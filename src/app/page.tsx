@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { Book, Profile } from "@/lib/types";
 
@@ -32,24 +33,26 @@ export default async function Home() {
               : null;
 
             return (
-              <li key={book.id} className="flex flex-col gap-2">
-                {coverUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={coverUrl}
-                    alt=""
-                    className="aspect-[2/3] w-full rounded-md object-cover"
-                  />
-                ) : (
-                  <div className="aspect-[2/3] w-full rounded-md bg-gray-100" />
-                )}
-                <span className="text-sm font-medium">{book.title}</span>
-                <span className="text-xs text-gray-500">
-                  {book.profiles?.display_name}
-                </span>
-                <span className="text-sm font-semibold">
-                  ${(book.price_cents / 100).toFixed(2)}
-                </span>
+              <li key={book.id}>
+                <Link href={`/books/${book.id}`} className="flex flex-col gap-2">
+                  {coverUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={coverUrl}
+                      alt=""
+                      className="aspect-[2/3] w-full rounded-md object-cover"
+                    />
+                  ) : (
+                    <div className="aspect-[2/3] w-full rounded-md bg-gray-100" />
+                  )}
+                  <span className="text-sm font-medium">{book.title}</span>
+                  <span className="text-xs text-gray-500">
+                    {book.profiles?.display_name}
+                  </span>
+                  <span className="text-sm font-semibold">
+                    ${(book.price_cents / 100).toFixed(2)}
+                  </span>
+                </Link>
               </li>
             );
           })}

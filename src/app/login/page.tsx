@@ -4,9 +4,9 @@ import { login } from "@/app/auth/actions";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
 
   return (
     <main className="mx-auto flex min-h-[80vh] max-w-sm flex-col justify-center px-4">
@@ -19,6 +19,7 @@ export default async function LoginPage({
       )}
 
       <form action={login} className="mt-6 flex flex-col gap-4">
+        {next && <input type="hidden" name="next" value={next} />}
         <label className="flex flex-col gap-1 text-sm">
           Email
           <input

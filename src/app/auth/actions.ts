@@ -40,12 +40,21 @@ export async function signup(formData: FormData) {
 export async function login(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
+  const next = String(formData.get("next") ?? "");
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
     redirect(`/login?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/", "layout");
+
+  // Only follow same-site relative paths, e.g. "/books/123" — never an
+  // absolute URL, which could redirect a user off the site.
+  if (next.startsWith("/")) {
+    redirect(next);
   }
 
   const {
@@ -58,7 +67,6 @@ export async function login(formData: FormData) {
     .eq("id", user!.id)
     .single();
 
-  revalidatePath("/", "layout");
   redirect(profile?.role === "author" ? "/dashboard" : "/");
 }
 
