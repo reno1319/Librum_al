@@ -42,12 +42,12 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 ## Trust, Legal & Info Pages
 
-- [ ] About page
-- [ ] Help / FAQ page
-- [ ] Terms of Service (placeholder — not real legal advice)
-- [ ] Privacy Policy (placeholder — not real legal advice)
-- [ ] "How self-publishing works" guide for authors
-- [ ] Contact / support page
+- [x] About page
+- [x] Help / FAQ page
+- [x] Terms of Service (placeholder — not real legal advice)
+- [x] Privacy Policy (placeholder — not real legal advice)
+- [x] "How self-publishing works" guide for authors
+- [x] Contact / support page
 
 ## Trust & Safety
 
