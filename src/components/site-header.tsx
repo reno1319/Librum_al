@@ -22,12 +22,12 @@ export async function SiteHeader() {
   }
 
   return (
-    <header className="flex flex-wrap items-center justify-between gap-y-2 border-b border-border bg-surface px-4 py-4 sm:px-6">
+    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface px-4 py-4 sm:px-6">
       <Link href="/" className="font-serif text-xl font-semibold text-primary">
         Librum
       </Link>
 
-      <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+      <nav className="flex flex-wrap items-center gap-4 text-sm">
         {user ? (
           <>
             {role === "author" && (

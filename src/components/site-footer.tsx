@@ -5,7 +5,7 @@ export function SiteFooter() {
     <footer className="border-t border-border px-4 py-8 text-sm text-muted sm:px-6">
       <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4">
         <span className="font-serif text-primary">Librum</span>
-        <nav className="flex flex-wrap gap-x-6 gap-y-2">
+        <nav className="flex flex-wrap gap-6">
           <Link href="/about" className="hover:underline">
             About
           </Link>

@@ -78,7 +78,7 @@ export default async function DashboardPage({
             return (
               <li
                 key={book.id}
-                className="flex flex-wrap items-center gap-x-4 gap-y-3 py-4"
+                className="flex flex-wrap items-center gap-4 py-4"
               >
                 {coverUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
