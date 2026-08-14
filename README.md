@@ -19,8 +19,11 @@ file storage), and Stripe (checkout + author payouts).
   page or from **My Library** — the file lives in private storage and a
   short-lived signed link is generated per request, so nobody can guess
   or share a permanent URL to it
-
-Not built yet: author payouts (Phase 5).
+- Authors connect a payout account (**Stripe Connect**) from
+  **Dashboard > Payouts** before they're allowed to publish. Stripe
+  handles identity verification and tax forms. Every sale is split
+  automatically — the author's cut goes straight to their bank account,
+  Dante keeps a platform fee (20% by default, see `src/lib/pricing.ts`)
 
 ## One-time setup
 
@@ -43,10 +46,10 @@ Not built yet: author payouts (Phase 5).
    security rules that keep users' data private, and two storage buckets
    (`covers` and `manuscripts`).
 
-   > Already ran an older version of `schema.sql` before it had a
-   > `purchases` table? Just run
-   > [`supabase/migrations/002_add_purchases.sql`](./supabase/migrations/002_add_purchases.sql)
-   > instead of the whole file again.
+   > Already ran an older version of `schema.sql`? Only run the
+   > migration files under [`supabase/migrations/`](./supabase/migrations)
+   > that came after the version you last ran, in order — each one's
+   > comment says what it adds and whether you need it.
 
 ### 3. Create a Stripe account (test mode)
 
@@ -62,6 +65,10 @@ Not built yet: author payouts (Phase 5).
    This prints a **webhook signing secret** (starts with `whsec_...`) —
    keep this terminal running whenever you're testing purchases locally,
    it's what delivers the "payment completed" event to your app.
+4. Go to **Connect** in the Stripe dashboard sidebar and click through
+   the "get started" prompt if you see one. This activates Connect on
+   your test account — required before authors can onboard for payouts.
+   No real business details are needed in test mode.
 
 ### 4. Configure environment variables
 
@@ -87,9 +94,12 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Sign up as an
-author, publish a book, then sign up as a reader (or log out) to buy it.
-On Stripe's checkout page, use test card `4242 4242 4242 4242`, any
-future expiry date, and any CVC/ZIP.
+author, then go to **Dashboard > Payouts** and click **Connect with
+Stripe** — Stripe's test-mode onboarding accepts fake data (e.g. phone
+verification code `000000`, routing number `110000000`, account number
+`000123456789`). Once that's done, publish a book, then sign up as a
+reader (or log out) to buy it. On Stripe's checkout page, use test card
+`4242 4242 4242 4242`, any future expiry date, and any CVC/ZIP.
 
 > By default, Supabase requires email confirmation before you can log in.
 > For local testing, you can turn this off under **Authentication >
@@ -108,6 +118,7 @@ src/
     auth/actions.ts               server actions for signup/login/logout
     dashboard/                     author-only area (protected)
       books/                        add/publish/unpublish/delete a book
+      payouts/                      Stripe Connect onboarding
     api/webhooks/stripe/            records a purchase once payment completes
     api/books/[id]/download/        issues a short-lived signed download URL
   components/
@@ -115,6 +126,7 @@ src/
   lib/
     supabase/                      browser/server/middleware/admin clients
     stripe.ts                      Stripe SDK client
+    pricing.ts                     platform fee constant/helper
     types.ts                       shared TypeScript types
 supabase/
   schema.sql                       full database schema

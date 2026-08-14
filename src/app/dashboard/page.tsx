@@ -3,11 +3,22 @@ import { createClient } from "@/lib/supabase/server";
 import { publishBook, unpublishBook, deleteBook } from "./books/actions";
 import type { Book } from "@/lib/types";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("stripe_payouts_enabled")
+    .eq("id", user!.id)
+    .single();
 
   const { data: books } = await supabase
     .from("books")
@@ -20,13 +31,37 @@ export default async function DashboardPage() {
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Your books</h1>
-        <Link
-          href="/dashboard/books/new"
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
-        >
-          Add new book
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard/payouts"
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            Payouts
+          </Link>
+          <Link
+            href="/dashboard/books/new"
+            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+          >
+            Add new book
+          </Link>
+        </div>
       </div>
+
+      {error && (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
+      {!profile?.stripe_payouts_enabled && (
+        <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          You need to{" "}
+          <Link href="/dashboard/payouts" className="font-medium underline">
+            connect a payout account
+          </Link>{" "}
+          before you can publish a book.
+        </p>
+      )}
 
       {!books || books.length === 0 ? (
         <div className="mt-8 rounded-md border border-dashed border-gray-300 px-6 py-16 text-center text-gray-500">

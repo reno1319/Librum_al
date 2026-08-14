@@ -10,6 +10,8 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   role text not null check (role in ('author', 'reader')),
   display_name text not null,
+  stripe_account_id text,
+  stripe_payouts_enabled boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -22,6 +24,12 @@ create policy "Profiles are viewable by everyone"
 create policy "Users can update their own profile"
   on public.profiles for update
   using (auth.uid() = id);
+
+-- stripe_account_id / stripe_payouts_enabled are only ever written by
+-- server code using the service role key (see src/lib/supabase/admin.ts),
+-- never by the user directly — otherwise an author could just set
+-- stripe_payouts_enabled = true on themselves via the API.
+revoke update (stripe_account_id, stripe_payouts_enabled) on public.profiles from authenticated;
 
 -- Auto-create a profile row whenever someone signs up, using the
 -- role/display_name passed in from the signup form's metadata.

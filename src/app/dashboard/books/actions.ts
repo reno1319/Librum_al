@@ -98,6 +98,16 @@ export async function publishBook(bookId: string) {
     redirect("/login");
   }
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("stripe_payouts_enabled")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.stripe_payouts_enabled) {
+    redirect("/dashboard?error=Connect+your+payout+account+before+publishing");
+  }
+
   await supabase
     .from("books")
     .update({ status: "published" })

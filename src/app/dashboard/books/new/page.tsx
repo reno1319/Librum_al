@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createBook } from "../actions";
+import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 
 export default async function NewBookPage({
   searchParams,
@@ -56,6 +57,10 @@ export default async function NewBookPage({
             required
             className="rounded-md border border-gray-300 px-3 py-2"
           />
+          <span className="text-xs text-gray-500">
+            Dante takes a {PLATFORM_FEE_PERCENT}% platform fee — you keep
+            the rest of every sale.
+          </span>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">

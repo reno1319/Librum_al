@@ -3,6 +3,19 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe";
+import { platformFeeCents } from "@/lib/pricing";
+
+type BookForCheckout = {
+  id: string;
+  title: string;
+  price_cents: number;
+  status: string;
+  author_id: string;
+  profiles: {
+    stripe_account_id: string | null;
+    stripe_payouts_enabled: boolean;
+  } | null;
+};
 
 export async function buyBook(bookId: string) {
   const supabase = await createClient();
@@ -16,12 +29,19 @@ export async function buyBook(bookId: string) {
 
   const { data: book } = await supabase
     .from("books")
-    .select("id, title, price_cents, status, author_id")
+    .select(
+      "id, title, price_cents, status, author_id, profiles(stripe_account_id, stripe_payouts_enabled)",
+    )
     .eq("id", bookId)
-    .single();
+    .single<BookForCheckout>();
 
   if (!book || book.status !== "published" || book.author_id === user.id) {
     redirect(`/books/${bookId}`);
+  }
+
+  const authorAccount = book.profiles?.stripe_account_id;
+  if (!book.profiles?.stripe_payouts_enabled || !authorAccount) {
+    redirect(`/books/${bookId}?error=This+book+isn%27t+available+for+purchase+right+now`);
   }
 
   const { data: existing } = await supabase
@@ -49,6 +69,12 @@ export async function buyBook(bookId: string) {
         quantity: 1,
       },
     ],
+    payment_intent_data: {
+      application_fee_amount: platformFeeCents(book.price_cents),
+      transfer_data: {
+        destination: authorAccount,
+      },
+    },
     success_url: `${origin}/books/${bookId}?purchase=success`,
     cancel_url: `${origin}/books/${bookId}?purchase=cancelled`,
     metadata: {
