@@ -28,6 +28,8 @@ file storage), and Stripe (checkout + author payouts).
   Librum keeps a platform fee (20% by default, see `src/lib/pricing.ts`)
 - Authors pick a genre when uploading a book; the storefront homepage has
   a search box (matches title/description) and a genre filter, combinable
+- Authors have a public profile page (photo, bio, their published books),
+  editable from **Dashboard > Profile**; book pages and cards link to it
 
 ## One-time setup
 

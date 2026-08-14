@@ -70,7 +70,13 @@ export default async function BookDetailPage({
         )}
         <h1 className="font-serif text-3xl font-semibold">{book.title}</h1>
         <p className="mt-1 text-sm text-muted">
-          by {book.profiles?.display_name}
+          by{" "}
+          <Link
+            href={`/authors/${book.author_id}`}
+            className="hover:underline"
+          >
+            {book.profiles?.display_name}
+          </Link>
         </p>
         <p className="mt-4 whitespace-pre-line text-foreground/90">
           {book.description}

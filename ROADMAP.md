@@ -25,7 +25,7 @@ dashboard. Established in Foundation, then reused everywhere else.
 - [ ] Book detail page redesign
 - [ ] "Look inside" sample preview (an excerpt readers can view before
       buying)
-- [ ] Author public profile pages (bio, photo, their books)
+- [x] Author public profile pages (bio, photo, their books)
 - [ ] Reader reviews & star ratings
 
 ## Author Tools
@@ -63,7 +63,8 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 ## Account & Settings
 
-- [ ] Edit profile (display name, avatar)
+- [x] Edit profile (display name, avatar) — bio included too, done as
+      part of author profile pages
 - [ ] Forgot-password flow
 - [ ] Delete account
 

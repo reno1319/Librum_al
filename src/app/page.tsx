@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { GENRES } from "@/lib/genres";
+import { BookCard } from "@/components/book-card";
 import type { Book, Profile } from "@/lib/types";
 
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
@@ -116,32 +117,11 @@ export default async function Home({
 
             return (
               <li key={book.id}>
-                <Link href={`/books/${book.id}`} className="group flex flex-col gap-2">
-                  {coverUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={coverUrl}
-                      alt=""
-                      className="aspect-[2/3] w-full rounded-lg object-cover shadow-sm transition-shadow group-hover:shadow-md"
-                    />
-                  ) : (
-                    <div className="aspect-[2/3] w-full rounded-lg bg-border" />
-                  )}
-                  {book.genre && (
-                    <span className="text-xs uppercase tracking-wide text-muted">
-                      {book.genre}
-                    </span>
-                  )}
-                  <span className="font-serif text-sm font-medium">
-                    {book.title}
-                  </span>
-                  <span className="text-xs text-muted">
-                    {book.profiles?.display_name}
-                  </span>
-                  <span className="text-sm font-semibold text-primary">
-                    ${(book.price_cents / 100).toFixed(2)}
-                  </span>
-                </Link>
+                <BookCard
+                  book={book}
+                  coverUrl={coverUrl}
+                  authorName={book.profiles?.display_name}
+                />
               </li>
             );
           })}

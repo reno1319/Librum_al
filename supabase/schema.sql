@@ -10,6 +10,8 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   role text not null check (role in ('author', 'reader')),
   display_name text not null,
+  bio text,
+  avatar_path text,
   stripe_account_id text,
   stripe_payouts_enabled boolean not null default false,
   created_at timestamptz not null default now()
@@ -107,7 +109,11 @@ insert into storage.buckets (id, name, public)
 values ('manuscripts', 'manuscripts', false)
 on conflict (id) do nothing;
 
--- Files are stored as "<author_id>/<filename>" so ownership can be
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+-- Files are stored as "<owner_id>/<filename>" so ownership can be
 -- checked from the path itself via storage.foldername(name).
 
 create policy "Cover images are publicly readable"
@@ -133,6 +139,18 @@ create policy "Authors can read their own manuscripts"
 create policy "Authors can replace their own manuscripts"
   on storage.objects for update
   using (bucket_id = 'manuscripts' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "Avatars are publicly readable"
+  on storage.objects for select
+  using (bucket_id = 'avatars');
+
+create policy "Users can upload their own avatar"
+  on storage.objects for insert
+  with check (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "Users can replace their own avatar"
+  on storage.objects for update
+  using (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
 
 -- ============================================================
 -- purchases: one row per completed sale, written only by the

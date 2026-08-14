@@ -4,6 +4,8 @@ export type Profile = {
   id: string;
   role: Role;
   display_name: string;
+  bio: string | null;
+  avatar_path: string | null;
   created_at: string;
 };
 
