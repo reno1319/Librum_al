@@ -9,11 +9,11 @@ export default async function LoginPage({
   const { error, next } = await searchParams;
 
   return (
-    <main className="mx-auto flex min-h-[80vh] max-w-sm flex-col justify-center px-4">
-      <h1 className="text-2xl font-semibold">Log in</h1>
+    <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
+      <h1 className="font-serif text-3xl font-semibold">Log in</h1>
 
       {error && (
-        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
@@ -26,7 +26,7 @@ export default async function LoginPage({
             name="email"
             type="email"
             required
-            className="rounded-md border border-gray-300 px-3 py-2"
+            className="rounded-lg border border-border bg-surface px-3 py-2"
           />
         </label>
 
@@ -36,21 +36,21 @@ export default async function LoginPage({
             name="password"
             type="password"
             required
-            className="rounded-md border border-gray-300 px-3 py-2"
+            className="rounded-lg border border-border bg-surface px-3 py-2"
           />
         </label>
 
         <button
           type="submit"
-          className="mt-2 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+          className="mt-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
         >
           Log in
         </button>
       </form>
 
-      <p className="mt-6 text-sm text-gray-600">
+      <p className="mt-6 text-sm text-muted">
         No account yet?{" "}
-        <Link href="/signup" className="font-medium underline">
+        <Link href="/signup" className="font-medium text-primary underline">
           Sign up
         </Link>
       </p>

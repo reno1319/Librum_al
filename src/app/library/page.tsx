@@ -23,30 +23,30 @@ export default async function LibraryPage() {
     .returns<PurchaseWithBook[]>();
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-10">
-      <h1 className="text-2xl font-semibold">Your library</h1>
+    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+      <h1 className="font-serif text-3xl font-semibold">Your library</h1>
 
       {!purchases || purchases.length === 0 ? (
-        <p className="mt-8 rounded-md border border-dashed border-gray-300 px-6 py-16 text-center text-gray-500">
+        <p className="mt-8 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
           You haven&apos;t bought any books yet.
         </p>
       ) : (
-        <ul className="mt-8 divide-y divide-gray-200">
+        <ul className="mt-8 divide-y divide-border">
           {purchases.map(({ books: book }) =>
             book ? (
               <li
                 key={book.id}
-                className="flex items-center justify-between py-4"
+                className="flex flex-wrap items-center justify-between gap-3 py-4"
               >
                 <Link
                   href={`/books/${book.id}`}
-                  className="font-medium hover:underline"
+                  className="font-serif font-medium hover:underline"
                 >
                   {book.title}
                 </Link>
                 <a
                   href={`/api/books/${book.id}/download`}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+                  className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
                 >
                   Download EPUB
                 </a>

@@ -34,26 +34,26 @@ export default async function PayoutsPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-lg flex-1 px-6 py-10">
-      <h1 className="text-2xl font-semibold">Payouts</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        Dante uses Stripe to pay you directly for every sale — Stripe
+    <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
+      <h1 className="font-serif text-3xl font-semibold">Payouts</h1>
+      <p className="mt-2 text-sm text-muted">
+        Librum uses Stripe to pay you directly for every sale — Stripe
         handles identity verification and tax forms, and takes care of
         the actual bank transfer. You keep {100 - PLATFORM_FEE_PERCENT}%
         of each sale.
       </p>
 
-      <div className="mt-8 rounded-md border border-gray-200 p-6">
+      <div className="mt-8 rounded-lg border border-border bg-surface p-6 shadow-sm">
         {!profile?.stripe_account_id ? (
           <>
-            <p className="text-sm text-gray-700">
+            <p className="text-sm">
               You haven&apos;t connected a payout account yet. You&apos;ll
               need to do this before you can publish a book.
             </p>
             <form action={connectStripeAccount} className="mt-4">
               <button
                 type="submit"
-                className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
               >
                 Connect with Stripe
               </button>
@@ -68,7 +68,7 @@ export default async function PayoutsPage() {
             <form action={openStripeExpressDashboard} className="mt-4">
               <button
                 type="submit"
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+                className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
               >
                 View Stripe dashboard
               </button>
@@ -76,14 +76,14 @@ export default async function PayoutsPage() {
           </>
         ) : (
           <>
-            <p className="text-sm text-gray-700">
+            <p className="text-sm">
               You started connecting a payout account, but Stripe still
               needs a bit more information before you can get paid.
             </p>
             <form action={connectStripeAccount} className="mt-4">
               <button
                 type="submit"
-                className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
               >
                 Finish setting up payouts
               </button>

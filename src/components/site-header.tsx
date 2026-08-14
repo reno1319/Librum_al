@@ -22,12 +22,12 @@ export async function SiteHeader() {
   }
 
   return (
-    <header className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-      <Link href="/" className="text-lg font-semibold">
-        Dante
+    <header className="flex flex-wrap items-center justify-between gap-y-2 border-b border-border bg-surface px-4 py-4 sm:px-6">
+      <Link href="/" className="font-serif text-xl font-semibold text-primary">
+        Librum
       </Link>
 
-      <nav className="flex items-center gap-4 text-sm">
+      <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
         {user ? (
           <>
             {role === "author" && (
@@ -38,7 +38,7 @@ export async function SiteHeader() {
             <Link href="/library" className="hover:underline">
               Library
             </Link>
-            <span className="text-gray-500">{displayName}</span>
+            <span className="hidden text-muted sm:inline">{displayName}</span>
             <form action={logout}>
               <button type="submit" className="hover:underline">
                 Log out
@@ -52,7 +52,7 @@ export async function SiteHeader() {
             </Link>
             <Link
               href="/signup"
-              className="rounded-md bg-gray-900 px-3 py-1.5 font-medium text-white hover:bg-gray-700"
+              className="rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground hover:bg-primary-hover"
             >
               Sign up
             </Link>

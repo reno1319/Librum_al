@@ -1,4 +1,4 @@
--- Dante: self-publishing platform database schema.
+-- Librum: self-publishing platform database schema.
 -- Run this once in the Supabase SQL Editor (Dashboard > SQL Editor > New query)
 -- after creating a new Supabase project.
 

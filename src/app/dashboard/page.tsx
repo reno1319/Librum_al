@@ -28,19 +28,19 @@ export default async function DashboardPage({
     .returns<Book[]>();
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Your books</h1>
+    <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-serif text-3xl font-semibold">Your books</h1>
         <div className="flex items-center gap-3">
           <Link
             href="/dashboard/payouts"
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
           >
             Payouts
           </Link>
           <Link
             href="/dashboard/books/new"
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
           >
             Add new book
           </Link>
@@ -48,13 +48,13 @@ export default async function DashboardPage({
       </div>
 
       {error && (
-        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
 
       {!profile?.stripe_payouts_enabled && (
-        <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
           You need to{" "}
           <Link href="/dashboard/payouts" className="font-medium underline">
             connect a payout account
@@ -64,11 +64,11 @@ export default async function DashboardPage({
       )}
 
       {!books || books.length === 0 ? (
-        <div className="mt-8 rounded-md border border-dashed border-gray-300 px-6 py-16 text-center text-gray-500">
+        <div className="mt-8 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
           <p>You haven&apos;t added any books yet.</p>
         </div>
       ) : (
-        <ul className="mt-8 divide-y divide-gray-200">
+        <ul className="mt-8 divide-y divide-border">
           {books.map((book) => {
             const coverUrl = book.cover_path
               ? supabase.storage.from("covers").getPublicUrl(book.cover_path)
@@ -76,7 +76,10 @@ export default async function DashboardPage({
               : null;
 
             return (
-              <li key={book.id} className="flex items-center gap-4 py-4">
+              <li
+                key={book.id}
+                className="flex flex-wrap items-center gap-x-4 gap-y-3 py-4"
+              >
                 {coverUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -85,15 +88,15 @@ export default async function DashboardPage({
                     className="h-16 w-11 shrink-0 rounded object-cover"
                   />
                 ) : (
-                  <div className="h-16 w-11 shrink-0 rounded bg-gray-100" />
+                  <div className="h-16 w-11 shrink-0 rounded bg-border" />
                 )}
 
-                <div className="flex-1">
-                  <p className="font-medium">{book.title}</p>
-                  <p className="text-sm text-gray-500 capitalize">{book.status}</p>
+                <div className="min-w-32 flex-1">
+                  <p className="font-serif font-medium">{book.title}</p>
+                  <p className="text-sm text-muted capitalize">{book.status}</p>
                 </div>
 
-                <span className="text-sm font-semibold">
+                <span className="text-sm font-semibold text-primary">
                   ${(book.price_cents / 100).toFixed(2)}
                 </span>
 
@@ -101,7 +104,7 @@ export default async function DashboardPage({
                   <form action={publishBook.bind(null, book.id)}>
                     <button
                       type="submit"
-                      className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+                      className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
                     >
                       Publish
                     </button>
@@ -110,7 +113,7 @@ export default async function DashboardPage({
                   <form action={unpublishBook.bind(null, book.id)}>
                     <button
                       type="submit"
-                      className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+                      className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
                     >
                       Unpublish
                     </button>
@@ -120,7 +123,7 @@ export default async function DashboardPage({
                 <form action={deleteBook.bind(null, book.id)}>
                   <button
                     type="submit"
-                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
                   >
                     Delete
                   </button>

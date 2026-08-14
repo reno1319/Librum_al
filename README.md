@@ -1,4 +1,4 @@
-# Dante
+# Librum
 
 A self-publishing platform for digital ebooks — authors upload and sell,
 readers browse and buy.
@@ -6,8 +6,7 @@ readers browse and buy.
 Built with Next.js, TypeScript, Tailwind CSS, Supabase (database, auth,
 file storage), and Stripe (checkout + author payouts).
 
-> Being renamed to **Librum** — see [`ROADMAP.md`](./ROADMAP.md) for
-> everything left to build.
+> See [`ROADMAP.md`](./ROADMAP.md) for everything left to build.
 
 ## What's built so far
 
@@ -26,7 +25,7 @@ file storage), and Stripe (checkout + author payouts).
   **Dashboard > Payouts** before they're allowed to publish. Stripe
   handles identity verification and tax forms. Every sale is split
   automatically — the author's cut goes straight to their bank account,
-  Dante keeps a platform fee (20% by default, see `src/lib/pricing.ts`)
+  Librum keeps a platform fee (20% by default, see `src/lib/pricing.ts`)
 
 ## One-time setup
 

@@ -14,14 +14,14 @@ export default async function Home() {
     .returns<BookWithAuthor[]>();
 
   return (
-    <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10">
-      <h1 className="text-3xl font-semibold">Discover ebooks</h1>
-      <p className="mt-2 text-gray-600">
+    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
+      <h1 className="font-serif text-4xl font-semibold">Discover ebooks</h1>
+      <p className="mt-2 text-muted">
         Independently published, straight from the author.
       </p>
 
       {!books || books.length === 0 ? (
-        <p className="mt-12 rounded-md border border-dashed border-gray-300 px-6 py-16 text-center text-gray-500">
+        <p className="mt-12 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
           No books have been published yet. Check back soon.
         </p>
       ) : (
@@ -34,22 +34,24 @@ export default async function Home() {
 
             return (
               <li key={book.id}>
-                <Link href={`/books/${book.id}`} className="flex flex-col gap-2">
+                <Link href={`/books/${book.id}`} className="group flex flex-col gap-2">
                   {coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={coverUrl}
                       alt=""
-                      className="aspect-[2/3] w-full rounded-md object-cover"
+                      className="aspect-[2/3] w-full rounded-lg object-cover shadow-sm transition-shadow group-hover:shadow-md"
                     />
                   ) : (
-                    <div className="aspect-[2/3] w-full rounded-md bg-gray-100" />
+                    <div className="aspect-[2/3] w-full rounded-lg bg-border" />
                   )}
-                  <span className="text-sm font-medium">{book.title}</span>
-                  <span className="text-xs text-gray-500">
+                  <span className="font-serif text-sm font-medium">
+                    {book.title}
+                  </span>
+                  <span className="text-xs text-muted">
                     {book.profiles?.display_name}
                   </span>
-                  <span className="text-sm font-semibold">
+                  <span className="text-sm font-semibold text-primary">
                     ${(book.price_cents / 100).toFixed(2)}
                   </span>
                 </Link>

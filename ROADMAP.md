@@ -12,10 +12,10 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 ## Foundation
 
-- [ ] Rebrand "Dante" → "Librum" across the UI, page titles, and docs
-- [ ] Warm/editorial design system: color palette, serif heading font,
+- [x] Rebrand "Dante" → "Librum" across the UI, page titles, and docs
+- [x] Warm/editorial design system: color palette, serif heading font,
       consistent buttons/cards/badges other pages build on
-- [ ] Mobile-responsive pass across existing pages
+- [x] Mobile-responsive pass across existing pages
 
 ## Discovery & Storefront
 
