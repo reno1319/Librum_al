@@ -25,18 +25,34 @@ export default async function Home() {
         </p>
       ) : (
         <ul className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4">
-          {books.map((book) => (
-            <li key={book.id} className="flex flex-col gap-2">
-              <div className="aspect-[2/3] w-full rounded-md bg-gray-100" />
-              <span className="text-sm font-medium">{book.title}</span>
-              <span className="text-xs text-gray-500">
-                {book.profiles?.display_name}
-              </span>
-              <span className="text-sm font-semibold">
-                ${(book.price_cents / 100).toFixed(2)}
-              </span>
-            </li>
-          ))}
+          {books.map((book) => {
+            const coverUrl = book.cover_path
+              ? supabase.storage.from("covers").getPublicUrl(book.cover_path)
+                  .data.publicUrl
+              : null;
+
+            return (
+              <li key={book.id} className="flex flex-col gap-2">
+                {coverUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={coverUrl}
+                    alt=""
+                    className="aspect-[2/3] w-full rounded-md object-cover"
+                  />
+                ) : (
+                  <div className="aspect-[2/3] w-full rounded-md bg-gray-100" />
+                )}
+                <span className="text-sm font-medium">{book.title}</span>
+                <span className="text-xs text-gray-500">
+                  {book.profiles?.display_name}
+                </span>
+                <span className="text-sm font-semibold">
+                  ${(book.price_cents / 100).toFixed(2)}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
