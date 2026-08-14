@@ -89,11 +89,27 @@ export default async function BookDetailPage({
           </span>
 
           {isAuthor ? (
-            <span className="text-sm text-gray-500">This is your book</span>
+            <>
+              <span className="text-sm text-gray-500">This is your book</span>
+              <a
+                href={`/api/books/${book.id}/download`}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              >
+                Download EPUB
+              </a>
+            </>
           ) : owned ? (
-            <span className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700">
-              You own this book
-            </span>
+            <>
+              <span className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700">
+                You own this book
+              </span>
+              <a
+                href={`/api/books/${book.id}/download`}
+                className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+              >
+                Download EPUB
+              </a>
+            </>
           ) : user ? (
             <form action={buyBook.bind(null, book.id)}>
               <button

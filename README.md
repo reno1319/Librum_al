@@ -15,9 +15,12 @@ file storage), and Stripe (checkout + author payouts).
   book
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
+- Owners (the buyer, or the author) can download the EPUB from the book
+  page or from **My Library** — the file lives in private storage and a
+  short-lived signed link is generated per request, so nobody can guess
+  or share a permanent URL to it
 
-Not built yet: actually downloading/reading a purchased book (Phase 4),
-and author payouts (Phase 5).
+Not built yet: author payouts (Phase 5).
 
 ## One-time setup
 
@@ -100,11 +103,13 @@ src/
   app/
     page.tsx                  storefront homepage
     books/[id]/                 book detail page + buy action
+    library/                     a reader's purchased books
     login/, signup/              auth pages
     auth/actions.ts               server actions for signup/login/logout
     dashboard/                     author-only area (protected)
       books/                        add/publish/unpublish/delete a book
     api/webhooks/stripe/            records a purchase once payment completes
+    api/books/[id]/download/        issues a short-lived signed download URL
   components/
     site-header.tsx               nav bar, aware of logged-in state
   lib/

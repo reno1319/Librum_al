@@ -35,6 +35,9 @@ export async function SiteHeader() {
                 Dashboard
               </Link>
             )}
+            <Link href="/library" className="hover:underline">
+              Library
+            </Link>
             <span className="text-gray-500">{displayName}</span>
             <form action={logout}>
               <button type="submit" className="hover:underline">
