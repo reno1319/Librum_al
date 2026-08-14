@@ -6,6 +6,9 @@ readers browse and buy.
 Built with Next.js, TypeScript, Tailwind CSS, Supabase (database, auth,
 file storage), and Stripe (checkout + author payouts).
 
+> Being renamed to **Librum** — see [`ROADMAP.md`](./ROADMAP.md) for
+> everything left to build.
+
 ## What's built so far
 
 - Sign up as an **author** or a **reader**; log in / log out
