@@ -12,7 +12,7 @@ const faqs = [
   },
   {
     q: "Can I edit a book after publishing it?",
-    a: "Not yet — this is on our roadmap. For now, unpublish the book, delete it, and re-upload a corrected version.",
+    a: "Yes — from your dashboard, click Edit on any book to change its title, description, genre, price, cover, or manuscript. Replacing the cover or manuscript is optional; leave those fields blank to keep the current file.",
   },
   {
     q: "How do refunds work?",

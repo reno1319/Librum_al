@@ -6,9 +6,9 @@ import type { Book } from "@/lib/types";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, success } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -59,6 +59,12 @@ export default async function DashboardPage({
         </p>
       )}
 
+      {success && (
+        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+          {success}
+        </p>
+      )}
+
       {!profile?.stripe_payouts_enabled && (
         <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
           You need to{" "}
@@ -105,6 +111,13 @@ export default async function DashboardPage({
                 <span className="text-sm font-semibold text-primary">
                   ${(book.price_cents / 100).toFixed(2)}
                 </span>
+
+                <Link
+                  href={`/dashboard/books/${book.id}/edit`}
+                  className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+                >
+                  Edit
+                </Link>
 
                 {book.status === "draft" ? (
                   <form action={publishBook.bind(null, book.id)}>

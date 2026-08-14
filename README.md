@@ -30,6 +30,9 @@ file storage), and Stripe (checkout + author payouts).
   a search box (matches title/description) and a genre filter, combinable
 - Authors have a public profile page (photo, bio, their published books),
   editable from **Dashboard > Profile**; book pages and cards link to it
+- Authors can edit a book after publishing (title, description, genre,
+  price, cover, manuscript) — replacing the cover or manuscript is
+  optional, leave those fields blank to keep the current file
 
 ## One-time setup
 
