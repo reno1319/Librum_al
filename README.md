@@ -33,6 +33,8 @@ file storage), and Stripe (checkout + author payouts).
 - Authors can edit a book after publishing (title, description, genre,
   price, cover, manuscript) — replacing the cover or manuscript is
   optional, leave those fields blank to keep the current file
+- **Dashboard > Sales** shows net revenue, units sold, a 14-day revenue
+  chart, and a per-book breakdown
 
 ## One-time setup
 

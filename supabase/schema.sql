@@ -174,4 +174,15 @@ create policy "Readers can view their own purchases"
   on public.purchases for select
   using (auth.uid() = reader_id);
 
+create policy "Authors can view purchases of their own books"
+  on public.purchases for select
+  using (
+    exists (
+      select 1 from public.books
+      where books.id = purchases.book_id
+      and books.author_id = auth.uid()
+    )
+  );
+
 create index purchases_reader_id_idx on public.purchases(reader_id);
+create index purchases_book_id_idx on public.purchases(book_id);

@@ -32,7 +32,7 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 - [x] Edit an existing book (title/description/price/cover/file) —
       currently publish/unpublish/delete only, no edit
-- [ ] Author sales dashboard (revenue over time, units sold, per-book
+- [x] Author sales dashboard (revenue over time, units sold, per-book
       breakdown)
 
 ## Reader Tools

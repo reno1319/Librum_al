@@ -33,6 +33,12 @@ export default async function DashboardPage({
         <h1 className="font-serif text-3xl font-semibold">Your books</h1>
         <div className="flex items-center gap-3">
           <Link
+            href="/dashboard/sales"
+            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+          >
+            Sales
+          </Link>
+          <Link
             href="/dashboard/profile"
             className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
           >
