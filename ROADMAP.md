@@ -20,8 +20,8 @@ dashboard. Established in Foundation, then reused everywhere else.
 ## Discovery & Storefront
 
 - [ ] Homepage redesign in the new style (hero section, curated layout)
-- [ ] Search bar
-- [ ] Genres/categories (add to book upload form + storefront filtering)
+- [x] Search bar
+- [x] Genres/categories (add to book upload form + storefront filtering)
 - [ ] Book detail page redesign
 - [ ] "Look inside" sample preview (an excerpt readers can view before
       buying)

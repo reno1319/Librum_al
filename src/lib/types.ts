@@ -14,6 +14,7 @@ export type Book = {
   author_id: string;
   title: string;
   description: string;
+  genre: string | null;
   price_cents: number;
   cover_path: string | null;
   file_path: string | null;

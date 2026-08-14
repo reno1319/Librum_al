@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createBook } from "../actions";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { GENRES } from "@/lib/genres";
 
 export default async function NewBookPage({
   searchParams,
@@ -44,6 +45,25 @@ export default async function NewBookPage({
             rows={4}
             className="rounded-lg border border-border bg-surface px-3 py-2"
           />
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          Genre
+          <select
+            name="genre"
+            required
+            defaultValue=""
+            className="rounded-lg border border-border bg-surface px-3 py-2"
+          >
+            <option value="" disabled>
+              Choose a genre
+            </option>
+            {GENRES.map((genre) => (
+              <option key={genre} value={genre}>
+                {genre}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">

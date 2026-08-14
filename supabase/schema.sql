@@ -54,11 +54,17 @@ create trigger on_auth_user_created
 -- books: owned by an author, visible to everyone once published
 -- ============================================================
 
+-- Keep this list in sync with GENRES in src/lib/genres.ts.
 create table public.books (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references public.profiles(id) on delete cascade,
   title text not null,
   description text not null default '',
+  genre text check (genre in (
+    'Fiction', 'Non-Fiction', 'Mystery & Thriller', 'Romance', 'Fantasy',
+    'Science Fiction', 'Horror', 'Biography & Memoir', 'Self-Help',
+    'History', 'Poetry', 'Young Adult', 'Children''s', 'Business'
+  )),
   price_cents integer not null default 0 check (price_cents >= 0),
   cover_path text,
   file_path text,
@@ -87,6 +93,7 @@ create policy "Authors can delete their own books"
 
 create index books_author_id_idx on public.books(author_id);
 create index books_status_idx on public.books(status);
+create index books_genre_idx on public.books(genre);
 
 -- ============================================================
 -- storage: cover images (public) and manuscript files (private)

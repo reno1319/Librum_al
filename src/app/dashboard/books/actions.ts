@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { GENRES } from "@/lib/genres";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -20,6 +21,7 @@ export async function createBook(formData: FormData) {
 
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
+  const genre = String(formData.get("genre") ?? "");
   const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
   const cover = formData.get("cover") as File | null;
   const manuscript = formData.get("manuscript") as File | null;
@@ -34,6 +36,10 @@ export async function createBook(formData: FormData) {
     priceCents < 0
   ) {
     redirect("/dashboard/books/new?error=Please+fill+in+every+field");
+  }
+
+  if (!GENRES.includes(genre as (typeof GENRES)[number])) {
+    redirect("/dashboard/books/new?error=Please+choose+a+genre");
   }
 
   if (!manuscript.name.toLowerCase().endsWith(".epub")) {
@@ -74,6 +80,7 @@ export async function createBook(formData: FormData) {
     author_id: user.id,
     title,
     description,
+    genre,
     price_cents: priceCents,
     cover_path: coverPath,
     file_path: manuscriptPath,

@@ -63,6 +63,11 @@ export default async function BookDetailPage({
       </div>
 
       <div className="flex-1">
+        {book.genre && (
+          <span className="text-xs uppercase tracking-wide text-muted">
+            {book.genre}
+          </span>
+        )}
         <h1 className="font-serif text-3xl font-semibold">{book.title}</h1>
         <p className="mt-1 text-sm text-muted">
           by {book.profiles?.display_name}
