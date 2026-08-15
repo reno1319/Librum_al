@@ -19,7 +19,10 @@ export function BookShelf({
   return (
     <section className="mt-12">
       <h2 className="font-serif text-xl font-semibold">{title}</h2>
-      <div className="mt-4 flex gap-4 overflow-x-auto pb-2">
+      <div
+        className="mt-4 overflow-x-auto pb-2"
+        style={{ display: "flex", gap: "1rem" }}
+      >
         {books.map((book) => {
           const coverUrl = book.cover_path
             ? supabase.storage.from("covers").getPublicUrl(book.cover_path)
@@ -27,7 +30,10 @@ export function BookShelf({
             : null;
 
           return (
-            <div key={book.id} className="w-36 shrink-0 sm:w-40">
+            <div
+              key={book.id}
+              style={{ width: "9rem", flexShrink: 0 }}
+            >
               <BookCard
                 book={book}
                 coverUrl={coverUrl}
