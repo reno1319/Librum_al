@@ -106,11 +106,22 @@ export default async function SalesPage() {
       <h2 className="mt-10 font-serif text-xl font-semibold">
         Net revenue, last {CHART_DAYS} days
       </h2>
-      <div className="mt-4 flex h-32 items-end gap-1.5 rounded-lg border border-border bg-surface p-4 shadow-sm">
+      <div
+        className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm"
+        style={{ display: "flex", alignItems: "flex-end", height: "8rem", gap: "6px" }}
+      >
         {days.map((day) => (
           <div
             key={day.date.toISOString()}
-            className="flex h-full flex-1 flex-col items-center justify-end gap-1"
+            style={{
+              display: "flex",
+              flex: "1 1 0%",
+              height: "100%",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: "4px",
+            }}
             title={`${day.date.toLocaleDateString(undefined, {
               month: "short",
               day: "numeric",
