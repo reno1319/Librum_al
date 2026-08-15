@@ -90,14 +90,16 @@ lean on that we don't have yet. Each item names what it's modeled after.
 
 ### Storefront depth (Amazon/KDP storefront, Gumroad discover)
 
-- [ ] Homepage redesign: a featured-book hero section, plus curated
+- [x] Homepage redesign: a featured-book hero section, plus curated
       rows ("New releases", "Bestsellers") instead of one flat grid —
-      carries over the unfinished item from the original roadmap
+      carries over the unfinished item from the original roadmap.
+      Search/filter results still show as the flat grid, unchanged
 - [ ] Book detail page redesign: richer layout, a "More by this author"
       row and a "You might also like" row (same genre) — carries over
       the unfinished item from the original roadmap
-- [ ] Bestseller/trending sorting on the homepage, using existing sales
-      data (no new tracking needed)
+- [x] Bestseller/trending sorting on the homepage, using existing sales
+      data (no new tracking needed) — done together with the redesign
+      above, since the "Bestsellers" shelf needed exactly this
 
 ### Commerce (Gumroad, Payhip, KDP countdown deals)
 

@@ -13,8 +13,11 @@ file storage), and Stripe (checkout + author payouts).
 - Sign up as an **author** or a **reader**; log in / log out
 - Authors upload a book (title, description, price, cover, EPUB file) as
   a draft, then publish it from their dashboard
-- Public storefront homepage and a book detail page for each published
-  book
+- Public storefront homepage — a hero section spotlighting the newest
+  published book, plus horizontally-scrolling "Bestsellers" (by units
+  sold) and "New releases" shelves; searching or filtering by genre
+  switches to a flat results grid instead — and a book detail page for
+  each published book
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
 - Owners (the buyer, or the author) can download the EPUB from the book
