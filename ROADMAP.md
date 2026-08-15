@@ -81,3 +81,45 @@ dashboard. Established in Foundation, then reused everywhere else.
 - [ ] Custom domain
 - [ ] Switch the Stripe webhook from the local CLI listener to a real
       deployed endpoint
+
+## Phase 2: Platform Depth
+
+Everything above got Librum to "fully working MVP." This section is about
+depth — features real self-publishing and creator-commerce platforms
+lean on that we don't have yet. Each item names what it's modeled after.
+
+### Storefront depth (Amazon/KDP storefront, Gumroad discover)
+
+- [ ] Homepage redesign: a featured-book hero section, plus curated
+      rows ("New releases", "Bestsellers") instead of one flat grid —
+      carries over the unfinished item from the original roadmap
+- [ ] Book detail page redesign: richer layout, a "More by this author"
+      row and a "You might also like" row (same genre) — carries over
+      the unfinished item from the original roadmap
+- [ ] Bestseller/trending sorting on the homepage, using existing sales
+      data (no new tracking needed)
+
+### Commerce (Gumroad, Payhip, KDP countdown deals)
+
+- [ ] Discount codes: authors create a promo code (% or $ off);
+      applied at Stripe Checkout
+- [ ] Bundles: an author combines their own books into one discounted
+      package, purchased as a single checkout that unlocks every book
+      in it (meaningfully more complex than the other items here — a
+      single Stripe session has to expand into multiple purchase rows)
+
+### Catalog depth (Amazon KDP, Lulu)
+
+- [ ] Series: group an author's books into a series with a reading
+      order, shown on each book's page
+- [ ] Co-authors & contributors: credit illustrators, translators,
+      narrators, or co-authors on a book, not just a single author
+- [ ] Keywords/tags: additional searchable metadata beyond genre
+
+### Engagement (Gumroad-style following)
+
+- [ ] Follow an author: readers opt in to an email when someone they
+      follow publishes a new book (reuses the existing email
+      infrastructure from Notifications)
+- [ ] Basic view-count analytics on the author sales dashboard (how
+      many people looked at a book page, not just who bought it)
