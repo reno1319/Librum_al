@@ -49,6 +49,7 @@ export default async function BookDetailPage({
       .select("id")
       .eq("book_id", id)
       .eq("reader_id", user.id)
+      .is("refunded_at", null)
       .maybeSingle();
     owned = !!purchaseRow;
 

@@ -60,6 +60,11 @@ file storage), and Stripe (checkout + author payouts).
 - Authors can add an optional preview excerpt when uploading or editing
   a book; readers can expand "Look inside" on the book page to read it
   before buying
+- Refunding a purchase in Stripe (Dashboard > Payments > find the charge
+  > Refund) automatically revokes the reader's access via the webhook —
+  the download link and review form disappear, and re-buying the same
+  book afterward works normally. Issuing the refund itself is still
+  manual; only the "what happens after" part is automated
 
 ## One-time setup
 

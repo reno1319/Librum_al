@@ -34,6 +34,7 @@ export default async function SalesPage() {
           .from("purchases")
           .select("book_id, amount_cents, created_at")
           .in("book_id", bookIds)
+          .is("refunded_at", null)
           .returns<Purchase[]>()
       : { data: [] as Purchase[] };
 

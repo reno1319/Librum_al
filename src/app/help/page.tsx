@@ -16,7 +16,7 @@ const faqs = [
   },
   {
     q: "How do refunds work?",
-    a: "There's no self-serve refund flow yet. If you need one, reach out from the contact page and we'll take care of it manually.",
+    a: "There's no self-serve refund request yet — reach out from the contact page and we'll process it manually through Stripe. Once we do, you'll lose access to the book automatically (it disappears from downloads, though it stays listed in your library marked as refunded).",
   },
   {
     q: "Is my payment information safe?",

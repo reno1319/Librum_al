@@ -164,7 +164,9 @@ create table public.purchases (
   book_id uuid not null references public.books(id) on delete cascade,
   reader_id uuid not null references public.profiles(id) on delete cascade,
   stripe_checkout_session_id text not null unique,
+  stripe_payment_intent_id text,
   amount_cents integer not null,
+  refunded_at timestamptz,
   created_at timestamptz not null default now(),
   unique (book_id, reader_id)
 );
@@ -187,6 +189,7 @@ create policy "Authors can view purchases of their own books"
 
 create index purchases_reader_id_idx on public.purchases(reader_id);
 create index purchases_book_id_idx on public.purchases(book_id);
+create index purchases_payment_intent_idx on public.purchases(stripe_payment_intent_id);
 
 -- ============================================================
 -- reviews: one per reader per book — only buyers can write one,

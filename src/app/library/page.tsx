@@ -7,6 +7,7 @@ type PurchaseWithBook = {
   book_id: string;
   amount_cents: number;
   created_at: string;
+  refunded_at: string | null;
   books: Book | null;
 };
 
@@ -22,13 +23,15 @@ export default async function LibraryPage() {
 
   const { data: purchases } = await supabase
     .from("purchases")
-    .select("book_id, amount_cents, created_at, books(*)")
+    .select("book_id, amount_cents, created_at, refunded_at, books(*)")
     .eq("reader_id", user.id)
     .order("created_at", { ascending: false })
     .returns<PurchaseWithBook[]>();
 
   const allPurchases = purchases ?? [];
-  const totalSpentCents = allPurchases.reduce((sum, p) => sum + p.amount_cents, 0);
+  const totalSpentCents = allPurchases
+    .filter((p) => !p.refunded_at)
+    .reduce((sum, p) => sum + p.amount_cents, 0);
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
@@ -72,14 +75,21 @@ export default async function LibraryPage() {
                         day: "numeric",
                       })}{" "}
                       · ${(purchase.amount_cents / 100).toFixed(2)}
+                      {purchase.refunded_at && (
+                        <span className="ml-2 text-red-600">Refunded</span>
+                      )}
                     </p>
                   </div>
-                  <a
-                    href={`/api/books/${purchase.book_id}/download`}
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                  >
-                    Download EPUB
-                  </a>
+                  {purchase.refunded_at ? (
+                    <span className="text-xs text-muted">No longer available</span>
+                  ) : (
+                    <a
+                      href={`/api/books/${purchase.book_id}/download`}
+                      className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+                    >
+                      Download EPUB
+                    </a>
+                  )}
                 </li>
               ) : null,
             )}

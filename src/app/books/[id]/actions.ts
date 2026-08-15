@@ -51,6 +51,7 @@ export async function buyBook(bookId: string) {
     .select("id")
     .eq("book_id", bookId)
     .eq("reader_id", user.id)
+    .is("refunded_at", null)
     .maybeSingle();
 
   if (existing) {
@@ -114,6 +115,7 @@ export async function submitReview(bookId: string, formData: FormData) {
     .select("id")
     .eq("book_id", bookId)
     .eq("reader_id", user.id)
+    .is("refunded_at", null)
     .maybeSingle();
 
   if (!purchase) {
