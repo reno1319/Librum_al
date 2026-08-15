@@ -158,6 +158,26 @@ export default async function BookDetailPage({
             {book.description}
           </p>
 
+          {book.keywords && (
+            <ul
+              className="mt-3 flex flex-wrap"
+              style={{ gap: "0.5rem" }}
+            >
+              {book.keywords
+                .split(",")
+                .map((k) => k.trim())
+                .filter(Boolean)
+                .map((keyword) => (
+                  <li
+                    key={keyword}
+                    className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted"
+                  >
+                    {keyword}
+                  </li>
+                ))}
+            </ul>
+          )}
+
           {book.preview_text && (
             <details className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
               <summary className="cursor-pointer font-serif font-medium">

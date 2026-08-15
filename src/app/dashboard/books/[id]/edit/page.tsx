@@ -93,6 +93,21 @@ export default async function EditBookPage({
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
+          Keywords (optional)
+          <input
+            name="keywords"
+            type="text"
+            defaultValue={book.keywords}
+            placeholder="e.g. space opera, first contact, hard sci-fi"
+            className="rounded-lg border border-border bg-surface px-3 py-2"
+          />
+          <span className="text-xs text-muted">
+            Comma-separated. Helps readers find your book by terms beyond
+            its genre — up to 15.
+          </span>
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
           Genre
           <select
             name="genre"

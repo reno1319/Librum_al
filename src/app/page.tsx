@@ -31,18 +31,24 @@ async function fetchSearchResults(
     return data ?? [];
   }
 
-  // Two separate ilike() queries (title, description) merged in JS, rather
-  // than one .or() filter string — .or() requires manually escaping commas
-  // and parentheses in the search term to stay valid, which is easy to get
-  // wrong. This is simpler and just as correct at our scale.
+  // Separate ilike() queries (title, description, keywords) merged in JS,
+  // rather than one .or() filter string — .or() requires manually escaping
+  // commas and parentheses in the search term to stay valid, which is easy
+  // to get wrong. This is simpler and just as correct at our scale.
   const pattern = `%${term}%`;
-  const [{ data: byTitle }, { data: byDescription }] = await Promise.all([
-    baseQuery().ilike("title", pattern).returns<BookWithAuthor[]>(),
-    baseQuery().ilike("description", pattern).returns<BookWithAuthor[]>(),
-  ]);
+  const [{ data: byTitle }, { data: byDescription }, { data: byKeywords }] =
+    await Promise.all([
+      baseQuery().ilike("title", pattern).returns<BookWithAuthor[]>(),
+      baseQuery().ilike("description", pattern).returns<BookWithAuthor[]>(),
+      baseQuery().ilike("keywords", pattern).returns<BookWithAuthor[]>(),
+    ]);
 
   const merged = new Map<string, BookWithAuthor>();
-  for (const book of [...(byTitle ?? []), ...(byDescription ?? [])]) {
+  for (const book of [
+    ...(byTitle ?? []),
+    ...(byDescription ?? []),
+    ...(byKeywords ?? []),
+  ]) {
     merged.set(book.id, book);
   }
 

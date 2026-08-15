@@ -118,7 +118,7 @@ lean on that we don't have yet. Each item names what it's modeled after.
       order, shown on each book's page
 - [ ] Co-authors & contributors: credit illustrators, translators,
       narrators, or co-authors on a book, not just a single author
-- [ ] Keywords/tags: additional searchable metadata beyond genre
+- [x] Keywords/tags: additional searchable metadata beyond genre
 
 ### Engagement (Gumroad-style following)
 

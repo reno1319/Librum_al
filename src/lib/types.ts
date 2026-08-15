@@ -17,6 +17,7 @@ export type Book = {
   title: string;
   description: string;
   preview_text: string;
+  keywords: string;
   genre: string | null;
   price_cents: number;
   cover_path: string | null;

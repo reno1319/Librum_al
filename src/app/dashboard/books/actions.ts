@@ -9,6 +9,18 @@ import { GENRES } from "@/lib/genres";
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
 
+// Stored as a single comma-separated string (searched the same way as
+// title/description) rather than a Postgres array — simpler to search
+// and edit, and tags don't need to be a distinct type for this MVP.
+function normalizeKeywords(raw: FormDataEntryValue | null): string {
+  return String(raw ?? "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean)
+    .slice(0, 15)
+    .join(", ");
+}
+
 export async function createBook(formData: FormData) {
   const supabase = await createClient();
   const {
@@ -22,6 +34,7 @@ export async function createBook(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const previewText = String(formData.get("previewText") ?? "").trim();
+  const keywords = normalizeKeywords(formData.get("keywords"));
   const genre = String(formData.get("genre") ?? "");
   const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
   const cover = formData.get("cover") as File | null;
@@ -82,6 +95,7 @@ export async function createBook(formData: FormData) {
     title,
     description,
     preview_text: previewText,
+    keywords,
     genre,
     price_cents: priceCents,
     cover_path: coverPath,
@@ -120,6 +134,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const previewText = String(formData.get("previewText") ?? "").trim();
+  const keywords = normalizeKeywords(formData.get("keywords"));
   const genre = String(formData.get("genre") ?? "");
   const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
   const cover = formData.get("cover") as File | null;
@@ -191,6 +206,7 @@ export async function updateBook(bookId: string, formData: FormData) {
       title,
       description,
       preview_text: previewText,
+      keywords,
       genre,
       price_cents: priceCents,
       cover_path: coverPath,

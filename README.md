@@ -31,7 +31,12 @@ file storage), and Stripe (checkout + author payouts).
   automatically — the author's cut goes straight to their bank account,
   Librum keeps a platform fee (20% by default, see `src/lib/pricing.ts`)
 - Authors pick a genre when uploading a book; the storefront homepage has
-  a search box (matches title/description) and a genre filter, combinable
+  a search box (matches title/description/keywords) and a genre filter,
+  combinable
+- Authors can add optional comma-separated keywords when uploading or
+  editing a book — searchable like title/description, and shown as tags
+  on the book page, for terms readers might search that a single genre
+  doesn't capture
 - Authors have a public profile page (photo, bio, their published books),
   editable from **Dashboard > Profile**; book pages and cards link to it
 - Authors can edit a book after publishing (title, description, genre,
