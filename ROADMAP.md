@@ -23,8 +23,10 @@ dashboard. Established in Foundation, then reused everywhere else.
 - [x] Search bar
 - [x] Genres/categories (add to book upload form + storefront filtering)
 - [ ] Book detail page redesign
-- [ ] "Look inside" sample preview (an excerpt readers can view before
-      buying)
+- [x] "Look inside" sample preview (an excerpt readers can view before
+      buying) — the author writes/pastes it in when uploading or editing
+      a book, rather than auto-extracting from the EPUB, which is too
+      unreliable given how much real-world EPUB structure varies
 - [x] Author public profile pages (bio, photo, their books)
 - [x] Reader reviews & star ratings
 

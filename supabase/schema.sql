@@ -62,6 +62,7 @@ create table public.books (
   author_id uuid not null references public.profiles(id) on delete cascade,
   title text not null,
   description text not null default '',
+  preview_text text not null default '',
   genre text check (genre in (
     'Fiction', 'Non-Fiction', 'Mystery & Thriller', 'Romance', 'Fantasy',
     'Science Fiction', 'Horror', 'Biography & Memoir', 'Self-Help',

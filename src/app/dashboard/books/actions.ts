@@ -21,6 +21,7 @@ export async function createBook(formData: FormData) {
 
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
+  const previewText = String(formData.get("previewText") ?? "").trim();
   const genre = String(formData.get("genre") ?? "");
   const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
   const cover = formData.get("cover") as File | null;
@@ -80,6 +81,7 @@ export async function createBook(formData: FormData) {
     author_id: user.id,
     title,
     description,
+    preview_text: previewText,
     genre,
     price_cents: priceCents,
     cover_path: coverPath,
@@ -117,6 +119,7 @@ export async function updateBook(bookId: string, formData: FormData) {
 
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
+  const previewText = String(formData.get("previewText") ?? "").trim();
   const genre = String(formData.get("genre") ?? "");
   const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
   const cover = formData.get("cover") as File | null;
@@ -187,6 +190,7 @@ export async function updateBook(bookId: string, formData: FormData) {
     .update({
       title,
       description,
+      preview_text: previewText,
       genre,
       price_cents: priceCents,
       cover_path: coverPath,

@@ -131,6 +131,17 @@ export default async function BookDetailPage({
             {book.description}
           </p>
 
+          {book.preview_text && (
+            <details className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
+              <summary className="cursor-pointer font-serif font-medium">
+                Look inside
+              </summary>
+              <p className="mt-3 whitespace-pre-line text-sm text-foreground/90">
+                {book.preview_text}
+              </p>
+            </details>
+          )}
+
           {purchase === "success" && (
             <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
               Purchase complete — thank you! It may take a few seconds to show

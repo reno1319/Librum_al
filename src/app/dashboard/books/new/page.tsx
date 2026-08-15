@@ -48,6 +48,19 @@ export default async function NewBookPage({
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
+          Preview excerpt (optional)
+          <textarea
+            name="previewText"
+            rows={8}
+            className="rounded-lg border border-border bg-surface px-3 py-2"
+          />
+          <span className="text-xs text-muted">
+            Shown to readers under &quot;Look inside&quot; before they buy —
+            the opening page or two works well. Leave blank to skip.
+          </span>
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
           Genre
           <select
             name="genre"

@@ -57,6 +57,9 @@ file storage), and Stripe (checkout + author payouts).
 - Logged-in readers can report a book from a small link on its page.
   Reports are stored in `book_reports` — there's no in-app moderation
   UI yet, so review them directly in Supabase's Table Editor
+- Authors can add an optional preview excerpt when uploading or editing
+  a book; readers can expand "Look inside" on the book page to read it
+  before buying
 
 ## One-time setup
 
