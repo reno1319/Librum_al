@@ -273,7 +273,10 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
             "linear-gradient(135deg, var(--color-surface) 0%, var(--color-background) 100%)",
         }}
       >
-        <div className="mx-auto w-48 shrink-0 sm:mx-0 sm:w-56">
+        <Link
+          href={`/books/${hero.id}`}
+          className="mx-auto w-48 shrink-0 sm:mx-0 sm:w-56"
+        >
           {heroCoverUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -284,13 +287,15 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
           ) : (
             <div className="aspect-[2/3] w-full rounded-lg bg-border" />
           )}
-        </div>
+        </Link>
         <div className="flex flex-1 flex-col justify-center">
           <span className="w-fit rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
             Just published
           </span>
           <h2 className="mt-3 font-serif text-4xl font-semibold sm:text-5xl">
-            {hero.title}
+            <Link href={`/books/${hero.id}`} className="hover:underline">
+              {hero.title}
+            </Link>
           </h2>
           <p className="mt-2 text-sm text-muted">
             by{" "}
