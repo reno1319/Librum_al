@@ -26,6 +26,10 @@ const faqs = [
     q: "Can readers preview a book before buying?",
     a: "Not yet — a sample preview is on our roadmap.",
   },
+  {
+    q: "I found a book that shouldn't be on Librum — what do I do?",
+    a: "Click \"Report this book\" near the bottom of its page and tell us why. We review every report.",
+  },
 ];
 
 export default function HelpPage() {

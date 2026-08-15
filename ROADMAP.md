@@ -55,7 +55,9 @@ dashboard. Established in Foundation, then reused everywhere else.
 - [x] Watermark downloads with the buyer's email (lightweight
       anti-piracy — full DRM is out of scope)
 - [ ] Refunds: a Stripe refund should revoke the reader's access
-- [ ] "Report this book" flag for readers
+- [x] "Report this book" flag for readers — stored in the database;
+      there's no in-app moderation UI yet, so review reports directly in
+      the Supabase Table Editor for now
 
 ## Notifications
 

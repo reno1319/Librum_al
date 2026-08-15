@@ -54,6 +54,9 @@ file storage), and Stripe (checkout + author payouts).
   account itself, which cascades through the database
 - Readers can save a book to their **Wishlist** instead of buying it
   right away, from the book page or from **Wishlist** in the nav
+- Logged-in readers can report a book from a small link on its page.
+  Reports are stored in `book_reports` — there's no in-app moderation
+  UI yet, so review them directly in Supabase's Table Editor
 
 ## One-time setup
 

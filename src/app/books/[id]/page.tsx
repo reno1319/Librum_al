@@ -15,10 +15,16 @@ export default async function BookDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ purchase?: string; review?: string; error?: string }>;
+  searchParams: Promise<{
+    purchase?: string;
+    review?: string;
+    report?: string;
+    error?: string;
+  }>;
 }) {
   const { id } = await params;
-  const { purchase, review: reviewStatus, error } = await searchParams;
+  const { purchase, review: reviewStatus, report: reportStatus, error } =
+    await searchParams;
 
   const supabase = await createClient();
   const {
@@ -134,6 +140,11 @@ export default async function BookDetailPage({
           {reviewStatus === "success" && (
             <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
               Thanks for your review!
+            </p>
+          )}
+          {reportStatus === "success" && (
+            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+              Thanks — we&apos;ve received your report and will take a look.
             </p>
           )}
           {error && (
@@ -274,6 +285,14 @@ export default async function BookDetailPage({
           </ul>
         )}
       </section>
+
+      {user && !isAuthor && (
+        <p className="mt-8 text-xs text-muted">
+          <Link href={`/books/${book.id}/report`} className="hover:underline">
+            Report this book
+          </Link>
+        </p>
+      )}
     </main>
   );
 }

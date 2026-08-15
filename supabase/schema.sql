@@ -257,3 +257,29 @@ create policy "Readers can remove from their own wishlist"
   using (auth.uid() = reader_id);
 
 create index wishlist_items_reader_id_idx on public.wishlist_items(reader_id);
+
+-- ============================================================
+-- book_reports: readers flag a book for review. Write-only from the
+-- app's perspective — there's no in-app moderation UI yet, so there's
+-- deliberately no select policy for regular users (not even the
+-- reported book's own author). Review reports directly in the
+-- Supabase dashboard's Table Editor for now.
+-- ============================================================
+
+create table public.book_reports (
+  id uuid primary key default gen_random_uuid(),
+  book_id uuid not null references public.books(id) on delete cascade,
+  reporter_id uuid not null references public.profiles(id) on delete cascade,
+  reason text not null,
+  details text not null default '',
+  status text not null default 'open' check (status in ('open', 'resolved', 'dismissed')),
+  created_at timestamptz not null default now()
+);
+
+alter table public.book_reports enable row level security;
+
+create policy "Readers can report a book"
+  on public.book_reports for insert
+  with check (auth.uid() = reporter_id);
+
+create index book_reports_book_id_idx on public.book_reports(book_id);

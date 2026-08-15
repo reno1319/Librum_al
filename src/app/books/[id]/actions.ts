@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe";
 import { platformFeeCents } from "@/lib/pricing";
+import { REPORT_REASONS } from "@/lib/report-reasons";
 
 type BookForCheckout = {
   id: string;
@@ -173,4 +174,35 @@ export async function removeFromWishlist(bookId: string) {
 
   revalidatePath(`/books/${bookId}`);
   revalidatePath("/wishlist");
+}
+
+export async function submitReport(bookId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?next=/books/${bookId}/report`);
+  }
+
+  const reason = String(formData.get("reason") ?? "");
+  const details = String(formData.get("details") ?? "").trim();
+
+  if (!REPORT_REASONS.includes(reason as (typeof REPORT_REASONS)[number])) {
+    redirect(`/books/${bookId}/report?error=Please+choose+a+reason`);
+  }
+
+  const { error } = await supabase.from("book_reports").insert({
+    book_id: bookId,
+    reporter_id: user.id,
+    reason,
+    details,
+  });
+
+  if (error) {
+    redirect(`/books/${bookId}/report?error=${encodeURIComponent(error.message)}`);
+  }
+
+  redirect(`/books/${bookId}?report=success`);
 }
