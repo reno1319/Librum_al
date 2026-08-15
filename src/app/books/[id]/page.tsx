@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { buyBook, submitReview, addToWishlist, removeFromWishlist } from "./actions";
 import { StarRating } from "@/components/star-rating";
+import { BookShelf } from "@/components/book-shelf";
 import type { Book, Profile, Review } from "@/lib/types";
 
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
@@ -86,10 +87,35 @@ export default async function BookDetailPage({
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
 
+  const { data: moreByAuthor } = await supabase
+    .from("books")
+    .select("*, profiles(display_name)")
+    .eq("status", "published")
+    .eq("author_id", book.author_id)
+    .neq("id", id)
+    .order("created_at", { ascending: false })
+    .limit(8)
+    .returns<BookWithAuthor[]>();
+
+  let youMightLike: BookWithAuthor[] = [];
+  if (book.genre) {
+    const { data } = await supabase
+      .from("books")
+      .select("*, profiles(display_name)")
+      .eq("status", "published")
+      .eq("genre", book.genre)
+      .neq("id", id)
+      .neq("author_id", book.author_id)
+      .order("created_at", { ascending: false })
+      .limit(8)
+      .returns<BookWithAuthor[]>();
+    youMightLike = data ?? [];
+  }
+
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
       <div className="flex flex-col gap-8 sm:flex-row">
-        <div className="mx-auto w-48 shrink-0 sm:mx-0">
+        <div className="mx-auto w-48 shrink-0 sm:mx-0 sm:w-56">
           {coverUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -297,6 +323,17 @@ export default async function BookDetailPage({
           </ul>
         )}
       </section>
+
+      <BookShelf
+        title="More by this author"
+        books={moreByAuthor ?? []}
+        supabase={supabase}
+      />
+      <BookShelf
+        title="You might also like"
+        books={youMightLike}
+        supabase={supabase}
+      />
 
       {user && !isAuthor && (
         <p className="mt-8 text-xs text-muted">

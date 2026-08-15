@@ -94,9 +94,11 @@ lean on that we don't have yet. Each item names what it's modeled after.
       rows ("New releases", "Bestsellers") instead of one flat grid —
       carries over the unfinished item from the original roadmap.
       Search/filter results still show as the flat grid, unchanged
-- [ ] Book detail page redesign: richer layout, a "More by this author"
-      row and a "You might also like" row (same genre) — carries over
-      the unfinished item from the original roadmap
+- [x] Book detail page redesign: richer layout, a "More by this author"
+      row and a "You might also like" row (same genre, different
+      author) — carries over the unfinished item from the original
+      roadmap. Extracted BookShelf into a shared component since the
+      homepage redesign already needed the same horizontal-shelf UI
 - [x] Bestseller/trending sorting on the homepage, using existing sales
       data (no new tracking needed) — done together with the redesign
       above, since the "Bestsellers" shelf needed exactly this

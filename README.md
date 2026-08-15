@@ -17,7 +17,8 @@ file storage), and Stripe (checkout + author payouts).
   published book, plus horizontally-scrolling "Bestsellers" (by units
   sold) and "New releases" shelves; searching or filtering by genre
   switches to a flat results grid instead — and a book detail page for
-  each published book
+  each published book, which itself ends with "More by this author"
+  and "You might also like" (same genre) shelves
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
 - Owners (the buyer, or the author) can download the EPUB from the book
