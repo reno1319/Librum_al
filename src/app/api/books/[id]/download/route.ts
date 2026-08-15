@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { watermarkEpub } from "@/lib/watermark";
 
 // Manuscripts live in a private storage bucket. Nobody gets a permanent
 // link to them — this route checks ownership on every request, then
-// mints a signed URL that expires almost immediately.
+// streams back a copy watermarked with the downloader's email.
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -49,16 +50,28 @@ export async function GET(
   }
 
   const admin = createAdminClient();
-  const fileName = `${book.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.epub`;
-  const { data: signed, error } = await admin.storage
+  const { data: fileBlob, error: downloadError } = await admin.storage
     .from("manuscripts")
-    .createSignedUrl(book.file_path, 60, { download: fileName });
+    .download(book.file_path);
 
-  if (error || !signed) {
+  if (downloadError || !fileBlob) {
     return NextResponse.redirect(
-      new URL(`/books/${id}?error=Could+not+create+a+download+link`, request.url),
+      new URL(`/books/${id}?error=Could+not+download+that+file`, request.url),
     );
   }
 
-  return NextResponse.redirect(signed.signedUrl);
+  const originalBytes = Buffer.from(await fileBlob.arrayBuffer());
+  const fileBytes = user.email
+    ? await watermarkEpub(originalBytes, user.email)
+    : originalBytes;
+
+  const fileName = `${book.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.epub`;
+
+  return new NextResponse(new Uint8Array(fileBytes), {
+    headers: {
+      "Content-Type": "application/epub+zip",
+      "Content-Disposition": `attachment; filename="${fileName}"`,
+      "Content-Length": String(fileBytes.length),
+    },
+  });
 }

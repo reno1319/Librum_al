@@ -18,9 +18,9 @@ file storage), and Stripe (checkout + author payouts).
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
 - Owners (the buyer, or the author) can download the EPUB from the book
-  page or from **My Library** — the file lives in private storage and a
-  short-lived signed link is generated per request, so nobody can guess
-  or share a permanent URL to it
+  page or from **My Library** — the file lives in private storage, and
+  every download request re-checks ownership before streaming it, so
+  there's no permanent, guessable URL to the file
 - Authors connect a payout account (**Stripe Connect**) from
   **Dashboard > Payouts** before they're allowed to publish. Stripe
   handles identity verification and tax forms. Every sale is split
@@ -40,6 +40,10 @@ file storage), and Stripe (checkout + author payouts).
   your existing review rather than creating a second one
 - **My Library** doubles as order history: purchase date, price paid,
   and a running total spent, alongside each book's download link
+- Downloads are watermarked: each EPUB is stamped with the downloader's
+  email in its own metadata before being sent, so a leaked copy can be
+  traced back to whoever downloaded it. Not DRM — the file still opens
+  normally everywhere, nothing is encrypted or locked down
 
 ## One-time setup
 

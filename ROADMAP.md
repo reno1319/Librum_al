@@ -52,7 +52,7 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 ## Trust & Safety
 
-- [ ] Watermark downloads with the buyer's email (lightweight
+- [x] Watermark downloads with the buyer's email (lightweight
       anti-piracy — full DRM is out of scope)
 - [ ] Refunds: a Stripe refund should revoke the reader's access
 - [ ] "Report this book" flag for readers
