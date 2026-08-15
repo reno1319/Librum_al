@@ -44,6 +44,9 @@ file storage), and Stripe (checkout + author payouts).
   email in its own metadata before being sent, so a leaked copy can be
   traced back to whoever downloaded it. Not DRM — the file still opens
   normally everywhere, nothing is encrypted or locked down
+- Purchases trigger two emails (optional — the app works fine without
+  this configured): a receipt to the reader, and a sale notification to
+  the author
 
 ## One-time setup
 
@@ -90,7 +93,20 @@ file storage), and Stripe (checkout + author payouts).
    your test account — required before authors can onboard for payouts.
    No real business details are needed in test mode.
 
-### 4. Configure environment variables
+### 4. (Optional) Create a Resend account for emails
+
+Skip this if you don't care about purchase receipt / sale notification
+emails right now — everything else works fine without it.
+
+1. Go to [resend.com](https://resend.com), sign up, and go to **API
+   Keys** to create one.
+2. Without verifying your own domain, Resend can only deliver to the
+   email address you signed up with — fine for trying this out, but
+   means test purchases as a *different* reader account won't actually
+   receive a receipt unless that reader's email matches your Resend
+   account's email too. Verifying a domain removes this limit.
+
+### 5. Configure environment variables
 
 1. Copy the example env file:
    ```bash
@@ -104,9 +120,11 @@ file storage), and Stripe (checkout + author payouts).
    STRIPE_SECRET_KEY=sk_test_...
    STRIPE_WEBHOOK_SECRET=whsec_...
    NEXT_PUBLIC_SITE_URL=http://localhost:3000
+   RESEND_API_KEY=re_...
    ```
+   (leave `RESEND_API_KEY` blank if you skipped step 4)
 
-### 5. Install dependencies and run
+### 6. Install dependencies and run
 
 ```bash
 npm install
@@ -146,6 +164,7 @@ src/
   lib/
     supabase/                      browser/server/middleware/admin clients
     stripe.ts                      Stripe SDK client
+    email.ts                       purchase receipt / sale notification emails
     pricing.ts                     platform fee constant/helper
     types.ts                       shared TypeScript types
 supabase/

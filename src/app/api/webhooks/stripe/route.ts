@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendPurchaseEmails } from "@/lib/email";
 
 // Stripe calls this URL directly (not a browser), so it must read the
 // raw request body to verify the signature — no cookies/session involved.
@@ -31,15 +32,19 @@ export async function POST(request: Request) {
 
     if (bookId && readerId) {
       const supabase = createAdminClient();
+      const amountCents = session.amount_total ?? 0;
+
       await supabase.from("purchases").upsert(
         {
           book_id: bookId,
           reader_id: readerId,
           stripe_checkout_session_id: session.id,
-          amount_cents: session.amount_total ?? 0,
+          amount_cents: amountCents,
         },
         { onConflict: "book_id,reader_id" },
       );
+
+      await sendPurchaseEmails(supabase, { bookId, readerId, amountCents });
     }
   }
 

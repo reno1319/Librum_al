@@ -59,8 +59,8 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 ## Notifications
 
-- [ ] Purchase receipt email to readers
-- [ ] "You made a sale" email to authors
+- [x] Purchase receipt email to readers
+- [x] "You made a sale" email to authors
 
 ## Account & Settings
 
