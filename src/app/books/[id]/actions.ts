@@ -89,3 +89,48 @@ export async function buyBook(bookId: string) {
 
   redirect(session.url);
 }
+
+export async function submitReview(bookId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?next=/books/${bookId}`);
+  }
+
+  const rating = Number(formData.get("rating"));
+  const body = String(formData.get("body") ?? "").trim();
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    redirect(`/books/${bookId}?error=Please+choose+a+rating`);
+  }
+
+  const { data: purchase } = await supabase
+    .from("purchases")
+    .select("id")
+    .eq("book_id", bookId)
+    .eq("reader_id", user.id)
+    .maybeSingle();
+
+  if (!purchase) {
+    redirect(`/books/${bookId}?error=Buy+this+book+to+review+it`);
+  }
+
+  // Resubmitting overwrites the reader's existing review for this book,
+  // thanks to the unique(book_id, reader_id) constraint — no separate
+  // "edit" flow needed.
+  const { error } = await supabase
+    .from("reviews")
+    .upsert(
+      { book_id: bookId, reader_id: user.id, rating, body },
+      { onConflict: "book_id,reader_id" },
+    );
+
+  if (error) {
+    redirect(`/books/${bookId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  redirect(`/books/${bookId}?review=success`);
+}

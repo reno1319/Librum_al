@@ -26,7 +26,7 @@ dashboard. Established in Foundation, then reused everywhere else.
 - [ ] "Look inside" sample preview (an excerpt readers can view before
       buying)
 - [x] Author public profile pages (bio, photo, their books)
-- [ ] Reader reviews & star ratings
+- [x] Reader reviews & star ratings
 
 ## Author Tools
 

@@ -24,3 +24,12 @@ export type Book = {
   created_at: string;
   updated_at: string;
 };
+
+export type Review = {
+  id: string;
+  book_id: string;
+  reader_id: string;
+  rating: number;
+  body: string;
+  created_at: string;
+};

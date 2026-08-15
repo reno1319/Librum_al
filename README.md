@@ -35,6 +35,9 @@ file storage), and Stripe (checkout + author payouts).
   optional, leave those fields blank to keep the current file
 - **Dashboard > Sales** shows net revenue, units sold, a 14-day revenue
   chart, and a per-book breakdown
+- Readers who bought a book can leave a star rating and review; the book
+  page shows the average rating and every review. Resubmitting updates
+  your existing review rather than creating a second one
 
 ## One-time setup
 
