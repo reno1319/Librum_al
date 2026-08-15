@@ -38,6 +38,9 @@ export async function SiteHeader() {
             <Link href="/library" className="hover:underline">
               Library
             </Link>
+            <Link href="/account" className="hover:underline">
+              Account
+            </Link>
             <span className="hidden text-muted sm:inline">{displayName}</span>
             <form action={logout}>
               <button type="submit" className="hover:underline">

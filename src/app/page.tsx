@@ -51,15 +51,21 @@ async function fetchBooks(
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; genre?: string }>;
+  searchParams: Promise<{ q?: string; genre?: string; account?: string }>;
 }) {
-  const { q, genre } = await searchParams;
+  const { q, genre, account } = await searchParams;
   const supabase = await createClient();
   const books = await fetchBooks(supabase, { q, genre });
   const isFiltered = Boolean(q?.trim() || genre);
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
+      {account === "deleted" && (
+        <p className="mb-6 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+          Your account has been deleted.
+        </p>
+      )}
+
       <h1 className="font-serif text-4xl font-semibold">Discover ebooks</h1>
       <p className="mt-2 text-muted">
         Independently published, straight from the author.

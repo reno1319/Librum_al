@@ -4,9 +4,9 @@ import { login } from "@/app/auth/actions";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; next?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; next?: string }>;
 }) {
-  const { error, next } = await searchParams;
+  const { error, success, next } = await searchParams;
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
@@ -15,6 +15,11 @@ export default async function LoginPage({
       {error && (
         <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
+        </p>
+      )}
+      {success && (
+        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+          {success}
         </p>
       )}
 
@@ -48,7 +53,13 @@ export default async function LoginPage({
         </button>
       </form>
 
-      <p className="mt-6 text-sm text-muted">
+      <p className="mt-4 text-sm text-muted">
+        <Link href="/forgot-password" className="hover:underline">
+          Forgot your password?
+        </Link>
+      </p>
+
+      <p className="mt-2 text-sm text-muted">
         No account yet?{" "}
         <Link href="/signup" className="font-medium text-primary underline">
           Sign up

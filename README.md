@@ -47,6 +47,11 @@ file storage), and Stripe (checkout + author payouts).
 - Purchases trigger two emails (optional — the app works fine without
   this configured): a receipt to the reader, and a sale notification to
   the author
+- Forgot-password flow (**/forgot-password**) via Supabase's own reset
+  email. Any logged-in user (reader or author) can delete their account
+  from **Account** in the nav — this removes their storage files first
+  (avatar, and covers/manuscripts for an author's books), then the
+  account itself, which cascades through the database
 
 ## One-time setup
 
@@ -153,7 +158,9 @@ src/
     books/[id]/                 book detail page + buy action
     library/                     a reader's purchased books
     login/, signup/              auth pages
-    auth/actions.ts               server actions for signup/login/logout
+    forgot-password/, reset-password/  password recovery flow
+    account/                     delete account (any logged-in user)
+    auth/actions.ts               server actions for signup/login/logout/reset
     dashboard/                     author-only area (protected)
       books/                        add/publish/unpublish/delete a book
       payouts/                      Stripe Connect onboarding

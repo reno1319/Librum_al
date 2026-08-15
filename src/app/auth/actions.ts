@@ -76,3 +76,54 @@ export async function logout() {
   revalidatePath("/", "layout");
   redirect("/");
 }
+
+export async function requestPasswordReset(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim();
+
+  if (!email) {
+    redirect("/forgot-password?error=Enter+your+email");
+  }
+
+  const supabase = await createClient();
+  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
+  await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/auth/callback?next=/reset-password`,
+  });
+
+  // Always show the same message whether or not that email has an
+  // account — otherwise this form could be used to check who's signed up.
+  redirect("/forgot-password?success=1");
+}
+
+export async function updatePassword(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(
+      "/login?error=That+reset+link+has+expired.+Request+a+new+one+from+the+login+page.",
+    );
+  }
+
+  const password = String(formData.get("password") ?? "");
+  const confirmPassword = String(formData.get("confirmPassword") ?? "");
+
+  if (!password || password.length < 6) {
+    redirect("/reset-password?error=Password+must+be+at+least+6+characters");
+  }
+
+  if (password !== confirmPassword) {
+    redirect("/reset-password?error=Passwords+don%27t+match");
+  }
+
+  const { error } = await supabase.auth.updateUser({ password });
+
+  if (error) {
+    redirect(`/reset-password?error=${encodeURIComponent(error.message)}`);
+  }
+
+  redirect("/login?success=Password+updated.+Log+in+with+your+new+password.");
+}

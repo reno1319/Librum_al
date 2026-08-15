@@ -66,8 +66,8 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 - [x] Edit profile (display name, avatar) — bio included too, done as
       part of author profile pages
-- [ ] Forgot-password flow
-- [ ] Delete account
+- [x] Forgot-password flow
+- [x] Delete account
 
 ## Going Live
 
