@@ -42,6 +42,10 @@ file storage), and Stripe (checkout + author payouts).
   readers enter one at checkout, and it's applied before Stripe splits
   the sale, so the platform fee and author payout are both based on the
   discounted price
+- Authors group their books into a **series** with a reading order, from
+  **Dashboard > Series** (create the series) and each book's edit page
+  (assign it and set its position). A book's page shows the full series
+  in order, linking to the other published entries
 - Authors have a public profile page (photo, bio, their published books),
   editable from **Dashboard > Profile**; book pages and cards link to it
 - Authors can edit a book after publishing (title, description, genre,

@@ -19,6 +19,8 @@ export type Book = {
   preview_text: string;
   keywords: string;
   genre: string | null;
+  series_id: string | null;
+  series_position: number | null;
   price_cents: number;
   cover_path: string | null;
   file_path: string | null;
@@ -33,6 +35,13 @@ export type Review = {
   reader_id: string;
   rating: number;
   body: string;
+  created_at: string;
+};
+
+export type Series = {
+  id: string;
+  author_id: string;
+  title: string;
   created_at: string;
 };
 

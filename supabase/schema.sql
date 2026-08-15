@@ -53,6 +53,38 @@ create trigger on_auth_user_created
   for each row execute procedure public.handle_new_user();
 
 -- ============================================================
+-- series: an author's named grouping of their own books, in reading
+-- order. Publicly viewable (a book's series info shows on its page to
+-- everyone), but only the owning author can create/rename/delete one.
+-- Declared before books, which references it.
+-- ============================================================
+
+create table public.series (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.series enable row level security;
+
+create policy "Series are viewable by everyone"
+  on public.series for select
+  using (true);
+
+create policy "Authors can create their own series"
+  on public.series for insert
+  with check (auth.uid() = author_id);
+
+create policy "Authors can rename their own series"
+  on public.series for update
+  using (auth.uid() = author_id);
+
+create policy "Authors can delete their own series"
+  on public.series for delete
+  using (auth.uid() = author_id);
+
+-- ============================================================
 -- books: owned by an author, visible to everyone once published
 -- ============================================================
 
@@ -69,6 +101,8 @@ create table public.books (
     'Science Fiction', 'Horror', 'Biography & Memoir', 'Self-Help',
     'History', 'Poetry', 'Young Adult', 'Children''s', 'Business'
   )),
+  series_id uuid references public.series(id) on delete set null,
+  series_position integer check (series_position > 0),
   price_cents integer not null default 0 check (price_cents >= 0),
   cover_path text,
   file_path text,
@@ -98,6 +132,7 @@ create policy "Authors can delete their own books"
 create index books_author_id_idx on public.books(author_id);
 create index books_status_idx on public.books(status);
 create index books_genre_idx on public.books(genre);
+create index books_series_id_idx on public.books(series_id);
 
 -- ============================================================
 -- discount_codes: an author's promo codes for one of their own books,

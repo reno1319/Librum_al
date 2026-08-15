@@ -4,9 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { buyBook, submitReview, addToWishlist, removeFromWishlist } from "./actions";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
-import type { Book, Profile, Review } from "@/lib/types";
+import type { Book, Profile, Review, Series } from "@/lib/types";
 
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
+type SeriesEntry = Pick<Book, "id" | "title" | "series_position">;
 type ReviewWithReader = Review & {
   profiles: Pick<Profile, "display_name"> | null;
 };
@@ -87,6 +88,26 @@ export default async function BookDetailPage({
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
 
+  let seriesInfo: Series | null = null;
+  let seriesEntries: SeriesEntry[] = [];
+  if (book.series_id) {
+    const { data: seriesRow } = await supabase
+      .from("series")
+      .select("*")
+      .eq("id", book.series_id)
+      .maybeSingle<Series>();
+    seriesInfo = seriesRow;
+
+    const { data: entries } = await supabase
+      .from("books")
+      .select("id, title, series_position")
+      .eq("series_id", book.series_id)
+      .eq("status", "published")
+      .order("series_position", { ascending: true, nullsFirst: false })
+      .returns<SeriesEntry[]>();
+    seriesEntries = entries ?? [];
+  }
+
   const { data: moreByAuthor } = await supabase
     .from("books")
     .select("*, profiles(display_name)")
@@ -144,6 +165,13 @@ export default async function BookDetailPage({
               {book.profiles?.display_name}
             </Link>
           </p>
+
+          {seriesInfo && (
+            <p className="mt-1 text-sm text-muted">
+              {book.series_position ? `Book ${book.series_position} of ` : ""}
+              the <span className="font-medium">{seriesInfo.title}</span> series
+            </p>
+          )}
 
           <div className="mt-2 flex items-center gap-2 text-sm">
             <StarRating rating={averageRating} />
@@ -352,6 +380,35 @@ export default async function BookDetailPage({
           </ul>
         )}
       </section>
+
+      {seriesInfo && seriesEntries.length > 1 && (
+        <section className="mt-12 border-t border-border pt-8">
+          <h2 className="font-serif text-xl font-semibold">
+            {seriesInfo.title}
+          </h2>
+          <ol className="mt-4 flex flex-col gap-2 text-sm">
+            {seriesEntries.map((entry) => (
+              <li key={entry.id}>
+                {entry.id === book.id ? (
+                  <span className="font-medium">
+                    {entry.series_position != null && `${entry.series_position}. `}
+                    {entry.title}{" "}
+                    <span className="text-xs text-muted">(this book)</span>
+                  </span>
+                ) : (
+                  <Link
+                    href={`/books/${entry.id}`}
+                    className="hover:underline"
+                  >
+                    {entry.series_position != null && `${entry.series_position}. `}
+                    {entry.title}
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       <BookShelf
         title="More by this author"

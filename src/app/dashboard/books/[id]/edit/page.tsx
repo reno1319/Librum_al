@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { updateBook } from "../../actions";
 import { GENRES } from "@/lib/genres";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
-import type { Book } from "@/lib/types";
+import type { Book, Series } from "@/lib/types";
 
 export default async function EditBookPage({
   params,
@@ -34,6 +34,13 @@ export default async function EditBookPage({
   if (!book || book.author_id !== user.id) {
     notFound();
   }
+
+  const { data: series } = await supabase
+    .from("series")
+    .select("*")
+    .eq("author_id", user.id)
+    .order("title")
+    .returns<Series[]>();
 
   const coverUrl = book.cover_path
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
@@ -125,6 +132,48 @@ export default async function EditBookPage({
             ))}
           </select>
         </label>
+
+        {series && series.length === 0 && (
+          <p className="text-xs text-muted">
+            Want to group this with other books as a series?{" "}
+            <Link href="/dashboard/series" className="underline">
+              Create a series first
+            </Link>
+            , then come back here.
+          </p>
+        )}
+
+        {series && series.length > 0 && (
+          <div className="flex gap-3">
+            <label className="flex flex-1 flex-col gap-1 text-sm">
+              Series (optional)
+              <select
+                name="seriesId"
+                defaultValue={book.series_id ?? ""}
+                className="rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <option value="">None</option>
+                {series.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Position
+              <input
+                name="seriesPosition"
+                type="number"
+                min="1"
+                step="1"
+                defaultValue={book.series_position ?? ""}
+                placeholder="1"
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-2"
+              />
+            </label>
+          </div>
+        )}
 
         <label className="flex flex-col gap-1 text-sm">
           Price (USD)

@@ -21,6 +21,41 @@ function normalizeKeywords(raw: FormDataEntryValue | null): string {
     .join(", ");
 }
 
+// Confirms the chosen series actually belongs to this author (an empty
+// selection is always valid — a book doesn't have to be in a series).
+// Redirects back with an error rather than returning one, matching the
+// other field validations in this file.
+async function resolveSeriesSelection(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  formData: FormData,
+  errorPath: string,
+) {
+  const seriesId = String(formData.get("seriesId") ?? "").trim() || null;
+  if (!seriesId) {
+    return { seriesId: null, seriesPosition: null };
+  }
+
+  const { data: series } = await supabase
+    .from("series")
+    .select("id")
+    .eq("id", seriesId)
+    .eq("author_id", userId)
+    .maybeSingle();
+
+  if (!series) {
+    redirect(`${errorPath}?error=Choose+one+of+your+own+series`);
+  }
+
+  const rawPosition = String(formData.get("seriesPosition") ?? "").trim();
+  const seriesPosition = rawPosition ? Number(rawPosition) : null;
+  if (seriesPosition != null && (!Number.isInteger(seriesPosition) || seriesPosition < 1)) {
+    redirect(`${errorPath}?error=Series+position+must+be+a+positive+whole+number`);
+  }
+
+  return { seriesId, seriesPosition };
+}
+
 export async function createBook(formData: FormData) {
   const supabase = await createClient();
   const {
@@ -55,6 +90,13 @@ export async function createBook(formData: FormData) {
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
     redirect("/dashboard/books/new?error=Please+choose+a+genre");
   }
+
+  const { seriesId, seriesPosition } = await resolveSeriesSelection(
+    supabase,
+    user.id,
+    formData,
+    "/dashboard/books/new",
+  );
 
   if (!manuscript.name.toLowerCase().endsWith(".epub")) {
     redirect("/dashboard/books/new?error=The+manuscript+must+be+an+EPUB+file");
@@ -97,6 +139,8 @@ export async function createBook(formData: FormData) {
     preview_text: previewText,
     keywords,
     genre,
+    series_id: seriesId,
+    series_position: seriesPosition,
     price_cents: priceCents,
     cover_path: coverPath,
     file_path: manuscriptPath,
@@ -147,6 +191,13 @@ export async function updateBook(bookId: string, formData: FormData) {
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
     redirect(`/dashboard/books/${bookId}/edit?error=Please+choose+a+genre`);
   }
+
+  const { seriesId, seriesPosition } = await resolveSeriesSelection(
+    supabase,
+    user.id,
+    formData,
+    `/dashboard/books/${bookId}/edit`,
+  );
 
   let coverPath = existing.cover_path;
   if (cover && cover.size > 0) {
@@ -208,6 +259,8 @@ export async function updateBook(bookId: string, formData: FormData) {
       preview_text: previewText,
       keywords,
       genre,
+      series_id: seriesId,
+      series_position: seriesPosition,
       price_cents: priceCents,
       cover_path: coverPath,
       file_path: filePath,

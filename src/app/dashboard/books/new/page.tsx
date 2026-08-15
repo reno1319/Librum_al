@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { createBook } from "../actions";
+import { createClient } from "@/lib/supabase/server";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { GENRES } from "@/lib/genres";
+import type { Series } from "@/lib/types";
 
 export default async function NewBookPage({
   searchParams,
@@ -9,6 +11,17 @@ export default async function NewBookPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: series } = await supabase
+    .from("series")
+    .select("*")
+    .eq("author_id", user!.id)
+    .order("title")
+    .returns<Series[]>();
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
@@ -92,6 +105,47 @@ export default async function NewBookPage({
             ))}
           </select>
         </label>
+
+        {series && series.length === 0 && (
+          <p className="text-xs text-muted">
+            Want to group this with other books as a series?{" "}
+            <Link href="/dashboard/series" className="underline">
+              Create a series first
+            </Link>
+            , then come back here.
+          </p>
+        )}
+
+        {series && series.length > 0 && (
+          <div className="flex gap-3">
+            <label className="flex flex-1 flex-col gap-1 text-sm">
+              Series (optional)
+              <select
+                name="seriesId"
+                defaultValue=""
+                className="rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <option value="">None</option>
+                {series.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Position
+              <input
+                name="seriesPosition"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="1"
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-2"
+              />
+            </label>
+          </div>
+        )}
 
         <label className="flex flex-col gap-1 text-sm">
           Price (USD)
