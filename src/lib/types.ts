@@ -35,3 +35,15 @@ export type Review = {
   body: string;
   created_at: string;
 };
+
+export type DiscountCode = {
+  id: string;
+  author_id: string;
+  book_id: string;
+  code: string;
+  percent_off: number | null;
+  amount_off_cents: number | null;
+  active: boolean;
+  expires_at: string | null;
+  created_at: string;
+};

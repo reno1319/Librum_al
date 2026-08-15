@@ -105,7 +105,7 @@ lean on that we don't have yet. Each item names what it's modeled after.
 
 ### Commerce (Gumroad, Payhip, KDP countdown deals)
 
-- [ ] Discount codes: authors create a promo code (% or $ off);
+- [x] Discount codes: authors create a promo code (% or $ off);
       applied at Stripe Checkout
 - [ ] Bundles: an author combines their own books into one discounted
       package, purchased as a single checkout that unlocks every book

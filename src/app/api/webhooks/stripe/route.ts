@@ -42,6 +42,7 @@ export async function POST(request: Request) {
           stripe_payment_intent_id:
             typeof session.payment_intent === "string" ? session.payment_intent : null,
           amount_cents: amountCents,
+          discount_code_id: session.metadata?.discount_code_id ?? null,
           // Explicit, not just omitted: on a re-purchase after an earlier
           // refund, the unique(book_id, reader_id) constraint means this
           // upsert updates that same row — without resetting this, it'd

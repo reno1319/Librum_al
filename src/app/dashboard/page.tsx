@@ -39,6 +39,12 @@ export default async function DashboardPage({
             Sales
           </Link>
           <Link
+            href="/dashboard/discounts"
+            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+          >
+            Discounts
+          </Link>
+          <Link
             href="/dashboard/profile"
             className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
           >

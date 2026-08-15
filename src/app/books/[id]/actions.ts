@@ -3,9 +3,11 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
-import { platformFeeCents } from "@/lib/pricing";
+import { platformFeeCents, applyDiscount } from "@/lib/pricing";
 import { REPORT_REASONS } from "@/lib/report-reasons";
+import type { DiscountCode } from "@/lib/types";
 
 type BookForCheckout = {
   id: string;
@@ -19,7 +21,7 @@ type BookForCheckout = {
   } | null;
 };
 
-export async function buyBook(bookId: string) {
+export async function buyBook(bookId: string, formData: FormData) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -58,6 +60,34 @@ export async function buyBook(bookId: string) {
     redirect(`/books/${bookId}`);
   }
 
+  let priceCents = book.price_cents;
+  let discountCodeId: string | null = null;
+
+  const rawCode = String(formData.get("code") ?? "").trim().toUpperCase();
+  if (rawCode) {
+    // Codes aren't publicly listable (see the RLS policies in
+    // schema.sql) — this is the one place one gets looked up, done
+    // server-side with the service role key against this specific book.
+    const admin = createAdminClient();
+    const { data: discount } = await admin
+      .from("discount_codes")
+      .select("*")
+      .eq("book_id", bookId)
+      .eq("code", rawCode)
+      .eq("active", true)
+      .maybeSingle<DiscountCode>();
+
+    const isExpired =
+      !!discount?.expires_at && new Date(discount.expires_at) < new Date();
+
+    if (!discount || isExpired) {
+      redirect(`/books/${bookId}?error=That+promo+code+isn%27t+valid`);
+    }
+
+    priceCents = applyDiscount(book.price_cents, discount);
+    discountCodeId = discount.id;
+  }
+
   const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
   const session = await stripe.checkout.sessions.create({
@@ -67,13 +97,13 @@ export async function buyBook(bookId: string) {
         price_data: {
           currency: "usd",
           product_data: { name: book.title },
-          unit_amount: book.price_cents,
+          unit_amount: priceCents,
         },
         quantity: 1,
       },
     ],
     payment_intent_data: {
-      application_fee_amount: platformFeeCents(book.price_cents),
+      application_fee_amount: platformFeeCents(priceCents),
       transfer_data: {
         destination: authorAccount,
       },
@@ -83,6 +113,7 @@ export async function buyBook(bookId: string) {
     metadata: {
       book_id: bookId,
       reader_id: user.id,
+      ...(discountCodeId ? { discount_code_id: discountCodeId } : {}),
     },
   });
 
