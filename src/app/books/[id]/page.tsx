@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { buyBook, submitReview } from "./actions";
+import { buyBook, submitReview, addToWishlist, removeFromWishlist } from "./actions";
 import { StarRating } from "@/components/star-rating";
 import type { Book, Profile, Review } from "@/lib/types";
 
@@ -36,6 +36,7 @@ export default async function BookDetailPage({
   }
 
   let owned = false;
+  let wishlisted = false;
   if (user) {
     const { data: purchaseRow } = await supabase
       .from("purchases")
@@ -44,6 +45,16 @@ export default async function BookDetailPage({
       .eq("reader_id", user.id)
       .maybeSingle();
     owned = !!purchaseRow;
+
+    if (!owned) {
+      const { data: wishlistRow } = await supabase
+        .from("wishlist_items")
+        .select("id")
+        .eq("book_id", id)
+        .eq("reader_id", user.id)
+        .maybeSingle();
+      wishlisted = !!wishlistRow;
+    }
   }
 
   const { data: reviews } = await supabase
@@ -159,14 +170,29 @@ export default async function BookDetailPage({
                 </a>
               </>
             ) : user ? (
-              <form action={buyBook.bind(null, book.id)}>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+              <>
+                <form action={buyBook.bind(null, book.id)}>
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+                  >
+                    Buy now
+                  </button>
+                </form>
+                <form
+                  action={(wishlisted ? removeFromWishlist : addToWishlist).bind(
+                    null,
+                    book.id,
+                  )}
                 >
-                  Buy now
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+                  >
+                    {wishlisted ? "Remove from wishlist" : "Save for later"}
+                  </button>
+                </form>
+              </>
             ) : (
               <Link
                 href={`/login?next=/books/${book.id}`}

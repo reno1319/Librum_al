@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe";
 import { platformFeeCents } from "@/lib/pricing";
@@ -133,4 +134,43 @@ export async function submitReview(bookId: string, formData: FormData) {
   }
 
   redirect(`/books/${bookId}?review=success`);
+}
+
+export async function addToWishlist(bookId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?next=/books/${bookId}`);
+  }
+
+  await supabase.from("wishlist_items").insert({
+    book_id: bookId,
+    reader_id: user.id,
+  });
+
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath("/wishlist");
+}
+
+export async function removeFromWishlist(bookId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  await supabase
+    .from("wishlist_items")
+    .delete()
+    .eq("book_id", bookId)
+    .eq("reader_id", user.id);
+
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath("/wishlist");
 }

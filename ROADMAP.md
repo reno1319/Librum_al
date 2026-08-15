@@ -39,7 +39,7 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 - [x] Order history / purchase receipts — merged into My Library rather
       than a separate page, since it's the same underlying data
-- [ ] Wishlist / save for later
+- [x] Wishlist / save for later
 
 ## Trust, Legal & Info Pages
 

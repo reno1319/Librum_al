@@ -52,6 +52,8 @@ file storage), and Stripe (checkout + author payouts).
   from **Account** in the nav — this removes their storage files first
   (avatar, and covers/manuscripts for an author's books), then the
   account itself, which cascades through the database
+- Readers can save a book to their **Wishlist** instead of buying it
+  right away, from the book page or from **Wishlist** in the nav
 
 ## One-time setup
 
