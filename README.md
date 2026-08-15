@@ -38,6 +38,8 @@ file storage), and Stripe (checkout + author payouts).
 - Readers who bought a book can leave a star rating and review; the book
   page shows the average rating and every review. Resubmitting updates
   your existing review rather than creating a second one
+- **My Library** doubles as order history: purchase date, price paid,
+  and a running total spent, alongside each book's download link
 
 ## One-time setup
 

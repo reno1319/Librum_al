@@ -37,7 +37,8 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 ## Reader Tools
 
-- [ ] Order history / purchase receipts
+- [x] Order history / purchase receipts — merged into My Library rather
+      than a separate page, since it's the same underlying data
 - [ ] Wishlist / save for later
 
 ## Trust, Legal & Info Pages
