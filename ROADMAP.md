@@ -102,6 +102,9 @@ lean on that we don't have yet. Each item names what it's modeled after.
 - [x] Bestseller/trending sorting on the homepage, using existing sales
       data (no new tracking needed) — done together with the redesign
       above, since the "Bestsellers" shelf needed exactly this
+- [x] Homepage split into two tracks (draft2digital/IngramSpark/Kobo
+      Writing Life-style author pitch, then the reader marketplace) —
+      see README for details
 
 ### Commerce (Gumroad, Payhip, KDP countdown deals)
 

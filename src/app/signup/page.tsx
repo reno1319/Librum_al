@@ -4,9 +4,10 @@ import { signup } from "@/app/auth/actions";
 export default async function SignupPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; role?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, role } = await searchParams;
+  const authorPreselected = role === "author";
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
@@ -53,11 +54,21 @@ export default async function SignupPage({
         <fieldset className="flex flex-col gap-2 text-sm">
           <legend className="mb-1">I am signing up as a...</legend>
           <label className="flex items-center gap-2">
-            <input type="radio" name="role" value="reader" defaultChecked />
+            <input
+              type="radio"
+              name="role"
+              value="reader"
+              defaultChecked={!authorPreselected}
+            />
             Reader — I want to buy and read ebooks
           </label>
           <label className="flex items-center gap-2">
-            <input type="radio" name="role" value="author" />
+            <input
+              type="radio"
+              name="role"
+              value="author"
+              defaultChecked={authorPreselected}
+            />
             Author — I want to publish and sell ebooks
           </label>
         </fieldset>
