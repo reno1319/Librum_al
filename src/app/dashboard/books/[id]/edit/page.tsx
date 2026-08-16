@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { updateBook } from "../../actions";
 import { GENRES } from "@/lib/genres";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { getPublishChecklist } from "@/lib/publish-checklist";
 import type { Book, Series } from "@/lib/types";
 
 export default async function EditBookPage({
@@ -46,6 +47,10 @@ export default async function EditBookPage({
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
   const manuscriptName = book.file_path?.split("/").pop() ?? null;
+  const incompleteChecklist =
+    book.status === "draft"
+      ? getPublishChecklist(book).filter((item) => !item.done)
+      : [];
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
@@ -58,6 +63,17 @@ export default async function EditBookPage({
         <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
+      )}
+
+      {incompleteChecklist.length > 0 && (
+        <div className="mt-4 rounded-lg border border-dashed border-border bg-surface px-4 py-3 text-sm">
+          <p className="font-medium">Before you publish, consider:</p>
+          <ul className="mt-2 flex flex-col text-muted" style={{ gap: "0.25rem" }}>
+            {incompleteChecklist.map((item) => (
+              <li key={item.label}>&middot; {item.label}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <form

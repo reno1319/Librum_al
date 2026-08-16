@@ -254,6 +254,25 @@ const AUTHOR_STRIP = [
   "Payouts via Stripe",
 ];
 
+const PUBLISHING_TOOLS = [
+  {
+    title: "Sales dashboard",
+    body: "Revenue, units sold, and a 14-day chart — broken down per book, so you know what's working.",
+  },
+  {
+    title: "Discount codes",
+    body: "Run a percentage- or dollar-off promo on any book, with an optional expiry date.",
+  },
+  {
+    title: "Series",
+    body: "Group your books in reading order — shown right on each book's page, linking readers to the next one.",
+  },
+  {
+    title: "Watermarked downloads",
+    body: "Every sale is stamped with the buyer's email — lightweight anti-piracy, no DRM, no restrictions for readers.",
+  },
+];
+
 function AuthorPitch() {
   return (
     <>
@@ -324,6 +343,22 @@ function AuthorPitch() {
         >
           Read the full guide &rarr;
         </Link>
+      </section>
+
+      <section className="mt-14">
+        <h2 className="font-serif text-xl font-semibold">
+          Everything you need to sell your book
+        </h2>
+        <div className="mt-6 grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-4">
+          {PUBLISHING_TOOLS.map((tool) => (
+            <div key={tool.title}>
+              <h3 className="font-serif text-lg font-semibold">
+                {tool.title}
+              </h3>
+              <p className="mt-1 text-sm text-foreground/90">{tool.body}</p>
+            </div>
+          ))}
+        </div>
       </section>
     </>
   );

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { publishBook, unpublishBook, deleteBook } from "./books/actions";
+import { getPublishChecklist } from "@/lib/publish-checklist";
 import type { Book } from "@/lib/types";
 
 export default async function DashboardPage({
@@ -105,66 +106,87 @@ export default async function DashboardPage({
                   .data.publicUrl
               : null;
 
-            return (
-              <li
-                key={book.id}
-                className="flex flex-wrap items-center gap-4 py-4"
-              >
-                {coverUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={coverUrl}
-                    alt=""
-                    className="h-16 w-11 shrink-0 rounded object-cover"
-                  />
-                ) : (
-                  <div className="h-16 w-11 shrink-0 rounded bg-border" />
-                )}
+            const incompleteChecklist =
+              book.status === "draft"
+                ? getPublishChecklist(book).filter((item) => !item.done)
+                : [];
 
-                <div className="min-w-32 flex-1">
-                  <p className="font-serif font-medium">{book.title}</p>
-                  <p className="text-sm text-muted capitalize">{book.status}</p>
+            return (
+              <li key={book.id} className="flex flex-col gap-2 py-4">
+                <div className="flex flex-wrap items-center gap-4">
+                  {coverUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={coverUrl}
+                      alt=""
+                      className="h-16 w-11 shrink-0 rounded object-cover"
+                    />
+                  ) : (
+                    <div className="h-16 w-11 shrink-0 rounded bg-border" />
+                  )}
+
+                  <div className="min-w-32 flex-1">
+                    <p className="font-serif font-medium">{book.title}</p>
+                    <p className="text-sm text-muted capitalize">
+                      {book.status}
+                    </p>
+                  </div>
+
+                  <span className="text-sm font-semibold text-primary">
+                    ${(book.price_cents / 100).toFixed(2)}
+                  </span>
+
+                  <Link
+                    href={`/dashboard/books/${book.id}/edit`}
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+                  >
+                    Edit
+                  </Link>
+
+                  {book.status === "draft" ? (
+                    <form action={publishBook.bind(null, book.id)}>
+                      <button
+                        type="submit"
+                        className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+                      >
+                        Publish
+                      </button>
+                    </form>
+                  ) : (
+                    <form action={unpublishBook.bind(null, book.id)}>
+                      <button
+                        type="submit"
+                        className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+                      >
+                        Unpublish
+                      </button>
+                    </form>
+                  )}
+
+                  <form action={deleteBook.bind(null, book.id)}>
+                    <button
+                      type="submit"
+                      className="rounded-lg border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </form>
                 </div>
 
-                <span className="text-sm font-semibold text-primary">
-                  ${(book.price_cents / 100).toFixed(2)}
-                </span>
-
-                <Link
-                  href={`/dashboard/books/${book.id}/edit`}
-                  className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                >
-                  Edit
-                </Link>
-
-                {book.status === "draft" ? (
-                  <form action={publishBook.bind(null, book.id)}>
-                    <button
-                      type="submit"
-                      className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                    >
-                      Publish
-                    </button>
-                  </form>
-                ) : (
-                  <form action={unpublishBook.bind(null, book.id)}>
-                    <button
-                      type="submit"
-                      className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                    >
-                      Unpublish
-                    </button>
-                  </form>
+                {incompleteChecklist.length > 0 && (
+                  <details className="w-full rounded-lg border border-dashed border-border bg-surface px-3 py-2 text-xs text-muted">
+                    <summary className="cursor-pointer font-medium">
+                      {incompleteChecklist.length}{" "}
+                      {incompleteChecklist.length === 1 ? "thing" : "things"}{" "}
+                      to consider before publishing
+                    </summary>
+                    <ul className="mt-2 flex flex-col" style={{ gap: "0.25rem" }}>
+                      {incompleteChecklist.map((item) => (
+                        <li key={item.label}>&middot; {item.label}</li>
+                      ))}
+                    </ul>
+                  </details>
                 )}
-
-                <form action={deleteBook.bind(null, book.id)}>
-                  <button
-                    type="submit"
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
-                  >
-                    Delete
-                  </button>
-                </form>
               </li>
             );
           })}

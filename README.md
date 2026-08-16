@@ -21,9 +21,15 @@ file storage), and Stripe (checkout + author payouts).
   units sold) and "New releases" shelves. The author pitch is skipped
   for anyone already logged in as an author, and for anyone searching
   or filtering by genre (which switches the marketplace to a flat
-  results grid). Each published book also has a detail page, which
-  itself ends with "More by this author" and "You might also like"
-  (same genre) shelves
+  results grid), and ends with a "Everything you need to sell your
+  book" showcase of the dashboard tools below. Each published book also
+  has a detail page, which itself ends with "More by this author" and
+  "You might also like" (same genre) shelves
+- Drafts show a non-blocking checklist of what's worth adding before
+  publishing (description, keywords, a preview excerpt, a price above
+  $0) — on the dashboard book list and on the edit page. It's a nudge,
+  not a gate: nothing stops you from publishing with any of these left
+  incomplete
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
 - Owners (the buyer, or the author) can download the EPUB from the book

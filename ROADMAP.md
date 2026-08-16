@@ -105,6 +105,10 @@ lean on that we don't have yet. Each item names what it's modeled after.
 - [x] Homepage split into two tracks (draft2digital/IngramSpark/Kobo
       Writing Life-style author pitch, then the reader marketplace) —
       see README for details
+- [x] "Everything you need to sell your book" tools showcase on the
+      homepage (sales dashboard, discount codes, series, watermarking)
+- [x] Non-blocking pre-publish checklist for draft books (description,
+      keywords, preview excerpt, price) — dashboard list + edit page
 
 ### Commerce (Gumroad, Payhip, KDP countdown deals)
 
