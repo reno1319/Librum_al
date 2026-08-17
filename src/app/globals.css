@@ -18,6 +18,12 @@
   --color-accent: #3f6b4f;
   --color-accent-foreground: #ffffff;
 
+  /* Subtle full-bleed background tints for the homepage's two tracks —
+     a faint wash of each track's color over the base cream background,
+     not a bold block of color. */
+  --color-author-tint: #f8ece7;
+  --color-reader-tint: #eef3ee;
+
   --font-sans: var(--font-geist-sans);
   --font-serif: var(--font-playfair);
   --font-mono: var(--font-geist-mono);

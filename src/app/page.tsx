@@ -187,81 +187,96 @@ export default async function Home({
   const heroCovers = showAuthorPitch ? await fetchHeroCovers(supabase) : [];
 
   return (
-    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
+    <main className="flex-1">
       {account === "deleted" && (
-        <p className="mb-6 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-          Your account has been deleted.
-        </p>
+        <div className="mx-auto w-full max-w-5xl px-4 pt-10 sm:px-6">
+          <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+            Your account has been deleted.
+          </p>
+        </div>
       )}
 
-      {showAuthorPitch && <AuthorPitch covers={heroCovers} />}
+      {showAuthorPitch && (
+        <div style={{ backgroundColor: "var(--color-author-tint)" }}>
+          <div
+            className="mx-auto w-full max-w-5xl px-4 sm:px-6"
+            style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}
+          >
+            <AuthorPitch covers={heroCovers} />
+          </div>
+        </div>
+      )}
 
-      <section
-        id="marketplace"
-        className={showAuthorPitch ? "border-t border-border" : ""}
-        style={showAuthorPitch ? { marginTop: "5rem", paddingTop: "4rem" } : undefined}
-      >
-        <span
-          className="w-fit rounded-full px-3 py-1 text-xs font-medium"
-          style={{ backgroundColor: "rgba(63, 107, 79, 0.12)", color: "var(--color-accent)" }}
+      <div id="marketplace" style={{ backgroundColor: "var(--color-reader-tint)" }}>
+        <div
+          className="mx-auto w-full max-w-5xl px-4 sm:px-6"
+          style={{
+            paddingTop: showAuthorPitch ? "4rem" : "2.5rem",
+            paddingBottom: "2.5rem",
+          }}
         >
-          For readers
-        </span>
-        {showAuthorPitch ? (
-          <h2 className="mt-3 font-serif text-4xl font-semibold">
-            Discover ebooks
-          </h2>
-        ) : (
-          <h1 className="mt-3 font-serif text-4xl font-semibold">
-            Discover ebooks
-          </h1>
-        )}
-        <p className="mt-2 text-muted">
-          Independently published, straight from the author.
-        </p>
-
-        <form action="/" method="get" className="mt-6 flex flex-wrap gap-3">
-          <input
-            type="search"
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Search titles or descriptions..."
-            className="min-w-48 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-          />
-          <select
-            name="genre"
-            defaultValue={genre ?? ""}
-            className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+          <span
+            className="w-fit rounded-full px-3 py-1 text-xs font-medium"
+            style={{ backgroundColor: "rgba(63, 107, 79, 0.12)", color: "var(--color-accent)" }}
           >
-            <option value="">All genres</option>
-            {GENRES.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-          >
-            Search
-          </button>
-          {isFiltered && (
-            <Link
-              href="/"
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-            >
-              Clear
-            </Link>
+            For readers
+          </span>
+          {showAuthorPitch ? (
+            <h2 className="mt-3 font-serif text-4xl font-semibold">
+              Discover ebooks
+            </h2>
+          ) : (
+            <h1 className="mt-3 font-serif text-4xl font-semibold">
+              Discover ebooks
+            </h1>
           )}
-        </form>
+          <p className="mt-2 text-muted">
+            Independently published, straight from the author.
+          </p>
 
-        {isFiltered ? (
-          <SearchResults supabase={supabase} q={q} genre={genre} />
-        ) : (
-          <CuratedHome supabase={supabase} />
-        )}
-      </section>
+          <form action="/" method="get" className="mt-6 flex flex-wrap gap-3">
+            <input
+              type="search"
+              name="q"
+              defaultValue={q ?? ""}
+              placeholder="Search titles or descriptions..."
+              className="min-w-48 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+            />
+            <select
+              name="genre"
+              defaultValue={genre ?? ""}
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+            >
+              <option value="">All genres</option>
+              {GENRES.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+            >
+              Search
+            </button>
+            {isFiltered && (
+              <Link
+                href="/"
+                className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+              >
+                Clear
+              </Link>
+            )}
+          </form>
+
+          {isFiltered ? (
+            <SearchResults supabase={supabase} q={q} genre={genre} />
+          ) : (
+            <CuratedHome supabase={supabase} />
+          )}
+        </div>
+      </div>
     </main>
   );
 }
