@@ -197,7 +197,7 @@ export default async function Home({
       )}
 
       {showAuthorPitch && (
-        <div style={{ backgroundColor: "var(--color-author-tint)" }}>
+        <div style={{ backgroundColor: "#f8ece7" }}>
           <div
             className="mx-auto w-full max-w-5xl px-4 sm:px-6"
             style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}
@@ -207,7 +207,7 @@ export default async function Home({
         </div>
       )}
 
-      <div id="marketplace" style={{ backgroundColor: "var(--color-reader-tint)" }}>
+      <div id="marketplace" style={{ backgroundColor: "#eef3ee" }}>
         <div
           className="mx-auto w-full max-w-5xl px-4 sm:px-6"
           style={{
@@ -217,7 +217,7 @@ export default async function Home({
         >
           <span
             className="w-fit rounded-full px-3 py-1 text-xs font-medium"
-            style={{ backgroundColor: "rgba(63, 107, 79, 0.12)", color: "var(--color-accent)" }}
+            style={{ backgroundColor: "rgba(63, 107, 79, 0.12)", color: "#3f6b4f" }}
           >
             For readers
           </span>
@@ -626,7 +626,7 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
         <div className="flex flex-1 flex-col justify-center">
           <span
             className="w-fit rounded-full px-3 py-1 text-xs font-medium"
-            style={{ backgroundColor: "rgba(63, 107, 79, 0.12)", color: "var(--color-accent)" }}
+            style={{ backgroundColor: "rgba(63, 107, 79, 0.12)", color: "#3f6b4f" }}
           >
             Just published
           </span>
@@ -666,7 +666,7 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
         <div>
           <p
             className="font-serif text-2xl font-semibold"
-            style={{ color: "var(--color-accent)" }}
+            style={{ color: "#3f6b4f" }}
           >
             {stats.bookCount}
           </p>
@@ -677,7 +677,7 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
         <div>
           <p
             className="font-serif text-2xl font-semibold"
-            style={{ color: "var(--color-accent)" }}
+            style={{ color: "#3f6b4f" }}
           >
             {stats.authorCount}
           </p>
@@ -688,7 +688,7 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
         <div>
           <p
             className="font-serif text-2xl font-semibold"
-            style={{ color: "var(--color-accent)" }}
+            style={{ color: "#3f6b4f" }}
           >
             {GENRES.length}
           </p>
@@ -707,7 +707,7 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
           <div key={prop.title}>
             <prop.icon
               style={{
-                color: "var(--color-accent)",
+                color: "#3f6b4f",
                 width: "1.75rem",
                 height: "1.75rem",
               }}
