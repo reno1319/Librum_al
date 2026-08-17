@@ -30,6 +30,14 @@ file storage), and Stripe (checkout + author payouts).
   $0) — on the dashboard book list and on the edit page. It's a nudge,
   not a gate: nothing stops you from publishing with any of these left
   incomplete
+- The homepage uses real cover art as imagery rather than stock photos —
+  a staggered, rotated collage of actual published covers in the author
+  pitch hero, and a soft "stacked shelf" of other recent covers behind
+  the marketplace's featured book. Small inline icons (no icon library,
+  hand-drawn SVGs in `src/components/icons.tsx`) mark the how-it-works
+  steps, trust strip, tools showcase, and reader value props. The
+  footer is a proper multi-column layout (Platform / Legal) instead of
+  a single row of links
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
 - Owners (the buyer, or the author) can download the EPUB from the book

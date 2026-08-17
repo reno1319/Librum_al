@@ -109,6 +109,9 @@ lean on that we don't have yet. Each item names what it's modeled after.
       homepage (sales dashboard, discount codes, series, watermarking)
 - [x] Non-blocking pre-publish checklist for draft books (description,
       keywords, preview excerpt, price) — dashboard list + edit page
+- [x] Homepage visual design pass: real book-cover imagery (hero
+      collage, stacked-shelf backdrop), hand-drawn inline SVG icons,
+      tighter spacing rhythm, and a multi-column footer
 
 ### Commerce (Gumroad, Payhip, KDP countdown deals)
 

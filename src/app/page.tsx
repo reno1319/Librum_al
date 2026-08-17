@@ -5,7 +5,23 @@ import { GENRES } from "@/lib/genres";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { BookCard } from "@/components/book-card";
 import { BookShelf } from "@/components/book-shelf";
+import {
+  IconUpload,
+  IconBolt,
+  IconBookOpen,
+  IconBank,
+  IconChart,
+  IconTag,
+  IconLayers,
+  IconShield,
+  IconCheck,
+  IconCoins,
+  IconUnlock,
+} from "@/components/icons";
 import type { Book, Profile } from "@/lib/types";
+import type { ComponentType, CSSProperties } from "react";
+
+type Icon = ComponentType<{ className?: string; style?: CSSProperties }>;
 
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -108,6 +124,23 @@ async function fetchCuratedHome(supabase: SupabaseClient) {
   return { hero, newReleases, bestsellers };
 }
 
+async function fetchHeroCovers(supabase: SupabaseClient) {
+  const { data } = await supabase
+    .from("books")
+    .select("id, cover_path")
+    .eq("status", "published")
+    .not("cover_path", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(8)
+    .returns<Pick<Book, "id" | "cover_path">[]>();
+
+  return (data ?? []).map((b) => ({
+    id: b.id,
+    url: supabase.storage.from("covers").getPublicUrl(b.cover_path!).data
+      .publicUrl,
+  }));
+}
+
 async function fetchStorefrontStats(supabase: SupabaseClient) {
   const { count } = await supabase
     .from("books")
@@ -151,6 +184,7 @@ export default async function Home({
   // readers — once someone is publishing on Librum already, they know
   // how it works, so skip straight to the marketplace for them.
   const showAuthorPitch = !isFiltered && !isLoggedInAuthor;
+  const heroCovers = showAuthorPitch ? await fetchHeroCovers(supabase) : [];
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
@@ -160,7 +194,7 @@ export default async function Home({
         </p>
       )}
 
-      {showAuthorPitch && <AuthorPitch />}
+      {showAuthorPitch && <AuthorPitch covers={heroCovers} />}
 
       <section
         id="marketplace"
@@ -228,22 +262,26 @@ export default async function Home({
   );
 }
 
-const PUBLISHING_STEPS = [
+const PUBLISHING_STEPS: { title: string; body: string; icon: Icon }[] = [
   {
     title: "Upload your book",
     body: "Add your EPUB manuscript, a cover, a description, and a price. Takes a few minutes.",
+    icon: IconUpload,
   },
   {
     title: "Publish instantly",
     body: "No submission queue, no approval wait — your book goes live the moment you hit publish.",
+    icon: IconBolt,
   },
   {
     title: "Readers buy directly",
     body: "Secure checkout, real DRM-free EPUB files — readers get a book they actually own.",
+    icon: IconBookOpen,
   },
   {
     title: "Get paid automatically",
     body: `Every sale splits instantly — you keep ${100 - PLATFORM_FEE_PERCENT}%, paid straight to your bank account.`,
+    icon: IconBank,
   },
 ];
 
@@ -254,61 +292,101 @@ const AUTHOR_STRIP = [
   "Payouts via Stripe",
 ];
 
-const PUBLISHING_TOOLS = [
+const PUBLISHING_TOOLS: { title: string; body: string; icon: Icon }[] = [
   {
     title: "Sales dashboard",
     body: "Revenue, units sold, and a 14-day chart — broken down per book, so you know what's working.",
+    icon: IconChart,
   },
   {
     title: "Discount codes",
     body: "Run a percentage- or dollar-off promo on any book, with an optional expiry date.",
+    icon: IconTag,
   },
   {
     title: "Series",
     body: "Group your books in reading order — shown right on each book's page, linking readers to the next one.",
+    icon: IconLayers,
   },
   {
     title: "Watermarked downloads",
     body: "Every sale is stamped with the buyer's email — lightweight anti-piracy, no DRM, no restrictions for readers.",
+    icon: IconShield,
   },
 ];
 
-function AuthorPitch() {
+// A staggered, slightly-rotated grid of real cover art from books already
+// published on the platform — used as hero imagery instead of stock
+// photography, which this environment has no way to fetch.
+function BookCoverFan({ covers }: { covers: { id: string; url: string }[] }) {
+  const shown = covers.slice(0, 6);
+  if (shown.length === 0) return null;
+
+  return (
+    <div className="mx-auto grid w-full max-w-xs grid-cols-3 gap-4 sm:mx-0 sm:max-w-sm">
+      {shown.map((cover, i) => (
+        <div
+          key={cover.id}
+          style={{
+            transform: `rotate(${i % 2 === 0 ? -4 : 4}deg) translateY(${i % 3 === 1 ? "-0.6rem" : "0"})`,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={cover.url}
+            alt=""
+            className="aspect-[2/3] w-full rounded-lg object-cover shadow-md"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
   return (
     <>
       <section
-        className="flex flex-col gap-6 rounded-lg border border-border p-6 shadow-sm sm:p-10"
+        className="flex flex-col gap-8 rounded-lg border border-border p-6 shadow-sm sm:flex-row sm:items-center sm:p-10"
         style={{
           background:
             "linear-gradient(135deg, var(--color-surface) 0%, var(--color-background) 100%)",
         }}
       >
-        <span className="w-fit rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-          For authors
-        </span>
-        <h1 className="font-serif text-4xl font-semibold sm:text-5xl">
-          Publish your ebook. Keep {100 - PLATFORM_FEE_PERCENT}% of every
-          sale.
-        </h1>
-        <p className="max-w-xl text-lg text-foreground/90">
-          Upload an EPUB, set your price, and go live today. Librum handles
-          checkout, delivery, and payouts — no submission queue, no
-          gatekeepers, no middleman between you and your readers.
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <Link
-            href="/signup?role=author"
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-          >
-            Start publishing — it&apos;s free
-          </Link>
-          <a
-            href="#marketplace"
-            className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-          >
-            Browse the marketplace
-          </a>
+        <div className="flex flex-1 flex-col gap-6">
+          <span className="w-fit rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+            For authors
+          </span>
+          <h1 className="font-serif text-4xl font-semibold sm:text-5xl">
+            Publish your ebook. Keep {100 - PLATFORM_FEE_PERCENT}% of every
+            sale.
+          </h1>
+          <p className="max-w-xl text-lg text-foreground/90">
+            Upload an EPUB, set your price, and go live today. Librum handles
+            checkout, delivery, and payouts — no submission queue, no
+            gatekeepers, no middleman between you and your readers.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/signup?role=author"
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+            >
+              Start publishing — it&apos;s free
+            </Link>
+            <a
+              href="#marketplace"
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+            >
+              Browse the marketplace
+            </a>
+          </div>
         </div>
+
+        {covers.length > 0 && (
+          <div className="sm:w-72 sm:flex-none">
+            <BookCoverFan covers={covers} />
+          </div>
+        )}
       </section>
 
       <div
@@ -316,21 +394,33 @@ function AuthorPitch() {
         style={{ gap: "0.75rem 2.5rem" }}
       >
         {AUTHOR_STRIP.map((item) => (
-          <span key={item}>{item}</span>
+          <span key={item} className="flex items-center gap-2">
+            <IconCheck
+              className="text-primary"
+              style={{ width: "1rem", height: "1rem" }}
+            />
+            {item}
+          </span>
         ))}
       </div>
 
-      <section className="mt-14">
-        <h2 className="font-serif text-xl font-semibold">
+      <section className="mt-16">
+        <h2 className="font-serif text-2xl font-semibold">
           How self-publishing works
         </h2>
         <ol className="mt-6 grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-4">
           {PUBLISHING_STEPS.map((step, i) => (
             <li key={step.title}>
-              <span className="font-serif text-3xl font-semibold text-primary">
-                {i + 1}
-              </span>
-              <h3 className="mt-2 font-serif text-lg font-semibold">
+              <div className="flex items-center gap-3">
+                <step.icon
+                  className="text-primary"
+                  style={{ width: "1.75rem", height: "1.75rem" }}
+                />
+                <span className="font-serif text-2xl font-semibold text-primary">
+                  {i + 1}
+                </span>
+              </div>
+              <h3 className="mt-3 font-serif text-lg font-semibold">
                 {step.title}
               </h3>
               <p className="mt-1 text-sm text-foreground/90">{step.body}</p>
@@ -345,14 +435,18 @@ function AuthorPitch() {
         </Link>
       </section>
 
-      <section className="mt-14">
-        <h2 className="font-serif text-xl font-semibold">
+      <section className="mt-16">
+        <h2 className="font-serif text-2xl font-semibold">
           Everything you need to sell your book
         </h2>
         <div className="mt-6 grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-4">
           {PUBLISHING_TOOLS.map((tool) => (
             <div key={tool.title}>
-              <h3 className="font-serif text-lg font-semibold">
+              <tool.icon
+                className="text-primary"
+                style={{ width: "1.75rem", height: "1.75rem" }}
+              />
+              <h3 className="mt-3 font-serif text-lg font-semibold">
                 {tool.title}
               </h3>
               <p className="mt-1 text-sm text-foreground/90">{tool.body}</p>
@@ -405,18 +499,21 @@ async function SearchResults({
   );
 }
 
-const VALUE_PROPS = [
+const VALUE_PROPS: { title: string; body: string; icon: Icon }[] = [
   {
     title: `Authors keep ${100 - PLATFORM_FEE_PERCENT}%`,
     body: "Buy a book and your money goes straight to the person who wrote it — Librum's cut is a flat platform fee, nothing more.",
+    icon: IconCoins,
   },
   {
     title: "No DRM, ever",
     body: "Every purchase is a real EPUB file you own outright. No apps to install, no restrictions on how you read it.",
+    icon: IconUnlock,
   },
   {
     title: "Published instantly",
     body: "No submission queue, no gatekeepers — authors publish directly, so you're reading it the day it's finished.",
+    icon: IconBolt,
   },
 ];
 
@@ -443,6 +540,18 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
       ? `${hero.description.slice(0, 220).trimEnd()}…`
       : hero.description;
 
+  // A couple of other recent covers, faded behind the hero cover, so the
+  // panel reads as "a shelf" rather than a single isolated cover.
+  const backdropCovers = newReleases
+    .slice(0, 2)
+    .map((b) =>
+      b.cover_path
+        ? supabase.storage.from("covers").getPublicUrl(b.cover_path).data
+            .publicUrl
+        : null,
+    )
+    .filter((url): url is string => !!url);
+
   return (
     <>
       <section
@@ -452,21 +561,41 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
             "linear-gradient(135deg, var(--color-surface) 0%, var(--color-background) 100%)",
         }}
       >
-        <Link
-          href={`/books/${hero.id}`}
-          className="mx-auto w-48 shrink-0 sm:mx-0 sm:w-56"
+        <div
+          className="relative mx-auto w-48 sm:mx-0 sm:w-56"
+          style={{ flexShrink: 0 }}
         >
-          {heroCoverUrl ? (
+          {backdropCovers.map((url, i) => (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={heroCoverUrl}
+              key={url}
+              src={url}
               alt=""
-              className="aspect-[2/3] w-full rounded-lg object-cover shadow-sm"
+              className="absolute inset-0 aspect-[2/3] w-full rounded-lg object-cover"
+              style={{
+                transform: `rotate(${i === 0 ? -6 : 6}deg) translateY(0.5rem)`,
+                opacity: 0.45,
+                zIndex: 0,
+              }}
             />
-          ) : (
-            <div className="aspect-[2/3] w-full rounded-lg bg-border" />
-          )}
-        </Link>
+          ))}
+          <Link
+            href={`/books/${hero.id}`}
+            className="relative block"
+            style={{ zIndex: 1 }}
+          >
+            {heroCoverUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={heroCoverUrl}
+                alt=""
+                className="aspect-[2/3] w-full rounded-lg object-cover shadow-md"
+              />
+            ) : (
+              <div className="aspect-[2/3] w-full rounded-lg bg-border" />
+            )}
+          </Link>
+        </div>
         <div className="flex flex-1 flex-col justify-center">
           <span className="w-fit rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
             Just published
@@ -531,17 +660,23 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
       <BookShelf title="Bestsellers" books={bestsellers} supabase={supabase} />
       <BookShelf title="New releases" books={newReleases} supabase={supabase} />
 
-      <section className="mt-14 grid grid-cols-1 gap-8 sm:grid-cols-3">
+      <section className="mt-16 grid grid-cols-1 gap-8 sm:grid-cols-3">
         {VALUE_PROPS.map((prop) => (
           <div key={prop.title}>
-            <h3 className="font-serif text-lg font-semibold">{prop.title}</h3>
+            <prop.icon
+              className="text-primary"
+              style={{ width: "1.75rem", height: "1.75rem" }}
+            />
+            <h3 className="mt-3 font-serif text-lg font-semibold">
+              {prop.title}
+            </h3>
             <p className="mt-2 text-sm text-foreground/90">{prop.body}</p>
           </div>
         ))}
       </section>
 
-      <section className="mt-14">
-        <h2 className="font-serif text-xl font-semibold">Browse by genre</h2>
+      <section className="mt-16">
+        <h2 className="font-serif text-2xl font-semibold">Browse by genre</h2>
         <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
           {GENRES.map((g) => (
             <li key={g}>
