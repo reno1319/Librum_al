@@ -126,7 +126,7 @@ lean on that we don't have yet. Each item names what it's modeled after.
 
 - [x] Series: group an author's books into a series with a reading
       order, shown on each book's page
-- [ ] Co-authors & contributors: credit illustrators, translators,
+- [x] Co-authors & contributors: credit illustrators, translators,
       narrators, or co-authors on a book, not just a single author
 - [x] Keywords/tags: additional searchable metadata beyond genre
 

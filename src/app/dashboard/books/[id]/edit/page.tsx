@@ -1,21 +1,22 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { updateBook } from "../../actions";
+import { updateBook, addContributor, removeContributor } from "../../actions";
 import { GENRES } from "@/lib/genres";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { getPublishChecklist } from "@/lib/publish-checklist";
-import type { Book, Series } from "@/lib/types";
+import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
+import type { Book, Series, Contributor } from "@/lib/types";
 
 export default async function EditBookPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; success?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error, success } = await searchParams;
 
   const supabase = await createClient();
   const {
@@ -43,6 +44,13 @@ export default async function EditBookPage({
     .order("title")
     .returns<Series[]>();
 
+  const { data: contributors } = await supabase
+    .from("book_contributors")
+    .select("*")
+    .eq("book_id", id)
+    .order("created_at")
+    .returns<Contributor[]>();
+
   const coverUrl = book.cover_path
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
@@ -62,6 +70,11 @@ export default async function EditBookPage({
       {error && (
         <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
+        </p>
+      )}
+      {success && (
+        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+          {success}
         </p>
       )}
 
@@ -256,6 +269,81 @@ export default async function EditBookPage({
           Save changes
         </button>
       </form>
+
+      <section className="mt-10 border-t border-border pt-6">
+        <h2 className="font-serif text-xl font-semibold">Contributors</h2>
+        <p className="mt-1 text-sm text-muted">
+          Credit anyone besides yourself — an illustrator, translator,
+          narrator, or co-author. Just a name and a role, no Librum account
+          needed.
+        </p>
+
+        {contributors && contributors.length > 0 && (
+          <ul
+            className="mt-4 text-sm"
+            style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+          >
+            {contributors.map((c) => (
+              <li
+                key={c.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <span>
+                  {c.name} <span className="text-muted">· {c.role}</span>
+                </span>
+                <form action={removeContributor.bind(null, book.id, c.id)}>
+                  <button
+                    type="submit"
+                    className="text-xs text-red-700 hover:underline"
+                  >
+                    Remove
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <form
+          action={addContributor.bind(null, book.id)}
+          className="mt-4 flex flex-wrap items-end gap-3"
+        >
+          <label className="flex flex-col gap-1 text-sm">
+            Name
+            <input
+              name="name"
+              type="text"
+              required
+              placeholder="e.g. Jane Doe"
+              className="rounded-lg border border-border bg-surface px-3 py-2"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            Role
+            <select
+              name="role"
+              required
+              defaultValue=""
+              className="rounded-lg border border-border bg-surface px-3 py-2"
+            >
+              <option value="" disabled>
+                Choose a role
+              </option>
+              {CONTRIBUTOR_ROLES.map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="submit"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+          >
+            Add contributor
+          </button>
+        </form>
+      </section>
     </main>
   );
 }

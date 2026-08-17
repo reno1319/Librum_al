@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { GENRES } from "@/lib/genres";
+import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -356,4 +357,76 @@ export async function deleteBook(bookId: string) {
 
   revalidatePath("/dashboard");
   revalidatePath("/");
+}
+
+export async function addContributor(bookId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const name = String(formData.get("name") ?? "").trim();
+  const role = String(formData.get("role") ?? "");
+
+  if (!name || !CONTRIBUTOR_ROLES.includes(role as (typeof CONTRIBUTOR_ROLES)[number])) {
+    redirect(`/dashboard/books/${bookId}/edit?error=Enter+a+name+and+choose+a+role`);
+  }
+
+  const { data: book } = await supabase
+    .from("books")
+    .select("id")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle();
+
+  if (!book) {
+    redirect("/dashboard");
+  }
+
+  const { error } = await supabase.from("book_contributors").insert({
+    book_id: bookId,
+    name,
+    role,
+  });
+
+  if (error) {
+    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/dashboard/books/${bookId}/edit`);
+  revalidatePath(`/books/${bookId}`);
+  redirect(`/dashboard/books/${bookId}/edit?success=Contributor+added`);
+}
+
+export async function removeContributor(bookId: string, contributorId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  // RLS also enforces this (the delete policy checks the book's
+  // author_id), but this makes the ownership check explicit here too.
+  const { data: book } = await supabase
+    .from("books")
+    .select("id")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle();
+
+  if (!book) {
+    redirect("/dashboard");
+  }
+
+  await supabase.from("book_contributors").delete().eq("id", contributorId);
+
+  revalidatePath(`/dashboard/books/${bookId}/edit`);
+  revalidatePath(`/books/${bookId}`);
 }

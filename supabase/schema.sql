@@ -135,6 +135,60 @@ create index books_genre_idx on public.books(genre);
 create index books_series_id_idx on public.books(series_id);
 
 -- ============================================================
+-- book_contributors: credits shown on a book's page beyond the single
+-- primary author (illustrator, translator, narrator, co-author, etc).
+-- Free text — the contributor doesn't need a Librum account, matching
+-- how most illustrators/translators/narrators actually work. Purely
+-- informational: no payout or account access is tied to this.
+-- ============================================================
+
+-- Keep this list in sync with CONTRIBUTOR_ROLES in src/lib/contributor-roles.ts.
+create table public.book_contributors (
+  id uuid primary key default gen_random_uuid(),
+  book_id uuid not null references public.books(id) on delete cascade,
+  name text not null,
+  role text not null check (role in (
+    'Co-Author', 'Illustrator', 'Translator', 'Narrator', 'Editor',
+    'Foreword', 'Cover Designer'
+  )),
+  created_at timestamptz not null default now()
+);
+
+alter table public.book_contributors enable row level security;
+
+create policy "Contributors are viewable wherever the book is"
+  on public.book_contributors for select
+  using (
+    exists (
+      select 1 from public.books
+      where books.id = book_contributors.book_id
+      and (books.status = 'published' or books.author_id = auth.uid())
+    )
+  );
+
+create policy "Authors can add contributors to their own books"
+  on public.book_contributors for insert
+  with check (
+    exists (
+      select 1 from public.books
+      where books.id = book_contributors.book_id
+      and books.author_id = auth.uid()
+    )
+  );
+
+create policy "Authors can remove contributors from their own books"
+  on public.book_contributors for delete
+  using (
+    exists (
+      select 1 from public.books
+      where books.id = book_contributors.book_id
+      and books.author_id = auth.uid()
+    )
+  );
+
+create index book_contributors_book_id_idx on public.book_contributors(book_id);
+
+-- ============================================================
 -- discount_codes: an author's promo codes for one of their own books,
 -- applied at Stripe Checkout. Only the author can list/manage their own
 -- codes (see RLS below) — looking a code up by book_id+code at checkout

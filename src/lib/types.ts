@@ -45,6 +45,14 @@ export type Series = {
   created_at: string;
 };
 
+export type Contributor = {
+  id: string;
+  book_id: string;
+  name: string;
+  role: string;
+  created_at: string;
+};
+
 export type DiscountCode = {
   id: string;
   author_id: string;

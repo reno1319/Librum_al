@@ -38,6 +38,12 @@ file storage), and Stripe (checkout + author payouts).
   steps, trust strip, tools showcase, and reader value props. The
   footer is a proper multi-column layout (Platform / Legal) instead of
   a single row of links
+- Authors can credit contributors on a book — illustrator, translator,
+  narrator, co-author, editor, foreword, or cover designer — from the
+  edit page. Just a name and a role, no Librum account required; shown
+  on the book page as e.g. "Illustrated by Jane Doe." Purely a credit,
+  no payout or account access is tied to it — all money still goes to
+  the primary author
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
 - Owners (the buyer, or the author) can download the EPUB from the book

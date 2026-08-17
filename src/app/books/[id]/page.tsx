@@ -4,7 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { buyBook, submitReview, addToWishlist, removeFromWishlist } from "./actions";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
-import type { Book, Profile, Review, Series } from "@/lib/types";
+import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
+import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
 
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
 type SeriesEntry = Pick<Book, "id" | "title" | "series_position">;
@@ -88,6 +89,13 @@ export default async function BookDetailPage({
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
 
+  const { data: contributors } = await supabase
+    .from("book_contributors")
+    .select("*")
+    .eq("book_id", id)
+    .order("created_at")
+    .returns<Contributor[]>();
+
   let seriesInfo: Series | null = null;
   let seriesEntries: SeriesEntry[] = [];
   if (book.series_id) {
@@ -170,6 +178,17 @@ export default async function BookDetailPage({
             <p className="mt-1 text-sm text-muted">
               {book.series_position ? `Book ${book.series_position} of ` : ""}
               the <span className="font-medium">{seriesInfo.title}</span> series
+            </p>
+          )}
+
+          {contributors && contributors.length > 0 && (
+            <p className="mt-1 text-sm text-muted">
+              {contributors
+                .map(
+                  (c) =>
+                    `${CONTRIBUTOR_ROLE_VERB[c.role as keyof typeof CONTRIBUTOR_ROLE_VERB] ?? c.role} ${c.name}`,
+                )
+                .join(" · ")}
             </p>
           )}
 
