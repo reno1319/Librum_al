@@ -461,12 +461,20 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
             </li>
           ))}
         </ol>
-        <Link
-          href="/how-it-works"
-          className="mt-6 inline-block text-sm font-medium text-primary hover:underline"
-        >
-          Read the full guide &rarr;
-        </Link>
+        <div className="mt-6 flex flex-wrap gap-6">
+          <Link
+            href="/how-it-works"
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            Read the full guide &rarr;
+          </Link>
+          <Link
+            href="/pricing"
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            Find out how much you can make &rarr;
+          </Link>
+        </div>
       </section>
 
       <section style={{ marginTop: "5rem" }}>

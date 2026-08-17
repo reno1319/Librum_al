@@ -44,6 +44,9 @@ file storage), and Stripe (checkout + author payouts).
   on the book page as e.g. "Illustrated by Jane Doe." Purely a credit,
   no payout or account access is tied to it — all money still goes to
   the primary author
+- A **Pricing** page (linked from the header, footer, and homepage)
+  explains the flat platform fee with a live earnings calculator — type
+  in a price and see the platform fee and your take-home split instantly
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
 - Owners (the buyer, or the author) can download the EPUB from the book

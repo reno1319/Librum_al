@@ -4,6 +4,7 @@ const FOOTER_LINKS = {
   Platform: [
     { href: "/about", label: "About" },
     { href: "/how-it-works", label: "How it works" },
+    { href: "/pricing", label: "Pricing" },
     { href: "/help", label: "Help" },
     { href: "/contact", label: "Contact" },
   ],

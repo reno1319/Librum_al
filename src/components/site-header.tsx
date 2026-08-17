@@ -53,6 +53,12 @@ export async function SiteHeader() {
           </>
         ) : (
           <>
+            <Link href="/how-it-works" className="hover:underline">
+              How it works
+            </Link>
+            <Link href="/pricing" className="hover:underline">
+              Pricing
+            </Link>
             <Link href="/login" className="hover:underline">
               Log in
             </Link>
