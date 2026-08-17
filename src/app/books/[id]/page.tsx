@@ -386,7 +386,10 @@ export default async function BookDetailPage({
           <h2 className="font-serif text-xl font-semibold">
             {seriesInfo.title}
           </h2>
-          <ol className="mt-4 flex flex-col gap-2 text-sm">
+          <ol
+            className="text-sm"
+            style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "1rem" }}
+          >
             {seriesEntries.map((entry) => (
               <li key={entry.id}>
                 {entry.id === book.id ? (

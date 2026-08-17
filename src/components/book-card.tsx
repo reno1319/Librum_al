@@ -11,8 +11,12 @@ export function BookCard({
   authorName?: string | null;
 }) {
   return (
-    <div className="flex flex-col gap-2">
-      <Link href={`/books/${book.id}`} className="group flex flex-col gap-2">
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+      <Link
+        href={`/books/${book.id}`}
+        className="group"
+        style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+      >
         {coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img

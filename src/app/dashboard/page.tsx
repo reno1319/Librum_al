@@ -112,7 +112,11 @@ export default async function DashboardPage({
                 : [];
 
             return (
-              <li key={book.id} className="flex flex-col gap-2 py-4">
+              <li
+                key={book.id}
+                className="py-4"
+                style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+              >
                 <div className="flex flex-wrap items-center gap-4">
                   {coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element

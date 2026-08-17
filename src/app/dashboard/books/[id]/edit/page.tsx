@@ -208,7 +208,7 @@ export default async function EditBookPage({
           </span>
         </label>
 
-        <div className="flex flex-col gap-2">
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {coverUrl && (
             // eslint-disable-next-line @next/next/no-img-element
             <img

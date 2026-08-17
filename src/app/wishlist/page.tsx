@@ -48,7 +48,10 @@ export default async function WishlistPage() {
               : null;
 
             return (
-              <li key={book.id} className="flex flex-col gap-2">
+              <li
+                key={book.id}
+                style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+              >
                 <BookCard
                   book={book}
                   coverUrl={coverUrl}

@@ -17,11 +17,11 @@ export function BookShelf({
   if (books.length === 0) return null;
 
   return (
-    <section className="mt-12">
+    <section style={{ marginTop: "3rem" }}>
       <h2 className="font-serif text-xl font-semibold">{title}</h2>
       <div
-        className="mt-4 overflow-x-auto pb-2"
-        style={{ display: "flex", gap: "1rem" }}
+        className="overflow-x-auto pb-2"
+        style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}
       >
         {books.map((book) => {
           const coverUrl = book.cover_path

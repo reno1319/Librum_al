@@ -51,7 +51,10 @@ export default async function SignupPage({
           />
         </label>
 
-        <fieldset className="flex flex-col gap-2 text-sm">
+        <fieldset
+          className="text-sm"
+          style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+        >
           <legend className="mb-1">I am signing up as a...</legend>
           <label className="flex items-center gap-2">
             <input
