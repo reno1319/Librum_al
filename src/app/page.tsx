@@ -198,9 +198,13 @@ export default async function Home({
 
       <section
         id="marketplace"
-        className={showAuthorPitch ? "mt-20 border-t border-border pt-16" : ""}
+        className={showAuthorPitch ? "border-t border-border" : ""}
+        style={showAuthorPitch ? { marginTop: "5rem", paddingTop: "4rem" } : undefined}
       >
-        <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
+        <span
+          className="w-fit rounded-full px-3 py-1 text-xs font-medium"
+          style={{ backgroundColor: "rgba(63, 107, 79, 0.12)", color: "var(--color-accent)" }}
+        >
           For readers
         </span>
         {showAuthorPitch ? (
@@ -398,8 +402,8 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
       </section>
 
       <div
-        className="mt-10 flex flex-wrap justify-center rounded-lg border border-border bg-surface py-5 text-center text-sm font-medium shadow-sm"
-        style={{ gap: "1rem 3rem" }}
+        className="flex flex-wrap justify-center rounded-lg border border-border bg-surface py-5 text-center text-sm font-medium shadow-sm"
+        style={{ gap: "1rem 3rem", marginTop: "2.5rem" }}
       >
         {AUTHOR_STRIP.map((item) => (
           <span key={item} className="flex items-center gap-2">
@@ -412,7 +416,7 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
         ))}
       </div>
 
-      <section className="mt-20">
+      <section style={{ marginTop: "5rem" }}>
         <h2 className="font-serif text-2xl font-semibold">
           How self-publishing works
         </h2>
@@ -443,7 +447,7 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
         </Link>
       </section>
 
-      <section className="mt-20">
+      <section style={{ marginTop: "5rem" }}>
         <h2 className="font-serif text-2xl font-semibold">
           Everything you need to sell your book
         </h2>
@@ -605,7 +609,10 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
           </Link>
         </div>
         <div className="flex flex-1 flex-col justify-center">
-          <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
+          <span
+            className="w-fit rounded-full px-3 py-1 text-xs font-medium"
+            style={{ backgroundColor: "rgba(63, 107, 79, 0.12)", color: "var(--color-accent)" }}
+          >
             Just published
           </span>
           <h2 className="mt-3 font-serif text-4xl font-semibold sm:text-5xl">
@@ -638,11 +645,14 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
       </section>
 
       <div
-        className="mt-10 flex flex-wrap justify-center rounded-lg border border-border bg-surface py-6 text-center shadow-sm"
-        style={{ gap: "1.5rem 3rem" }}
+        className="flex flex-wrap justify-center rounded-lg border border-border bg-surface py-6 text-center shadow-sm"
+        style={{ gap: "1.5rem 3rem", marginTop: "2.5rem" }}
       >
         <div>
-          <p className="font-serif text-2xl font-semibold text-accent">
+          <p
+            className="font-serif text-2xl font-semibold"
+            style={{ color: "var(--color-accent)" }}
+          >
             {stats.bookCount}
           </p>
           <p className="text-xs uppercase tracking-wide text-muted">
@@ -650,7 +660,10 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
           </p>
         </div>
         <div>
-          <p className="font-serif text-2xl font-semibold text-accent">
+          <p
+            className="font-serif text-2xl font-semibold"
+            style={{ color: "var(--color-accent)" }}
+          >
             {stats.authorCount}
           </p>
           <p className="text-xs uppercase tracking-wide text-muted">
@@ -658,7 +671,10 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
           </p>
         </div>
         <div>
-          <p className="font-serif text-2xl font-semibold text-accent">
+          <p
+            className="font-serif text-2xl font-semibold"
+            style={{ color: "var(--color-accent)" }}
+          >
             {GENRES.length}
           </p>
           <p className="text-xs uppercase tracking-wide text-muted">Genres</p>
@@ -668,12 +684,18 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
       <BookShelf title="Bestsellers" books={bestsellers} supabase={supabase} />
       <BookShelf title="New releases" books={newReleases} supabase={supabase} />
 
-      <section className="mt-20 grid grid-cols-1 gap-10 sm:grid-cols-3">
+      <section
+        className="grid grid-cols-1 gap-10 sm:grid-cols-3"
+        style={{ marginTop: "5rem" }}
+      >
         {VALUE_PROPS.map((prop) => (
           <div key={prop.title}>
             <prop.icon
-              className="text-accent"
-              style={{ width: "1.75rem", height: "1.75rem" }}
+              style={{
+                color: "var(--color-accent)",
+                width: "1.75rem",
+                height: "1.75rem",
+              }}
             />
             <h3 className="mt-3 font-serif text-lg font-semibold">
               {prop.title}
@@ -683,14 +705,14 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
         ))}
       </section>
 
-      <section className="mt-20">
+      <section style={{ marginTop: "5rem" }}>
         <h2 className="font-serif text-2xl font-semibold">Browse by genre</h2>
         <ul className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
           {GENRES.map((g) => (
             <li key={g}>
               <Link
                 href={`/?genre=${encodeURIComponent(g)}`}
-                className="flex h-24 items-center justify-center rounded-lg border border-border bg-surface px-3 text-center font-serif text-sm hover:border-accent hover:bg-surface-hover"
+                className="flex h-24 items-center justify-center rounded-lg border border-border bg-surface px-3 text-center font-serif text-sm hover:bg-surface-hover"
               >
                 {g}
               </Link>
