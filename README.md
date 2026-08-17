@@ -47,6 +47,10 @@ file storage), and Stripe (checkout + author payouts).
 - A **Pricing** page (linked from the header, footer, and homepage)
   explains the flat platform fee with a live earnings calculator — type
   in a price and see the platform fee and your take-home split instantly
+- **Dashboard > Sales** also shows book page views — a basic count (not
+  deduplicated unique visitors, and never counting the author's own
+  visits), both as a total and per book, alongside units sold and
+  revenue
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
 - Owners (the buyer, or the author) can download the EPUB from the book

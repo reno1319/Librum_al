@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { buyBook, submitReview, addToWishlist, removeFromWishlist } from "./actions";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
@@ -88,6 +89,16 @@ export default async function BookDetailPage({
   const coverUrl = book.cover_path
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
+
+  // A basic view count, not deduplicated unique visitors — a reload or
+  // a repeat visit counts again. Only published books, and never the
+  // author's own visits (so previewing/editing doesn't inflate it).
+  // Admin client because this is a system-recorded event, not something
+  // tied to the viewer's own RLS-governed rows.
+  if (book.status === "published" && !isAuthor) {
+    const admin = createAdminClient();
+    await admin.from("book_views").insert({ book_id: id });
+  }
 
   const { data: contributors } = await supabase
     .from("book_contributors")

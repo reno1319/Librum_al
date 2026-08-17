@@ -38,8 +38,19 @@ export default async function SalesPage() {
           .returns<Purchase[]>()
       : { data: [] as Purchase[] };
 
+  const { data: views } =
+    bookIds.length > 0
+      ? await supabase
+          .from("book_views")
+          .select("book_id")
+          .in("book_id", bookIds)
+          .returns<{ book_id: string }[]>()
+      : { data: [] as { book_id: string }[] };
+
   const allPurchases = purchases ?? [];
+  const allViews = views ?? [];
   const totalUnitsSold = allPurchases.length;
+  const totalViews = allViews.length;
   const totalNetCents = allPurchases.reduce(
     (sum, p) => sum + netCents(p.amount_cents),
     0,
@@ -49,10 +60,12 @@ export default async function SalesPage() {
 
   const perBook = (books ?? []).map((book) => {
     const bookPurchases = allPurchases.filter((p) => p.book_id === book.id);
+    const bookViews = allViews.filter((v) => v.book_id === book.id).length;
     return {
       id: book.id,
       title: book.title,
       unitsSold: bookPurchases.length,
+      views: bookViews,
       netCents: bookPurchases.reduce((sum, p) => sum + netCents(p.amount_cents), 0),
     };
   });
@@ -83,7 +96,7 @@ export default async function SalesPage() {
         Your net revenue, after Librum&apos;s platform fee.
       </p>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
           <p className="text-sm text-muted">Net revenue</p>
           <p className="mt-1 font-serif text-2xl font-semibold text-primary">
@@ -94,6 +107,12 @@ export default async function SalesPage() {
           <p className="text-sm text-muted">Units sold</p>
           <p className="mt-1 font-serif text-2xl font-semibold">
             {totalUnitsSold}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <p className="text-sm text-muted">Book page views</p>
+          <p className="mt-1 font-serif text-2xl font-semibold">
+            {totalViews}
           </p>
         </div>
         <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
@@ -156,6 +175,9 @@ export default async function SalesPage() {
               className="flex flex-wrap items-center justify-between gap-2 py-3"
             >
               <span className="font-serif font-medium">{book.title}</span>
+              <span className="text-sm text-muted">
+                {book.views} view{book.views === 1 ? "" : "s"}
+              </span>
               <span className="text-sm text-muted">
                 {book.unitsSold} sold
               </span>

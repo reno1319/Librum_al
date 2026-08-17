@@ -135,5 +135,5 @@ lean on that we don't have yet. Each item names what it's modeled after.
 - [ ] Follow an author: readers opt in to an email when someone they
       follow publishes a new book (reuses the existing email
       infrastructure from Notifications)
-- [ ] Basic view-count analytics on the author sales dashboard (how
+- [x] Basic view-count analytics on the author sales dashboard (how
       many people looked at a book page, not just who bought it)

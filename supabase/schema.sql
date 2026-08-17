@@ -189,6 +189,36 @@ create policy "Authors can remove contributors from their own books"
 create index book_contributors_book_id_idx on public.book_contributors(book_id);
 
 -- ============================================================
+-- book_views: one row per page view of a published book, for basic
+-- author-facing analytics. Anonymous — no viewer identity is stored —
+-- and a simple count, not deduplicated unique visitors: a reload or a
+-- repeat visit counts again. Written only by the app's server code
+-- using the service role key (like purchases), so there's deliberately
+-- no insert policy for regular users.
+-- ============================================================
+
+create table public.book_views (
+  id uuid primary key default gen_random_uuid(),
+  book_id uuid not null references public.books(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+alter table public.book_views enable row level security;
+
+create policy "Authors can view the view-counts of their own books"
+  on public.book_views for select
+  using (
+    exists (
+      select 1 from public.books
+      where books.id = book_views.book_id
+      and books.author_id = auth.uid()
+    )
+  );
+
+create index book_views_book_id_idx on public.book_views(book_id);
+create index book_views_created_at_idx on public.book_views(created_at);
+
+-- ============================================================
 -- discount_codes: an author's promo codes for one of their own books,
 -- applied at Stripe Checkout. Only the author can list/manage their own
 -- codes (see RLS below) — looking a code up by book_id+code at checkout
