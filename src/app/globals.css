@@ -12,6 +12,12 @@
   --color-primary-hover: #5e2129;
   --color-primary-foreground: #ffffff;
 
+  /* A second, cooler accent for the reader/marketplace track, so it
+     reads as visually distinct from the maroon "for authors" track —
+     a muted forest green, still within the warm/editorial palette. */
+  --color-accent: #3f6b4f;
+  --color-accent-foreground: #ffffff;
+
   --font-sans: var(--font-geist-sans);
   --font-serif: var(--font-playfair);
   --font-mono: var(--font-geist-mono);

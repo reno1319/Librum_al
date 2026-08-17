@@ -198,9 +198,9 @@ export default async function Home({
 
       <section
         id="marketplace"
-        className={showAuthorPitch ? "mt-16 border-t border-border pt-12" : ""}
+        className={showAuthorPitch ? "mt-20 border-t border-border pt-16" : ""}
       >
-        <span className="w-fit rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+        <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
           For readers
         </span>
         {showAuthorPitch ? (
@@ -398,8 +398,8 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
       </section>
 
       <div
-        className="mt-8 flex flex-wrap justify-center rounded-lg border border-border bg-surface py-4 text-center text-sm font-medium shadow-sm"
-        style={{ gap: "0.75rem 2.5rem" }}
+        className="mt-10 flex flex-wrap justify-center rounded-lg border border-border bg-surface py-5 text-center text-sm font-medium shadow-sm"
+        style={{ gap: "1rem 3rem" }}
       >
         {AUTHOR_STRIP.map((item) => (
           <span key={item} className="flex items-center gap-2">
@@ -412,11 +412,11 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
         ))}
       </div>
 
-      <section className="mt-16">
+      <section className="mt-20">
         <h2 className="font-serif text-2xl font-semibold">
           How self-publishing works
         </h2>
-        <ol className="mt-6 grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-4">
+        <ol className="mt-8 grid grid-cols-1 gap-10 sm:grid-cols-2 md:grid-cols-4">
           {PUBLISHING_STEPS.map((step, i) => (
             <li key={step.title}>
               <div className="flex items-center gap-3">
@@ -443,11 +443,11 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
         </Link>
       </section>
 
-      <section className="mt-16">
+      <section className="mt-20">
         <h2 className="font-serif text-2xl font-semibold">
           Everything you need to sell your book
         </h2>
-        <div className="mt-6 grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-4">
+        <div className="mt-8 grid grid-cols-1 gap-10 sm:grid-cols-2 md:grid-cols-4">
           {PUBLISHING_TOOLS.map((tool) => (
             <div key={tool.title}>
               <tool.icon
@@ -605,7 +605,7 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
           </Link>
         </div>
         <div className="flex flex-1 flex-col justify-center">
-          <span className="w-fit rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+          <span className="w-fit rounded-full bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
             Just published
           </span>
           <h2 className="mt-3 font-serif text-4xl font-semibold sm:text-5xl">
@@ -638,11 +638,11 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
       </section>
 
       <div
-        className="mt-8 flex flex-wrap justify-center rounded-lg border border-border bg-surface py-6 text-center shadow-sm"
+        className="mt-10 flex flex-wrap justify-center rounded-lg border border-border bg-surface py-6 text-center shadow-sm"
         style={{ gap: "1.5rem 3rem" }}
       >
         <div>
-          <p className="font-serif text-2xl font-semibold text-primary">
+          <p className="font-serif text-2xl font-semibold text-accent">
             {stats.bookCount}
           </p>
           <p className="text-xs uppercase tracking-wide text-muted">
@@ -650,7 +650,7 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
           </p>
         </div>
         <div>
-          <p className="font-serif text-2xl font-semibold text-primary">
+          <p className="font-serif text-2xl font-semibold text-accent">
             {stats.authorCount}
           </p>
           <p className="text-xs uppercase tracking-wide text-muted">
@@ -658,7 +658,7 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
           </p>
         </div>
         <div>
-          <p className="font-serif text-2xl font-semibold text-primary">
+          <p className="font-serif text-2xl font-semibold text-accent">
             {GENRES.length}
           </p>
           <p className="text-xs uppercase tracking-wide text-muted">Genres</p>
@@ -668,11 +668,11 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
       <BookShelf title="Bestsellers" books={bestsellers} supabase={supabase} />
       <BookShelf title="New releases" books={newReleases} supabase={supabase} />
 
-      <section className="mt-16 grid grid-cols-1 gap-8 sm:grid-cols-3">
+      <section className="mt-20 grid grid-cols-1 gap-10 sm:grid-cols-3">
         {VALUE_PROPS.map((prop) => (
           <div key={prop.title}>
             <prop.icon
-              className="text-primary"
+              className="text-accent"
               style={{ width: "1.75rem", height: "1.75rem" }}
             />
             <h3 className="mt-3 font-serif text-lg font-semibold">
@@ -683,14 +683,14 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
         ))}
       </section>
 
-      <section className="mt-16">
+      <section className="mt-20">
         <h2 className="font-serif text-2xl font-semibold">Browse by genre</h2>
-        <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+        <ul className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
           {GENRES.map((g) => (
             <li key={g}>
               <Link
                 href={`/?genre=${encodeURIComponent(g)}`}
-                className="flex h-20 items-center justify-center rounded-lg border border-border bg-surface px-3 text-center font-serif text-sm hover:bg-surface-hover"
+                className="flex h-24 items-center justify-center rounded-lg border border-border bg-surface px-3 text-center font-serif text-sm hover:border-accent hover:bg-surface-hover"
               >
                 {g}
               </Link>
