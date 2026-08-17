@@ -52,6 +52,12 @@ export default async function DashboardPage({
             Series
           </Link>
           <Link
+            href="/dashboard/bundles"
+            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+          >
+            Bundles
+          </Link>
+          <Link
             href="/dashboard/profile"
             className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
           >

@@ -219,6 +219,99 @@ create index book_views_book_id_idx on public.book_views(book_id);
 create index book_views_created_at_idx on public.book_views(created_at);
 
 -- ============================================================
+-- bundles: an author packages several of their own published books
+-- into one discounted purchase. Declared before purchases, which
+-- references it.
+-- ============================================================
+
+create table public.bundles (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null,
+  description text not null default '',
+  price_cents integer not null default 0 check (price_cents >= 0),
+  status text not null default 'draft' check (status in ('draft', 'published')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.bundles enable row level security;
+
+create policy "Published bundles are viewable by everyone, drafts by their author"
+  on public.bundles for select
+  using (status = 'published' or auth.uid() = author_id);
+
+create policy "Authors can insert their own bundles"
+  on public.bundles for insert
+  with check (auth.uid() = author_id);
+
+create policy "Authors can update their own bundles"
+  on public.bundles for update
+  using (auth.uid() = author_id);
+
+create policy "Authors can delete their own bundles"
+  on public.bundles for delete
+  using (auth.uid() = author_id);
+
+create index bundles_author_id_idx on public.bundles(author_id);
+create index bundles_status_idx on public.bundles(status);
+
+-- ============================================================
+-- bundle_books: which books are in a bundle. Both the bundle and the
+-- book must belong to the same author — enforced in the insert policy
+-- via two separate EXISTS checks, since a single-table policy can't
+-- express "same owner across two tables" any more simply than that.
+-- ============================================================
+
+create table public.bundle_books (
+  id uuid primary key default gen_random_uuid(),
+  bundle_id uuid not null references public.bundles(id) on delete cascade,
+  book_id uuid not null references public.books(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (bundle_id, book_id)
+);
+
+alter table public.bundle_books enable row level security;
+
+create policy "Bundle contents are viewable wherever the bundle is"
+  on public.bundle_books for select
+  using (
+    exists (
+      select 1 from public.bundles
+      where bundles.id = bundle_books.bundle_id
+      and (bundles.status = 'published' or bundles.author_id = auth.uid())
+    )
+  );
+
+create policy "Authors can add books to their own bundles"
+  on public.bundle_books for insert
+  with check (
+    exists (
+      select 1 from public.bundles
+      where bundles.id = bundle_books.bundle_id
+      and bundles.author_id = auth.uid()
+    )
+    and exists (
+      select 1 from public.books
+      where books.id = bundle_books.book_id
+      and books.author_id = auth.uid()
+    )
+  );
+
+create policy "Authors can remove books from their own bundles"
+  on public.bundle_books for delete
+  using (
+    exists (
+      select 1 from public.bundles
+      where bundles.id = bundle_books.bundle_id
+      and bundles.author_id = auth.uid()
+    )
+  );
+
+create index bundle_books_bundle_id_idx on public.bundle_books(bundle_id);
+create index bundle_books_book_id_idx on public.bundle_books(book_id);
+
+-- ============================================================
 -- discount_codes: an author's promo codes for one of their own books,
 -- applied at Stripe Checkout. Only the author can list/manage their own
 -- codes (see RLS below) — looking a code up by book_id+code at checkout
@@ -332,10 +425,15 @@ create table public.purchases (
   id uuid primary key default gen_random_uuid(),
   book_id uuid not null references public.books(id) on delete cascade,
   reader_id uuid not null references public.profiles(id) on delete cascade,
-  stripe_checkout_session_id text not null unique,
+  -- Not unique on its own: a bundle checkout is one Stripe session that
+  -- fans out into one purchase row per book in the bundle, so several
+  -- rows can share the same session id. (book_id, reader_id) below is
+  -- still the real uniqueness guarantee.
+  stripe_checkout_session_id text not null,
   stripe_payment_intent_id text,
   amount_cents integer not null,
   discount_code_id uuid references public.discount_codes(id) on delete set null,
+  bundle_id uuid references public.bundles(id) on delete set null,
   refunded_at timestamptz,
   created_at timestamptz not null default now(),
   unique (book_id, reader_id)
@@ -360,6 +458,8 @@ create policy "Authors can view purchases of their own books"
 create index purchases_reader_id_idx on public.purchases(reader_id);
 create index purchases_book_id_idx on public.purchases(book_id);
 create index purchases_payment_intent_idx on public.purchases(stripe_payment_intent_id);
+create index purchases_checkout_session_idx on public.purchases(stripe_checkout_session_id);
+create index purchases_bundle_id_idx on public.purchases(bundle_id);
 
 -- ============================================================
 -- reviews: one per reader per book — only buyers can write one,

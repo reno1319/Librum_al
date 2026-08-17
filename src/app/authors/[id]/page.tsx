@@ -1,7 +1,8 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
-import type { Book, Profile } from "@/lib/types";
+import type { Book, Bundle, Profile } from "@/lib/types";
 
 export default async function AuthorProfilePage({
   params,
@@ -29,6 +30,14 @@ export default async function AuthorProfilePage({
     .eq("status", "published")
     .order("created_at", { ascending: false })
     .returns<Book[]>();
+
+  const { data: bundles } = await supabase
+    .from("bundles")
+    .select("*")
+    .eq("author_id", id)
+    .eq("status", "published")
+    .order("created_at", { ascending: false })
+    .returns<Bundle[]>();
 
   const avatarUrl = author.avatar_path
     ? supabase.storage.from("avatars").getPublicUrl(author.avatar_path).data
@@ -79,6 +88,30 @@ export default async function AuthorProfilePage({
             );
           })}
         </ul>
+      )}
+
+      {bundles && bundles.length > 0 && (
+        <>
+          <h2 className="mt-10 font-serif text-xl font-semibold">Bundles</h2>
+          <ul
+            className="mt-6"
+            style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
+          >
+            {bundles.map((bundle) => (
+              <li key={bundle.id}>
+                <Link
+                  href={`/bundles/${bundle.id}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
+                >
+                  <span className="font-serif font-medium">{bundle.title}</span>
+                  <span className="text-sm font-semibold text-primary">
+                    ${(bundle.price_cents / 100).toFixed(2)}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </main>
   );

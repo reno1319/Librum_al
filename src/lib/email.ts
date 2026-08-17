@@ -67,3 +67,50 @@ export async function sendPurchaseEmails(
     );
   }
 }
+
+export async function sendBundlePurchaseEmails(
+  admin: ReturnType<typeof createAdminClient>,
+  { bundleId, readerId, amountCents }: { bundleId: string; readerId: string; amountCents: number },
+) {
+  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
+  const { data: bundle } = await admin
+    .from("bundles")
+    .select("title, author_id")
+    .eq("id", bundleId)
+    .single();
+
+  if (!bundle) return;
+
+  const [{ data: reader }, { data: author }] = await Promise.all([
+    admin.auth.admin.getUserById(readerId),
+    admin.auth.admin.getUserById(bundle.author_id),
+  ]);
+
+  const amount = (amountCents / 100).toFixed(2);
+  const bundleUrl = `${origin}/bundles/${bundleId}`;
+
+  if (reader?.user?.email) {
+    await sendEmail(
+      reader.user.email,
+      "Your Librum purchase receipt",
+      `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Thanks for your purchase!</h1>
+        <p>You bought the <strong>${bundle.title}</strong> bundle for $${amount}.</p>
+        <p><a href="${bundleUrl}">View your bundle</a></p>
+      </div>`,
+    );
+  }
+
+  if (author?.user?.email) {
+    await sendEmail(
+      author.user.email,
+      "You made a sale on Librum",
+      `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">You made a sale!</h1>
+        <p>Your <strong>${bundle.title}</strong> bundle just sold for $${amount}.</p>
+        <p><a href="${origin}/dashboard/sales">View your sales</a></p>
+      </div>`,
+    );
+  }
+}

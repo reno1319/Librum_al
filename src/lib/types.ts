@@ -53,6 +53,17 @@ export type Contributor = {
   created_at: string;
 };
 
+export type Bundle = {
+  id: string;
+  author_id: string;
+  title: string;
+  description: string;
+  price_cents: number;
+  status: BookStatus;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DiscountCode = {
   id: string;
   author_id: string;

@@ -19,10 +19,11 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 ## Discovery & Storefront
 
-- [ ] Homepage redesign in the new style (hero section, curated layout)
+- [x] Homepage redesign in the new style (hero section, curated layout)
+      — see "Phase 2: Storefront depth" below
 - [x] Search bar
 - [x] Genres/categories (add to book upload form + storefront filtering)
-- [ ] Book detail page redesign
+- [x] Book detail page redesign — see "Phase 2: Storefront depth" below
 - [x] "Look inside" sample preview (an excerpt readers can view before
       buying) — the author writes/pastes it in when uploading or editing
       a book, rather than auto-extracting from the EPUB, which is too
@@ -117,7 +118,7 @@ lean on that we don't have yet. Each item names what it's modeled after.
 
 - [x] Discount codes: authors create a promo code (% or $ off);
       applied at Stripe Checkout
-- [ ] Bundles: an author combines their own books into one discounted
+- [x] Bundles: an author combines their own books into one discounted
       package, purchased as a single checkout that unlocks every book
       in it (meaningfully more complex than the other items here — a
       single Stripe session has to expand into multiple purchase rows)

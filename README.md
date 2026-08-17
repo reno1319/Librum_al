@@ -51,6 +51,15 @@ file storage), and Stripe (checkout + author payouts).
   deduplicated unique visitors, and never counting the author's own
   visits), both as a total and per book, alongside units sold and
   revenue
+- Authors combine 2+ of their own published books into a **Bundle**
+  (**Dashboard > Bundles**) at a discounted price, shown on their author
+  profile page and its own bundle page. One Stripe Checkout for the
+  bundle grants ownership of every book in it — the webhook fans a
+  single payment out into one `purchases` row per book (split
+  proportionally by each book's own price for revenue reporting), so
+  everything else — the book page, downloads, reviews, the sales
+  dashboard — treats a bundle-derived purchase exactly like a regular
+  one, no separate code path needed
 - Readers buy a book via **Stripe Checkout**; ownership is recorded once
   payment completes
 - Owners (the buyer, or the author) can download the EPUB from the book
