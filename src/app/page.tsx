@@ -522,7 +522,11 @@ async function SearchResults({
     <ul
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+        // auto-fill (not auto-fit): with few results, auto-fit would
+        // collapse the empty tracks and stretch the remaining item(s)
+        // to fill the row — auto-fill keeps the reserved tracks so a
+        // single result stays a normal card width instead of a huge one.
+        gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
         gap: "1.5rem",
         marginTop: "2rem",
       }}
