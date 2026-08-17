@@ -323,7 +323,15 @@ function BookCoverFan({ covers }: { covers: { id: string; url: string }[] }) {
   if (shown.length === 0) return null;
 
   return (
-    <div className="mx-auto grid w-full max-w-xs grid-cols-3 gap-4 sm:mx-0 sm:max-w-sm">
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: "1rem",
+        width: "100%",
+        maxWidth: "20rem",
+      }}
+    >
       {shown.map((cover, i) => (
         <div
           key={cover.id}
@@ -383,7 +391,7 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
         </div>
 
         {covers.length > 0 && (
-          <div className="sm:w-72 sm:flex-none">
+          <div style={{ flexShrink: 0, margin: "0 auto" }}>
             <BookCoverFan covers={covers} />
           </div>
         )}

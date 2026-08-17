@@ -16,8 +16,16 @@ const FOOTER_LINKS = {
 export function SiteFooter() {
   return (
     <footer className="border-t border-border bg-surface">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-4 py-12 sm:flex-row sm:justify-between sm:px-6">
-        <div className="max-w-xs">
+      <div
+        className="mx-auto w-full max-w-5xl px-4 py-12 sm:px-6"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "space-between",
+          gap: "2.5rem",
+        }}
+      >
+        <div style={{ maxWidth: "20rem" }}>
           <span className="font-serif text-2xl text-primary">Librum</span>
           <p className="mt-2 text-sm text-muted">
             Independent ebooks, published directly by the people who wrote
@@ -25,13 +33,16 @@ export function SiteFooter() {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-10 sm:gap-16">
+        <div style={{ display: "flex", gap: "4rem" }}>
           {Object.entries(FOOTER_LINKS).map(([section, links]) => (
             <div key={section}>
               <p className="text-xs font-medium uppercase tracking-wide text-muted">
                 {section}
               </p>
-              <nav className="mt-3 flex flex-col gap-2 text-sm">
+              <nav
+                className="mt-3 text-sm"
+                style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+              >
                 {links.map((link) => (
                   <Link
                     key={link.href}
