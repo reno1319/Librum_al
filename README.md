@@ -47,6 +47,12 @@ file storage), and Stripe (checkout + author payouts).
 - A **Pricing** page (linked from the header, footer, and homepage)
   explains the flat platform fee with a live earnings calculator — type
   in a price and see the platform fee and your take-home split instantly
+- Readers can **follow an author** from their profile page and get an
+  email the next time that author publishes a new book — only on a
+  genuine first publish, not on every unpublish/republish toggle.
+  **Following** in the nav lists everyone you follow, with an unfollow
+  button. Follower identities are never exposed publicly — only a
+  follower count shows on the author's page
 - **Dashboard > Sales** also shows book page views — a basic count (not
   deduplicated unique visitors, and never counting the author's own
   visits), both as a total and per book, alongside units sold and

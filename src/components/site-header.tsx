@@ -41,6 +41,9 @@ export async function SiteHeader() {
             <Link href="/wishlist" className="hover:underline">
               Wishlist
             </Link>
+            <Link href="/following" className="hover:underline">
+              Following
+            </Link>
             <Link href="/account" className="hover:underline">
               Account
             </Link>

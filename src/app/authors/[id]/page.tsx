@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { BookCard } from "@/components/book-card";
+import { followAuthor, unfollowAuthor } from "./actions";
 import type { Book, Bundle, Profile } from "@/lib/types";
 
 export default async function AuthorProfilePage({
@@ -11,6 +13,9 @@ export default async function AuthorProfilePage({
 }) {
   const { id } = await params;
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data: author } = await supabase
     .from("profiles")
@@ -22,6 +27,26 @@ export default async function AuthorProfilePage({
   if (!author) {
     notFound();
   }
+
+  const isSelf = user?.id === id;
+  let isFollowing = false;
+  if (user && !isSelf) {
+    const { data: followRow } = await supabase
+      .from("author_follows")
+      .select("id")
+      .eq("follower_id", user.id)
+      .eq("author_id", id)
+      .maybeSingle();
+    isFollowing = !!followRow;
+  }
+
+  // Follower identities aren't publicly readable (see schema.sql), so
+  // the count is read separately with the service role key.
+  const admin = createAdminClient();
+  const { count: followerCount } = await admin
+    .from("author_follows")
+    .select("id", { count: "exact", head: true })
+    .eq("author_id", id);
 
   const { data: books } = await supabase
     .from("books")
@@ -61,9 +86,41 @@ export default async function AuthorProfilePage({
           <h1 className="font-serif text-3xl font-semibold">
             {author.display_name}
           </h1>
+          <p className="mt-1 text-sm text-muted">
+            {followerCount ?? 0} follower{followerCount === 1 ? "" : "s"}
+          </p>
           {author.bio && (
             <p className="mt-2 max-w-xl text-foreground/90">{author.bio}</p>
           )}
+
+          {!isSelf &&
+            (user ? (
+              <form
+                action={(isFollowing ? unfollowAuthor : followAuthor).bind(
+                  null,
+                  id,
+                )}
+                className="mt-3"
+              >
+                <button
+                  type="submit"
+                  className={
+                    isFollowing
+                      ? "rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+                      : "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+                  }
+                >
+                  {isFollowing ? "Following" : "Follow"}
+                </button>
+              </form>
+            ) : (
+              <Link
+                href={`/login?next=/authors/${id}`}
+                className="mt-3 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+              >
+                Follow
+              </Link>
+            ))}
         </div>
       </div>
 

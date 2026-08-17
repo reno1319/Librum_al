@@ -4,8 +4,10 @@ import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { GENRES } from "@/lib/genres";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
+import { sendNewBookEmails } from "@/lib/email";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -299,11 +301,26 @@ export async function publishBook(bookId: string) {
     redirect("/dashboard?error=Connect+your+payout+account+before+publishing");
   }
 
+  // Only a genuine draft -> published transition should notify
+  // followers — otherwise every unpublish/republish toggle would spam
+  // them again.
+  const { data: bookBefore } = await supabase
+    .from("books")
+    .select("status")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .single();
+
   await supabase
     .from("books")
     .update({ status: "published" })
     .eq("id", bookId)
     .eq("author_id", user.id);
+
+  if (bookBefore?.status === "draft") {
+    const admin = createAdminClient();
+    await sendNewBookEmails(admin, { bookId, authorId: user.id });
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/");

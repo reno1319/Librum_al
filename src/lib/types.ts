@@ -64,6 +64,13 @@ export type Bundle = {
   updated_at: string;
 };
 
+export type AuthorFollow = {
+  id: string;
+  follower_id: string;
+  author_id: string;
+  created_at: string;
+};
+
 export type DiscountCode = {
   id: string;
   author_id: string;

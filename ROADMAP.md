@@ -133,7 +133,7 @@ lean on that we don't have yet. Each item names what it's modeled after.
 
 ### Engagement (Gumroad-style following)
 
-- [ ] Follow an author: readers opt in to an email when someone they
+- [x] Follow an author: readers opt in to an email when someone they
       follow publishes a new book (reuses the existing email
       infrastructure from Notifications)
 - [x] Basic view-count analytics on the author sales dashboard (how

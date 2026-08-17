@@ -114,3 +114,42 @@ export async function sendBundlePurchaseEmails(
     );
   }
 }
+
+// Only called on a genuine first publish (draft -> published), not on
+// every unpublish/republish toggle — see the check in publishBook.
+// Follower emails are looked up one at a time via the admin auth API,
+// same as the reader/author lookups above; fine at this project's
+// scale, but would need a bulk lookup if follower counts ever got large.
+export async function sendNewBookEmails(
+  admin: ReturnType<typeof createAdminClient>,
+  { bookId, authorId }: { bookId: string; authorId: string },
+) {
+  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
+  const [{ data: book }, { data: author }, { data: follows }] = await Promise.all([
+    admin.from("books").select("title").eq("id", bookId).single(),
+    admin.from("profiles").select("display_name").eq("id", authorId).single(),
+    admin.from("author_follows").select("follower_id").eq("author_id", authorId),
+  ]);
+
+  if (!book || !author || !follows || follows.length === 0) return;
+
+  const bookUrl = `${origin}/books/${bookId}`;
+
+  await Promise.all(
+    follows.map(async ({ follower_id: followerId }) => {
+      const { data: follower } = await admin.auth.admin.getUserById(followerId);
+      if (!follower?.user?.email) return;
+
+      await sendEmail(
+        follower.user.email,
+        `${author.display_name} just published a new book`,
+        `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+          <h1 style="font-size: 20px;">New from ${author.display_name}</h1>
+          <p><strong>${book.title}</strong> just went live.</p>
+          <p><a href="${bookUrl}">View the book</a></p>
+        </div>`,
+      );
+    }),
+  );
+}
