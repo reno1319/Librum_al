@@ -435,7 +435,14 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
         <h2 className="font-serif text-2xl font-semibold">
           How self-publishing works
         </h2>
-        <ol className="mt-8 grid grid-cols-1 gap-10 sm:grid-cols-2 md:grid-cols-4">
+        <ol
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: "2.5rem",
+            marginTop: "2rem",
+          }}
+        >
           {PUBLISHING_STEPS.map((step, i) => (
             <li key={step.title}>
               <div className="flex items-center gap-3">
@@ -466,7 +473,14 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
         <h2 className="font-serif text-2xl font-semibold">
           Everything you need to sell your book
         </h2>
-        <div className="mt-8 grid grid-cols-1 gap-10 sm:grid-cols-2 md:grid-cols-4">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: "2.5rem",
+            marginTop: "2rem",
+          }}
+        >
           {PUBLISHING_TOOLS.map((tool) => (
             <div key={tool.title}>
               <tool.icon
@@ -505,7 +519,14 @@ async function SearchResults({
   }
 
   return (
-    <ul className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4">
+    <ul
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+        gap: "1.5rem",
+        marginTop: "2rem",
+      }}
+    >
       {books.map((book) => {
         const coverUrl = book.cover_path
           ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data
@@ -700,8 +721,12 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
       <BookShelf title="New releases" books={newReleases} supabase={supabase} />
 
       <section
-        className="grid grid-cols-1 gap-10 sm:grid-cols-3"
-        style={{ marginTop: "5rem" }}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: "2.5rem",
+          marginTop: "5rem",
+        }}
       >
         {VALUE_PROPS.map((prop) => (
           <div key={prop.title}>
@@ -722,7 +747,14 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
 
       <section style={{ marginTop: "5rem" }}>
         <h2 className="font-serif text-2xl font-semibold">Browse by genre</h2>
-        <ul className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+        <ul
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+            gap: "1rem",
+            marginTop: "1.5rem",
+          }}
+        >
           {GENRES.map((g) => (
             <li key={g}>
               <Link
