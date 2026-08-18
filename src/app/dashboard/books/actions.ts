@@ -73,6 +73,7 @@ export async function createBook(formData: FormData) {
   const description = String(formData.get("description") ?? "").trim();
   const previewText = String(formData.get("previewText") ?? "").trim();
   const keywords = normalizeKeywords(formData.get("keywords"));
+  const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
   const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
   const cover = formData.get("cover") as File | null;
@@ -141,6 +142,7 @@ export async function createBook(formData: FormData) {
     description,
     preview_text: previewText,
     keywords,
+    isbn,
     genre,
     series_id: seriesId,
     series_position: seriesPosition,
@@ -182,6 +184,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   const description = String(formData.get("description") ?? "").trim();
   const previewText = String(formData.get("previewText") ?? "").trim();
   const keywords = normalizeKeywords(formData.get("keywords"));
+  const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
   const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
   const cover = formData.get("cover") as File | null;
@@ -261,6 +264,7 @@ export async function updateBook(bookId: string, formData: FormData) {
       description,
       preview_text: previewText,
       keywords,
+      isbn,
       genre,
       series_id: seriesId,
       series_position: seriesPosition,

@@ -144,6 +144,21 @@ export default async function EditBookPage({
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
+          ISBN (optional)
+          <input
+            name="isbn"
+            type="text"
+            defaultValue={book.isbn ?? ""}
+            placeholder="e.g. 978-3-16-148410-0"
+            className="rounded-lg border border-border bg-surface px-3 py-2"
+          />
+          <span className="text-xs text-muted">
+            Only if you already own one — Librum doesn&apos;t issue or
+            register ISBNs. Leave blank to skip.
+          </span>
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
           Genre
           <select
             name="genre"

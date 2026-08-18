@@ -18,6 +18,7 @@ export type Book = {
   description: string;
   preview_text: string;
   keywords: string;
+  isbn: string | null;
   genre: string | null;
   series_id: string | null;
   series_position: number | null;

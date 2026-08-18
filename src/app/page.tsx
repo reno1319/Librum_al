@@ -17,6 +17,7 @@ import {
   IconCheck,
   IconCoins,
   IconUnlock,
+  IconGlobe,
 } from "@/components/icons";
 import type { Book, Profile } from "@/lib/types";
 import type { ComponentType, CSSProperties } from "react";
@@ -28,7 +29,19 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 async function fetchSearchResults(
   supabase: SupabaseClient,
-  { q, genre }: { q?: string; genre?: string },
+  {
+    q,
+    genre,
+    sort,
+    minPriceCents,
+    maxPriceCents,
+  }: {
+    q?: string;
+    genre?: string;
+    sort?: string;
+    minPriceCents?: number;
+    maxPriceCents?: number;
+  },
 ) {
   const baseQuery = () => {
     let query = supabase
@@ -36,41 +49,71 @@ async function fetchSearchResults(
       .select("*, profiles(display_name)")
       .eq("status", "published");
     if (genre) query = query.eq("genre", genre);
+    if (minPriceCents != null) query = query.gte("price_cents", minPriceCents);
+    if (maxPriceCents != null) query = query.lte("price_cents", maxPriceCents);
     return query;
   };
 
   const term = q?.trim();
+  let results: BookWithAuthor[];
   if (!term) {
     const { data } = await baseQuery()
       .order("created_at", { ascending: false })
       .returns<BookWithAuthor[]>();
-    return data ?? [];
+    results = data ?? [];
+  } else {
+    // Separate ilike() queries (title, description, keywords) merged in JS,
+    // rather than one .or() filter string — .or() requires manually
+    // escaping commas and parentheses in the search term to stay valid,
+    // which is easy to get wrong. This is simpler and just as correct at
+    // our scale.
+    const pattern = `%${term}%`;
+    const [{ data: byTitle }, { data: byDescription }, { data: byKeywords }] =
+      await Promise.all([
+        baseQuery().ilike("title", pattern).returns<BookWithAuthor[]>(),
+        baseQuery().ilike("description", pattern).returns<BookWithAuthor[]>(),
+        baseQuery().ilike("keywords", pattern).returns<BookWithAuthor[]>(),
+      ]);
+
+    const merged = new Map<string, BookWithAuthor>();
+    for (const book of [
+      ...(byTitle ?? []),
+      ...(byDescription ?? []),
+      ...(byKeywords ?? []),
+    ]) {
+      merged.set(book.id, book);
+    }
+
+    results = [...merged.values()].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
   }
 
-  // Separate ilike() queries (title, description, keywords) merged in JS,
-  // rather than one .or() filter string — .or() requires manually escaping
-  // commas and parentheses in the search term to stay valid, which is easy
-  // to get wrong. This is simpler and just as correct at our scale.
-  const pattern = `%${term}%`;
-  const [{ data: byTitle }, { data: byDescription }, { data: byKeywords }] =
-    await Promise.all([
-      baseQuery().ilike("title", pattern).returns<BookWithAuthor[]>(),
-      baseQuery().ilike("description", pattern).returns<BookWithAuthor[]>(),
-      baseQuery().ilike("keywords", pattern).returns<BookWithAuthor[]>(),
-    ]);
+  if (sort === "price_asc") {
+    results = [...results].sort((a, b) => a.price_cents - b.price_cents);
+  } else if (sort === "price_desc") {
+    results = [...results].sort((a, b) => b.price_cents - a.price_cents);
+  } else if (sort === "bestselling") {
+    // Purchase counts span every reader, not just the current visitor, so
+    // this needs the admin client — see fetchCuratedHome for the same
+    // pattern. Only book_id counts are read here, never who bought what.
+    const admin = createAdminClient();
+    const { data: purchases } = await admin
+      .from("purchases")
+      .select("book_id")
+      .is("refunded_at", null);
 
-  const merged = new Map<string, BookWithAuthor>();
-  for (const book of [
-    ...(byTitle ?? []),
-    ...(byDescription ?? []),
-    ...(byKeywords ?? []),
-  ]) {
-    merged.set(book.id, book);
+    const counts = new Map<string, number>();
+    for (const p of purchases ?? []) {
+      counts.set(p.book_id, (counts.get(p.book_id) ?? 0) + 1);
+    }
+
+    results = [...results].sort(
+      (a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0),
+    );
   }
 
-  return [...merged.values()].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
+  return results;
 }
 
 async function fetchCuratedHome(supabase: SupabaseClient) {
@@ -160,11 +203,28 @@ async function fetchStorefrontStats(supabase: SupabaseClient) {
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; genre?: string; account?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    genre?: string;
+    sort?: string;
+    minPrice?: string;
+    maxPrice?: string;
+    account?: string;
+  }>;
 }) {
-  const { q, genre, account } = await searchParams;
+  const { q, genre, sort, minPrice, maxPrice, account } = await searchParams;
   const supabase = await createClient();
-  const isFiltered = Boolean(q?.trim() || genre);
+  const minPriceCents =
+    minPrice && Number.isFinite(Number(minPrice))
+      ? Math.round(Number(minPrice) * 100)
+      : undefined;
+  const maxPriceCents =
+    maxPrice && Number.isFinite(Number(maxPrice))
+      ? Math.round(Number(maxPrice) * 100)
+      : undefined;
+  const isFiltered = Boolean(
+    q?.trim() || genre || sort || minPriceCents != null || maxPriceCents != null,
+  );
 
   const {
     data: { user },
@@ -254,6 +314,34 @@ export default async function Home({
                 </option>
               ))}
             </select>
+            <select
+              name="sort"
+              defaultValue={sort ?? ""}
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+            >
+              <option value="">Newest</option>
+              <option value="bestselling">Bestselling</option>
+              <option value="price_asc">Price: low to high</option>
+              <option value="price_desc">Price: high to low</option>
+            </select>
+            <input
+              type="number"
+              name="minPrice"
+              defaultValue={minPrice ?? ""}
+              placeholder="Min $"
+              min="0"
+              step="0.01"
+              className="w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+            />
+            <input
+              type="number"
+              name="maxPrice"
+              defaultValue={maxPrice ?? ""}
+              placeholder="Max $"
+              min="0"
+              step="0.01"
+              className="w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+            />
             <button
               type="submit"
               className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
@@ -271,7 +359,14 @@ export default async function Home({
           </form>
 
           {isFiltered ? (
-            <SearchResults supabase={supabase} q={q} genre={genre} />
+            <SearchResults
+              supabase={supabase}
+              q={q}
+              genre={genre}
+              sort={sort}
+              minPriceCents={minPriceCents}
+              maxPriceCents={maxPriceCents}
+            />
           ) : (
             <CuratedHome supabase={supabase} />
           )}
@@ -309,6 +404,24 @@ const AUTHOR_STRIP = [
   "No minimum sales",
   `Keep ${100 - PLATFORM_FEE_PERCENT}% of every sale`,
   "Payouts via Stripe",
+];
+
+const WHY_LIBRUM: { title: string; body: string; icon: Icon }[] = [
+  {
+    title: "Publish in minutes",
+    body: "No submission queue, no waiting on approval — upload your book and it's live the moment you hit publish.",
+    icon: IconBolt,
+  },
+  {
+    title: "You control your earnings",
+    body: `Set your own price, run your own discounts, and keep ${100 - PLATFORM_FEE_PERCENT}% of every sale — paid straight to your bank account.`,
+    icon: IconBank,
+  },
+  {
+    title: "Reach readers everywhere",
+    body: "Your book page is public and shareable from day one — no separate storefront to set up.",
+    icon: IconGlobe,
+  },
 ];
 
 const PUBLISHING_TOOLS: { title: string; body: string; icon: Icon }[] = [
@@ -432,6 +545,31 @@ function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
       </div>
 
       <section style={{ marginTop: "5rem" }}>
+        <h2 className="font-serif text-2xl font-semibold">Why Librum?</h2>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: "2.5rem",
+            marginTop: "2rem",
+          }}
+        >
+          {WHY_LIBRUM.map((item) => (
+            <div key={item.title}>
+              <item.icon
+                className="text-primary"
+                style={{ width: "1.75rem", height: "1.75rem" }}
+              />
+              <h3 className="mt-3 font-serif text-lg font-semibold">
+                {item.title}
+              </h3>
+              <p className="mt-1 text-sm text-foreground/90">{item.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section style={{ marginTop: "5rem" }}>
         <h2 className="font-serif text-2xl font-semibold">
           How self-publishing works
         </h2>
@@ -511,12 +649,24 @@ async function SearchResults({
   supabase,
   q,
   genre,
+  sort,
+  minPriceCents,
+  maxPriceCents,
 }: {
   supabase: SupabaseClient;
   q?: string;
   genre?: string;
+  sort?: string;
+  minPriceCents?: number;
+  maxPriceCents?: number;
 }) {
-  const books = await fetchSearchResults(supabase, { q, genre });
+  const books = await fetchSearchResults(supabase, {
+    q,
+    genre,
+    sort,
+    minPriceCents,
+    maxPriceCents,
+  });
 
   if (books.length === 0) {
     return (

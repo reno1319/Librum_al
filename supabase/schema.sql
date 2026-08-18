@@ -96,6 +96,7 @@ create table public.books (
   description text not null default '',
   preview_text text not null default '',
   keywords text not null default '',
+  isbn text,
   genre text check (genre in (
     'Fiction', 'Non-Fiction', 'Mystery & Thriller', 'Romance', 'Fantasy',
     'Science Fiction', 'Horror', 'Biography & Memoir', 'Self-Help',

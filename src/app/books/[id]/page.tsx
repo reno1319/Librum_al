@@ -236,6 +236,10 @@ export default async function BookDetailPage({
             </ul>
           )}
 
+          {book.isbn && (
+            <p className="mt-3 text-xs text-muted">ISBN: {book.isbn}</p>
+          )}
+
           {book.preview_text && (
             <details className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
               <summary className="cursor-pointer font-serif font-medium">
