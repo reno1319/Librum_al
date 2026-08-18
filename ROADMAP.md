@@ -188,6 +188,17 @@ screenshots). Decisions made on what to adopt now vs. defer:
       icon on the right (replacing separate Log in / Sign up links) —
       Librum has no real cart, so /cart is an honest static "empty
       cart, log in to see your saved cart" page
+- [x] Body font switched from Geist to Inter, matching Lulu's clean
+      sans more closely; headings keep Playfair Display (already close
+      to Lulu's bold serif look)
+- [x] Header nav reordered to About, How it works, Pricing, Create,
+      Products, Program, Bookstore — all always visible regardless of
+      login state; Create routes to the upload wizard for authors, or
+      to signup for everyone else
+- [x] Primary blue lightened again per feedback (was #4f3fe0, now
+      #6a5cf0)
+- [x] Large circular icon badges (matching Lulu's feature-grid sizing)
+      on Why Librum, How self-publishing works, and the tools showcase
 - [ ] Not doing yet, by explicit choice: Albanian translation (English
       first, translate once the feature set settles), physical
       print-on-demand (ebook-only for now), additional ebook export

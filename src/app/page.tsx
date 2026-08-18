@@ -148,7 +148,7 @@ const PUBLISHING_TOOLS: { title: string; body: string; icon: Icon }[] = [
 // section, in the mold of Lulu's own homepage.
 function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
   return (
-    <section style={{ backgroundColor: "#4f3fe0" }}>
+    <section style={{ backgroundColor: "#6a5cf0" }}>
       <div
         className="mx-auto w-full max-w-2xl px-4 text-center sm:px-6"
         style={{ paddingTop: "5rem", paddingBottom: "3rem" }}
@@ -173,7 +173,7 @@ function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
           <Link
             href="/signup?role=author"
             className="rounded-lg px-5 py-2.5 text-sm font-medium"
-            style={{ backgroundColor: "#ffffff", color: "#4f3fe0" }}
+            style={{ backgroundColor: "#ffffff", color: "#6a5cf0" }}
           >
             Publish your book
           </Link>
@@ -233,7 +233,9 @@ function AuthorPitch() {
       </div>
 
       <section style={{ marginTop: "5rem" }}>
-        <h2 className="font-serif text-2xl font-semibold">Why Librum?</h2>
+        <h2 className="text-center font-serif text-2xl font-semibold">
+          Why Librum?
+        </h2>
         <div
           style={{
             display: "grid",
@@ -243,12 +245,9 @@ function AuthorPitch() {
           }}
         >
           {WHY_LIBRUM.map((item) => (
-            <div key={item.title}>
-              <item.icon
-                className="text-primary"
-                style={{ width: "1.75rem", height: "1.75rem" }}
-              />
-              <h3 className="mt-3 font-serif text-lg font-semibold">
+            <div key={item.title} className="text-center">
+              <IconBadge icon={item.icon} />
+              <h3 className="mt-4 font-serif text-lg font-semibold">
                 {item.title}
               </h3>
               <p className="mt-1 text-sm text-foreground/90">{item.body}</p>
@@ -258,7 +257,7 @@ function AuthorPitch() {
       </section>
 
       <section style={{ marginTop: "5rem" }}>
-        <h2 className="font-serif text-2xl font-semibold">
+        <h2 className="text-center font-serif text-2xl font-semibold">
           How self-publishing works
         </h2>
         <ol
@@ -270,24 +269,21 @@ function AuthorPitch() {
           }}
         >
           {PUBLISHING_STEPS.map((step, i) => (
-            <li key={step.title}>
-              <div className="flex items-center gap-3">
-                <step.icon
-                  className="text-primary"
-                  style={{ width: "1.75rem", height: "1.75rem" }}
-                />
-                <span className="font-serif text-2xl font-semibold text-primary">
-                  {i + 1}
-                </span>
-              </div>
-              <h3 className="mt-3 font-serif text-lg font-semibold">
+            <li key={step.title} className="text-center">
+              <IconBadge icon={step.icon} />
+              <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-primary">
+                Step {i + 1}
+              </p>
+              <h3 className="mt-1 font-serif text-lg font-semibold">
                 {step.title}
               </h3>
               <p className="mt-1 text-sm text-foreground/90">{step.body}</p>
             </li>
           ))}
         </ol>
-        <div className="mt-6 flex flex-wrap gap-6">
+        <div
+          className="mt-6 flex flex-wrap justify-center gap-6"
+        >
           <Link
             href="/how-it-works"
             className="text-sm font-medium text-primary hover:underline"
@@ -304,7 +300,7 @@ function AuthorPitch() {
       </section>
 
       <section style={{ marginTop: "5rem" }}>
-        <h2 className="font-serif text-2xl font-semibold">
+        <h2 className="text-center font-serif text-2xl font-semibold">
           Everything you need to sell your book
         </h2>
         <div
@@ -316,12 +312,9 @@ function AuthorPitch() {
           }}
         >
           {PUBLISHING_TOOLS.map((tool) => (
-            <div key={tool.title}>
-              <tool.icon
-                className="text-primary"
-                style={{ width: "1.75rem", height: "1.75rem" }}
-              />
-              <h3 className="mt-3 font-serif text-lg font-semibold">
+            <div key={tool.title} className="text-center">
+              <IconBadge icon={tool.icon} />
+              <h3 className="mt-4 font-serif text-lg font-semibold">
                 {tool.title}
               </h3>
               <p className="mt-1 text-sm text-foreground/90">{tool.body}</p>
@@ -330,5 +323,29 @@ function AuthorPitch() {
         </div>
       </section>
     </>
+  );
+}
+
+// A large circular icon badge, matching the sizing/proportion of Lulu's
+// own feature-grid icons rather than a small inline glyph.
+function IconBadge({ icon: Icon }: { icon: Icon }) {
+  return (
+    <div
+      style={{
+        width: "5.5rem",
+        height: "5.5rem",
+        borderRadius: "50%",
+        backgroundColor: "rgba(106, 92, 240, 0.1)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        margin: "0 auto",
+      }}
+    >
+      <Icon
+        className="text-primary"
+        style={{ width: "2.25rem", height: "2.25rem" }}
+      />
+    </div>
   );
 }
