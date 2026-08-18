@@ -1,4 +1,10 @@
 import Link from "next/link";
+import { IconInstagram, IconFacebook } from "@/components/icons";
+
+const SOCIAL_LINKS = [
+  { href: "#", label: "Instagram", icon: IconInstagram },
+  { href: "#", label: "Facebook", icon: IconFacebook },
+];
 
 const FOOTER_LINKS = {
   Platform: [
@@ -38,6 +44,23 @@ export function SiteFooter() {
             Independent ebooks, published directly by the people who wrote
             them.
           </p>
+          <div
+            className="mt-4"
+            style={{ display: "flex", gap: "0.75rem" }}
+          >
+            {SOCIAL_LINKS.map((social) => (
+              <a
+                key={social.label}
+                href={social.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={social.label}
+                className="text-muted hover:text-foreground"
+              >
+                <social.icon style={{ width: "1.25rem", height: "1.25rem" }} />
+              </a>
+            ))}
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: "4rem" }}>

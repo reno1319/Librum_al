@@ -28,11 +28,17 @@ export async function SiteHeader() {
       </Link>
 
       <nav className="flex flex-wrap items-center gap-4 text-sm">
+        <Link href="/products" className="hover:underline">
+          Products
+        </Link>
         <Link href="/bookstore" className="hover:underline">
           Bookstore
         </Link>
         <Link href="/pricing" className="hover:underline">
           Pricing
+        </Link>
+        <Link href="/program" className="hover:underline">
+          Program
         </Link>
         {user ? (
           <>

@@ -26,7 +26,7 @@ async function fetchHeroCovers(supabase: SupabaseClient) {
     .eq("status", "published")
     .not("cover_path", "is", null)
     .order("created_at", { ascending: false })
-    .limit(8)
+    .limit(12)
     .returns<Pick<Book, "id" | "cover_path">[]>();
 
   return (data ?? []).map((b) => ({
@@ -55,12 +55,14 @@ export default async function Home({
         </div>
       )}
 
+      <HeroSection covers={heroCovers} />
+
       <div style={{ backgroundColor: "#e9eff8" }}>
         <div
           className="mx-auto w-full max-w-5xl px-4 sm:px-6"
-          style={{ paddingTop: "2.5rem", paddingBottom: "5rem" }}
+          style={{ paddingTop: "4rem", paddingBottom: "5rem" }}
         >
-          <AuthorPitch covers={heroCovers} />
+          <AuthorPitch />
         </div>
       </div>
     </main>
@@ -141,85 +143,90 @@ const PUBLISHING_TOOLS: { title: string; body: string; icon: Icon }[] = [
 // A staggered, slightly-rotated grid of real cover art from books already
 // published on the platform — used as hero imagery instead of stock
 // photography, which this environment has no way to fetch.
-function BookCoverFan({ covers }: { covers: { id: string; url: string }[] }) {
-  const shown = covers.slice(0, 6);
-  if (shown.length === 0) return null;
-
+// Full-bleed, edge-to-edge hero band — deliberately escapes the site's
+// usual max-w-5xl content column so it reads as a distinct "front door"
+// section, in the mold of Lulu's own homepage.
+function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(3, 1fr)",
-        gap: "1rem",
-        width: "100%",
-        maxWidth: "20rem",
-      }}
-    >
-      {shown.map((cover, i) => (
-        <div
-          key={cover.id}
-          style={{
-            transform: `rotate(${i % 2 === 0 ? -4 : 4}deg) translateY(${i % 3 === 1 ? "-0.6rem" : "0"})`,
-          }}
+    <section style={{ backgroundColor: "#1e3a66" }}>
+      <div
+        className="mx-auto w-full max-w-2xl px-4 text-center sm:px-6"
+        style={{ paddingTop: "5rem", paddingBottom: "3rem" }}
+      >
+        <h1
+          className="font-serif text-4xl font-semibold sm:text-6xl"
+          style={{ color: "#ffffff" }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={cover.url}
-            alt=""
-            className="aspect-[2/3] w-full rounded-lg object-cover shadow-md"
-          />
+          Write. Publish. Profit.
+        </h1>
+        <p
+          className="mx-auto mt-4 max-w-lg text-lg"
+          style={{ color: "rgba(255, 255, 255, 0.8)" }}
+        >
+          Upload an EPUB, set your price, and go live today — Librum handles
+          checkout, delivery, and payouts.
+        </p>
+        <div
+          className="mt-8 flex flex-wrap justify-center"
+          style={{ gap: "0.75rem" }}
+        >
+          <Link
+            href="/signup?role=author"
+            className="rounded-lg px-5 py-2.5 text-sm font-medium"
+            style={{ backgroundColor: "#ffffff", color: "#1e3a66" }}
+          >
+            Publish your book
+          </Link>
+          <Link
+            href="/signup"
+            className="rounded-lg px-5 py-2.5 text-sm font-medium"
+            style={{
+              color: "#ffffff",
+              border: "1px solid rgba(255, 255, 255, 0.4)",
+            }}
+          >
+            Create an account
+          </Link>
         </div>
-      ))}
-    </div>
+      </div>
+
+      {covers.length > 0 && (
+        <div style={{ overflowX: "auto", paddingBottom: "3rem" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "1rem",
+              width: "max-content",
+              padding: "0 1.5rem",
+              margin: "0 auto",
+            }}
+          >
+            {covers.map((cover) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={cover.id}
+                src={cover.url}
+                alt=""
+                style={{
+                  width: "9rem",
+                  flexShrink: 0,
+                  aspectRatio: "2 / 3",
+                  objectFit: "cover",
+                  borderRadius: "0.5rem",
+                  boxShadow: "0 10px 25px rgba(0, 0, 0, 0.25)",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
-function AuthorPitch({ covers }: { covers: { id: string; url: string }[] }) {
+function AuthorPitch() {
   return (
     <>
-      <section
-        className="flex flex-col gap-8 rounded-lg border border-border p-6 shadow-sm sm:flex-row sm:items-center sm:p-10"
-        style={{
-          background:
-            "linear-gradient(135deg, var(--color-surface) 0%, var(--color-background) 100%)",
-        }}
-      >
-        <div className="flex flex-1 flex-col gap-6">
-          <span className="w-fit rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-            For authors
-          </span>
-          <h1 className="font-serif text-4xl font-semibold sm:text-5xl">
-            Publish your ebook. Keep {100 - PLATFORM_FEE_PERCENT}% of every
-            sale.
-          </h1>
-          <p className="max-w-xl text-lg text-foreground/90">
-            Upload an EPUB, set your price, and go live today. Librum handles
-            checkout, delivery, and payouts — no submission queue, no
-            gatekeepers, no middleman between you and your readers.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/signup?role=author"
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-            >
-              Start publishing — it&apos;s free
-            </Link>
-            <Link
-              href="/bookstore"
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-            >
-              Browse the bookstore
-            </Link>
-          </div>
-        </div>
-
-        {covers.length > 0 && (
-          <div style={{ flexShrink: 0, margin: "0 auto" }}>
-            <BookCoverFan covers={covers} />
-          </div>
-        )}
-      </section>
-
       <div
         className="flex flex-wrap justify-center rounded-lg border border-border bg-surface py-5 text-center text-sm font-medium shadow-sm"
         style={{ gap: "1rem 3rem", marginTop: "2.5rem" }}

@@ -116,6 +116,24 @@ export function IconGlobe({ className, style }: IconProps) {
   );
 }
 
+export function IconInstagram({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4.5" />
+      <circle cx="17.2" cy="6.8" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function IconFacebook({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <path d="M14 21v-8h2.5l.5-3H14V8c0-.9.3-1.5 1.7-1.5H17V3.8C16.6 3.7 15.6 3.6 14.5 3.6 12.1 3.6 10.5 5.1 10.5 7.7V10H8v3h2.5v8h3.5z" />
+    </svg>
+  );
+}
+
 export function IconUnlock({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>

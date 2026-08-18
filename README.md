@@ -16,30 +16,36 @@ file storage), and Stripe (checkout + author payouts).
   dashboard. An optional ISBN field is available for authors who already
   own one — Librum doesn't issue or register ISBNs
 - The homepage (`/`) is exclusively the author pitch, for everyone —
-  logged out, reader, or author: how self-publishing works in four
-  steps, a "Why Librum?" benefit strip, a trust strip, and a "Start
-  publishing" call to action, ending with an "Everything you need to
-  sell your book" showcase of the dashboard tools. The reader
-  storefront lives on its own page, **Bookstore** (`/bookstore`,
-  linked from the header) — a hero section spotlighting the newest
-  published book, horizontally-scrolling "Bestsellers" (by units sold)
-  and "New releases" shelves, and search/genre/sort/price filters that
-  switch it to a flat results grid. Each published book also has a
-  detail page, which itself ends with "More by this author" and "You
-  might also like" (same genre) shelves
+  logged out, reader, or author: a full-bleed dark-blue hero ("Write.
+  Publish. Profit.") with a horizontally-scrolling strip of real
+  published covers, then how self-publishing works in four steps, a
+  "Why Librum?" benefit strip, a trust strip, and a "Start publishing"
+  call to action, ending with an "Everything you need to sell your
+  book" showcase of the dashboard tools. The reader storefront lives
+  on its own page, **Bookstore** (`/bookstore`, linked from the
+  header) — a hero section spotlighting the newest published book,
+  horizontally-scrolling "Bestsellers" (by units sold) and "New
+  releases" shelves, and search/genre/sort/price filters that switch
+  it to a flat results grid. Each published book also has a detail
+  page, which itself ends with "More by this author" and "You might
+  also like" (same genre) shelves
+- **Products** and **Program** are placeholder pages linked from the
+  header nav for parts of the Librum.al roadmap not built yet (a
+  Print/product overview, and a reader/bookstore/school partnership
+  program) — no dead-end links, just an honest "coming soon"
 - Drafts show a non-blocking checklist of what's worth adding before
   publishing (description, keywords, a preview excerpt, a price above
   $0) — on the dashboard book list and on the edit page. It's a nudge,
   not a gate: nothing stops you from publishing with any of these left
   incomplete
 - The homepage uses real cover art as imagery rather than stock photos —
-  a staggered, rotated collage of actual published covers in the author
-  pitch hero, and a soft "stacked shelf" of other recent covers behind
-  the marketplace's featured book. Small inline icons (no icon library,
+  a horizontally-scrolling strip of actual published covers below the
+  Home hero, and a soft "stacked shelf" of other recent covers behind
+  the Bookstore's featured book. Small inline icons (no icon library,
   hand-drawn SVGs in `src/components/icons.tsx`) mark the how-it-works
   steps, trust strip, tools showcase, and reader value props. The
-  footer is a proper multi-column layout (Platform / Legal) instead of
-  a single row of links
+  footer is a proper multi-column layout (Platform / Legal) with
+  Instagram/Facebook icon links, instead of a single row of links
 - Authors can credit contributors on a book — illustrator, translator,
   narrator, co-author, editor, foreword, or cover designer — from the
   edit page. Just a name and a role, no Librum account required; shown

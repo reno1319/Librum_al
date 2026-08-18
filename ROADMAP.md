@@ -170,6 +170,15 @@ screenshots). Decisions made on what to adopt now vs. defer:
       storefront moved to its own **Bookstore** page (`/bookstore`),
       matching the doc's separate "Libraria" page rather than one page
       serving both audiences
+- [x] Home hero redesigned to match the doc's Lulu-style layout:
+      full-bleed dark-blue band, "Write. Publish. Profit." headline, two
+      CTAs (Publish your book / Create an account, no emoji), and a
+      horizontally-scrolling strip of real covers below it
+- [x] Header nav: added Products and Program as honest "coming soon"
+      placeholder pages (no dead-end links) for the doc's Produktet and
+      Programi i Bashkëpunimit items we haven't built yet
+- [x] Footer: added Instagram/Facebook icon links (placeholder `#`
+      hrefs — swap in the real profile URLs)
 - [ ] Not doing yet, by explicit choice: Albanian translation (English
       first, translate once the feature set settles), physical
       print-on-demand (ebook-only for now), additional ebook export
