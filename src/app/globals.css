@@ -12,15 +12,14 @@
   --color-primary-hover: #142845;
   --color-primary-foreground: #ffffff;
 
-  /* A second accent for the reader/marketplace track, so it reads as
-     visually distinct from the dark-blue "for authors" track — a warm
-     orange, paired with the dark blue per the Librum.al brand palette. */
+  /* A second accent for the /bookstore page, so it reads as visually
+     distinct from the dark-blue Home (author pitch) page — a warm orange,
+     paired with the dark blue per the Librum.al brand palette. */
   --color-accent: #e2751f;
   --color-accent-foreground: #ffffff;
 
-  /* Subtle full-bleed background tints for the homepage's two tracks —
-     a faint wash of each track's color over the base gray background,
-     not a bold block of color. */
+  /* Subtle full-bleed background tints — a faint wash of each page's
+     color over the base gray background, not a bold block of color. */
   --color-author-tint: #e9eff8;
   --color-reader-tint: #fdf0e3;
 

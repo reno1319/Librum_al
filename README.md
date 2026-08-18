@@ -15,18 +15,18 @@ file storage), and Stripe (checkout + author payouts).
   details, price, review) as a draft, then publish it from their
   dashboard. An optional ISBN field is available for authors who already
   own one — Librum doesn't issue or register ISBNs
-- The homepage has two tracks: an author-facing pitch at the top (how
-  self-publishing works, in four steps, plus a trust strip and a "Start
-  publishing" call to action) for logged-out visitors and readers, then
-  the reader marketplace below it — a hero section spotlighting the
-  newest published book, plus horizontally-scrolling "Bestsellers" (by
-  units sold) and "New releases" shelves. The author pitch is skipped
-  for anyone already logged in as an author, and for anyone searching
-  or filtering by genre (which switches the marketplace to a flat
-  results grid), and ends with a "Everything you need to sell your
-  book" showcase of the dashboard tools below. Each published book also
-  has a detail page, which itself ends with "More by this author" and
-  "You might also like" (same genre) shelves
+- The homepage (`/`) is exclusively the author pitch, for everyone —
+  logged out, reader, or author: how self-publishing works in four
+  steps, a "Why Librum?" benefit strip, a trust strip, and a "Start
+  publishing" call to action, ending with an "Everything you need to
+  sell your book" showcase of the dashboard tools. The reader
+  storefront lives on its own page, **Bookstore** (`/bookstore`,
+  linked from the header) — a hero section spotlighting the newest
+  published book, horizontally-scrolling "Bestsellers" (by units sold)
+  and "New releases" shelves, and search/genre/sort/price filters that
+  switch it to a flat results grid. Each published book also has a
+  detail page, which itself ends with "More by this author" and "You
+  might also like" (same genre) shelves
 - Drafts show a non-blocking checklist of what's worth adding before
   publishing (description, keywords, a preview excerpt, a price above
   $0) — on the dashboard book list and on the edit page. It's a nudge,
@@ -79,8 +79,8 @@ file storage), and Stripe (checkout + author payouts).
   handles identity verification and tax forms. Every sale is split
   automatically — the author's cut goes straight to their bank account,
   Librum keeps a platform fee (20% by default, see `src/lib/pricing.ts`)
-- Authors pick a genre when uploading a book; the storefront homepage has
-  a search box (matches title/description/keywords), a genre filter, a
+- Authors pick a genre when uploading a book; the Bookstore page has a
+  search box (matches title/description/keywords), a genre filter, a
   sort dropdown (newest, bestselling, price), and a min/max price filter —
   all combinable
 - Authors can add optional comma-separated keywords when uploading or

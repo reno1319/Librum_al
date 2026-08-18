@@ -105,9 +105,10 @@ lean on that we don't have yet. Each item names what it's modeled after.
 - [x] Bestseller/trending sorting on the homepage, using existing sales
       data (no new tracking needed) — done together with the redesign
       above, since the "Bestsellers" shelf needed exactly this
-- [x] Homepage split into two tracks (draft2digital/IngramSpark/Kobo
-      Writing Life-style author pitch, then the reader marketplace) —
-      see README for details
+- [x] Homepage split into an author pitch and a reader marketplace —
+      originally two tracks on one page (draft2digital/IngramSpark/Kobo
+      Writing Life-style), later split into two separate pages, Home
+      and Bookstore, in Phase 3 below — see README for details
 - [x] "Everything you need to sell your book" tools showcase on the
       homepage (sales dashboard, discount codes, series, watermarking)
 - [x] Non-blocking pre-publish checklist for draft books (description,
@@ -164,6 +165,11 @@ screenshots). Decisions made on what to adopt now vs. defer:
       actually offer
 - [x] Add-book form converted into a 4-step wizard (manuscript & cover,
       details, price, review), matching the doc's guided "Krijo" flow
+- [x] Homepage split: `/` is exclusively the author pitch for everyone
+      (no more logged-in-author/filtered skip logic), and the reader
+      storefront moved to its own **Bookstore** page (`/bookstore`),
+      matching the doc's separate "Libraria" page rather than one page
+      serving both audiences
 - [ ] Not doing yet, by explicit choice: Albanian translation (English
       first, translate once the feature set settles), physical
       print-on-demand (ebook-only for now), additional ebook export
