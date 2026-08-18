@@ -140,3 +140,26 @@ lean on that we don't have yet. Each item names what it's modeled after.
       infrastructure from Notifications)
 - [x] Basic view-count analytics on the author sales dashboard (how
       many people looked at a book page, not just who bought it)
+
+## Phase 3: Librum.al roadmap alignment
+
+Reviewed against two planning documents modeled on Lulu.com (sitemap +
+screenshots). Decisions made on what to adopt now vs. defer:
+
+- [x] Color palette switched to dark blue + orange + light gray (was
+      warm maroon/cream/forest-green)
+- [x] Header nav restructured to mirror Lulu's Produktet/Honoraret/
+      Krijo/Libraria/Llogaria ime grouping — added "Browse" (jumps to
+      the reader marketplace) and "Create" (authors' quick link to
+      publish a new book) as first-class nav items, alongside the
+      existing Pricing/Dashboard/Library/Wishlist/Following/Account
+- [x] "Boto me L&K" footer link to the author's separate imprint
+      (lamajkalemi.al)
+- [ ] Not doing yet, by explicit choice: Albanian translation (English
+      first, translate once the feature set settles), physical
+      print-on-demand (ebook-only for now), additional ebook export
+      formats beyond EPUB (PDF/MOBI/AZW3/etc.), an affiliate/referral
+      program, a "Komuniteti" resources section, a %-of-book free
+      preview (keeping the existing free-text excerpt), and a
+      balance/withdraw-funds payout model (keeping instant per-sale
+      Stripe transfers)

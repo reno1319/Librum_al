@@ -14,6 +14,12 @@ const FOOTER_LINKS = {
   ],
 };
 
+const EXTERNAL_FOOTER_LINKS = {
+  More: [
+    { href: "https://www.lamajkalemi.al", label: "Boto me L&K" },
+  ],
+};
+
 export function SiteFooter() {
   return (
     <footer className="border-t border-border bg-surface">
@@ -52,6 +58,29 @@ export function SiteFooter() {
                   >
                     {link.label}
                   </Link>
+                ))}
+              </nav>
+            </div>
+          ))}
+          {Object.entries(EXTERNAL_FOOTER_LINKS).map(([section, links]) => (
+            <div key={section}>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                {section}
+              </p>
+              <nav
+                className="mt-3 text-sm"
+                style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+              >
+                {links.map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:underline"
+                  >
+                    {link.label}
+                  </a>
                 ))}
               </nav>
             </div>

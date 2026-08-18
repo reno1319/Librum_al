@@ -1,28 +1,28 @@
 @import "tailwindcss";
 
 @theme inline {
-  /* Warm, editorial palette — a literary bookstore, not a SaaS dashboard. */
-  --color-background: #fbf6ec;
+  /* Librum.al palette — dark blue + orange + light gray. */
+  --color-background: #f5f6f8;
   --color-surface: #ffffff;
-  --color-surface-hover: #f4ebdc;
-  --color-foreground: #2b2118;
-  --color-muted: #8a7a66;
-  --color-border: #e6d9c4;
-  --color-primary: #7a2e3a;
-  --color-primary-hover: #5e2129;
+  --color-surface-hover: #eceef2;
+  --color-foreground: #1a2233;
+  --color-muted: #667085;
+  --color-border: #dbe0e8;
+  --color-primary: #1e3a66;
+  --color-primary-hover: #142845;
   --color-primary-foreground: #ffffff;
 
-  /* A second, cooler accent for the reader/marketplace track, so it
-     reads as visually distinct from the maroon "for authors" track —
-     a muted forest green, still within the warm/editorial palette. */
-  --color-accent: #3f6b4f;
+  /* A second accent for the reader/marketplace track, so it reads as
+     visually distinct from the dark-blue "for authors" track — a warm
+     orange, paired with the dark blue per the Librum.al brand palette. */
+  --color-accent: #e2751f;
   --color-accent-foreground: #ffffff;
 
   /* Subtle full-bleed background tints for the homepage's two tracks —
-     a faint wash of each track's color over the base cream background,
+     a faint wash of each track's color over the base gray background,
      not a bold block of color. */
-  --color-author-tint: #f8ece7;
-  --color-reader-tint: #eef3ee;
+  --color-author-tint: #e9eff8;
+  --color-reader-tint: #fdf0e3;
 
   --font-sans: var(--font-geist-sans);
   --font-serif: var(--font-playfair);

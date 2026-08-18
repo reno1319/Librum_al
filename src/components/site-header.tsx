@@ -28,12 +28,23 @@ export async function SiteHeader() {
       </Link>
 
       <nav className="flex flex-wrap items-center gap-4 text-sm">
+        <Link href="/#marketplace" className="hover:underline">
+          Browse
+        </Link>
+        <Link href="/pricing" className="hover:underline">
+          Pricing
+        </Link>
         {user ? (
           <>
             {role === "author" && (
-              <Link href="/dashboard" className="hover:underline">
-                Dashboard
-              </Link>
+              <>
+                <Link href="/dashboard" className="hover:underline">
+                  Dashboard
+                </Link>
+                <Link href="/dashboard/books/new" className="hover:underline">
+                  Create
+                </Link>
+              </>
             )}
             <Link href="/library" className="hover:underline">
               Library
@@ -58,9 +69,6 @@ export async function SiteHeader() {
           <>
             <Link href="/how-it-works" className="hover:underline">
               How it works
-            </Link>
-            <Link href="/pricing" className="hover:underline">
-              Pricing
             </Link>
             <Link href="/login" className="hover:underline">
               Log in
