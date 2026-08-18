@@ -60,7 +60,7 @@ export default async function Home({
       <div style={{ backgroundColor: "#e9eff8" }}>
         <div
           className="mx-auto w-full max-w-5xl px-4 sm:px-6"
-          style={{ paddingTop: "4rem", paddingBottom: "5rem" }}
+          style={{ paddingTop: "2.5rem", paddingBottom: "3rem" }}
         >
           <AuthorPitch />
         </div>
@@ -151,23 +151,23 @@ function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
     <section style={{ backgroundColor: "#6a5cf0" }}>
       <div
         className="mx-auto w-full max-w-2xl px-4 text-center sm:px-6"
-        style={{ paddingTop: "5rem", paddingBottom: "3rem" }}
+        style={{ paddingTop: "3.5rem", paddingBottom: "2rem" }}
       >
         <h1
-          className="font-serif text-4xl font-semibold sm:text-6xl"
+          className="font-serif text-4xl font-bold sm:text-6xl"
           style={{ color: "#ffffff" }}
         >
           Write. Publish. Profit.
         </h1>
         <p
-          className="mx-auto mt-4 max-w-lg text-lg"
+          className="mx-auto mt-3 max-w-lg text-lg"
           style={{ color: "rgba(255, 255, 255, 0.8)" }}
         >
-          Upload an EPUB, set your price, and go live today — Librum handles
-          checkout, delivery, and payouts.
+          Vetëbotimi i një libri elektronik është më shumë sesa piksel në
+          një ekran: është zëri juaj që udhëton nëpër botë.
         </p>
         <div
-          className="mt-8 flex flex-wrap justify-center"
+          className="mt-6 flex flex-wrap justify-center"
           style={{ gap: "0.75rem" }}
         >
           <Link
@@ -181,7 +181,7 @@ function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
       </div>
 
       {covers.length > 0 && (
-        <div style={{ overflowX: "auto", paddingBottom: "3rem" }}>
+        <div style={{ overflowX: "auto", paddingBottom: "2rem" }}>
           <div
             style={{
               display: "flex",
@@ -219,7 +219,7 @@ function AuthorPitch() {
     <>
       <div
         className="flex flex-wrap justify-center rounded-lg border border-border bg-surface py-5 text-center text-sm font-medium shadow-sm"
-        style={{ gap: "1rem 3rem", marginTop: "2.5rem" }}
+        style={{ gap: "1rem 3rem", marginTop: "1.5rem" }}
       >
         {AUTHOR_STRIP.map((item) => (
           <span key={item} className="flex items-center gap-2">
@@ -232,22 +232,22 @@ function AuthorPitch() {
         ))}
       </div>
 
-      <section style={{ marginTop: "5rem" }}>
-        <h2 className="text-center font-serif text-2xl font-semibold">
+      <section style={{ marginTop: "3rem" }}>
+        <h2 className="text-center font-serif text-2xl font-bold">
           Why Librum?
         </h2>
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "2.5rem",
-            marginTop: "2rem",
+            gap: "2rem",
+            marginTop: "1.5rem",
           }}
         >
           {WHY_LIBRUM.map((item) => (
             <div key={item.title} className="text-center">
               <IconBadge icon={item.icon} />
-              <h3 className="mt-4 font-serif text-lg font-semibold">
+              <h3 className="mt-3 font-serif text-lg font-bold">
                 {item.title}
               </h3>
               <p className="mt-1 text-sm text-foreground/90">{item.body}</p>
@@ -256,16 +256,16 @@ function AuthorPitch() {
         </div>
       </section>
 
-      <section style={{ marginTop: "5rem" }}>
-        <h2 className="text-center font-serif text-2xl font-semibold">
+      <section style={{ marginTop: "3rem" }}>
+        <h2 className="text-center font-serif text-2xl font-bold">
           How self-publishing works
         </h2>
         <ol
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "2.5rem",
-            marginTop: "2rem",
+            gap: "2rem",
+            marginTop: "1.5rem",
           }}
         >
           {PUBLISHING_STEPS.map((step, i) => (
@@ -274,7 +274,7 @@ function AuthorPitch() {
               <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-primary">
                 Step {i + 1}
               </p>
-              <h3 className="mt-1 font-serif text-lg font-semibold">
+              <h3 className="mt-1 font-serif text-lg font-bold">
                 {step.title}
               </h3>
               <p className="mt-1 text-sm text-foreground/90">{step.body}</p>
@@ -282,7 +282,7 @@ function AuthorPitch() {
           ))}
         </ol>
         <div
-          className="mt-6 flex flex-wrap justify-center gap-6"
+          className="mt-4 flex flex-wrap justify-center gap-6"
         >
           <Link
             href="/how-it-works"
@@ -299,22 +299,22 @@ function AuthorPitch() {
         </div>
       </section>
 
-      <section style={{ marginTop: "5rem" }}>
-        <h2 className="text-center font-serif text-2xl font-semibold">
+      <section style={{ marginTop: "3rem" }}>
+        <h2 className="text-center font-serif text-2xl font-bold">
           Everything you need to sell your book
         </h2>
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "2.5rem",
-            marginTop: "2rem",
+            gap: "2rem",
+            marginTop: "1.5rem",
           }}
         >
           {PUBLISHING_TOOLS.map((tool) => (
             <div key={tool.title} className="text-center">
               <IconBadge icon={tool.icon} />
-              <h3 className="mt-4 font-serif text-lg font-semibold">
+              <h3 className="mt-3 font-serif text-lg font-bold">
                 {tool.title}
               </h3>
               <p className="mt-1 text-sm text-foreground/90">{tool.body}</p>

@@ -35,7 +35,7 @@ export async function SiteHeader() {
           Librum
         </Link>
 
-        <nav className="flex flex-wrap items-center gap-4 text-sm">
+        <nav className="flex flex-wrap items-center gap-4 text-sm font-medium">
           <Link href="/about" className="hover:underline">
             About
           </Link>

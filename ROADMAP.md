@@ -199,6 +199,14 @@ screenshots). Decisions made on what to adopt now vs. defer:
       #6a5cf0)
 - [x] Large circular icon badges (matching Lulu's feature-grid sizing)
       on Why Librum, How self-publishing works, and the tools showcase
+- [x] Bolder headings sitewide (hero, section h2/h3, header nav links)
+      to match Lulu's heavier type weight
+- [x] Tightened homepage vertical spacing throughout (hero padding,
+      section gaps, grid gaps) — was noticeably looser than Lulu's
+- [x] Hero subtitle replaced with the user's own Albanian tagline
+      ("Vetëbotimi i një libri elektronik...") — a deliberate exception
+      to the "English for now" language decision, at the user's
+      explicit request for this specific line
 - [ ] Not doing yet, by explicit choice: Albanian translation (English
       first, translate once the feature set settles), physical
       print-on-demand (ebook-only for now), additional ebook export
