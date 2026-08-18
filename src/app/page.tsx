@@ -148,7 +148,7 @@ const PUBLISHING_TOOLS: { title: string; body: string; icon: Icon }[] = [
 // section, in the mold of Lulu's own homepage.
 function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
   return (
-    <section style={{ backgroundColor: "#1e3a66" }}>
+    <section style={{ backgroundColor: "#4f3fe0" }}>
       <div
         className="mx-auto w-full max-w-2xl px-4 text-center sm:px-6"
         style={{ paddingTop: "5rem", paddingBottom: "3rem" }}
@@ -173,19 +173,9 @@ function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
           <Link
             href="/signup?role=author"
             className="rounded-lg px-5 py-2.5 text-sm font-medium"
-            style={{ backgroundColor: "#ffffff", color: "#1e3a66" }}
+            style={{ backgroundColor: "#ffffff", color: "#4f3fe0" }}
           >
             Publish your book
-          </Link>
-          <Link
-            href="/signup"
-            className="rounded-lg px-5 py-2.5 text-sm font-medium"
-            style={{
-              color: "#ffffff",
-              border: "1px solid rgba(255, 255, 255, 0.4)",
-            }}
-          >
-            Create an account
           </Link>
         </div>
       </div>

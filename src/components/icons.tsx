@@ -106,6 +106,24 @@ export function IconCoins({ className, style }: IconProps) {
   );
 }
 
+export function IconPerson({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7" />
+    </svg>
+  );
+}
+
+export function IconBag({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <path d="M6 8h12l1 12H5L6 8z" />
+      <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+    </svg>
+  );
+}
+
 export function IconGlobe({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>

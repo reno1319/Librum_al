@@ -179,6 +179,15 @@ screenshots). Decisions made on what to adopt now vs. defer:
       Programi i Bashkëpunimit items we haven't built yet
 - [x] Footer: added Instagram/Facebook icon links (placeholder `#`
       hrefs — swap in the real profile URLs)
+- [x] Hero simplified to a single "Publish your book" CTA (dropped the
+      second "Create an account" button), and the primary blue
+      brightened to match Lulu's actual brand color (was dark navy)
+- [x] Header restructured Lulu-style: fixed left nav group (Products,
+      Bookstore, Pricing, Program, How it works, now always visible
+      regardless of login state) plus a cart icon and a single account
+      icon on the right (replacing separate Log in / Sign up links) —
+      Librum has no real cart, so /cart is an honest static "empty
+      cart, log in to see your saved cart" page
 - [ ] Not doing yet, by explicit choice: Albanian translation (English
       first, translate once the feature set settles), physical
       print-on-demand (ebook-only for now), additional ebook export

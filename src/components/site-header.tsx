@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/auth/actions";
+import { IconBag, IconPerson } from "@/components/icons";
 
 export async function SiteHeader() {
   const supabase = await createClient();
@@ -23,24 +24,38 @@ export async function SiteHeader() {
 
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface px-4 py-4 sm:px-6">
-      <Link href="/" className="font-serif text-xl font-semibold text-primary">
-        Librum
-      </Link>
+      <div
+        className="flex flex-wrap items-center"
+        style={{ gap: "2rem" }}
+      >
+        <Link
+          href="/"
+          className="font-serif text-xl font-semibold text-primary"
+        >
+          Librum
+        </Link>
+
+        <nav className="flex flex-wrap items-center gap-4 text-sm">
+          <Link href="/products" className="hover:underline">
+            Products
+          </Link>
+          <Link href="/bookstore" className="hover:underline">
+            Bookstore
+          </Link>
+          <Link href="/pricing" className="hover:underline">
+            Pricing
+          </Link>
+          <Link href="/program" className="hover:underline">
+            Program
+          </Link>
+          <Link href="/how-it-works" className="hover:underline">
+            How it works
+          </Link>
+        </nav>
+      </div>
 
       <nav className="flex flex-wrap items-center gap-4 text-sm">
-        <Link href="/products" className="hover:underline">
-          Products
-        </Link>
-        <Link href="/bookstore" className="hover:underline">
-          Bookstore
-        </Link>
-        <Link href="/pricing" className="hover:underline">
-          Pricing
-        </Link>
-        <Link href="/program" className="hover:underline">
-          Program
-        </Link>
-        {user ? (
+        {user && (
           <>
             {role === "author" && (
               <>
@@ -61,31 +76,27 @@ export async function SiteHeader() {
             <Link href="/following" className="hover:underline">
               Following
             </Link>
-            <Link href="/account" className="hover:underline">
-              Account
-            </Link>
             <span className="hidden text-muted sm:inline">{displayName}</span>
-            <form action={logout}>
-              <button type="submit" className="hover:underline">
-                Log out
-              </button>
-            </form>
           </>
-        ) : (
-          <>
-            <Link href="/how-it-works" className="hover:underline">
-              How it works
-            </Link>
-            <Link href="/login" className="hover:underline">
-              Log in
-            </Link>
-            <Link
-              href="/signup"
-              className="rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground hover:bg-primary-hover"
-            >
-              Sign up
-            </Link>
-          </>
+        )}
+
+        <Link href="/cart" aria-label="Cart" className="text-foreground">
+          <IconBag style={{ width: "1.25rem", height: "1.25rem" }} />
+        </Link>
+        <Link
+          href={user ? "/account" : "/login"}
+          aria-label={user ? "Account" : "Log in or sign up"}
+          className="text-foreground"
+        >
+          <IconPerson style={{ width: "1.25rem", height: "1.25rem" }} />
+        </Link>
+
+        {user && (
+          <form action={logout}>
+            <button type="submit" className="hover:underline">
+              Log out
+            </button>
+          </form>
         )}
       </nav>
     </header>

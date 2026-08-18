@@ -10,15 +10,20 @@ file storage), and Stripe (checkout + author payouts).
 
 ## What's built so far
 
-- Sign up as an **author** or a **reader**; log in / log out
+- Sign up as an **author** or a **reader**; log in / log out. The
+  header's account icon (top right) doubles as log in when logged out
+  and Account when logged in, next to a cart icon — Librum has no
+  cart system (checkout is per-book), so the cart page is an honest
+  static "your cart is empty, log in to see your saved cart" page
 - Authors upload a book through a 4-step wizard (manuscript & cover,
   details, price, review) as a draft, then publish it from their
   dashboard. An optional ISBN field is available for authors who already
   own one — Librum doesn't issue or register ISBNs
 - The homepage (`/`) is exclusively the author pitch, for everyone —
-  logged out, reader, or author: a full-bleed dark-blue hero ("Write.
-  Publish. Profit.") with a horizontally-scrolling strip of real
-  published covers, then how self-publishing works in four steps, a
+  logged out, reader, or author: a full-bleed bright indigo-blue hero
+  ("Write. Publish. Profit.", a single "Publish your book" CTA) with a
+  horizontally-scrolling strip of real published covers, then how
+  self-publishing works in four steps, a
   "Why Librum?" benefit strip, a trust strip, and a "Start publishing"
   call to action, ending with an "Everything you need to sell your
   book" showcase of the dashboard tools. The reader storefront lives
