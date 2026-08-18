@@ -11,10 +11,11 @@ file storage), and Stripe (checkout + author payouts).
 ## What's built so far
 
 - Sign up as an **author** or a **reader**; log in / log out. The
-  header's account icon (top right) doubles as log in when logged out
-  and Account when logged in, next to a cart icon — Librum has no
-  cart system (checkout is per-book), so the cart page is an honest
-  static "your cart is empty, log in to see your saved cart" page
+  header nav is deliberately minimal — Home, Bookstore, About,
+  Pricing — plus an account icon (top right) that doubles as log in
+  when logged out and Account when logged in. Logged in, **Library**
+  in the header shows an author's own dashboard (books, sales) or a
+  reader's purchase history, depending on which the account is
 - Authors upload a book through a 4-step wizard (manuscript & cover,
   details, price, review) as a draft, then publish it from their
   dashboard. An optional ISBN field is available for authors who already
@@ -34,10 +35,6 @@ file storage), and Stripe (checkout + author payouts).
   it to a flat results grid. Each published book also has a detail
   page, which itself ends with "More by this author" and "You might
   also like" (same genre) shelves
-- **Products** and **Program** are placeholder pages linked from the
-  header nav for parts of the Librum.al roadmap not built yet (a
-  Print/product overview, and a reader/bookstore/school partnership
-  program) — no dead-end links, just an honest "coming soon"
 - Drafts show a non-blocking checklist of what's worth adding before
   publishing (description, keywords, a preview excerpt, a price above
   $0) — on the dashboard book list and on the edit page. It's a nudge,
@@ -63,9 +60,10 @@ file storage), and Stripe (checkout + author payouts).
 - Readers can **follow an author** from their profile page and get an
   email the next time that author publishes a new book — only on a
   genuine first publish, not on every unpublish/republish toggle.
-  **Following** in the nav lists everyone you follow, with an unfollow
-  button. Follower identities are never exposed publicly — only a
-  follower count shows on the author's page
+  **/following** lists everyone you follow, with an unfollow button —
+  not currently linked from the header nav (kept minimal for now),
+  still reachable directly. Follower identities are never exposed
+  publicly — only a follower count shows on the author's page
 - **Dashboard > Sales** also shows book page views — a basic count (not
   deduplicated unique visitors, and never counting the author's own
   visits), both as a total and per book, alongside units sold and
@@ -131,8 +129,9 @@ file storage), and Stripe (checkout + author payouts).
   from **Account** in the nav — this removes their storage files first
   (avatar, and covers/manuscripts for an author's books), then the
   account itself, which cascades through the database
-- Readers can save a book to their **Wishlist** instead of buying it
-  right away, from the book page or from **Wishlist** in the nav
+- Readers can save a book to their **/wishlist** instead of buying it
+  right away, from the book page — not currently linked from the
+  header nav (kept minimal for now), still reachable directly
 - Logged-in readers can report a book from a small link on its page.
   Reports are stored in `book_reports` — there's no in-app moderation
   UI yet, so review them directly in Supabase's Table Editor

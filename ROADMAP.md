@@ -207,6 +207,15 @@ screenshots). Decisions made on what to adopt now vs. defer:
       ("Vetëbotimi i një libri elektronik...") — a deliberate exception
       to the "English for now" language decision, at the user's
       explicit request for this specific line
+- [x] Header nav decluttered to best-practice minimal structure, per
+      direct feedback that the Lulu-mimicking sprawl (Products,
+      Program, Create, How it works, cart icon) wasn't reading as
+      professional: now just Home, Bookstore, About, Pricing, plus
+      **Library** (routes authors to their dashboard, readers to their
+      purchase history) and the account icon. Wishlist/Following and
+      the Products/Program placeholder pages are unlinked from the nav
+      (pages still exist, just not "needed for now"); the decorative
+      cart page is deleted outright since Librum has no real cart
 - [ ] Not doing yet, by explicit choice: Albanian translation (English
       first, translate once the feature set settles), physical
       print-on-demand (ebook-only for now), additional ebook export
