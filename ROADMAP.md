@@ -78,9 +78,11 @@ dashboard. Established in Foundation, then reused everywhere else.
 
 ## Going Live
 
-- [ ] Deploy to Vercel
+- [x] Deploy to Vercel — live at https://librumal.vercel.app (Stripe
+      still in test mode, so purchases use fake test cards, no real
+      money moves)
 - [ ] Custom domain
-- [ ] Switch the Stripe webhook from the local CLI listener to a real
+- [x] Switch the Stripe webhook from the local CLI listener to a real
       deployed endpoint
 
 ## Phase 2: Platform Depth
