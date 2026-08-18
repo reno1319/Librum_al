@@ -11,8 +11,10 @@ file storage), and Stripe (checkout + author payouts).
 ## What's built so far
 
 - Sign up as an **author** or a **reader**; log in / log out
-- Authors upload a book (title, description, price, cover, EPUB file) as
-  a draft, then publish it from their dashboard
+- Authors upload a book through a 4-step wizard (manuscript & cover,
+  details, price, review) as a draft, then publish it from their
+  dashboard. An optional ISBN field is available for authors who already
+  own one — Librum doesn't issue or register ISBNs
 - The homepage has two tracks: an author-facing pitch at the top (how
   self-publishing works, in four steps, plus a trust strip and a "Start
   publishing" call to action) for logged-out visitors and readers, then
@@ -78,8 +80,9 @@ file storage), and Stripe (checkout + author payouts).
   automatically — the author's cut goes straight to their bank account,
   Librum keeps a platform fee (20% by default, see `src/lib/pricing.ts`)
 - Authors pick a genre when uploading a book; the storefront homepage has
-  a search box (matches title/description/keywords) and a genre filter,
-  combinable
+  a search box (matches title/description/keywords), a genre filter, a
+  sort dropdown (newest, bestselling, price), and a min/max price filter —
+  all combinable
 - Authors can add optional comma-separated keywords when uploading or
   editing a book — searchable like title/description, and shown as tags
   on the book page, for terms readers might search that a single genre

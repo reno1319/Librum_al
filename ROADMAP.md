@@ -155,6 +155,15 @@ screenshots). Decisions made on what to adopt now vs. defer:
       existing Pricing/Dashboard/Library/Wishlist/Following/Account
 - [x] "Boto me L&K" footer link to the author's separate imprint
       (lamajkalemi.al)
+- [x] Optional ISBN field on books (metadata only — Librum doesn't issue
+      or register ISBNs)
+- [x] Browse/search: sort (newest, bestselling, price) and a min/max
+      price filter, alongside the existing search + genre filter
+- [x] "Why Librum?" 3-benefit strip on the homepage (speed, earnings
+      control, reach) — honest copy, no distribution claims we don't
+      actually offer
+- [x] Add-book form converted into a 4-step wizard (manuscript & cover,
+      details, price, review), matching the doc's guided "Krijo" flow
 - [ ] Not doing yet, by explicit choice: Albanian translation (English
       first, translate once the feature set settles), physical
       print-on-demand (ebook-only for now), additional ebook export
