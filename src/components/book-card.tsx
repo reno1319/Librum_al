@@ -43,7 +43,7 @@ export function BookCard({
         </Link>
       )}
       <span className="text-sm font-semibold text-primary">
-        ${(book.price_cents / 100).toFixed(2)}
+        {book.price_cents === 0 ? "Free" : `$${(book.price_cents / 100).toFixed(2)}`}
       </span>
     </div>
   );

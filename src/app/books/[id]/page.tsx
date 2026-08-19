@@ -2,7 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buyBook, submitReview, addToWishlist, removeFromWishlist } from "./actions";
+import {
+  buyBook,
+  getFreeBook,
+  submitReview,
+  addToWishlist,
+  removeFromWishlist,
+} from "./actions";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
@@ -21,14 +27,20 @@ export default async function BookDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{
     purchase?: string;
+    free?: string;
     review?: string;
     report?: string;
     error?: string;
   }>;
 }) {
   const { id } = await params;
-  const { purchase, review: reviewStatus, report: reportStatus, error } =
-    await searchParams;
+  const {
+    purchase,
+    free: freeStatus,
+    review: reviewStatus,
+    report: reportStatus,
+    error,
+  } = await searchParams;
 
   const supabase = await createClient();
   const {
@@ -266,6 +278,21 @@ export default async function BookDetailPage({
               )}
             </p>
           )}
+          {freeStatus === "success" && (
+            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+              {owned ? (
+                <>
+                  Added to your library!{" "}
+                  <Link href="/library" className="font-medium underline">
+                    Go to your library
+                  </Link>{" "}
+                  to download it anytime.
+                </>
+              ) : (
+                "Added to your library! It may take a few seconds to show as owned below."
+              )}
+            </p>
+          )}
           {reviewStatus === "success" && (
             <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
               Thanks for your review!
@@ -284,7 +311,9 @@ export default async function BookDetailPage({
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <span className="text-xl font-semibold text-primary">
-              ${(book.price_cents / 100).toFixed(2)}
+              {book.price_cents === 0
+                ? "Free"
+                : `$${(book.price_cents / 100).toFixed(2)}`}
             </span>
 
             {isAuthor ? (
@@ -311,23 +340,34 @@ export default async function BookDetailPage({
               </>
             ) : user ? (
               <>
-                <form
-                  action={buyBook.bind(null, book.id)}
-                  className="flex items-center gap-2"
-                >
-                  <input
-                    name="code"
-                    type="text"
-                    placeholder="Promo code (optional)"
-                    className="w-40 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-                  />
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+                {book.price_cents === 0 ? (
+                  <form action={getFreeBook.bind(null, book.id)}>
+                    <button
+                      type="submit"
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+                    >
+                      Get this book
+                    </button>
+                  </form>
+                ) : (
+                  <form
+                    action={buyBook.bind(null, book.id)}
+                    className="flex items-center gap-2"
                   >
-                    Buy now
-                  </button>
-                </form>
+                    <input
+                      name="code"
+                      type="text"
+                      placeholder="Promo code (optional)"
+                      className="w-40 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+                    >
+                      Buy now
+                    </button>
+                  </form>
+                )}
                 <form
                   action={(wishlisted ? removeFromWishlist : addToWishlist).bind(
                     null,
@@ -347,7 +387,7 @@ export default async function BookDetailPage({
                 href={`/login?next=/books/${book.id}`}
                 className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
               >
-                Log in to buy
+                {book.price_cents === 0 ? "Log in to get this book" : "Log in to buy"}
               </Link>
             )}
           </div>

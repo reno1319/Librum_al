@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -122,6 +123,81 @@ export async function buyBook(bookId: string, formData: FormData) {
   }
 
   redirect(session.url);
+}
+
+type BookForFreeAcquisition = {
+  id: string;
+  price_cents: number;
+  status: string;
+  author_id: string;
+};
+
+export async function getFreeBook(bookId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?next=/books/${bookId}`);
+  }
+
+  const { data: book } = await supabase
+    .from("books")
+    .select("id, price_cents, status, author_id")
+    .eq("id", bookId)
+    .single<BookForFreeAcquisition>();
+
+  if (
+    !book ||
+    book.status !== "published" ||
+    book.price_cents !== 0 ||
+    book.author_id === user.id
+  ) {
+    redirect(`/books/${bookId}`);
+  }
+
+  const { data: existing } = await supabase
+    .from("purchases")
+    .select("id")
+    .eq("book_id", bookId)
+    .eq("reader_id", user.id)
+    .is("refunded_at", null)
+    .maybeSingle();
+
+  if (existing) {
+    // Already owned (e.g. a real paid purchase from before the book went
+    // free) -- idempotent no-op rather than overwriting that record.
+    redirect(`/books/${bookId}?free=success`);
+  }
+
+  // Free acquisitions never touch Stripe, so there's no real checkout
+  // session id to store. purchases.stripe_checkout_session_id is
+  // not-null, and this column is never read back anywhere (only written,
+  // in this file and the Stripe webhook) -- so a clearly-non-Stripe
+  // placeholder satisfies the constraint without a schema change or any
+  // risk of being mistaken for a real payment.
+  const admin = createAdminClient();
+  const { error } = await admin.from("purchases").upsert(
+    {
+      book_id: bookId,
+      reader_id: user.id,
+      amount_cents: 0,
+      stripe_checkout_session_id: `free_${randomUUID()}`,
+      stripe_payment_intent_id: null,
+      refunded_at: null,
+    },
+    { onConflict: "book_id,reader_id" },
+  );
+
+  if (error) {
+    redirect(`/books/${bookId}?error=Could+not+add+this+book+right+now`);
+  }
+
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath("/library");
+
+  redirect(`/books/${bookId}?free=success`);
 }
 
 export async function submitReview(bookId: string, formData: FormData) {

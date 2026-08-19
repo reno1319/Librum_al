@@ -14,6 +14,16 @@ type Icon = ComponentType<{ className?: string; style?: CSSProperties }>;
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
+// Hard cap while the catalog is small -- see the Phase 6 bookstore audit.
+// A real pagination UI is separate, later work; this just prevents an
+// unbounded grid once the catalog grows.
+const SEARCH_RESULT_LIMIT = 48;
+
+// The Bestsellers shelf only appears once there's genuine platform-wide
+// sales activity behind it -- below this, "bestselling" isn't a
+// meaningful claim yet.
+const BESTSELLER_MIN_PURCHASES = 10;
+
 async function fetchSearchResults(
   supabase: SupabaseClient,
   {
@@ -29,7 +39,7 @@ async function fetchSearchResults(
     minPriceCents?: number;
     maxPriceCents?: number;
   },
-) {
+): Promise<{ books: BookWithAuthor[]; error: boolean }> {
   const baseQuery = () => {
     let query = supabase
       .from("books")
@@ -43,30 +53,73 @@ async function fetchSearchResults(
 
   const term = q?.trim();
   let results: BookWithAuthor[];
+  let hadError = false;
+
   if (!term) {
-    const { data } = await baseQuery()
+    const { data, error } = await baseQuery()
       .order("created_at", { ascending: false })
       .returns<BookWithAuthor[]>();
+    if (error) {
+      console.error("Bookstore: failed to load books:", error);
+      hadError = true;
+    }
     results = data ?? [];
   } else {
-    // Separate ilike() queries (title, description, keywords) merged in JS,
-    // rather than one .or() filter string — .or() requires manually
-    // escaping commas and parentheses in the search term to stay valid,
-    // which is easy to get wrong. This is simpler and just as correct at
-    // our scale.
+    // Separate ilike() queries (title, description, keywords, author
+    // name) merged in JS, rather than one .or() filter string — .or()
+    // requires manually escaping commas and parentheses in the search
+    // term to stay valid, which is easy to get wrong. This is simpler
+    // and just as correct at our scale.
     const pattern = `%${term}%`;
-    const [{ data: byTitle }, { data: byDescription }, { data: byKeywords }] =
-      await Promise.all([
-        baseQuery().ilike("title", pattern).returns<BookWithAuthor[]>(),
-        baseQuery().ilike("description", pattern).returns<BookWithAuthor[]>(),
-        baseQuery().ilike("keywords", pattern).returns<BookWithAuthor[]>(),
-      ]);
+
+    // Author-name matches: look up matching author profiles first, then
+    // pull their books through the same baseQuery() filters (genre/
+    // price), merged the same way as the title/description/keyword
+    // matches below.
+    const { data: matchingAuthors, error: authorLookupError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("role", "author")
+      .ilike("display_name", pattern);
+    const authorIds = (matchingAuthors ?? []).map((a) => a.id);
+
+    const [
+      { data: byTitle, error: titleError },
+      { data: byDescription, error: descriptionError },
+      { data: byKeywords, error: keywordsError },
+      { data: byAuthor, error: authorError },
+    ] = await Promise.all([
+      baseQuery().ilike("title", pattern).returns<BookWithAuthor[]>(),
+      baseQuery().ilike("description", pattern).returns<BookWithAuthor[]>(),
+      baseQuery().ilike("keywords", pattern).returns<BookWithAuthor[]>(),
+      authorIds.length > 0
+        ? baseQuery().in("author_id", authorIds).returns<BookWithAuthor[]>()
+        : Promise.resolve({ data: [] as BookWithAuthor[], error: null }),
+    ]);
+
+    if (
+      authorLookupError ||
+      titleError ||
+      descriptionError ||
+      keywordsError ||
+      authorError
+    ) {
+      console.error("Bookstore search: one or more queries failed", {
+        authorLookupError,
+        titleError,
+        descriptionError,
+        keywordsError,
+        authorError,
+      });
+      hadError = true;
+    }
 
     const merged = new Map<string, BookWithAuthor>();
     for (const book of [
       ...(byTitle ?? []),
       ...(byDescription ?? []),
       ...(byKeywords ?? []),
+      ...(byAuthor ?? []),
     ]) {
       merged.set(book.id, book);
     }
@@ -80,31 +133,87 @@ async function fetchSearchResults(
     results = [...results].sort((a, b) => a.price_cents - b.price_cents);
   } else if (sort === "price_desc") {
     results = [...results].sort((a, b) => b.price_cents - a.price_cents);
-  } else if (sort === "bestselling") {
-    // Purchase counts span every reader, not just the current visitor, so
-    // this needs the admin client — see fetchCuratedHome for the same
-    // pattern. Only book_id counts are read here, never who bought what.
+  } else if (sort === "bestselling" && results.length > 0) {
+    // Real non-refunded purchase counts for exactly the books already in
+    // this result set, aggregated server-side (see bestselling_books in
+    // supabase/schema.sql) rather than fetching every purchases row.
     const admin = createAdminClient();
-    const { data: purchases } = await admin
-      .from("purchases")
-      .select("book_id")
-      .is("refunded_at", null);
-
-    const counts = new Map<string, number>();
-    for (const p of purchases ?? []) {
-      counts.set(p.book_id, (counts.get(p.book_id) ?? 0) + 1);
-    }
-
-    results = [...results].sort(
-      (a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0),
+    const { data: counts, error: countsError } = await admin.rpc(
+      "bestselling_books",
+      { book_ids: results.map((b) => b.id) },
     );
+
+    if (countsError) {
+      // Sort is a nice-to-have on top of an already-correct result set
+      // (e.g. the migration adding this function may not be applied
+      // yet) -- fail soft by leaving the existing order rather than
+      // erroring the whole search.
+      console.error("Bookstore search: bestselling sort unavailable:", countsError);
+    } else {
+      const countByBook = new Map(
+        (counts as { book_id: string; purchase_count: number }[] ?? []).map(
+          (row) => [row.book_id, row.purchase_count],
+        ),
+      );
+      results = [...results].sort(
+        (a, b) => Number(countByBook.get(b.id) ?? 0) - Number(countByBook.get(a.id) ?? 0),
+      );
+    }
   }
 
-  return results;
+  return { books: results.slice(0, SEARCH_RESULT_LIMIT), error: hadError };
+}
+
+async function fetchBestsellers(
+  supabase: SupabaseClient,
+): Promise<BookWithAuthor[]> {
+  const admin = createAdminClient();
+
+  const { count, error: countError } = await admin
+    .from("purchases")
+    .select("id", { count: "exact", head: true })
+    .is("refunded_at", null);
+
+  if (countError) {
+    console.error("Bookstore: failed to check purchase count:", countError);
+    return [];
+  }
+  if ((count ?? 0) < BESTSELLER_MIN_PURCHASES) {
+    return [];
+  }
+
+  const { data: ranked, error: rpcError } = await admin.rpc("bestselling_books", {
+    result_limit: 8,
+  });
+
+  if (rpcError || !ranked || ranked.length === 0) {
+    // Fails closed by simply not showing the shelf -- e.g. if the
+    // migration adding this function hasn't been applied yet -- rather
+    // than erroring the whole bookstore page over a supplementary shelf.
+    if (rpcError) {
+      console.error("Bookstore: bestseller ranking unavailable:", rpcError);
+    }
+    return [];
+  }
+
+  const topBookIds = (ranked as { book_id: string; purchase_count: number }[]).map(
+    (r) => r.book_id,
+  );
+  const { data: bestsellerBooks } = await supabase
+    .from("books")
+    .select("*, profiles(display_name)")
+    .eq("status", "published")
+    .in("id", topBookIds)
+    .returns<BookWithAuthor[]>();
+
+  const byId = new Map((bestsellerBooks ?? []).map((b) => [b.id, b]));
+  return topBookIds
+    .map((id: string) => byId.get(id))
+    .filter((b): b is BookWithAuthor => !!b);
 }
 
 async function fetchCuratedHome(supabase: SupabaseClient) {
-  const { data: latest } = await supabase
+  const { data: latest, error } = await supabase
     .from("books")
     .select("*, profiles(display_name)")
     .eq("status", "published")
@@ -112,46 +221,17 @@ async function fetchCuratedHome(supabase: SupabaseClient) {
     .limit(9)
     .returns<BookWithAuthor[]>();
 
+  if (error) {
+    console.error("Bookstore: failed to load curated books:", error);
+    return { hero: null, newReleases: [], bestsellers: [], loadError: true };
+  }
+
   const releases = latest ?? [];
   const hero = releases[0] ?? null;
   const newReleases = releases.slice(1);
+  const bestsellers = await fetchBestsellers(supabase);
 
-  // Purchase counts span every reader, not just the current visitor, so
-  // this needs the admin client — regular RLS only lets a user see their
-  // own purchases (or an author see purchases of their own books). Only
-  // book_id counts are read here, never who bought what.
-  const admin = createAdminClient();
-  const { data: purchases } = await admin
-    .from("purchases")
-    .select("book_id")
-    .is("refunded_at", null);
-
-  const counts = new Map<string, number>();
-  for (const p of purchases ?? []) {
-    counts.set(p.book_id, (counts.get(p.book_id) ?? 0) + 1);
-  }
-
-  const topBookIds = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([id]) => id);
-
-  let bestsellers: BookWithAuthor[] = [];
-  if (topBookIds.length > 0) {
-    const { data: bestsellerBooks } = await supabase
-      .from("books")
-      .select("*, profiles(display_name)")
-      .eq("status", "published")
-      .in("id", topBookIds)
-      .returns<BookWithAuthor[]>();
-
-    const byId = new Map((bestsellerBooks ?? []).map((b) => [b.id, b]));
-    bestsellers = topBookIds
-      .map((id) => byId.get(id))
-      .filter((b): b is BookWithAuthor => !!b);
-  }
-
-  return { hero, newReleases, bestsellers };
+  return { hero, newReleases, bestsellers, loadError: false };
 }
 
 async function fetchStorefrontStats(supabase: SupabaseClient) {
@@ -219,14 +299,23 @@ export default async function BookstorePage({
           method="get"
           className="mt-6 flex flex-wrap gap-3"
         >
+          <label htmlFor="bookstore-q" className="sr-only">
+            Search books
+          </label>
           <input
+            id="bookstore-q"
             type="search"
             name="q"
             defaultValue={q ?? ""}
-            placeholder="Search titles or descriptions..."
+            placeholder="Search titles, authors, or descriptions..."
             className="min-w-48 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
           />
+
+          <label htmlFor="bookstore-genre" className="sr-only">
+            Genre
+          </label>
           <select
+            id="bookstore-genre"
             name="genre"
             defaultValue={genre ?? ""}
             className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
@@ -238,7 +327,12 @@ export default async function BookstorePage({
               </option>
             ))}
           </select>
+
+          <label htmlFor="bookstore-sort" className="sr-only">
+            Sort by
+          </label>
           <select
+            id="bookstore-sort"
             name="sort"
             defaultValue={sort ?? ""}
             className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
@@ -248,7 +342,12 @@ export default async function BookstorePage({
             <option value="price_asc">Price: low to high</option>
             <option value="price_desc">Price: high to low</option>
           </select>
+
+          <label htmlFor="bookstore-min-price" className="sr-only">
+            Minimum price
+          </label>
           <input
+            id="bookstore-min-price"
             type="number"
             name="minPrice"
             defaultValue={minPrice ?? ""}
@@ -257,7 +356,12 @@ export default async function BookstorePage({
             step="0.01"
             className="w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
           />
+
+          <label htmlFor="bookstore-max-price" className="sr-only">
+            Maximum price
+          </label>
           <input
+            id="bookstore-max-price"
             type="number"
             name="maxPrice"
             defaultValue={maxPrice ?? ""}
@@ -266,6 +370,7 @@ export default async function BookstorePage({
             step="0.01"
             className="w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
           />
+
           <button
             type="submit"
             className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
@@ -314,13 +419,21 @@ async function SearchResults({
   minPriceCents?: number;
   maxPriceCents?: number;
 }) {
-  const books = await fetchSearchResults(supabase, {
+  const { books, error } = await fetchSearchResults(supabase, {
     q,
     genre,
     sort,
     minPriceCents,
     maxPriceCents,
   });
+
+  if (error) {
+    return (
+      <p className="mt-12 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
+        We couldn&apos;t load the bookstore right now. Please try again.
+      </p>
+    );
+  }
 
   if (books.length === 0) {
     return (
@@ -382,10 +495,18 @@ const VALUE_PROPS: { title: string; body: string; icon: Icon }[] = [
 ];
 
 async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
-  const [{ hero, newReleases, bestsellers }, stats] = await Promise.all([
+  const [{ hero, newReleases, bestsellers, loadError }, stats] = await Promise.all([
     fetchCuratedHome(supabase),
     fetchStorefrontStats(supabase),
   ]);
+
+  if (loadError) {
+    return (
+      <p className="mt-12 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
+        We couldn&apos;t load the bookstore right now. Please try again.
+      </p>
+    );
+  }
 
   if (!hero) {
     return (
@@ -484,7 +605,9 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
           <p className="mt-4 text-foreground/90">{heroDescription}</p>
           <div className="mt-6 flex items-center gap-3">
             <span className="text-lg font-semibold text-primary">
-              ${(hero.price_cents / 100).toFixed(2)}
+              {hero.price_cents === 0
+                ? "Free"
+                : `$${(hero.price_cents / 100).toFixed(2)}`}
             </span>
             <Link
               href={`/books/${hero.id}`}

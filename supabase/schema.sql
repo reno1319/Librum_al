@@ -456,6 +456,35 @@ create policy "Authors can view purchases of their own books"
     )
   );
 
+-- Ranks bestselling books by real, non-refunded purchase count without
+-- pulling every purchases row into the app to count in memory. security
+-- definer is required since RLS above restricts purchases to the
+-- reader/author involved in each row -- not a new privilege, since the
+-- app's own admin/service-role client already bypasses RLS for this
+-- exact aggregate elsewhere. Only ever returns (book_id, purchase_count)
+-- -- never reader_id or amount_cents -- so it can't expose who bought
+-- what.
+create or replace function public.bestselling_books(
+  book_ids uuid[] default null,
+  result_limit int default null
+)
+returns table (book_id uuid, purchase_count bigint)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select purchases.book_id, count(*) as purchase_count
+  from public.purchases
+  where purchases.refunded_at is null
+    and (book_ids is null or purchases.book_id = any(book_ids))
+  group by purchases.book_id
+  order by purchase_count desc
+  limit result_limit;
+$$;
+
+grant execute on function public.bestselling_books(uuid[], int) to anon, authenticated;
+
 create index purchases_reader_id_idx on public.purchases(reader_id);
 create index purchases_book_id_idx on public.purchases(book_id);
 create index purchases_payment_intent_idx on public.purchases(stripe_payment_intent_id);
