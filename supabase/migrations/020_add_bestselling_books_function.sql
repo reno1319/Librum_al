@@ -43,7 +43,7 @@ create or replace function public.bestselling_books(
 returns table (book_id uuid, purchase_count bigint)
 language sql
 security definer
-set search_path = public
+set search_path = ''
 stable
 as $$
   select purchases.book_id, count(*) as purchase_count
