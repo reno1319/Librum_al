@@ -114,10 +114,9 @@ function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
           className="mx-auto mt-3 max-w-lg text-lg"
           style={{ color: "rgba(255, 255, 255, 0.8)" }}
         >
-          Librum is the digital publishing platform and bookstore for
-          Albanian-language ebooks — giving authors a simple way to publish
-          and sell their work, and readers a place to discover their next
-          book.
+          Publish and sell your books. Discover new voices. Librum brings
+          Albanian-language authors and readers together in one digital
+          bookstore.
         </p>
         <div
           className="mt-6 flex flex-wrap justify-center"
@@ -192,19 +191,26 @@ function BookDiscoverySection({
 
   return (
     <section style={{ marginTop: "3.5rem" }}>
-      <p className="text-sm text-muted">
+      <h2 className="font-serif text-2xl font-bold">
+        Explore the latest releases
+      </h2>
+      <p className="mt-1 text-sm text-muted">
         Freshly published books from independent authors.
       </p>
-      <div style={{ marginTop: "0.5rem" }}>
-        <BookShelf
-          title="Explore the latest releases"
-          books={books}
-          supabase={supabase}
-        />
+      {/* BookShelf renders its own heading + top margin, meant for
+          standalone use on /bookstore — here the heading above already
+          covers that job, so title is left empty and the .homepage-shelf
+          scope (see globals.css) hides the now-empty <h2> and neutralizes
+          the duplicate top margin, plus slims the scrollbar and adds
+          right-edge padding so the last cover isn't clipped. All of this
+          is scoped to this wrapper class only — /bookstore's BookShelf is
+          untouched. */}
+      <div className="homepage-shelf" style={{ marginTop: "0.75rem" }}>
+        <BookShelf title="" books={books} supabase={supabase} />
       </div>
       <Link
         href="/bookstore"
-        className="mt-4 inline-block text-sm font-medium text-primary hover:underline"
+        className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
       >
         Explore all books &rarr;
       </Link>
@@ -231,7 +237,7 @@ function AuthorValueSection() {
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
         gap: "3rem",
-        marginTop: "5rem",
+        marginTop: "3.5rem",
         alignItems: "center",
       }}
     >
@@ -240,9 +246,9 @@ function AuthorValueSection() {
           Publish on your terms.
         </h2>
         <p className="mt-3 text-foreground/90">
-          Librum gives independent authors a direct line to readers — no
-          publisher, no gatekeepers, no long waits. You control every part
-          of the process, and keep the vast majority of what you earn.
+          Librum gives independent authors a direct path to readers.
+          Publish on your terms, control your book and pricing, and keep{" "}
+          {100 - PLATFORM_FEE_PERCENT}% of every sale.
         </p>
         <Link
           href="/pricing"
@@ -296,7 +302,7 @@ const PUBLISHING_STEPS: { title: string; body: string; icon: Icon }[] = [
 
 function HowItWorksSection() {
   return (
-    <section style={{ marginTop: "5rem" }}>
+    <section style={{ marginTop: "3.5rem" }}>
       <h2 className="text-center font-serif text-2xl font-bold">
         How self-publishing works
       </h2>
@@ -365,37 +371,50 @@ function IconBadge({ icon: Icon }: { icon: Icon }) {
 // Section 5 — Reader Experience
 // ============================================================
 
-// A small staggered collage of real cover art, reusing the same covers
-// already fetched for the hero strip — no separate query.
+// An intentional, overlapping composition of real cover art — subtle
+// overlap, varied vertical position, and modest scale differences
+// rather than a floating grid — reusing the same covers already
+// fetched for the hero strip, no separate query.
+const COLLAGE_LAYOUT = [
+  { top: "2.5rem", left: "0rem", width: "7.5rem", rotate: -3, z: 1 },
+  { top: "0rem", left: "5.25rem", width: "9.5rem", rotate: 0, z: 3 },
+  { top: "3rem", left: "11.5rem", width: "7rem", rotate: 3, z: 2 },
+];
+
 function CoverCollage({ covers }: { covers: { id: string; url: string }[] }) {
-  const shown = covers.slice(0, 4);
+  const shown = covers.slice(0, COLLAGE_LAYOUT.length);
   if (shown.length === 0) return null;
 
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(2, 1fr)",
-        gap: "1.25rem",
-        maxWidth: "20rem",
+        position: "relative",
+        width: "100%",
+        maxWidth: "19rem",
+        height: "17.5rem",
         margin: "0 auto",
       }}
     >
-      {shown.map((cover, i) => (
-        <div
-          key={cover.id}
-          style={{
-            transform: `rotate(${i % 2 === 0 ? -3 : 3}deg) translateY(${i % 3 === 1 ? "-0.75rem" : "0"})`,
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
+      {shown.map((cover, i) => {
+        const layout = COLLAGE_LAYOUT[i];
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
+            key={cover.id}
             src={cover.url}
             alt=""
-            className="aspect-[2/3] w-full rounded-lg object-cover shadow-md"
+            className="aspect-[2/3] rounded-lg object-cover shadow-lg"
+            style={{
+              position: "absolute",
+              top: layout.top,
+              left: layout.left,
+              width: layout.width,
+              zIndex: layout.z,
+              transform: `rotate(${layout.rotate}deg)`,
+            }}
           />
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -410,8 +429,8 @@ function ReaderExperienceSection({
       style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-        gap: "3rem",
-        marginTop: "5rem",
+        gap: "2.5rem",
+        marginTop: "3.5rem",
         alignItems: "center",
       }}
     >
@@ -445,7 +464,7 @@ function ReaderExperienceSection({
 
 function EarningsSection() {
   return (
-    <section style={{ backgroundColor: "#fdf0e3", marginTop: "5rem" }}>
+    <section style={{ backgroundColor: "#fdf0e3", marginTop: "3.5rem" }}>
       <div
         className="mx-auto w-full max-w-2xl px-4 text-center sm:px-6"
         style={{ paddingTop: "4rem", paddingBottom: "4rem" }}
@@ -454,9 +473,8 @@ function EarningsSection() {
           You keep {100 - PLATFORM_FEE_PERCENT}% of every sale.
         </h2>
         <p className="mx-auto mt-4 max-w-md text-foreground/90">
-          Librum&apos;s platform fee is a flat {PLATFORM_FEE_PERCENT}% — no
-          hidden charges, no tiered pricing. You set your price, and the
-          rest is yours.
+          You set the price. You keep {100 - PLATFORM_FEE_PERCENT}% of
+          every sale. Librum&apos;s platform share is {PLATFORM_FEE_PERCENT}%.
         </p>
         <Link
           href="/pricing"

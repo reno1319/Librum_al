@@ -33,3 +33,36 @@ body {
   color: var(--color-foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Homepage-only BookShelf styling (src/app/page.tsx's Book Discovery
+   section). Scoped entirely under .homepage-shelf so /bookstore's own
+   BookShelf usage is completely unaffected — nothing here is a change
+   to the BookShelf component itself.
+   - Hides BookShelf's own <h2> (left empty on the homepage in favor of
+     a page-level heading above it) and its built-in top margin, which
+     would otherwise stack with the homepage section's own spacing.
+   - Slims/hides the native horizontal scrollbar (still fully
+     scrollable by mouse, trackpad, and touch — this only restyles the
+     scrollbar affordance, not the scroll behavior).
+   - Adds right-edge padding so the last cover has breathing room
+     instead of looking clipped at the container edge. */
+.homepage-shelf > section {
+  margin-top: 0 !important;
+}
+.homepage-shelf h2 {
+  display: none;
+}
+.homepage-shelf .overflow-x-auto {
+  scrollbar-width: thin;
+  padding-right: 1.5rem;
+}
+.homepage-shelf .overflow-x-auto::-webkit-scrollbar {
+  height: 6px;
+}
+.homepage-shelf .overflow-x-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+.homepage-shelf .overflow-x-auto::-webkit-scrollbar-thumb {
+  background-color: var(--color-border);
+  border-radius: 999px;
+}
