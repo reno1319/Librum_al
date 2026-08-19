@@ -1,23 +1,27 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { BookShelf } from "@/components/book-shelf";
 import {
   IconUpload,
-  IconBolt,
   IconBookOpen,
-  IconBank,
+  IconBolt,
   IconChart,
-  IconTag,
-  IconLayers,
-  IconShield,
   IconCheck,
-  IconGlobe,
 } from "@/components/icons";
-import type { Book } from "@/lib/types";
+import type { Book, Profile } from "@/lib/types";
 import type { ComponentType, CSSProperties } from "react";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Librum — Publish and Discover Albanian Ebooks",
+  description:
+    "Librum is the digital publishing platform and bookstore for Albanian-language ebooks. Publish your book, reach readers, and discover your next read.",
+};
 
 type Icon = ComponentType<{ className?: string; style?: CSSProperties }>;
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
 
 async function fetchHeroCovers(supabase: SupabaseClient) {
   const { data } = await supabase
@@ -36,6 +40,22 @@ async function fetchHeroCovers(supabase: SupabaseClient) {
   }));
 }
 
+// Same query shape as fetchCuratedHome's "New releases" shelf on
+// /bookstore (status=published, newest first, joined to the author's
+// display name) — reused here rather than re-derived, just without the
+// bestseller/hero split that page also computes.
+async function fetchLatestBooks(supabase: SupabaseClient) {
+  const { data } = await supabase
+    .from("books")
+    .select("*, profiles(display_name)")
+    .eq("status", "published")
+    .order("created_at", { ascending: false })
+    .limit(9)
+    .returns<BookWithAuthor[]>();
+
+  return data ?? [];
+}
+
 export default async function Home({
   searchParams,
 }: {
@@ -43,7 +63,10 @@ export default async function Home({
 }) {
   const { account } = await searchParams;
   const supabase = await createClient();
-  const heroCovers = await fetchHeroCovers(supabase);
+  const [heroCovers, latestBooks] = await Promise.all([
+    fetchHeroCovers(supabase),
+    fetchLatestBooks(supabase),
+  ]);
 
   return (
     <main className="flex-1">
@@ -57,95 +80,23 @@ export default async function Home({
 
       <HeroSection covers={heroCovers} />
 
-      <div style={{ backgroundColor: "#e9eff8" }}>
-        <div
-          className="mx-auto w-full max-w-5xl px-4 sm:px-6"
-          style={{ paddingTop: "2.5rem", paddingBottom: "3rem" }}
-        >
-          <AuthorPitch />
-        </div>
+      <div className="mx-auto w-full max-w-5xl px-4 sm:px-6">
+        <BookDiscoverySection books={latestBooks} supabase={supabase} />
+        <AuthorValueSection />
+        <HowItWorksSection />
+        <ReaderExperienceSection covers={heroCovers} />
       </div>
+
+      <EarningsSection />
+      <FinalCtaSection />
     </main>
   );
 }
 
-const PUBLISHING_STEPS: { title: string; body: string; icon: Icon }[] = [
-  {
-    title: "Upload your book",
-    body: "Add your EPUB manuscript, a cover, a description, and a price. Takes a few minutes.",
-    icon: IconUpload,
-  },
-  {
-    title: "Publish instantly",
-    body: "No submission queue, no approval wait — your book goes live the moment you hit publish.",
-    icon: IconBolt,
-  },
-  {
-    title: "Readers buy directly",
-    body: "Secure checkout, real DRM-free EPUB files — readers get a book they actually own.",
-    icon: IconBookOpen,
-  },
-  {
-    title: "Get paid automatically",
-    body: `Every sale splits instantly — you keep ${100 - PLATFORM_FEE_PERCENT}%, paid straight to your bank account.`,
-    icon: IconBank,
-  },
-];
+// ============================================================
+// Section 1 — Hero
+// ============================================================
 
-const AUTHOR_STRIP = [
-  "No setup fees",
-  "No minimum sales",
-  `Keep ${100 - PLATFORM_FEE_PERCENT}% of every sale`,
-  "Payouts via Stripe",
-];
-
-const WHY_LIBRUM: { title: string; body: string; icon: Icon }[] = [
-  {
-    title: "Publish in minutes",
-    body: "No submission queue, no waiting on approval — upload your book and it's live the moment you hit publish.",
-    icon: IconBolt,
-  },
-  {
-    title: "You control your earnings",
-    body: `Set your own price, run your own discounts, and keep ${100 - PLATFORM_FEE_PERCENT}% of every sale — paid straight to your bank account.`,
-    icon: IconBank,
-  },
-  {
-    title: "Reach readers everywhere",
-    body: "Your book page is public and shareable from day one — no separate storefront to set up.",
-    icon: IconGlobe,
-  },
-];
-
-const PUBLISHING_TOOLS: { title: string; body: string; icon: Icon }[] = [
-  {
-    title: "Sales dashboard",
-    body: "Revenue, units sold, and a 14-day chart — broken down per book, so you know what's working.",
-    icon: IconChart,
-  },
-  {
-    title: "Discount codes",
-    body: "Run a percentage- or dollar-off promo on any book, with an optional expiry date.",
-    icon: IconTag,
-  },
-  {
-    title: "Series",
-    body: "Group your books in reading order — shown right on each book's page, linking readers to the next one.",
-    icon: IconLayers,
-  },
-  {
-    title: "Watermarked downloads",
-    body: "Every sale is stamped with the buyer's email — lightweight anti-piracy, no DRM, no restrictions for readers.",
-    icon: IconShield,
-  },
-];
-
-// A staggered, slightly-rotated grid of real cover art from books already
-// published on the platform — used as hero imagery instead of stock
-// photography, which this environment has no way to fetch.
-// Full-bleed, edge-to-edge hero band — deliberately escapes the site's
-// usual max-w-5xl content column so it reads as a distinct "front door"
-// section, in the mold of Lulu's own homepage.
 function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
   return (
     <section style={{ backgroundColor: "#6a5cf0" }}>
@@ -157,14 +108,16 @@ function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
           className="font-serif text-4xl font-bold sm:text-6xl"
           style={{ color: "#ffffff" }}
         >
-          Write. Publish. Profit.
+          Publish your book. Find your readers.
         </h1>
         <p
           className="mx-auto mt-3 max-w-lg text-lg"
           style={{ color: "rgba(255, 255, 255, 0.8)" }}
         >
-          Vetëbotimi i një libri elektronik është më shumë sesa piksel në
-          një ekran: është zëri juaj që udhëton nëpër botë.
+          Librum is the digital publishing platform and bookstore for
+          Albanian-language ebooks — giving authors a simple way to publish
+          and sell their work, and readers a place to discover their next
+          book.
         </p>
         <div
           className="mt-6 flex flex-wrap justify-center"
@@ -176,6 +129,16 @@ function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
             style={{ backgroundColor: "#ffffff", color: "#6a5cf0" }}
           >
             Publish your book
+          </Link>
+          <Link
+            href="/bookstore"
+            className="rounded-lg px-5 py-2.5 text-sm font-medium"
+            style={{
+              color: "#ffffff",
+              border: "1px solid rgba(255, 255, 255, 0.4)",
+            }}
+          >
+            Explore books
           </Link>
         </div>
       </div>
@@ -214,120 +177,168 @@ function HeroSection({ covers }: { covers: { id: string; url: string }[] }) {
   );
 }
 
-function AuthorPitch() {
+// ============================================================
+// Section 2 — Book Discovery
+// ============================================================
+
+function BookDiscoverySection({
+  books,
+  supabase,
+}: {
+  books: BookWithAuthor[];
+  supabase: SupabaseClient;
+}) {
+  if (books.length === 0) return null;
+
   return (
-    <>
-      <div
-        className="flex flex-wrap justify-center rounded-lg border border-border bg-surface py-5 text-center text-sm font-medium shadow-sm"
-        style={{ gap: "1rem 3rem", marginTop: "1.5rem" }}
-      >
-        {AUTHOR_STRIP.map((item) => (
-          <span key={item} className="flex items-center gap-2">
-            <IconCheck
-              className="text-primary"
-              style={{ width: "1rem", height: "1rem" }}
-            />
-            {item}
-          </span>
-        ))}
+    <section style={{ marginTop: "3.5rem" }}>
+      <p className="text-sm text-muted">
+        Freshly published books from independent authors.
+      </p>
+      <div style={{ marginTop: "0.5rem" }}>
+        <BookShelf
+          title="Explore the latest releases"
+          books={books}
+          supabase={supabase}
+        />
       </div>
-
-      <section style={{ marginTop: "3rem" }}>
-        <h2 className="text-center font-serif text-2xl font-bold">
-          Why Librum?
-        </h2>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "2rem",
-            marginTop: "1.5rem",
-          }}
-        >
-          {WHY_LIBRUM.map((item) => (
-            <div key={item.title} className="text-center">
-              <IconBadge icon={item.icon} />
-              <h3 className="mt-3 font-serif text-lg font-bold">
-                {item.title}
-              </h3>
-              <p className="mt-1 text-sm text-foreground/90">{item.body}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section style={{ marginTop: "3rem" }}>
-        <h2 className="text-center font-serif text-2xl font-bold">
-          How self-publishing works
-        </h2>
-        <ol
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "2rem",
-            marginTop: "1.5rem",
-          }}
-        >
-          {PUBLISHING_STEPS.map((step, i) => (
-            <li key={step.title} className="text-center">
-              <IconBadge icon={step.icon} />
-              <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-primary">
-                Step {i + 1}
-              </p>
-              <h3 className="mt-1 font-serif text-lg font-bold">
-                {step.title}
-              </h3>
-              <p className="mt-1 text-sm text-foreground/90">{step.body}</p>
-            </li>
-          ))}
-        </ol>
-        <div
-          className="mt-4 flex flex-wrap justify-center gap-6"
-        >
-          <Link
-            href="/how-it-works"
-            className="text-sm font-medium text-primary hover:underline"
-          >
-            Read the full guide &rarr;
-          </Link>
-          <Link
-            href="/pricing"
-            className="text-sm font-medium text-primary hover:underline"
-          >
-            Find out how much you can make &rarr;
-          </Link>
-        </div>
-      </section>
-
-      <section style={{ marginTop: "3rem" }}>
-        <h2 className="text-center font-serif text-2xl font-bold">
-          Everything you need to sell your book
-        </h2>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "2rem",
-            marginTop: "1.5rem",
-          }}
-        >
-          {PUBLISHING_TOOLS.map((tool) => (
-            <div key={tool.title} className="text-center">
-              <IconBadge icon={tool.icon} />
-              <h3 className="mt-3 font-serif text-lg font-bold">
-                {tool.title}
-              </h3>
-              <p className="mt-1 text-sm text-foreground/90">{tool.body}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-    </>
+      <Link
+        href="/bookstore"
+        className="mt-4 inline-block text-sm font-medium text-primary hover:underline"
+      >
+        Explore all books &rarr;
+      </Link>
+    </section>
   );
 }
 
-// A large circular icon badge, matching the sizing/proportion of Lulu's
-// own feature-grid icons rather than a small inline glyph.
+// ============================================================
+// Section 3 — Author Value Proposition
+// ============================================================
+
+const AUTHOR_CHECKLIST = [
+  "Simple publishing",
+  "Direct access to Albanian-language readers",
+  `Keep ${100 - PLATFORM_FEE_PERCENT}% of every sale`,
+  "Control your book, price and listing",
+  "Sales dashboard with revenue and units sold",
+];
+
+function AuthorValueSection() {
+  return (
+    <section
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+        gap: "3rem",
+        marginTop: "5rem",
+        alignItems: "center",
+      }}
+    >
+      <div>
+        <h2 className="font-serif text-3xl font-bold">
+          Publish on your terms.
+        </h2>
+        <p className="mt-3 text-foreground/90">
+          Librum gives independent authors a direct line to readers — no
+          publisher, no gatekeepers, no long waits. You control every part
+          of the process, and keep the vast majority of what you earn.
+        </p>
+        <Link
+          href="/pricing"
+          className="mt-4 inline-block text-sm font-medium text-primary hover:underline"
+        >
+          See how much you could earn &rarr;
+        </Link>
+      </div>
+
+      <ul style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}>
+        {AUTHOR_CHECKLIST.map((item) => (
+          <li key={item} className="flex items-center gap-3 text-sm">
+            <IconCheck
+              className="text-primary"
+              style={{ width: "1.125rem", height: "1.125rem", flexShrink: 0 }}
+            />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// ============================================================
+// Section 4 — How It Works
+// ============================================================
+
+const PUBLISHING_STEPS: { title: string; body: string; icon: Icon }[] = [
+  {
+    title: "Upload your book",
+    body: "Add your EPUB manuscript and cover.",
+    icon: IconUpload,
+  },
+  {
+    title: "Prepare your listing",
+    body: "Add your title, description, genre and price.",
+    icon: IconBookOpen,
+  },
+  {
+    title: "Publish",
+    body: "Review everything, then go live.",
+    icon: IconBolt,
+  },
+  {
+    title: "Sell and track your results",
+    body: "Track revenue and units sold from your dashboard.",
+    icon: IconChart,
+  },
+];
+
+function HowItWorksSection() {
+  return (
+    <section style={{ marginTop: "5rem" }}>
+      <h2 className="text-center font-serif text-2xl font-bold">
+        How self-publishing works
+      </h2>
+      <ol
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: "2rem",
+          marginTop: "2rem",
+        }}
+      >
+        {PUBLISHING_STEPS.map((step, i) => (
+          <li key={step.title} className="text-center">
+            <IconBadge icon={step.icon} />
+            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-primary">
+              Step {i + 1}
+            </p>
+            <h3 className="mt-1 font-serif text-lg font-bold">
+              {step.title}
+            </h3>
+            <p className="mt-1 text-sm text-foreground/90">{step.body}</p>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-6 flex flex-wrap justify-center gap-6">
+        <Link
+          href="/how-it-works"
+          className="text-sm font-medium text-primary hover:underline"
+        >
+          Read the full guide &rarr;
+        </Link>
+        <Link
+          href="/pricing"
+          className="text-sm font-medium text-primary hover:underline"
+        >
+          Find out how much you can make &rarr;
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 function IconBadge({ icon: Icon }: { icon: Icon }) {
   return (
     <div
@@ -347,5 +358,153 @@ function IconBadge({ icon: Icon }: { icon: Icon }) {
         style={{ width: "2.25rem", height: "2.25rem" }}
       />
     </div>
+  );
+}
+
+// ============================================================
+// Section 5 — Reader Experience
+// ============================================================
+
+// A small staggered collage of real cover art, reusing the same covers
+// already fetched for the hero strip — no separate query.
+function CoverCollage({ covers }: { covers: { id: string; url: string }[] }) {
+  const shown = covers.slice(0, 4);
+  if (shown.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, 1fr)",
+        gap: "1.25rem",
+        maxWidth: "20rem",
+        margin: "0 auto",
+      }}
+    >
+      {shown.map((cover, i) => (
+        <div
+          key={cover.id}
+          style={{
+            transform: `rotate(${i % 2 === 0 ? -3 : 3}deg) translateY(${i % 3 === 1 ? "-0.75rem" : "0"})`,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={cover.url}
+            alt=""
+            className="aspect-[2/3] w-full rounded-lg object-cover shadow-md"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReaderExperienceSection({
+  covers,
+}: {
+  covers: { id: string; url: string }[];
+}) {
+  return (
+    <section
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+        gap: "3rem",
+        marginTop: "5rem",
+        alignItems: "center",
+      }}
+    >
+      <div style={{ order: 2 }}>
+        <h2 className="font-serif text-3xl font-bold">
+          A bookstore, not just a platform.
+        </h2>
+        <p className="mt-3 text-foreground/90">
+          Discover ebooks by genre or keyword, preview a sample before you
+          buy, and own what you purchase — a DRM-free file you can read
+          anywhere, revisit anytime from your library.
+        </p>
+        <Link
+          href="/bookstore"
+          className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+        >
+          Browse the bookstore
+        </Link>
+      </div>
+
+      <div style={{ order: 1 }}>
+        <CoverCollage covers={covers} />
+      </div>
+    </section>
+  );
+}
+
+// ============================================================
+// Section 6 — 80% Author Earnings
+// ============================================================
+
+function EarningsSection() {
+  return (
+    <section style={{ backgroundColor: "#fdf0e3", marginTop: "5rem" }}>
+      <div
+        className="mx-auto w-full max-w-2xl px-4 text-center sm:px-6"
+        style={{ paddingTop: "4rem", paddingBottom: "4rem" }}
+      >
+        <h2 className="font-serif text-4xl font-bold sm:text-5xl">
+          You keep {100 - PLATFORM_FEE_PERCENT}% of every sale.
+        </h2>
+        <p className="mx-auto mt-4 max-w-md text-foreground/90">
+          Librum&apos;s platform fee is a flat {PLATFORM_FEE_PERCENT}% — no
+          hidden charges, no tiered pricing. You set your price, and the
+          rest is yours.
+        </p>
+        <Link
+          href="/pricing"
+          className="mt-6 inline-block text-sm font-medium text-primary hover:underline"
+        >
+          Try the earnings calculator &rarr;
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+// ============================================================
+// Section 7 — Final Dual CTA
+// ============================================================
+
+function FinalCtaSection() {
+  return (
+    <section style={{ backgroundColor: "#e9eff8" }}>
+      <div
+        className="mx-auto w-full max-w-2xl px-4 text-center sm:px-6"
+        style={{ paddingTop: "4rem", paddingBottom: "4rem" }}
+      >
+        <h2 className="font-serif text-3xl font-bold sm:text-4xl">
+          Your next chapter starts here.
+        </h2>
+        <p className="mx-auto mt-3 max-w-md text-foreground/90">
+          Whether you&apos;re here to publish or to read, Librum is ready
+          when you are.
+        </p>
+        <div
+          className="mt-6 flex flex-wrap justify-center"
+          style={{ gap: "0.75rem" }}
+        >
+          <Link
+            href="/signup?role=author"
+            className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+          >
+            Publish your book
+          </Link>
+          <Link
+            href="/bookstore"
+            className="rounded-lg border border-border px-5 py-2.5 text-sm font-medium hover:bg-surface-hover"
+          >
+            Explore books
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }
