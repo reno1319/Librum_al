@@ -135,6 +135,72 @@ create index books_status_idx on public.books(status);
 create index books_genre_idx on public.books(genre);
 create index books_series_id_idx on public.books(series_id);
 
+-- Dedicated schema for extensions, per Supabase's own recommendation
+-- (avoids cluttering/coupling public with extension objects). Created
+-- defensively with "if not exists" since we can't assume it's already
+-- there -- this is additive and harmless if it already exists.
+create schema if not exists extensions;
+create extension if not exists unaccent with schema extensions;
+
+-- Diacritic-tolerant bookstore search (see the Phase 6B search audit).
+-- Matches title/description/keywords/author-display-name using
+-- extensions.unaccent() on both the stored text and the search term, so
+-- e.g. a search for "Kerc" matches stored "Kërc" and vice versa -- ë/e
+-- and ç/c fold together (along with other accented Latin letters,
+-- unaccent's normal behavior), while ILIKE keeps matching
+-- case-insensitive as before.
+--
+-- SECURITY INVOKER (the default, stated explicitly): unlike
+-- bestselling_books, this only reads books/profiles data that's already
+-- publicly selectable under existing RLS ("Published books are viewable
+-- by everyone" / "Profiles are viewable by everyone") -- there is no
+-- privileged data to bypass, so no elevated privilege is used or
+-- needed. It runs under the calling role's own RLS, same as any other
+-- query the bookstore already makes.
+--
+-- Returns ONLY book_id -- never any profiles or purchases column -- the
+-- caller re-fetches full book rows (with profiles(display_name)) the
+-- same way the rest of the bookstore code already does. result_limit is
+-- clamped to 1-48 (48 is the bookstore's existing search-result cap) so
+-- no caller can force an unbounded scan.
+create or replace function public.search_books(
+  search_term text default null,
+  genre_filter text default null,
+  min_price_cents int default null,
+  max_price_cents int default null,
+  result_limit int default 48
+)
+returns table (book_id uuid)
+language sql
+security invoker
+set search_path = ''
+stable
+as $$
+  select books.id as book_id
+  from public.books
+  where books.status = 'published'
+    and (genre_filter is null or books.genre = genre_filter)
+    and (min_price_cents is null or books.price_cents >= min_price_cents)
+    and (max_price_cents is null or books.price_cents <= max_price_cents)
+    and (
+      search_term is null
+      or extensions.unaccent(books.title) ilike extensions.unaccent('%' || search_term || '%')
+      or extensions.unaccent(books.description) ilike extensions.unaccent('%' || search_term || '%')
+      or extensions.unaccent(books.keywords) ilike extensions.unaccent('%' || search_term || '%')
+      or exists (
+        select 1
+        from public.profiles
+        where profiles.id = books.author_id
+          and profiles.role = 'author'
+          and extensions.unaccent(profiles.display_name) ilike extensions.unaccent('%' || search_term || '%')
+      )
+    )
+  limit least(greatest(coalesce(result_limit, 48), 1), 48);
+$$;
+
+revoke all on function public.search_books(text, text, int, int, int) from public;
+grant execute on function public.search_books(text, text, int, int, int) to anon, authenticated;
+
 -- ============================================================
 -- book_contributors: credits shown on a book's page beyond the single
 -- primary author (illustrator, translator, narrator, co-author, etc).

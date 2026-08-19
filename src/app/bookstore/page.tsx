@@ -65,68 +65,65 @@ async function fetchSearchResults(
     }
     results = data ?? [];
   } else {
-    // Separate ilike() queries (title, description, keywords, author
-    // name) merged in JS, rather than one .or() filter string — .or()
-    // requires manually escaping commas and parentheses in the search
-    // term to stay valid, which is easy to get wrong. This is simpler
-    // and just as correct at our scale.
-    const pattern = `%${term}%`;
-
-    // Author-name matches: look up matching author profiles first, then
-    // pull their books through the same baseQuery() filters (genre/
-    // price), merged the same way as the title/description/keyword
-    // matches below.
-    const { data: matchingAuthors, error: authorLookupError } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("role", "author")
-      .ilike("display_name", pattern);
-    const authorIds = (matchingAuthors ?? []).map((a) => a.id);
-
-    const [
-      { data: byTitle, error: titleError },
-      { data: byDescription, error: descriptionError },
-      { data: byKeywords, error: keywordsError },
-      { data: byAuthor, error: authorError },
-    ] = await Promise.all([
-      baseQuery().ilike("title", pattern).returns<BookWithAuthor[]>(),
-      baseQuery().ilike("description", pattern).returns<BookWithAuthor[]>(),
-      baseQuery().ilike("keywords", pattern).returns<BookWithAuthor[]>(),
-      authorIds.length > 0
-        ? baseQuery().in("author_id", authorIds).returns<BookWithAuthor[]>()
-        : Promise.resolve({ data: [] as BookWithAuthor[], error: null }),
-    ]);
-
-    if (
-      authorLookupError ||
-      titleError ||
-      descriptionError ||
-      keywordsError ||
-      authorError
-    ) {
-      console.error("Bookstore search: one or more queries failed", {
-        authorLookupError,
-        titleError,
-        descriptionError,
-        keywordsError,
-        authorError,
-      });
-      hadError = true;
-    }
-
-    const merged = new Map<string, BookWithAuthor>();
-    for (const book of [
-      ...(byTitle ?? []),
-      ...(byDescription ?? []),
-      ...(byKeywords ?? []),
-      ...(byAuthor ?? []),
-    ]) {
-      merged.set(book.id, book);
-    }
-
-    results = [...merged.values()].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    // Diacritic-tolerant matching (e.g. "Kerc" finding "Kërc") needs
+    // Postgres's unaccent(), which the Supabase-js query builder can't
+    // express directly -- so matching itself happens server-side in the
+    // search_books() RPC (see supabase/schema.sql), which returns only
+    // matched book ids. This still fully respects the same genre/price/
+    // published-only scoping baseQuery() applies elsewhere on this page
+    // -- those filters are passed into the RPC and enforced inside it.
+    const { data: matches, error: searchError } = await supabase.rpc(
+      "search_books",
+      {
+        search_term: term,
+        genre_filter: genre ?? null,
+        min_price_cents: minPriceCents ?? null,
+        max_price_cents: maxPriceCents ?? null,
+        result_limit: SEARCH_RESULT_LIMIT,
+      },
     );
+
+    if (searchError) {
+      console.error("Bookstore search: search_books RPC failed:", searchError);
+      hadError = true;
+      results = [];
+    } else {
+      const matchedIds = (matches as { book_id: string }[] ?? []).map(
+        (row) => row.book_id,
+      );
+
+      let matchedBooks: BookWithAuthor[] = [];
+      if (matchedIds.length > 0) {
+        // Re-fetch full rows for the matched ids the same normal way
+        // every other book listing on this page already does -- the
+        // RPC only ever hands back ids, never book/profile data itself.
+        const { data: fetchedBooks, error: fetchError } = await supabase
+          .from("books")
+          .select("*, profiles(display_name)")
+          .eq("status", "published")
+          .in("id", matchedIds)
+          .returns<BookWithAuthor[]>();
+
+        if (fetchError) {
+          console.error(
+            "Bookstore search: failed to load matched books:",
+            fetchError,
+          );
+          hadError = true;
+        } else {
+          matchedBooks = fetchedBooks ?? [];
+        }
+      }
+
+      // .in() doesn't preserve the RPC's return order, and the RPC's
+      // order isn't meaningful anyway -- explicitly apply the same
+      // newest-first default the no-search-term branch above uses, so
+      // "Newest" stays the true default regardless of match order. The
+      // sort dropdown below can still override this.
+      results = [...matchedBooks].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+    }
   }
 
   if (sort === "price_asc") {
