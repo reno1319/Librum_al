@@ -611,6 +611,9 @@ create policy "Reviews are viewable by everyone"
   on public.reviews for select
   using (true);
 
+-- refunded_at is null is required here (not just app-level) so a
+-- refunded reader can't write a review via a direct API call -- see the
+-- Phase 7 book detail page audit.
 create policy "Buyers can review books they own"
   on public.reviews for insert
   with check (
@@ -619,6 +622,7 @@ create policy "Buyers can review books they own"
       select 1 from public.purchases
       where purchases.book_id = reviews.book_id
       and purchases.reader_id = auth.uid()
+      and purchases.refunded_at is null
     )
   );
 

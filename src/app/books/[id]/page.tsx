@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -19,6 +20,58 @@ type SeriesEntry = Pick<Book, "id" | "title" | "series_position">;
 type ReviewWithReader = Review & {
   profiles: Pick<Profile, "display_name"> | null;
 };
+
+const METADATA_DESCRIPTION_MAX = 160;
+
+function truncateForMetadata(text: string, max: number) {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const supabase = await createClient();
+
+  const { data: book } = await supabase
+    .from("books")
+    .select("title, description, status, cover_path")
+    .eq("id", id)
+    .maybeSingle<Pick<Book, "title" | "description" | "status" | "cover_path">>();
+
+  // Draft/unpublished/nonexistent books never get book-specific public
+  // metadata. An author can still view their own draft's page body, but
+  // metadata lives in <head> and can be read by crawlers/link-preview
+  // bots regardless of who's logged in -- it must never present a
+  // private draft's title/description/cover as public marketing copy.
+  // Falling back to {} lets the root layout's generic site metadata
+  // apply instead.
+  if (!book || book.status !== "published") {
+    return {};
+  }
+
+  const title = `${book.title} — Librum`;
+  const description = book.description
+    ? truncateForMetadata(book.description, METADATA_DESCRIPTION_MAX)
+    : undefined;
+  const coverUrl = book.cover_path
+    ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
+    : null;
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: "book",
+      ...(coverUrl ? { images: [{ url: coverUrl }] } : {}),
+    },
+  };
+}
 
 export default async function BookDetailPage({
   params,
@@ -172,7 +225,7 @@ export default async function BookDetailPage({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={coverUrl}
-              alt=""
+              alt={`${book.title} cover`}
               className="aspect-[2/3] w-full rounded-lg object-cover shadow-sm"
             />
           ) : (
@@ -197,119 +250,7 @@ export default async function BookDetailPage({
             </Link>
           </p>
 
-          {seriesInfo && (
-            <p className="mt-1 text-sm text-muted">
-              {book.series_position ? `Book ${book.series_position} of ` : ""}
-              the <span className="font-medium">{seriesInfo.title}</span> series
-            </p>
-          )}
-
-          {contributors && contributors.length > 0 && (
-            <p className="mt-1 text-sm text-muted">
-              {contributors
-                .map(
-                  (c) =>
-                    `${CONTRIBUTOR_ROLE_VERB[c.role as keyof typeof CONTRIBUTOR_ROLE_VERB] ?? c.role} ${c.name}`,
-                )
-                .join(" · ")}
-            </p>
-          )}
-
-          <div className="mt-2 flex items-center gap-2 text-sm">
-            <StarRating rating={averageRating} />
-            <span className="text-muted">
-              {reviewCount > 0
-                ? `${averageRating.toFixed(1)} · ${reviewCount} review${reviewCount === 1 ? "" : "s"}`
-                : "No reviews yet"}
-            </span>
-          </div>
-
-          <p className="mt-4 whitespace-pre-line text-foreground/90">
-            {book.description}
-          </p>
-
-          {book.keywords && (
-            <ul
-              className="mt-3 flex flex-wrap"
-              style={{ gap: "0.5rem" }}
-            >
-              {book.keywords
-                .split(",")
-                .map((k) => k.trim())
-                .filter(Boolean)
-                .map((keyword) => (
-                  <li
-                    key={keyword}
-                    className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted"
-                  >
-                    {keyword}
-                  </li>
-                ))}
-            </ul>
-          )}
-
-          {book.isbn && (
-            <p className="mt-3 text-xs text-muted">ISBN: {book.isbn}</p>
-          )}
-
-          {book.preview_text && (
-            <details className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
-              <summary className="cursor-pointer font-serif font-medium">
-                Look inside
-              </summary>
-              <p className="mt-3 whitespace-pre-line text-sm text-foreground/90">
-                {book.preview_text}
-              </p>
-            </details>
-          )}
-
-          {purchase === "success" && (
-            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              {owned ? (
-                <>
-                  Purchase complete — thank you!{" "}
-                  <Link href="/library" className="font-medium underline">
-                    Go to your library
-                  </Link>{" "}
-                  to download it anytime.
-                </>
-              ) : (
-                "Purchase complete — thank you! It may take a few seconds to show as owned below."
-              )}
-            </p>
-          )}
-          {freeStatus === "success" && (
-            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              {owned ? (
-                <>
-                  Added to your library!{" "}
-                  <Link href="/library" className="font-medium underline">
-                    Go to your library
-                  </Link>{" "}
-                  to download it anytime.
-                </>
-              ) : (
-                "Added to your library! It may take a few seconds to show as owned below."
-              )}
-            </p>
-          )}
-          {reviewStatus === "success" && (
-            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              Thanks for your review!
-            </p>
-          )}
-          {reportStatus === "success" && (
-            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              Thanks — we&apos;ve received your report and will take a look.
-            </p>
-          )}
-          {error && (
-            <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </p>
-          )}
-
-          <div className="mt-6 flex flex-wrap items-center gap-3">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <span className="text-xl font-semibold text-primary">
               {book.price_cents === 0
                 ? "Free"
@@ -391,6 +332,126 @@ export default async function BookDetailPage({
               </Link>
             )}
           </div>
+
+          {!isAuthor && !owned && (
+            <p className="mt-2 text-xs text-muted">
+              {book.price_cents === 0
+                ? "Free — no payment required. You'll get a DRM-free EPUB you can download anytime from your Librum Library."
+                : "DRM-free EPUB. Download it anytime from your Librum Library."}
+            </p>
+          )}
+
+          {purchase === "success" && (
+            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+              {owned ? (
+                <>
+                  Purchase complete — thank you!{" "}
+                  <Link href="/library" className="font-medium underline">
+                    Go to your library
+                  </Link>{" "}
+                  to download it anytime.
+                </>
+              ) : (
+                "Purchase complete — thank you! It may take a few seconds to show as owned below."
+              )}
+            </p>
+          )}
+          {freeStatus === "success" && (
+            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+              {owned ? (
+                <>
+                  Added to your library!{" "}
+                  <Link href="/library" className="font-medium underline">
+                    Go to your library
+                  </Link>{" "}
+                  to download it anytime.
+                </>
+              ) : (
+                "Added to your library! It may take a few seconds to show as owned below."
+              )}
+            </p>
+          )}
+          {reviewStatus === "success" && (
+            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+              Thanks for your review!
+            </p>
+          )}
+          {reportStatus === "success" && (
+            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+              Thanks — we&apos;ve received your report and will take a look.
+            </p>
+          )}
+          {error && (
+            <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </p>
+          )}
+
+          {seriesInfo && (
+            <p className="mt-4 text-sm text-muted">
+              {book.series_position ? `Book ${book.series_position} of ` : ""}
+              the <span className="font-medium">{seriesInfo.title}</span> series
+            </p>
+          )}
+
+          {contributors && contributors.length > 0 && (
+            <p className="mt-1 text-sm text-muted">
+              {contributors
+                .map(
+                  (c) =>
+                    `${CONTRIBUTOR_ROLE_VERB[c.role as keyof typeof CONTRIBUTOR_ROLE_VERB] ?? c.role} ${c.name}`,
+                )
+                .join(" · ")}
+            </p>
+          )}
+
+          <div className="mt-2 flex items-center gap-2 text-sm">
+            <StarRating rating={averageRating} />
+            <span className="text-muted">
+              {reviewCount > 0
+                ? `${averageRating.toFixed(1)} · ${reviewCount} review${reviewCount === 1 ? "" : "s"}`
+                : "No reviews yet"}
+            </span>
+          </div>
+
+          <p className="mt-4 whitespace-pre-line text-foreground/90">
+            {book.description}
+          </p>
+
+          {book.keywords && (
+            <ul
+              className="mt-3 flex flex-wrap"
+              style={{ gap: "0.5rem" }}
+            >
+              {book.keywords
+                .split(",")
+                .map((k) => k.trim())
+                .filter(Boolean)
+                .map((keyword) => (
+                  <li
+                    key={keyword}
+                    className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted"
+                  >
+                    {keyword}
+                  </li>
+                ))}
+            </ul>
+          )}
+
+          {book.isbn && (
+            <p className="mt-3 text-xs text-muted">ISBN: {book.isbn}</p>
+          )}
+
+          {book.preview_text && (
+            <details className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
+              <summary className="cursor-pointer font-serif font-medium">
+                Look inside
+              </summary>
+              <p className="mt-3 whitespace-pre-line text-sm text-foreground/90">
+                {book.preview_text}
+              </p>
+            </details>
+          )}
         </div>
       </div>
 

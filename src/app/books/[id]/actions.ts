@@ -44,6 +44,14 @@ export async function buyBook(bookId: string, formData: FormData) {
     redirect(`/books/${bookId}`);
   }
 
+  // Free books must go through getFreeBook, never Stripe -- this is a
+  // server-side invariant, not just a UI convenience: the price is
+  // re-read from the database here, so this holds even if buyBook were
+  // ever invoked directly for a book priced at 0.
+  if (book.price_cents <= 0) {
+    redirect(`/books/${bookId}?error=This+book+is+free+-+use+the+free+download+option+instead`);
+  }
+
   const authorAccount = book.profiles?.stripe_account_id;
   if (!book.profiles?.stripe_payouts_enabled || !authorAccount) {
     redirect(`/books/${bookId}?error=This+book+isn%27t+available+for+purchase+right+now`);
