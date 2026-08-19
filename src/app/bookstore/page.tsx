@@ -16,8 +16,22 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 // Hard cap while the catalog is small -- see the Phase 6 bookstore audit.
 // A real pagination UI is separate, later work; this just prevents an
-// unbounded grid once the catalog grows.
+// unbounded grid once the catalog grows. This is the VISIBLE result
+// cap, applied after sorting -- see SEARCH_CANDIDATE_LIMIT below for the
+// separate, larger concept it must not be confused with.
 const SEARCH_RESULT_LIMIT = 48;
+
+// How many matching books search_books() may return before the app
+// sorts and applies SEARCH_RESULT_LIMIT. This must be large enough to
+// cover every book that could plausibly match a single query, not just
+// the 48 eventually shown -- otherwise sorting (newest/price/
+// bestselling) would silently run over an incomplete, arbitrary subset
+// of the true matches instead of the whole matched set (see the
+// Phase 6B-2 correction audit). 500 is a bounded ceiling appropriate
+// for Librum's current catalog size, not a claim that it's correct at
+// arbitrary scale -- see the comment on search_books() in
+// supabase/schema.sql for the full reasoning.
+const SEARCH_CANDIDATE_LIMIT = 500;
 
 // The Bestsellers shelf only appears once there's genuine platform-wide
 // sales activity behind it -- below this, "bestselling" isn't a
@@ -79,7 +93,7 @@ async function fetchSearchResults(
         genre_filter: genre ?? null,
         min_price_cents: minPriceCents ?? null,
         max_price_cents: maxPriceCents ?? null,
-        result_limit: SEARCH_RESULT_LIMIT,
+        result_limit: SEARCH_CANDIDATE_LIMIT,
       },
     );
 

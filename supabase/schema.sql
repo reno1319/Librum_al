@@ -160,15 +160,35 @@ create extension if not exists unaccent with schema extensions;
 --
 -- Returns ONLY book_id -- never any profiles or purchases column -- the
 -- caller re-fetches full book rows (with profiles(display_name)) the
--- same way the rest of the bookstore code already does. result_limit is
--- clamped to 1-48 (48 is the bookstore's existing search-result cap) so
--- no caller can force an unbounded scan.
+-- same way the rest of the bookstore code already does.
+--
+-- SEARCH CANDIDATE LIMIT vs. VISIBLE SEARCH RESULT LIMIT: result_limit
+-- here clamps to 1-500 -- this is a CANDIDATE ceiling, not the 48
+-- results the bookstore actually displays. The application sorts
+-- (newest / price / bestselling) over whatever this function returns,
+-- then applies its own separate 48-row display cap AFTER sorting -- so
+-- this limit must cover every book that could plausibly match a query,
+-- not just the number shown on screen, or sorting would silently run
+-- over an incomplete/arbitrary subset of the true matches (see the
+-- Phase 6B-2 correction audit). 500 is a bounded ceiling judged
+-- appropriate for Librum's current catalog size (low hundreds of
+-- published books, per the Phase 6B-1 audit) -- it is NOT claimed to be
+-- correct at arbitrary catalog size. If the catalog can plausibly grow
+-- to where a single query matches more than 500 published books, this
+-- architecture (push sorting into the database, or paginate, or both)
+-- must be revisited before that happens -- raising this constant alone
+-- would silently reintroduce the same truncate-before-sort bug this
+-- fixes, just at a higher threshold.
+--
+-- This still guards against an unbounded scan/result set -- 500 is a
+-- hard cap, not "no limit" -- mirroring the same defensive
+-- least/greatest/coalesce pattern already used by bestselling_books.
 create or replace function public.search_books(
   search_term text default null,
   genre_filter text default null,
   min_price_cents int default null,
   max_price_cents int default null,
-  result_limit int default 48
+  result_limit int default 500
 )
 returns table (book_id uuid)
 language sql
@@ -195,7 +215,9 @@ as $$
           and extensions.unaccent(profiles.display_name) ilike extensions.unaccent('%' || search_term || '%')
       )
     )
-  limit least(greatest(coalesce(result_limit, 48), 1), 48);
+  -- SEARCH CANDIDATE LIMIT (500) -- see the comment block above. NOT the
+  -- 48-row VISIBLE SEARCH RESULT LIMIT the bookstore displays.
+  limit least(greatest(coalesce(result_limit, 500), 1), 500);
 $$;
 
 revoke all on function public.search_books(text, text, int, int, int) from public;
