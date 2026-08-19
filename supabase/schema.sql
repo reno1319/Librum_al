@@ -464,6 +464,13 @@ create policy "Authors can view purchases of their own books"
 -- exact aggregate elsewhere. Only ever returns (book_id, purchase_count)
 -- -- never reader_id or amount_cents -- so it can't expose who bought
 -- what.
+--
+-- EXECUTE is restricted to service_role only -- this reads across every
+-- reader's purchase rows (bypassing the per-reader/author RLS scoping
+-- above), so it must never be directly callable by a public/browser
+-- client, only by the app's server-side admin client. result_limit is
+-- clamped to 1-100 regardless of caller input (NULL, 0, negative, or
+-- oversized all resolve to a safe bound).
 create or replace function public.bestselling_books(
   book_ids uuid[] default null,
   result_limit int default null
@@ -480,10 +487,13 @@ as $$
     and (book_ids is null or purchases.book_id = any(book_ids))
   group by purchases.book_id
   order by purchase_count desc
-  limit result_limit;
+  limit least(greatest(coalesce(result_limit, 100), 1), 100);
 $$;
 
-grant execute on function public.bestselling_books(uuid[], int) to anon, authenticated;
+revoke all on function public.bestselling_books(uuid[], int) from public;
+revoke all on function public.bestselling_books(uuid[], int) from anon;
+revoke all on function public.bestselling_books(uuid[], int) from authenticated;
+grant execute on function public.bestselling_books(uuid[], int) to service_role;
 
 create index purchases_reader_id_idx on public.purchases(reader_id);
 create index purchases_book_id_idx on public.purchases(book_id);

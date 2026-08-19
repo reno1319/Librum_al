@@ -7,18 +7,34 @@
 -- to the reader/author involved in each row -- this function needs to
 -- read across all of them to produce a count. This is not a new
 -- privilege: the app's own admin/service-role client already bypasses
--- RLS for this exact same purpose (see fetchCuratedHome's existing
--- bestseller logic in src/app/bookstore/page.tsx) -- this function just
--- moves that same aggregate work into the database instead of pulling
--- every row into application memory first.
+-- RLS for this exact same purpose (see fetchBestsellers and the
+-- "bestselling" sort in src/app/bookstore/page.tsx) -- this function
+-- just moves that same aggregate work into the database instead of
+-- pulling every row into application memory first.
 --
 -- Only ever returns (book_id, purchase_count) pairs -- never reader_id,
 -- amount_cents, or any other column -- so it cannot be used to expose
 -- who bought what.
 --
--- If you're setting up a fresh project, just run schema.sql instead (it
--- does not include this function -- run this migration afterward either
--- way, on a fresh or an existing project).
+-- EXECUTE is intentionally restricted to service_role only (revoked from
+-- PUBLIC, anon, and authenticated below). This is a SECURITY DEFINER
+-- function that reads across every reader's purchase rows, bypassing the
+-- RLS policies that would otherwise scope that read to one reader/author
+-- at a time -- it must never be callable directly by a public/browser
+-- client, only by the app's server-side admin client, exactly like every
+-- other current caller of it already does.
+--
+-- result_limit is clamped server-side (via least/greatest/coalesce in
+-- the query below) to a safe range of 1-100 regardless of what a caller
+-- passes in -- NULL, 0, negative, or an oversized value all resolve to a
+-- sane bound -- so no caller can force an unbounded or absurdly large
+-- aggregate scan.
+--
+-- schema.sql already includes this function (kept in sync with this
+-- migration) for fresh project setups -- if you're setting up a fresh
+-- project, running schema.sql alone is sufficient. This migration file
+-- exists to add or update the function on an existing, already-running
+-- database that was set up before this function existed.
 
 create or replace function public.bestselling_books(
   book_ids uuid[] default null,
@@ -36,7 +52,12 @@ as $$
     and (book_ids is null or purchases.book_id = any(book_ids))
   group by purchases.book_id
   order by purchase_count desc
-  limit result_limit;
+  limit least(greatest(coalesce(result_limit, 100), 1), 100);
 $$;
 
-grant execute on function public.bestselling_books(uuid[], int) to anon, authenticated;
+-- Explicitly close off public/browser access -- only the server-side
+-- admin (service-role) client may call this function.
+revoke all on function public.bestselling_books(uuid[], int) from public;
+revoke all on function public.bestselling_books(uuid[], int) from anon;
+revoke all on function public.bestselling_books(uuid[], int) from authenticated;
+grant execute on function public.bestselling_books(uuid[], int) to service_role;
