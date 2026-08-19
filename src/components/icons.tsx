@@ -152,6 +152,22 @@ export function IconFacebook({ className, style }: IconProps) {
   );
 }
 
+export function IconMenu({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <path d="M4 7h16M4 12h16M4 17h16" />
+    </svg>
+  );
+}
+
+export function IconClose({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+
 export function IconUnlock({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>

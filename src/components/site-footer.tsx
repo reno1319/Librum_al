@@ -1,14 +1,15 @@
 import Link from "next/link";
-import { IconInstagram, IconFacebook } from "@/components/icons";
 
-const SOCIAL_LINKS = [
-  { href: "#", label: "Instagram", icon: IconInstagram },
-  { href: "#", label: "Facebook", icon: IconFacebook },
-];
+// Instagram/Facebook icon links were removed from render below (not
+// deleted from src/components/icons.tsx, which stays reusable) because
+// no real Librum social URLs exist anywhere in the repo yet — a
+// href="#" placeholder reads as a dead/broken link rather than
+// unimplemented. Re-add once real URLs are available.
 
 const FOOTER_LINKS = {
   Platform: [
     { href: "/about", label: "About" },
+    { href: "/bookstore", label: "Bookstore" },
     { href: "/how-it-works", label: "How it works" },
     { href: "/pricing", label: "Pricing" },
     { href: "/help", label: "Help" },
@@ -44,23 +45,6 @@ export function SiteFooter() {
             Independent ebooks, published directly by the people who wrote
             them.
           </p>
-          <div
-            className="mt-4"
-            style={{ display: "flex", gap: "0.75rem" }}
-          >
-            {SOCIAL_LINKS.map((social) => (
-              <a
-                key={social.label}
-                href={social.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={social.label}
-                className="text-muted hover:text-foreground"
-              >
-                <social.icon style={{ width: "1.25rem", height: "1.25rem" }} />
-              </a>
-            ))}
-          </div>
         </div>
 
         <div style={{ display: "flex", gap: "4rem" }}>

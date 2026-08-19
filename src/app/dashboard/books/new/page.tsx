@@ -26,7 +26,7 @@ export default async function NewBookPage({
       <Link href="/dashboard" className="text-sm text-muted hover:underline">
         &larr; Back to dashboard
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">Add a new book</h1>
+      <h1 className="mt-2 font-serif text-3xl font-semibold">Add a book</h1>
       <p className="mt-1 text-sm text-muted">
         It&apos;s saved as a draft first — you can publish it from your
         dashboard once you&apos;re happy with it.

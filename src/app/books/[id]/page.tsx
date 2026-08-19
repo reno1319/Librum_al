@@ -253,8 +253,17 @@ export default async function BookDetailPage({
 
           {purchase === "success" && (
             <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              Purchase complete — thank you! It may take a few seconds to show
-              as owned below.
+              {owned ? (
+                <>
+                  Purchase complete — thank you!{" "}
+                  <Link href="/library" className="font-medium underline">
+                    Go to your library
+                  </Link>{" "}
+                  to download it anytime.
+                </>
+              ) : (
+                "Purchase complete — thank you! It may take a few seconds to show as owned below."
+              )}
             </p>
           )}
           {reviewStatus === "success" && (

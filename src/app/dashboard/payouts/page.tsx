@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
@@ -35,7 +36,10 @@ export default async function PayoutsPage() {
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-3xl font-semibold">Payouts</h1>
+      <Link href="/dashboard" className="text-sm text-muted hover:underline">
+        &larr; Back to dashboard
+      </Link>
+      <h1 className="mt-2 font-serif text-3xl font-semibold">Payouts</h1>
       <p className="mt-2 text-sm text-muted">
         Librum uses Stripe to pay you directly for every sale — Stripe
         handles identity verification and tax forms, and takes care of

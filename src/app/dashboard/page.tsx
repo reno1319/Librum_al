@@ -73,7 +73,7 @@ export default async function DashboardPage({
             href="/dashboard/books/new"
             className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
           >
-            Add new book
+            Add a book
           </Link>
         </div>
       </div>
@@ -152,6 +152,15 @@ export default async function DashboardPage({
                   >
                     Edit
                   </Link>
+
+                  {book.status === "published" && (
+                    <Link
+                      href={`/books/${book.id}`}
+                      className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+                    >
+                      View book
+                    </Link>
+                  )}
 
                   {book.status === "draft" ? (
                     <form action={publishBook.bind(null, book.id)}>

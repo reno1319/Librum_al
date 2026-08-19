@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { platformFeeCents } from "@/lib/pricing";
 import type { Book } from "@/lib/types";
@@ -91,7 +92,10 @@ export default async function SalesPage() {
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-3xl font-semibold">Sales</h1>
+      <Link href="/dashboard" className="text-sm text-muted hover:underline">
+        &larr; Back to dashboard
+      </Link>
+      <h1 className="mt-2 font-serif text-3xl font-semibold">Sales</h1>
       <p className="mt-1 text-sm text-muted">
         Your net revenue, after Librum&apos;s platform fee.
       </p>

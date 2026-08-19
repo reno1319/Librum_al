@@ -31,8 +31,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${inter.variable} ${geistMono.variable} ${playfairDisplay.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground"
+        >
+          Skip to content
+        </a>
         <SiteHeader />
-        <div className="flex flex-1 flex-col">{children}</div>
+        <div id="main-content" className="flex flex-1 flex-col">
+          {children}
+        </div>
         <SiteFooter />
       </body>
     </html>
