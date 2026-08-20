@@ -100,16 +100,27 @@ export default async function BookDetailPage({
     data: { user },
   } = await supabase.auth.getUser();
 
+  // With migration 024 applied, RLS itself now permits fetching an
+  // unpublished book's row for its author OR a legitimate (non-refunded)
+  // owner -- not just the author, as before. So the fetch below can
+  // succeed for either, and ownership has to be known before the
+  // visibility gate can tell them apart from an unrelated authenticated
+  // reader, for whom RLS will have already returned no row at all.
   const { data: book } = await supabase
     .from("books")
     .select("*, profiles(display_name)")
     .eq("id", id)
     .single<BookWithAuthor>();
 
-  if (!book || (book.status !== "published" && book.author_id !== user?.id)) {
+  if (!book) {
     notFound();
   }
 
+  const isAuthor = user?.id === book.author_id;
+
+  // Same refunded_at is null semantics as the download route and every
+  // other ownership check on this book -- a refunded purchase never
+  // counts as ownership.
   let owned = false;
   let wishlisted = false;
   if (user) {
@@ -133,6 +144,15 @@ export default async function BookDetailPage({
     }
   }
 
+  // Belt-and-suspenders on top of RLS: even though RLS should already
+  // make an unrelated user's fetch above return no row, this explicit
+  // check is what actually decides visibility from the application's
+  // point of view, and keeps this page's behavior legible without
+  // having to reason about the RLS policy to know what it does.
+  if (book.status !== "published" && !isAuthor && !owned) {
+    notFound();
+  }
+
   const { data: reviews } = await supabase
     .from("reviews")
     .select("*, profiles(display_name)")
@@ -150,7 +170,6 @@ export default async function BookDetailPage({
     ? (allReviews.find((r) => r.reader_id === user.id) ?? null)
     : null;
 
-  const isAuthor = user?.id === book.author_id;
   const coverUrl = book.cover_path
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
@@ -332,6 +351,13 @@ export default async function BookDetailPage({
               </Link>
             )}
           </div>
+
+          {!isAuthor && book.status !== "published" && owned && (
+            <p className="mt-2 text-xs font-medium text-amber-700">
+              This book is no longer available for sale. You can still
+              download your copy anytime.
+            </p>
+          )}
 
           {!isAuthor && !owned && (
             <p className="mt-2 text-xs text-muted">
