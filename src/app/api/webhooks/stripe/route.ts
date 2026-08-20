@@ -25,6 +25,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
+  // A failure here means Stripe was paid but Librum failed to persist the
+  // entitlement/refund it's supposed to represent -- that must never be
+  // acknowledged as a 2xx, or Stripe will never redeliver the event and
+  // the gap becomes permanent and invisible. Returning 500 tells Stripe
+  // to retry; the (book_id, reader_id) upsert and the refunded_at guard
+  // below are both already safe to run again once the underlying failure
+  // clears.
+  const failWebhook = (context: Record<string, unknown>) => {
+    console.error("Stripe webhook: critical entitlement write failed", context);
+    return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
+  };
+
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     const bookId = session.metadata?.book_id;
@@ -42,11 +54,30 @@ export async function POST(request: Request) {
       // per-book ownership/download/review logic keeps working
       // unmodified), with amount_cents split proportionally to that
       // book's own price so per-book revenue reporting stays meaningful.
-      const { data: bundleBooks } = await supabase
+      const { data: bundleBooks, error: bundleBooksError } = await supabase
         .from("bundle_books")
         .select("book_id, books(price_cents)")
         .eq("bundle_id", bundleId)
         .returns<{ book_id: string; books: { price_cents: number } | null }[]>();
+
+      // This read is required to know which books to grant -- an empty
+      // result from a FAILED read looks identical, in shape, to a
+      // legitimately empty bundle unless the error itself is checked. If
+      // this failed, there is no reliable list of books to upsert at
+      // all, so the same "never acknowledge success over a failure to
+      // persist the entitlement" rule applies here as it does to the
+      // upserts themselves -- fail before attempting any write, rather
+      // than silently proceeding as if the bundle had zero books.
+      if (bundleBooksError) {
+        return failWebhook({
+          eventId: event.id,
+          checkoutSessionId: session.id,
+          paymentIntentId,
+          bundleId,
+          readerId,
+          error: bundleBooksError,
+        });
+      }
 
       const items = bundleBooks ?? [];
       const totalOriginalCents = items.reduce(
@@ -54,13 +85,20 @@ export async function POST(request: Request) {
         0,
       );
 
+      // Every item is attempted regardless of an earlier failure in this
+      // same delivery -- upserts are independent and idempotent, so
+      // letting book B persist even if book A just failed means less
+      // work is left for the eventual retry, not more. Any failure still
+      // blocks emails and the 200 below.
+      let bundleWriteFailed = false;
+
       for (const item of items) {
         const share =
           totalOriginalCents > 0
             ? Math.round((amountCents * (item.books?.price_cents ?? 0)) / totalOriginalCents)
             : Math.round(amountCents / items.length);
 
-        await supabase.from("purchases").upsert(
+        const { error: purchaseError } = await supabase.from("purchases").upsert(
           {
             book_id: item.book_id,
             reader_id: readerId,
@@ -72,13 +110,36 @@ export async function POST(request: Request) {
           },
           { onConflict: "book_id,reader_id" },
         );
+
+        if (purchaseError) {
+          bundleWriteFailed = true;
+          console.error("Stripe webhook: bundle purchase upsert failed", {
+            eventId: event.id,
+            checkoutSessionId: session.id,
+            paymentIntentId,
+            bundleId,
+            bookId: item.book_id,
+            readerId,
+            error: purchaseError,
+          });
+        }
+      }
+
+      if (bundleWriteFailed) {
+        return failWebhook({
+          eventId: event.id,
+          checkoutSessionId: session.id,
+          paymentIntentId,
+          bundleId,
+          readerId,
+        });
       }
 
       await sendBundlePurchaseEmails(supabase, { bundleId, readerId, amountCents });
     } else if (bookId && readerId) {
       const supabase = createAdminClient();
 
-      await supabase.from("purchases").upsert(
+      const { error: purchaseError } = await supabase.from("purchases").upsert(
         {
           book_id: bookId,
           reader_id: readerId,
@@ -95,6 +156,17 @@ export async function POST(request: Request) {
         { onConflict: "book_id,reader_id" },
       );
 
+      if (purchaseError) {
+        return failWebhook({
+          eventId: event.id,
+          checkoutSessionId: session.id,
+          paymentIntentId,
+          bookId,
+          readerId,
+          error: purchaseError,
+        });
+      }
+
       await sendPurchaseEmails(supabase, { bookId, readerId, amountCents });
     }
   }
@@ -109,11 +181,19 @@ export async function POST(request: Request) {
 
     if (paymentIntentId) {
       const supabase = createAdminClient();
-      await supabase
+      const { error: refundError } = await supabase
         .from("purchases")
         .update({ refunded_at: new Date().toISOString() })
         .eq("stripe_payment_intent_id", paymentIntentId)
         .is("refunded_at", null);
+
+      if (refundError) {
+        return failWebhook({
+          eventId: event.id,
+          paymentIntentId,
+          error: refundError,
+        });
+      }
     }
   }
 
