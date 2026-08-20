@@ -115,6 +115,71 @@ export async function sendBundlePurchaseEmails(
   }
 }
 
+// Used only by the Stage 9B-2 snapshot-based bundle fulfillment path
+// (see the Stripe webhook) -- deliberately does NOT re-read the live
+// "bundles" row the way sendBundlePurchaseEmails above does, since a
+// snapshot's bundle may have since been edited or deleted entirely.
+// bundleTitle/authorId are passed in already resolved from the
+// immutable checkout snapshot, so this never risks silently skipping
+// the email just because the live bundle is gone (as
+// sendBundlePurchaseEmails would, via its "if (!bundle) return").
+export async function sendSnapshotBundlePurchaseEmails(
+  admin: ReturnType<typeof createAdminClient>,
+  {
+    bundleId,
+    bundleTitle,
+    authorId,
+    readerId,
+    amountCents,
+  }: {
+    bundleId: string | null;
+    bundleTitle: string;
+    authorId: string | null;
+    readerId: string;
+    amountCents: number;
+  },
+) {
+  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
+  const [{ data: reader }, { data: author }] = await Promise.all([
+    admin.auth.admin.getUserById(readerId),
+    authorId
+      ? admin.auth.admin.getUserById(authorId)
+      : Promise.resolve({ data: { user: null }, error: null }),
+  ]);
+
+  const amount = (amountCents / 100).toFixed(2);
+  // The bundle itself may no longer exist or may no longer look like
+  // this purchase did -- link to the reader's library instead when
+  // there's no bundle_id to point at, since that's always a valid
+  // destination for what they just bought.
+  const bundleUrl = bundleId ? `${origin}/bundles/${bundleId}` : `${origin}/library`;
+
+  if (reader?.user?.email) {
+    await sendEmail(
+      reader.user.email,
+      "Your Librum purchase receipt",
+      `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Thanks for your purchase!</h1>
+        <p>You bought the <strong>${bundleTitle}</strong> bundle for $${amount}.</p>
+        <p><a href="${bundleUrl}">View your bundle</a></p>
+      </div>`,
+    );
+  }
+
+  if (author?.user?.email) {
+    await sendEmail(
+      author.user.email,
+      "You made a sale on Librum",
+      `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">You made a sale!</h1>
+        <p>Your <strong>${bundleTitle}</strong> bundle just sold for $${amount}.</p>
+        <p><a href="${origin}/dashboard/sales">View your sales</a></p>
+      </div>`,
+    );
+  }
+}
+
 // Only called on a genuine first publish (draft -> published), not on
 // every unpublish/republish toggle — see the check in publishBook.
 // Follower emails are looked up one at a time via the admin auth API,
