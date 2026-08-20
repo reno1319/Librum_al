@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { buyBundle } from "./actions";
+import { BuyBundleButton } from "./buy-bundle-button";
 import { BookCard } from "@/components/book-card";
 import type { Book, Bundle, Profile } from "@/lib/types";
 
@@ -114,12 +115,7 @@ export default async function BundleDetailPage({
           </span>
         ) : user ? (
           <form action={buyBundle.bind(null, bundle.id)}>
-            <button
-              type="submit"
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-            >
-              Buy bundle
-            </button>
+            <BuyBundleButton />
           </form>
         ) : (
           <Link
