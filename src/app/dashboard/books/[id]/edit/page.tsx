@@ -273,7 +273,9 @@ export default async function EditBookPage({
             className="text-sm"
           />
           <span className="text-xs text-muted">
-            Leave blank to keep the current manuscript.
+            Leave blank to keep the current manuscript. Replacing this
+            manuscript updates the EPUB that existing readers will receive
+            on their next download.
           </span>
         </label>
 

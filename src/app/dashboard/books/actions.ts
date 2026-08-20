@@ -295,33 +295,44 @@ export async function publishBook(bookId: string) {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("stripe_payouts_enabled")
-    .eq("id", user.id)
+  const { data: book } = await supabase
+    .from("books")
+    .select("status, price_cents")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
     .single();
 
-  if (!profile?.stripe_payouts_enabled) {
-    redirect("/dashboard?error=Connect+your+payout+account+before+publishing");
+  if (!book) {
+    redirect("/dashboard");
+  }
+
+  // Free books never touch Stripe (see getFreeBook), so payout
+  // readiness is only a real requirement for a book that will actually
+  // be sold. price_cents is read fresh from the book's own row here --
+  // never trusted from the client -- so this can't be spoofed by
+  // submitting some other "free" signal.
+  if (book.price_cents > 0) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("stripe_payouts_enabled")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile?.stripe_payouts_enabled) {
+      redirect("/dashboard?error=Connect+your+payout+account+before+publishing");
+    }
   }
 
   // Only a genuine draft -> published transition should notify
   // followers — otherwise every unpublish/republish toggle would spam
   // them again.
-  const { data: bookBefore } = await supabase
-    .from("books")
-    .select("status")
-    .eq("id", bookId)
-    .eq("author_id", user.id)
-    .single();
-
   await supabase
     .from("books")
     .update({ status: "published" })
     .eq("id", bookId)
     .eq("author_id", user.id);
 
-  if (bookBefore?.status === "draft") {
+  if (book.status === "draft") {
     const admin = createAdminClient();
     await sendNewBookEmails(admin, { bookId, authorId: user.id });
   }
@@ -367,14 +378,89 @@ export async function deleteBook(bookId: string) {
     .eq("author_id", user.id)
     .single();
 
-  if (book?.cover_path) {
-    await supabase.storage.from("covers").remove([book.cover_path]);
-  }
-  if (book?.file_path) {
-    await supabase.storage.from("manuscripts").remove([book.file_path]);
+  if (!book) {
+    redirect("/dashboard");
   }
 
-  await supabase.from("books").delete().eq("id", bookId).eq("author_id", user.id);
+  // A book with ANY acquisition history -- paid, free, or refunded --
+  // must never be hard-deletable: those purchases rows are readers'
+  // permanent record of ownership. count/head avoids reading the rows
+  // themselves; the "Authors can view purchases of their own books" RLS
+  // policy already lets this count run as the owning author. Unpublish
+  // is the only removal path once any row exists (the database itself
+  // also enforces this via purchases.book_id's foreign key -- see
+  // supabase/migrations -- so this app-level check is a UX nicety on
+  // top of a real, authoritative guarantee, not the only thing standing
+  // between a book and its buyers' purchase history).
+  const { count: purchaseCount } = await supabase
+    .from("purchases")
+    .select("id", { count: "exact", head: true })
+    .eq("book_id", bookId);
+
+  if ((purchaseCount ?? 0) > 0) {
+    redirect(
+      "/dashboard?error=This+book+has+been+acquired+by+readers+and+can%27t+be+deleted+-+unpublish+it+instead",
+    );
+  }
+
+  // The books row is deleted BEFORE any storage cleanup is attempted --
+  // deliberately, not incidentally. The count check above is only an
+  // advisory, point-in-time snapshot: a reader could acquire this book
+  // in the window between that check and this delete. Once migration
+  // 023 is applied, purchases.book_id's ON DELETE RESTRICT makes this
+  // delete itself the authoritative, race-proof guard -- it will fail
+  // if a purchase now exists, and because it runs first, no file has
+  // been touched yet if that happens. Deleting storage first would risk
+  // destroying a legitimate new buyer's manuscript even though their
+  // purchase record (and the book row) end up surviving.
+  const { error: deleteError } = await supabase
+    .from("books")
+    .delete()
+    .eq("id", bookId)
+    .eq("author_id", user.id);
+
+  if (deleteError) {
+    // 23503 is Postgres's foreign_key_violation code -- once migration
+    // 023 is applied, this is exactly the race this whole ordering
+    // exists to catch: a purchase appeared after the advisory count
+    // check above but before this delete ran, and purchases.book_id's
+    // ON DELETE RESTRICT rejected the delete to protect it. That's the
+    // same "acquired by readers" case as the earlier check, not a
+    // generic failure, so it gets the same friendly message rather than
+    // a raw constraint-violation string.
+    if (deleteError.code === "23503") {
+      redirect(
+        "/dashboard?error=This+book+has+been+acquired+by+readers+and+can%27t+be+deleted+-+unpublish+it+instead",
+      );
+    }
+    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+  }
+
+  // The book row is gone at this point -- from the author's perspective
+  // the deletion already succeeded. Any failure past here is an orphan
+  // storage file to clean up later, not a failed book deletion, so it's
+  // logged rather than surfaced as an error, and the row is never
+  // recreated to "undo" a partially-completed cleanup.
+  if (book.cover_path) {
+    const { error: coverError } = await supabase.storage
+      .from("covers")
+      .remove([book.cover_path]);
+    if (coverError) {
+      console.error("deleteBook: failed to remove orphaned cover file:", coverError);
+    }
+  }
+
+  if (book.file_path) {
+    const { error: manuscriptError } = await supabase.storage
+      .from("manuscripts")
+      .remove([book.file_path]);
+    if (manuscriptError) {
+      console.error(
+        "deleteBook: failed to remove orphaned manuscript file:",
+        manuscriptError,
+      );
+    }
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/");

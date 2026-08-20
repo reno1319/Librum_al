@@ -492,6 +492,18 @@ create policy "Authors can replace their own manuscripts"
   on storage.objects for update
   using (bucket_id = 'manuscripts' and auth.uid()::text = (storage.foldername(name))[1]);
 
+-- deleteBook (src/app/dashboard/books/actions.ts) needs to remove an
+-- author's own cover/manuscript files for a zero-acquisition book --
+-- owner-scoped the same way as the insert/update policies above, never
+-- public/anonymous. See the Phase 8 audit.
+create policy "Authors can delete their own cover images"
+  on storage.objects for delete
+  using (bucket_id = 'covers' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "Authors can delete their own manuscripts"
+  on storage.objects for delete
+  using (bucket_id = 'manuscripts' and auth.uid()::text = (storage.foldername(name))[1]);
+
 create policy "Avatars are publicly readable"
   on storage.objects for select
   using (bucket_id = 'avatars');
@@ -512,7 +524,14 @@ create policy "Users can replace their own avatar"
 
 create table public.purchases (
   id uuid primary key default gen_random_uuid(),
-  book_id uuid not null references public.books(id) on delete cascade,
+  -- restrict, not cascade: a book with any acquisition history must
+  -- never be deletable -- see the Phase 8 audit and
+  -- 023_restrict_purchase_book_deletion.sql. Unlike bundle_id below
+  -- (correctly "set null", since deleting a bundle shouldn't affect the
+  -- per-book purchase records it fanned out to), book_id is the
+  -- purchase's actual subject and must never be severed or allow its
+  -- row to be cascaded away.
+  book_id uuid not null references public.books(id) on delete restrict,
   reader_id uuid not null references public.profiles(id) on delete cascade,
   -- Not unique on its own: a bundle checkout is one Stripe session that
   -- fans out into one purchase row per book in the bundle, so several

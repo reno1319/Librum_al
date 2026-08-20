@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { publishBook, unpublishBook, deleteBook } from "./books/actions";
 import { getPublishChecklist } from "@/lib/publish-checklist";
+import { DeleteBookButton } from "./delete-book-button";
 import type { Book } from "@/lib/types";
 
 export default async function DashboardPage({
@@ -183,12 +184,7 @@ export default async function DashboardPage({
                   )}
 
                   <form action={deleteBook.bind(null, book.id)}>
-                    <button
-                      type="submit"
-                      className="rounded-lg border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
-                    >
-                      Delete
-                    </button>
+                    <DeleteBookButton title={book.title} />
                   </form>
                 </div>
 
