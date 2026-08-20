@@ -9,6 +9,20 @@ type Purchase = {
   book_id: string;
   amount_cents: number;
   created_at: string;
+  stripe_checkout_session_id: string;
+};
+
+// A fulfilled, non-refunded bundle snapshot whose Stripe Checkout Session
+// isn't represented by any of this author's own purchases rows -- i.e. a
+// snapshot bundle payment where every item turned out to already be
+// actively owned through some unrelated transaction (see the Phase 9B-2
+// zero-eligible-item accounting fix). Real revenue with zero new book
+// entitlements to attribute it to -- purchases alone would under-report
+// this author's actual revenue by exactly this amount.
+type BundleSnapshotRevenue = {
+  stripe_checkout_session_id: string | null;
+  total_amount_cents: number | null;
+  fulfilled_at: string;
 };
 
 function netCents(amountCents: number) {
@@ -33,11 +47,27 @@ export default async function SalesPage() {
     bookIds.length > 0
       ? await supabase
           .from("purchases")
-          .select("book_id, amount_cents, created_at")
+          .select("book_id, amount_cents, created_at, stripe_checkout_session_id")
           .in("book_id", bookIds)
           .is("refunded_at", null)
           .returns<Purchase[]>()
       : { data: [] as Purchase[] };
+
+  // Own-client (RLS-respecting, not admin) read -- migration 027's
+  // "Authors can view their own fulfilled bundle snapshot transactions"
+  // policy is what makes this legal; it also already restricts these
+  // rows to auth.uid() = author_id and fulfilled_at is not null, so an
+  // in-flight/unpaid/expired checkout stays invisible here regardless of
+  // this query's own filters. refunded_at is filtered explicitly anyway,
+  // matching this page's existing purchases query style, rather than
+  // relying solely on the RLS policy (which doesn't cover refund state).
+  const { data: snapshots } = await supabase
+    .from("bundle_checkout_snapshots")
+    .select("stripe_checkout_session_id, total_amount_cents, fulfilled_at")
+    .eq("author_id", user!.id)
+    .not("fulfilled_at", "is", null)
+    .is("refunded_at", null)
+    .returns<BundleSnapshotRevenue[]>();
 
   const { data: views } =
     bookIds.length > 0
@@ -50,12 +80,40 @@ export default async function SalesPage() {
 
   const allPurchases = purchases ?? [];
   const allViews = views ?? [];
+
+  // A normal or partial-ownership bundle checkout's revenue is already
+  // fully represented by the purchases rows it wrote (their amounts sum
+  // to the snapshot's own total_amount_cents by construction -- see the
+  // webhook's allocation logic) -- adding the snapshot's total again
+  // here would double-count it. Only a snapshot whose Stripe Checkout
+  // Session ID does NOT appear among this author's own purchases
+  // qualifies as supplementary, not-yet-represented revenue: the
+  // zero-eligible-item case where every book was already owned, so
+  // fulfillment wrote no purchases row at all for that payment.
+  const purchasedSessionIds = new Set(
+    allPurchases.map((p) => p.stripe_checkout_session_id),
+  );
+  const transactionOnlySnapshots = (snapshots ?? []).filter(
+    (snapshot) =>
+      snapshot.stripe_checkout_session_id !== null &&
+      !purchasedSessionIds.has(snapshot.stripe_checkout_session_id),
+  );
+
+  // "Units" means books acquired -- one purchases row per book per
+  // reader (see the `purchases` table's own unique(book_id, reader_id)
+  // constraint and this page's per-book breakdown below, both keyed on
+  // book_id). A transaction-only snapshot has no purchases row and
+  // therefore no book to count -- it must NOT increment Units, and
+  // doesn't: totalUnitsSold is computed from allPurchases alone, exactly
+  // as before this change.
   const totalUnitsSold = allPurchases.length;
   const totalViews = allViews.length;
-  const totalNetCents = allPurchases.reduce(
-    (sum, p) => sum + netCents(p.amount_cents),
-    0,
-  );
+  const totalNetCents =
+    allPurchases.reduce((sum, p) => sum + netCents(p.amount_cents), 0) +
+    transactionOnlySnapshots.reduce(
+      (sum, snapshot) => sum + netCents(snapshot.total_amount_cents ?? 0),
+      0,
+    );
   const publishedCount =
     books?.filter((book) => book.status === "published").length ?? 0;
 
@@ -86,6 +144,25 @@ export default async function SalesPage() {
     purchaseDate.setHours(0, 0, 0, 0);
     const bucket = days.find((d) => d.date.getTime() === purchaseDate.getTime());
     if (bucket) bucket.cents += netCents(purchase.amount_cents);
+  }
+
+  // Bucketed by fulfilled_at, not created_at: fulfilled_at is set
+  // atomically by the webhook at the moment Stripe confirms this
+  // transaction was actually paid (the same moment a normal purchase's
+  // own created_at is written), while created_at on a snapshot is
+  // checkout-START time -- when the reader clicked "Buy," potentially
+  // hours or days before payment, sometimes on an entirely different
+  // calendar day. Revenue recognition belongs on the day payment
+  // completed. Only transactionOnlySnapshots are added here --
+  // normal/partial-ownership snapshots are excluded by the same
+  // session-id membership check used for Net revenue above, so their
+  // revenue (already charted via the purchases loop) is never counted
+  // twice in this same daily series.
+  for (const snapshot of transactionOnlySnapshots) {
+    const snapshotDate = new Date(snapshot.fulfilled_at);
+    snapshotDate.setHours(0, 0, 0, 0);
+    const bucket = days.find((d) => d.date.getTime() === snapshotDate.getTime());
+    if (bucket) bucket.cents += netCents(snapshot.total_amount_cents ?? 0);
   }
 
   const maxCents = Math.max(1, ...days.map((d) => d.cents));

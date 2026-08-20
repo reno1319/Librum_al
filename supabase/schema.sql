@@ -427,9 +427,24 @@ create index bundle_books_book_id_idx on public.bundle_books(book_id);
 -- time, and purchases.amount_cents (per book, per row) is already the
 -- authoritative record of it once it does. Duplicating it here would be
 -- redundant state with no reconciliation benefit.
+--
+-- stripe_payment_intent_id/refunded_at (added by migration 027) make
+-- this row the durable transaction/payment record for a snapshot bundle
+-- checkout, independent of how many (if any) purchases rows it produced
+-- -- see that migration's own comment for the full Phase 9B-2
+-- zero-eligible-item rationale. stripe_payment_intent_id is UNIQUE,
+-- unlike purchases.stripe_payment_intent_id: one snapshot maps to
+-- exactly one Stripe Checkout Session (stripe_checkout_session_id above
+-- is already unique on this table) and a "payment" mode session has
+-- exactly one PaymentIntent, so this is genuinely 1:1, and the
+-- constraint catches a real bug class rather than being decorative.
+-- NULL is expected and unconstrained (a free/$0 bundle fulfillment never
+-- gets a Stripe PaymentIntent at all, and pre-fulfillment rows haven't
+-- been paid yet).
 create table public.bundle_checkout_snapshots (
   id uuid primary key default gen_random_uuid(),
   stripe_checkout_session_id text unique,
+  stripe_payment_intent_id text unique,
   bundle_id uuid references public.bundles(id) on delete set null,
   bundle_title text not null,
   author_id uuid references public.profiles(id) on delete set null,
@@ -439,17 +454,33 @@ create table public.bundle_checkout_snapshots (
   items jsonb not null,
   protection_expires_at timestamptz not null,
   fulfilled_at timestamptz,
+  refunded_at timestamptz,
   created_at timestamptz not null default now()
 );
 
 alter table public.bundle_checkout_snapshots enable row level security;
 
--- Deliberately zero policies for anon/authenticated -- nothing in the
--- product surfaces "my pending checkout" to a reader anywhere. The only
--- legitimate writer is create_bundle_checkout_snapshot() below
--- (SECURITY DEFINER); the only legitimate reader is the Stripe webhook
--- (service role, bypasses RLS entirely -- no policy is added "for
--- symmetry", since a service-role policy would be inert).
+-- No reader-facing policy is added -- nothing in the product surfaces
+-- "my pending checkout" to a reader anywhere, and the Stripe webhook
+-- (service role, bypasses RLS entirely) is the only writer/fulfiller.
+--
+-- One SELECT policy exists, added by migration 027 once the sales
+-- dashboard needed to fold a fulfilled bundle's total_amount_cents into
+-- an author's own revenue reporting (see the Phase 9B-2 zero-eligible-
+-- item accounting fix) using the ordinary, RLS-respecting client rather
+-- than the admin client. Scoped as narrowly as that need: auth.uid() =
+-- author_id (same scoping as "Authors can view purchases of their own
+-- books" on purchases below -- no reader access is granted by this
+-- policy at all), and fulfilled_at is not null, so an in-flight, unpaid,
+-- or expired checkout attempt stays exactly as invisible to its own
+-- author as it always was.
+create policy "Authors can view their own fulfilled bundle snapshot transactions"
+  on public.bundle_checkout_snapshots
+  for select
+  using (
+    auth.uid() = author_id
+    and fulfilled_at is not null
+  );
 
 create index bundle_checkout_snapshots_bundle_id_idx on public.bundle_checkout_snapshots(bundle_id);
 create index bundle_checkout_snapshots_author_id_idx on public.bundle_checkout_snapshots(author_id);

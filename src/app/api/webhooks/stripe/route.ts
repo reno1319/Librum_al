@@ -8,6 +8,31 @@ import {
   sendSnapshotBundlePurchaseEmails,
 } from "@/lib/email";
 
+// Stripe's own type for both Checkout.Session.payment_intent and
+// Charge.payment_intent is `string | Stripe.PaymentIntent | null` --
+// which shape arrives depends on whether the object was expanded when
+// fetched. Only the plain-string id case was previously handled here
+// (an expanded object would have been silently treated as "missing"),
+// which was harmless while a missing id was already tolerated
+// everywhere it's used, but stops being harmless once the snapshot path
+// starts REQUIRING a usable id for a paid transaction (see
+// fulfillBundleSnapshot below). This never invents an id -- an object
+// without a valid string `id` field still resolves to null, same as a
+// bare null does.
+function extractPaymentIntentId(
+  paymentIntent: string | Stripe.PaymentIntent | null,
+): string | null {
+  if (typeof paymentIntent === "string") return paymentIntent;
+  if (
+    paymentIntent &&
+    typeof paymentIntent === "object" &&
+    typeof paymentIntent.id === "string"
+  ) {
+    return paymentIntent.id;
+  }
+  return null;
+}
+
 type SnapshotItem = {
   bookId: string;
   title: string;
@@ -93,6 +118,53 @@ function allocateBundleRevenue(
     const exactShare =
       (amountTotalCents * item.priceCentsAtCheckout) / totalFrozenPriceCents;
     return { bookId: item.bookId, amount: Math.floor(exactShare) };
+  });
+
+  let remainingCents =
+    amountTotalCents - shares.reduce((sum, share) => sum + share.amount, 0);
+
+  for (let i = 0; i < shares.length && remainingCents > 0; i++) {
+    shares[i].amount += 1;
+    remainingCents -= 1;
+  }
+
+  return new Map(shares.map((share) => [share.bookId, share.amount]));
+}
+
+// Legacy-path counterpart to allocateBundleRevenue above, for bundle
+// checkouts created before the migration-025 snapshot flow (metadata
+// carries bundle_id + reader_id directly, not a snapshot_id). The
+// original code here computed each item's share independently via
+// Math.round(amountTotalCents * itemPrice / totalPrice), which is NOT
+// guaranteed to sum to exactly amountTotalCents -- independent roundings
+// can drift a cent in either direction depending on the exact inputs.
+// Since this file is already being modified for the ownership-
+// preservation fix below, this reuses the same floor-then-distribute-
+// the-remainder technique as allocateBundleRevenue so retries of this
+// path are exact and deterministic too. Ordered by book_id, not by any
+// created_at/position column -- the query that produces `items` here
+// has no ORDER BY and Postgres does not guarantee row order without
+// one, so book_id (stable, always present) is the only value available
+// to make the remainder-cent distribution reproducible identically
+// across every retry of the same event.
+function allocateLegacyBundleRevenue(
+  items: { book_id: string; books: { price_cents: number } | null }[],
+  amountTotalCents: number,
+): Map<string, number> {
+  const totalOriginalCents = items.reduce(
+    (sum, item) => sum + (item.books?.price_cents ?? 0),
+    0,
+  );
+  const orderedItems = [...items].sort((a, b) =>
+    a.book_id < b.book_id ? -1 : a.book_id > b.book_id ? 1 : 0,
+  );
+
+  const shares = orderedItems.map((item) => {
+    const exactShare =
+      totalOriginalCents > 0
+        ? (amountTotalCents * (item.books?.price_cents ?? 0)) / totalOriginalCents
+        : amountTotalCents / orderedItems.length;
+    return { bookId: item.book_id, amount: Math.floor(exactShare) };
   });
 
   let remainingCents =
@@ -223,6 +295,37 @@ async function fulfillBundleSnapshot(
     });
   }
 
+  // A PAID snapshot transaction (amountCents > 0) must never be claimed
+  // fulfilled without a usable Stripe payment intent id -- see migration
+  // 027. bundle_checkout_snapshots is now this transaction's durable
+  // payment record (independent of how many purchases rows, if any, it
+  // produces), and a record with no payment intent can never be matched
+  // by a later charge.refunded event -- exactly the accounting/refund
+  // blind spot this fix exists to close. amountCents === 0 is exempt: a
+  // genuinely free bundle never gets a Stripe PaymentIntent at all (Stripe
+  // does not create one for a $0 total Checkout Session), so requiring
+  // one here would make every free bundle unfulfillable.
+  //
+  // Placed here -- before the classification loop and before any
+  // purchases write is even considered -- so that a missing payment
+  // intent on a paid transaction fails this delivery before anything is
+  // written, not after. Nothing above this point writes to purchases or
+  // claims the snapshot, so this can never leave a partially-fulfilled
+  // snapshot behind merely because of this check; a retry (once Stripe
+  // resends an event carrying a resolvable payment intent, which for a
+  // completed Checkout Session should always be the case) starts from
+  // the same clean, unwritten state.
+  if (amountCents > 0 && !paymentIntentId) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason:
+        "paid snapshot checkout session has no usable Stripe payment intent id",
+    });
+  }
+
   // Stripe's own charged total is authoritative for what was actually
   // paid -- bundle_price_cents_at_checkout is only ever used to derive
   // allocation RATIOS between books, never as proof of payment. Once a
@@ -244,60 +347,65 @@ async function fulfillBundleSnapshot(
     });
   }
 
-  // A bundle whose books all price out to 0 has no ratio to split a
-  // POSITIVE Stripe total across -- unlike the legacy path (which falls
-  // back to an equal split for this same condition), the new path
-  // treats it as inconsistent commercial data rather than inventing an
-  // allocation: 0 total item price with a real charge behind it should
-  // never occur once Stage 2B prices Stripe's checkout directly from
-  // this same frozen bundle price, so it's failed loudly here instead
-  // of silently guessed at. A genuinely free bundle (amountCents also
-  // 0) is unaffected -- allocateBundleRevenue below still correctly
-  // gives every item a $0 share in that case.
-  const totalFrozenPriceCents = items.reduce(
-    (sum, item) => sum + item.priceCentsAtCheckout,
-    0,
-  );
-  if (totalFrozenPriceCents === 0 && amountCents > 0) {
-    return failWebhook({
-      eventId: event.id,
-      checkoutSessionId: session.id,
-      paymentIntentId,
-      snapshotId,
-      reason:
-        "snapshot item prices sum to zero but Stripe charged a positive amount",
-    });
-  }
+  // Classify every item's existing ownership BEFORE computing any
+  // allocation or writing anything -- see the Phase 9B-2 bundle
+  // fulfillment integrity audit. A prior version of this code
+  // distinguished only "written by this same session" (leave alone)
+  // from "everything else" (upsert fresh values) -- but "everything
+  // else" wrongly included a book the reader already actively owns
+  // through a completely unrelated transaction, and upserting into that
+  // row silently overwrote its real purchase history (session, payment
+  // intent, amount, bundle_id) with this bundle's values. The fix is
+  // this three-way classification:
+  //
+  // - "same_session": already written by an earlier delivery of this
+  //   exact event -- left untouched, exactly as before.
+  // - "active_other_session": an existing, non-refunded row belonging
+  //   to a DIFFERENT transaction -- the reader already owns this book
+  //   for reasons that have nothing to do with this bundle checkout.
+  //   Must be left completely untouched -- no field of that row may
+  //   change -- and excluded entirely from this transaction's revenue
+  //   allocation, since no new entitlement is being granted for it.
+  // - "eligible": no existing row, or an existing row that's refunded
+  //   (the reader does NOT currently own this book) -- gets a fresh
+  //   write and is included in this transaction's allocation, exactly
+  //   like every other purchase path in this file already does for a
+  //   genuine new or renewed acquisition.
+  //
+  // Known, deliberately NOT addressed by this fix: because purchases has
+  // unique(book_id, reader_id), a refunded row being reacquired here (a
+  // "no existing row" or "refunded row" case above, both -> eligible)
+  // upserts onto that SAME row rather than inserting a new one. The
+  // original refunded acquisition's own transaction identity (its own
+  // stripe_checkout_session_id/payment_intent/amount_cents) is
+  // overwritten by the reacquisition -- there is no separate historical
+  // record of the earlier, refunded purchase after this. This is an
+  // existing architectural limitation of the one-row-per-(book,reader)
+  // schema, not something introduced or fixed here; redesigning it is
+  // out of scope for this correction.
+  const classifications = new Map<
+    string,
+    "same_session" | "active_other_session" | "eligible"
+  >();
 
-  const allocations = allocateBundleRevenue(items, amountCents);
-
-  let bundleWriteFailed = false;
+  const existingAmountCentsByBookId = new Map<string, number>();
 
   for (const item of items) {
-    // A retry (Stripe redelivering this same event after an earlier
-    // partial failure, or a second concurrent delivery) must never
-    // clear a refunded_at that was legitimately set on this row in the
-    // meantime -- distinct from a genuine NEW purchase of a book this
-    // reader previously owned and had refunded, which correctly SHOULD
-    // clear a stale refunded_at. The two are told apart by whether the
-    // existing row (if any) already belongs to THIS checkout session:
-    // same session id -> this row was already written by an earlier
-    // delivery of this exact event, so it's left completely untouched,
-    // refunded_at included. Different session id (or no row at all) ->
-    // this is either the first write ever, or a separate, later
-    // purchase superseding old history -- both correctly get a fresh
-    // refunded_at: null, exactly like every other purchase path in this
-    // file already does.
     const { data: existing, error: existingError } = await supabase
       .from("purchases")
-      .select("id, stripe_checkout_session_id")
+      .select("stripe_checkout_session_id, refunded_at, amount_cents")
       .eq("book_id", item.bookId)
       .eq("reader_id", snapshot.reader_id)
       .maybeSingle();
 
     if (existingError) {
-      bundleWriteFailed = true;
-      console.error("Stripe webhook: snapshot bundle purchase lookup failed", {
+      // Allocation below depends on knowing every item's classification
+      // up front -- proceeding with an unknown classification risks
+      // either wrongly touching an active row or miscomputing the
+      // split, so this fails the whole delivery here rather than
+      // continuing with incomplete information. Nothing has been
+      // written yet at this point, so this is fully retry-safe.
+      return failWebhook({
         eventId: event.id,
         checkoutSessionId: session.id,
         paymentIntentId,
@@ -306,13 +414,127 @@ async function fulfillBundleSnapshot(
         readerId: snapshot.reader_id,
         error: existingError,
       });
-      continue;
+    }
+
+    if (existing) {
+      existingAmountCentsByBookId.set(item.bookId, existing.amount_cents);
     }
 
     if (existing && existing.stripe_checkout_session_id === session.id) {
-      continue;
+      classifications.set(item.bookId, "same_session");
+    } else if (existing && existing.refunded_at === null) {
+      classifications.set(item.bookId, "active_other_session");
+    } else {
+      classifications.set(item.bookId, "eligible");
+    }
+  }
+
+  const sameSessionItems = items.filter(
+    (item) => classifications.get(item.bookId) === "same_session",
+  );
+  const eligibleItems = items.filter(
+    (item) => classifications.get(item.bookId) === "eligible",
+  );
+  // active_other_session items are simply never referenced again below --
+  // no array is needed for them, since "excluded from everything" is
+  // exactly what not appearing in either array above already means.
+
+  // SAME_SESSION rows are FIXED, already-committed amounts from an
+  // earlier delivery of this exact event -- never recomputed, never
+  // rewritten. alreadyAllocatedCents is the sum of what's already on
+  // disk for them; remainingCents is what's left of THIS transaction's
+  // charge to divide across whatever still needs a write. On a retry
+  // following a partial failure (A written, B failed), this makes B
+  // recover exactly its original share -- 599 - 349 = 250 -- without
+  // ever touching A's committed 349, rather than re-deriving a fresh
+  // ratio that could hand B the full 599 a second time.
+  const alreadyAllocatedCents = sameSessionItems.reduce(
+    (sum, item) => sum + (existingAmountCentsByBookId.get(item.bookId) ?? 0),
+    0,
+  );
+  const remainingCents = amountCents - alreadyAllocatedCents;
+
+  // Committed same_session amounts already exceeding what Stripe charged
+  // for this transaction is not something any allocation choice here can
+  // fix -- it means the amounts on disk are wrong by construction. Fail
+  // loudly rather than deriving a nonsensical negative or zero-clamped
+  // share for the remaining items.
+  if (remainingCents < 0) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason:
+        "already-committed same-session purchase amounts exceed this Stripe transaction's charged total",
+      alreadyAllocatedCents,
+      amountCents,
+    });
+  }
+
+  if (eligibleItems.length === 0) {
+    // Nothing left to write -- either every item was already actively
+    // owned (alreadyAllocatedCents is 0, remainingCents === amountCents,
+    // and that's fine: no revenue from THIS transaction was ever
+    // claimed for any of them) or this is a full duplicate delivery
+    // (every item is same_session). In the duplicate-delivery case,
+    // remainingCents must be exactly 0 -- anything else means the
+    // committed rows don't actually reconcile to what Stripe charged,
+    // which must be surfaced, not silently tolerated as "already done."
+    if (sameSessionItems.length > 0 && remainingCents !== 0) {
+      return failWebhook({
+        eventId: event.id,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        snapshotId,
+        reason:
+          "same-session purchase amounts do not reconcile to this Stripe transaction's charged total and there are no eligible items left to absorb the difference",
+        alreadyAllocatedCents,
+        amountCents,
+      });
+    }
+  }
+
+  let allocations = new Map<string, number>();
+
+  if (eligibleItems.length > 0) {
+    const eligibleFrozenPriceCents = eligibleItems.reduce(
+      (sum, item) => sum + item.priceCentsAtCheckout,
+      0,
+    );
+
+    // A positive remaining amount with nothing but zero-priced eligible
+    // items to divide it across has no ratio to derive shares from --
+    // treated as inconsistent commercial data rather than inventing an
+    // allocation, same posture as every other allocation path in this
+    // file. A remainingCents of 0 (see below) is unaffected either way.
+    if (eligibleFrozenPriceCents === 0 && remainingCents > 0) {
+      return failWebhook({
+        eventId: event.id,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        snapshotId,
+        reason:
+          "eligible snapshot item prices sum to zero but a positive remaining amount must still be allocated",
+      });
     }
 
+    // Only the remaining, not-yet-committed amount is divided across
+    // eligibleItems -- allocateBundleRevenue's floor+remainder-
+    // distribution still guarantees this sums to EXACTLY remainingCents,
+    // so alreadyAllocatedCents + sum(these shares) === amountCents
+    // always holds. remainingCents === 0 here (all revenue already
+    // committed to same_session rows, or a genuinely free bundle) is
+    // handled without a special case: every eligible item's exact share
+    // is 0 * price / total = 0, so each legitimately receives $0 --
+    // correct entitlement (ownership is still granted) with correct
+    // accounting (adds nothing to the sum).
+    allocations = allocateBundleRevenue(eligibleItems, remainingCents);
+  }
+
+  let bundleWriteFailed = false;
+
+  for (const item of eligibleItems) {
     const { error: purchaseError } = await supabase.from("purchases").upsert(
       {
         book_id: item.bookId,
@@ -359,6 +581,7 @@ async function fulfillBundleSnapshot(
     .update({
       fulfilled_at: new Date().toISOString(),
       total_amount_cents: amountCents,
+      stripe_payment_intent_id: paymentIntentId,
     })
     .eq("id", snapshotId)
     .is("fulfilled_at", null)
@@ -491,8 +714,7 @@ export async function POST(request: Request) {
     const bundleId = session.metadata?.bundle_id;
     const readerId = session.metadata?.reader_id;
     const snapshotId = session.metadata?.snapshot_id;
-    const paymentIntentId =
-      typeof session.payment_intent === "string" ? session.payment_intent : null;
+    const paymentIntentId = extractPaymentIntentId(session.payment_intent);
     const amountCents = session.amount_total ?? 0;
 
     // NEW bundle checkouts (created once buyBundle is updated to use
@@ -551,10 +773,131 @@ export async function POST(request: Request) {
       }
 
       const items = bundleBooks ?? [];
-      const totalOriginalCents = items.reduce(
-        (sum, item) => sum + (item.books?.price_cents ?? 0),
+
+      // Same ownership-preservation fix as the snapshot-based path above
+      // -- this legacy path upserts on the exact same (book_id,
+      // reader_id) conflict target, so it has the identical exposure: a
+      // book the reader already actively owns through an unrelated
+      // transaction must never be touched or counted into this
+      // transaction's allocation. See the Phase 9B-2 bundle fulfillment
+      // integrity audit.
+      const classifications = new Map<
+        string,
+        "same_session" | "active_other_session" | "eligible"
+      >();
+      const existingAmountCentsByBookId = new Map<string, number>();
+
+      for (const item of items) {
+        const { data: existing, error: existingError } = await supabase
+          .from("purchases")
+          .select("stripe_checkout_session_id, refunded_at, amount_cents")
+          .eq("book_id", item.book_id)
+          .eq("reader_id", readerId)
+          .maybeSingle();
+
+        if (existingError) {
+          return failWebhook({
+            eventId: event.id,
+            checkoutSessionId: session.id,
+            paymentIntentId,
+            bundleId,
+            readerId,
+            bookId: item.book_id,
+            error: existingError,
+          });
+        }
+
+        if (existing) {
+          existingAmountCentsByBookId.set(item.book_id, existing.amount_cents);
+        }
+
+        if (existing && existing.stripe_checkout_session_id === session.id) {
+          classifications.set(item.book_id, "same_session");
+        } else if (existing && existing.refunded_at === null) {
+          classifications.set(item.book_id, "active_other_session");
+        } else {
+          classifications.set(item.book_id, "eligible");
+        }
+      }
+
+      const sameSessionItems = items.filter(
+        (item) => classifications.get(item.book_id) === "same_session",
+      );
+      const eligibleItems = items.filter(
+        (item) => classifications.get(item.book_id) === "eligible",
+      );
+      // active_other_session items are simply never referenced again --
+      // no array needed for them; not appearing in either array above
+      // already means "excluded from everything."
+
+      // Fixed-committed-amount model, identical to the snapshot path
+      // above: sameSessionItems' existing amount_cents is authoritative
+      // and is never recomputed or rewritten. Only the amount NOT yet
+      // committed to a same-session row is divided across eligibleItems.
+      const alreadyAllocatedCents = sameSessionItems.reduce(
+        (sum, item) => sum + (existingAmountCentsByBookId.get(item.book_id) ?? 0),
         0,
       );
+      const remainingCents = amountCents - alreadyAllocatedCents;
+
+      if (remainingCents < 0) {
+        return failWebhook({
+          eventId: event.id,
+          checkoutSessionId: session.id,
+          paymentIntentId,
+          bundleId,
+          readerId,
+          reason:
+            "already-committed same-session purchase amounts exceed this Stripe transaction's charged total",
+          alreadyAllocatedCents,
+          amountCents,
+        });
+      }
+
+      if (
+        eligibleItems.length === 0 &&
+        sameSessionItems.length > 0 &&
+        remainingCents !== 0
+      ) {
+        return failWebhook({
+          eventId: event.id,
+          checkoutSessionId: session.id,
+          paymentIntentId,
+          bundleId,
+          readerId,
+          reason:
+            "same-session purchase amounts do not reconcile to this Stripe transaction's charged total and there are no eligible items left to absorb the difference",
+          alreadyAllocatedCents,
+          amountCents,
+        });
+      }
+
+      let allocations = new Map<string, number>();
+
+      if (eligibleItems.length > 0) {
+        const eligibleOriginalCents = eligibleItems.reduce(
+          (sum, item) => sum + (item.books?.price_cents ?? 0),
+          0,
+        );
+
+        if (eligibleOriginalCents === 0 && remainingCents > 0) {
+          return failWebhook({
+            eventId: event.id,
+            checkoutSessionId: session.id,
+            paymentIntentId,
+            bundleId,
+            readerId,
+            reason:
+              "eligible legacy bundle item prices sum to zero but a positive remaining amount must still be allocated",
+          });
+        }
+
+        // Only the remaining, not-yet-committed amount is divided --
+        // allocateLegacyBundleRevenue's floor+remainder-distribution
+        // guarantees this sums to exactly remainingCents, so
+        // alreadyAllocatedCents + sum(these shares) === amountCents.
+        allocations = allocateLegacyBundleRevenue(eligibleItems, remainingCents);
+      }
 
       // Every item is attempted regardless of an earlier failure in this
       // same delivery -- upserts are independent and idempotent, so
@@ -563,19 +906,14 @@ export async function POST(request: Request) {
       // blocks emails and the 200 below.
       let bundleWriteFailed = false;
 
-      for (const item of items) {
-        const share =
-          totalOriginalCents > 0
-            ? Math.round((amountCents * (item.books?.price_cents ?? 0)) / totalOriginalCents)
-            : Math.round(amountCents / items.length);
-
+      for (const item of eligibleItems) {
         const { error: purchaseError } = await supabase.from("purchases").upsert(
           {
             book_id: item.book_id,
             reader_id: readerId,
             stripe_checkout_session_id: session.id,
             stripe_payment_intent_id: paymentIntentId,
-            amount_cents: share,
+            amount_cents: allocations.get(item.book_id) ?? 0,
             bundle_id: bundleId,
             refunded_at: null,
           },
@@ -647,8 +985,7 @@ export async function POST(request: Request) {
   // see the note in migrations/011_add_refunds.sql.
   if (event.type === "charge.refunded") {
     const charge = event.data.object as Stripe.Charge;
-    const paymentIntentId =
-      typeof charge.payment_intent === "string" ? charge.payment_intent : null;
+    const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
 
     if (paymentIntentId) {
       const supabase = createAdminClient();
@@ -663,6 +1000,41 @@ export async function POST(request: Request) {
           eventId: event.id,
           paymentIntentId,
           error: refundError,
+        });
+      }
+
+      // Snapshot-level counterpart to the purchases update above -- see
+      // migration 027. A snapshot bundle transaction where every item was
+      // already actively owned through some unrelated purchase writes
+      // ZERO purchases rows (see fulfillBundleSnapshot's zero-eligible
+      // handling), so it has no row the update above could ever match --
+      // without this, that payment's later refund would be entirely
+      // unrepresented in Librum. Run unconditionally alongside the
+      // purchases update (not only when it matched zero rows): a normal
+      // bundle payment's snapshot also carries this same payment_intent,
+      // and marking it refunded too keeps the transaction-level record
+      // consistent with the entitlement-level one it fulfilled.
+      //
+      // Independently idempotent, same as the purchases update: its own
+      // `refunded_at is null` guard means a duplicate delivery of this
+      // event matches zero rows here, a clean no-op. If this update
+      // errors after the purchases update already succeeded, failing the
+      // whole delivery (rather than returning 200) is deliberate -- a
+      // retry safely completes just this remaining half, since the
+      // purchases update above is itself a no-op on that retry (already
+      // refunded). Never silently acknowledge a refund event that only
+      // partially persisted.
+      const { error: snapshotRefundError } = await supabase
+        .from("bundle_checkout_snapshots")
+        .update({ refunded_at: new Date().toISOString() })
+        .eq("stripe_payment_intent_id", paymentIntentId)
+        .is("refunded_at", null);
+
+      if (snapshotRefundError) {
+        return failWebhook({
+          eventId: event.id,
+          paymentIntentId,
+          error: snapshotRefundError,
         });
       }
     }
