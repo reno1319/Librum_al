@@ -97,7 +97,8 @@ export default async function DashboardPage({
           <Link href="/dashboard/payouts" className="font-medium underline">
             connect a payout account
           </Link>{" "}
-          before you can publish a book.
+          before you can publish a paid book. Free books can be published
+          without one.
         </p>
       )}
 

@@ -108,7 +108,7 @@ export default async function SalesPage() {
           </p>
         </div>
         <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <p className="text-sm text-muted">Units sold</p>
+          <p className="text-sm text-muted">Units</p>
           <p className="mt-1 font-serif text-2xl font-semibold">
             {totalUnitsSold}
           </p>
@@ -183,7 +183,7 @@ export default async function SalesPage() {
                 {book.views} view{book.views === 1 ? "" : "s"}
               </span>
               <span className="text-sm text-muted">
-                {book.unitsSold} sold
+                {book.unitsSold} unit{book.unitsSold === 1 ? "" : "s"}
               </span>
               <span className="text-sm font-semibold text-primary">
                 ${(book.netCents / 100).toFixed(2)}

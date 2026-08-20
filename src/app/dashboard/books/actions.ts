@@ -3,6 +3,7 @@
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import JSZip from "jszip";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { GENRES } from "@/lib/genres";
@@ -11,6 +12,109 @@ import { sendNewBookEmails } from "@/lib/email";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
+
+// container.xml is always a tiny, fixed-shape file (a few hundred bytes
+// in every real EPUB). JSZip has no supported, public API to inspect an
+// entry's uncompressed size before decompressing it -- the only such
+// property, _data.uncompressedSize, is explicitly documented as private
+// in JSZip's own type definitions ("this private _data property... if/
+// when it is made public this should be uncommented"), so it is
+// deliberately not used here. Instead, container.xml's decoded text is
+// rejected outright if it's larger than this cap -- a lightweight,
+// public-API-only bound on how much of it gets processed, not zip-bomb
+// protection for the archive as a whole (which remains bounded only by
+// the existing 50MB upload limit).
+const MAX_CONTAINER_XML_BYTES = 16 * 1024;
+
+// Deliberately lightweight structural validation, not EPUBCheck-style
+// conformance validation: confirms the upload is a real ZIP archive with
+// the specific handful of entries every EPUB must have (the mimetype
+// file with the exact required value, a container.xml that points at a
+// package/OPF document, and that document actually existing in the
+// archive) -- without ever decompressing or reading the manuscript
+// content itself. This is enough to reject "any file renamed .epub"
+// while staying far short of validating the book's actual EPUB
+// conformance, which is out of scope.
+async function isValidEpubStructure(bytes: Buffer): Promise<boolean> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(bytes);
+  } catch {
+    return false;
+  }
+
+  const mimetypeFile = zip.file("mimetype");
+  if (!mimetypeFile) return false;
+
+  // The EPUB spec requires this entry to be stored uncompressed. JSZip
+  // exposes each entry's compression method via the public, documented
+  // `options.compression` property (typed as 'STORE' | 'DEFLATE'), so
+  // this can be checked without touching any private/internal API.
+  if (mimetypeFile.options.compression !== "STORE") return false;
+
+  let mimetype: string;
+  try {
+    mimetype = (await mimetypeFile.async("string")).trim();
+  } catch {
+    return false;
+  }
+  if (mimetype !== "application/epub+zip") return false;
+
+  const containerFile = zip.file("META-INF/container.xml");
+  if (!containerFile) return false;
+
+  let containerXml: string;
+  try {
+    containerXml = await containerFile.async("string");
+  } catch {
+    return false;
+  }
+  // See MAX_CONTAINER_XML_BYTES above: rejected outright rather than
+  // truncated, since a real EPUB's container.xml never approaches this
+  // size in the first place.
+  if (containerXml.length > MAX_CONTAINER_XML_BYTES) return false;
+
+  // Conservative, bounded extraction -- only looks for the one attribute
+  // that matters, within the already size-capped string above. Accepts
+  // either quote style via the backreference, and normal attribute
+  // ordering/whitespace -- including whitespace around "=", which XML
+  // permits (e.g. full-path = "OEBPS/content.opf") -- but can only ever
+  // match inside a <rootfile ...> tag, never arbitrary unrelated text.
+  const rootfileMatch = containerXml.match(
+    /<rootfile\b[^>]*\bfull-path\s*=\s*(["'])(.*?)\1/i,
+  );
+  if (!rootfileMatch) return false;
+
+  const opfPath = rootfileMatch[2].trim();
+  if (!opfPath) return false;
+  if (!zip.file(opfPath)) return false;
+
+  return true;
+}
+
+// Checks the actual file signature (magic bytes), not the filename or
+// browser-reported MIME type -- neither of those can be trusted, and
+// this is the standard, dependency-free way to confirm a file's real
+// format. Only reads the first few bytes, never the whole image.
+async function hasValidImageSignature(file: File): Promise<boolean> {
+  const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+
+  const isPng =
+    header.length >= 8 &&
+    header[0] === 0x89 &&
+    header[1] === 0x50 &&
+    header[2] === 0x4e &&
+    header[3] === 0x47 &&
+    header[4] === 0x0d &&
+    header[5] === 0x0a &&
+    header[6] === 0x1a &&
+    header[7] === 0x0a;
+
+  const isJpeg =
+    header.length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+
+  return isPng || isJpeg;
+}
 
 // Stored as a single comma-separated string (searched the same way as
 // title/description) rather than a Postgres array — simpler to search
@@ -114,6 +218,21 @@ export async function createBook(formData: FormData) {
     redirect("/dashboard/books/new?error=Manuscript+must+be+under+50MB");
   }
 
+  if (!(await hasValidImageSignature(cover))) {
+    redirect(
+      "/dashboard/books/new?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image",
+    );
+  }
+
+  // Read once, reused for both validation and the upload below, rather
+  // than reading the manuscript twice.
+  const manuscriptBytes = Buffer.from(await manuscript.arrayBuffer());
+  if (!(await isValidEpubStructure(manuscriptBytes))) {
+    redirect(
+      "/dashboard/books/new?error=This+file+doesn%27t+appear+to+be+a+valid+EPUB",
+    );
+  }
+
   const bookId = randomUUID();
   const coverExt = cover.name.split(".").pop() || "jpg";
   const coverPath = `${user.id}/${bookId}-cover.${coverExt}`;
@@ -124,15 +243,21 @@ export async function createBook(formData: FormData) {
     .upload(coverPath, cover, { contentType: cover.type });
 
   if (coverError) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent(coverError.message)}`);
+    console.error("createBook: cover upload failed:", coverError);
+    redirect(
+      "/dashboard/books/new?error=Could+not+upload+your+cover+image.+Please+try+again",
+    );
   }
 
   const { error: manuscriptError } = await supabase.storage
     .from("manuscripts")
-    .upload(manuscriptPath, manuscript, { contentType: "application/epub+zip" });
+    .upload(manuscriptPath, manuscriptBytes, { contentType: "application/epub+zip" });
 
   if (manuscriptError) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent(manuscriptError.message)}`);
+    console.error("createBook: manuscript upload failed:", manuscriptError);
+    redirect(
+      "/dashboard/books/new?error=Could+not+upload+your+manuscript.+Please+try+again",
+    );
   }
 
   const { error: insertError } = await supabase.from("books").insert({
@@ -153,7 +278,10 @@ export async function createBook(formData: FormData) {
   });
 
   if (insertError) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent(insertError.message)}`);
+    console.error("createBook: book insert failed:", insertError);
+    redirect(
+      "/dashboard/books/new?error=Something+went+wrong+saving+your+book.+Please+try+again",
+    );
   }
 
   revalidatePath("/dashboard");
@@ -206,9 +334,20 @@ export async function updateBook(bookId: string, formData: FormData) {
   );
 
   let coverPath = existing.cover_path;
+  // Only set once a replacement cover has actually been uploaded
+  // successfully -- the old file is removed AFTER the DB update below
+  // succeeds, never before, so a failed update never leaves
+  // books.cover_path pointing at a file that's already gone.
+  let coverPathToRemove: string | null = null;
   if (cover && cover.size > 0) {
     if (cover.size > MAX_COVER_BYTES) {
       redirect(`/dashboard/books/${bookId}/edit?error=Cover+image+must+be+under+5MB`);
+    }
+
+    if (!(await hasValidImageSignature(cover))) {
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image`,
+      );
     }
 
     const coverExt = cover.name.split(".").pop() || "jpg";
@@ -219,11 +358,14 @@ export async function updateBook(bookId: string, formData: FormData) {
       .upload(newCoverPath, cover, { contentType: cover.type, upsert: true });
 
     if (coverError) {
-      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(coverError.message)}`);
+      console.error("updateBook: cover upload failed:", coverError);
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`,
+      );
     }
 
     if (existing.cover_path && existing.cover_path !== newCoverPath) {
-      await supabase.storage.from("covers").remove([existing.cover_path]);
+      coverPathToRemove = existing.cover_path;
     }
 
     coverPath = newCoverPath;
@@ -239,19 +381,30 @@ export async function updateBook(bookId: string, formData: FormData) {
       redirect(`/dashboard/books/${bookId}/edit?error=Manuscript+must+be+under+50MB`);
     }
 
+    // Read once, reused for both validation and the upload below.
+    const manuscriptBytes = Buffer.from(await manuscript.arrayBuffer());
+    if (!(await isValidEpubStructure(manuscriptBytes))) {
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=This+file+doesn%27t+appear+to+be+a+valid+EPUB`,
+      );
+    }
+
     // Manuscripts always live at the same "<author>/<bookId>.epub" path,
     // so this simply overwrites the old file in place.
     const newManuscriptPath = `${user.id}/${bookId}.epub`;
 
     const { error: manuscriptError } = await supabase.storage
       .from("manuscripts")
-      .upload(newManuscriptPath, manuscript, {
+      .upload(newManuscriptPath, manuscriptBytes, {
         contentType: "application/epub+zip",
         upsert: true,
       });
 
     if (manuscriptError) {
-      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(manuscriptError.message)}`);
+      console.error("updateBook: manuscript upload failed:", manuscriptError);
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=Could+not+upload+your+manuscript.+Please+try+again`,
+      );
     }
 
     filePath = newManuscriptPath;
@@ -276,7 +429,24 @@ export async function updateBook(bookId: string, formData: FormData) {
     .eq("author_id", user.id);
 
   if (updateError) {
-    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(updateError.message)}`);
+    console.error("updateBook: book update failed:", updateError);
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=Something+went+wrong+saving+your+changes.+Please+try+again`,
+    );
+  }
+
+  // Only now that the DB row correctly points at the new cover is it
+  // safe to remove the file it superseded. A cleanup failure here is an
+  // orphaned-file problem, not a failed update -- same philosophy as
+  // deleteBook's storage cleanup in Phase 8A: log it, don't tell the
+  // author their update failed, don't undo the already-successful save.
+  if (coverPathToRemove) {
+    const { error: cleanupError } = await supabase.storage
+      .from("covers")
+      .remove([coverPathToRemove]);
+    if (cleanupError) {
+      console.error("updateBook: failed to remove superseded cover file:", cleanupError);
+    }
   }
 
   revalidatePath("/dashboard");
@@ -339,6 +509,7 @@ export async function publishBook(bookId: string) {
 
   revalidatePath("/dashboard");
   revalidatePath("/");
+  redirect("/dashboard?success=Your+book+is+now+live");
 }
 
 export async function unpublishBook(bookId: string) {

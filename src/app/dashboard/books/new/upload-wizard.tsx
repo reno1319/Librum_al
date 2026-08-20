@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { createBook } from "../actions";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
@@ -8,6 +9,19 @@ import { GENRES } from "@/lib/genres";
 import type { Series } from "@/lib/types";
 
 const STEPS = ["Manuscript & cover", "Details", "Price", "Review"];
+
+function SaveButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+    >
+      {pending ? "Saving…" : "Save as draft"}
+    </button>
+  );
+}
 
 export function UploadWizard({ series }: { series: Series[] }) {
   const [step, setStep] = useState(1);
@@ -57,7 +71,11 @@ export function UploadWizard({ series }: { series: Series[] }) {
         {STEPS.map((label, i) => (
           <li
             key={label}
-            style={{ color: step === i + 1 ? "var(--color-primary)" : undefined }}
+            aria-current={step === i + 1 ? "step" : undefined}
+            style={{
+              color: step === i + 1 ? "var(--color-primary)" : undefined,
+              fontWeight: step === i + 1 ? 700 : undefined,
+            }}
           >
             {i + 1}. {label}
           </li>
@@ -65,7 +83,10 @@ export function UploadWizard({ series }: { series: Series[] }) {
       </ol>
 
       {stepError && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p
+          role="status"
+          className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
           {stepError}
         </p>
       )}
@@ -87,6 +108,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
               name="cover"
               type="file"
               accept="image/png,image/jpeg"
+              required
               className="text-sm"
               onChange={(e) => setCover(e.target.files?.[0] ?? null)}
             />
@@ -98,6 +120,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
               name="manuscript"
               type="file"
               accept=".epub,application/epub+zip"
+              required
               className="text-sm"
               onChange={(e) => setManuscript(e.target.files?.[0] ?? null)}
             />
@@ -130,6 +153,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
           <input
             name="title"
             type="text"
+            required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className="rounded-lg border border-border bg-surface px-3 py-2"
@@ -190,6 +214,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
           Genre
           <select
             name="genre"
+            required
             value={genre}
             onChange={(e) => setGenre(e.target.value)}
             className="rounded-lg border border-border bg-surface px-3 py-2"
@@ -262,6 +287,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
             type="number"
             min="0"
             step="0.01"
+            required
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             className="rounded-lg border border-border bg-surface px-3 py-2"
@@ -307,7 +333,9 @@ export function UploadWizard({ series }: { series: Series[] }) {
           <div className="flex justify-between gap-4">
             <dt className="text-muted">Price</dt>
             <dd className="text-right">
-              ${Number.isFinite(Number(price)) ? Number(price).toFixed(2) : "0.00"}
+              {Number.isFinite(Number(price)) && Number(price) === 0
+                ? "Free"
+                : `$${Number.isFinite(Number(price)) ? Number(price).toFixed(2) : "0.00"}`}
             </dd>
           </div>
           <div className="flex justify-between gap-4">
@@ -343,12 +371,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
             Next
           </button>
         ) : (
-          <button
-            type="submit"
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-          >
-            Save as draft
-          </button>
+          <SaveButton />
         )}
       </div>
     </form>
