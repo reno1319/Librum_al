@@ -533,6 +533,12 @@ create index bundle_checkout_reader_holds_reader_id_idx on public.bundle_checkou
 -- Takes no reader_id parameter -- always derives it from auth.uid(), so
 -- a caller can only ever snapshot a checkout for themselves, never for
 -- another reader.
+--
+-- Serializes concurrent calls for the same (reader, bundle) pair via a
+-- transaction-scoped advisory lock, and reuses an existing active
+-- (unfulfilled, unexpired) snapshot for that pair instead of creating a
+-- second one -- see the Phase 9B-2 Stage 2C audit. A reused snapshot's
+-- frozen values are returned verbatim; nothing about it is refreshed.
 create or replace function public.create_bundle_checkout_snapshot(
   bundle_id uuid
 )
@@ -552,10 +558,61 @@ declare
   v_items jsonb;
   v_protection_expires_at timestamptz;
   v_snapshot_id uuid;
+  v_existing record;
 begin
   v_reader_id := auth.uid();
   if v_reader_id is null then
     raise exception 'not authenticated';
+  end if;
+
+  -- Serializes every call for this exact (reader, bundle) pair against
+  -- every other concurrent call for the SAME pair. Transaction-scoped:
+  -- released automatically at this call's commit, or at any of this
+  -- function's raise exception rollbacks -- no manual unlock needed.
+  -- hashtext() is applied to each id SEPARATELY (not concatenated
+  -- first), so the two-int overload's collision surface is the product
+  -- of two independent 32-bit hash spaces. Even a collision only ever
+  -- causes an unrelated request to briefly wait its turn -- it can
+  -- never let one reader see or reuse another reader's snapshot, since
+  -- every lookup below still filters on the real reader_id/bundle_id
+  -- columns, never on this hash. pg_catalog is already implicitly
+  -- reachable under this function's empty search_path (as it already
+  -- is for now(), jsonb_agg(), etc. elsewhere in this function), but
+  -- both calls are schema-qualified explicitly here for clarity on this
+  -- new, security-relevant statement.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext(v_reader_id::text),
+    pg_catalog.hashtext(create_bundle_checkout_snapshot.bundle_id::text)
+  );
+
+  -- Reuse an existing active checkout for this exact reader+bundle
+  -- instead of creating a second, independent one. This is what makes
+  -- two concurrent buyBundle calls end up sharing the same snapshot_id
+  -- -- and therefore the same Stripe idempotency key downstream --
+  -- instead of producing two separately-payable Checkout Sessions.
+  -- Reuse returns the row's ALREADY-frozen values verbatim: nothing
+  -- about an active snapshot -- title, price, items, item prices,
+  -- membership, protection_expires_at -- is ever refreshed on reuse.
+  -- An author editing the bundle after this snapshot was created must
+  -- not change what this already-active checkout promises.
+  select s.id, s.bundle_title, s.bundle_price_cents_at_checkout, s.protection_expires_at
+  into v_existing
+  from public.bundle_checkout_snapshots s
+  where s.reader_id = v_reader_id
+    and s.bundle_id = create_bundle_checkout_snapshot.bundle_id
+    and s.fulfilled_at is null
+    and s.protection_expires_at > now()
+  order by s.created_at desc
+  limit 1;
+
+  if v_existing.id is not null then
+    return query
+    select
+      v_existing.id,
+      v_existing.bundle_title,
+      v_existing.bundle_price_cents_at_checkout,
+      v_existing.protection_expires_at;
+    return;
   end if;
 
   -- Must still be published at this exact moment, not merely when
@@ -600,6 +657,31 @@ begin
 
   if v_items is null or jsonb_array_length(v_items) < 2 then
     raise exception 'bundle does not have enough books to check out';
+  end if;
+
+  -- Closes the race where a concurrent request fulfilled a purchase for
+  -- this same reader while THIS call was waiting on the advisory lock
+  -- above: buyBundle's own "already own everything" check runs before
+  -- that fulfillment and is stale by the time execution reaches here.
+  -- Re-checked against the exact same book list v_items was just built
+  -- from -- the current, authoritative bundle membership -- not a
+  -- second, separately-fetched list, so this can never disagree with
+  -- what the new snapshot below is about to freeze. A reader who
+  -- already owns every one of these books gets no new snapshot at all.
+  -- A reader who owns only SOME of them is unaffected -- fresh-snapshot
+  -- creation proceeds exactly as it already did before this migration.
+  if not exists (
+    select 1
+    from jsonb_array_elements(v_items) as item
+    where not exists (
+      select 1
+      from public.purchases p
+      where p.book_id = (item->>'book_id')::uuid
+        and p.reader_id = v_reader_id
+        and p.refunded_at is null
+    )
+  ) then
+    raise exception 'reader already owns every book in this bundle';
   end if;
 
   -- Computed once, before any Stripe call is ever made by the caller --
