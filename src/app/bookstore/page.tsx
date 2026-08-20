@@ -6,13 +6,23 @@ import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { BookCard } from "@/components/book-card";
 import { BookShelf } from "@/components/book-shelf";
 import { IconCoins, IconUnlock, IconBolt } from "@/components/icons";
-import type { Book, Profile } from "@/lib/types";
+import type { Book, Bundle, Profile } from "@/lib/types";
 import type { ComponentType, CSSProperties } from "react";
 
 type Icon = ComponentType<{ className?: string; style?: CSSProperties }>;
 
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
+type BundleWithAuthor = Pick<Bundle, "id" | "title" | "price_cents"> & {
+  profiles: Pick<Profile, "display_name"> | null;
+};
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
+// Small, fixed cap consistent with the other curated-home shelves (see
+// BESTSELLER_MIN_PURCHASES/the "latest" query's own limit below) --
+// this section is a discovery aid on the home view, not a full bundle
+// catalog. Search/genre/price filtering are explicitly out of scope for
+// this pass (see the Bookstore bundle-discovery audit).
+const CURATED_BUNDLE_LIMIT = 8;
 
 // Hard cap while the catalog is small -- see the Phase 6 bookstore audit.
 // A real pagination UI is separate, later work; this just prevents an
@@ -223,6 +233,35 @@ async function fetchBestsellers(
     .filter((b): b is BookWithAuthor => !!b);
 }
 
+// Published bundles only -- the same "published or own author" policy
+// that already governs books also covers bundles (see schema.sql), but
+// this is a public, unauthenticated-safe listing page, so it only ever
+// asks for status = 'published' rather than relying on RLS alone to
+// hide drafts. Only the fields this section actually displays are
+// selected -- no description, no author_id-only internals.
+async function fetchPublishedBundles(
+  supabase: SupabaseClient,
+): Promise<BundleWithAuthor[]> {
+  const { data, error } = await supabase
+    .from("bundles")
+    .select("id, title, price_cents, profiles(display_name)")
+    .eq("status", "published")
+    .order("created_at", { ascending: false })
+    .limit(CURATED_BUNDLE_LIMIT)
+    .returns<BundleWithAuthor[]>();
+
+  if (error) {
+    // Same fail-soft posture as the Bestsellers shelf below -- this is
+    // a supplementary section, not core inventory, so a failure here
+    // just means the section doesn't render rather than erroring the
+    // whole curated homepage.
+    console.error("Bookstore: failed to load published bundles:", error);
+    return [];
+  }
+
+  return data ?? [];
+}
+
 async function fetchCuratedHome(supabase: SupabaseClient) {
   const { data: latest, error } = await supabase
     .from("books")
@@ -234,15 +273,18 @@ async function fetchCuratedHome(supabase: SupabaseClient) {
 
   if (error) {
     console.error("Bookstore: failed to load curated books:", error);
-    return { hero: null, newReleases: [], bestsellers: [], loadError: true };
+    return { hero: null, newReleases: [], bestsellers: [], bundles: [], loadError: true };
   }
 
   const releases = latest ?? [];
   const hero = releases[0] ?? null;
   const newReleases = releases.slice(1);
-  const bestsellers = await fetchBestsellers(supabase);
+  const [bestsellers, bundles] = await Promise.all([
+    fetchBestsellers(supabase),
+    fetchPublishedBundles(supabase),
+  ]);
 
-  return { hero, newReleases, bestsellers, loadError: false };
+  return { hero, newReleases, bestsellers, bundles, loadError: false };
 }
 
 async function fetchStorefrontStats(supabase: SupabaseClient) {
@@ -506,7 +548,7 @@ const VALUE_PROPS: { title: string; body: string; icon: Icon }[] = [
 ];
 
 async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
-  const [{ hero, newReleases, bestsellers, loadError }, stats] = await Promise.all([
+  const [{ hero, newReleases, bestsellers, bundles, loadError }, stats] = await Promise.all([
     fetchCuratedHome(supabase),
     fetchStorefrontStats(supabase),
   ]);
@@ -669,6 +711,44 @@ async function CuratedHome({ supabase }: { supabase: SupabaseClient }) {
 
       <BookShelf title="Bestsellers" books={bestsellers} supabase={supabase} />
       <BookShelf title="New releases" books={newReleases} supabase={supabase} />
+
+      {/* No empty state -- if there are no published bundles, this
+          section simply doesn't render, and the page looks exactly as
+          it did before bundles were added here. */}
+      {bundles.length > 0 && (
+        <section style={{ marginTop: "3rem" }}>
+          <h2 className="font-serif text-2xl font-semibold">Bundles</h2>
+          <ul
+            className="mt-6"
+            style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
+          >
+            {bundles.map((bundle) => (
+              <li key={bundle.id}>
+                <Link
+                  href={`/bundles/${bundle.id}`}
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
+                >
+                  <span
+                    className="w-fit rounded-full px-3 py-1 text-xs font-medium"
+                    style={{ backgroundColor: "rgba(226, 117, 31, 0.12)", color: "#e2751f" }}
+                  >
+                    Bundle
+                  </span>
+                  <span className="font-serif font-medium">{bundle.title}</span>
+                  {bundle.profiles?.display_name && (
+                    <span className="text-sm text-muted">
+                      by {bundle.profiles.display_name}
+                    </span>
+                  )}
+                  <span className="ml-auto text-sm font-semibold text-primary">
+                    ${(bundle.price_cents / 100).toFixed(2)}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section
         style={{
