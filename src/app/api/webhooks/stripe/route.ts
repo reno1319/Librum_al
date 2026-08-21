@@ -198,7 +198,12 @@ type SnapshotRow = {
 // NextResponse if the request should end early (a failure, or an
 // already-fulfilled short-circuit); returns null to let the caller fall
 // through to the normal `{ received: true }` response.
-async function fulfillBundleSnapshot(
+// Exported (only) so the transaction-integrity test suite
+// (src/app/api/webhooks/stripe/route.test.ts) can drive this function
+// directly with a fake Supabase client and assert its classification/
+// allocation/idempotency behavior in isolation -- POST() remains the
+// actual route handler and is not itself exported or changed.
+export async function fulfillBundleSnapshot(
   supabase: ReturnType<typeof createAdminClient>,
   event: Stripe.Event,
   session: Stripe.Checkout.Session,

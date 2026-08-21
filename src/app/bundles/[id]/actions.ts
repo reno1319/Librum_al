@@ -2,8 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
 import { platformFeeCents } from "@/lib/pricing";
+import {
+  classifyLinkBackResult,
+  shouldExposeStripeCheckoutSession,
+  type LinkBackOutcome,
+} from "./link-back";
 
 type BundleForCheckout = {
   id: string;
@@ -196,58 +202,128 @@ export async function buyBundle(bundleId: string) {
 
   // Audit-only -- fulfillment never depends on this succeeding, since
   // the webhook resolves the snapshot directly from metadata.snapshot_id
-  // (see the Stage 2A webhook path). A failure here is logged and
-  // otherwise ignored; checkout must still proceed for the reader
-  // either way.
+  // (see the Stage 2A webhook path) and links this same field itself,
+  // via its own admin-role client, independent of whether this call
+  // does. A failure here is logged and otherwise ignored; checkout must
+  // still proceed for the reader either way.
   //
-  // The write itself is the conditional filter, not a separate read
-  // beforehand -- this UPDATE only ever touches a row that is both this
-  // exact snapshot AND still unlinked, so there is no window between
-  // checking and writing for a concurrent process to race. If it claims
-  // zero rows, that's not itself an error: it means either this exact
-  // session is already stored (a duplicate/retried call for the same
-  // snapshot) or -- a genuine anomaly -- a DIFFERENT session got there
-  // first. The follow-up read exists only to tell those two apart for
-  // logging, never to decide whether to write.
-  const { data: linkedRows, error: linkBackError } = await supabase
+  // Performed with the ADMIN client, not the request-scoped one used
+  // for everything above -- bundle_checkout_snapshots has never had an
+  // UPDATE (or reader-facing SELECT) policy for authenticated, so the
+  // original direct UPDATE from the reader's own client always matched
+  // zero rows, silently, on every single bundle checkout (RLS
+  // default-deny with no applicable policy is not a SQL error). A
+  // client-callable RPC to bypass that was considered and rejected: an
+  // authenticated reader could call it directly with an ARBITRARY
+  // session id for their own unlinked snapshot -- transaction identity
+  // must only ever be asserted by trusted server code after Stripe
+  // itself has returned session.id, never accepted as caller input, even
+  // narrowly. buyBundle is already a Server Action (`"use server"` at
+  // the top of this file) -- it never runs in, and is never bundled
+  // into, the browser -- so using the admin client HERE, directly, is
+  // the same trusted-server-code posture already used for this exact
+  // purpose in the webhook (src/app/api/webhooks/stripe/route.ts) and
+  // for admin reads/writes elsewhere in this codebase (see
+  // src/lib/supabase/admin.ts and its other callers). The UPDATE itself
+  // is scoped to touch ONLY stripe_checkout_session_id, only this one
+  // snapshot id, only while it's still unlinked -- every other frozen
+  // field (items, bundle_price_cents_at_checkout, fulfilled_at, and so
+  // on) is completely untouched by this statement, admin client or not.
+  const admin = createAdminClient();
+  const { data: linkedRows, error: linkBackError } = await admin
     .from("bundle_checkout_snapshots")
     .update({ stripe_checkout_session_id: session.id })
     .eq("id", snapshot.snapshot_id)
     .is("stripe_checkout_session_id", null)
     .select("id");
 
+  let outcome: LinkBackOutcome;
+  let readBackError: unknown = null;
   if (linkBackError) {
-    console.error("buyBundle: failed to link snapshot to its checkout session", {
-      snapshotId: snapshot.snapshot_id,
-      error: linkBackError,
-    });
-  } else if ((linkedRows?.length ?? 0) === 0) {
-    const { data: currentSnapshot, error: readBackError } = await supabase
+    outcome = { kind: "update_error" };
+  } else if ((linkedRows?.length ?? 0) > 0) {
+    outcome = { kind: "linked" };
+  } else {
+    // Zero rows updated -- ambiguous between "already linked to this
+    // exact session" (a harmless retry/duplicate call) and "linked to
+    // something else" (a genuine anomaly) until read back. Also via the
+    // admin client -- the same RLS gap that blocks the reader's own
+    // client from writing this field blocks it from reading this row
+    // back too.
+    const { data: currentSnapshot, error: readBackErr } = await admin
       .from("bundle_checkout_snapshots")
       .select("stripe_checkout_session_id")
       .eq("id", snapshot.snapshot_id)
       .maybeSingle();
+    readBackError = readBackErr;
 
-    if (readBackError) {
+    outcome = classifyLinkBackResult({
+      linkedRowCount: 0,
+      updateError: null,
+      readBackSessionId: currentSnapshot?.stripe_checkout_session_id,
+      readBackError: readBackErr,
+      sessionId: session.id,
+    });
+  }
+
+  switch (outcome.kind) {
+    case "linked":
+    case "already_linked":
+      // Nothing to log -- either this call set it, or an earlier
+      // delivery already had, correctly, to this exact session.
+      break;
+    case "update_error":
+      console.error("buyBundle: failed to link snapshot to its checkout session", {
+        snapshotId: snapshot.snapshot_id,
+        error: linkBackError,
+      });
+      break;
+    case "read_back_error":
       console.error(
         "buyBundle: failed to read back snapshot after a missed link-back claim",
         { snapshotId: snapshot.snapshot_id, error: readBackError },
       );
-    } else if (
-      currentSnapshot?.stripe_checkout_session_id &&
-      currentSnapshot.stripe_checkout_session_id !== session.id
-    ) {
+      break;
+    case "missing":
       console.error(
-        "buyBundle: snapshot already linked to a different checkout session -- not overwriting",
+        "buyBundle: snapshot link-back matched zero rows and the read-back found no session id either -- snapshot may no longer exist",
+        { snapshotId: snapshot.snapshot_id, incomingSessionId: session.id },
+      );
+      break;
+    case "conflict":
+      // A different, non-null session id is already on this snapshot.
+      // Under Stripe's own idempotency guarantee this should be
+      // unreachable in normal operation -- two concurrent buyBundle
+      // calls that both reuse this same snapshot use the identical
+      // idempotency key ("bundle-checkout:" + snapshot_id, see above)
+      // and are therefore guaranteed the SAME session.id back from
+      // Stripe, not two different ones. A genuine mismatch here means
+      // either a Stripe idempotency-key violation or an out-of-band
+      // change to this row -- a confirmed integrity-invariant
+      // violation, not an ordinary availability hiccup like the other
+      // cases above. See shouldExposeStripeCheckoutSession below for
+      // why this is the one outcome that blocks the redirect.
+      console.error(
+        "buyBundle: SNAPSHOT LINKAGE INTEGRITY ANOMALY -- snapshot already linked to a different checkout session, refusing to expose a second session for the same snapshot",
         {
           snapshotId: snapshot.snapshot_id,
-          existingSessionId: currentSnapshot.stripe_checkout_session_id,
+          existingSessionId: outcome.existingSessionId,
           incomingSessionId: session.id,
         },
       );
-    }
-    // Otherwise the row is already correctly linked to this exact
-    // session -- nothing further to do.
+      break;
+  }
+
+  // The only safety-critical branch point in this whole link-back
+  // block: everything above is best-effort logging, this is the actual
+  // decision of whether it's safe to hand the reader a Stripe Checkout
+  // URL. Deliberately a single call to a pure, independently tested
+  // predicate (link-back.ts) rather than inline logic duplicated from
+  // the switch above -- "conflict does not redirect to Stripe" is an
+  // invariant worth being able to verify in isolation, decoupled from
+  // Stripe/redirect/DB mocking.
+  if (!shouldExposeStripeCheckoutSession(outcome)) {
+    redirect(`/bundles/${bundleId}?error=Could+not+start+checkout`);
   }
 
   redirect(session.url);
