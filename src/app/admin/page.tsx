@@ -1,10 +1,13 @@
+import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
 
 // Minimal admin landing page for Phase REFUND-1A -- proves
 // requireAdmin() actually gates this route (unauthenticated -> /login,
 // authenticated non-admin -> /, admin -> this page renders) before any
 // real admin functionality (refund review, moderation, etc.) is built
-// on top of it. Intentionally no content beyond that proof yet.
+// on top of it. Now links out to the first such feature (Phase
+// REFUND-1B Step 3's refund review queue) rather than staying a dead
+// end.
 export default async function AdminPage() {
   const { profile } = await requireAdmin();
 
@@ -15,6 +18,15 @@ export default async function AdminPage() {
       <p className="mt-6 text-sm text-foreground/90">
         Signed in as {profile.display_name}.
       </p>
+
+      <div className="mt-6">
+        <Link
+          href="/admin/refunds"
+          className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+        >
+          Refund requests
+        </Link>
+      </div>
     </main>
   );
 }
