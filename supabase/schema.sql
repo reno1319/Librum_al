@@ -527,6 +527,19 @@ create policy "Authors can view their own fulfilled bundle snapshot transactions
     and fulfilled_at is not null
   );
 
+-- Added by migration 030 (Phase REFUND-1B Step 2 correction): the
+-- reader-side counterpart to the author policy above, same shape,
+-- reader_id instead of author_id. No GRANT/REVOKE accompanies this --
+-- see migration 030's own comment for why the existing ambient
+-- table-level SELECT privilege already covers it.
+create policy "Readers can view their own fulfilled bundle snapshot transactions"
+  on public.bundle_checkout_snapshots
+  for select
+  using (
+    auth.uid() = reader_id
+    and fulfilled_at is not null
+  );
+
 create index bundle_checkout_snapshots_bundle_id_idx on public.bundle_checkout_snapshots(bundle_id);
 create index bundle_checkout_snapshots_author_id_idx on public.bundle_checkout_snapshots(author_id);
 create index bundle_checkout_snapshots_reader_id_idx on public.bundle_checkout_snapshots(reader_id);

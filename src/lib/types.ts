@@ -96,3 +96,21 @@ export type DiscountCode = {
   expires_at: string | null;
   created_at: string;
 };
+
+// Mirrors refund_requests.status's CHECK constraint (migration 029).
+// 'refunded' is only ever reached via the service-role/webhook path --
+// no client-facing code in this app can produce it.
+export type RefundRequestStatus =
+  | "requested"
+  | "approved"
+  | "rejected"
+  | "refunded"
+  | "cancelled";
+
+export type RefundRequest = {
+  id: string;
+  stripe_payment_intent_id: string;
+  status: RefundRequestStatus;
+  reason: string | null;
+  requested_at: string;
+};
