@@ -13,7 +13,12 @@ vi.mock("@/lib/email", () => ({
   sendSnapshotBundlePurchaseEmails: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { fulfillBundleSnapshot, processChargeRefund } = await import("./route");
+const {
+  fulfillBundleSnapshot,
+  processChargeRefund,
+  processRefundLifecycleEvent,
+  processChargeRefundedEvent,
+} = await import("./route");
 
 // ---------------------------------------------------------------------
 // A minimal, in-memory fake of the Supabase query builder -- just
@@ -795,5 +800,657 @@ describe("processChargeRefund: refund_requests synchronization", () => {
     expect(tables.bundle_checkout_snapshots[0].refunded_at).toBeNull();
     expect(tables.refund_requests[0].status).toBe("requested");
     expect(failWebhook).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------
+// REFUND-1B Step 5, second correction: the terminal-success invariant.
+// "Librum finalizes only after a terminal successful Stripe Refund" must
+// hold for EVERY trigger path -- refund.updated/refund.created
+// (processRefundLifecycleEvent) AND charge.refunded
+// (processChargeRefundedEvent) -- not just the newer one. Both functions
+// now go through the exact same isChargeFullyRefundedBySucceededRefunds
+// check (not exported/tested directly; its behavior is exhaustively
+// exercised through both callers below) before ever calling the
+// unchanged processChargeRefund.
+//
+// A single fake Stripe client covers both: `charges.retrieve` (only
+// processRefundLifecycleEvent calls this, to look up the charge behind a
+// refund it was handed) and `refunds.list` (both call this, to get
+// Stripe's live, authoritative view of every refund on a charge -- shaped
+// as an object with `.autoPagingToArray`, mirroring the real SDK's
+// ApiListPromise so the production code under test needs no special-
+// casing for the fake).
+// ---------------------------------------------------------------------
+describe("terminal-success invariant: processRefundLifecycleEvent and processChargeRefundedEvent", () => {
+  const PAYMENT_INTENT_ID = "pi_test_lifecycle";
+  const CHARGE_ID = "ch_test_lifecycle";
+  const REQUEST_ID = "refund-request-lifecycle-1";
+  const READER_ID = "reader-1";
+  const CHARGE_AMOUNT = 500;
+
+  function lifecycleTables(overrides: { refund_requests?: Row[] } = {}): Tables {
+    return {
+      purchases: [
+        {
+          id: "purchase-1",
+          book_id: "book-1",
+          reader_id: READER_ID,
+          stripe_checkout_session_id: "cs_test_1",
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          amount_cents: CHARGE_AMOUNT,
+          bundle_id: null,
+          refunded_at: null,
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      bundle_checkout_snapshots: [
+        {
+          id: "snapshot-1",
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          refunded_at: null,
+        },
+      ],
+      refund_requests:
+        overrides.refund_requests ??
+        [
+          {
+            id: REQUEST_ID,
+            reader_id: READER_ID,
+            stripe_payment_intent_id: PAYMENT_INTENT_ID,
+            bundle_checkout_snapshot_id: null,
+            amount_cents: CHARGE_AMOUNT,
+            reason: null,
+            status: "approved",
+            requested_at: "2026-01-01T00:00:00.000Z",
+            reviewed_at: "2026-01-02T00:00:00.000Z",
+            reviewed_by: "admin-1",
+            admin_notes: null,
+            refunded_at: null,
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+    };
+  }
+
+  function makeFakeCharge(overrides: Partial<Stripe.Charge> = {}): Stripe.Charge {
+    return {
+      id: CHARGE_ID,
+      object: "charge",
+      amount: CHARGE_AMOUNT,
+      payment_intent: PAYMENT_INTENT_ID,
+      ...overrides,
+    } as Stripe.Charge;
+  }
+
+  function makeRefund(overrides: Partial<Stripe.Refund>): Stripe.Refund {
+    return {
+      id: "re_test_1",
+      object: "refund",
+      status: "succeeded",
+      amount: CHARGE_AMOUNT,
+      charge: CHARGE_ID,
+      payment_intent: PAYMENT_INTENT_ID,
+      ...overrides,
+    } as Stripe.Refund;
+  }
+
+  // params.charge is what charges.retrieve() resolves with (only used by
+  // processRefundLifecycleEvent). params.refunds is Stripe's live,
+  // authoritative refund list for the charge -- the single source of
+  // truth both functions ultimately gate finalization on.
+  function makeFakeStripeClient(params: {
+    charge?: Partial<Stripe.Charge> | null;
+    chargeError?: Error;
+    refunds?: Partial<Stripe.Refund>[];
+    refundsListError?: Error;
+  }) {
+    const chargesRetrieve = vi.fn(() => {
+      if (params.chargeError) return Promise.reject(params.chargeError);
+      return Promise.resolve(params.charge as Stripe.Charge);
+    });
+    const refundsList = vi.fn(() => ({
+      autoPagingToArray: () => {
+        if (params.refundsListError) return Promise.reject(params.refundsListError);
+        return Promise.resolve((params.refunds ?? []) as Stripe.Refund[]);
+      },
+    }));
+    return {
+      charges: { retrieve: chargesRetrieve },
+      refunds: { list: refundsList },
+    };
+  }
+
+  function fakeFailWebhookForLifecycle(): NextResponse {
+    return { status: 500 } as unknown as NextResponse;
+  }
+
+  // ---------------------------------------------------------------
+  // processRefundLifecycleEvent (refund.updated / refund.created)
+  // ---------------------------------------------------------------
+  describe("processRefundLifecycleEvent", () => {
+    it("full + succeeded: finalizes when the live refund list confirms a succeeded refund covers the full amount", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        charge: makeFakeCharge(),
+        refunds: [makeRefund({ status: "succeeded", amount: CHARGE_AMOUNT })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeRefund({ status: "succeeded" }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.purchases[0].refunded_at).not.toBeNull();
+      expect(tables.bundle_checkout_snapshots[0].refunded_at).not.toBeNull();
+      expect(tables.refund_requests[0].status).toBe("refunded");
+    });
+
+    it("full + pending: never even lists refunds -- the Refund itself hasn't reached succeeded", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({ charge: makeFakeCharge(), refunds: [] });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeRefund({ status: "pending" }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(stripeClient.charges.retrieve).not.toHaveBeenCalled();
+      expect(stripeClient.refunds.list).not.toHaveBeenCalled();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.purchases[0].refunded_at).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+
+    it("full + requires_action: no finalization, no Stripe lookups", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({ charge: makeFakeCharge(), refunds: [] });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeRefund({ status: "requires_action" }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(stripeClient.refunds.list).not.toHaveBeenCalled();
+      expect(tables.purchases[0].refunded_at).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+
+    it("full + failed: no finalization -- a failed attempt never revokes entitlement", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({ charge: makeFakeCharge(), refunds: [] });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeRefund({ status: "failed" }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(stripeClient.refunds.list).not.toHaveBeenCalled();
+      expect(tables.purchases[0].refunded_at).toBeNull();
+      expect(tables.bundle_checkout_snapshots[0].refunded_at).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+
+    it("partial succeeded: this refund succeeded, but the live refund list doesn't yet cover the full charge amount", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        charge: makeFakeCharge(),
+        // Only 200 of 500 has actually succeeded.
+        refunds: [makeRefund({ status: "succeeded", amount: 200 })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeRefund({ status: "succeeded", amount: 200 }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(stripeClient.refunds.list).toHaveBeenCalledTimes(1);
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.purchases[0].refunded_at).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+
+    it("cumulative: multiple partial refunds whose SUCCEEDED total reaches the full amount finalize on the delivery that completes it", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      // Delivery 1: a first partial refund succeeded (200 of 500).
+      const stripeClientPartial = makeFakeStripeClient({
+        charge: makeFakeCharge(),
+        refunds: [makeRefund({ id: "re_partial_1", status: "succeeded", amount: 200 })],
+      });
+      const firstResult = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClientPartial as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeRefund({ id: "re_partial_1", status: "succeeded", amount: 200 }),
+        failWebhook,
+      );
+      expect(firstResult).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+
+      // Delivery 2: a second refund succeeds, and Stripe's live refund
+      // list for the charge now shows BOTH succeeded refunds, summing to
+      // the full amount.
+      const stripeClientFull = makeFakeStripeClient({
+        charge: makeFakeCharge(),
+        refunds: [
+          makeRefund({ id: "re_partial_1", status: "succeeded", amount: 200 }),
+          makeRefund({ id: "re_partial_2", status: "succeeded", amount: 300 }),
+        ],
+      });
+      const secondResult = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClientFull as never,
+        { id: "evt_2" } as Stripe.Event,
+        makeRefund({ id: "re_partial_2", status: "succeeded", amount: 300 }),
+        failWebhook,
+      );
+
+      expect(secondResult).toBeNull();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.purchases[0].refunded_at).not.toBeNull();
+      expect(tables.refund_requests[0].status).toBe("refunded");
+    });
+
+    it("duplicate refund.updated deliveries for an already-finalized transaction are idempotent", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        charge: makeFakeCharge(),
+        refunds: [makeRefund({ status: "succeeded", amount: CHARGE_AMOUNT })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+      const refund = makeRefund({ status: "succeeded" });
+
+      await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        refund,
+        failWebhook,
+      );
+      const refundedAtAfterFirst = tables.refund_requests[0].refunded_at;
+      expect(refundedAtAfterFirst).not.toBeNull();
+
+      const secondResult = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_2" } as Stripe.Event,
+        refund,
+        failWebhook,
+      );
+
+      expect(secondResult).toBeNull();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.refund_requests[0].refunded_at).toBe(refundedAtAfterFirst);
+      expect(tables.refund_requests[0].status).toBe("refunded");
+    });
+
+    it("a Stripe error listing refunds fails the webhook delivery for retry, without finalizing", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        charge: makeFakeCharge(),
+        refundsListError: new Error("connection reset"),
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeRefund({ status: "succeeded" }),
+        failWebhook,
+      );
+
+      expect(result).not.toBeNull();
+      expect(failWebhook).toHaveBeenCalledTimes(1);
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+  });
+
+  // ---------------------------------------------------------------
+  // processChargeRefundedEvent (charge.refunded) -- the exact function
+  // Blocker 1 required be brought under the same invariant.
+  // ---------------------------------------------------------------
+  describe("processChargeRefundedEvent", () => {
+    it("charge.refunded(full=true) while the associated Refund is still 'pending' MUST NOT finalize", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      // Stripe's live refund list shows the sole refund still pending --
+      // charge.refunded firing with a cumulative-amount boolean of true
+      // must not be trusted on its own.
+      const stripeClient = makeFakeStripeClient({
+        refunds: [makeRefund({ status: "pending", amount: CHARGE_AMOUNT })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeFakeCharge({ refunded: true }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.purchases[0].refunded_at).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+
+    it("charge.refunded(full=true) while the associated Refund is 'requires_action' MUST NOT finalize", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        refunds: [makeRefund({ status: "requires_action", amount: CHARGE_AMOUNT })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeFakeCharge({ refunded: true }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(tables.purchases[0].refunded_at).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+
+    it("charge.refunded(full=true) whose associated Refund is 'failed' MUST NOT finalize", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        refunds: [makeRefund({ status: "failed", amount: CHARGE_AMOUNT })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeFakeCharge({ refunded: true }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(tables.purchases[0].refunded_at).toBeNull();
+      expect(tables.bundle_checkout_snapshots[0].refunded_at).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+
+    it("charge.refunded whose live refund list confirms a succeeded refund covering the full amount finalizes", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        refunds: [makeRefund({ status: "succeeded", amount: CHARGE_AMOUNT })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeFakeCharge({ refunded: true }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.purchases[0].refunded_at).not.toBeNull();
+      expect(tables.refund_requests[0].status).toBe("refunded");
+    });
+
+    it("partial successful refund via charge.refunded: no finalization", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        refunds: [makeRefund({ status: "succeeded", amount: 200 })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeFakeCharge({ refunded: false }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(tables.purchases[0].refunded_at).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+
+    it("manual Stripe Dashboard full successful refund: finalizes via the exact same path, no admin action involved", async () => {
+      const tables = lifecycleTables({
+        refund_requests: [
+          {
+            id: REQUEST_ID,
+            reader_id: READER_ID,
+            stripe_payment_intent_id: PAYMENT_INTENT_ID,
+            bundle_checkout_snapshot_id: null,
+            amount_cents: CHARGE_AMOUNT,
+            reason: null,
+            status: "requested",
+            requested_at: "2026-01-01T00:00:00.000Z",
+            reviewed_at: null,
+            reviewed_by: null,
+            admin_notes: null,
+            refunded_at: null,
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      });
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        refunds: [makeRefund({ status: "succeeded", amount: CHARGE_AMOUNT })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeFakeCharge({ refunded: true }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(tables.purchases[0].refunded_at).not.toBeNull();
+      expect(tables.refund_requests[0].status).toBe("refunded");
+    });
+
+    it("no resolvable payment intent on the charge: safely no-ops, no Stripe lookup attempted", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({ refunds: [] });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeFakeCharge({ payment_intent: null }),
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(stripeClient.refunds.list).not.toHaveBeenCalled();
+    });
+
+    it("a Stripe error listing refunds fails the webhook delivery for retry, without finalizing", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        refundsListError: new Error("connection reset"),
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const result = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeFakeCharge({ refunded: true }),
+        failWebhook,
+      );
+
+      expect(result).not.toBeNull();
+      expect(failWebhook).toHaveBeenCalledTimes(1);
+      expect(tables.refund_requests[0].status).toBe("approved");
+    });
+  });
+
+  // ---------------------------------------------------------------
+  // Cross-path: event ordering between charge.refunded and
+  // refund.created/refund.updated must not matter -- both converge on
+  // the same live Stripe read and the same idempotent finalizer.
+  // ---------------------------------------------------------------
+  describe("event ordering across charge.refunded and refund.* is immaterial", () => {
+    it("charge.refunded arriving BEFORE refund.created: first delivery no-ops (refund not yet succeeded), second finalizes once it does", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      // charge.refunded arrives while the refund is still pending at
+      // Stripe's side -- live refund list confirms nothing succeeded yet.
+      const stripeClientPending = makeFakeStripeClient({
+        refunds: [makeRefund({ status: "pending", amount: CHARGE_AMOUNT })],
+      });
+      const chargeResult = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClientPending as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeFakeCharge({ refunded: true }),
+        failWebhook,
+      );
+      expect(chargeResult).toBeNull();
+      expect(tables.refund_requests[0].status).toBe("approved");
+
+      // refund.created/updated arrives once the SAME refund has actually
+      // settled -- live refund list now confirms it succeeded.
+      const stripeClientSucceeded = makeFakeStripeClient({
+        charge: makeFakeCharge(),
+        refunds: [makeRefund({ status: "succeeded", amount: CHARGE_AMOUNT })],
+      });
+      const refundResult = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClientSucceeded as never,
+        { id: "evt_2" } as Stripe.Event,
+        makeRefund({ status: "succeeded" }),
+        failWebhook,
+      );
+
+      expect(refundResult).toBeNull();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.refund_requests[0].status).toBe("refunded");
+    });
+
+    it("refund.created arriving BEFORE charge.refunded: first delivery finalizes, second (charge.refunded) is a harmless idempotent duplicate", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+
+      const stripeClientSucceeded = makeFakeStripeClient({
+        charge: makeFakeCharge(),
+        refunds: [makeRefund({ status: "succeeded", amount: CHARGE_AMOUNT })],
+      });
+      const refundResult = await processRefundLifecycleEvent(
+        supabase as never,
+        stripeClientSucceeded as never,
+        { id: "evt_1" } as Stripe.Event,
+        makeRefund({ status: "succeeded" }),
+        failWebhook,
+      );
+      expect(refundResult).toBeNull();
+      const refundedAtAfterFirst = tables.refund_requests[0].refunded_at;
+      expect(refundedAtAfterFirst).not.toBeNull();
+
+      // charge.refunded for the same, already-settled transaction
+      // arrives second (Stripe does not guarantee ordering) -- must not
+      // create a second finalization or overwrite refunded_at.
+      const chargeResult = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClientSucceeded as never,
+        { id: "evt_2" } as Stripe.Event,
+        makeFakeCharge({ refunded: true }),
+        failWebhook,
+      );
+
+      expect(chargeResult).toBeNull();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.refund_requests[0].refunded_at).toBe(refundedAtAfterFirst);
+      expect(tables.refund_requests[0].status).toBe("refunded");
+    });
+
+    it("duplicate charge.refunded deliveries after finalization remain idempotent", async () => {
+      const tables = lifecycleTables();
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeStripeClient({
+        refunds: [makeRefund({ status: "succeeded", amount: CHARGE_AMOUNT })],
+      });
+      const failWebhook = vi.fn(fakeFailWebhookForLifecycle);
+      const charge = makeFakeCharge({ refunded: true });
+
+      await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_1" } as Stripe.Event,
+        charge,
+        failWebhook,
+      );
+      const refundedAtAfterFirst = tables.refund_requests[0].refunded_at;
+      expect(refundedAtAfterFirst).not.toBeNull();
+
+      const secondResult = await processChargeRefundedEvent(
+        supabase as never,
+        stripeClient as never,
+        { id: "evt_2" } as Stripe.Event,
+        charge,
+        failWebhook,
+      );
+
+      expect(secondResult).toBeNull();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(tables.refund_requests[0].refunded_at).toBe(refundedAtAfterFirst);
+      expect(tables.refund_requests[0].status).toBe("refunded");
+    });
   });
 });

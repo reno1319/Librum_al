@@ -4,12 +4,14 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth";
+import { stripe } from "@/lib/stripe";
 import {
   mapReviewRpcError,
   validateAdminNotes,
   GENERIC_REVIEW_ERROR_MESSAGE,
   REVIEW_RPC_NOT_AUTHENTICATED_MESSAGE,
 } from "./refund-review-logic";
+import { executeApprovedRefund } from "./issue-refund";
 
 // requireAdmin() here is defense in depth, not the actual security
 // boundary -- Server Actions are independent server-side entry points
@@ -69,4 +71,79 @@ export async function reviewRefundRequest(
       decision === "approved" ? "Refund request approved." : "Refund request rejected.",
     )}`,
   );
+}
+
+// requireAdmin() here is the same defense-in-depth pattern as
+// reviewRefundRequest() above, for the same reason (Server Actions
+// bypass the page/layout tree). The actual gate against a non-admin
+// executing a real Stripe refund is executeApprovedRefund() re-fetching
+// the request through the request-scoped, RLS-respecting client below
+// -- no service-role/admin Supabase client is used anywhere in this
+// action. It was audited and found unnecessary: this action never
+// writes to any Supabase table (Stripe execution and Librum's own
+// refund-request/entitlement bookkeeping are deliberately kept
+// separate -- see issue-refund.ts's own documentation), and the one
+// read it performs (refund_requests by id) is already covered by
+// migration 029's "Admins can view all refund requests" RLS policy plus
+// its accompanying `grant select ... to authenticated`. Stripe's secret
+// key is only ever read server-side via src/lib/stripe.ts, imported
+// here in a "use server" file -- never reachable from client code.
+export async function issueStripeRefund(refundRequestId: string) {
+  await requireAdmin();
+
+  const supabase = await createClient();
+  const outcome = await executeApprovedRefund(supabase, stripe, refundRequestId);
+
+  switch (outcome.kind) {
+    case "not_found":
+      redirect(`/admin/refunds?error=${encodeURIComponent(GENERIC_REVIEW_ERROR_MESSAGE)}`);
+      break;
+    case "not_approved":
+      redirect(
+        `/admin/refunds/${refundRequestId}?error=${encodeURIComponent(
+          "This request is no longer approved -- it may have already been refunded, rejected, or cancelled.",
+        )}`,
+      );
+      break;
+    case "stripe_error":
+      redirect(
+        `/admin/refunds/${refundRequestId}?error=${encodeURIComponent(outcome.message)}`,
+      );
+      break;
+    case "submitted":
+      // Deliberately does NOT say "Refunded" -- Stripe accepting this
+      // call means only that the refund was initiated. The Stripe
+      // webhook (processChargeRefund, gated by
+      // isChargeFullyRefundedBySucceededRefunds -- see route.ts) remains
+      // the sole writer of purchases.refunded_at,
+      // bundle_checkout_snapshots.refunded_at, and refund_requests.
+      // status = 'refunded'/refunded_at -- nothing here touches any of
+      // those. If that webhook has already landed by the time this page
+      // re-renders (a real, possible race: Stripe can deliver
+      // charge.refunded before this redirect even completes), the
+      // request's own status badge on the page -- re-read fresh on every
+      // render, independent of this banner -- will already correctly
+      // show "Refunded"; this transient message is only ever a
+      // same-request confirmation that the click worked, never the
+      // source of truth for current status.
+      //
+      // This same "waiting for confirmation" wording is used for EVERY
+      // "submitted" outcome, including an immediate refund.status ===
+      // 'succeeded' response from Stripe (see executeApprovedRefund in
+      // issue-refund.ts) -- explicitly confirmed correct, not an
+      // oversight: even a refund Stripe reports as already 'succeeded'
+      // at creation time has not yet been confirmed by Librum's own
+      // webhook, which independently re-verifies terminal success before
+      // writing anything (see isChargeFullyRefundedBySucceededRefunds).
+      // "Waiting for confirmation" is accurate regardless of how quickly
+      // that confirmation actually arrives.
+      revalidatePath(`/admin/refunds/${refundRequestId}`);
+      revalidatePath("/admin/refunds");
+      redirect(
+        `/admin/refunds/${refundRequestId}?success=${encodeURIComponent(
+          "Refund submitted to Stripe. Waiting for confirmation.",
+        )}`,
+      );
+      break;
+  }
 }

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   abbreviatePaymentIntentId,
+  canIssueRefund,
   canReview,
   compareForTriage,
+  getIssueRefundConfirmationMessage,
   getReviewConfirmationMessage,
   mapReviewRpcError,
   resolveProfileDisplayName,
@@ -86,6 +88,31 @@ describe("canReview", () => {
     expect(canReview("rejected")).toBe(false);
     expect(canReview("refunded")).toBe(false);
     expect(canReview("cancelled")).toBe(false);
+  });
+});
+
+describe("canIssueRefund", () => {
+  it("allows issuing a refund only when status is approved", () => {
+    expect(canIssueRefund("approved")).toBe(true);
+  });
+
+  it("disallows issuing a refund for every other status", () => {
+    expect(canIssueRefund("requested")).toBe(false);
+    expect(canIssueRefund("rejected")).toBe(false);
+    expect(canIssueRefund("refunded")).toBe(false);
+    expect(canIssueRefund("cancelled")).toBe(false);
+  });
+});
+
+describe("getIssueRefundConfirmationMessage", () => {
+  it("formats the amount as dollars and cents and states the consequence is irreversible", () => {
+    expect(getIssueRefundConfirmationMessage(699)).toBe(
+      "Issue the $6.99 refund through Stripe? This will return the payment to the reader. This action cannot be undone.",
+    );
+  });
+
+  it("formats a whole-dollar amount with two decimal places", () => {
+    expect(getIssueRefundConfirmationMessage(500)).toContain("$5.00");
   });
 });
 

@@ -4,12 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 import type { RefundRequestStatus } from "@/lib/types";
 import {
   abbreviatePaymentIntentId,
+  canIssueRefund,
   canReview,
   resolveProfileDisplayName,
   REVIEW_STATUS_LABELS,
 } from "../refund-review-logic";
-import { reviewRefundRequest } from "../actions";
+import { reviewRefundRequest, issueStripeRefund } from "../actions";
 import { ReviewButtons } from "./review-buttons";
+import { IssueRefundButton } from "./issue-refund-button";
 
 type AdminRefundRequestDetail = {
   id: string;
@@ -228,6 +230,22 @@ export default async function AdminRefundRequestDetailPage({
             onApprove={reviewRefundRequest.bind(null, request.id, "approved")}
             onReject={reviewRefundRequest.bind(null, request.id, "rejected")}
           />
+        </form>
+      )}
+
+      {canIssueRefund(request.status) && (
+        <form
+          action={issueStripeRefund.bind(null, request.id)}
+          className="mt-6 rounded-lg border border-border bg-surface p-4 shadow-sm"
+        >
+          <p className="text-sm text-muted">
+            This request has been approved. Issuing the refund submits it to Stripe --
+            Librum&apos;s own records update automatically once Stripe confirms it, not
+            immediately on submission.
+          </p>
+          <div className="mt-3">
+            <IssueRefundButton amountCents={request.amount_cents} />
+          </div>
         </form>
       )}
     </main>

@@ -687,25 +687,24 @@ export async function fulfillBundleSnapshot(
 // what Stripe's own charge object already resolved to this id.
 //
 // isFullyRefunded is the caller's one required piece of authoritative
-// Charge data, and it is checked FIRST, before anything else: Stripe's
-// charge.refunded event fires for partial refunds too, not only full
-// ones -- confirmed directly against the installed SDK's own type
-// definitions (stripe@22.5.0, pinned API version 2026-07-29.dahlia --
-// see node_modules/stripe/cjs/apiVersion.js), not assumed from memory.
-// Stripe.Charge.amount_refunded's own doc comment: "can be less than
-// the amount attribute on the charge if a partial refund was issued."
-// Stripe.Charge.refunded's own doc comment: "Whether the charge has
-// been fully refunded. If the charge is only partially refunded, this
-// attribute will still be false." That `refunded` boolean is exactly
-// this invariant, computed by Stripe itself -- equivalent to (and
-// preferred over re-deriving) `amount_refunded >= amount` by hand: it
-// needs no local arithmetic, cannot disagree with Stripe's own
-// determination of "fully refunded" (currency rounding, multiple
-// partial increments summing to the full amount, etc. are already
-// resolved on Stripe's side), and every call site here passes
-// `charge.refunded` straight through -- there is no code path in this
-// function, or in POST()'s call site, that could derive "fully
-// refunded" from a merely nonzero amount.
+// refund data, and it is checked FIRST, before anything else. Originally
+// (REFUND-1B Step 4) every call site passed Stripe.Charge.refunded
+// straight through, on the reasoning that it's Stripe's own cumulative
+// "fully refunded by amount" computation and therefore safer than
+// re-deriving `amount_refunded >= amount` by hand. A later audit
+// (REFUND-1B Step 5, second correction) found that reasoning necessary
+// but not sufficient: `charge.refunded` alone says nothing about whether
+// the refund(s) behind that amount have actually reached a terminal
+// *successful* Stripe state (Refund.status can be `pending` or
+// `requires_action`, not just `succeeded`/`failed`/`canceled` -- see
+// isChargeFullyRefundedBySucceededRefunds's own documentation above for
+// the full citation trail). Every call site into this function now
+// passes the result of that stricter check instead of `charge.refunded`
+// directly -- isFullyRefunded here means "Stripe confirms this charge is
+// cumulatively fully refunded, entirely by refunds that have themselves
+// reached `succeeded`," not merely "the amounts add up." This function's
+// own logic is unchanged either way: it still just trusts whatever
+// boolean its caller derived, first, before any write.
 //
 // Librum has no partial-refund concept anywhere in its design (see the
 // approved Phase REFUND-1B decisions) -- a partial refund is therefore
@@ -852,6 +851,284 @@ export async function processChargeRefund(
   }
 
   return null;
+}
+
+// REFUND-1B Step 5 correction: closes a gap the original charge.refunded-
+// only design left completely unhandled. Confirmed against the installed
+// stripe@22.5.0 SDK's own types (node_modules/stripe/cjs/resources/
+// Refunds.d.ts): Refund.status is `pending | requires_action | succeeded |
+// failed | canceled`, RefundResource.cancel()'s own doc comment ("Cancels
+// a refund with a status of requires_action... only refunds for payment
+// methods that require customer action can enter the requires_action
+// state") proves requires_action is a real, reachable non-terminal return
+// value from refunds.create() -- the SDK's create() doc comment only
+// documents throwing for an already-fully-refunded charge or an
+// over-large amount, never for a refund that will settle asynchronously.
+// Refund.pending_reason and Refund.failure_reason/failure_balance_transaction
+// exist specifically to describe those non-immediate-success outcomes.
+//
+// Before this correction, this webhook handled ONLY checkout.session.
+// completed and charge.refunded -- refund.created/refund.updated/
+// refund.failed were not handled at all. That is an unconditional gap
+// regardless of any timing question about charge.refunded specifically: a
+// refund that is created in `pending` or `requires_action` and settles to
+// `succeeded` later had NO code path here that could ever finalize it,
+// since nothing re-checked it after the fact. This function closes that
+// gap by reacting directly to the Refund object's own lifecycle events.
+//
+// Additive alongside charge.refunded, not a replacement for it: a direct
+// Stripe Dashboard refund, and the common synchronously-completing
+// card-refund case, both still fire charge.refunded (or a refund.
+// created/updated event with status already 'succeeded', or both) --
+// Stripe's events carry no "who/what triggered this" distinction Librum
+// could depend on instead, so both remain live triggers. What changed in
+// a SECOND correction (below, and in POST()'s charge.refunded branch):
+// charge.refunded is no longer an independent authority that can finalize
+// on its own cumulative-amount boolean alone -- it now goes through the
+// exact same isChargeFullyRefundedBySucceededRefunds gate this function
+// uses, before either is allowed to call processChargeRefund. Both event
+// families converge on the same, unchanged, already-idempotent
+// processChargeRefund -- no new Librum-side state machine or rollback
+// semantics were introduced (a refund.failed delivery is logged for
+// operator visibility only; it never attempts to reverse a prior
+// finalization, since nothing here can prove that's ever actually
+// reachable in practice for a fully-settled card refund, and inventing
+// that machinery speculatively would be a materially larger change than
+// this gap warrants).
+//
+// Only proceeds once refund.status === 'succeeded' -- pending and
+// requires_action both no-op here by design (a later refund.updated
+// delivery, once the refund actually settles, is what completes it).
+// 'failed'/'canceled' are handled by the sibling refund.failed branch in
+// POST() (log-only, see there). A single refund reaching 'succeeded' is
+// NOT by itself proof the full transaction is refunded -- Librum only
+// ever finalizes a FULL refund, and a charge can have multiple partial
+// refunds -- so this retrieves the charge fresh from Stripe and runs
+// isChargeFullyRefundedBySucceededRefunds (see its own documentation
+// above) before calling processChargeRefund. This mirrors the
+// user-specified preferred design: inspect Refund.status, proceed only
+// on succeeded, verify the cumulative charge is fully refunded BY
+// terminal-successful refunds specifically, then run the existing
+// three-table finalization unchanged.
+function extractChargeId(charge: string | Stripe.Charge | null): string | null {
+  if (typeof charge === "string") return charge;
+  if (charge && typeof charge === "object" && typeof charge.id === "string") {
+    return charge.id;
+  }
+  return null;
+}
+
+type StripeRefundVerificationClient = Pick<Stripe, "charges" | "refunds">;
+
+// REFUND-1B Step 5, second correction: closes the gap the first
+// correction left open. The first correction added refund.updated/
+// refund.created handling gated on Refund.status === 'succeeded', but
+// left the PRE-EXISTING charge.refunded branch calling
+// processChargeRefund directly off `charge.refunded === true` alone --
+// meaning that branch could still independently finalize Librum without
+// ever confirming a Refund actually reached a terminal successful state.
+// The invariant "Librum finalizes only after a terminal successful
+// Stripe Refund" was therefore not enforced globally: the new, careful
+// path could be bypassed entirely by the old one. This function is now
+// the SOLE gate both `charge.refunded` and `refund.updated`/
+// `refund.created` go through before either is allowed to call
+// processChargeRefund -- see both call sites in POST() and in
+// processRefundLifecycleEvent below.
+//
+// Re-audited what data charge.refunded/a Charge object actually expose
+// (installed stripe@22.5.0 SDK, node_modules/stripe/cjs/resources/
+// Charges.d.ts): `Charge.refunds?: ApiList<Refund> | null` -- "A list of
+// refunds that have been applied to the charge" -- and
+// RefundResource.list()'s own doc comment confirms "The 10 most recent
+// refunds are always available by default on the Charge object."
+// Rather than rely on that embedded, capped-at-10, possibly-stale
+// snapshot, this calls `stripe.refunds.list({ charge })` directly --
+// RefundListParams.charge?: string is a confirmed, real filter on the
+// Refunds resource -- to get Stripe's own live, complete, paginated view
+// of every refund on this charge, at the moment this event is processed.
+//
+// The invariant enforced is a single, self-contained condition that
+// implies BOTH of the two the user asked for at once, rather than
+// combining two separately-checked booleans (which could accidentally
+// both be true without either one actually proving the full amount was
+// returned by SUCCEEDED refunds specifically): sum the `amount` of every
+// refund on this charge whose `status === 'succeeded'`, and require that
+// sum to reach the charge's own `amount`. This depends on nothing but
+// directly-typed, unambiguous fields (`Refund.status`, `Refund.amount`,
+// `Charge.amount`) and sidesteps entirely the one question this audit
+// could not resolve via the installed SDK or official docs (blocked by
+// this environment's network egress proxy) -- whether `Charge.refunded`/
+// `amount_refunded` themselves are gated on refund success or merely on
+// refund creation. It does not matter here: only succeeded refunds are
+// ever counted.
+//
+// Capped at 100 refunds (Stripe's own list max) via autoPagingToArray --
+// Librum's product has no partial-refund concept of its own, so a real
+// charge here will essentially always have a small handful of refunds at
+// most; 100 is a generous, defensive ceiling against an unbounded loop,
+// not a limit expected to ever bind in practice.
+async function isChargeFullyRefundedBySucceededRefunds(
+  stripeClient: StripeRefundVerificationClient,
+  chargeId: string,
+  chargeAmount: number,
+): Promise<boolean> {
+  const refunds = await stripeClient.refunds
+    .list({ charge: chargeId, limit: 100 })
+    .autoPagingToArray({ limit: 100 });
+
+  const succeededTotal = refunds
+    .filter((refund) => refund.status === "succeeded")
+    .reduce((sum, refund) => sum + refund.amount, 0);
+
+  return succeededTotal >= chargeAmount;
+}
+
+export async function processRefundLifecycleEvent(
+  supabase: ReturnType<typeof createAdminClient>,
+  stripeClient: StripeRefundVerificationClient,
+  event: Stripe.Event,
+  refund: Stripe.Refund,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  if (refund.status !== "succeeded") {
+    return null;
+  }
+
+  const chargeId = extractChargeId(refund.charge);
+
+  if (!chargeId) {
+    // No resolvable charge id on a succeeded refund shouldn't normally
+    // happen for a card-based Checkout charge, but there is nothing
+    // actionable to do here without one -- the charge.refunded path
+    // remains a second, independent trigger for this same transaction if
+    // it really is a full refund. Logged, not failed: retrying this same
+    // event will never produce a different charge id.
+    console.warn(
+      "Stripe webhook: succeeded refund has no resolvable charge id -- skipping cumulative-refund verification",
+      { eventId: event.id, refundId: refund.id },
+    );
+    return null;
+  }
+
+  let charge: Stripe.Charge;
+  try {
+    charge = await stripeClient.charges.retrieve(chargeId);
+  } catch (error) {
+    return failWebhook({
+      eventId: event.id,
+      refundId: refund.id,
+      chargeId,
+      reason: "failed to retrieve charge to verify cumulative refund state",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  let fullyRefundedBySucceeded: boolean;
+  try {
+    fullyRefundedBySucceeded = await isChargeFullyRefundedBySucceededRefunds(
+      stripeClient,
+      chargeId,
+      charge.amount,
+    );
+  } catch (error) {
+    return failWebhook({
+      eventId: event.id,
+      refundId: refund.id,
+      chargeId,
+      reason: "failed to list refunds to verify terminal-success state",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (!fullyRefundedBySucceeded) {
+    // Either this refund is only a partial contribution (Librum has no
+    // partial-refund concept -- same successful no-op posture as
+    // processChargeRefund's own isFullyRefunded=false path), or Stripe's
+    // own cumulative amount includes a refund that hasn't reached
+    // 'succeeded' yet. Either way, a later refund.updated delivery (once
+    // whatever's still settling actually does) re-runs this same check.
+    return null;
+  }
+
+  const paymentIntentId =
+    extractPaymentIntentId(refund.payment_intent) ?? extractPaymentIntentId(charge.payment_intent);
+
+  if (!paymentIntentId) {
+    return failWebhook({
+      eventId: event.id,
+      refundId: refund.id,
+      chargeId,
+      reason: "charge is fully refunded but no resolvable payment intent id was found",
+    });
+  }
+
+  return processChargeRefund(supabase, event, paymentIntentId, true, failWebhook);
+}
+
+// REFUND-1B Step 5, second correction. Extracted out of POST() for the
+// same reason as every other handler in this file (fulfillBundleSnapshot,
+// processChargeRefund, processRefundLifecycleEvent): direct testability
+// with fake Supabase/Stripe clients, no real HTTP request needed.
+//
+// This branch used to call processChargeRefund directly off
+// `charge.refunded === true` -- Stripe's own cumulative "fully refunded
+// by amount" boolean, with no check of whether the refund(s) behind that
+// amount had actually reached a terminal successful state. That let this
+// branch independently finalize Librum without ever confirming
+// Refund.status, bypassing the exact invariant the refund.updated/
+// refund.created path (processRefundLifecycleEvent) exists to enforce.
+// It now goes through the SAME isChargeFullyRefundedBySucceededRefunds
+// check as that path before ever calling processChargeRefund -- both
+// event families are now equally strict, and neither can independently
+// finalize on an unconfirmed/non-terminal refund. This keeps
+// charge.refunded as a trigger (still fires for a direct Stripe
+// Dashboard refund exactly like an API-initiated one), just no longer as
+// an independent authority.
+export async function processChargeRefundedEvent(
+  supabase: ReturnType<typeof createAdminClient>,
+  stripeClient: StripeRefundVerificationClient,
+  event: Stripe.Event,
+  charge: Stripe.Charge,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
+
+  if (!paymentIntentId) {
+    return null;
+  }
+
+  let fullyRefundedBySucceeded: boolean;
+  try {
+    fullyRefundedBySucceeded = await isChargeFullyRefundedBySucceededRefunds(
+      stripeClient,
+      charge.id,
+      charge.amount,
+    );
+  } catch (error) {
+    return failWebhook({
+      eventId: event.id,
+      paymentIntentId,
+      chargeId: charge.id,
+      reason: "failed to list refunds to verify terminal-success state",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (!fullyRefundedBySucceeded) {
+    // charge.refunded fired (Stripe's own cumulative-amount boolean),
+    // but no refund on this charge has yet reached 'succeeded' for an
+    // amount covering the full charge -- do not finalize. A later
+    // refund.updated delivery, once the underlying refund actually
+    // settles, re-runs this same verification (via
+    // processRefundLifecycleEvent) and completes it then.
+    console.warn(
+      "Stripe webhook: charge.refunded received but no succeeded refunds yet cover the full charge amount -- awaiting terminal refund status",
+      { eventId: event.id, paymentIntentId, chargeId: charge.id },
+    );
+    return null;
+  }
+
+  return processChargeRefund(supabase, event, paymentIntentId, true, failWebhook);
 }
 
 // Stripe calls this URL directly (not a browser), so it must read the
@@ -1164,21 +1441,55 @@ export async function POST(request: Request) {
   // see the note in migrations/011_add_refunds.sql.
   if (event.type === "charge.refunded") {
     const charge = event.data.object as Stripe.Charge;
-    const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
-
-    if (paymentIntentId) {
-      const supabase = createAdminClient();
-      const failureResponse = await processChargeRefund(
-        supabase,
-        event,
-        paymentIntentId,
-        charge.refunded,
-        failWebhook,
-      );
-      if (failureResponse) {
-        return failureResponse;
-      }
+    const supabase = createAdminClient();
+    const failureResponse = await processChargeRefundedEvent(
+      supabase,
+      stripe,
+      event,
+      charge,
+      failWebhook,
+    );
+    if (failureResponse) {
+      return failureResponse;
     }
+  }
+
+  // REFUND-1B Step 5 correction: catches a refund that was still
+  // pending/requires_action when (or if) charge.refunded fired, and has
+  // now settled to succeeded/failed -- see processRefundLifecycleEvent's
+  // own documentation above for the full rationale. refund.created is
+  // included alongside refund.updated because a refund that resolves
+  // synchronously can arrive already 'succeeded' on its very first event.
+  if (event.type === "refund.updated" || event.type === "refund.created") {
+    const refund = event.data.object as Stripe.Refund;
+    const supabase = createAdminClient();
+    const failureResponse = await processRefundLifecycleEvent(
+      supabase,
+      stripe,
+      event,
+      refund,
+      failWebhook,
+    );
+    if (failureResponse) {
+      return failureResponse;
+    }
+  }
+
+  // Log-only: gives an operator visibility into a refund that failed
+  // after being created, without attempting any automatic reversal of
+  // Librum state. No rollback semantics are implemented here -- see
+  // processRefundLifecycleEvent's own documentation for why building
+  // that machinery isn't justified by anything confirmed reachable in
+  // practice for a card-based Checkout charge.
+  if (event.type === "refund.failed") {
+    const refund = event.data.object as Stripe.Refund;
+    console.error("Stripe webhook: a refund failed after being created", {
+      eventId: event.id,
+      refundId: refund.id,
+      paymentIntentId: extractPaymentIntentId(refund.payment_intent),
+      chargeId: extractChargeId(refund.charge),
+      failureReason: refund.failure_reason ?? null,
+    });
   }
 
   return NextResponse.json({ received: true });

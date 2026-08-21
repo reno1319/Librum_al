@@ -29,6 +29,36 @@ export function canReview(status: RefundRequestStatus): boolean {
   return status === "requested";
 }
 
+// The "Issue refund" control (Phase REFUND-1B Step 5) only ever appears
+// for a request currently 'approved' -- 'requested' still needs
+// Approve/Reject first, and 'rejected'/'cancelled'/'refunded' are all
+// terminal from this action's perspective (a refunded request has
+// nothing left to issue; the other two were never approved to begin
+// with). Presentational only, exactly like canReview() above:
+// executeApprovedRefund() (src/app/admin/refunds/issue-refund.ts)
+// independently re-checks the request's CURRENT status before ever
+// calling Stripe, and is what actually decides whether execution is
+// legal -- this function only decides whether the button renders.
+export function canIssueRefund(status: RefundRequestStatus): boolean {
+  return status === "approved";
+}
+
+// Confirmation copy for the "Issue refund" button
+// (src/app/admin/refunds/[id]/issue-refund-button.tsx) -- extracted as a
+// pure function for the same reason as getReviewConfirmationMessage
+// above: directly testable without a DOM/browser testing setup. The
+// amount shown here comes from the already-rendered, server-fetched
+// refund_requests.amount_cents -- purely for the admin's own
+// information before they decide whether to proceed. It plays no role
+// in what Stripe actually refunds: executeApprovedRefund() never passes
+// an amount to Stripe at all (see its own documentation for why),
+// so this confirmation text can never be more (or less) authoritative
+// than what actually happens next.
+export function getIssueRefundConfirmationMessage(amountCents: number): string {
+  const amount = (amountCents / 100).toFixed(2);
+  return `Issue the $${amount} refund through Stripe? This will return the payment to the reader. This action cannot be undone.`;
+}
+
 // Sorts requested (actionable) items first, then by most recently
 // requested within each group -- pure triage ordering, no bearing on
 // what any request is actually allowed to do.
