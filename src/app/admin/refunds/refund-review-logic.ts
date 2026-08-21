@@ -43,6 +43,45 @@ export function canIssueRefund(status: RefundRequestStatus): boolean {
   return status === "approved";
 }
 
+// The exact success-banner text issueStripeRefund() (src/app/admin/
+// refunds/actions.ts) redirects with on a "submitted" outcome. Exported
+// as a shared constant, not duplicated as a string literal in actions.ts,
+// specifically so resolveSuccessBannerMessage below can never drift out
+// of sync with what that redirect actually sends.
+export const REFUND_SUBMITTED_SUCCESS_MESSAGE = "Refund submitted to Stripe. Waiting for confirmation.";
+
+// Shown instead of REFUND_SUBMITTED_SUCCESS_MESSAGE once the webhook has
+// already finalized the request -- see resolveSuccessBannerMessage.
+export const REFUND_CONFIRMED_SUCCESS_MESSAGE = "Refund confirmed by Stripe.";
+
+// Fixes the one observed UX defect in the otherwise-verified refund
+// lifecycle: issueStripeRefund()'s redirect always carries
+// REFUND_SUBMITTED_SUCCESS_MESSAGE at the moment it fires, but the
+// webhook can finalize the request (status -> 'refunded') before the
+// admin ever sees that redirect -- a real, already-documented race (see
+// issueStripeRefund's own comment). Without this, the page would show
+// "Waiting for confirmation" right next to a status badge that already
+// says "Refunded", which is confusing even though neither value is
+// technically wrong on its own.
+//
+// Deliberately narrow: only ever rewrites THIS specific, exact message,
+// and only when status is 'refunded'. Every other success message
+// (e.g. "Refund request approved.") is returned unchanged regardless of
+// status -- those were never a race with the webhook's own finalization
+// in the first place, so there is nothing stale to correct. Purely
+// presentational, like every other function in this file: it does not
+// read or influence refund_requests.status itself, only how a message
+// already computed elsewhere is displayed.
+export function resolveSuccessBannerMessage(
+  status: RefundRequestStatus,
+  successMessage: string | undefined,
+): string | undefined {
+  if (successMessage === REFUND_SUBMITTED_SUCCESS_MESSAGE && status === "refunded") {
+    return REFUND_CONFIRMED_SUCCESS_MESSAGE;
+  }
+  return successMessage;
+}
+
 // Confirmation copy for the "Issue refund" button
 // (src/app/admin/refunds/[id]/issue-refund-button.tsx) -- extracted as a
 // pure function for the same reason as getReviewConfirmationMessage

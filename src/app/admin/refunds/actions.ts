@@ -10,6 +10,7 @@ import {
   validateAdminNotes,
   GENERIC_REVIEW_ERROR_MESSAGE,
   REVIEW_RPC_NOT_AUTHENTICATED_MESSAGE,
+  REFUND_SUBMITTED_SUCCESS_MESSAGE,
 } from "./refund-review-logic";
 import { executeApprovedRefund } from "./issue-refund";
 
@@ -125,7 +126,12 @@ export async function issueStripeRefund(refundRequestId: string) {
       // render, independent of this banner -- will already correctly
       // show "Refunded"; this transient message is only ever a
       // same-request confirmation that the click worked, never the
-      // source of truth for current status.
+      // source of truth for current status. The page itself now also
+      // rewrites this exact message to REFUND_CONFIRMED_SUCCESS_MESSAGE
+      // when it detects that race (status already 'refunded' by the
+      // time this redirect is rendered) -- see
+      // resolveSuccessBannerMessage in refund-review-logic.ts -- so the
+      // banner and the badge can never visibly disagree.
       //
       // This same "waiting for confirmation" wording is used for EVERY
       // "submitted" outcome, including an immediate refund.status ===
@@ -141,7 +147,7 @@ export async function issueStripeRefund(refundRequestId: string) {
       revalidatePath("/admin/refunds");
       redirect(
         `/admin/refunds/${refundRequestId}?success=${encodeURIComponent(
-          "Refund submitted to Stripe. Waiting for confirmation.",
+          REFUND_SUBMITTED_SUCCESS_MESSAGE,
         )}`,
       );
       break;

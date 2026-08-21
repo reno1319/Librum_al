@@ -8,9 +8,12 @@ import {
   getReviewConfirmationMessage,
   mapReviewRpcError,
   resolveProfileDisplayName,
+  resolveSuccessBannerMessage,
   validateAdminNotes,
   ADMIN_NOTES_MAX_LENGTH,
   GENERIC_REVIEW_ERROR_MESSAGE,
+  REFUND_CONFIRMED_SUCCESS_MESSAGE,
+  REFUND_SUBMITTED_SUCCESS_MESSAGE,
 } from "./refund-review-logic";
 
 describe("resolveProfileDisplayName", () => {
@@ -101,6 +104,34 @@ describe("canIssueRefund", () => {
     expect(canIssueRefund("rejected")).toBe(false);
     expect(canIssueRefund("refunded")).toBe(false);
     expect(canIssueRefund("cancelled")).toBe(false);
+  });
+});
+
+describe("resolveSuccessBannerMessage", () => {
+  it("approved + the submitted-success message: shown as-is (\"waiting for confirmation\")", () => {
+    expect(resolveSuccessBannerMessage("approved", REFUND_SUBMITTED_SUCCESS_MESSAGE)).toBe(
+      REFUND_SUBMITTED_SUCCESS_MESSAGE,
+    );
+  });
+
+  it("refunded + the submitted-success message: rewritten to the confirmed message, not the stale one", () => {
+    expect(resolveSuccessBannerMessage("refunded", REFUND_SUBMITTED_SUCCESS_MESSAGE)).toBe(
+      REFUND_CONFIRMED_SUCCESS_MESSAGE,
+    );
+  });
+
+  it("leaves every other success message untouched regardless of status, even when refunded", () => {
+    expect(resolveSuccessBannerMessage("refunded", "Refund request approved.")).toBe(
+      "Refund request approved.",
+    );
+    expect(resolveSuccessBannerMessage("requested", "Refund request rejected.")).toBe(
+      "Refund request rejected.",
+    );
+  });
+
+  it("passes through an absent success message unchanged (no banner to show)", () => {
+    expect(resolveSuccessBannerMessage("approved", undefined)).toBeUndefined();
+    expect(resolveSuccessBannerMessage("refunded", undefined)).toBeUndefined();
   });
 });
 

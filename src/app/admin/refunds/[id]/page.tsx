@@ -7,6 +7,7 @@ import {
   canIssueRefund,
   canReview,
   resolveProfileDisplayName,
+  resolveSuccessBannerMessage,
   REVIEW_STATUS_LABELS,
 } from "../refund-review-logic";
 import { reviewRefundRequest, issueStripeRefund } from "../actions";
@@ -114,6 +115,11 @@ export default async function AdminRefundRequestDetailPage({
 
   const allItems = items ?? [];
   const reviewable = canReview(request.status);
+  // Fixes the observed stale-banner defect: issueStripeRefund()'s
+  // redirect always carries the "waiting for confirmation" message, but
+  // the webhook can finalize the request before this page ever renders
+  // that redirect -- see resolveSuccessBannerMessage's own docs.
+  const successMessage = resolveSuccessBannerMessage(request.status, success);
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
@@ -125,8 +131,10 @@ export default async function AdminRefundRequestDetailPage({
       {error && (
         <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       )}
-      {success && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{success}</p>
+      {successMessage && (
+        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+          {successMessage}
+        </p>
       )}
 
       <div className="mt-6 rounded-lg border border-border bg-surface p-4 shadow-sm">
