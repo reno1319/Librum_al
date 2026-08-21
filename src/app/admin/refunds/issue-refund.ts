@@ -363,10 +363,36 @@ export async function executeApprovedRefund(
     return { kind: "submitted" };
   }
 
+  // LAUNCH-1 P1-1 correction: every checkout in this codebase (buyBook,
+  // buyBundle) creates a Stripe Connect DESTINATION charge --
+  // payment_intent_data.transfer_data.destination sends the author's
+  // share (100% - PLATFORM_FEE_PERCENT, see src/lib/pricing.ts)
+  // straight to their connected account at charge time, alongside
+  // application_fee_amount retained by Librum. Confirmed directly
+  // against the installed stripe@22.5.0 SDK's own doc comment on
+  // RefundCreateParams.reverse_transfer (node_modules/stripe/cjs/
+  // resources/Refunds.d.ts): "Boolean indicating whether the transfer
+  // should be reversed when refunding this charge. The transfer will be
+  // reversed proportionally to the amount being refunded... A transfer
+  // can be reversed only by the application that created the charge."
+  // Without this, refunding the reader does NOT claw back the author's
+  // already-transferred share -- the author keeps it, and Librum's own
+  // Stripe balance absorbs the full customer refund alone. reverse_transfer
+  // is not a business-policy choice, it's a correctness requirement: an
+  // author must not keep payment for a transaction Librum's own records
+  // (refund_requests.status, purchases.refunded_at) now say was refunded.
+  //
+  // Deliberately does NOT set refund_application_fee: whether Librum's
+  // own platform-fee share should also be returned on a refund is a
+  // genuine, undecided business policy question -- no page, doc, or
+  // comment anywhere in this codebase (Terms, Pricing, How It Works,
+  // Help, README) states what happens to Librum's fee on a refund, only
+  // what happens on a normal sale. Per instruction, this is left exactly
+  // as an open decision for a human to make, not invented here.
   let refund: Stripe.Refund;
   try {
     refund = await stripeClient.refunds.create(
-      { payment_intent: request.stripe_payment_intent_id },
+      { payment_intent: request.stripe_payment_intent_id, reverse_transfer: true },
       { idempotencyKey: plan.idempotencyKey },
     );
   } catch (error) {

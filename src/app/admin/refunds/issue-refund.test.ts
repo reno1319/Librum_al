@@ -389,7 +389,7 @@ describe("executeApprovedRefund", () => {
     }
   });
 
-  it("first approved refund: submits with the base idempotency key, using payment_intent with no amount", async () => {
+  it("first approved refund: submits with the base idempotency key, using payment_intent with no amount, reversing the Connect transfer", async () => {
     const supabase = makeFakeSupabase({
       id: REQUEST_ID,
       status: "approved",
@@ -402,16 +402,26 @@ describe("executeApprovedRefund", () => {
     expect(outcome).toEqual({ kind: "submitted" });
     expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
     expect(stripe.refunds.create).toHaveBeenCalledWith(
-      { payment_intent: PAYMENT_INTENT_ID },
+      { payment_intent: PAYMENT_INTENT_ID, reverse_transfer: true },
       { idempotencyKey: buildRefundIdempotencyKey(REQUEST_ID) },
     );
     // No `amount` key at all -- the full remaining charge, per Stripe's
-    // own documented default behavior when amount is omitted.
+    // own documented default behavior when amount is omitted. Full
+    // refund + reverse_transfer: true reverses the ENTIRE Connect
+    // transfer (the SDK's own doc comment: reversed "proportionally to
+    // the amount being refunded (either the entire or partial
+    // amount)") -- Librum only ever does full refunds, so this is
+    // always a 100% reversal, never a partial one. Also asserts
+    // refund_application_fee is NOT sent -- LAUNCH-1 P1-1 deliberately
+    // leaves whether Librum's own platform fee should be refunded as an
+    // undecided business question, not invented here.
     const [params] = stripe.refunds.create.mock.calls[0] as unknown as [Record<string, unknown>];
     expect(params).not.toHaveProperty("amount");
+    expect(params).not.toHaveProperty("refund_application_fee");
+    expect(params.reverse_transfer).toBe(true);
   });
 
-  it("double click on the first attempt: both calls use the identical base idempotency key (Stripe's own dedup contract)", async () => {
+  it("double click on the first attempt: both calls use the identical base idempotency key (Stripe's own dedup contract) and both request reverse_transfer", async () => {
     const supabase = makeFakeSupabase({
       id: REQUEST_ID,
       status: "approved",
@@ -423,14 +433,18 @@ describe("executeApprovedRefund", () => {
     await executeApprovedRefund(supabase as never, stripe as never, REQUEST_ID);
 
     expect(stripe.refunds.create).toHaveBeenCalledTimes(2);
-    const [firstCallOptions] = stripe.refunds.create.mock.calls[0].slice(1) as unknown as [
+    const [firstCallParams, firstCallOptions] = stripe.refunds.create.mock.calls[0] as unknown as [
+      { reverse_transfer?: boolean },
       { idempotencyKey: string },
     ];
-    const [secondCallOptions] = stripe.refunds.create.mock.calls[1].slice(1) as unknown as [
+    const [secondCallParams, secondCallOptions] = stripe.refunds.create.mock.calls[1] as unknown as [
+      { reverse_transfer?: boolean },
       { idempotencyKey: string },
     ];
     expect(firstCallOptions.idempotencyKey).toBe(secondCallOptions.idempotencyKey);
     expect(firstCallOptions.idempotencyKey).toBe(buildRefundIdempotencyKey(REQUEST_ID));
+    expect(firstCallParams.reverse_transfer).toBe(true);
+    expect(secondCallParams.reverse_transfer).toBe(true);
   });
 
   it.each(["pending", "requires_action"])(
@@ -503,7 +517,7 @@ describe("executeApprovedRefund", () => {
     expect(stripe.refunds.create).not.toHaveBeenCalled();
   });
 
-  it("R1 failed: retry creates R2 using a key deterministically derived from R1", async () => {
+  it("R1 failed: retry creates R2 using a key deterministically derived from R1, still reversing the transfer", async () => {
     const supabase = makeFakeSupabase({
       id: REQUEST_ID,
       status: "approved",
@@ -519,12 +533,12 @@ describe("executeApprovedRefund", () => {
     expect(outcome).toEqual({ kind: "submitted" });
     expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
     expect(stripe.refunds.create).toHaveBeenCalledWith(
-      { payment_intent: PAYMENT_INTENT_ID },
+      { payment_intent: PAYMENT_INTENT_ID, reverse_transfer: true },
       { idempotencyKey: buildRetryIdempotencyKey(REQUEST_ID, "re_r1") },
     );
   });
 
-  it("two concurrent retries after R1 failed both derive the identical R2 key and collapse at Stripe", async () => {
+  it("two concurrent retries after R1 failed both derive the identical R2 key, collapse at Stripe, and both reverse the transfer", async () => {
     const supabase = makeFakeSupabase({
       id: REQUEST_ID,
       status: "approved",
@@ -538,14 +552,18 @@ describe("executeApprovedRefund", () => {
     await executeApprovedRefund(supabase as never, stripe as never, REQUEST_ID);
 
     expect(stripe.refunds.create).toHaveBeenCalledTimes(2);
-    const [firstOptions] = stripe.refunds.create.mock.calls[0].slice(1) as unknown as [
+    const [firstParams, firstOptions] = stripe.refunds.create.mock.calls[0] as unknown as [
+      { reverse_transfer?: boolean },
       { idempotencyKey: string },
     ];
-    const [secondOptions] = stripe.refunds.create.mock.calls[1].slice(1) as unknown as [
+    const [secondParams, secondOptions] = stripe.refunds.create.mock.calls[1] as unknown as [
+      { reverse_transfer?: boolean },
       { idempotencyKey: string },
     ];
     expect(firstOptions.idempotencyKey).toBe(secondOptions.idempotencyKey);
     expect(firstOptions.idempotencyKey).toBe(buildRetryIdempotencyKey(REQUEST_ID, "re_r1"));
+    expect(firstParams.reverse_transfer).toBe(true);
+    expect(secondParams.reverse_transfer).toBe(true);
   });
 
   it("R1 failed, R2 failed: the next retry uses a DIFFERENT deterministic key derived from R2, not R1", async () => {
@@ -567,7 +585,7 @@ describe("executeApprovedRefund", () => {
 
     expect(outcome).toEqual({ kind: "submitted" });
     expect(stripe.refunds.create).toHaveBeenCalledWith(
-      { payment_intent: PAYMENT_INTENT_ID },
+      { payment_intent: PAYMENT_INTENT_ID, reverse_transfer: true },
       { idempotencyKey: buildRetryIdempotencyKey(REQUEST_ID, "re_r2") },
     );
   });
