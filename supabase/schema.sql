@@ -8,7 +8,14 @@
 
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  role text not null check (role in ('author', 'reader')),
+  -- 'admin' (added by migration 028) is a durable, server-enforced
+  -- marketplace-operator role -- see requireAdmin() in src/lib/auth.ts
+  -- and the Phase REFUND-1A audit. Never settable by the user: signup
+  -- (handle_new_user() below) only ever writes 'author' or 'reader',
+  -- and UPDATE on this column is revoked from authenticated entirely
+  -- (see below) -- promotion to admin is only ever a direct,
+  -- privileged database operation.
+  role text not null check (role in ('author', 'reader', 'admin')),
   display_name text not null,
   bio text,
   avatar_path text,
@@ -27,21 +34,59 @@ create policy "Users can update their own profile"
   on public.profiles for update
   using (auth.uid() = id);
 
--- stripe_account_id / stripe_payouts_enabled are only ever written by
--- server code using the service role key (see src/lib/supabase/admin.ts),
--- never by the user directly — otherwise an author could just set
--- stripe_payouts_enabled = true on themselves via the API.
-revoke update (stripe_account_id, stripe_payouts_enabled) on public.profiles from authenticated;
+-- The UPDATE policy above is row-scoped only (auth.uid() = id), never
+-- column-restricted -- Supabase's own default privilege provisioning
+-- grants authenticated table-level UPDATE on every table it creates
+-- (confirmed directly against a live project via
+-- information_schema.role_table_grants, not merely assumed), so
+-- without an explicit column restriction here, ANY column -- including
+-- role, stripe_account_id, and stripe_payouts_enabled -- would be
+-- directly PATCHable by an authenticated user via a raw API call on
+-- their own row, regardless of what the application's own UI exposes.
+--
+-- A column-scoped REVOKE on just the sensitive columns (an earlier
+-- version of this file did exactly that, matching what migration 003
+-- originally shipped) does NOT work: Postgres table-level and
+-- column-level grants are independent, additive ACL entries, not a
+-- hierarchy -- a column-scoped REVOKE cannot narrow a still-standing
+-- table-level GRANT, because no column-level grant on that column ever
+-- existed to remove in the first place (see the Phase REFUND-1A
+-- database-security review). The only correct fix is to revoke the
+-- table-level grant entirely and re-grant UPDATE only on the columns
+-- authenticated legitimately needs -- confirmed by tracing every
+-- authenticated-client UPDATE against profiles in this codebase
+-- (src/app/dashboard/profile/actions.ts's updateProfile()): only
+-- display_name, bio, and avatar_path. role, stripe_account_id, and
+-- stripe_payouts_enabled are written exclusively via the admin/
+-- service-role client (src/app/dashboard/payouts/actions.ts,
+-- src/app/dashboard/payouts/page.tsx) -- service_role is a separate
+-- privilege grantee, entirely unaffected by anything revoked here.
+revoke update on public.profiles from authenticated;
+
+grant update (display_name, bio, avatar_path)
+  on public.profiles
+  to authenticated;
 
 -- Auto-create a profile row whenever someone signs up, using the
--- role/display_name passed in from the signup form's metadata.
-create function public.handle_new_user()
+-- role/display_name passed in from the signup form's metadata. Role
+-- resolution is a WHITELIST, not a passthrough (tightened by migration
+-- 028 when 'admin' became a valid column value): only an exact 'author'
+-- match is honored, anything else -- including 'admin', or any other
+-- value a crafted signup request might submit -- becomes 'reader'.
+-- Before that migration, the CHECK constraint accepting only
+-- 'author'/'reader' was the sole thing preventing a crafted
+-- raw_user_meta_data.role from creating a privileged profile; this
+-- makes that safe independent of the constraint's exact value set.
+create or replace function public.handle_new_user()
 returns trigger as $$
 begin
   insert into public.profiles (id, role, display_name)
   values (
     new.id,
-    coalesce(new.raw_user_meta_data->>'role', 'reader'),
+    case
+      when new.raw_user_meta_data->>'role' = 'author' then 'author'
+      else 'reader'
+    end,
     coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email, '@', 1))
   );
   return new;

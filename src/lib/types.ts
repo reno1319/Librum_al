@@ -1,4 +1,17 @@
-export type Role = "author" | "reader";
+// 'admin' (see migration 028) is a durable, server-enforced
+// marketplace-operator role -- never selectable by a user. It exists on
+// Profile.role because a profile row can legitimately have it, but no
+// user-facing flow (signup, profile editing) may ever produce it -- see
+// SignupRole below and requireAdmin() in src/lib/auth.ts.
+export type Role = "author" | "reader" | "admin";
+
+// The subset of Role a user may ever choose for themselves at signup.
+// Deliberately narrower than Role so a future edit to the signup form
+// that tried to widen its allowed values to include "admin" fails to
+// typecheck, rather than silently compiling -- one more layer alongside
+// the runtime allowlist in src/app/auth/actions.ts, the database CHECK
+// constraint, and handle_new_user()'s own whitelist (migration 028).
+export type SignupRole = Extract<Role, "author" | "reader">;
 
 export type Profile = {
   id: string;

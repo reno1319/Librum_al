@@ -3,13 +3,29 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import type { Role } from "@/lib/types";
+import type { SignupRole } from "@/lib/types";
+
+// Never widen this beyond "author"/"reader" -- signup must never be
+// able to produce an "admin" profile. handle_new_user() (migration 028)
+// enforces the same whitelist again, independently, at the database
+// layer, in case this validation is ever bypassed or this action is
+// ever called some other way -- but this is the first line of defense
+// against a crafted form submission (formData isn't limited to the
+// <select>'s own two options; a raw POST to this Server Action could
+// submit anything).
+const SIGNUP_ROLES: readonly SignupRole[] = ["author", "reader"];
+
+function resolveSignupRole(value: FormDataEntryValue | null): SignupRole {
+  return (SIGNUP_ROLES as readonly string[]).includes(value as string)
+    ? (value as SignupRole)
+    : "reader";
+}
 
 export async function signup(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const displayName = String(formData.get("displayName") ?? "");
-  const role = String(formData.get("role") ?? "reader") as Role;
+  const role = resolveSignupRole(formData.get("role"));
 
   if (!email || !password || !displayName) {
     redirect("/signup?error=Please+fill+in+every+field");
