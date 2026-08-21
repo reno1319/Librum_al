@@ -680,6 +680,180 @@ export async function fulfillBundleSnapshot(
   return null;
 }
 
+// Fulfills a Stripe-confirmed FULL refund (charge.refunded) against
+// every table that tracks refund state for the given PaymentIntent.
+// Scoped ENTIRELY by stripe_payment_intent_id -- never reads or trusts
+// anything else about which books/reader/amount are involved beyond
+// what Stripe's own charge object already resolved to this id.
+//
+// isFullyRefunded is the caller's one required piece of authoritative
+// Charge data, and it is checked FIRST, before anything else: Stripe's
+// charge.refunded event fires for partial refunds too, not only full
+// ones -- confirmed directly against the installed SDK's own type
+// definitions (stripe@22.5.0, pinned API version 2026-07-29.dahlia --
+// see node_modules/stripe/cjs/apiVersion.js), not assumed from memory.
+// Stripe.Charge.amount_refunded's own doc comment: "can be less than
+// the amount attribute on the charge if a partial refund was issued."
+// Stripe.Charge.refunded's own doc comment: "Whether the charge has
+// been fully refunded. If the charge is only partially refunded, this
+// attribute will still be false." That `refunded` boolean is exactly
+// this invariant, computed by Stripe itself -- equivalent to (and
+// preferred over re-deriving) `amount_refunded >= amount` by hand: it
+// needs no local arithmetic, cannot disagree with Stripe's own
+// determination of "fully refunded" (currency rounding, multiple
+// partial increments summing to the full amount, etc. are already
+// resolved on Stripe's side), and every call site here passes
+// `charge.refunded` straight through -- there is no code path in this
+// function, or in POST()'s call site, that could derive "fully
+// refunded" from a merely nonzero amount.
+//
+// Librum has no partial-refund concept anywhere in its design (see the
+// approved Phase REFUND-1B decisions) -- a partial refund is therefore
+// a deliberate, successful no-op here: none of purchases/
+// bundle_checkout_snapshots/refund_requests are touched, entitlement is
+// left completely alone, and the webhook still returns success (never
+// failed merely because Librum doesn't yet model partial state).
+//
+// Cumulative partial refunds resolve correctly with no extra tracking:
+// Stripe's `refunded` boolean on each charge.refunded delivery already
+// reflects the charge's current CUMULATIVE state, not a delta for that
+// one event -- so an early partial delivery no-ops here, and whichever
+// later delivery finally reports the charge as fully refunded (because
+// the cumulative amount_refunded has reached amount) runs the full
+// three-table transition below, exactly once, via the same idempotency
+// guards already in place for duplicate deliveries of that same
+// fully-refunded state.
+//
+// Three independent, sequential updates once isFullyRefunded is true,
+// none of which read from or depend on the others' outcome or row
+// count:
+//   1. purchases.refunded_at -- entitlement revocation (unchanged from
+//      before this function existed).
+//   2. bundle_checkout_snapshots.refunded_at -- transaction-level
+//      record, needed because a zero-eligible-item bundle snapshot (see
+//      fulfillBundleSnapshot above) can have no purchases row for this
+//      payment intent at all (unchanged from before this function
+//      existed; see migration 027).
+//   3. refund_requests.status/refunded_at -- Phase REFUND-1B Step 4:
+//      syncs Librum's own refund-request record (if one happens to
+//      exist for this payment intent) to what Stripe has already
+//      confirmed. New in this phase.
+//
+// Ordering: entitlement/transaction truth (1, 2) is written before the
+// refund-request housekeeping record (3) that merely reports on it --
+// on a partial failure, this means refund_requests.status = 'refunded'
+// can never be observed before purchases/snapshot themselves already
+// reflect the refund, never the other way around. This ordering is not
+// required for eventual correctness (each step's own idempotency guard
+// makes every step safe to retry regardless of which others already
+// completed -- see below), but it's the more defensible invariant to
+// hold when there's no other reason to pick an order, so it's kept
+// consistent with how (2) was already ordered after (1) before this
+// phase.
+//
+// Retry-safety: this is NOT one atomic transaction across the three
+// Supabase calls -- a real failure between any two of them is possible.
+// Each step is independently idempotent (its own WHERE clause only ever
+// matches a row still in a "not yet refunded" state), so no matter which
+// prior step(s) already committed before a later one fails and this
+// function returns a failure response (Stripe redelivers the event):
+//   - already-completed steps re-run as clean no-ops (their guard now
+//     matches zero rows) -- purchases: `is("refunded_at", null)`;
+//     snapshot: `is("refunded_at", null)`; refund_requests:
+//     `in("status", ["requested", "approved"])`.
+//   - the step that failed (or never got attempted before an earlier
+//     one failed) reruns as a real, first-time write.
+// The system therefore converges to full consistency after enough
+// retries, regardless of exactly where a prior delivery's transient
+// failure landed.
+//
+// refund_requests.status is only ever written here for a row still in
+// 'requested' or 'approved' -- migration 029's own partial unique index
+// (`unique ... where status in ('requested','approved')`) guarantees at
+// most one such row can exist per payment intent, so this can never
+// touch more than one row, and a 'cancelled'/'rejected' row (a
+// different, terminal state) is never matched or touched by this
+// update. A payment intent with no refund_requests row at all (the
+// refund predates the request system, or was made directly in Stripe
+// without ever going through a reader/admin request) matches zero rows
+// here -- a successful no-op, not an error; the entitlement writes above
+// are completely unaffected by whether a request row exists.
+//
+// Deliberately mirrors ONLY status and refunded_at -- reviewed_at,
+// reviewed_by, and admin_notes are never touched here. A request that
+// was still 'requested' (an operator refunded directly in Stripe
+// without ever using the admin approve flow) ends up 'refunded' with
+// reviewed_at/reviewed_by still null -- a legitimate, expected state,
+// not a data gap: nothing in this app's UI (Step 2/3) requires a
+// reviewed_at to correctly hide the Request/Cancel/Approve/Reject
+// controls once status = 'refunded' (see deriveTransactionRefundState
+// and canReview, both of which key off status alone).
+//
+// Exported (only) for the same reason as fulfillBundleSnapshot above:
+// direct testability with a fake Supabase client
+// (src/app/api/webhooks/stripe/route.test.ts). POST() remains the
+// actual route handler and is not itself exported or changed beyond
+// calling this function.
+export async function processChargeRefund(
+  supabase: ReturnType<typeof createAdminClient>,
+  event: Stripe.Event,
+  paymentIntentId: string,
+  isFullyRefunded: boolean,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  if (!isFullyRefunded) {
+    console.warn(
+      "Stripe webhook: charge.refunded event is a partial refund -- skipping full-refund processing",
+      { eventId: event.id, paymentIntentId },
+    );
+    return null;
+  }
+
+  const { error: refundError } = await supabase
+    .from("purchases")
+    .update({ refunded_at: new Date().toISOString() })
+    .eq("stripe_payment_intent_id", paymentIntentId)
+    .is("refunded_at", null);
+
+  if (refundError) {
+    return failWebhook({
+      eventId: event.id,
+      paymentIntentId,
+      error: refundError,
+    });
+  }
+
+  const { error: snapshotRefundError } = await supabase
+    .from("bundle_checkout_snapshots")
+    .update({ refunded_at: new Date().toISOString() })
+    .eq("stripe_payment_intent_id", paymentIntentId)
+    .is("refunded_at", null);
+
+  if (snapshotRefundError) {
+    return failWebhook({
+      eventId: event.id,
+      paymentIntentId,
+      error: snapshotRefundError,
+    });
+  }
+
+  const { error: refundRequestError } = await supabase
+    .from("refund_requests")
+    .update({ status: "refunded", refunded_at: new Date().toISOString() })
+    .eq("stripe_payment_intent_id", paymentIntentId)
+    .in("status", ["requested", "approved"]);
+
+  if (refundRequestError) {
+    return failWebhook({
+      eventId: event.id,
+      paymentIntentId,
+      error: refundRequestError,
+    });
+  }
+
+  return null;
+}
+
 // Stripe calls this URL directly (not a browser), so it must read the
 // raw request body to verify the signature — no cookies/session involved.
 export async function POST(request: Request) {
@@ -994,53 +1168,15 @@ export async function POST(request: Request) {
 
     if (paymentIntentId) {
       const supabase = createAdminClient();
-      const { error: refundError } = await supabase
-        .from("purchases")
-        .update({ refunded_at: new Date().toISOString() })
-        .eq("stripe_payment_intent_id", paymentIntentId)
-        .is("refunded_at", null);
-
-      if (refundError) {
-        return failWebhook({
-          eventId: event.id,
-          paymentIntentId,
-          error: refundError,
-        });
-      }
-
-      // Snapshot-level counterpart to the purchases update above -- see
-      // migration 027. A snapshot bundle transaction where every item was
-      // already actively owned through some unrelated purchase writes
-      // ZERO purchases rows (see fulfillBundleSnapshot's zero-eligible
-      // handling), so it has no row the update above could ever match --
-      // without this, that payment's later refund would be entirely
-      // unrepresented in Librum. Run unconditionally alongside the
-      // purchases update (not only when it matched zero rows): a normal
-      // bundle payment's snapshot also carries this same payment_intent,
-      // and marking it refunded too keeps the transaction-level record
-      // consistent with the entitlement-level one it fulfilled.
-      //
-      // Independently idempotent, same as the purchases update: its own
-      // `refunded_at is null` guard means a duplicate delivery of this
-      // event matches zero rows here, a clean no-op. If this update
-      // errors after the purchases update already succeeded, failing the
-      // whole delivery (rather than returning 200) is deliberate -- a
-      // retry safely completes just this remaining half, since the
-      // purchases update above is itself a no-op on that retry (already
-      // refunded). Never silently acknowledge a refund event that only
-      // partially persisted.
-      const { error: snapshotRefundError } = await supabase
-        .from("bundle_checkout_snapshots")
-        .update({ refunded_at: new Date().toISOString() })
-        .eq("stripe_payment_intent_id", paymentIntentId)
-        .is("refunded_at", null);
-
-      if (snapshotRefundError) {
-        return failWebhook({
-          eventId: event.id,
-          paymentIntentId,
-          error: snapshotRefundError,
-        });
+      const failureResponse = await processChargeRefund(
+        supabase,
+        event,
+        paymentIntentId,
+        charge.refunded,
+        failWebhook,
+      );
+      if (failureResponse) {
+        return failureResponse;
       }
     }
   }

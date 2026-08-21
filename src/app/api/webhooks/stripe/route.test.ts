@@ -13,22 +13,26 @@ vi.mock("@/lib/email", () => ({
   sendSnapshotBundlePurchaseEmails: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { fulfillBundleSnapshot } = await import("./route");
+const { fulfillBundleSnapshot, processChargeRefund } = await import("./route");
 
 // ---------------------------------------------------------------------
 // A minimal, in-memory fake of the Supabase query builder -- just
-// enough of the fluent chain (.select/.eq/.is/.update/.upsert/.delete/
-// .maybeSingle, and plain `await` on the builder itself) to exercise
-// every Supabase call fulfillBundleSnapshot actually makes against
-// `bundle_checkout_snapshots` and `purchases`. Not a general-purpose
-// Supabase mock -- deliberately scoped to this one function's call
-// shapes, since that's what these tests drive.
+// enough of the fluent chain (.select/.eq/.is/.in/.update/.upsert/
+// .delete/.maybeSingle, and plain `await` on the builder itself) to
+// exercise every Supabase call fulfillBundleSnapshot and
+// processChargeRefund actually make against `bundle_checkout_snapshots`,
+// `purchases`, and `refund_requests`. Not a general-purpose Supabase
+// mock -- deliberately scoped to these functions' call shapes, since
+// that's what these tests drive. `.in()` and the errorOnUpdate injection
+// hook (both used only by the processChargeRefund tests below) were
+// added for Phase REFUND-1B Step 4 -- everything else is unchanged from
+// the original fulfillBundleSnapshot test suite.
 // ---------------------------------------------------------------------
 type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
 
 class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
-  private filters: { col: string; val: unknown }[] = [];
+  private filters: { col: string; val: unknown; op: "eq" | "in" }[] = [];
   private op: "select" | "update" | "upsert" | "delete" = "select";
   private payload: Row | undefined;
   private upsertOnConflict: string | undefined;
@@ -37,6 +41,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
   constructor(
     private tables: Tables,
     private table: string,
+    private errorOnUpdate: Partial<Record<string, unknown>> = {},
   ) {}
 
   select() {
@@ -45,12 +50,17 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
   }
 
   eq(col: string, val: unknown) {
-    this.filters.push({ col, val });
+    this.filters.push({ col, val, op: "eq" });
     return this;
   }
 
   is(col: string, val: unknown) {
-    this.filters.push({ col, val });
+    this.filters.push({ col, val, op: "eq" });
+    return this;
+  }
+
+  in(col: string, vals: unknown[]) {
+    this.filters.push({ col, val: vals, op: "in" });
     return this;
   }
 
@@ -77,7 +87,9 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
   }
 
   private matches(row: Row): boolean {
-    return this.filters.every((f) => row[f.col] === f.val);
+    return this.filters.every((f) =>
+      f.op === "in" ? (f.val as unknown[]).includes(row[f.col]) : row[f.col] === f.val,
+    );
   }
 
   private execute(): { data: unknown; error: unknown } {
@@ -88,6 +100,13 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
     }
 
     if (this.op === "update") {
+      // Injected failure simulation (Phase REFUND-1B Step 4's error-path
+      // tests) -- returns a Postgres-shaped error without touching any
+      // row, exactly like a real failed UPDATE would leave the table
+      // unchanged.
+      if (this.table in this.errorOnUpdate) {
+        return { data: null, error: this.errorOnUpdate[this.table] };
+      }
       const matched = rows.filter((r) => this.matches(r));
       for (const row of matched) Object.assign(row, this.payload);
       return { data: this.wantReturnRows ? matched : null, error: null };
@@ -125,9 +144,9 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
   }
 }
 
-function makeFakeSupabase(tables: Tables) {
+function makeFakeSupabase(tables: Tables, errorOnUpdate: Partial<Record<string, unknown>> = {}) {
   return {
-    from: (table: string) => new FakeQuery(tables, table),
+    from: (table: string) => new FakeQuery(tables, table, errorOnUpdate),
   };
 }
 
@@ -337,5 +356,444 @@ describe("fulfillBundleSnapshot: partially-owned bundle transaction integrity", 
     expect(bookARow?.stripe_checkout_session_id).toBe(OLD_SESSION_ID);
     expect(bookBRow?.amount_cents).toBe(599);
     expect(bookBRow?.stripe_checkout_session_id).toBe(NEW_SESSION_ID);
+  });
+});
+
+// ---------------------------------------------------------------------
+// Phase REFUND-1B Step 4: processChargeRefund's refund_requests sync,
+// alongside the pre-existing purchases/snapshot refund behavior it was
+// extracted from (unchanged by this phase -- see route.ts's own
+// comment on processChargeRefund for the extraction rationale).
+// ---------------------------------------------------------------------
+describe("processChargeRefund: refund_requests synchronization", () => {
+  const PAYMENT_INTENT_ID = "pi_test_refund_sync";
+  const OTHER_PAYMENT_INTENT_ID = "pi_test_unrelated";
+  const REQUEST_ID = "refund-request-1";
+  const READER_ID = "reader-1";
+  const ADMIN_ID = "admin-1";
+
+  function refundTables(overrides: { refund_requests?: Row[] } = {}): Tables {
+    return {
+      purchases: [
+        {
+          id: "purchase-1",
+          book_id: "book-1",
+          reader_id: READER_ID,
+          stripe_checkout_session_id: "cs_test_1",
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          amount_cents: 500,
+          bundle_id: null,
+          refunded_at: null,
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+        // A completely unrelated purchase (different payment intent) --
+        // must never be touched by a refund of PAYMENT_INTENT_ID.
+        {
+          id: "purchase-unrelated",
+          book_id: "book-2",
+          reader_id: "reader-2",
+          stripe_checkout_session_id: "cs_test_unrelated",
+          stripe_payment_intent_id: OTHER_PAYMENT_INTENT_ID,
+          amount_cents: 700,
+          bundle_id: null,
+          refunded_at: null,
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      bundle_checkout_snapshots: [
+        {
+          id: "snapshot-1",
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          refunded_at: null,
+        },
+      ],
+      refund_requests:
+        overrides.refund_requests ??
+        [
+          {
+            id: REQUEST_ID,
+            reader_id: READER_ID,
+            stripe_payment_intent_id: PAYMENT_INTENT_ID,
+            bundle_checkout_snapshot_id: null,
+            amount_cents: 500,
+            reason: "wrong edition",
+            status: "requested",
+            requested_at: "2026-01-01T00:00:00.000Z",
+            reviewed_at: null,
+            reviewed_by: null,
+            admin_notes: null,
+            refunded_at: null,
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+    };
+  }
+
+  function fakeFailWebhookForRefund(): NextResponse {
+    return { status: 500 } as unknown as NextResponse;
+  }
+
+  it("A: an approved request becomes refunded, preserving reviewed_at/reviewed_by/admin_notes", async () => {
+    const tables = refundTables({
+      refund_requests: [
+        {
+          id: REQUEST_ID,
+          reader_id: READER_ID,
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          bundle_checkout_snapshot_id: null,
+          amount_cents: 500,
+          reason: "wrong edition",
+          status: "approved",
+          requested_at: "2026-01-01T00:00:00.000Z",
+          reviewed_at: "2026-01-02T00:00:00.000Z",
+          reviewed_by: ADMIN_ID,
+          admin_notes: "looks legitimate",
+          refunded_at: null,
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    const result = await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+
+    const request = tables.refund_requests[0];
+    expect(request.status).toBe("refunded");
+    expect(request.refunded_at).not.toBeNull();
+    expect(request.reviewed_at).toBe("2026-01-02T00:00:00.000Z");
+    expect(request.reviewed_by).toBe(ADMIN_ID);
+    expect(request.admin_notes).toBe("looks legitimate");
+  });
+
+  it("B: a still-requested request becomes refunded via a direct Stripe refund, leaving reviewed_at/reviewed_by null", async () => {
+    const tables = refundTables(); // default fixture: status "requested"
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    const request = tables.refund_requests[0];
+    expect(request.status).toBe("refunded");
+    expect(request.refunded_at).not.toBeNull();
+    expect(request.reviewed_at).toBeNull();
+    expect(request.reviewed_by).toBeNull();
+  });
+
+  it("C: no matching refund_requests row is a successful no-op; purchases refund still occurs", async () => {
+    const tables = refundTables({ refund_requests: [] });
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    const result = await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.refund_requests).toHaveLength(0);
+
+    const purchase = tables.purchases.find((r) => r.id === "purchase-1");
+    expect(purchase?.refunded_at).not.toBeNull();
+  });
+
+  it("D: a duplicate webhook delivery does not rewrite an already-refunded request's refunded_at", async () => {
+    const tables = refundTables();
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+    const event = { id: "evt_1" } as Stripe.Event;
+
+    await processChargeRefund(supabase as never, event, PAYMENT_INTENT_ID, true, failWebhook);
+    const firstRefundedAt = tables.refund_requests[0].refunded_at;
+    expect(firstRefundedAt).not.toBeNull();
+
+    const secondResult = await processChargeRefund(
+      supabase as never,
+      event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(secondResult).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.refund_requests[0].refunded_at).toBe(firstRefundedAt);
+    expect(tables.refund_requests[0].status).toBe("refunded");
+  });
+
+  it("E: a cancelled request is never moved to refunded", async () => {
+    const tables = refundTables({
+      refund_requests: [
+        {
+          id: REQUEST_ID,
+          reader_id: READER_ID,
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          bundle_checkout_snapshot_id: null,
+          amount_cents: 500,
+          reason: null,
+          status: "cancelled",
+          requested_at: "2026-01-01T00:00:00.000Z",
+          reviewed_at: null,
+          reviewed_by: null,
+          admin_notes: null,
+          refunded_at: null,
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.refund_requests[0].status).toBe("cancelled");
+    expect(tables.refund_requests[0].refunded_at).toBeNull();
+  });
+
+  it("F: a rejected request is never moved to refunded", async () => {
+    const tables = refundTables({
+      refund_requests: [
+        {
+          id: REQUEST_ID,
+          reader_id: READER_ID,
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          bundle_checkout_snapshot_id: null,
+          amount_cents: 500,
+          reason: null,
+          status: "rejected",
+          requested_at: "2026-01-01T00:00:00.000Z",
+          reviewed_at: "2026-01-02T00:00:00.000Z",
+          reviewed_by: ADMIN_ID,
+          admin_notes: "not eligible",
+          refunded_at: null,
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    const request = tables.refund_requests[0];
+    expect(request.status).toBe("rejected");
+    expect(request.refunded_at).toBeNull();
+    expect(request.admin_notes).toBe("not eligible");
+  });
+
+  it("G: a real database error updating refund_requests fails the webhook delivery for retry", async () => {
+    const tables = refundTables();
+    const supabase = makeFakeSupabase(tables, {
+      refund_requests: { message: "connection reset by peer", code: "08006" },
+    });
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    const result = await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledTimes(1);
+    // The entitlement write (purchases) already completed before this
+    // failure -- confirms the ordering/retry-safety this phase relies
+    // on: a retry only needs to redo the step that actually failed.
+    const purchase = tables.purchases.find((r) => r.id === "purchase-1");
+    expect(purchase?.refunded_at).not.toBeNull();
+    // The refund_requests row itself must be untouched by the failed
+    // update, not left in some partially-written state.
+    expect(tables.refund_requests[0].status).toBe("requested");
+  });
+
+  it("H: an unrelated purchase under a different payment intent is never refunded", async () => {
+    const tables = refundTables();
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    const unrelated = tables.purchases.find((r) => r.id === "purchase-unrelated");
+    expect(unrelated?.refunded_at).toBeNull();
+  });
+
+  // -------------------------------------------------------------------
+  // Full-vs-partial refund guard. charge.refunded fires for partial
+  // refunds too (verified against the installed stripe@22.5.0 SDK's own
+  // Charge type: amount_refunded "can be less than the amount attribute
+  // ... if a partial refund was issued"; refunded "Whether the charge
+  // has been fully refunded. If the charge is only partially refunded,
+  // this attribute will still be false.") -- isFullyRefunded is exactly
+  // that `refunded` boolean, passed straight through from POST()'s own
+  // `charge.refunded` field access, never derived from an amount here.
+  // -------------------------------------------------------------------
+
+  it("partial refund: isFullyRefunded=false leaves all three tables untouched and still succeeds", async () => {
+    const tables = refundTables();
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    const result = await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      false,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.purchases.find((r) => r.id === "purchase-1")?.refunded_at).toBeNull();
+    expect(tables.bundle_checkout_snapshots[0].refunded_at).toBeNull();
+    expect(tables.refund_requests[0].status).toBe("requested");
+    expect(tables.refund_requests[0].refunded_at).toBeNull();
+  });
+
+  it("full refund: isFullyRefunded=true runs the normal three-table processing", async () => {
+    const tables = refundTables();
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    const result = await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.purchases.find((r) => r.id === "purchase-1")?.refunded_at).not.toBeNull();
+    expect(tables.bundle_checkout_snapshots[0].refunded_at).not.toBeNull();
+    expect(tables.refund_requests[0].status).toBe("refunded");
+  });
+
+  it("cumulative refund: an early partial delivery no-ops, and a later delivery reporting fully-refunded performs the transition", async () => {
+    const tables = refundTables();
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    // Delivery 1: charge partially refunded so far (e.g. Stripe's
+    // cumulative amount_refunded is still less than amount).
+    const firstResult = await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      false,
+      failWebhook,
+    );
+    expect(firstResult).toBeNull();
+    expect(tables.purchases.find((r) => r.id === "purchase-1")?.refunded_at).toBeNull();
+    expect(tables.refund_requests[0].status).toBe("requested");
+
+    // Delivery 2: a later refund brings the cumulative amount_refunded
+    // up to the full charge amount -- Stripe now reports this charge as
+    // fully refunded.
+    const secondResult = await processChargeRefund(
+      supabase as never,
+      { id: "evt_2" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(secondResult).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.purchases.find((r) => r.id === "purchase-1")?.refunded_at).not.toBeNull();
+    expect(tables.bundle_checkout_snapshots[0].refunded_at).not.toBeNull();
+    expect(tables.refund_requests[0].status).toBe("refunded");
+  });
+
+  it("duplicate full-refund delivery after the cumulative transition remains idempotent", async () => {
+    const tables = refundTables();
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+    const event = { id: "evt_full" } as Stripe.Event;
+
+    await processChargeRefund(supabase as never, event, PAYMENT_INTENT_ID, true, failWebhook);
+    const refundedAtAfterFirst = tables.refund_requests[0].refunded_at;
+    expect(refundedAtAfterFirst).not.toBeNull();
+
+    const secondResult = await processChargeRefund(
+      supabase as never,
+      event,
+      PAYMENT_INTENT_ID,
+      true,
+      failWebhook,
+    );
+
+    expect(secondResult).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.refund_requests[0].refunded_at).toBe(refundedAtAfterFirst);
+    expect(tables.refund_requests[0].status).toBe("refunded");
+  });
+
+  it("a partial refund is never promoted to full processing merely because its amount_refunded is nonzero", async () => {
+    // processChargeRefund never sees a raw amount at all -- it only
+    // ever receives the pre-computed isFullyRefunded boolean (POST()'s
+    // own `charge.refunded` field access), so there is no code path
+    // here that could mistake "some amount was refunded" (nonzero) for
+    // "the full amount was refunded". This asserts that contract
+    // directly: passing false processes nothing, regardless of how
+    // large a hypothetical partial refund might have been.
+    const tables = refundTables();
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhookForRefund);
+
+    await processChargeRefund(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      PAYMENT_INTENT_ID,
+      false,
+      failWebhook,
+    );
+
+    expect(tables.purchases.find((r) => r.id === "purchase-1")?.refunded_at).toBeNull();
+    expect(tables.bundle_checkout_snapshots[0].refunded_at).toBeNull();
+    expect(tables.refund_requests[0].status).toBe("requested");
+    expect(failWebhook).not.toHaveBeenCalled();
   });
 });
