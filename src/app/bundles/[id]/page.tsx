@@ -48,19 +48,18 @@ export default async function BundleDetailPage({
   const originalTotalCents = books.reduce((sum, b) => sum + b.price_cents, 0);
   const savingsCents = Math.max(0, originalTotalCents - bundle.price_cents);
 
+  // LAUNCH-1 P1-7A: per-book, via user_owns_book() (also excludes a
+  // purchase whose payment intent has a dispute at status 'lost')
+  // rather than a raw multi-book purchases select -- payment_disputes
+  // is fully closed to this request-scoped client. This is a display
+  // check, not a security boundary -- buyBundle and create_bundle_
+  // checkout_snapshot independently re-verify.
   let ownsEverything = false;
   if (user && books.length > 0) {
-    const { data: owned } = await supabase
-      .from("purchases")
-      .select("book_id")
-      .eq("reader_id", user.id)
-      .in(
-        "book_id",
-        books.map((b) => b.id),
-      )
-      .is("refunded_at", null);
-    const ownedIds = new Set((owned ?? []).map((p) => p.book_id));
-    ownsEverything = books.every((b) => ownedIds.has(b.id));
+    const ownershipChecks = await Promise.all(
+      books.map((b) => supabase.rpc("user_owns_book", { target_book_id: b.id })),
+    );
+    ownsEverything = ownershipChecks.every((result) => !!result.data);
   }
 
   return (

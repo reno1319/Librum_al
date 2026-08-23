@@ -32,16 +32,18 @@ export async function GET(
     );
   }
 
+  // LAUNCH-1 P1-7A: user_owns_book() now also excludes a purchase whose
+  // payment intent has a dispute at status 'lost' (see migration 035) --
+  // routed through this RPC rather than a raw purchases select, since
+  // public.payment_disputes is fully closed to the request-scoped
+  // client and this SECURITY DEFINER function already encapsulates the
+  // complete, correct ownership predicate.
   let owned = book.author_id === user.id;
   if (!owned) {
-    const { data: purchase } = await supabase
-      .from("purchases")
-      .select("id")
-      .eq("book_id", id)
-      .eq("reader_id", user.id)
-      .is("refunded_at", null)
-      .maybeSingle();
-    owned = !!purchase;
+    const { data: ownsBook } = await supabase.rpc("user_owns_book", {
+      target_book_id: id,
+    });
+    owned = !!ownsBook;
   }
 
   if (!owned) {

@@ -812,16 +812,19 @@ begin
   -- already owns every one of these books gets no new snapshot at all.
   -- A reader who owns only SOME of them is unaffected -- fresh-snapshot
   -- creation proceeds exactly as it already did before this migration.
+  --
+  -- LAUNCH-1 P1-7A correction: was an inline `exists (select 1 from
+  -- purchases where ... and refunded_at is null)` per item -- replaced
+  -- with public.user_owns_book(), the same canonical predicate every
+  -- other ownership check in this schema now uses. A reader whose only
+  -- purchase of a book in this bundle is disputed-and-lost is correctly
+  -- treated as NOT owning it. Same read, same place, inside this same
+  -- already-advisory-locked transaction -- no new concurrency exposure
+  -- to the reservation/hold mechanism.
   if not exists (
     select 1
     from jsonb_array_elements(v_items) as item
-    where not exists (
-      select 1
-      from public.purchases p
-      where p.book_id = (item->>'book_id')::uuid
-        and p.reader_id = v_reader_id
-        and p.refunded_at is null
-    )
+    where not public.user_owns_book((item->>'book_id')::uuid)
   ) then
     raise exception 'reader already owns every book in this bundle';
   end if;
@@ -1214,6 +1217,86 @@ revoke all on function public.bestselling_books(uuid[], int) from anon;
 revoke all on function public.bestselling_books(uuid[], int) from authenticated;
 grant execute on function public.bestselling_books(uuid[], int) to service_role;
 
+-- ============================================================
+-- payment_disputes: LAUNCH-1 P1-7A. One durable row per Stripe Dispute
+-- object (charge.dispute.created/.updated/.closed/.funds_withdrawn/
+-- .funds_reinstated), keyed by the dispute's own stable id. This is
+-- the SOLE authoritative record of dispute state -- deliberately not
+-- denormalized onto purchases/bundle_checkout_snapshots (stress-tested
+-- and rejected during the P1-7A design phase: a second copy creates a
+-- real divergence-prevention burden with no offsetting benefit, since
+-- an indexed NOT EXISTS against this table costs the same order of
+-- magnitude as the EXISTS subquery user_owns_book() already runs
+-- against purchases today).
+--
+-- status/reason are stored verbatim, with NO check constraint: the
+-- installed stripe@22.5.0 SDK types both as open string unions
+-- (Dispute.status includes `| OtherString`, confirmed directly in
+-- node_modules/stripe/cjs/resources/Disputes.d.ts) since Stripe can
+-- introduce new values -- constraining this column would risk
+-- rejecting a legitimate future Stripe status outright. Only the
+-- literal string 'lost' is ever treated as revoking entitlement (see
+-- user_owns_book() below) -- an unrecognized value is therefore safe
+-- by construction, not by any allowlist maintained here.
+-- ============================================================
+
+create table public.payment_disputes (
+  id uuid primary key default gen_random_uuid(),
+  stripe_dispute_id text unique not null,
+  stripe_payment_intent_id text not null,
+  status text not null,
+  reason text not null,
+  amount_cents integer not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index payment_disputes_payment_intent_idx
+  on public.payment_disputes(stripe_payment_intent_id);
+
+alter table public.payment_disputes enable row level security;
+
+-- Zero policies for any command, same posture as bundle_checkout_
+-- reservations/bundle_checkout_reader_holds -- doubly closed alongside
+-- the explicit revoke below. Only service_role (the webhook) and the
+-- two SECURITY DEFINER functions that read it (both bypass RLS as the
+-- function owner) ever touch this table.
+revoke all on public.payment_disputes from public, anon, authenticated;
+
+-- payment_intent_has_lost_dispute(): the ONE place "does this exact
+-- Stripe payment intent have a dispute at status 'lost'" is defined.
+-- Explicitly parameterized (not auth.uid()-based) because it is called
+-- from contexts where the relevant identity is NOT the calling
+-- session's own -- most notably finalize_book_checkout_intent, which
+-- runs as the service-role webhook acting on an explicit reader_id
+-- read from the intent row, where auth.uid() would not reflect that
+-- reader at all. user_owns_book() below also calls this, rather than
+-- duplicating the same fragment inline -- one canonical predicate,
+-- reused everywhere the "is this payment intent's dispute lost" fact
+-- is needed, whether or not auth.uid() happens to be meaningful in the
+-- caller's context.
+create or replace function public.payment_intent_has_lost_dispute(
+  target_payment_intent_id text
+)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.payment_disputes d
+    where d.stripe_payment_intent_id = target_payment_intent_id
+      and d.status = 'lost'
+  );
+$$;
+
+revoke all on function public.payment_intent_has_lost_dispute(text) from public;
+revoke all on function public.payment_intent_has_lost_dispute(text) from anon;
+revoke all on function public.payment_intent_has_lost_dispute(text) from authenticated;
+grant execute on function public.payment_intent_has_lost_dispute(text) to authenticated;
+
 -- Lets a reader who legitimately owns a book keep viewing its detail
 -- page after the author unpublishes it (see the Phase 8/8A audit).
 -- Declared here, after purchases, rather than alongside books' other
@@ -1238,6 +1321,31 @@ grant execute on function public.bestselling_books(uuid[], int) to service_role;
 -- or reader id. Takes no reader_id parameter -- always uses auth.uid()
 -- internally, so a caller can only ever ask "do I own this," never
 -- "does someone else."
+--
+-- LAUNCH-1 P1-7A: extended with the dispute-lost predicate, via
+-- payment_intent_has_lost_dispute() above. Every other entitlement/
+-- ownership call site in the application (the manuscript download
+-- route, submitReview, the book detail page's "owned" display state,
+-- buyBook's and getFreeBook's "already own it" repurchase guards, and
+-- buyBundle's/the bundle page's per-book ownership checks) calls this
+-- RPC instead of duplicating the raw purchases query -- payment_
+-- disputes is fully closed to anon/authenticated above, so a
+-- request-scoped client cannot read it directly; routing every check
+-- through this one SECURITY DEFINER function avoids granting any new
+-- table-level privilege and consolidates what used to be several
+-- separately-duplicated ownership queries into one canonical
+-- predicate. The dispute check correctly no-ops for a free acquisition
+-- (purchases.stripe_payment_intent_id is null for those -- see
+-- getFreeBook -- and null can never equal a dispute's real payment_
+-- intent_id).
+--
+-- create_book_checkout_intent() and create_bundle_checkout_snapshot()
+-- (both invoked in a request-scoped, auth.uid()-meaningful context)
+-- also call this function directly for their own "does the reader
+-- already own this" pre-checks, rather than duplicating the predicate
+-- -- see each function's own comment for the pre-production audit that
+-- found they had NOT originally been updated, leaving a reader whose
+-- purchase was disputed-and-lost unable to ever repurchase.
 create or replace function public.user_owns_book(target_book_id uuid)
 returns boolean
 language sql
@@ -1251,6 +1359,7 @@ as $$
     where purchases.book_id = target_book_id
       and purchases.reader_id = auth.uid()
       and purchases.refunded_at is null
+      and not public.payment_intent_has_lost_dispute(purchases.stripe_payment_intent_id)
   );
 $$;
 
@@ -1995,7 +2104,7 @@ create table public.book_checkout_intents (
   check (expires_at > created_at),
   check (fulfilled_at is null or completed_at is not null),
   check ((reconciliation_reason is not null) = (completed_at is not null and fulfilled_at is null)),
-  check (reconciliation_reason is null or reconciliation_reason in ('active_other_session', 'book_or_reader_deleted'))
+  check (reconciliation_reason is null or reconciliation_reason in ('active_other_session', 'book_or_reader_deleted', 'disputed_lost'))
 );
 
 alter table public.book_checkout_intents enable row level security;
@@ -2073,13 +2182,16 @@ begin
     raise exception 'book not available for purchase';
   end if;
 
-  if exists (
-    select 1
-    from public.purchases p
-    where p.book_id = create_book_checkout_intent.book_id
-      and p.reader_id = v_reader_id
-      and p.refunded_at is null
-  ) then
+  -- LAUNCH-1 P1-7A correction: was `if exists (select 1 from purchases
+  -- where ... and refunded_at is null)` -- exactly the "second
+  -- definition of active ownership" this correction exists to remove --
+  -- replaced with the same canonical predicate everything else uses. A
+  -- reader whose only purchase of this book is disputed-and-lost may
+  -- now legitimately start a fresh checkout; a reader with an open,
+  -- won, warning/inquiry, 'prevented', or unrecognized-status dispute
+  -- (user_owns_book() still returns true for all of those) is still
+  -- correctly refused, exactly as before.
+  if public.user_owns_book(create_book_checkout_intent.book_id) then
     raise exception 'reader already owns this book';
   end if;
 
@@ -2135,9 +2247,11 @@ create or replace function public.finalize_book_checkout_intent(
   p_amount_cents integer
 )
 returns table (
-  outcome text,
-  out_book_id uuid,
-  out_reader_id uuid
+  outcome text,        -- 'eligible_fulfilled' | 'active_other_session'
+                        -- | 'blocked_book_or_reader_deleted'
+                        -- | 'blocked_disputed_lost' | 'already_finalized'
+  out_book_id uuid,     -- null only for blocked_book_or_reader_deleted
+  out_reader_id uuid    -- null only for blocked_book_or_reader_deleted
 )
 language plpgsql
 security definer
@@ -2167,6 +2281,30 @@ begin
     raise exception 'stripe amount does not match this intent''s frozen price';
   end if;
 
+  -- LAUNCH-1 P1-7A: dispute-before-fulfillment guarantee. If a dispute
+  -- on this exact payment intent has already reached 'lost', no
+  -- purchases row is ever written for it -- recorded as completed-but-
+  -- blocked, exactly like the book/reader-deleted case below, rather
+  -- than silently granting entitlement Librum's own dispute record
+  -- already says was lost. Runs inside this function's own existing
+  -- row-locked transaction (the `for update` taken above) -- no new
+  -- lock needed, since that row lock already fully serializes every
+  -- call for this exact intent_id, and this check reads an unrelated
+  -- table. Correct under real-world dispute timing: a dispute can only
+  -- ever be filed against an already-completed charge, so "dispute
+  -- before fulfillment" only ever means webhook processing order
+  -- inverted, never that the underlying events truly raced -- a plain
+  -- read of already-committed state is sufficient.
+  if public.payment_intent_has_lost_dispute(p_stripe_payment_intent_id) then
+    update public.book_checkout_intents
+    set stripe_payment_intent_id = p_stripe_payment_intent_id,
+        completed_at = now(),
+        reconciliation_reason = 'disputed_lost'
+    where id = p_intent_id;
+    return query select 'blocked_disputed_lost'::text, v_intent.book_id, v_intent.reader_id;
+    return;
+  end if;
+
   if v_intent.book_id is null or v_intent.reader_id is null then
     update public.book_checkout_intents
     set stripe_payment_intent_id = p_stripe_payment_intent_id,
@@ -2182,13 +2320,24 @@ begin
     pg_catalog.hashtext(v_intent.book_id::text)
   );
 
-  select p.stripe_checkout_session_id, p.refunded_at
+  select p.stripe_checkout_session_id, p.stripe_payment_intent_id, p.refunded_at
   into v_existing
   from public.purchases p
   where p.book_id = v_intent.book_id
     and p.reader_id = v_intent.reader_id;
 
-  if v_existing.stripe_checkout_session_id is not null and v_existing.refunded_at is null then
+  -- LAUNCH-1 P1-7A correction: added `and not payment_intent_has_lost_
+  -- dispute(v_existing.stripe_payment_intent_id)` -- without it, a
+  -- reader's own OLD, disputed-and-lost purchase row would still be
+  -- classified "active" here (a dispute never sets refunded_at), wrongly
+  -- blocking their legitimate repurchase after paying a second time. An
+  -- existing row whose own payment intent is disputed-lost now falls
+  -- through to the eligible/upsert path below, exactly like a refunded
+  -- row already does.
+  if v_existing.stripe_checkout_session_id is not null
+     and v_existing.refunded_at is null
+     and not public.payment_intent_has_lost_dispute(v_existing.stripe_payment_intent_id)
+  then
     update public.book_checkout_intents
     set stripe_payment_intent_id = p_stripe_payment_intent_id,
         completed_at = now(),

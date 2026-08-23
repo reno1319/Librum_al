@@ -70,16 +70,18 @@ export async function buyBook(bookId: string, formData: FormData) {
   // Cheap, non-authoritative early check for a friendlier redirect --
   // create_book_checkout_intent re-validates ownership atomically at the
   // moment it actually mints/reuses the checkout intent (see LAUNCH-1
-  // P1-4), so nothing here needs to be race-free with that.
-  const { data: existing } = await supabase
-    .from("purchases")
-    .select("id")
-    .eq("book_id", bookId)
-    .eq("reader_id", user.id)
-    .is("refunded_at", null)
-    .maybeSingle();
+  // P1-4), so nothing here needs to be race-free with that. LAUNCH-1
+  // P1-7A: routed through user_owns_book() (also excludes a purchase
+  // whose payment intent has a dispute at status 'lost') rather than a
+  // raw purchases select, so this early check agrees with the RPC's own
+  // now-corrected authoritative check -- a reader whose only purchase
+  // was disputed-and-lost is no longer redirected away as "already
+  // owns it."
+  const { data: ownsBook } = await supabase.rpc("user_owns_book", {
+    target_book_id: bookId,
+  });
 
-  if (existing) {
+  if (ownsBook) {
     redirect(`/books/${bookId}`);
   }
 
@@ -282,15 +284,18 @@ export async function getFreeBook(bookId: string) {
     redirect(`/books/${bookId}`);
   }
 
-  const { data: existing } = await supabase
-    .from("purchases")
-    .select("id")
-    .eq("book_id", bookId)
-    .eq("reader_id", user.id)
-    .is("refunded_at", null)
-    .maybeSingle();
+  // LAUNCH-1 P1-7A: routed through user_owns_book() (also excludes a
+  // purchase whose payment intent has a dispute at status 'lost')
+  // rather than a raw purchases select -- a reader whose only purchase
+  // was disputed-and-lost is no longer treated as "already owned" here,
+  // and instead correctly falls through to a fresh acquisition below
+  // (the same upsert-over-the-old-row path a refunded reader already
+  // takes to legitimately reacquire a book).
+  const { data: ownsBook } = await supabase.rpc("user_owns_book", {
+    target_book_id: bookId,
+  });
 
-  if (existing) {
+  if (ownsBook) {
     // Already owned (e.g. a real paid purchase from before the book went
     // free) -- idempotent no-op rather than overwriting that record.
     redirect(`/books/${bookId}?free=success`);
@@ -342,15 +347,17 @@ export async function submitReview(bookId: string, formData: FormData) {
     redirect(`/books/${bookId}?error=Please+choose+a+rating`);
   }
 
-  const { data: purchase } = await supabase
-    .from("purchases")
-    .select("id")
-    .eq("book_id", bookId)
-    .eq("reader_id", user.id)
-    .is("refunded_at", null)
-    .maybeSingle();
+  // LAUNCH-1 P1-7A: routed through user_owns_book() (also excludes a
+  // purchase whose payment intent has a dispute at status 'lost', see
+  // migration 035) rather than a raw purchases select -- public.
+  // payment_disputes is fully closed to this request-scoped client, and
+  // this SECURITY DEFINER RPC already encapsulates the complete,
+  // correct ownership predicate.
+  const { data: ownsBook } = await supabase.rpc("user_owns_book", {
+    target_book_id: bookId,
+  });
 
-  if (!purchase) {
+  if (!ownsBook) {
     redirect(`/books/${bookId}?error=Buy+this+book+to+review+it`);
   }
 

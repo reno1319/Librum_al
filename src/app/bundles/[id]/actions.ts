@@ -74,15 +74,18 @@ export async function buyBundle(bundleId: string) {
     redirect(`/bundles/${bundleId}`);
   }
 
-  const { data: existingPurchases } = await supabase
-    .from("purchases")
-    .select("book_id")
-    .eq("reader_id", user.id)
-    .in("book_id", bookIds)
-    .is("refunded_at", null);
-
-  const ownedIds = new Set((existingPurchases ?? []).map((p) => p.book_id));
-  const ownsEverything = bookIds.every((id) => ownedIds.has(id));
+  // LAUNCH-1 P1-7A: per-book, via user_owns_book() (also excludes a
+  // purchase whose payment intent has a dispute at status 'lost')
+  // rather than a single raw multi-book purchases select -- payment_
+  // disputes is fully closed to this request-scoped client, so a raw
+  // query here could no longer see the same ownership truth
+  // create_bundle_checkout_snapshot's own (now-corrected) authoritative
+  // check uses. Bundles are small (a handful of books at most), so N
+  // RPC round trips in parallel is not a real cost.
+  const ownershipChecks = await Promise.all(
+    bookIds.map((id) => supabase.rpc("user_owns_book", { target_book_id: id })),
+  );
+  const ownsEverything = ownershipChecks.every((result) => !!result.data);
   if (ownsEverything) {
     redirect(`/bundles/${bundleId}`);
   }

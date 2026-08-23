@@ -331,6 +331,50 @@ export async function fulfillBundleSnapshot(
     });
   }
 
+  // LAUNCH-1 P1-7A: dispute-before-fulfillment guarantee for the bundle
+  // path. Scoped identically to every other lookup in this function --
+  // by stripe_payment_intent_id alone -- and skipped entirely when
+  // there is no payment intent to check (a genuinely free, $0 bundle:
+  // no real charge, so no dispute can exist against it). Mirrors
+  // finalize_book_checkout_intent's own guard (migration 035): a
+  // dispute already reached 'lost' for this exact payment intent must
+  // block entitlement from being granted at all.
+  if (paymentIntentId) {
+    const { data: lostDispute, error: disputeCheckError } = await supabase
+      .from("payment_disputes")
+      .select("id")
+      .eq("stripe_payment_intent_id", paymentIntentId)
+      .eq("status", "lost")
+      .maybeSingle();
+
+    if (disputeCheckError) {
+      return failWebhook({
+        eventId: event.id,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        snapshotId,
+        error: disputeCheckError,
+      });
+    }
+
+    if (lostDispute) {
+      // Not retried -- Stripe redelivering this exact event will never
+      // produce a different outcome, since the dispute is already
+      // durably lost. Logged for manual reconciliation instead, the
+      // same posture fulfillSingleBookPurchase already uses for its own
+      // non-retryable blocked outcomes (see 'blocked_disputed_lost'
+      // below). Nothing is written: no purchases rows, and the snapshot
+      // itself is left completely unclaimed (fulfilled_at stays null)
+      // so it remains visible as "paid but not fulfilled" to any future
+      // reconciliation query.
+      console.error(
+        "Stripe webhook: bundle snapshot checkout paid but blocked by an already-lost dispute -- needs manual reconciliation",
+        { eventId: event.id, checkoutSessionId: session.id, paymentIntentId, snapshotId },
+      );
+      return null;
+    }
+  }
+
   // Stripe's own charged total is authoritative for what was actually
   // paid -- bundle_price_cents_at_checkout is only ever used to derive
   // allocation RATIOS between books, never as proof of payment. Once a
@@ -388,6 +432,21 @@ export async function fulfillBundleSnapshot(
   // existing architectural limitation of the one-row-per-(book,reader)
   // schema, not something introduced or fixed here; redesigning it is
   // out of scope for this correction.
+  //
+  // LAUNCH-1 P1-7A correction: "active_other_session" originally meant
+  // only "an existing, non-refunded row" -- but a lost-disputed
+  // purchase is ALSO non-refunded (a dispute never sets refunded_at).
+  // Left uncorrected, a reader who legitimately buys this exact book
+  // again via a bundle, after an earlier lost dispute on it, would have
+  // that old row classified active_other_session -- excluded from this
+  // transaction's allocation and left untouched -- so they'd pay for
+  // the bundle (including this book) and still end up not owning it:
+  // the same "charged without entitlement" failure class the dispute-
+  // tracking work exists to prevent. A row is now only "active" if it
+  // is neither refunded NOR disputed-lost; this mirrors the exact same
+  // correction made to finalize_book_checkout_intent's own
+  // active_other_session check (migration 035) and to user_owns_book()
+  // itself.
   const classifications = new Map<
     string,
     "same_session" | "active_other_session" | "eligible"
@@ -398,7 +457,7 @@ export async function fulfillBundleSnapshot(
   for (const item of items) {
     const { data: existing, error: existingError } = await supabase
       .from("purchases")
-      .select("stripe_checkout_session_id, refunded_at, amount_cents")
+      .select("stripe_checkout_session_id, stripe_payment_intent_id, refunded_at, amount_cents")
       .eq("book_id", item.bookId)
       .eq("reader_id", snapshot.reader_id)
       .maybeSingle();
@@ -428,7 +487,29 @@ export async function fulfillBundleSnapshot(
     if (existing && existing.stripe_checkout_session_id === session.id) {
       classifications.set(item.bookId, "same_session");
     } else if (existing && existing.refunded_at === null) {
-      classifications.set(item.bookId, "active_other_session");
+      let hasLostDispute = false;
+      if (existing.stripe_payment_intent_id) {
+        const { data: lostDispute, error: disputeCheckError } = await supabase
+          .from("payment_disputes")
+          .select("id")
+          .eq("stripe_payment_intent_id", existing.stripe_payment_intent_id)
+          .eq("status", "lost")
+          .maybeSingle();
+
+        if (disputeCheckError) {
+          return failWebhook({
+            eventId: event.id,
+            checkoutSessionId: session.id,
+            paymentIntentId,
+            snapshotId,
+            bookId: item.bookId,
+            readerId: snapshot.reader_id,
+            error: disputeCheckError,
+          });
+        }
+        hasLostDispute = !!lostDispute;
+      }
+      classifications.set(item.bookId, hasLostDispute ? "eligible" : "active_other_session");
     } else {
       classifications.set(item.bookId, "eligible");
     }
@@ -680,6 +761,317 @@ export async function fulfillBundleSnapshot(
   return null;
 }
 
+// Fulfills a LEGACY-shape bundle checkout (metadata.bundle_id +
+// metadata.reader_id, no snapshot_id) -- the pre-migration-025 checkout
+// shape, kept only for as long as any Checkout Session created before
+// that rollout could still be open. See the Phase 9B-2 rollout plan for
+// when this branch can eventually be removed. Structurally the same
+// three-way same_session/active_other_session/eligible classification
+// and proportional-allocation logic as fulfillBundleSnapshot above,
+// just reading the bundle's book list live from bundle_books/books
+// instead of from a frozen snapshot row (this legacy shape predates
+// bundle_checkout_snapshots existing at all). Returns a NextResponse if
+// the request should end early (a failure), or null to let the caller
+// fall through to the normal `{ received: true }` response.
+// Exported (only) so route.test.ts can drive this function directly with
+// a fake Supabase client, the same spirit as fulfillBundleSnapshot's own
+// test coverage -- POST() remains the actual route handler and is not
+// itself exported or changed.
+export async function fulfillLegacyBundle(
+  supabase: ReturnType<typeof createAdminClient>,
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+  bundleId: string,
+  readerId: string,
+  paymentIntentId: string | null,
+  amountCents: number,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  // LAUNCH-1 P1-7A: dispute-before-fulfillment guarantee for the LEGACY
+  // bundle path -- mirrors fulfillBundleSnapshot's own guard above (see
+  // "dispute-before-fulfillment guarantee for the bundle path" in that
+  // function). Scoped identically: by this transaction's own
+  // stripe_payment_intent_id alone, and skipped entirely when there is
+  // no payment intent (a genuinely free, $0 bundle never gets a Stripe
+  // PaymentIntent, so no dispute can exist against it). Placed before
+  // the bundle's book list is even read, so nothing below this point --
+  // the classification loop, any purchases write, the confirmation
+  // email -- ever runs for a delivery blocked here.
+  if (paymentIntentId) {
+    const { data: lostDispute, error: disputeCheckError } = await supabase
+      .from("payment_disputes")
+      .select("id")
+      .eq("stripe_payment_intent_id", paymentIntentId)
+      .eq("status", "lost")
+      .maybeSingle();
+
+    if (disputeCheckError) {
+      return failWebhook({
+        eventId: event.id,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        bundleId,
+        readerId,
+        error: disputeCheckError,
+      });
+    }
+
+    if (lostDispute) {
+      // Not retried -- Stripe redelivering this exact event will never
+      // produce a different outcome, since the dispute is already
+      // durably lost. Logged for manual reconciliation instead, the
+      // same posture fulfillBundleSnapshot and fulfillSingleBookPurchase
+      // both already use for their own non-retryable blocked outcomes.
+      // Nothing is written: no purchases rows for any book in the
+      // bundle, and no confirmation email is sent.
+      console.error(
+        "Stripe webhook: legacy bundle checkout paid but blocked by an already-lost dispute -- needs manual reconciliation",
+        {
+          eventId: event.id,
+          checkoutSessionId: session.id,
+          paymentIntentId,
+          bundleId,
+          readerId,
+        },
+      );
+      return null;
+    }
+  }
+
+  // A bundle checkout is one session that has to grant every book in
+  // the bundle — each gets its own purchases row (so all the existing
+  // per-book ownership/download/review logic keeps working
+  // unmodified), with amount_cents split proportionally to that
+  // book's own price so per-book revenue reporting stays meaningful.
+  const { data: bundleBooks, error: bundleBooksError } = await supabase
+    .from("bundle_books")
+    .select("book_id, books(price_cents)")
+    .eq("bundle_id", bundleId)
+    .returns<{ book_id: string; books: { price_cents: number } | null }[]>();
+
+  // This read is required to know which books to grant -- an empty
+  // result from a FAILED read looks identical, in shape, to a
+  // legitimately empty bundle unless the error itself is checked. If
+  // this failed, there is no reliable list of books to upsert at
+  // all, so the same "never acknowledge success over a failure to
+  // persist the entitlement" rule applies here as it does to the
+  // upserts themselves -- fail before attempting any write, rather
+  // than silently proceeding as if the bundle had zero books.
+  if (bundleBooksError) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      bundleId,
+      readerId,
+      error: bundleBooksError,
+    });
+  }
+
+  const items = bundleBooks ?? [];
+
+  // Same ownership-preservation fix as the snapshot-based path above
+  // -- this legacy path upserts on the exact same (book_id,
+  // reader_id) conflict target, so it has the identical exposure: a
+  // book the reader already actively owns through an unrelated
+  // transaction must never be touched or counted into this
+  // transaction's allocation. See the Phase 9B-2 bundle fulfillment
+  // integrity audit.
+  //
+  // LAUNCH-1 P1-7A correction: same fix as fulfillBundleSnapshot
+  // above -- "active_other_session" must not match a row whose own
+  // payment intent is disputed-lost (a dispute never sets
+  // refunded_at), or a legitimate repurchase via this legacy path
+  // would leave the reader having paid again with no entitlement.
+  const classifications = new Map<
+    string,
+    "same_session" | "active_other_session" | "eligible"
+  >();
+  const existingAmountCentsByBookId = new Map<string, number>();
+
+  for (const item of items) {
+    const { data: existing, error: existingError } = await supabase
+      .from("purchases")
+      .select("stripe_checkout_session_id, stripe_payment_intent_id, refunded_at, amount_cents")
+      .eq("book_id", item.book_id)
+      .eq("reader_id", readerId)
+      .maybeSingle();
+
+    if (existingError) {
+      return failWebhook({
+        eventId: event.id,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        bundleId,
+        readerId,
+        bookId: item.book_id,
+        error: existingError,
+      });
+    }
+
+    if (existing) {
+      existingAmountCentsByBookId.set(item.book_id, existing.amount_cents);
+    }
+
+    if (existing && existing.stripe_checkout_session_id === session.id) {
+      classifications.set(item.book_id, "same_session");
+    } else if (existing && existing.refunded_at === null) {
+      let hasLostDispute = false;
+      if (existing.stripe_payment_intent_id) {
+        const { data: lostDispute, error: disputeCheckError } = await supabase
+          .from("payment_disputes")
+          .select("id")
+          .eq("stripe_payment_intent_id", existing.stripe_payment_intent_id)
+          .eq("status", "lost")
+          .maybeSingle();
+
+        if (disputeCheckError) {
+          return failWebhook({
+            eventId: event.id,
+            checkoutSessionId: session.id,
+            paymentIntentId,
+            bundleId,
+            readerId,
+            bookId: item.book_id,
+            error: disputeCheckError,
+          });
+        }
+        hasLostDispute = !!lostDispute;
+      }
+      classifications.set(item.book_id, hasLostDispute ? "eligible" : "active_other_session");
+    } else {
+      classifications.set(item.book_id, "eligible");
+    }
+  }
+
+  const sameSessionItems = items.filter(
+    (item) => classifications.get(item.book_id) === "same_session",
+  );
+  const eligibleItems = items.filter(
+    (item) => classifications.get(item.book_id) === "eligible",
+  );
+  // active_other_session items are simply never referenced again --
+  // no array needed for them; not appearing in either array above
+  // already means "excluded from everything."
+
+  // Fixed-committed-amount model, identical to the snapshot path
+  // above: sameSessionItems' existing amount_cents is authoritative
+  // and is never recomputed or rewritten. Only the amount NOT yet
+  // committed to a same-session row is divided across eligibleItems.
+  const alreadyAllocatedCents = sameSessionItems.reduce(
+    (sum, item) => sum + (existingAmountCentsByBookId.get(item.book_id) ?? 0),
+    0,
+  );
+  const remainingCents = amountCents - alreadyAllocatedCents;
+
+  if (remainingCents < 0) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      bundleId,
+      readerId,
+      reason:
+        "already-committed same-session purchase amounts exceed this Stripe transaction's charged total",
+      alreadyAllocatedCents,
+      amountCents,
+    });
+  }
+
+  if (
+    eligibleItems.length === 0 &&
+    sameSessionItems.length > 0 &&
+    remainingCents !== 0
+  ) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      bundleId,
+      readerId,
+      reason:
+        "same-session purchase amounts do not reconcile to this Stripe transaction's charged total and there are no eligible items left to absorb the difference",
+      alreadyAllocatedCents,
+      amountCents,
+    });
+  }
+
+  let allocations = new Map<string, number>();
+
+  if (eligibleItems.length > 0) {
+    const eligibleOriginalCents = eligibleItems.reduce(
+      (sum, item) => sum + (item.books?.price_cents ?? 0),
+      0,
+    );
+
+    if (eligibleOriginalCents === 0 && remainingCents > 0) {
+      return failWebhook({
+        eventId: event.id,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        bundleId,
+        readerId,
+        reason:
+          "eligible legacy bundle item prices sum to zero but a positive remaining amount must still be allocated",
+      });
+    }
+
+    // Only the remaining, not-yet-committed amount is divided --
+    // allocateLegacyBundleRevenue's floor+remainder-distribution
+    // guarantees this sums to exactly remainingCents, so
+    // alreadyAllocatedCents + sum(these shares) === amountCents.
+    allocations = allocateLegacyBundleRevenue(eligibleItems, remainingCents);
+  }
+
+  // Every item is attempted regardless of an earlier failure in this
+  // same delivery -- upserts are independent and idempotent, so
+  // letting book B persist even if book A just failed means less
+  // work is left for the eventual retry, not more. Any failure still
+  // blocks emails and the 200 below.
+  let bundleWriteFailed = false;
+
+  for (const item of eligibleItems) {
+    const { error: purchaseError } = await supabase.from("purchases").upsert(
+      {
+        book_id: item.book_id,
+        reader_id: readerId,
+        stripe_checkout_session_id: session.id,
+        stripe_payment_intent_id: paymentIntentId,
+        amount_cents: allocations.get(item.book_id) ?? 0,
+        bundle_id: bundleId,
+        refunded_at: null,
+      },
+      { onConflict: "book_id,reader_id" },
+    );
+
+    if (purchaseError) {
+      bundleWriteFailed = true;
+      console.error("Stripe webhook: bundle purchase upsert failed", {
+        eventId: event.id,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        bundleId,
+        bookId: item.book_id,
+        readerId,
+        error: purchaseError,
+      });
+    }
+  }
+
+  if (bundleWriteFailed) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      bundleId,
+      readerId,
+    });
+  }
+
+  await sendBundlePurchaseEmails(supabase, { bundleId, readerId, amountCents });
+  return null;
+}
+
 // Fulfills a single-book checkout (checkout.session.completed with
 // metadata.intent_id, no snapshot/bundle). LAUNCH-1 P1-4: a thin wrapper
 // around finalize_book_checkout_intent (migration 032), a SECURITY
@@ -757,7 +1149,11 @@ export async function fulfillSingleBookPurchase(
     return null;
   }
 
-  if (outcome === "active_other_session" || outcome === "blocked_book_or_reader_deleted") {
+  if (
+    outcome === "active_other_session" ||
+    outcome === "blocked_book_or_reader_deleted" ||
+    outcome === "blocked_disputed_lost"
+  ) {
     // The DB row is the durable record either way (see this migration's
     // own reconciliation query) -- this is immediate ops visibility, not
     // the source of truth.
@@ -1224,6 +1620,129 @@ export async function processChargeRefundedEvent(
   return processChargeRefund(supabase, event, paymentIntentId, true, failWebhook);
 }
 
+type StripeDisputeVerificationClient = Pick<Stripe, "disputes">;
+
+// Every Dispute.status Stripe currently documents (installed
+// stripe@22.5.0 SDK, node_modules/stripe/cjs/resources/Disputes.d.ts)
+// -- used ONLY to decide whether to log an "unrecognized status"
+// warning for operator investigation. Dispute.status is typed as an
+// OPEN union (it includes `| OtherString`) precisely because Stripe can
+// introduce new values -- this list is never used to gate any
+// entitlement or fulfillment decision (user_owns_book(),
+// finalize_book_checkout_intent, and the bundle guard below all test
+// only `status === 'lost'` directly), so an unrecognized value here can
+// never be silently misclassified as either safe or terminal.
+// 'prevented' is included as a real, documented status (Stripe's own
+// automatic dispute-prevention network programs) -- stored and logged
+// like any other recognized value, never treated as equivalent to
+// won/lost or given any invented terminal meaning (LAUNCH-1 P1-7A
+// design decision: its exact real-world resolution semantics were not
+// confirmed against Stripe's own docs in this environment -- network
+// access to docs.stripe.com is blocked here).
+const KNOWN_DISPUTE_STATUSES = new Set([
+  "lost",
+  "needs_response",
+  "prevented",
+  "under_review",
+  "warning_closed",
+  "warning_needs_response",
+  "warning_under_review",
+  "won",
+]);
+
+// LAUNCH-1 P1-7A: the sole write path for public.payment_disputes,
+// Librum's sole authoritative record of Stripe dispute state -- see the
+// P1-7A design audit for why this is NOT also denormalized onto
+// purchases/bundle_checkout_snapshots. Handles all five
+// charge.dispute.* event types identically (created, updated, closed,
+// funds_withdrawn, funds_reinstated) -- each is just "something about
+// this dispute changed, go re-sync it," so one function covers all
+// five call sites in POST() below.
+//
+// Re-fetches the dispute LIVE via stripe.disputes.retrieve(), never
+// trusts the event payload's own status as authoritative -- the same
+// defensive posture already established for refunds
+// (processRefundLifecycleEvent's own re-fetch-live-charge pattern).
+// This is what makes duplicate delivery a clean no-op (re-writing
+// identical values) and out-of-order delivery safe: a stale .updated
+// arriving after .closed still re-fetches and re-writes Stripe's
+// CURRENT state, so it can never regress a more-recent write -- there
+// is no "trust whichever event arrived last" ordering dependency.
+//
+// Single-table upsert keyed on stripe_dispute_id (unique constraint) --
+// Postgres's own ON CONFLICT ... DO UPDATE is natively atomic under
+// concurrent/duplicate execution, so no advisory lock or RPC is needed
+// here, unlike finalize_book_checkout_intent (which needs one because
+// it performs a multi-table, row-locked transaction) -- this function
+// performs exactly one table write.
+//
+// Exported (only) for the same reason as every other handler in this
+// file: direct testability with fake Supabase/Stripe clients
+// (src/app/api/webhooks/stripe/route.test.ts).
+export async function processDisputeEvent(
+  supabase: ReturnType<typeof createAdminClient>,
+  stripeClient: StripeDisputeVerificationClient,
+  event: Stripe.Event,
+  disputeId: string,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  let dispute: Stripe.Dispute;
+  try {
+    dispute = await stripeClient.disputes.retrieve(disputeId);
+  } catch (error) {
+    return failWebhook({
+      eventId: event.id,
+      disputeId,
+      reason: "failed to retrieve live dispute state",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const paymentIntentId = extractPaymentIntentId(dispute.payment_intent);
+
+  if (!paymentIntentId) {
+    // No resolvable payment intent on a dispute shouldn't normally
+    // happen for a card-based Checkout charge, but there is nothing
+    // actionable to do without one -- retrying this same event will
+    // never produce a different id. Logged, not failed.
+    console.warn(
+      "Stripe webhook: dispute has no resolvable payment intent id -- skipping",
+      { eventId: event.id, disputeId },
+    );
+    return null;
+  }
+
+  if (!KNOWN_DISPUTE_STATUSES.has(dispute.status)) {
+    console.error(
+      "Stripe webhook: dispute has an unrecognized status -- stored verbatim, investigate",
+      { eventId: event.id, disputeId, paymentIntentId, status: dispute.status },
+    );
+  }
+
+  const { error } = await supabase.from("payment_disputes").upsert(
+    {
+      stripe_dispute_id: dispute.id,
+      stripe_payment_intent_id: paymentIntentId,
+      status: dispute.status,
+      reason: dispute.reason,
+      amount_cents: dispute.amount,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "stripe_dispute_id" },
+  );
+
+  if (error) {
+    return failWebhook({
+      eventId: event.id,
+      disputeId,
+      paymentIntentId,
+      error,
+    });
+  }
+
+  return null;
+}
+
 // Stripe calls this URL directly (not a browser), so it must read the
 // raw request body to verify the signature — no cookies/session involved.
 export async function POST(request: Request) {
@@ -1276,9 +1795,9 @@ export async function POST(request: Request) {
     // are fulfilled entirely from that durable, frozen row. Checkout
     // Sessions created before that change carry the LEGACY
     // metadata.bundle_id + reader_id shape instead, and must keep being
-    // fulfilled by the unchanged branch below for as long as any of
-    // them could still be open -- see the Phase 9B-2 rollout plan for
-    // when that legacy branch can eventually be removed.
+    // fulfilled by fulfillLegacyBundle below for as long as any of them
+    // could still be open -- see the Phase 9B-2 rollout plan for when
+    // that legacy branch can eventually be removed.
     if (snapshotId) {
       const supabase = createAdminClient();
       const failureResponse = await fulfillBundleSnapshot(
@@ -1295,210 +1814,19 @@ export async function POST(request: Request) {
       }
     } else if (bundleId && readerId) {
       const supabase = createAdminClient();
-
-      // A bundle checkout is one session that has to grant every book in
-      // the bundle — each gets its own purchases row (so all the existing
-      // per-book ownership/download/review logic keeps working
-      // unmodified), with amount_cents split proportionally to that
-      // book's own price so per-book revenue reporting stays meaningful.
-      const { data: bundleBooks, error: bundleBooksError } = await supabase
-        .from("bundle_books")
-        .select("book_id, books(price_cents)")
-        .eq("bundle_id", bundleId)
-        .returns<{ book_id: string; books: { price_cents: number } | null }[]>();
-
-      // This read is required to know which books to grant -- an empty
-      // result from a FAILED read looks identical, in shape, to a
-      // legitimately empty bundle unless the error itself is checked. If
-      // this failed, there is no reliable list of books to upsert at
-      // all, so the same "never acknowledge success over a failure to
-      // persist the entitlement" rule applies here as it does to the
-      // upserts themselves -- fail before attempting any write, rather
-      // than silently proceeding as if the bundle had zero books.
-      if (bundleBooksError) {
-        return failWebhook({
-          eventId: event.id,
-          checkoutSessionId: session.id,
-          paymentIntentId,
-          bundleId,
-          readerId,
-          error: bundleBooksError,
-        });
-      }
-
-      const items = bundleBooks ?? [];
-
-      // Same ownership-preservation fix as the snapshot-based path above
-      // -- this legacy path upserts on the exact same (book_id,
-      // reader_id) conflict target, so it has the identical exposure: a
-      // book the reader already actively owns through an unrelated
-      // transaction must never be touched or counted into this
-      // transaction's allocation. See the Phase 9B-2 bundle fulfillment
-      // integrity audit.
-      const classifications = new Map<
-        string,
-        "same_session" | "active_other_session" | "eligible"
-      >();
-      const existingAmountCentsByBookId = new Map<string, number>();
-
-      for (const item of items) {
-        const { data: existing, error: existingError } = await supabase
-          .from("purchases")
-          .select("stripe_checkout_session_id, refunded_at, amount_cents")
-          .eq("book_id", item.book_id)
-          .eq("reader_id", readerId)
-          .maybeSingle();
-
-        if (existingError) {
-          return failWebhook({
-            eventId: event.id,
-            checkoutSessionId: session.id,
-            paymentIntentId,
-            bundleId,
-            readerId,
-            bookId: item.book_id,
-            error: existingError,
-          });
-        }
-
-        if (existing) {
-          existingAmountCentsByBookId.set(item.book_id, existing.amount_cents);
-        }
-
-        if (existing && existing.stripe_checkout_session_id === session.id) {
-          classifications.set(item.book_id, "same_session");
-        } else if (existing && existing.refunded_at === null) {
-          classifications.set(item.book_id, "active_other_session");
-        } else {
-          classifications.set(item.book_id, "eligible");
-        }
-      }
-
-      const sameSessionItems = items.filter(
-        (item) => classifications.get(item.book_id) === "same_session",
+      const failureResponse = await fulfillLegacyBundle(
+        supabase,
+        event,
+        session,
+        bundleId,
+        readerId,
+        paymentIntentId,
+        amountCents,
+        failWebhook,
       );
-      const eligibleItems = items.filter(
-        (item) => classifications.get(item.book_id) === "eligible",
-      );
-      // active_other_session items are simply never referenced again --
-      // no array needed for them; not appearing in either array above
-      // already means "excluded from everything."
-
-      // Fixed-committed-amount model, identical to the snapshot path
-      // above: sameSessionItems' existing amount_cents is authoritative
-      // and is never recomputed or rewritten. Only the amount NOT yet
-      // committed to a same-session row is divided across eligibleItems.
-      const alreadyAllocatedCents = sameSessionItems.reduce(
-        (sum, item) => sum + (existingAmountCentsByBookId.get(item.book_id) ?? 0),
-        0,
-      );
-      const remainingCents = amountCents - alreadyAllocatedCents;
-
-      if (remainingCents < 0) {
-        return failWebhook({
-          eventId: event.id,
-          checkoutSessionId: session.id,
-          paymentIntentId,
-          bundleId,
-          readerId,
-          reason:
-            "already-committed same-session purchase amounts exceed this Stripe transaction's charged total",
-          alreadyAllocatedCents,
-          amountCents,
-        });
+      if (failureResponse) {
+        return failureResponse;
       }
-
-      if (
-        eligibleItems.length === 0 &&
-        sameSessionItems.length > 0 &&
-        remainingCents !== 0
-      ) {
-        return failWebhook({
-          eventId: event.id,
-          checkoutSessionId: session.id,
-          paymentIntentId,
-          bundleId,
-          readerId,
-          reason:
-            "same-session purchase amounts do not reconcile to this Stripe transaction's charged total and there are no eligible items left to absorb the difference",
-          alreadyAllocatedCents,
-          amountCents,
-        });
-      }
-
-      let allocations = new Map<string, number>();
-
-      if (eligibleItems.length > 0) {
-        const eligibleOriginalCents = eligibleItems.reduce(
-          (sum, item) => sum + (item.books?.price_cents ?? 0),
-          0,
-        );
-
-        if (eligibleOriginalCents === 0 && remainingCents > 0) {
-          return failWebhook({
-            eventId: event.id,
-            checkoutSessionId: session.id,
-            paymentIntentId,
-            bundleId,
-            readerId,
-            reason:
-              "eligible legacy bundle item prices sum to zero but a positive remaining amount must still be allocated",
-          });
-        }
-
-        // Only the remaining, not-yet-committed amount is divided --
-        // allocateLegacyBundleRevenue's floor+remainder-distribution
-        // guarantees this sums to exactly remainingCents, so
-        // alreadyAllocatedCents + sum(these shares) === amountCents.
-        allocations = allocateLegacyBundleRevenue(eligibleItems, remainingCents);
-      }
-
-      // Every item is attempted regardless of an earlier failure in this
-      // same delivery -- upserts are independent and idempotent, so
-      // letting book B persist even if book A just failed means less
-      // work is left for the eventual retry, not more. Any failure still
-      // blocks emails and the 200 below.
-      let bundleWriteFailed = false;
-
-      for (const item of eligibleItems) {
-        const { error: purchaseError } = await supabase.from("purchases").upsert(
-          {
-            book_id: item.book_id,
-            reader_id: readerId,
-            stripe_checkout_session_id: session.id,
-            stripe_payment_intent_id: paymentIntentId,
-            amount_cents: allocations.get(item.book_id) ?? 0,
-            bundle_id: bundleId,
-            refunded_at: null,
-          },
-          { onConflict: "book_id,reader_id" },
-        );
-
-        if (purchaseError) {
-          bundleWriteFailed = true;
-          console.error("Stripe webhook: bundle purchase upsert failed", {
-            eventId: event.id,
-            checkoutSessionId: session.id,
-            paymentIntentId,
-            bundleId,
-            bookId: item.book_id,
-            readerId,
-            error: purchaseError,
-          });
-        }
-      }
-
-      if (bundleWriteFailed) {
-        return failWebhook({
-          eventId: event.id,
-          checkoutSessionId: session.id,
-          paymentIntentId,
-          bundleId,
-          readerId,
-        });
-      }
-
-      await sendBundlePurchaseEmails(supabase, { bundleId, readerId, amountCents });
     } else if (intentId) {
       const supabase = createAdminClient();
       const failureResponse = await fulfillSingleBookPurchase(
@@ -1570,6 +1898,35 @@ export async function POST(request: Request) {
       chargeId: extractChargeId(refund.charge),
       failureReason: refund.failure_reason ?? null,
     });
+  }
+
+  // LAUNCH-1 P1-7A: all five charge.dispute.* event types Stripe emits
+  // (confirmed against the installed stripe@22.5.0 SDK's own Events.d.ts
+  // union -- created, updated, closed, funds_withdrawn, funds_reinstated)
+  // route into the same processDisputeEvent, which re-fetches the
+  // dispute's live state and upserts public.payment_disputes. See that
+  // function's own documentation for why one handler correctly covers
+  // all five (each is just "something about this dispute changed, go
+  // re-sync it") and why no event-ordering assumption is needed.
+  if (
+    event.type === "charge.dispute.created" ||
+    event.type === "charge.dispute.updated" ||
+    event.type === "charge.dispute.closed" ||
+    event.type === "charge.dispute.funds_withdrawn" ||
+    event.type === "charge.dispute.funds_reinstated"
+  ) {
+    const dispute = event.data.object as Stripe.Dispute;
+    const supabase = createAdminClient();
+    const failureResponse = await processDisputeEvent(
+      supabase,
+      stripe,
+      event,
+      dispute.id,
+      failWebhook,
+    );
+    if (failureResponse) {
+      return failureResponse;
+    }
   }
 
   return NextResponse.json({ received: true });

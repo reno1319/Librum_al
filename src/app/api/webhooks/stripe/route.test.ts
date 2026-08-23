@@ -15,10 +15,12 @@ vi.mock("@/lib/email", () => ({
 
 const {
   fulfillBundleSnapshot,
+  fulfillLegacyBundle,
   fulfillSingleBookPurchase,
   processChargeRefund,
   processRefundLifecycleEvent,
   processChargeRefundedEvent,
+  processDisputeEvent,
 } = await import("./route");
 
 // ---------------------------------------------------------------------
@@ -68,6 +70,14 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
   in(col: string, vals: unknown[]) {
     this.filters.push({ col, val: vals, op: "in" });
     return this;
+  }
+
+  // Real Supabase's .returns<T>() is a type-only cast with no runtime
+  // effect -- fulfillLegacyBundle's bundle_books query is the first in
+  // this test file to call it, since every other select() here already
+  // gets its shape from a maybeSingle() or a plain await instead.
+  returns<T>() {
+    return this as unknown as PromiseLike<{ data: T; error: unknown }>;
   }
 
   update(payload: Row) {
@@ -372,6 +382,478 @@ describe("fulfillBundleSnapshot: partially-owned bundle transaction integrity", 
 });
 
 // ---------------------------------------------------------------------
+// LAUNCH-1 P1-7A: the bundle-path dispute-before-fulfillment guard.
+// Mirrors finalize_book_checkout_intent's own SQL-level guard
+// (migration 035) at the Node layer, since fulfillBundleSnapshot is not
+// itself a locked RPC. Scoped by stripe_payment_intent_id, exactly like
+// every other lookup in this function.
+// ---------------------------------------------------------------------
+describe("fulfillBundleSnapshot: dispute-before-fulfillment guard", () => {
+  let tables: Tables;
+
+  beforeEach(() => {
+    tables = freshTables();
+  });
+
+  it("a 'lost' dispute on this payment intent blocks entitlement entirely -- no purchases written, snapshot left unclaimed", async () => {
+    tables.payment_disputes = [
+      {
+        id: "dispute-row-1",
+        stripe_dispute_id: "dp_test_1",
+        stripe_payment_intent_id: NEW_PAYMENT_INTENT_ID,
+        status: "lost",
+        reason: "fraudulent",
+        amount_cents: 599,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillBundleSnapshot(
+      supabase as never,
+      { id: "evt_disputed" } as Stripe.Event,
+      { id: NEW_SESSION_ID } as Stripe.Checkout.Session,
+      SNAPSHOT_ID,
+      NEW_PAYMENT_INTENT_ID,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.purchases.find((r) => r.book_id === BOOK_B)).toBeUndefined();
+    expect(tables.bundle_checkout_snapshots[0].fulfilled_at).toBeNull();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("blocked by an already-lost dispute"),
+      expect.objectContaining({ paymentIntentId: NEW_PAYMENT_INTENT_ID, snapshotId: SNAPSHOT_ID }),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("a non-'lost' dispute status (e.g. under_review) does not block entitlement", async () => {
+    tables.payment_disputes = [
+      {
+        id: "dispute-row-2",
+        stripe_dispute_id: "dp_test_2",
+        stripe_payment_intent_id: NEW_PAYMENT_INTENT_ID,
+        status: "under_review",
+        reason: "fraudulent",
+        amount_cents: 599,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillBundleSnapshot(
+      supabase as never,
+      { id: "evt_under_review" } as Stripe.Event,
+      { id: NEW_SESSION_ID } as Stripe.Checkout.Session,
+      SNAPSHOT_ID,
+      NEW_PAYMENT_INTENT_ID,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.purchases.find((r) => r.book_id === BOOK_B)).toBeDefined();
+    expect(tables.bundle_checkout_snapshots[0].fulfilled_at).not.toBeNull();
+  });
+
+  it("no payment intent (a genuinely free bundle) skips the dispute check entirely", async () => {
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillBundleSnapshot(
+      supabase as never,
+      { id: "evt_free" } as Stripe.Event,
+      { id: NEW_SESSION_ID } as Stripe.Checkout.Session,
+      SNAPSHOT_ID,
+      null,
+      0,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------
+// LAUNCH-1 P1-7A pre-production correction: "active_other_session" must
+// not match a reader's own OLD purchase row when that row's payment
+// intent has a 'lost' dispute (a dispute never sets refunded_at, so the
+// original classification test alone would wrongly treat it as still
+// active). Reuses freshTables()'s existing fixture: BOOK_A is already
+// "owned" by READER_ID via OLD_SESSION_ID/OLD_PAYMENT_INTENT_ID.
+// ---------------------------------------------------------------------
+describe("fulfillBundleSnapshot: active_other_session must exclude a lost-disputed existing purchase", () => {
+  let tables: Tables;
+
+  beforeEach(() => {
+    tables = freshTables();
+  });
+
+  it("a lost dispute on the OLD purchase's payment intent reclassifies it eligible -- the reader is granted fresh entitlement via this new transaction", async () => {
+    tables.payment_disputes = [
+      {
+        id: "dispute-row-old",
+        stripe_dispute_id: "dp_test_old",
+        stripe_payment_intent_id: OLD_PAYMENT_INTENT_ID,
+        status: "lost",
+        reason: "fraudulent",
+        amount_cents: 999,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillBundleSnapshot(
+      supabase as never,
+      { id: "evt_repurchase" } as Stripe.Event,
+      { id: NEW_SESSION_ID } as Stripe.Checkout.Session,
+      SNAPSHOT_ID,
+      NEW_PAYMENT_INTENT_ID,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+
+    // Same row (unique(book_id, reader_id)), now updated to reflect the
+    // NEW, legitimate repurchase transaction -- no longer the stale old
+    // session/payment intent.
+    const bookARow = tables.purchases.find((r) => r.book_id === BOOK_A);
+    expect(bookARow?.stripe_checkout_session_id).toBe(NEW_SESSION_ID);
+    expect(bookARow?.stripe_payment_intent_id).toBe(NEW_PAYMENT_INTENT_ID);
+    expect(bookARow?.refunded_at).toBeNull();
+  });
+
+  it("a non-lost dispute (e.g. won) on the OLD purchase's payment intent leaves active_other_session classification unchanged -- regression check", async () => {
+    tables.payment_disputes = [
+      {
+        id: "dispute-row-old-won",
+        stripe_dispute_id: "dp_test_old_won",
+        stripe_payment_intent_id: OLD_PAYMENT_INTENT_ID,
+        status: "won",
+        reason: "fraudulent",
+        amount_cents: 999,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillBundleSnapshot(
+      supabase as never,
+      { id: "evt_still_active" } as Stripe.Event,
+      { id: NEW_SESSION_ID } as Stripe.Checkout.Session,
+      SNAPSHOT_ID,
+      NEW_PAYMENT_INTENT_ID,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+
+    // Untouched -- still the OLD transaction's own values, exactly as
+    // active_other_session has always guaranteed.
+    const bookARow = tables.purchases.find((r) => r.book_id === BOOK_A);
+    expect(bookARow?.stripe_checkout_session_id).toBe(OLD_SESSION_ID);
+    expect(bookARow?.stripe_payment_intent_id).toBe(OLD_PAYMENT_INTENT_ID);
+  });
+});
+
+// ---------------------------------------------------------------------
+// LAUNCH-1 P1-7A remediation: fulfillLegacyBundle -- the pre-migration-
+// 025 checkout.session.completed shape (metadata.bundle_id + reader_id,
+// no snapshot_id), extracted out of POST() for direct testability, the
+// same reason as every other handler in this file. The audit that led
+// to this section found this branch had received the exact same
+// active_other_session-vs-lost-dispute reclassification fix as
+// fulfillBundleSnapshot (both already tested above), but NOT the
+// standalone pre-fulfillment "block entirely if THIS transaction's own
+// payment intent is already lost" guard fulfillBundleSnapshot has. These
+// tests cover that guard, plus a baseline/regression pass over the
+// reclassification fix now that this branch is independently callable.
+// Uses its own fixture (freshLegacyTables), deliberately disjoint from
+// freshTables()'s ids, since bundle_books/books is a different table
+// shape than bundle_checkout_snapshots.items.
+// ---------------------------------------------------------------------
+const READER_ID_LEGACY = "reader-legacy-1";
+const BUNDLE_ID_LEGACY = "bundle-legacy-1";
+const NEW_SESSION_ID_LEGACY = "cs_test_legacy_new_599";
+const NEW_PAYMENT_INTENT_ID_LEGACY = "pi_test_legacy_new_599";
+const OLD_SESSION_ID_LEGACY = "cs_test_legacy_old_unrelated";
+const OLD_PAYMENT_INTENT_ID_LEGACY = "pi_test_legacy_old_unrelated";
+const BOOK_A_LEGACY = "book-legacy-a"; // already owned, unrelated old transaction
+const BOOK_B_LEGACY = "book-legacy-b"; // not yet owned
+
+function freshLegacyTables(): Tables {
+  return {
+    bundle_books: [
+      { book_id: BOOK_A_LEGACY, bundle_id: BUNDLE_ID_LEGACY, books: { price_cents: 300 } },
+      { book_id: BOOK_B_LEGACY, bundle_id: BUNDLE_ID_LEGACY, books: { price_cents: 299 } },
+    ],
+    purchases: [
+      {
+        id: "purchase-legacy-a-1",
+        book_id: BOOK_A_LEGACY,
+        reader_id: READER_ID_LEGACY,
+        stripe_checkout_session_id: OLD_SESSION_ID_LEGACY,
+        stripe_payment_intent_id: OLD_PAYMENT_INTENT_ID_LEGACY,
+        amount_cents: 999,
+        bundle_id: null,
+        refunded_at: null,
+        created_at: "2020-01-01T00:00:00.000Z",
+      },
+    ],
+    payment_disputes: [],
+  };
+}
+
+describe("fulfillLegacyBundle: dispute-before-fulfillment guard", () => {
+  let tables: Tables;
+
+  beforeEach(() => {
+    tables = freshLegacyTables();
+  });
+
+  it("a 'lost' dispute on this transaction's payment intent blocks entitlement entirely -- zero purchases written for every book in the bundle, nothing overwritten", async () => {
+    tables.payment_disputes = [
+      {
+        id: "dispute-legacy-row-1",
+        stripe_dispute_id: "dp_test_legacy_1",
+        stripe_payment_intent_id: NEW_PAYMENT_INTENT_ID_LEGACY,
+        status: "lost",
+        reason: "fraudulent",
+        amount_cents: 599,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillLegacyBundle(
+      supabase as never,
+      { id: "evt_legacy_disputed" } as Stripe.Event,
+      { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+
+    // Book B (not previously owned) must not have been granted -- the
+    // guard runs before the book list is even read, so this proves it
+    // blocks every book in the bundle, not just one.
+    expect(tables.purchases.find((r) => r.book_id === BOOK_B_LEGACY)).toBeUndefined();
+
+    // Book A's pre-existing, unrelated purchase row must be completely
+    // untouched -- still the OLD transaction's own values, not
+    // overwritten with this blocked transaction's session/payment intent.
+    const bookARow = tables.purchases.find((r) => r.book_id === BOOK_A_LEGACY);
+    expect(bookARow?.stripe_checkout_session_id).toBe(OLD_SESSION_ID_LEGACY);
+    expect(bookARow?.stripe_payment_intent_id).toBe(OLD_PAYMENT_INTENT_ID_LEGACY);
+    expect(tables.purchases).toHaveLength(1);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("blocked by an already-lost dispute"),
+      expect.objectContaining({
+        paymentIntentId: NEW_PAYMENT_INTENT_ID_LEGACY,
+        bundleId: BUNDLE_ID_LEGACY,
+        readerId: READER_ID_LEGACY,
+      }),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("a replayed/duplicate webhook delivery for an already-lost-disputed payment intent remains safe -- still zero writes, still no error, on every delivery", async () => {
+    tables.payment_disputes = [
+      {
+        id: "dispute-legacy-row-replay",
+        stripe_dispute_id: "dp_test_legacy_replay",
+        stripe_payment_intent_id: NEW_PAYMENT_INTENT_ID_LEGACY,
+        status: "lost",
+        reason: "fraudulent",
+        amount_cents: 599,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const event = { id: "evt_legacy_disputed_replay" } as Stripe.Event;
+    const session = { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session;
+
+    const first = await fulfillLegacyBundle(
+      supabase as never,
+      event,
+      session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+    const second = await fulfillLegacyBundle(
+      supabase as never,
+      event,
+      session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(first).toBeNull();
+    expect(second).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.purchases).toHaveLength(1); // unchanged pre-existing row only, both times
+    errorSpy.mockRestore();
+  });
+
+  it("a non-'lost' dispute status (e.g. under_review) on this transaction's payment intent does not block fulfillment", async () => {
+    tables.payment_disputes = [
+      {
+        id: "dispute-legacy-row-2",
+        stripe_dispute_id: "dp_test_legacy_2",
+        stripe_payment_intent_id: NEW_PAYMENT_INTENT_ID_LEGACY,
+        status: "under_review",
+        reason: "fraudulent",
+        amount_cents: 599,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLegacyBundle(
+      supabase as never,
+      { id: "evt_legacy_under_review" } as Stripe.Event,
+      { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const bookBRow = tables.purchases.find((r) => r.book_id === BOOK_B_LEGACY);
+    expect(bookBRow).toBeDefined();
+    expect(bookBRow?.stripe_checkout_session_id).toBe(NEW_SESSION_ID_LEGACY);
+    expect(bookBRow?.stripe_payment_intent_id).toBe(NEW_PAYMENT_INTENT_ID_LEGACY);
+  });
+
+  it("no payment intent (a genuinely free legacy bundle) skips the dispute check entirely and fulfills normally", async () => {
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLegacyBundle(
+      supabase as never,
+      { id: "evt_legacy_free" } as Stripe.Event,
+      { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      null,
+      0,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.purchases.find((r) => r.book_id === BOOK_B_LEGACY)).toBeDefined();
+  });
+});
+
+describe("fulfillLegacyBundle: active_other_session must exclude a lost-disputed existing purchase", () => {
+  let tables: Tables;
+
+  beforeEach(() => {
+    tables = freshLegacyTables();
+  });
+
+  it("a lost dispute on the OLD purchase's payment intent reclassifies it eligible -- the reader is granted fresh entitlement via this new legacy transaction", async () => {
+    tables.payment_disputes = [
+      {
+        id: "dispute-legacy-row-old",
+        stripe_dispute_id: "dp_test_legacy_old",
+        stripe_payment_intent_id: OLD_PAYMENT_INTENT_ID_LEGACY,
+        status: "lost",
+        reason: "fraudulent",
+        amount_cents: 999,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLegacyBundle(
+      supabase as never,
+      { id: "evt_legacy_repurchase" } as Stripe.Event,
+      { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+
+    // Same row (unique(book_id, reader_id)), now updated to reflect the
+    // NEW, legitimate repurchase transaction -- no longer the stale old
+    // session/payment intent.
+    const bookARow = tables.purchases.find((r) => r.book_id === BOOK_A_LEGACY);
+    expect(bookARow?.stripe_checkout_session_id).toBe(NEW_SESSION_ID_LEGACY);
+    expect(bookARow?.stripe_payment_intent_id).toBe(NEW_PAYMENT_INTENT_ID_LEGACY);
+    expect(bookARow?.refunded_at).toBeNull();
+  });
+
+  it("a non-lost dispute (e.g. won) on the OLD purchase's payment intent leaves active_other_session classification unchanged -- regression check", async () => {
+    tables.payment_disputes = [
+      {
+        id: "dispute-legacy-row-old-won",
+        stripe_dispute_id: "dp_test_legacy_old_won",
+        stripe_payment_intent_id: OLD_PAYMENT_INTENT_ID_LEGACY,
+        status: "won",
+        reason: "fraudulent",
+        amount_cents: 999,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLegacyBundle(
+      supabase as never,
+      { id: "evt_legacy_still_active" } as Stripe.Event,
+      { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+
+    // Untouched -- still the OLD transaction's own values, exactly as
+    // active_other_session has always guaranteed.
+    const bookARow = tables.purchases.find((r) => r.book_id === BOOK_A_LEGACY);
+    expect(bookARow?.stripe_checkout_session_id).toBe(OLD_SESSION_ID_LEGACY);
+    expect(bookARow?.stripe_payment_intent_id).toBe(OLD_PAYMENT_INTENT_ID_LEGACY);
+  });
+});
+
+// ---------------------------------------------------------------------
 // LAUNCH-1 P1-4: fulfillSingleBookPurchase is now a thin wrapper around
 // finalize_book_checkout_intent (migration 032) -- a SECURITY DEFINER
 // SQL RPC that does the classification, the purchases write, and the
@@ -503,6 +985,36 @@ describe("fulfillSingleBookPurchase: finalize_book_checkout_intent wrapper", () 
     const { sendPurchaseEmails } = await import("@/lib/email");
     expect(sendPurchaseEmails).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("blocked_disputed_lost (LAUNCH-1 P1-7A): sends no email, logs for reconciliation, still 200s", async () => {
+    const supabase = makeRpcSupabase({
+      data: [{ outcome: "blocked_disputed_lost", out_book_id: SB_BOOK_ID, out_reader_id: SB_READER_ID }],
+      error: null,
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    vi.mocked((await import("@/lib/email")).sendPurchaseEmails).mockClear();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillSingleBookPurchase(
+      supabase as never,
+      { id: "evt_disputed" } as Stripe.Event,
+      { id: SB_SESSION_ID, metadata: {} } as unknown as Stripe.Checkout.Session,
+      SB_INTENT_ID,
+      SB_PAYMENT_INTENT_ID,
+      500,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const { sendPurchaseEmails } = await import("@/lib/email");
+    expect(sendPurchaseEmails).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("needs manual reconciliation"),
+      expect.objectContaining({ outcome: "blocked_disputed_lost" }),
+    );
     errorSpy.mockRestore();
   });
 
@@ -1661,5 +2173,354 @@ describe("terminal-success invariant: processRefundLifecycleEvent and processCha
       expect(tables.refund_requests[0].refunded_at).toBe(refundedAtAfterFirst);
       expect(tables.refund_requests[0].status).toBe("refunded");
     });
+  });
+});
+
+// ---------------------------------------------------------------------
+// LAUNCH-1 P1-7A: processDisputeEvent -- the sole write path for
+// public.payment_disputes. All five charge.dispute.* event types route
+// through this one function (see route.ts's own documentation for why
+// one handler correctly covers all five); these tests exercise it
+// directly with a fake Stripe disputes.retrieve client and the same
+// in-memory Supabase fake used throughout this file.
+// ---------------------------------------------------------------------
+describe("processDisputeEvent", () => {
+  const DISPUTE_ID = "dp_test_lifecycle";
+  const PAYMENT_INTENT_ID = "pi_test_dispute";
+
+  function makeFakeDispute(overrides: Partial<Stripe.Dispute> = {}): Stripe.Dispute {
+    return {
+      id: DISPUTE_ID,
+      object: "dispute",
+      status: "needs_response",
+      reason: "fraudulent",
+      amount: 500,
+      payment_intent: PAYMENT_INTENT_ID,
+      charge: "ch_test_dispute",
+      ...overrides,
+    } as Stripe.Dispute;
+  }
+
+  function makeFakeDisputeClient(params: { dispute?: Stripe.Dispute; retrieveError?: Error }) {
+    const retrieve = vi.fn(() => {
+      if (params.retrieveError) return Promise.reject(params.retrieveError);
+      return Promise.resolve(params.dispute as Stripe.Dispute);
+    });
+    return { disputes: { retrieve } };
+  }
+
+  function fakeFailWebhookForDispute(): NextResponse {
+    return { status: 500 } as unknown as NextResponse;
+  }
+
+  it("created: upserts a new payment_disputes row with the live-retrieved status", async () => {
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({ dispute: makeFakeDispute({ status: "needs_response" }) });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+
+    const result = await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_1" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(stripeClient.disputes.retrieve).toHaveBeenCalledWith(DISPUTE_ID);
+    expect(tables.payment_disputes).toHaveLength(1);
+    expect(tables.payment_disputes[0]).toMatchObject({
+      stripe_dispute_id: DISPUTE_ID,
+      stripe_payment_intent_id: PAYMENT_INTENT_ID,
+      status: "needs_response",
+      reason: "fraudulent",
+      amount_cents: 500,
+    });
+  });
+
+  it("won: the live-retrieved status is stored verbatim, never treated as an error", async () => {
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({ dispute: makeFakeDispute({ status: "won" }) });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+
+    await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_won" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].status).toBe("won");
+  });
+
+  it("lost: stored verbatim -- this is the value user_owns_book()/the fulfillment guards gate on", async () => {
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({ dispute: makeFakeDispute({ status: "lost" }) });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+
+    await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_lost" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].status).toBe("lost");
+  });
+
+  it("warning track (warning_needs_response): stored like any other recognized status, no special casing", async () => {
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({
+      dispute: makeFakeDispute({ status: "warning_needs_response" }),
+    });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_warning" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].status).toBe("warning_needs_response");
+    // Recognized status -- no "unrecognized status" warning logged.
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("unrecognized status"),
+      expect.anything(),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("'prevented': stored and treated like any other recognized status, never given invented terminal meaning", async () => {
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({ dispute: makeFakeDispute({ status: "prevented" }) });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_prevented" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].status).toBe("prevented");
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("unrecognized status"),
+      expect.anything(),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("unknown/future status: stored verbatim, never rejected, logged prominently for investigation", async () => {
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({
+      dispute: makeFakeDispute({ status: "some_future_stripe_status" as Stripe.Dispute.Status }),
+    });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_unknown" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].status).toBe("some_future_stripe_status");
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("unrecognized status"),
+      expect.objectContaining({ status: "some_future_stripe_status" }),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("duplicate delivery (same dispute.id, same event replayed): upsert is a clean no-op, no duplicate row", async () => {
+    const tables: Tables = {
+      payment_disputes: [
+        {
+          id: "existing-row",
+          stripe_dispute_id: DISPUTE_ID,
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          status: "needs_response",
+          reason: "fraudulent",
+          amount_cents: 500,
+        },
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({ dispute: makeFakeDispute({ status: "needs_response" }) });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+
+    await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_dup" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes).toHaveLength(1);
+  });
+
+  it("out-of-order delivery: a stale event for an earlier state still re-fetches and writes Stripe's CURRENT live status", async () => {
+    // Simulates: .closed (status now 'won') already processed and
+    // committed, then a stale, late-arriving .updated delivery for the
+    // dispute's earlier 'under_review' state is processed next. Because
+    // this function always re-fetches LIVE state rather than trusting
+    // the event payload, it re-reads 'won' regardless of which event
+    // triggered this call -- it can never regress the more-recent write.
+    const tables: Tables = {
+      payment_disputes: [
+        {
+          id: "existing-row",
+          stripe_dispute_id: DISPUTE_ID,
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          status: "won",
+          reason: "fraudulent",
+          amount_cents: 500,
+        },
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+    // The live Stripe state is 'won' -- this function has no way to see
+    // the stale event's own (irrelevant) payload; it always retrieves
+    // live state, which is exactly what's being verified here.
+    const stripeClient = makeFakeDisputeClient({ dispute: makeFakeDispute({ status: "won" }) });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+
+    await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_stale_updated" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].status).toBe("won");
+  });
+
+  it("funds_withdrawn / funds_reinstated events: same handler, same live re-sync, no special casing", async () => {
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({ dispute: makeFakeDispute({ status: "lost" }) });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+
+    await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_funds_withdrawn" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].status).toBe("lost");
+  });
+
+  it("no resolvable payment intent: logged and skipped, not failed (retrying can never help)", async () => {
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({
+      dispute: makeFakeDispute({ payment_intent: null }),
+    });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_no_pi" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes).toHaveLength(0);
+    warnSpy.mockRestore();
+  });
+
+  it("Stripe retrieve failure: fails the webhook (forces a retry), writes nothing", async () => {
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({ retrieveError: new Error("network error") });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+
+    const result = await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_retrieve_fail" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(tables.payment_disputes).toHaveLength(0);
+  });
+
+  it("Supabase upsert failure: fails the webhook", async () => {
+    const supabase = makeFakeSupabase({ payment_disputes: [] }, { payment_disputes: { message: "db down" } });
+    const stripeClient = makeFakeDisputeClient({ dispute: makeFakeDispute() });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+
+    const result = await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_dispute_db_fail" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+  });
+
+  it("single-book payment intent: no bundle-path code exercised, dispute recorded the same way", async () => {
+    // processDisputeEvent has no book/bundle-specific branching at all --
+    // it writes exactly one payment_disputes row keyed by payment
+    // intent, regardless of what kind of purchase that intent paid for.
+    // This test exists to make that property explicit, not because the
+    // function's behavior differs from the "created" test above.
+    const tables: Tables = { payment_disputes: [] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeDisputeClient({
+      dispute: makeFakeDispute({ payment_intent: "pi_single_book_only" }),
+    });
+    const failWebhook = vi.fn(fakeFailWebhookForDispute);
+
+    await processDisputeEvent(
+      supabase as never,
+      stripeClient as never,
+      { id: "evt_single_book" } as Stripe.Event,
+      DISPUTE_ID,
+      failWebhook,
+    );
+
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].stripe_payment_intent_id).toBe("pi_single_book_only");
   });
 });

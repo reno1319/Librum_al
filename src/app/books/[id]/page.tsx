@@ -118,20 +118,21 @@ export default async function BookDetailPage({
 
   const isAuthor = user?.id === book.author_id;
 
-  // Same refunded_at is null semantics as the download route and every
-  // other ownership check on this book -- a refunded purchase never
-  // counts as ownership.
+  // LAUNCH-1 P1-7A: routed through user_owns_book() (also excludes a
+  // purchase whose payment intent has a dispute at status 'lost', see
+  // migration 035) rather than a raw purchases select -- public.
+  // payment_disputes is fully closed to this request-scoped client, and
+  // this SECURITY DEFINER RPC already encapsulates the complete,
+  // correct ownership predicate (the same one the download route and
+  // submitReview now also use). This is a display/UX check, not a
+  // security boundary -- the download route independently re-verifies.
   let owned = false;
   let wishlisted = false;
   if (user) {
-    const { data: purchaseRow } = await supabase
-      .from("purchases")
-      .select("id")
-      .eq("book_id", id)
-      .eq("reader_id", user.id)
-      .is("refunded_at", null)
-      .maybeSingle();
-    owned = !!purchaseRow;
+    const { data: ownsBook } = await supabase.rpc("user_owns_book", {
+      target_book_id: id,
+    });
+    owned = !!ownsBook;
 
     if (!owned) {
       const { data: wishlistRow } = await supabase
