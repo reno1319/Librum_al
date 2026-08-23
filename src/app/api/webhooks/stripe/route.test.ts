@@ -15,6 +15,7 @@ vi.mock("@/lib/email", () => ({
 
 const {
   fulfillBundleSnapshot,
+  fulfillSingleBookPurchase,
   processChargeRefund,
   processRefundLifecycleEvent,
   processChargeRefundedEvent,
@@ -123,6 +124,12 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
     }
 
     // upsert
+    // Same injected-failure mechanism as the update branch above (LAUNCH-1
+    // P1-4's fulfillSingleBookPurchase write-failure test is the first to
+    // need it on an upsert rather than an update).
+    if (this.table in this.errorOnUpdate) {
+      return { data: null, error: this.errorOnUpdate[this.table] };
+    }
     const conflictCols = (this.upsertOnConflict ?? "").split(",").map((s) => s.trim());
     const existingIndex = rows.findIndex((r) =>
       conflictCols.every((c) => r[c] === this.payload![c]),
@@ -361,6 +368,208 @@ describe("fulfillBundleSnapshot: partially-owned bundle transaction integrity", 
     expect(bookARow?.stripe_checkout_session_id).toBe(OLD_SESSION_ID);
     expect(bookBRow?.amount_cents).toBe(599);
     expect(bookBRow?.stripe_checkout_session_id).toBe(NEW_SESSION_ID);
+  });
+});
+
+// ---------------------------------------------------------------------
+// LAUNCH-1 P1-4: fulfillSingleBookPurchase is now a thin wrapper around
+// finalize_book_checkout_intent (migration 032) -- a SECURITY DEFINER
+// SQL RPC that does the classification, the purchases write, and the
+// intent's own state transition as one atomic, advisory-lock-serialized
+// Postgres transaction. That logic no longer exists in TypeScript at
+// all, so these tests mock the RPC call itself and assert only what
+// remains this function's own job: which arguments it sends, and how it
+// maps each returned outcome to sending (or not sending) the purchase
+// email and to logging for reconciliation. The RPC's own concurrency/
+// classification correctness is covered by the committed SQL regression
+// suite in supabase/tests/032_book_checkout_intents.test.sql and
+// supabase/tests/032_advisory_lock_contention.sh, not here.
+// ---------------------------------------------------------------------
+const SB_INTENT_ID = "intent-sb-1";
+const SB_BOOK_ID = "book-sb-1";
+const SB_READER_ID = "reader-sb-1";
+const SB_SESSION_ID = "cs_test_sb_new";
+const SB_PAYMENT_INTENT_ID = "pi_test_sb_new";
+
+function makeRpcSupabase(result: { data: unknown; error: unknown }) {
+  const rpc = vi.fn().mockResolvedValue(result);
+  return { rpc };
+}
+
+describe("fulfillSingleBookPurchase: finalize_book_checkout_intent wrapper", () => {
+  it("calls finalize_book_checkout_intent with exactly the expected arguments", async () => {
+    const supabase = makeRpcSupabase({
+      data: [{ outcome: "eligible_fulfilled", out_book_id: SB_BOOK_ID, out_reader_id: SB_READER_ID }],
+      error: null,
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    await fulfillSingleBookPurchase(
+      supabase as never,
+      { id: "evt_1" } as Stripe.Event,
+      { id: SB_SESSION_ID, metadata: {} } as unknown as Stripe.Checkout.Session,
+      SB_INTENT_ID,
+      SB_PAYMENT_INTENT_ID,
+      500,
+      failWebhook,
+    );
+
+    expect(supabase.rpc).toHaveBeenCalledWith("finalize_book_checkout_intent", {
+      p_intent_id: SB_INTENT_ID,
+      p_stripe_checkout_session_id: SB_SESSION_ID,
+      p_stripe_payment_intent_id: SB_PAYMENT_INTENT_ID,
+      p_amount_cents: 500,
+    });
+  });
+
+  it("eligible_fulfilled: sends the purchase email with the RPC's own book_id/reader_id", async () => {
+    const supabase = makeRpcSupabase({
+      data: [{ outcome: "eligible_fulfilled", out_book_id: SB_BOOK_ID, out_reader_id: SB_READER_ID }],
+      error: null,
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    vi.mocked((await import("@/lib/email")).sendPurchaseEmails).mockClear();
+
+    const result = await fulfillSingleBookPurchase(
+      supabase as never,
+      { id: "evt_2" } as Stripe.Event,
+      { id: SB_SESSION_ID, metadata: {} } as unknown as Stripe.Checkout.Session,
+      SB_INTENT_ID,
+      SB_PAYMENT_INTENT_ID,
+      500,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const { sendPurchaseEmails } = await import("@/lib/email");
+    expect(sendPurchaseEmails).toHaveBeenCalledWith(
+      supabase,
+      expect.objectContaining({ bookId: SB_BOOK_ID, readerId: SB_READER_ID, amountCents: 500 }),
+    );
+  });
+
+  it("active_other_session: sends no email, logs for reconciliation, still 200s", async () => {
+    const supabase = makeRpcSupabase({
+      data: [{ outcome: "active_other_session", out_book_id: SB_BOOK_ID, out_reader_id: SB_READER_ID }],
+      error: null,
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    vi.mocked((await import("@/lib/email")).sendPurchaseEmails).mockClear();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillSingleBookPurchase(
+      supabase as never,
+      { id: "evt_3" } as Stripe.Event,
+      { id: SB_SESSION_ID, metadata: {} } as unknown as Stripe.Checkout.Session,
+      SB_INTENT_ID,
+      SB_PAYMENT_INTENT_ID,
+      500,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const { sendPurchaseEmails } = await import("@/lib/email");
+    expect(sendPurchaseEmails).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("needs manual reconciliation"),
+      expect.objectContaining({ outcome: "active_other_session" }),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("blocked_book_or_reader_deleted: sends no email, logs for reconciliation, still 200s", async () => {
+    const supabase = makeRpcSupabase({
+      data: [{ outcome: "blocked_book_or_reader_deleted", out_book_id: null, out_reader_id: null }],
+      error: null,
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    vi.mocked((await import("@/lib/email")).sendPurchaseEmails).mockClear();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillSingleBookPurchase(
+      supabase as never,
+      { id: "evt_4" } as Stripe.Event,
+      { id: SB_SESSION_ID, metadata: {} } as unknown as Stripe.Checkout.Session,
+      SB_INTENT_ID,
+      SB_PAYMENT_INTENT_ID,
+      500,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const { sendPurchaseEmails } = await import("@/lib/email");
+    expect(sendPurchaseEmails).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("already_finalized (duplicate webhook delivery): complete no-op, no email, no error log", async () => {
+    const supabase = makeRpcSupabase({
+      data: [{ outcome: "already_finalized", out_book_id: SB_BOOK_ID, out_reader_id: SB_READER_ID }],
+      error: null,
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    vi.mocked((await import("@/lib/email")).sendPurchaseEmails).mockClear();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillSingleBookPurchase(
+      supabase as never,
+      { id: "evt_5" } as Stripe.Event,
+      { id: SB_SESSION_ID, metadata: {} } as unknown as Stripe.Checkout.Session,
+      SB_INTENT_ID,
+      SB_PAYMENT_INTENT_ID,
+      500,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const { sendPurchaseEmails } = await import("@/lib/email");
+    expect(sendPurchaseEmails).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("RPC error: fails the webhook via failWebhook, sends no email", async () => {
+    const supabase = makeRpcSupabase({ data: null, error: { message: "connection reset" } });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    vi.mocked((await import("@/lib/email")).sendPurchaseEmails).mockClear();
+
+    const result = await fulfillSingleBookPurchase(
+      supabase as never,
+      { id: "evt_6" } as Stripe.Event,
+      { id: SB_SESSION_ID, metadata: {} } as unknown as Stripe.Checkout.Session,
+      SB_INTENT_ID,
+      SB_PAYMENT_INTENT_ID,
+      500,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    const { sendPurchaseEmails } = await import("@/lib/email");
+    expect(sendPurchaseEmails).not.toHaveBeenCalled();
+  });
+
+  it("RPC returns no row (defensive): fails the webhook rather than silently succeeding", async () => {
+    const supabase = makeRpcSupabase({ data: [], error: null });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillSingleBookPurchase(
+      supabase as never,
+      { id: "evt_7" } as Stripe.Event,
+      { id: SB_SESSION_ID, metadata: {} } as unknown as Stripe.Checkout.Session,
+      SB_INTENT_ID,
+      SB_PAYMENT_INTENT_ID,
+      500,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
   });
 });
 

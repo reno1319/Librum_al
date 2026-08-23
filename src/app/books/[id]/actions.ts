@@ -1,13 +1,15 @@
 "use server";
 
+import Stripe from "stripe";
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
-import { platformFeeCents, applyDiscount } from "@/lib/pricing";
+import { platformFeeCents } from "@/lib/pricing";
 import { REPORT_REASONS } from "@/lib/report-reasons";
+import { toStripeExpiresAtSeconds } from "./checkout-logic";
 import type { DiscountCode } from "@/lib/types";
 
 type BookForCheckout = {
@@ -20,6 +22,14 @@ type BookForCheckout = {
     stripe_account_id: string | null;
     stripe_payouts_enabled: boolean;
   } | null;
+};
+
+// The shape create_book_checkout_intent (migration 032) returns.
+type CheckoutIntentResult = {
+  intent_id: string;
+  price_cents_at_checkout: number;
+  discount_code_id: string | null;
+  expires_at: string;
 };
 
 export async function buyBook(bookId: string, formData: FormData) {
@@ -57,6 +67,10 @@ export async function buyBook(bookId: string, formData: FormData) {
     redirect(`/books/${bookId}?error=This+book+isn%27t+available+for+purchase+right+now`);
   }
 
+  // Cheap, non-authoritative early check for a friendlier redirect --
+  // create_book_checkout_intent re-validates ownership atomically at the
+  // moment it actually mints/reuses the checkout intent (see LAUNCH-1
+  // P1-4), so nothing here needs to be race-free with that.
   const { data: existing } = await supabase
     .from("purchases")
     .select("id")
@@ -69,9 +83,12 @@ export async function buyBook(bookId: string, formData: FormData) {
     redirect(`/books/${bookId}`);
   }
 
-  let priceCents = book.price_cents;
-  let discountCodeId: string | null = null;
-
+  // Cheap, non-authoritative early check purely for a friendlier "That
+  // promo code isn't valid" message -- create_book_checkout_intent
+  // independently re-normalizes and re-validates the code itself, never
+  // trusting this check's result, exactly the two-layer pattern
+  // buyBundle already uses for its own early ownership check alongside
+  // create_bundle_checkout_snapshot's own authoritative one.
   const rawCode = String(formData.get("code") ?? "").trim().toUpperCase();
   if (rawCode) {
     // Codes aren't publicly listable (see the RLS policies in
@@ -92,42 +109,142 @@ export async function buyBook(bookId: string, formData: FormData) {
     if (!discount || isExpired) {
       redirect(`/books/${bookId}?error=That+promo+code+isn%27t+valid`);
     }
+  }
 
-    priceCents = applyDiscount(book.price_cents, discount);
-    discountCodeId = discount.id;
+  // The sole source of truth for what Stripe actually charges from this
+  // point forward -- price, the resolved discount, and this attempt's
+  // own durable identity are all frozen atomically by this one call
+  // (migration 032's create_book_checkout_intent). Never trusts
+  // book.price_cents or the discount lookup above for the actual charge
+  // -- both are re-derived server-side inside the RPC, which is directly
+  // callable by any authenticated client and so can never trust a
+  // caller-supplied price.
+  const { data: intentRows, error: intentError } = await supabase.rpc(
+    "create_book_checkout_intent",
+    { book_id: bookId, p_discount_code: rawCode || null },
+  );
+
+  const intent = (intentRows as CheckoutIntentResult[] | null)?.[0];
+
+  if (intentError || !intent) {
+    console.error("buyBook: create_book_checkout_intent failed", {
+      bookId,
+      readerId: user.id,
+      error: intentError,
+    });
+    redirect(`/books/${bookId}?error=Could+not+start+checkout`);
+  }
+
+  // `intentRows as CheckoutIntentResult[] | null` above is a
+  // compile-time cast only -- it gives no runtime guarantee the RPC
+  // actually returned well-formed values. Every field that flows into
+  // the Stripe call below is checked explicitly before that call is
+  // ever made.
+  const isIntentUsable =
+    typeof intent.intent_id === "string" &&
+    intent.intent_id.length > 0 &&
+    typeof intent.price_cents_at_checkout === "number" &&
+    Number.isInteger(intent.price_cents_at_checkout) &&
+    intent.price_cents_at_checkout > 0 &&
+    Number.isFinite(Date.parse(intent.expires_at));
+
+  if (!isIntentUsable) {
+    console.error("buyBook: checkout intent RPC returned a malformed result", {
+      bookId,
+      readerId: user.id,
+      intent,
+    });
+    redirect(`/books/${bookId}?error=Could+not+start+checkout`);
   }
 
   const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    line_items: [
+  let session: Stripe.Checkout.Session;
+  try {
+    session = await stripe.checkout.sessions.create(
       {
-        price_data: {
-          currency: "usd",
-          product_data: { name: book.title },
-          unit_amount: priceCents,
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: book.title },
+              unit_amount: intent.price_cents_at_checkout,
+            },
+            quantity: 1,
+          },
+        ],
+        payment_intent_data: {
+          application_fee_amount: platformFeeCents(intent.price_cents_at_checkout),
+          transfer_data: {
+            destination: authorAccount,
+          },
         },
-        quantity: 1,
+        // Aligned with the intent's own expires_at (Math.floor, never
+        // Math.round -- see toStripeExpiresAtSeconds) so Stripe can never
+        // hold this session payable past the moment the database has
+        // already stopped reusing this intent for a fresh attempt.
+        expires_at: toStripeExpiresAtSeconds(intent.expires_at),
+        success_url: `${origin}/books/${bookId}?purchase=success`,
+        cancel_url: `${origin}/books/${bookId}?purchase=cancelled`,
+        metadata: {
+          intent_id: intent.intent_id,
+        },
       },
-    ],
-    payment_intent_data: {
-      application_fee_amount: platformFeeCents(priceCents),
-      transfer_data: {
-        destination: authorAccount,
+      {
+        // Deterministic, not random: retrying this exact intent's
+        // checkout-creation request (e.g. after an ambiguous network
+        // failure) must never be able to create a second, independent
+        // Stripe Checkout Session for the same frozen intent. Mirrors
+        // buyBundle's identical `bundle-checkout:${snapshot_id}` pattern.
+        idempotencyKey: `book-checkout:${intent.intent_id}`,
       },
-    },
-    success_url: `${origin}/books/${bookId}?purchase=success`,
-    cancel_url: `${origin}/books/${bookId}?purchase=cancelled`,
-    metadata: {
-      book_id: bookId,
-      reader_id: user.id,
-      ...(discountCodeId ? { discount_code_id: discountCodeId } : {}),
-    },
-  });
+    );
+  } catch (err) {
+    // A concurrent invocation (double-click, two tabs) racing on the
+    // SAME idempotency key can land here: Stripe rejects a second
+    // request using a key still being processed by an in-flight first
+    // request, rather than queuing it. Sent back to a normal, retryable
+    // error state instead of an unhandled exception. Every other Stripe
+    // error is handled the same generic way buyBundle already handles
+    // its own checkout-creation failures -- logged and redirected, never
+    // left to crash.
+    if (err instanceof Stripe.errors.StripeIdempotencyError) {
+      redirect(`/books/${bookId}?error=Checkout+already+in+progress+-+please+try+again`);
+    }
+    console.error("buyBook: Stripe checkout session creation failed", {
+      bookId,
+      readerId: user.id,
+      intentId: intent.intent_id,
+      error: err,
+    });
+    redirect(`/books/${bookId}?error=Could+not+start+checkout`);
+  }
 
   if (!session.url) {
     redirect(`/books/${bookId}?error=Could+not+start+checkout`);
+  }
+
+  // Audit-only, best-effort -- fulfillment never depends on this
+  // succeeding, since the webhook's finalize_book_checkout_intent
+  // resolves everything directly from metadata.intent_id, never from
+  // this column. Performed with the ADMIN client: the request-scoped
+  // client has no direct UPDATE privilege on book_checkout_intents at
+  // all (migration 032 revokes it from authenticated/anon entirely --
+  // only the RPC and the service-role webhook may touch this table).
+  const admin = createAdminClient();
+  const { error: linkBackError } = await admin
+    .from("book_checkout_intents")
+    .update({ stripe_checkout_session_id: session.id })
+    .eq("id", intent.intent_id);
+
+  if (linkBackError) {
+    console.error("buyBook: failed to link back stripe_checkout_session_id onto the intent", {
+      bookId,
+      readerId: user.id,
+      intentId: intent.intent_id,
+      error: linkBackError,
+    });
   }
 
   redirect(session.url);

@@ -680,6 +680,99 @@ export async function fulfillBundleSnapshot(
   return null;
 }
 
+// Fulfills a single-book checkout (checkout.session.completed with
+// metadata.intent_id, no snapshot/bundle). LAUNCH-1 P1-4: a thin wrapper
+// around finalize_book_checkout_intent (migration 032), a SECURITY
+// DEFINER RPC that does the classification, the purchases write, and the
+// intent's own state transition as ONE atomic, advisory-lock-serialized
+// Postgres transaction -- moved there deliberately, not left as
+// separate read/classify/write steps from Node. Two truly concurrent
+// webhook deliveries for two DIFFERENT, both-genuinely-paid intents of
+// the same reader/book could otherwise both read purchases before either
+// had written anything, both decide "eligible," and race to overwrite
+// each other with neither ever being durably recorded as the loser --
+// exactly the defect class this whole design exists to prevent, just
+// relocated from buyBook to the webhook. See finalize_book_checkout_intent's
+// own extensive comment in migration 032 for the full concurrency
+// argument and its two independent locks (a row lock on the intent
+// itself, plus the same (reader_id, book_id) advisory-lock namespace
+// create_book_checkout_intent uses).
+//
+// metadata.intent_id (present in the Stripe session's own metadata since
+// the moment buyBook created it) is sufficient on its own for this
+// function to resolve and fulfill the purchase -- nothing here depends
+// on book_checkout_intents.stripe_checkout_session_id (the buyBook
+// link-back column) ever having been successfully written.
+//
+// Exported (only) so route.test.ts can drive this function directly with
+// a mocked RPC call, the same spirit as fulfillBundleSnapshot's own fake
+// Supabase client, without needing to fake finalize_book_checkout_intent's
+// own SQL logic in TypeScript (there is nothing left to fake -- that
+// logic no longer exists in TypeScript at all; see the committed SQL
+// regression suite in supabase/tests/ for that).
+export async function fulfillSingleBookPurchase(
+  supabase: ReturnType<typeof createAdminClient>,
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+  intentId: string,
+  paymentIntentId: string | null,
+  amountCents: number,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  const { data: rows, error } = await supabase.rpc("finalize_book_checkout_intent", {
+    p_intent_id: intentId,
+    p_stripe_checkout_session_id: session.id,
+    p_stripe_payment_intent_id: paymentIntentId,
+    p_amount_cents: amountCents,
+  });
+
+  if (error) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      error,
+    });
+  }
+
+  const result = (
+    rows as { outcome: string; out_book_id: string | null; out_reader_id: string | null }[] | null
+  )?.[0];
+
+  if (!result) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      error: "finalize_book_checkout_intent returned no row",
+    });
+  }
+
+  const { outcome, out_book_id: bookId, out_reader_id: readerId } = result;
+
+  if (outcome === "eligible_fulfilled" && bookId && readerId) {
+    await sendPurchaseEmails(supabase, { bookId, readerId, amountCents });
+    return null;
+  }
+
+  if (outcome === "active_other_session" || outcome === "blocked_book_or_reader_deleted") {
+    // The DB row is the durable record either way (see this migration's
+    // own reconciliation query) -- this is immediate ops visibility, not
+    // the source of truth.
+    console.error(
+      "Stripe webhook: single-book checkout paid but not fulfilled -- needs manual reconciliation",
+      { eventId: event.id, checkoutSessionId: session.id, paymentIntentId, intentId, outcome },
+    );
+    return null;
+  }
+
+  // 'already_finalized' -- a duplicate delivery of an event already
+  // settled by an earlier call. Complete no-op.
+  return null;
+}
+
 // Fulfills a Stripe-confirmed FULL refund (charge.refunded) against
 // every table that tracks refund state for the given PaymentIntent.
 // Scoped ENTIRELY by stripe_payment_intent_id -- never reads or trusts
@@ -1166,10 +1259,15 @@ export async function POST(request: Request) {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    const bookId = session.metadata?.book_id;
     const bundleId = session.metadata?.bundle_id;
     const readerId = session.metadata?.reader_id;
     const snapshotId = session.metadata?.snapshot_id;
+    // LAUNCH-1 P1-4: single-book checkouts carry metadata.intent_id
+    // (book_checkout_intents.id, migration 032) since buyBook stopped
+    // putting book_id/reader_id in Stripe metadata directly -- both are
+    // now resolved server-side, inside finalize_book_checkout_intent,
+    // from the intent row itself.
+    const intentId = session.metadata?.intent_id;
     const paymentIntentId = extractPaymentIntentId(session.payment_intent);
     const amountCents = session.amount_total ?? 0;
 
@@ -1401,38 +1499,20 @@ export async function POST(request: Request) {
       }
 
       await sendBundlePurchaseEmails(supabase, { bundleId, readerId, amountCents });
-    } else if (bookId && readerId) {
+    } else if (intentId) {
       const supabase = createAdminClient();
-
-      const { error: purchaseError } = await supabase.from("purchases").upsert(
-        {
-          book_id: bookId,
-          reader_id: readerId,
-          stripe_checkout_session_id: session.id,
-          stripe_payment_intent_id: paymentIntentId,
-          amount_cents: amountCents,
-          discount_code_id: session.metadata?.discount_code_id ?? null,
-          // Explicit, not just omitted: on a re-purchase after an earlier
-          // refund, the unique(book_id, reader_id) constraint means this
-          // upsert updates that same row — without resetting this, it'd
-          // keep the stale refund timestamp from the previous purchase.
-          refunded_at: null,
-        },
-        { onConflict: "book_id,reader_id" },
+      const failureResponse = await fulfillSingleBookPurchase(
+        supabase,
+        event,
+        session,
+        intentId,
+        paymentIntentId,
+        amountCents,
+        failWebhook,
       );
-
-      if (purchaseError) {
-        return failWebhook({
-          eventId: event.id,
-          checkoutSessionId: session.id,
-          paymentIntentId,
-          bookId,
-          readerId,
-          error: purchaseError,
-        });
+      if (failureResponse) {
+        return failureResponse;
       }
-
-      await sendPurchaseEmails(supabase, { bookId, readerId, amountCents });
     }
   }
 

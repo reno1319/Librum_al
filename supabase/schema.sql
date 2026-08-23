@@ -1891,3 +1891,274 @@ revoke all on function public.review_refund_request(uuid, text, text) from publi
 revoke all on function public.review_refund_request(uuid, text, text) from anon;
 revoke all on function public.review_refund_request(uuid, text, text) from authenticated;
 grant execute on function public.review_refund_request(uuid, text, text) to authenticated;
+
+-- ============================================================
+-- LAUNCH-1 P1-4: single-book checkout race hardening. Mirrors
+-- supabase/migrations/032_book_checkout_intents.sql exactly -- see that
+-- file's own header comment for the full audit/design rationale (why
+-- Stripe idempotency keys alone are insufficient, why a calendar-
+-- bucketed key was tried and rejected, and the concurrency argument
+-- behind finalize_book_checkout_intent's two independent locks).
+-- ============================================================
+
+create table public.book_checkout_intents (
+  id uuid primary key default gen_random_uuid(),
+  book_id uuid references public.books(id) on delete set null,
+  reader_id uuid references public.profiles(id) on delete set null,
+  book_title text not null,
+  price_cents_at_checkout integer not null,
+  discount_code_id uuid references public.discount_codes(id) on delete set null,
+  stripe_checkout_session_id text unique,
+  stripe_payment_intent_id text unique,
+  expires_at timestamptz not null,
+  completed_at timestamptz,
+  fulfilled_at timestamptz,
+  reconciliation_reason text,
+  created_at timestamptz not null default now(),
+
+  check (expires_at > created_at),
+  check (fulfilled_at is null or completed_at is not null),
+  check ((reconciliation_reason is not null) = (completed_at is not null and fulfilled_at is null)),
+  check (reconciliation_reason is null or reconciliation_reason in ('active_other_session', 'book_or_reader_deleted'))
+);
+
+alter table public.book_checkout_intents enable row level security;
+
+revoke all on public.book_checkout_intents from public, anon, authenticated;
+
+create index book_checkout_intents_reader_book_open_idx
+  on public.book_checkout_intents (reader_id, book_id, created_at desc)
+  where fulfilled_at is null;
+
+create index book_checkout_intents_needs_reconciliation_idx
+  on public.book_checkout_intents (completed_at)
+  where fulfilled_at is null and completed_at is not null;
+
+create or replace function public.create_book_checkout_intent(
+  book_id uuid,
+  p_discount_code text default null
+)
+returns table (
+  intent_id uuid,
+  price_cents_at_checkout integer,
+  discount_code_id uuid,
+  expires_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_reader_id uuid;
+  v_book record;
+  v_discount record;
+  v_price_cents integer;
+  v_discount_code_id uuid;
+  v_expires_at timestamptz;
+  v_intent_id uuid;
+  v_existing record;
+begin
+  v_reader_id := auth.uid();
+  if v_reader_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext(v_reader_id::text),
+    pg_catalog.hashtext(create_book_checkout_intent.book_id::text)
+  );
+
+  select i.id, i.price_cents_at_checkout, i.discount_code_id, i.expires_at
+  into v_existing
+  from public.book_checkout_intents i
+  where i.book_id = create_book_checkout_intent.book_id
+    and i.reader_id = v_reader_id
+    and i.fulfilled_at is null
+    and i.completed_at is null
+    and i.expires_at > now()
+  order by i.created_at desc
+  limit 1;
+
+  if v_existing.id is not null then
+    return query
+    select v_existing.id, v_existing.price_cents_at_checkout, v_existing.discount_code_id, v_existing.expires_at;
+    return;
+  end if;
+
+  select b.id, b.title, b.price_cents, b.status, b.author_id
+  into v_book
+  from public.books b
+  where b.id = create_book_checkout_intent.book_id;
+
+  if v_book.id is null
+     or v_book.status <> 'published'
+     or v_book.author_id = v_reader_id
+     or v_book.price_cents <= 0 then
+    raise exception 'book not available for purchase';
+  end if;
+
+  if exists (
+    select 1
+    from public.purchases p
+    where p.book_id = create_book_checkout_intent.book_id
+      and p.reader_id = v_reader_id
+      and p.refunded_at is null
+  ) then
+    raise exception 'reader already owns this book';
+  end if;
+
+  v_price_cents := v_book.price_cents;
+  v_discount_code_id := null;
+
+  if p_discount_code is not null and pg_catalog.length(pg_catalog.btrim(p_discount_code)) > 0 then
+    select d.id, d.percent_off, d.amount_off_cents
+    into v_discount
+    from public.discount_codes d
+    where d.book_id = create_book_checkout_intent.book_id
+      and d.code = pg_catalog.upper(pg_catalog.btrim(p_discount_code))
+      and d.active = true
+      and (d.expires_at is null or d.expires_at > now())
+    limit 1;
+
+    if v_discount.id is not null then
+      v_price_cents := greatest(
+        case
+          when v_discount.percent_off is not null
+            then round(v_book.price_cents::numeric * (100 - v_discount.percent_off) / 100)::integer
+          else v_book.price_cents - v_discount.amount_off_cents
+        end,
+        50
+      );
+      v_discount_code_id := v_discount.id;
+    end if;
+  end if;
+
+  v_expires_at := now() + interval '23 hours';
+
+  insert into public.book_checkout_intents (
+    book_id, reader_id, book_title, price_cents_at_checkout, discount_code_id, expires_at
+  ) values (
+    create_book_checkout_intent.book_id, v_reader_id, v_book.title, v_price_cents, v_discount_code_id, v_expires_at
+  )
+  returning id into v_intent_id;
+
+  return query
+  select v_intent_id, v_price_cents, v_discount_code_id, v_expires_at;
+end;
+$$;
+
+revoke all on function public.create_book_checkout_intent(uuid, text) from public;
+revoke all on function public.create_book_checkout_intent(uuid, text) from anon;
+revoke all on function public.create_book_checkout_intent(uuid, text) from authenticated;
+grant execute on function public.create_book_checkout_intent(uuid, text) to authenticated;
+
+create or replace function public.finalize_book_checkout_intent(
+  p_intent_id uuid,
+  p_stripe_checkout_session_id text,
+  p_stripe_payment_intent_id text,
+  p_amount_cents integer
+)
+returns table (
+  outcome text,
+  out_book_id uuid,
+  out_reader_id uuid
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_intent record;
+  v_existing record;
+begin
+  select id, book_id, reader_id, discount_code_id, price_cents_at_checkout,
+         fulfilled_at, completed_at, reconciliation_reason
+  into v_intent
+  from public.book_checkout_intents
+  where id = p_intent_id
+  for update;
+
+  if v_intent.id is null then
+    raise exception 'checkout intent not found';
+  end if;
+
+  if v_intent.fulfilled_at is not null or v_intent.reconciliation_reason is not null then
+    return query select 'already_finalized'::text, v_intent.book_id, v_intent.reader_id;
+    return;
+  end if;
+
+  if p_amount_cents is null or p_amount_cents <> v_intent.price_cents_at_checkout then
+    raise exception 'stripe amount does not match this intent''s frozen price';
+  end if;
+
+  if v_intent.book_id is null or v_intent.reader_id is null then
+    update public.book_checkout_intents
+    set stripe_payment_intent_id = p_stripe_payment_intent_id,
+        completed_at = now(),
+        reconciliation_reason = 'book_or_reader_deleted'
+    where id = p_intent_id;
+    return query select 'blocked_book_or_reader_deleted'::text, null::uuid, null::uuid;
+    return;
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext(v_intent.reader_id::text),
+    pg_catalog.hashtext(v_intent.book_id::text)
+  );
+
+  select p.stripe_checkout_session_id, p.refunded_at
+  into v_existing
+  from public.purchases p
+  where p.book_id = v_intent.book_id
+    and p.reader_id = v_intent.reader_id;
+
+  if v_existing.stripe_checkout_session_id is not null and v_existing.refunded_at is null then
+    update public.book_checkout_intents
+    set stripe_payment_intent_id = p_stripe_payment_intent_id,
+        completed_at = now(),
+        reconciliation_reason = 'active_other_session'
+    where id = p_intent_id;
+    return query select 'active_other_session'::text, v_intent.book_id, v_intent.reader_id;
+    return;
+  end if;
+
+  insert into public.purchases (
+    book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id,
+    amount_cents, discount_code_id, refunded_at
+  ) values (
+    v_intent.book_id, v_intent.reader_id, p_stripe_checkout_session_id, p_stripe_payment_intent_id,
+    v_intent.price_cents_at_checkout, v_intent.discount_code_id, null
+  )
+  on conflict (book_id, reader_id) do update set
+    stripe_checkout_session_id = excluded.stripe_checkout_session_id,
+    stripe_payment_intent_id = excluded.stripe_payment_intent_id,
+    amount_cents = excluded.amount_cents,
+    discount_code_id = excluded.discount_code_id,
+    refunded_at = null;
+
+  update public.book_checkout_intents
+  set stripe_payment_intent_id = p_stripe_payment_intent_id,
+      completed_at = now(),
+      fulfilled_at = now()
+  where id = p_intent_id;
+
+  return query select 'eligible_fulfilled'::text, v_intent.book_id, v_intent.reader_id;
+end;
+$$;
+
+revoke all on function public.finalize_book_checkout_intent(uuid, text, text, integer) from public;
+revoke all on function public.finalize_book_checkout_intent(uuid, text, text, integer) from anon;
+revoke all on function public.finalize_book_checkout_intent(uuid, text, text, integer) from authenticated;
+grant execute on function public.finalize_book_checkout_intent(uuid, text, text, integer) to service_role;
+
+-- Admin reconciliation query for every Stripe-confirmed paid transaction
+-- that was NOT fulfilled into purchases:
+--
+-- select
+--   i.id as intent_id, i.book_id, i.book_title, i.reader_id,
+--   i.price_cents_at_checkout, i.stripe_checkout_session_id,
+--   i.stripe_payment_intent_id, i.completed_at, i.reconciliation_reason,
+--   i.created_at
+-- from public.book_checkout_intents i
+-- where i.completed_at is not null and i.fulfilled_at is null
+-- order by i.completed_at desc;
