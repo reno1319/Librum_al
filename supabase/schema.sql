@@ -948,15 +948,42 @@ create policy "Authors can create discount codes for their own books"
     )
   );
 
+-- with check mirrors the insert policy's ownership check exactly (see
+-- migration 031 for the full reasoning): without it, only author_id was
+-- re-verified on update -- book_id (and every other column) was
+-- completely unconstrained, letting an author repoint their own code at
+-- a book they don't own via a raw API call.
 create policy "Authors can update their own discount codes"
   on public.discount_codes for update
-  using (auth.uid() = author_id);
+  using (auth.uid() = author_id)
+  with check (
+    auth.uid() = author_id
+    and exists (
+      select 1 from public.books
+      where books.id = discount_codes.book_id
+      and books.author_id = auth.uid()
+    )
+  );
 
 create policy "Authors can delete their own discount codes"
   on public.discount_codes for delete
   using (auth.uid() = author_id);
 
 create index discount_codes_book_id_idx on public.discount_codes(book_id);
+
+-- Column-level grant, same two-layer pattern as public.profiles above:
+-- the app's only UPDATE call (toggleDiscountCode) ever names just
+-- `active` in its payload -- see migration 031 for why this is safe
+-- (a plain .update(), not an upsert) and why the equivalent restriction
+-- is deliberately NOT applied to reviews below. Revokes from BOTH anon
+-- and authenticated (see migration 031's own comment on this exact
+-- line for why authenticated-only, mirroring the profiles pattern
+-- above, was insufficient here).
+revoke update on public.discount_codes from anon, authenticated;
+
+grant update (active)
+  on public.discount_codes
+  to authenticated;
 
 -- ============================================================
 -- storage: cover images (public) and manuscript files (private)
@@ -1214,9 +1241,26 @@ create policy "Buyers can review books they own"
     )
   );
 
+-- with check mirrors the insert policy's ownership+refund check exactly
+-- (see migration 031 for the full reasoning, including why this is
+-- required -- not merely defensive -- for submitReview's own genuine
+-- upsert-based edit flow to keep working, and why no column-level grant
+-- restriction is applied here unlike discount_codes above). Without
+-- this, only reader_id was re-verified on update -- book_id was
+-- completely unconstrained, and a refunded reader's review could be
+-- edited indefinitely.
 create policy "Readers can update their own review"
   on public.reviews for update
-  using (auth.uid() = reader_id);
+  using (auth.uid() = reader_id)
+  with check (
+    auth.uid() = reader_id
+    and exists (
+      select 1 from public.purchases
+      where purchases.book_id = reviews.book_id
+      and purchases.reader_id = auth.uid()
+      and purchases.refunded_at is null
+    )
+  );
 
 create policy "Readers can delete their own review"
   on public.reviews for delete
