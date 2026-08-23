@@ -32,17 +32,15 @@ create policy "Profiles are viewable by everyone"
 
 create policy "Users can update their own profile"
   on public.profiles for update
-  using (auth.uid() = id);
+  using (auth.uid() = id)
+  with check (auth.uid() = id);
 
--- The UPDATE policy above is row-scoped only (auth.uid() = id), never
--- column-restricted -- Supabase's own default privilege provisioning
--- grants authenticated table-level UPDATE on every table it creates
--- (confirmed directly against a live project via
--- information_schema.role_table_grants, not merely assumed), so
--- without an explicit column restriction here, ANY column -- including
--- role, stripe_account_id, and stripe_payouts_enabled -- would be
--- directly PATCHable by an authenticated user via a raw API call on
--- their own row, regardless of what the application's own UI exposes.
+-- Table-level ACL is what actually protects role/stripe_account_id/
+-- stripe_payouts_enabled from a raw authenticated/anon PATCH -- RLS's
+-- USING/WITH CHECK above only ever constrain which ROW, never which
+-- COLUMNS, so without an explicit ACL restriction ANY column would be
+-- directly writable on the caller's own row regardless of what the
+-- application's own UI exposes.
 --
 -- A column-scoped REVOKE on just the sensitive columns (an earlier
 -- version of this file did exactly that, matching what migration 003
@@ -51,17 +49,38 @@ create policy "Users can update their own profile"
 -- hierarchy -- a column-scoped REVOKE cannot narrow a still-standing
 -- table-level GRANT, because no column-level grant on that column ever
 -- existed to remove in the first place (see the Phase REFUND-1A
--- database-security review). The only correct fix is to revoke the
--- table-level grant entirely and re-grant UPDATE only on the columns
--- authenticated legitimately needs -- confirmed by tracing every
--- authenticated-client UPDATE against profiles in this codebase
+-- database-security review). Nor is a targeted `revoke update ...`
+-- alone sufficient once more than one role is in play: migration 028
+-- correctly revoked and re-granted for authenticated, but never touched
+-- anon -- REVOKE/GRANT are per-role, independent ACL entries, so
+-- narrowing one role's privileges has zero effect on another's. anon
+-- retained Supabase's full ambient default privileges (SELECT, INSERT,
+-- UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER) on every column until
+-- LAUNCH-1 P1-5 (migration 033) closed it -- the exact same defect
+-- class already found and fixed for discount_codes/reviews (migration
+-- 031) and refund_requests (migration 029).
+--
+-- Reset-and-regrant, not a narrower REVOKE: removes every privilege
+-- type Supabase's own ambient defaults hand out (not just UPDATE) for
+-- both anon and authenticated, then re-grants exactly what each
+-- legitimately needs -- confirmed by tracing every authenticated-client
+-- write against profiles in this codebase
 -- (src/app/dashboard/profile/actions.ts's updateProfile()): only
 -- display_name, bio, and avatar_path. role, stripe_account_id, and
 -- stripe_payouts_enabled are written exclusively via the admin/
 -- service-role client (src/app/dashboard/payouts/actions.ts,
 -- src/app/dashboard/payouts/page.tsx) -- service_role is a separate
 -- privilege grantee, entirely unaffected by anything revoked here.
-revoke update on public.profiles from authenticated;
+-- Neither role gets INSERT or DELETE -- profiles has zero RLS policies
+-- for either command, so both are already unconditionally blocked
+-- regardless of ACL; this makes that inertness structural rather than
+-- incidental. anon gets no UPDATE grant at all, on any column -- it has
+-- no legitimate reason to update anything on this table.
+revoke all on public.profiles from anon, authenticated;
+
+grant select
+  on public.profiles
+  to anon, authenticated;
 
 grant update (display_name, bio, avatar_path)
   on public.profiles
