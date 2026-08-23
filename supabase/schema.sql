@@ -96,6 +96,16 @@ grant update (display_name, bio, avatar_path)
 -- 'author'/'reader' was the sole thing preventing a crafted
 -- raw_user_meta_data.role from creating a privileged profile; this
 -- makes that safe independent of the constraint's exact value set.
+--
+-- search_path is the empty string (LAUNCH-1 P1-6), matching every
+-- other SECURITY DEFINER function in this schema -- every table
+-- reference below is already schema-qualified (public.profiles), and
+-- the one unqualified call (split_part, below) resolves via pg_catalog
+-- regardless, since pg_catalog is always implicitly searched first
+-- unless explicitly repositioned in search_path. This was confirmed
+-- non-exploitable even under the previous `search_path = public`
+-- setting by the P1-6 audit; the change is for consistency/auditability,
+-- not a live exploit closure.
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
@@ -110,11 +120,21 @@ begin
   );
   return new;
 end;
-$$ language plpgsql security definer set search_path = public;
+$$ language plpgsql security definer set search_path = '';
 
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- EXECUTE is revoked from public/anon/authenticated (LAUNCH-1 P1-6),
+-- the same belt-and-suspenders treatment already given to this
+-- schema's other two trigger functions below (clear_expired_book_
+-- reservations, clear_expired_reader_holds). Cannot break signup:
+-- RETURNS TRIGGER already makes direct invocation structurally
+-- impossible ("trigger functions can only be called as triggers"), and
+-- the trigger mechanism itself never checks EXECUTE privilege on the
+-- function it fires.
+revoke all on function public.handle_new_user() from public, anon, authenticated;
 
 -- ============================================================
 -- series: an author's named grouping of their own books, in reading
@@ -142,7 +162,8 @@ create policy "Authors can create their own series"
 
 create policy "Authors can rename their own series"
   on public.series for update
-  using (auth.uid() = author_id);
+  using (auth.uid() = author_id)
+  with check (auth.uid() = author_id);
 
 create policy "Authors can delete their own series"
   on public.series for delete
@@ -188,7 +209,8 @@ create policy "Authors can insert their own books"
 
 create policy "Authors can update their own books"
   on public.books for update
-  using (auth.uid() = author_id);
+  using (auth.uid() = author_id)
+  with check (auth.uid() = author_id);
 
 create policy "Authors can delete their own books"
   on public.books for delete
@@ -400,7 +422,8 @@ create policy "Authors can insert their own bundles"
 
 create policy "Authors can update their own bundles"
   on public.bundles for update
-  using (auth.uid() = author_id);
+  using (auth.uid() = author_id)
+  with check (auth.uid() = author_id);
 
 create policy "Authors can delete their own bundles"
   on public.bundles for delete
@@ -523,6 +546,17 @@ create table public.bundle_checkout_snapshots (
 );
 
 alter table public.bundle_checkout_snapshots enable row level security;
+
+-- Explicit least-privilege table grant (LAUNCH-1 P1-6), same rationale
+-- as purchases above: both SELECT policies below require auth.uid(),
+-- so anon gets nothing, and every request-scoped read (library.page.
+-- tsx's refund-window grouping, dashboard/sales/page.tsx's revenue
+-- rollup) runs behind an already-authenticated guard. Zero INSERT/
+-- UPDATE/DELETE policy exists for any role -- create_bundle_checkout_
+-- snapshot() (SECURITY DEFINER) and the Stripe webhook (service_role,
+-- untouched by this revoke) are the only writers.
+revoke all on public.bundle_checkout_snapshots from anon, authenticated;
+grant select on public.bundle_checkout_snapshots to authenticated;
 
 -- No reader-facing policy is added -- nothing in the product surfaces
 -- "my pending checkout" to a reader anywhere, and the Stripe webhook
@@ -990,15 +1024,23 @@ create policy "Authors can delete their own discount codes"
 
 create index discount_codes_book_id_idx on public.discount_codes(book_id);
 
--- Column-level grant, same two-layer pattern as public.profiles above:
--- the app's only UPDATE call (toggleDiscountCode) ever names just
--- `active` in its payload -- see migration 031 for why this is safe
--- (a plain .update(), not an upsert) and why the equivalent restriction
--- is deliberately NOT applied to reviews below. Revokes from BOTH anon
--- and authenticated (see migration 031's own comment on this exact
--- line for why authenticated-only, mirroring the profiles pattern
--- above, was insufficient here).
-revoke update on public.discount_codes from anon, authenticated;
+-- Explicit least-privilege table grant (LAUNCH-1 P1-6): supersedes an
+-- earlier, narrower `revoke update`-only fix (migration 031) with a
+-- full reset-and-regrant, the same model already used for profiles/
+-- refund_requests/purchases/bundle_checkout_snapshots above. anon gets
+-- nothing -- no discount_codes operation is ever legitimately
+-- anonymous; the one anon-adjacent lookup (matching a code string at
+-- checkout) is done server-side with the service role key, never
+-- through a client-facing select. authenticated gets exactly the four
+-- operations src/app/dashboard/discounts/actions.ts uses: SELECT (list
+-- own codes), INSERT (create), UPDATE (active only -- toggleDiscountCode's
+-- payload is a plain, single-key `{ active }` object, not an upsert, so
+-- narrowing the grantable column set is safe), DELETE (remove).
+revoke all on public.discount_codes from anon, authenticated;
+
+grant select, insert, delete
+  on public.discount_codes
+  to authenticated;
 
 grant update (active)
   on public.discount_codes
@@ -1103,6 +1145,21 @@ create table public.purchases (
 );
 
 alter table public.purchases enable row level security;
+
+-- Explicit least-privilege table grant (LAUNCH-1 P1-6), same rationale
+-- as refund_requests below: state the privilege model outright rather
+-- than relying on RLS alone to narrow Supabase's ambient default
+-- table-level privileges. authenticated needs SELECT only -- every
+-- request-scoped read against this table runs behind an
+-- already-authenticated guard (library order history, the sales
+-- dashboard, every ownership/eligibility check in books/[id]/
+-- actions.ts and the download route). anon gets nothing: both SELECT
+-- policies below require auth.uid(), which an anon session never has.
+-- No INSERT/UPDATE/DELETE policy exists for any role below -- the
+-- Stripe webhook, via service_role (untouched by this revoke), is the
+-- only writer.
+revoke all on public.purchases from anon, authenticated;
+grant select on public.purchases to authenticated;
 
 create policy "Readers can view their own purchases"
   on public.purchases for select

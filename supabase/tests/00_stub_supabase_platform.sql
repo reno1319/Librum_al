@@ -27,17 +27,24 @@ end $$;
 
 grant anon, authenticated, service_role to current_user;
 
--- Real Supabase provisions service_role with broad default table-level
--- privileges on every table created under public, same as anon/
--- authenticated get until explicitly revoked (see schema.sql's own
--- comment on the profiles table) -- no migration in this repo ever
--- revokes from service_role, since the Stripe webhook's admin client
--- relies on that ambient grant to write directly to purchases,
--- bundle_checkout_snapshots, and book_checkout_intents' own link-back
--- column. ALTER DEFAULT PRIVILEGES applies to tables schema.sql and the
--- migrations create AFTER this stub runs, not just ones that exist now.
-alter default privileges in schema public grant all on tables to service_role;
-alter default privileges in schema public grant all on sequences to service_role;
+-- Real Supabase provisions service_role, anon, AND authenticated with
+-- broad default table-level privileges (SELECT/INSERT/UPDATE/DELETE/
+-- TRUNCATE/REFERENCES/TRIGGER) on every table created under public,
+-- until explicitly revoked (see schema.sql's own comment on the
+-- profiles table, and the LAUNCH-1 P1-6 audit, which is entirely about
+-- this ambient grant). All three roles are stubbed identically here so
+-- that a table with no explicit ACL of its own -- most tables in this
+-- schema -- behaves exactly as it does in production: readable/
+-- writable by anon/authenticated except where RLS independently blocks
+-- it, not silently privilege-denied the way an under-stubbed anon/
+-- authenticated would be. No migration in this repo ever revokes from
+-- service_role, since the Stripe webhook's admin client relies on that
+-- ambient grant to write directly to purchases, bundle_checkout_
+-- snapshots, and book_checkout_intents' own link-back column. ALTER
+-- DEFAULT PRIVILEGES applies to tables schema.sql and the migrations
+-- create AFTER this stub runs, not just ones that exist now.
+alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 
 -- email/raw_user_meta_data exist because supabase/schema.sql's own
 -- handle_new_user() trigger (fired after insert on auth.users) reads
