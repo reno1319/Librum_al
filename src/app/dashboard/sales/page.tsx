@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { platformFeeCents } from "@/lib/pricing";
+import { collectDistinctPaymentIntentIds, excludeLostDisputedRows } from "./revenue-logic";
 import type { Book } from "@/lib/types";
 
 const CHART_DAYS = 14;
@@ -10,6 +11,7 @@ type Purchase = {
   amount_cents: number;
   created_at: string;
   stripe_checkout_session_id: string;
+  stripe_payment_intent_id: string | null;
 };
 
 // A fulfilled, non-refunded bundle snapshot whose Stripe Checkout Session
@@ -21,6 +23,7 @@ type Purchase = {
 // this author's actual revenue by exactly this amount.
 type BundleSnapshotRevenue = {
   stripe_checkout_session_id: string | null;
+  stripe_payment_intent_id: string | null;
   total_amount_cents: number | null;
   fulfilled_at: string;
 };
@@ -47,7 +50,9 @@ export default async function SalesPage() {
     bookIds.length > 0
       ? await supabase
           .from("purchases")
-          .select("book_id, amount_cents, created_at, stripe_checkout_session_id")
+          .select(
+            "book_id, amount_cents, created_at, stripe_checkout_session_id, stripe_payment_intent_id",
+          )
           .in("book_id", bookIds)
           .is("refunded_at", null)
           .returns<Purchase[]>()
@@ -63,7 +68,7 @@ export default async function SalesPage() {
   // relying solely on the RLS policy (which doesn't cover refund state).
   const { data: snapshots } = await supabase
     .from("bundle_checkout_snapshots")
-    .select("stripe_checkout_session_id, total_amount_cents, fulfilled_at")
+    .select("stripe_checkout_session_id, stripe_payment_intent_id, total_amount_cents, fulfilled_at")
     .eq("author_id", user!.id)
     .not("fulfilled_at", "is", null)
     .is("refunded_at", null)
@@ -78,8 +83,37 @@ export default async function SalesPage() {
           .returns<{ book_id: string }[]>()
       : { data: [] as { book_id: string }[] };
 
-  const allPurchases = purchases ?? [];
+  const rawPurchases = purchases ?? [];
+  const rawSnapshots = snapshots ?? [];
   const allViews = views ?? [];
+
+  // LAUNCH-1 P1-8: a lost-disputed purchase must not be represented as
+  // active author revenue -- refunded_at alone (the filter already
+  // applied to both queries above) never covers this, since a dispute
+  // never sets refunded_at. One batched RPC call, not one per row (this
+  // page can have hundreds/thousands of purchases rows for a successful
+  // author, unlike the Library/bundle pages' own per-book
+  // user_owns_book() checks, which are bounded by a single reader's own
+  // purchase count) -- collects the distinct payment-intent id set from
+  // BOTH purchases and snapshots (a bundle's purchases rows and its own
+  // snapshot row always share one payment intent -- see the P1-7A/P1-8
+  // audits), then excludes any row whose payment intent comes back, so
+  // a disputed bundle transaction is excluded consistently across both
+  // representations, not just one.
+  const candidatePaymentIntentIds = collectDistinctPaymentIntentIds(rawPurchases, rawSnapshots);
+
+  const lostDisputedPaymentIntentIds = new Set<string>();
+  if (candidatePaymentIntentIds.length > 0) {
+    const { data: lostDisputed } = await supabase.rpc("lost_disputed_payment_intents", {
+      target_payment_intent_ids: candidatePaymentIntentIds,
+    });
+    for (const row of (lostDisputed ?? []) as { stripe_payment_intent_id: string }[]) {
+      lostDisputedPaymentIntentIds.add(row.stripe_payment_intent_id);
+    }
+  }
+
+  const allPurchases = excludeLostDisputedRows(rawPurchases, lostDisputedPaymentIntentIds);
+  const filteredSnapshots = excludeLostDisputedRows(rawSnapshots, lostDisputedPaymentIntentIds);
 
   // A normal or partial-ownership bundle checkout's revenue is already
   // fully represented by the purchases rows it wrote (their amounts sum
@@ -93,7 +127,7 @@ export default async function SalesPage() {
   const purchasedSessionIds = new Set(
     allPurchases.map((p) => p.stripe_checkout_session_id),
   );
-  const transactionOnlySnapshots = (snapshots ?? []).filter(
+  const transactionOnlySnapshots = filteredSnapshots.filter(
     (snapshot) =>
       snapshot.stripe_checkout_session_id !== null &&
       !purchasedSessionIds.has(snapshot.stripe_checkout_session_id),

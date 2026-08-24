@@ -1254,6 +1254,42 @@ create table public.payment_disputes (
 create index payment_disputes_payment_intent_idx
   on public.payment_disputes(stripe_payment_intent_id);
 
+-- LAUNCH-1 P1-8: durable lost-dispute transfer-reversal-recovery state,
+-- added directly to this table (strictly 1:1 with a dispute -- see the
+-- Migration 036 design report for why this isn't a dedicated table).
+-- transfer_reversal_status is a small state machine, not a boolean:
+-- 'not_attempted' (default) -> 'attempting' -> 'succeeded' | 'failed',
+-- with 'failed' retryable by either the webhook or the reconciliation
+-- route. transfer_reversal_amount_cents is always derived live from the
+-- Stripe Transfer object at attempt time, never from Librum's own
+-- platform-fee split. transfer_reversal_attempt_count increments only
+-- on a claim from 'not_attempted' or a definitively-terminal 'failed'
+-- -- never on a stale 'attempting' re-claim, whose retry (if any)
+-- reuses the same attempt number and therefore the same deterministic
+-- Stripe idempotency key.
+alter table public.payment_disputes
+  add column transfer_reversal_status text not null default 'not_attempted'
+    check (transfer_reversal_status in ('not_attempted', 'attempting', 'succeeded', 'failed')),
+  add column stripe_transfer_id text,
+  add column stripe_transfer_reversal_id text,
+  add column transfer_reversal_amount_cents integer
+    check (transfer_reversal_amount_cents is null or transfer_reversal_amount_cents >= 0),
+  add column transfer_reversal_attempt_count integer not null default 0
+    check (transfer_reversal_attempt_count >= 0),
+  add column transfer_reversal_attempted_at timestamptz,
+  add column transfer_reversal_succeeded_at timestamptz,
+  add column transfer_reversal_failure_code text,
+  add column transfer_reversal_failure_message text;
+
+-- Composite partial index supporting both the webhook's own immediate
+-- 'failed' retry and the reconciliation route's periodic scan for
+-- 'failed' rows and stale 'attempting' rows -- excludes 'not_attempted'
+-- and 'succeeded' rows entirely.
+create index payment_disputes_needs_reversal_idx
+  on public.payment_disputes (transfer_reversal_status, transfer_reversal_attempted_at)
+  where status = 'lost'
+    and transfer_reversal_status in ('attempting', 'failed');
+
 alter table public.payment_disputes enable row level security;
 
 -- Zero policies for any command, same posture as bundle_checkout_
@@ -1296,6 +1332,36 @@ revoke all on function public.payment_intent_has_lost_dispute(text) from public;
 revoke all on function public.payment_intent_has_lost_dispute(text) from anon;
 revoke all on function public.payment_intent_has_lost_dispute(text) from authenticated;
 grant execute on function public.payment_intent_has_lost_dispute(text) to authenticated;
+
+-- LAUNCH-1 P1-8: lost_disputed_payment_intents() -- batched membership
+-- test for the Sales dashboard correction (src/app/dashboard/sales/
+-- page.tsx). Returns which of the caller-supplied payment intent ids
+-- have a 'lost' dispute -- a single batched call rather than one call
+-- per purchases row, since an author's Sales dashboard can have
+-- hundreds or thousands of rows, unlike the Library/bundle pages' own
+-- per-book payment_intent_has_lost_dispute() calls. Same SECURITY
+-- DEFINER / empty search_path / stable posture, and the same security
+-- shape: a caller-supplied-subset membership test only, over
+-- payment-intent ids the caller must already know to ask about.
+create or replace function public.lost_disputed_payment_intents(
+  target_payment_intent_ids text[]
+)
+returns table (stripe_payment_intent_id text)
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select distinct d.stripe_payment_intent_id
+  from public.payment_disputes d
+  where d.stripe_payment_intent_id = any(target_payment_intent_ids)
+    and d.status = 'lost';
+$$;
+
+revoke all on function public.lost_disputed_payment_intents(text[]) from public;
+revoke all on function public.lost_disputed_payment_intents(text[]) from anon;
+revoke all on function public.lost_disputed_payment_intents(text[]) from authenticated;
+grant execute on function public.lost_disputed_payment_intents(text[]) to authenticated;
 
 -- Lets a reader who legitimately owns a book keep viewing its detail
 -- page after the author unpublishes it (see the Phase 8/8A audit).

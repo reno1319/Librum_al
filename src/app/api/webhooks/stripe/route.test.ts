@@ -21,6 +21,8 @@ const {
   processRefundLifecycleEvent,
   processChargeRefundedEvent,
   processDisputeEvent,
+  reverseAuthorTransferForLostDispute,
+  buildTransferReversalIdempotencyKey,
 } = await import("./route");
 
 // ---------------------------------------------------------------------
@@ -39,12 +41,39 @@ const {
 type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
 
+// LAUNCH-1 P1-8: table-level column defaults, applied ONLY to a
+// genuinely NEW row on upsert (never to an update of an existing row)
+// -- mirrors real Postgres INSERT semantics (a column omitted from the
+// INSERT's column list gets its table default) for the columns this
+// test double has no schema awareness of otherwise. Needed because
+// processDisputeEvent's own upsert payload deliberately never sets
+// transfer_reversal_* (that would clobber existing reversal state on
+// every routine dispute-status refresh -- see route.ts's own
+// documentation) -- migration 036's real DEFAULTs are what supply
+// 'not_attempted'/0/null for a brand-new payment_disputes row in
+// production; this is the fake's equivalent.
+const TABLE_DEFAULTS: Record<string, Row> = {
+  payment_disputes: {
+    transfer_reversal_status: "not_attempted",
+    transfer_reversal_attempt_count: 0,
+    stripe_transfer_id: null,
+    stripe_transfer_reversal_id: null,
+    transfer_reversal_amount_cents: null,
+    transfer_reversal_attempted_at: null,
+    transfer_reversal_succeeded_at: null,
+    transfer_reversal_failure_code: null,
+    transfer_reversal_failure_message: null,
+  },
+};
+
 class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
-  private filters: { col: string; val: unknown; op: "eq" | "in" }[] = [];
+  private filters: { col: string; val: unknown; op: "eq" | "in" | "lt" }[] = [];
   private op: "select" | "update" | "upsert" | "delete" = "select";
   private payload: Row | undefined;
   private upsertOnConflict: string | undefined;
   private wantReturnRows = false;
+  private orderSpec: { col: string; ascending: boolean } | undefined;
+  private limitCount: number | undefined;
 
   constructor(
     private tables: Tables,
@@ -69,6 +98,28 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
 
   in(col: string, vals: unknown[]) {
     this.filters.push({ col, val: vals, op: "in" });
+    return this;
+  }
+
+  // LAUNCH-1 P1-8: used only by the reconciliation route's stale-
+  // 'attempting' candidate scan (transfer_reversal_attempted_at <
+  // cutoff). String/ISO-timestamp comparison, matching how the real
+  // column is actually compared (timestamptz vs. an ISO string).
+  lt(col: string, val: unknown) {
+    this.filters.push({ col, val, op: "lt" });
+    return this;
+  }
+
+  // LAUNCH-1 P1-8: no-op beyond recording the spec -- applied at
+  // execute() time, after filtering, for the reconciliation route's
+  // oldest-first candidate ordering.
+  order(col: string, options?: { ascending?: boolean }) {
+    this.orderSpec = { col, ascending: options?.ascending ?? true };
+    return this;
+  }
+
+  limit(count: number) {
+    this.limitCount = count;
     return this;
   }
 
@@ -103,16 +154,33 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
   }
 
   private matches(row: Row): boolean {
-    return this.filters.every((f) =>
-      f.op === "in" ? (f.val as unknown[]).includes(row[f.col]) : row[f.col] === f.val,
-    );
+    return this.filters.every((f) => {
+      if (f.op === "in") return (f.val as unknown[]).includes(row[f.col]);
+      if (f.op === "lt") {
+        const rowVal = row[f.col];
+        if (rowVal === null || rowVal === undefined) return false;
+        return String(rowVal) < String(f.val);
+      }
+      return row[f.col] === f.val;
+    });
   }
 
   private execute(): { data: unknown; error: unknown } {
     const rows = this.rows();
 
     if (this.op === "select") {
-      return { data: rows.filter((r) => this.matches(r)), error: null };
+      let result = rows.filter((r) => this.matches(r));
+      if (this.orderSpec) {
+        const { col, ascending } = this.orderSpec;
+        result = [...result].sort((a, b) => {
+          const cmp = String(a[col] ?? "").localeCompare(String(b[col] ?? ""));
+          return ascending ? cmp : -cmp;
+        });
+      }
+      if (this.limitCount !== undefined) {
+        result = result.slice(0, this.limitCount);
+      }
+      return { data: result, error: null };
     }
 
     if (this.op === "update") {
@@ -147,7 +215,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
     if (existingIndex >= 0) {
       rows[existingIndex] = { ...rows[existingIndex], ...this.payload };
     } else {
-      rows.push({ ...this.payload });
+      rows.push({ ...(TABLE_DEFAULTS[this.table] ?? {}), ...this.payload });
     }
     return { data: null, error: null };
   }
@@ -2201,12 +2269,87 @@ describe("processDisputeEvent", () => {
     } as Stripe.Dispute;
   }
 
-  function makeFakeDisputeClient(params: { dispute?: Stripe.Dispute; retrieveError?: Error }) {
+  const DEFAULT_CHARGE_ID = "ch_test_dispute";
+  const DEFAULT_TRANSFER_ID = "tr_test_dispute";
+
+  // LAUNCH-1 P1-8: extended to also fake charges/transfers -- every
+  // "lost" dispute now also drives reverseAuthorTransferForLostDispute
+  // (see processDisputeEvent's own new call site), which needs
+  // charges.retrieve/transfers.retrieve/transfers.listReversals/
+  // transfers.createReversal on top of the pre-existing disputes.
+  // retrieve. Defaults describe a clean, fully-resolvable
+  // destination-charge transfer with nothing reversed yet and no
+  // existing reversal -- realistic enough that every PRE-EXISTING test
+  // in this describe block (which only cares about dispute-status
+  // recording, not reversal outcome) continues to exercise a coherent,
+  // non-erroring path through the new code, not an incidental
+  // TypeError swallowed by processDisputeEvent's own try/catch.
+  function makeFakeDisputeClient(params: {
+    dispute?: Stripe.Dispute;
+    retrieveError?: Error;
+    charge?: Partial<Stripe.Charge> | "not_found";
+    transfer?: Partial<Stripe.Transfer> | "not_found";
+    reversals?: Partial<Stripe.TransferReversal>[];
+    reversalsListError?: Error;
+    createReversalResult?: Partial<Stripe.TransferReversal>;
+    createReversalError?: Error;
+  }) {
     const retrieve = vi.fn(() => {
       if (params.retrieveError) return Promise.reject(params.retrieveError);
       return Promise.resolve(params.dispute as Stripe.Dispute);
     });
-    return { disputes: { retrieve } };
+
+    const chargesRetrieve = vi.fn(() => {
+      if (params.charge === "not_found") {
+        return Promise.reject(new Error("No such charge"));
+      }
+      return Promise.resolve({
+        id: DEFAULT_CHARGE_ID,
+        object: "charge",
+        amount: 500,
+        transfer: DEFAULT_TRANSFER_ID,
+        ...params.charge,
+      } as Stripe.Charge);
+    });
+
+    const transfersRetrieve = vi.fn(() => {
+      if (params.transfer === "not_found") {
+        return Promise.reject(new Error("No such transfer"));
+      }
+      return Promise.resolve({
+        id: DEFAULT_TRANSFER_ID,
+        object: "transfer",
+        amount: 400,
+        amount_reversed: 0,
+        ...params.transfer,
+      } as Stripe.Transfer);
+    });
+
+    const reversalsArray = (params.reversals ?? []) as Stripe.TransferReversal[];
+    const listReversals = vi.fn(() => ({
+      autoPagingToArray: () =>
+        params.reversalsListError
+          ? Promise.reject(params.reversalsListError)
+          : Promise.resolve(reversalsArray),
+    }));
+
+    const createReversal = vi.fn(() => {
+      if (params.createReversalError) return Promise.reject(params.createReversalError);
+      return Promise.resolve({
+        id: "trr_test_default",
+        object: "transfer_reversal",
+        amount: 0,
+        currency: "usd",
+        metadata: {},
+        ...params.createReversalResult,
+      } as Stripe.TransferReversal);
+    });
+
+    return {
+      disputes: { retrieve },
+      charges: { retrieve: chargesRetrieve },
+      transfers: { retrieve: transfersRetrieve, listReversals, createReversal },
+    };
   }
 
   function fakeFailWebhookForDispute(): NextResponse {
@@ -2522,5 +2665,603 @@ describe("processDisputeEvent", () => {
 
     expect(failWebhook).not.toHaveBeenCalled();
     expect(tables.payment_disputes[0].stripe_payment_intent_id).toBe("pi_single_book_only");
+  });
+});
+
+// ---------------------------------------------------------------------
+// LAUNCH-1 P1-8: reverseAuthorTransferForLostDispute -- the lost-dispute
+// author-transfer recovery mechanism. Drives the function directly with
+// a fake Supabase client (payment_disputes pre-seeded to a specific
+// reversal state per test, mirroring the exact shape migration 036's
+// real column defaults produce -- see TABLE_DEFAULTS above) and a fake
+// Stripe client exposing charges/transfers alongside disputes.
+// ---------------------------------------------------------------------
+describe("reverseAuthorTransferForLostDispute", () => {
+  const DISPUTE_ID = "dp_test_reversal";
+  const PAYMENT_INTENT_ID = "pi_test_reversal";
+  const CHARGE_ID = "ch_test_reversal";
+  const TRANSFER_ID = "tr_test_reversal";
+
+  function makeFakeDispute(overrides: Partial<Stripe.Dispute> = {}): Stripe.Dispute {
+    return {
+      id: DISPUTE_ID,
+      object: "dispute",
+      status: "lost",
+      reason: "fraudulent",
+      amount: 500,
+      payment_intent: PAYMENT_INTENT_ID,
+      charge: CHARGE_ID,
+      ...overrides,
+    } as Stripe.Dispute;
+  }
+
+  function makeFakeReversalClient(params: {
+    charge?: Partial<Stripe.Charge> | "not_found";
+    transfer?: Partial<Stripe.Transfer> | "not_found";
+    reversals?: Partial<Stripe.TransferReversal>[];
+    createReversalResult?: Partial<Stripe.TransferReversal>;
+    createReversalError?: Error;
+  }) {
+    const chargesRetrieve = vi.fn(() => {
+      if (params.charge === "not_found") return Promise.reject(new Error("No such charge"));
+      return Promise.resolve({
+        id: CHARGE_ID,
+        object: "charge",
+        amount: 500,
+        transfer: TRANSFER_ID,
+        ...params.charge,
+      } as Stripe.Charge);
+    });
+
+    const transfersRetrieve = vi.fn(() => {
+      if (params.transfer === "not_found") return Promise.reject(new Error("No such transfer"));
+      return Promise.resolve({
+        id: TRANSFER_ID,
+        object: "transfer",
+        amount: 400,
+        amount_reversed: 0,
+        ...params.transfer,
+      } as Stripe.Transfer);
+    });
+
+    const reversalsArray = (params.reversals ?? []) as Stripe.TransferReversal[];
+    const listReversals = vi.fn(() => ({
+      autoPagingToArray: () => Promise.resolve(reversalsArray),
+    }));
+
+    const createReversal = vi.fn(() => {
+      if (params.createReversalError) return Promise.reject(params.createReversalError);
+      return Promise.resolve({
+        id: "trr_test_reversal",
+        object: "transfer_reversal",
+        amount: 400,
+        currency: "usd",
+        metadata: {},
+        ...params.createReversalResult,
+      } as Stripe.TransferReversal);
+    });
+
+    return {
+      charges: { retrieve: chargesRetrieve },
+      transfers: { retrieve: transfersRetrieve, listReversals, createReversal },
+    };
+  }
+
+  function freshDisputeRow(overrides: Row = {}): Row {
+    return {
+      stripe_dispute_id: DISPUTE_ID,
+      stripe_payment_intent_id: PAYMENT_INTENT_ID,
+      status: "lost",
+      reason: "fraudulent",
+      amount_cents: 500,
+      ...TABLE_DEFAULTS.payment_disputes,
+      ...overrides,
+    };
+  }
+
+  it("lost dispute -> successful reversal: correct amount, metadata, idempotency key, and durable state", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({});
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+    );
+
+    expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 400 });
+    expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
+      TRANSFER_ID,
+      {
+        amount: 400,
+        metadata: {
+          librum_operation: "lost_dispute_recovery",
+          stripe_dispute_id: DISPUTE_ID,
+          stripe_payment_intent_id: PAYMENT_INTENT_ID,
+          recovery_formula_version: "1",
+        },
+      },
+      { idempotencyKey: buildTransferReversalIdempotencyKey(DISPUTE_ID, 1) },
+    );
+
+    const row = tables.payment_disputes[0];
+    expect(row.transfer_reversal_status).toBe("succeeded");
+    expect(row.stripe_transfer_id).toBe(TRANSFER_ID);
+    expect(row.stripe_transfer_reversal_id).toBe("trr_test_reversal");
+    expect(row.transfer_reversal_amount_cents).toBe(400);
+    expect(row.transfer_reversal_attempt_count).toBe(1);
+    expect(row.transfer_reversal_succeeded_at).not.toBeNull();
+  });
+
+  it("won dispute -> zero reversal: not_lost outcome, no Stripe or DB writes attempted", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow({ status: "won" })] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({});
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ status: "won" }),
+    );
+
+    expect(outcome).toEqual({ kind: "not_lost" });
+    expect(stripeClient.charges.retrieve).not.toHaveBeenCalled();
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("not_attempted");
+  });
+
+  it("open/needs_response dispute -> zero reversal", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow({ status: "needs_response" })] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({});
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ status: "needs_response" }),
+    );
+
+    expect(outcome).toEqual({ kind: "not_lost" });
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+  });
+
+  it("duplicate lost webhook: second delivery is a clean no-op once already succeeded", async () => {
+    const tables: Tables = {
+      payment_disputes: [
+        freshDisputeRow({
+          transfer_reversal_status: "succeeded",
+          stripe_transfer_id: TRANSFER_ID,
+          stripe_transfer_reversal_id: "trr_already_done",
+          transfer_reversal_amount_cents: 400,
+          transfer_reversal_attempt_count: 1,
+        }),
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({});
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+    );
+
+    expect(outcome).toEqual({ kind: "not_claimed" });
+    expect(stripeClient.charges.retrieve).not.toHaveBeenCalled();
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].stripe_transfer_reversal_id).toBe("trr_already_done");
+  });
+
+  it("concurrent duplicate handling: a row another worker already claimed ('attempting', fresh) is left untouched", async () => {
+    const tables: Tables = {
+      payment_disputes: [
+        freshDisputeRow({
+          transfer_reversal_status: "attempting",
+          transfer_reversal_attempted_at: new Date().toISOString(),
+          transfer_reversal_attempt_count: 1,
+        }),
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({});
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+      // No staleAttemptingCutoff -- the immediate webhook path never
+      // reclaims an 'attempting' row, regardless of its age.
+    );
+
+    expect(outcome).toEqual({ kind: "not_claimed" });
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+  });
+
+  it("exact Stripe metadata correlation: an existing reversal with matching metadata is found and reconciled, no new call made", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      reversals: [
+        {
+          id: "trr_already_exists",
+          amount: 400,
+          metadata: {
+            librum_operation: "lost_dispute_recovery",
+            stripe_dispute_id: DISPUTE_ID,
+            stripe_payment_intent_id: PAYMENT_INTENT_ID,
+            recovery_formula_version: "1",
+          },
+        },
+      ],
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+    );
+
+    expect(outcome).toEqual({
+      kind: "reconciled_existing",
+      reversalId: "trr_already_exists",
+      amountCents: 400,
+    });
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("succeeded");
+    expect(tables.payment_disputes[0].stripe_transfer_reversal_id).toBe("trr_already_exists");
+  });
+
+  it("a refund-caused reversal on the same transfer is NEVER mistaken for a dispute recovery -- a genuine new reversal is still created", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      reversals: [
+        {
+          id: "trr_from_a_refund",
+          amount: 200,
+          metadata: {}, // a reverse_transfer:true refund reversal never carries this metadata
+          source_refund: "re_test_unrelated_refund",
+        },
+      ],
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+    );
+
+    expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 400 });
+    expect(stripeClient.transfers.createReversal).toHaveBeenCalledOnce();
+  });
+
+  it("Stripe timeout after successful reversal: reconciliation discovers the exact reversal and records success without a second call", async () => {
+    const staleAttemptedAt = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const tables: Tables = {
+      payment_disputes: [
+        freshDisputeRow({
+          transfer_reversal_status: "attempting",
+          transfer_reversal_attempted_at: staleAttemptedAt,
+          transfer_reversal_attempt_count: 1,
+          stripe_transfer_id: TRANSFER_ID,
+        }),
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      reversals: [
+        {
+          id: "trr_created_before_the_crash",
+          amount: 400,
+          metadata: {
+            librum_operation: "lost_dispute_recovery",
+            stripe_dispute_id: DISPUTE_ID,
+            stripe_payment_intent_id: PAYMENT_INTENT_ID,
+            recovery_formula_version: "1",
+          },
+        },
+      ],
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+      new Date(Date.now() - 10 * 60 * 1000), // 10-minute stale cutoff
+    );
+
+    expect(outcome).toEqual({
+      kind: "reconciled_existing",
+      reversalId: "trr_created_before_the_crash",
+      amountCents: 400,
+    });
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("succeeded");
+    // Reused the SAME attempt count as the original -- no new attempt
+    // was minted merely to reconcile an unknown-outcome retry.
+    expect(tables.payment_disputes[0].transfer_reversal_attempt_count).toBe(1);
+  });
+
+  it("stale 'attempting' row (no existing reversal found) is reconciled by making a genuine attempt under the SAME attempt count/key", async () => {
+    const staleAttemptedAt = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const tables: Tables = {
+      payment_disputes: [
+        freshDisputeRow({
+          transfer_reversal_status: "attempting",
+          transfer_reversal_attempted_at: staleAttemptedAt,
+          transfer_reversal_attempt_count: 1,
+        }),
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({});
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+      new Date(Date.now() - 10 * 60 * 1000),
+    );
+
+    expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 400 });
+    expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
+      TRANSFER_ID,
+      expect.anything(),
+      { idempotencyKey: buildTransferReversalIdempotencyKey(DISPUTE_ID, 1) }, // SAME attempt count, not bumped
+    );
+    expect(tables.payment_disputes[0].transfer_reversal_attempt_count).toBe(1);
+  });
+
+  it("fresh 'attempting' row (inside the stale window) is left completely untouched by the reconciliation path too", async () => {
+    const freshAttemptedAt = new Date(Date.now() - 2 * 60 * 1000).toISOString(); // 2 minutes ago
+    const tables: Tables = {
+      payment_disputes: [
+        freshDisputeRow({
+          transfer_reversal_status: "attempting",
+          transfer_reversal_attempted_at: freshAttemptedAt,
+          transfer_reversal_attempt_count: 1,
+        }),
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({});
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+      new Date(Date.now() - 10 * 60 * 1000), // 10-minute cutoff -- 2 minutes ago is NOT stale
+    );
+
+    expect(outcome).toEqual({ kind: "not_claimed" });
+    expect(stripeClient.charges.retrieve).not.toHaveBeenCalled();
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+  });
+
+  it("'failed' row is retried with a NEW attempt count and a NEW idempotency key", async () => {
+    const tables: Tables = {
+      payment_disputes: [
+        freshDisputeRow({
+          transfer_reversal_status: "failed",
+          transfer_reversal_attempt_count: 1,
+          transfer_reversal_failure_code: "balance_insufficient",
+          transfer_reversal_failure_message: "a previous, unrelated failure",
+        }),
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({});
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+    );
+
+    expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 400 });
+    expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
+      TRANSFER_ID,
+      expect.anything(),
+      { idempotencyKey: buildTransferReversalIdempotencyKey(DISPUTE_ID, 2) }, // bumped from 1 -> 2
+    );
+    expect(tables.payment_disputes[0].transfer_reversal_attempt_count).toBe(2);
+    expect(tables.payment_disputes[0].transfer_reversal_failure_code).toBeNull();
+  });
+
+  it("insufficient-balance-style rejection: persisted as 'failed' with Stripe's own code/message verbatim, never represented as success", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const rejection = Object.assign(new Error("Your card's balance is insufficient."), {
+      code: "balance_insufficient",
+    });
+    const stripeClient = makeFakeReversalClient({ createReversalError: rejection });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+    );
+
+    expect(outcome).toEqual({ kind: "failed", message: "Your card's balance is insufficient." });
+    const row = tables.payment_disputes[0];
+    expect(row.transfer_reversal_status).toBe("failed");
+    expect(row.transfer_reversal_failure_code).toBe("balance_insufficient");
+    expect(row.transfer_reversal_failure_message).toBe("Your card's balance is insufficient.");
+    expect(row.stripe_transfer_reversal_id).toBeNull();
+  });
+
+  it("charge.amount <= 0: fails safely with an explicit reason rather than guessing an amount", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({ charge: { amount: 0 } });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  it("fully-reversed transfer -> zero additional reversal, no Stripe mutation call", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      transfer: { amount: 400, amount_reversed: 400 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute(),
+    );
+
+    expect(outcome).toEqual({ kind: "nothing_to_reverse" });
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("succeeded");
+    expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(0);
+  });
+
+  // LAUNCH-1 P1-8, final approved formula: targetAmount = round(transfer.
+  // amount * dispute.amount / charge.amount), clamped to transfer.amount
+  // - transfer.amount_reversed -- amount_reversed is NEVER subtracted
+  // from targetAmount itself. Worked example from the design report:
+  // transfer=800, already reversed=200 (any cause), dispute.amount=50,
+  // charge.amount=100 -> target = 800*50/100 = 400; remaining = 600;
+  // min(400,600) = 400 (not 300, and not 200).
+  it("partial prior reversal (any cause) + partial dispute: uses the FINAL approved formula, not remaining*proportion and not target-minus-reversed", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 100 },
+      transfer: { amount: 800, amount_reversed: 200 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 50 }),
+    );
+
+    expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 400 });
+    expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
+      TRANSFER_ID,
+      expect.objectContaining({ amount: 400 }),
+      expect.anything(),
+    );
+  });
+
+  it("the computed amount is clamped and never exceeds the live remaining transfer balance", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    // target = round(800 * 90/100) = 720, but only 100 remains unreversed.
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 100 },
+      transfer: { amount: 800, amount_reversed: 700 },
+    });
+
+    await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 90 }),
+    );
+
+    expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
+      TRANSFER_ID,
+      expect.objectContaining({ amount: 100 }),
+      expect.anything(),
+    );
+  });
+
+  // LAUNCH-1 P1-8: Stripe can exceptionally create multiple distinct
+  // disputes for one payment -- each is claimed/idempotency-guarded
+  // independently by its OWN stripe_dispute_id, but both share one
+  // aggregate ceiling (the live remaining transfer balance), which is
+  // what prevents them from cumulatively over-reversing the transfer.
+  it("multiple disputes on the same PaymentIntent/transfer cannot cumulatively reverse more than the live remaining transfer amount", async () => {
+    const SECOND_DISPUTE_ID = "dp_test_reversal_second";
+    const tables: Tables = {
+      payment_disputes: [
+        freshDisputeRow(),
+        freshDisputeRow({ stripe_dispute_id: SECOND_DISPUTE_ID }),
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+
+    // First dispute: charge=100, transfer=800, nothing reversed yet,
+    // disputed 50 -> reverses 400 (matches the worked formula above).
+    const firstStripeClient = makeFakeReversalClient({
+      charge: { amount: 100 },
+      transfer: { amount: 800, amount_reversed: 0 },
+      createReversalResult: { id: "trr_first_dispute", amount: 400 },
+    });
+    await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      firstStripeClient as never,
+      makeFakeDispute({ amount: 50 }),
+    );
+    expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(400);
+
+    // Second, DISTINCT dispute on the same transfer: charge=100 again,
+    // but the transfer's LIVE amount_reversed now correctly reflects
+    // the first dispute's own reversal (400) -- disputed 80 would
+    // naively target round(800*80/100)=640, but only 400 remains
+    // (800-400), so the ceiling clamp is what prevents over-reversal.
+    const secondStripeClient = makeFakeReversalClient({
+      charge: { amount: 100 },
+      transfer: { amount: 800, amount_reversed: 400 },
+      createReversalResult: { id: "trr_second_dispute", amount: 400 },
+    });
+    const secondOutcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      secondStripeClient as never,
+      makeFakeDispute({ id: SECOND_DISPUTE_ID, amount: 80 }),
+    );
+
+    expect(secondOutcome).toEqual({ kind: "reversed", reversalId: "trr_second_dispute", amountCents: 400 });
+    expect(secondStripeClient.transfers.createReversal).toHaveBeenCalledWith(
+      TRANSFER_ID,
+      expect.objectContaining({ amount: 400 }), // clamped to the 400 actually remaining, not 640
+      expect.anything(),
+    );
+    // Each dispute claimed and keyed independently -- attempt_count=1
+    // on EACH row, not shared/accumulated across the two disputes.
+    expect(tables.payment_disputes[0].transfer_reversal_attempt_count).toBe(1);
+    expect(tables.payment_disputes[1].transfer_reversal_attempt_count).toBe(1);
+  });
+
+  it("reader entitlement state (payment_disputes.status) is untouched by a reversal failure -- entitlement never depends on reversal success", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      createReversalError: new Error("simulated rejection"),
+    });
+
+    await reverseAuthorTransferForLostDispute(supabase as never, stripeClient as never, makeFakeDispute());
+
+    // status (the column payment_intent_has_lost_dispute()/
+    // user_owns_book() actually key off) is never written by this
+    // function at all -- only the transfer_reversal_* columns are.
+    expect(tables.payment_disputes[0].status).toBe("lost");
+  });
+
+  it("bundle context: a single dispute produces a single reversal attempt regardless of how many books the underlying transaction covered -- no bundle-specific branching exists in this function", async () => {
+    // reverseAuthorTransferForLostDispute never reads purchases/
+    // bundle_checkout_snapshots at all -- it operates purely on
+    // dispute -> charge -> transfer, which is a property of the
+    // PAYMENT, not of how many books it happened to cover. This test
+    // exists to make that structural fact explicit.
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({});
+
+    await reverseAuthorTransferForLostDispute(supabase as never, stripeClient as never, makeFakeDispute());
+
+    expect(stripeClient.transfers.createReversal).toHaveBeenCalledOnce();
+    expect(tables.payment_disputes).toHaveLength(1);
   });
 });

@@ -1620,7 +1620,12 @@ export async function processChargeRefundedEvent(
   return processChargeRefund(supabase, event, paymentIntentId, true, failWebhook);
 }
 
-type StripeDisputeVerificationClient = Pick<Stripe, "disputes">;
+// LAUNCH-1 P1-8: widened from Pick<Stripe, "disputes"> to also cover
+// "charges" and "transfers" -- the lost-dispute transfer-reversal
+// recovery mechanism below needs to walk dispute -> charge -> transfer
+// and to create/list transfer reversals, on top of the pre-existing
+// dispute-status re-fetch.
+type StripeDisputeVerificationClient = Pick<Stripe, "disputes" | "charges" | "transfers">;
 
 // Every Dispute.status Stripe currently documents (installed
 // stripe@22.5.0 SDK, node_modules/stripe/cjs/resources/Disputes.d.ts)
@@ -1740,7 +1745,468 @@ export async function processDisputeEvent(
     });
   }
 
+  // LAUNCH-1 P1-8: attempt author-transfer recovery only once this
+  // event's own dispute-status upsert has committed -- the claim below
+  // reads payment_disputes.status fresh, so it must never run against a
+  // pre-upsert (possibly stale) row. Never gates the webhook's own
+  // success/failure response: recording the dispute's status is this
+  // handler's primary responsibility and has already succeeded above;
+  // the recovery attempt is a separate, best-effort concern whose own
+  // outcome (succeeded/failed/not-yet-claimable) is durably persisted on
+  // payment_disputes itself, not surfaced as a webhook-level failure --
+  // the same "entitlement/webhook success does not depend on reversal
+  // success" invariant the Migration 036 design established for reader
+  // entitlement, extended here to this handler's own return value.
+  // Wrapped defensively: a bug in the recovery path must never take down
+  // dispute-status recording, which is this function's actual contract.
+  if (dispute.status === "lost") {
+    try {
+      await reverseAuthorTransferForLostDispute(supabase, stripeClient, dispute);
+    } catch (recoveryError) {
+      console.error(
+        "Stripe webhook: lost-dispute transfer recovery threw unexpectedly -- needs manual reconciliation",
+        { eventId: event.id, disputeId, paymentIntentId, error: recoveryError },
+      );
+    }
+  }
+
   return null;
+}
+
+// ============================================================
+// LAUNCH-1 P1-8: lost-dispute author-transfer recovery. Closes the P0
+// finding from the P1-8 money-flow audit -- Librum's destination-charge
+// model means Stripe debits a lost dispute's full amount (plus its own
+// dispute fee) from Librum's PLATFORM balance, but never automatically
+// claws back the matching share already transferred to the author's
+// connected account at checkout time. See the three Migration 036
+// design rounds for the full reasoning behind every decision below;
+// summarized in each function's own comment only where needed.
+//
+// Approved policy: a reversal is attempted ONLY when a dispute's live
+// status is exactly 'lost' -- never merely opened/under_review/etc, and
+// a won dispute produces zero transfer movement. Application-fee refund
+// policy on this reversal is left deliberately unset
+// (refund_application_fee is never passed to createReversal()) -- a
+// separate, undecided business-policy question, unchanged by this
+// migration.
+// ============================================================
+
+const LOST_DISPUTE_RECOVERY_OPERATION = "lost_dispute_recovery";
+const LOST_DISPUTE_RECOVERY_FORMULA_VERSION = "1";
+
+// Deterministic idempotency key for a lost-dispute transfer-reversal
+// attempt, mirroring buildRefundIdempotencyKey's own naming convention
+// (src/app/admin/refunds/issue-refund.ts) but keyed off Librum's OWN
+// row-locked-by-WHERE-clause attempt counter rather than a Stripe
+// object id -- a rejected transfers.createReversal() call (e.g.
+// insufficient connected-account balance) typically throws with no
+// persisted TransferReversal object to chain a retry key off of, unlike
+// a rejected refunds.create() call, which can still return a real
+// Refund object with a terminal failed/canceled status. See the
+// Migration 036 design report for the full asymmetry.
+export function buildTransferReversalIdempotencyKey(
+  disputeId: string,
+  attemptCount: number,
+): string {
+  return `dispute-reversal-${disputeId}-attempt-${attemptCount}`;
+}
+
+type TransferReversalClaim = {
+  attemptCount: number;
+  existingTransferId: string | null;
+  paymentIntentId: string;
+};
+
+// The sole DB-layer claim mechanism for a lost-dispute transfer-
+// reversal attempt. A plain read (current status/attempt_count) then a
+// conditional UPDATE re-checking `.eq("transfer_reversal_status",
+// <the exact value just observed>)` -- this is a compare-and-swap via
+// WHERE clause, not a dedicated PL/pgSQL RPC: Postgres always
+// re-evaluates an UPDATE's WHERE clause against the row's CURRENT state
+// at the moment it actually acquires the row lock, not against the
+// client's possibly-stale read, so if a concurrent worker already
+// claimed this row between our read and our write, our own UPDATE's
+// WHERE no longer matches and we correctly get back zero rows -- the
+// exact mechanism that makes overlapping claimants (a redelivered
+// webhook racing the reconciliation route, or two overlapping
+// reconciliation runs) safe with no distributed lock.
+//
+// staleAttemptingCutoff distinguishes the two legitimate claimants:
+// - null (the webhook's own immediate path): matches only
+//   'not_attempted' and 'failed' -- an 'attempting' row is left
+//   strictly alone, since a concurrent delivery may still legitimately
+//   be working on it and the webhook is never the recovery mechanism
+//   for a stuck attempt.
+// - a Date (the reconciliation route): additionally matches
+//   'attempting' rows whose transfer_reversal_attempted_at is older
+//   than the cutoff.
+//
+// attempt_count increments ONLY when entering 'attempting' from
+// 'not_attempted' or 'failed' -- a stale-'attempting' re-claim leaves it
+// untouched, so any retry that results reuses the exact same
+// deterministic idempotency key as the original, possibly-still-
+// in-flight attempt (buildTransferReversalIdempotencyKey above) -- a
+// timeout alone can never mint a fresh key.
+async function claimTransferReversalAttempt(
+  supabase: ReturnType<typeof createAdminClient>,
+  disputeId: string,
+  staleAttemptingCutoff: Date | null,
+): Promise<TransferReversalClaim | null> {
+  const { data: current, error: readError } = await supabase
+    .from("payment_disputes")
+    .select(
+      "status, transfer_reversal_status, transfer_reversal_attempt_count, transfer_reversal_attempted_at, stripe_transfer_id, stripe_payment_intent_id",
+    )
+    .eq("stripe_dispute_id", disputeId)
+    .maybeSingle();
+
+  if (readError || !current || current.status !== "lost") {
+    return null;
+  }
+
+  const isStaleAttempting =
+    staleAttemptingCutoff !== null &&
+    current.transfer_reversal_status === "attempting" &&
+    current.transfer_reversal_attempted_at !== null &&
+    new Date(current.transfer_reversal_attempted_at) < staleAttemptingCutoff;
+
+  const isClaimable =
+    current.transfer_reversal_status === "not_attempted" ||
+    current.transfer_reversal_status === "failed" ||
+    isStaleAttempting;
+
+  if (!isClaimable) {
+    return null;
+  }
+
+  const nextAttemptCount = isStaleAttempting
+    ? current.transfer_reversal_attempt_count
+    : current.transfer_reversal_attempt_count + 1;
+
+  const { data: claimed, error: claimError } = await supabase
+    .from("payment_disputes")
+    .update({
+      transfer_reversal_status: "attempting",
+      transfer_reversal_attempted_at: new Date().toISOString(),
+      transfer_reversal_attempt_count: nextAttemptCount,
+    })
+    .eq("stripe_dispute_id", disputeId)
+    .eq("transfer_reversal_status", current.transfer_reversal_status)
+    .select("transfer_reversal_attempt_count, stripe_transfer_id, stripe_payment_intent_id")
+    .maybeSingle();
+
+  if (claimError || !claimed) {
+    // Lost the race -- not an error, see this function's own
+    // documentation above.
+    return null;
+  }
+
+  return {
+    attemptCount: claimed.transfer_reversal_attempt_count,
+    existingTransferId: claimed.stripe_transfer_id,
+    paymentIntentId: claimed.stripe_payment_intent_id,
+  };
+}
+
+// Resolves the destination-charge Transfer that received the author's
+// share of THIS dispute's charge. dispute.charge (not payment_intent.
+// latest_charge) is used deliberately -- it is the exact,
+// definitionally-unambiguous charge that was disputed, per Disputes.
+// d.ts's own doc comment ("ID of the charge that's disputed"), with no
+// "which charge" ambiguity a PaymentIntent's latest_charge could
+// theoretically carry. Charge.transfer (Charges.d.ts: "ID of the
+// transfer to the destination account... only applicable if the charge
+// was created using the destination parameter") is exactly the
+// destination-charge transfer id every checkout in this codebase
+// produces (buyBook/buyBundle both set payment_intent_data.transfer_
+// data.destination). Always re-resolved (even when stripe_transfer_id
+// is already cached), since charge.amount is separately needed for the
+// reversal-amount formula below and there is no cheaper way to get it
+// alone -- a charge's own destination transfer id never changes once
+// set, so re-deriving it here is always consistent with any cached
+// value, never a source of drift.
+async function resolveDisputeChargeAndTransfer(
+  stripeClient: StripeDisputeVerificationClient,
+  dispute: Stripe.Dispute,
+): Promise<{ charge: Stripe.Charge; transferId: string } | { error: string }> {
+  const chargeId = typeof dispute.charge === "string" ? dispute.charge : dispute.charge.id;
+
+  let charge: Stripe.Charge;
+  try {
+    charge = await stripeClient.charges.retrieve(chargeId, { expand: ["transfer"] });
+  } catch (error) {
+    return {
+      error: `failed to retrieve disputed charge: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  const transferId =
+    typeof charge.transfer === "string" ? charge.transfer : (charge.transfer?.id ?? null);
+
+  if (!transferId) {
+    return { error: "disputed charge has no destination transfer id" };
+  }
+
+  return { charge, transferId };
+}
+
+// Identifies THIS Librum lost-dispute recovery's own TransferReversal,
+// if one already exists on the transfer -- never "any reversal
+// exists." Matched on metadata alone (librum_operation +
+// stripe_dispute_id), which only a reversal Librum itself created via
+// this same recovery mechanism ever carries -- a reversal caused by an
+// admin refund's reverse_transfer:true was never created with this
+// metadata (its own TransferReversal.source_refund would be set
+// instead, and its metadata would be empty), so it can never be
+// mistaken for a dispute-driven recovery, and a DIFFERENT dispute's
+// reversal is excluded by the stripe_dispute_id match even in the
+// structurally-impossible case of two disputes sharing a transfer.
+// Lists Stripe's own live, complete, paginated reversal set
+// (transfers.listReversals(), not the embedded, capped-at-10 Transfer.
+// reversals snapshot), mirroring determineRefundAttempt's identical
+// "always list live state" posture (src/app/admin/refunds/issue-refund.ts).
+async function findExistingLostDisputeReversal(
+  stripeClient: StripeDisputeVerificationClient,
+  transferId: string,
+  disputeId: string,
+): Promise<Stripe.TransferReversal | null> {
+  const reversals = await stripeClient.transfers
+    .listReversals(transferId, { limit: 100 })
+    .autoPagingToArray({ limit: 100 });
+
+  return (
+    reversals.find(
+      (reversal) =>
+        reversal.metadata?.librum_operation === LOST_DISPUTE_RECOVERY_OPERATION &&
+        reversal.metadata?.stripe_dispute_id === disputeId,
+    ) ?? null
+  );
+}
+
+// The FINAL approved reversal-amount formula (Migration 036 design,
+// round 4 -- externally verified against current Stripe documentation:
+// a partially-refunded payment CAN subsequently be disputed for the
+// full payment amount, so Dispute.amount must never be assumed already
+// netted against a prior refund). Always reads live Stripe values --
+// transfer.amount, transfer.amount_reversed, dispute.amount,
+// charge.amount -- NEVER Librum's own 80/20 platform-fee split
+// (src/lib/pricing.ts's PLATFORM_FEE_PERCENT is not consulted anywhere
+// in this computation).
+//
+// targetAmount: the author's proportional share of what THIS dispute
+// claims, computed against the transfer's ORIGINAL amount (fixed, never
+// shrinks) -- not the current remaining balance, which would
+// double-apply the dispute's proportion against an already-reduced
+// base (see the design report's worked 800/200/50% example for why
+// that alternative over-recovers).
+//
+// remainingTransfer (transfer.amount - transfer.amount_reversed) is
+// used ONLY as a hard ceiling -- the same ceiling Stripe itself enforces
+// (createReversal() "Can only reverse up to the unreversed amount
+// remaining of the transfer") -- amount_reversed is NEVER subtracted
+// from targetAmount itself, regardless of what caused a prior reversal
+// (an earlier refund's reverse_transfer, or a distinct earlier dispute
+// on the same PaymentIntent -- Stripe can exceptionally create multiple
+// disputes for one payment; each is identified and idempotency-guarded
+// independently by its own stripe_dispute_id via claimTransferReversal
+// Attempt/buildTransferReversalIdempotencyKey above, but all of them
+// share this ONE aggregate ceiling, which is exactly what prevents them
+// from cumulatively over-reversing the transfer).
+//
+// Returns null (never a guessed amount) if charge.amount is not usable
+// -- the caller persists a 'failed' state with an explicit reason
+// rather than proceeding on inconsistent data.
+function computeLostDisputeReversalAmountCents(
+  transfer: Pick<Stripe.Transfer, "amount" | "amount_reversed">,
+  dispute: Pick<Stripe.Dispute, "amount">,
+  charge: Pick<Stripe.Charge, "amount">,
+): number | null {
+  if (!Number.isFinite(charge.amount) || charge.amount <= 0) {
+    return null;
+  }
+  if (!Number.isFinite(transfer.amount) || !Number.isFinite(transfer.amount_reversed)) {
+    return null;
+  }
+
+  const remainingTransfer = transfer.amount - transfer.amount_reversed;
+  const targetAmount = Math.round((transfer.amount * dispute.amount) / charge.amount);
+  const amountToReverseNow = Math.min(targetAmount, remainingTransfer);
+
+  return Math.max(0, amountToReverseNow);
+}
+
+async function succeedTransferReversalAttempt(
+  supabase: ReturnType<typeof createAdminClient>,
+  disputeId: string,
+  reversalId: string | null,
+  amountCents: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from("payment_disputes")
+    .update({
+      transfer_reversal_status: "succeeded",
+      stripe_transfer_reversal_id: reversalId,
+      transfer_reversal_amount_cents: amountCents,
+      transfer_reversal_succeeded_at: new Date().toISOString(),
+      transfer_reversal_failure_code: null,
+      transfer_reversal_failure_message: null,
+    })
+    .eq("stripe_dispute_id", disputeId);
+
+  if (error) {
+    console.error(
+      "Stripe webhook: failed to persist a succeeded lost-dispute transfer reversal -- needs manual reconciliation",
+      { disputeId, reversalId, amountCents, error },
+    );
+  }
+}
+
+async function failTransferReversalAttempt(
+  supabase: ReturnType<typeof createAdminClient>,
+  disputeId: string,
+  message: string,
+  code?: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from("payment_disputes")
+    .update({
+      transfer_reversal_status: "failed",
+      transfer_reversal_failure_code: code ?? null,
+      transfer_reversal_failure_message: message,
+    })
+    .eq("stripe_dispute_id", disputeId);
+
+  if (error) {
+    console.error(
+      "Stripe webhook: failed to persist a failed lost-dispute transfer reversal -- needs manual reconciliation",
+      { disputeId, message, error },
+    );
+  }
+}
+
+// The core orchestration: claim -> resolve charge/transfer -> check for
+// an already-existing reversal (unconditionally, before any mutation
+// call) -> compute the amount -> reverse -> persist. Shared by both the
+// webhook's own immediate call (processDisputeEvent above,
+// staleAttemptingCutoff omitted/null) and the reconciliation route
+// (src/app/api/internal/reconcile-transfer-reversals/route.ts, which
+// passes an actual cutoff) -- the exact same function, not a
+// duplicated copy, so both call sites are guaranteed to apply identical
+// claim/idempotency/amount/reconciliation logic.
+//
+// Exported (only) for the same reason as every other handler in this
+// file: direct testability with fake Supabase/Stripe clients.
+export type TransferReversalOutcome =
+  | { kind: "not_lost" }
+  | { kind: "not_claimed" }
+  | { kind: "reconciled_existing"; reversalId: string; amountCents: number }
+  | { kind: "reversed"; reversalId: string; amountCents: number }
+  | { kind: "nothing_to_reverse" }
+  | { kind: "failed"; message: string };
+
+export async function reverseAuthorTransferForLostDispute(
+  supabase: ReturnType<typeof createAdminClient>,
+  stripeClient: StripeDisputeVerificationClient,
+  dispute: Stripe.Dispute,
+  staleAttemptingCutoff: Date | null = null,
+): Promise<TransferReversalOutcome> {
+  if (dispute.status !== "lost") {
+    return { kind: "not_lost" };
+  }
+
+  const claim = await claimTransferReversalAttempt(supabase, dispute.id, staleAttemptingCutoff);
+  if (!claim) {
+    return { kind: "not_claimed" };
+  }
+
+  const resolved = await resolveDisputeChargeAndTransfer(stripeClient, dispute);
+  if ("error" in resolved) {
+    await failTransferReversalAttempt(supabase, dispute.id, resolved.error);
+    return { kind: "failed", message: resolved.error };
+  }
+  const { charge, transferId } = resolved;
+
+  if (!claim.existingTransferId) {
+    const { error: linkError } = await supabase
+      .from("payment_disputes")
+      .update({ stripe_transfer_id: transferId })
+      .eq("stripe_dispute_id", dispute.id);
+    if (linkError) {
+      console.error(
+        "Stripe webhook: failed to cache the resolved transfer id for a lost dispute -- non-fatal, will be re-resolved next attempt",
+        { disputeId: dispute.id, transferId, error: linkError },
+      );
+    }
+  }
+
+  // Unconditional, before ANY createReversal() call -- see
+  // findExistingLostDisputeReversal's own documentation. Recovers an
+  // unknown-outcome retry (a crash/timeout after Stripe already
+  // processed the original call) without ever performing a second
+  // Stripe mutation.
+  const existing = await findExistingLostDisputeReversal(stripeClient, transferId, dispute.id);
+  if (existing) {
+    await succeedTransferReversalAttempt(supabase, dispute.id, existing.id, existing.amount);
+    return { kind: "reconciled_existing", reversalId: existing.id, amountCents: existing.amount };
+  }
+
+  let transfer: Stripe.Transfer;
+  try {
+    transfer = await stripeClient.transfers.retrieve(transferId);
+  } catch (error) {
+    const message = `failed to retrieve destination transfer: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    await failTransferReversalAttempt(supabase, dispute.id, message);
+    return { kind: "failed", message };
+  }
+
+  const amountToReverseNow = computeLostDisputeReversalAmountCents(transfer, dispute, charge);
+  if (amountToReverseNow === null) {
+    const message = "unable to compute a safe reversal amount from live Stripe state";
+    await failTransferReversalAttempt(supabase, dispute.id, message);
+    return { kind: "failed", message };
+  }
+
+  if (amountToReverseNow === 0) {
+    // Nothing left to recover -- either the transfer is already fully
+    // reversed (e.g. an earlier full refund's reverse_transfer already
+    // covered it), or the computed target itself rounds to zero.
+    // Recorded succeeded with a zero amount and no reversal id, not
+    // left 'attempting' forever, and not treated as an error.
+    await succeedTransferReversalAttempt(supabase, dispute.id, null, 0);
+    return { kind: "nothing_to_reverse" };
+  }
+
+  const idempotencyKey = buildTransferReversalIdempotencyKey(dispute.id, claim.attemptCount);
+
+  let reversal: Stripe.TransferReversal;
+  try {
+    reversal = await stripeClient.transfers.createReversal(
+      transferId,
+      {
+        amount: amountToReverseNow,
+        metadata: {
+          librum_operation: LOST_DISPUTE_RECOVERY_OPERATION,
+          stripe_dispute_id: dispute.id,
+          stripe_payment_intent_id: claim.paymentIntentId,
+          recovery_formula_version: LOST_DISPUTE_RECOVERY_FORMULA_VERSION,
+        },
+      },
+      { idempotencyKey },
+    );
+  } catch (error) {
+    const stripeError = error as { code?: string; message?: string };
+    const message = stripeError.message ?? String(error);
+    await failTransferReversalAttempt(supabase, dispute.id, message, stripeError.code ?? null);
+    return { kind: "failed", message };
+  }
+
+  await succeedTransferReversalAttempt(supabase, dispute.id, reversal.id, reversal.amount);
+  return { kind: "reversed", reversalId: reversal.id, amountCents: reversal.amount };
 }
 
 // Stripe calls this URL directly (not a browser), so it must read the
