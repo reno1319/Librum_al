@@ -91,6 +91,30 @@ export default async function LibraryPage({
 
   const allPurchases = purchases ?? [];
 
+  // LAUNCH-1 P1-7B: refunded_at alone is no longer sufficient to decide
+  // whether a listed purchase is still actively downloadable -- a
+  // lost-disputed purchase (migration 035) never sets refunded_at, so
+  // it must also read as not-currently-owned here, exactly like the
+  // book detail and bundle pages' own "owned" checks (both already
+  // routed through this same RPC). One call per distinct purchases row
+  // -- purchases has unique(book_id, reader_id), so this is exactly one
+  // call per book actually listed on this page, not per transaction
+  // group. A bundle transaction whose books share one Stripe
+  // PaymentIntent needs no special-casing: user_owns_book() keys off
+  // each book's OWN purchases row, and every book in that bundle
+  // carries that same shared payment intent, so a lost dispute on it
+  // correctly revokes every one of those books here, not just one.
+  const ownershipEntries = await Promise.all(
+    allPurchases.map(
+      async (purchase) =>
+        [
+          purchase.book_id,
+          !!(await supabase.rpc("user_owns_book", { target_book_id: purchase.book_id })).data,
+        ] as const,
+    ),
+  );
+  const ownedByBookId = new Map(ownershipEntries);
+
   // Merges purchases rows AND fulfilled bundle snapshots into one entry
   // per actual paid transaction -- including a transaction with zero
   // purchases rows (every bundle item was already owned elsewhere), which
@@ -203,15 +227,15 @@ export default async function LibraryPage({
                                 )}
                               </p>
                             </div>
-                            {purchase.refunded_at ? (
-                              <span className="text-xs text-muted">No longer available</span>
-                            ) : (
+                            {ownedByBookId.get(purchase.book_id) ? (
                               <a
                                 href={`/api/books/${purchase.book_id}/download`}
                                 className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
                               >
                                 Download EPUB
                               </a>
+                            ) : (
+                              <span className="text-xs text-muted">No longer available</span>
                             )}
                           </li>
                         ) : null,
