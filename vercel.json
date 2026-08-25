@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/internal/reconcile-transfer-reversals",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
