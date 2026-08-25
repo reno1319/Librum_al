@@ -10,9 +10,33 @@ vi.mock("@/lib/email", () => ({
   sendSnapshotBundlePurchaseEmails: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { POST, runTransferReversalReconciliation, STALE_ATTEMPTING_THRESHOLD_MS } = await import(
-  "./route"
-);
+// LAUNCH-1 P1-8 (Vercel Cron GET compatibility): the exported GET/POST
+// handlers each call the real createAdminClient()/stripe imports
+// internally before delegating to runTransferReversalReconciliation --
+// unlike the rest of this file's tests (which call
+// runTransferReversalReconciliation directly with fake clients), a test
+// that invokes GET/POST themselves would otherwise reach real Supabase/
+// Stripe network calls. These two module mocks stand in for both,
+// keeping every "authenticated request" test below fully offline. Both
+// factories are lazy (called fresh per invocation) so each test's own
+// mockAdminTables mutation is picked up.
+let mockAdminTables: Tables = {};
+const mockCreateAdminClient = vi.fn(() => makeFakeSupabase(mockAdminTables));
+
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => mockCreateAdminClient(),
+}));
+
+vi.mock("@/lib/stripe", () => ({
+  stripe: {
+    disputes: { retrieve: vi.fn() },
+    charges: { retrieve: vi.fn() },
+    transfers: { retrieve: vi.fn(), listReversals: vi.fn(), createReversal: vi.fn() },
+  },
+}));
+
+const { GET, POST, runTransferReversalReconciliation, STALE_ATTEMPTING_THRESHOLD_MS } =
+  await import("./route");
 
 // ---------------------------------------------------------------------
 // A minimal in-memory fake, deliberately scoped to exactly what
@@ -376,5 +400,111 @@ describe("POST /api/internal/reconcile-transfer-reversals: authentication", () =
       }),
     );
     expect(response.status).toBe(503);
+  });
+
+  it("accepts a correctly-authenticated request and executes reconciliation exactly once", async () => {
+    mockAdminTables = {};
+    mockCreateAdminClient.mockClear();
+    const response = await POST(
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", {
+        method: "POST",
+        headers: { authorization: "Bearer test-cron-secret" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ received: true, candidateCount: 0 });
+    // createAdminClient() is the one thing handleReconciliationRequest
+    // calls immediately before its single runTransferReversalReconciliation
+    // call -- exactly one call proves reconciliation ran exactly once,
+    // not zero or duplicated, for this one request.
+    expect(mockCreateAdminClient).toHaveBeenCalledOnce();
+  });
+});
+
+// LAUNCH-1 P1-8: Vercel Cron Jobs invoke the configured path with GET,
+// not POST -- see the deployment/scheduler audit. GET must be
+// authenticated identically to POST and must delegate to the exact same
+// reconciliation implementation, never a duplicated copy.
+describe("GET /api/internal/reconcile-transfer-reversals: authentication", () => {
+  const originalSecret = process.env.CRON_SECRET;
+
+  beforeEach(() => {
+    process.env.CRON_SECRET = "test-cron-secret";
+  });
+
+  afterEach(() => {
+    process.env.CRON_SECRET = originalSecret;
+  });
+
+  it("rejects a request with no Authorization header", async () => {
+    const response = await GET(
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", { method: "GET" }),
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects a request with the wrong bearer token", async () => {
+    const response = await GET(
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", {
+        method: "GET",
+        headers: { authorization: "Bearer wrong-secret" },
+      }),
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("fails closed (503) when CRON_SECRET is not configured at all", async () => {
+    delete process.env.CRON_SECRET;
+    const response = await GET(
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", {
+        method: "GET",
+        headers: { authorization: "Bearer anything" },
+      }),
+    );
+    expect(response.status).toBe(503);
+  });
+
+  it("accepts a correctly-authenticated request and executes reconciliation exactly once", async () => {
+    mockAdminTables = {};
+    mockCreateAdminClient.mockClear();
+    const response = await GET(
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", {
+        method: "GET",
+        headers: { authorization: "Bearer test-cron-secret" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ received: true, candidateCount: 0 });
+    expect(mockCreateAdminClient).toHaveBeenCalledOnce();
+  });
+});
+
+describe("GET and POST return identical response shapes for equivalent authenticated requests", () => {
+  const originalSecret = process.env.CRON_SECRET;
+
+  beforeEach(() => {
+    process.env.CRON_SECRET = "test-cron-secret";
+    mockAdminTables = {};
+  });
+
+  afterEach(() => {
+    process.env.CRON_SECRET = originalSecret;
+  });
+
+  it("empty-batch GET and POST bodies are structurally identical", async () => {
+    const authedRequest = (method: "GET" | "POST") =>
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", {
+        method,
+        headers: { authorization: "Bearer test-cron-secret" },
+      });
+
+    const getResponse = await GET(authedRequest("GET"));
+    const postResponse = await POST(authedRequest("POST"));
+
+    expect(getResponse.status).toBe(postResponse.status);
+    const [getBody, postBody] = await Promise.all([getResponse.json(), postResponse.json()]);
+    expect(getBody).toEqual(postBody);
   });
 });

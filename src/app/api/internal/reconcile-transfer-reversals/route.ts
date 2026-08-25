@@ -34,7 +34,12 @@ import {
 // session -- there is no admin-role check here, only the shared secret,
 // the same posture the Stripe webhook itself uses (signature
 // verification, not a session).
-export async function POST(request: Request) {
+// Single authenticated implementation shared by both exported handlers
+// below -- see the two exports for why there are two. Nothing here
+// differs by HTTP method: the same CRON_SECRET bearer check, the same
+// fail-closed-on-unconfigured-secret behavior, and the same
+// reconciliation pass regardless of which verb reached it.
+async function handleReconciliationRequest(request: Request): Promise<Response> {
   const configuredSecret = process.env.CRON_SECRET;
 
   if (!configuredSecret) {
@@ -56,6 +61,22 @@ export async function POST(request: Request) {
   const summary = await runTransferReversalReconciliation(supabase, stripe);
 
   return NextResponse.json({ received: true, ...summary });
+}
+
+// Vercel Cron Jobs invoke the configured path with GET, not POST -- see
+// the P1-8 deployment/scheduler audit. POST is kept for manual/curl
+// operator invocation and any non-Vercel scheduler that prefers it (the
+// same convention the Stripe webhook itself doesn't need, since Stripe
+// always POSTs, but this route's original manual-trigger design assumed
+// POST before Vercel Cron compatibility was required). Both delegate to
+// the exact same authenticated implementation -- no duplicated auth or
+// business logic between them.
+export async function GET(request: Request) {
+  return handleReconciliationRequest(request);
+}
+
+export async function POST(request: Request) {
+  return handleReconciliationRequest(request);
 }
 
 // LAUNCH-1 P1-8: 10-minute stale threshold -- roughly an order of
