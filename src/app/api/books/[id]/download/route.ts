@@ -82,9 +82,41 @@ export async function GET(
   }
 
   const originalBytes = Buffer.from(await fileBlob.arrayBuffer());
-  const fileBytes = user.email
-    ? await watermarkEpub(originalBytes, user.email)
-    : originalBytes;
+
+  // LAUNCH-1 P3-2: watermarking is fail-open by design -- the reader
+  // must always get their purchased EPUB, watermarked or not. This
+  // route is the SOLE logging boundary for that fallback (watermark.ts
+  // itself never logs) -- exactly one warn/error per fallback, never
+  // both, and never for a successful watermark. Every log line below
+  // stays deliberately narrow: bookId/readerId (opaque ids, not email),
+  // byte size, and a small failure-stage tag -- never the manuscript
+  // contents, the container/OPF XML, the storage path, or the reader's
+  // email itself.
+  let fileBytes: Buffer;
+  if (!user.email) {
+    // watermarkEpub is never invoked here at all (no email to embed),
+    // so this is a route-level fallback stage, not a WatermarkFailureStage.
+    console.warn("Download: served an unwatermarked EPUB (fallback)", {
+      bookId: id,
+      readerId: user.id,
+      byteSize: originalBytes.length,
+      stage: "missing_reader_email",
+    });
+    fileBytes = originalBytes;
+  } else {
+    const watermarkResult = await watermarkEpub(originalBytes, user.email);
+    if (!watermarkResult.watermarked) {
+      const log =
+        watermarkResult.failureStage === "unexpected_exception" ? console.error : console.warn;
+      log("Download: served an unwatermarked EPUB (fallback)", {
+        bookId: id,
+        readerId: user.id,
+        byteSize: originalBytes.length,
+        stage: watermarkResult.failureStage,
+      });
+    }
+    fileBytes = watermarkResult.bytes;
+  }
 
   const fileName = `${book.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.epub`;
 
