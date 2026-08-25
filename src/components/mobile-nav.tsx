@@ -15,11 +15,18 @@ export function MobileNav({
   loggedIn,
   accountHref,
   logoutAction,
+  recoveryActive = false,
 }: {
   items: NavItem[];
   loggedIn: boolean;
   accountHref: string;
   logoutAction: (formData: FormData) => void | Promise<void>;
+  // LAUNCH-1 P2-5: takes precedence over loggedIn -- a recovery-
+  // restricted session still has loggedIn=true (a real Supabase user
+  // exists), but must never show ordinary authenticated nav, nor fall
+  // back to the logged-out branch's Sign up link (also a dead end
+  // during recovery; see the P2-5 audit's RECOVERY_ALLOWED_PATHS trace).
+  recoveryActive?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -70,42 +77,57 @@ export function MobileNav({
           id={panelId}
           className="absolute inset-x-0 top-full border-b border-border bg-surface px-4 py-4 shadow-sm"
         >
-          <nav
-            style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}
-          >
-            {items.map((item) => (
-              <Link key={item.href} href={item.href} className={linkClassName}>
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+          {recoveryActive ? (
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}
+            >
+              <span className="text-sm text-muted">Password recovery</span>
+              <form action={logoutAction}>
+                <button type="submit" className={linkClassName}>
+                  Log out
+                </button>
+              </form>
+            </div>
+          ) : (
+            <>
+              <nav
+                style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}
+              >
+                {items.map((item) => (
+                  <Link key={item.href} href={item.href} className={linkClassName}>
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
 
-          <div
-            className="mt-4 border-t border-border pt-4"
-            style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}
-          >
-            {loggedIn ? (
-              <>
-                <Link href={accountHref} className={linkClassName}>
-                  Account
-                </Link>
-                <form action={logoutAction}>
-                  <button type="submit" className={linkClassName}>
-                    Log out
-                  </button>
-                </form>
-              </>
-            ) : (
-              <>
-                <Link href="/login" className={linkClassName}>
-                  Log in
-                </Link>
-                <Link href="/signup" className={linkClassName}>
-                  Sign up
-                </Link>
-              </>
-            )}
-          </div>
+              <div
+                className="mt-4 border-t border-border pt-4"
+                style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}
+              >
+                {loggedIn ? (
+                  <>
+                    <Link href={accountHref} className={linkClassName}>
+                      Account
+                    </Link>
+                    <form action={logoutAction}>
+                      <button type="submit" className={linkClassName}>
+                        Log out
+                      </button>
+                    </form>
+                  </>
+                ) : (
+                  <>
+                    <Link href="/login" className={linkClassName}>
+                      Log in
+                    </Link>
+                    <Link href="/signup" className={linkClassName}>
+                      Sign up
+                    </Link>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
