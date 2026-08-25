@@ -382,17 +382,24 @@ export async function executeApprovedRefund(
   // author must not keep payment for a transaction Librum's own records
   // (refund_requests.status, purchases.refunded_at) now say was refunded.
   //
-  // Deliberately does NOT set refund_application_fee: whether Librum's
-  // own platform-fee share should also be returned on a refund is a
-  // genuine, undecided business policy question -- no page, doc, or
-  // comment anywhere in this codebase (Terms, Pricing, How It Works,
-  // Help, README) states what happens to Librum's fee on a refund, only
-  // what happens on a normal sale. Per instruction, this is left exactly
-  // as an open decision for a human to make, not invented here.
+  // LAUNCH-1 P1-9: also sets refund_application_fee -- the approved
+  // launch policy (Policy B, P1-9 audit) is that Librum's own platform
+  // fee is refunded alongside the reader's payment and the author's
+  // transfer, so a fully-refunded transaction nets to zero for all three
+  // parties, not just the reader and author. This applies ONLY to this
+  // normal, application-originated full-refund path -- it does not
+  // change Migration 036's lost-dispute transfer-reversal behavior
+  // (src/app/api/webhooks/stripe/route.ts), which remains a separate,
+  // still-undecided question (a lost dispute has no Refund object to
+  // attach this flag to in the first place).
   let refund: Stripe.Refund;
   try {
     refund = await stripeClient.refunds.create(
-      { payment_intent: request.stripe_payment_intent_id, reverse_transfer: true },
+      {
+        payment_intent: request.stripe_payment_intent_id,
+        reverse_transfer: true,
+        refund_application_fee: true,
+      },
       { idempotencyKey: plan.idempotencyKey },
     );
   } catch (error) {
