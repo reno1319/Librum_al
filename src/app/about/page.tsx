@@ -24,8 +24,10 @@ export default function AboutPage() {
       </h2>
       <p className="mt-3 text-foreground/90">
         Librum takes a 20% platform fee on every sale. The remaining 80%
-        goes straight to the author&apos;s bank account, handled by Stripe.
-        We never see or store payment card details. See{" "}
+        is transferred to the author&apos;s bank account by Stripe,
+        automatically per sale — actual timing depends on Stripe&apos;s own
+        processing schedule. We never see or store payment card details.
+        See{" "}
         <Link href="/how-it-works" className="text-primary underline">
           how self-publishing works
         </Link>{" "}

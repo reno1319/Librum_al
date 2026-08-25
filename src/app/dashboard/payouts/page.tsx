@@ -78,7 +78,9 @@ export default async function PayoutsPage({
           <>
             <p className="text-sm font-medium text-green-700">
               Payouts are active — you&apos;ll be paid automatically for
-              every sale.
+              every sale. Bank-transfer timing depends on Stripe&apos;s own
+              processing schedule, and refunded sales, or sales disputed and
+              resolved against the payment, are adjusted accordingly.
             </p>
             <form action={openStripeExpressDashboard} className="mt-4">
               <button

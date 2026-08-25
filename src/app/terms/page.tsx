@@ -1,3 +1,5 @@
+import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+
 export default function TermsPage() {
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
@@ -59,16 +61,61 @@ export default function TermsPage() {
             5. Payments and fees
           </h2>
           <p className="mt-2">
-            Readers pay through Stripe. Authors receive their share
-            (Librum&apos;s platform fee is disclosed in the author
-            dashboard) automatically via Stripe Connect. Librum doesn&apos;t
-            store card details.
+            Readers pay through Stripe. For each completed sale, the author
+            receives {100 - PLATFORM_FEE_PERCENT}% of the price and Librum
+            retains {PLATFORM_FEE_PERCENT}% as its platform fee. Payment
+            processing is handled by Stripe; Stripe may separately affect
+            settlement timing, but Librum doesn&apos;t store card details.
           </p>
         </section>
 
         <section>
           <h2 className="font-serif text-lg font-semibold">
-            6. Termination
+            6. Refunds
+          </h2>
+          <p className="mt-2">
+            When Librum approves a refund for a purchase, the reader&apos;s
+            access to the refunded title or bundle may be removed, the
+            corresponding author proceeds are reversed, and Librum&apos;s
+            corresponding platform fee is also refunded. Librum doesn&apos;t
+            promise a specific settlement time for a refund to appear.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="font-serif text-lg font-semibold">
+            7. Payment disputes and chargebacks
+          </h2>
+          <p className="mt-2">
+            A reader&apos;s bank or card issuer may allow them to dispute a
+            payment directly with the issuer rather than through Librum.
+            Opening a dispute does not by itself remove access to a
+            purchase. If a dispute is ultimately resolved against the
+            payment, the reader&apos;s access to the affected purchase may
+            be removed, and Librum may recover from the author only the
+            remaining economic proceeds the author actually retained from
+            that transaction. Librum does not charge the author for
+            Librum&apos;s own platform-fee share of a lost dispute, and
+            Librum bears the payment processor&apos;s dispute fee under its
+            current policy.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="font-serif text-lg font-semibold">
+            8. Payouts
+          </h2>
+          <p className="mt-2">
+            Stripe handles author payout account onboarding and
+            bank-transfer processing. Payout availability and timing
+            depend on your Stripe account status and Stripe&apos;s own
+            processing schedule.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="font-serif text-lg font-semibold">
+            9. Termination
           </h2>
           <p className="mt-2">
             Either party can end this relationship at any time. We may
@@ -79,7 +126,7 @@ export default function TermsPage() {
 
         <section>
           <h2 className="font-serif text-lg font-semibold">
-            7. Disclaimer
+            10. Disclaimer
           </h2>
           <p className="mt-2">
             Librum is provided &quot;as is,&quot; without warranties of any
@@ -89,7 +136,7 @@ export default function TermsPage() {
 
         <section>
           <h2 className="font-serif text-lg font-semibold">
-            8. Changes to these terms
+            11. Changes to these terms
           </h2>
           <p className="mt-2">
             We may update these terms from time to time. Continued use of

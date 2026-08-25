@@ -5,8 +5,9 @@ import { EarningsCalculator } from "@/components/earnings-calculator";
 const HOW_IT_WORKS = [
   "You set the price for your book — any price you like, including free.",
   `Librum takes a flat ${PLATFORM_FEE_PERCENT}% platform fee on every sale. That's it — no other cuts.`,
-  "The rest is paid straight to your bank account by Stripe, automatically, per sale.",
+  "The rest is transferred to your bank account by Stripe automatically, per sale — actual timing depends on your Stripe account status and Stripe's own processing schedule.",
   "No setup fees, no monthly subscription, no minimum number of sales.",
+  "Refunded transactions, or disputes resolved against the payment, are adjusted accordingly.",
 ];
 
 export default function PricingPage() {

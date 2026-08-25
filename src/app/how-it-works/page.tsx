@@ -20,7 +20,7 @@ const steps = [
   },
   {
     title: "5. Get paid",
-    body: `Every sale splits automatically: you keep ${100 - PLATFORM_FEE_PERCENT}%, transferred straight to your bank account by Stripe. Librum keeps a ${PLATFORM_FEE_PERCENT}% platform fee.`,
+    body: `Every sale splits automatically: you keep ${100 - PLATFORM_FEE_PERCENT}%, transferred to your bank account by Stripe. Librum keeps a ${PLATFORM_FEE_PERCENT}% platform fee. Actual bank-transfer timing depends on your Stripe account status and Stripe's own processing schedule, and refunded sales, or sales disputed and resolved against the payment, are adjusted accordingly.`,
   },
 ];
 
