@@ -922,6 +922,235 @@ describe("fulfillLegacyBundle: active_other_session must exclude a lost-disputed
 });
 
 // ---------------------------------------------------------------------
+// LAUNCH-1 P2-4: fulfillLegacyBundle email idempotency. This path is
+// unreachable for new purchases (buyBundle's checkout creation always
+// sets metadata.snapshot_id, which fulfillLegacyBundle's own caller
+// checks first -- see the P2-4 audit) -- these tests exercise it purely
+// as the historical-redelivery handler it now is. Unlike
+// fulfillBundleSnapshot, this legacy shape has no durable per-checkout
+// fulfillment claim (no fulfilled_at-equivalent row) to gate the email
+// on, so the fix reuses eligibleItems -- the same classification this
+// function already computes for its own allocation -- as the signal:
+// email only when this delivery actually wrote at least one newly-
+// eligible legacy purchase.
+// ---------------------------------------------------------------------
+describe("fulfillLegacyBundle: email idempotency (LAUNCH-1 P2-4)", () => {
+  let tables: Tables;
+
+  beforeEach(async () => {
+    tables = freshLegacyTables();
+    vi.mocked((await import("@/lib/email")).sendBundlePurchaseEmails).mockClear();
+  });
+
+  it("first legacy fulfillment (fresh bundle/reader, no prior purchase history): sends the bundle emails exactly once, with the correct bundleId/readerId/amountCents", async () => {
+    tables.purchases = []; // no prior history at all -- both books eligible
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLegacyBundle(
+      supabase as never,
+      { id: "evt_p24_first" } as Stripe.Event,
+      { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const sendBundlePurchaseEmails = vi.mocked((await import("@/lib/email")).sendBundlePurchaseEmails);
+    expect(sendBundlePurchaseEmails).toHaveBeenCalledTimes(1);
+    expect(sendBundlePurchaseEmails).toHaveBeenCalledWith(
+      supabase,
+      { bundleId: BUNDLE_ID_LEGACY, readerId: READER_ID_LEGACY, amountCents: 599 },
+    );
+  });
+
+  it("exact sequential redelivery: the second delivery sends zero additional emails and writes zero additional/duplicate purchases -- total email count stays exactly 1, allocated amounts stay unchanged", async () => {
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const event = { id: "evt_p24_redelivery" } as Stripe.Event;
+    const session = { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session;
+    const sendBundlePurchaseEmails = vi.mocked((await import("@/lib/email")).sendBundlePurchaseEmails);
+
+    const first = await fulfillLegacyBundle(
+      supabase as never,
+      event,
+      session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+    expect(first).toBeNull();
+    expect(sendBundlePurchaseEmails).toHaveBeenCalledTimes(1);
+
+    const purchasesAfterFirst = tables.purchases.map((row) => ({ ...row }));
+
+    const second = await fulfillLegacyBundle(
+      supabase as never,
+      event,
+      session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(second).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    // No additional email on the redelivery -- total remains exactly 1.
+    expect(sendBundlePurchaseEmails).toHaveBeenCalledTimes(1);
+    // Purchase idempotency: no new/duplicate rows, no changed amounts.
+    expect(tables.purchases).toHaveLength(purchasesAfterFirst.length);
+    expect(tables.purchases).toEqual(purchasesAfterFirst);
+  });
+
+  it("mixed same-session + eligible (a book already committed by an earlier partial delivery of THIS session, another still eligible): exactly one email attempt when fulfillment completes, purchases reconcile to the full charged amount", async () => {
+    // Simulates recovering from an earlier delivery that partially wrote
+    // book A (this exact session) before failing on book B -- book A's
+    // amount is FIXED/authoritative (same_session), only the remaining
+    // 299 is allocated to book B.
+    tables.purchases = [
+      {
+        id: "purchase-legacy-a-same-session",
+        book_id: BOOK_A_LEGACY,
+        reader_id: READER_ID_LEGACY,
+        stripe_checkout_session_id: NEW_SESSION_ID_LEGACY,
+        stripe_payment_intent_id: NEW_PAYMENT_INTENT_ID_LEGACY,
+        amount_cents: 300,
+        bundle_id: BUNDLE_ID_LEGACY,
+        refunded_at: null,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLegacyBundle(
+      supabase as never,
+      { id: "evt_p24_mixed" } as Stripe.Event,
+      { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const sendBundlePurchaseEmails = vi.mocked((await import("@/lib/email")).sendBundlePurchaseEmails);
+    expect(sendBundlePurchaseEmails).toHaveBeenCalledTimes(1);
+
+    const bookARow = tables.purchases.find((r) => r.book_id === BOOK_A_LEGACY);
+    const bookBRow = tables.purchases.find((r) => r.book_id === BOOK_B_LEGACY);
+    expect(bookARow?.amount_cents).toBe(300); // unchanged, fixed same_session amount
+    expect(bookBRow?.amount_cents).toBe(299); // remaining 599-300 allocated to the newly-eligible book
+    expect(bookBRow?.stripe_checkout_session_id).toBe(NEW_SESSION_ID_LEGACY);
+  });
+
+  it("active-other-session + eligible (reader already owns one title via an unrelated purchase, another title newly eligible): email still sends exactly once", async () => {
+    // freshLegacyTables() already sets this shape up: book A owned via
+    // an unrelated OLD session, book B with no prior purchase at all.
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLegacyBundle(
+      supabase as never,
+      { id: "evt_p24_active_other" } as Stripe.Event,
+      { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const sendBundlePurchaseEmails = vi.mocked((await import("@/lib/email")).sendBundlePurchaseEmails);
+    expect(sendBundlePurchaseEmails).toHaveBeenCalledTimes(1);
+
+    // Book A (active_other_session) is completely untouched -- still the
+    // OLD, unrelated transaction's own values.
+    const bookARow = tables.purchases.find((r) => r.book_id === BOOK_A_LEGACY);
+    expect(bookARow?.stripe_checkout_session_id).toBe(OLD_SESSION_ID_LEGACY);
+    // Book B is freshly granted via this new legacy transaction.
+    const bookBRow = tables.purchases.find((r) => r.book_id === BOOK_B_LEGACY);
+    expect(bookBRow?.stripe_checkout_session_id).toBe(NEW_SESSION_ID_LEGACY);
+  });
+
+  // LAUNCH-1 P2-4, ACCEPTED HISTORICAL TRADE-OFF (approved, not a bug):
+  // a historical legacy checkout where the reader already actively
+  // owned every book in the bundle through unrelated purchases has
+  // eligibleItems.length === 0 even on its first (and only) delivery --
+  // no purchases row is ever written under this checkout's own
+  // session_id, so nothing in the purchases table can distinguish
+  // "first delivery" from "the Nth redelivery" for this shape. Under
+  // this fix, no bundle email is sent for it. Approved because: this
+  // path is unreachable for new purchases (see the P2-4 audit's
+  // reachability proof), no entitlement or financial state is affected
+  // either way, and adding a new schema mechanism solely to email a
+  // reader about an already-fully-owned historical bundle is not
+  // warranted.
+  it("all-active-other-session historical edge case: reader already owns every book in the bundle via unrelated purchases -- eligibleItems is empty, no email is sent (accepted trade-off, not a regression)", async () => {
+    tables.purchases = [
+      {
+        id: "purchase-legacy-a-preowned",
+        book_id: BOOK_A_LEGACY,
+        reader_id: READER_ID_LEGACY,
+        stripe_checkout_session_id: OLD_SESSION_ID_LEGACY,
+        stripe_payment_intent_id: OLD_PAYMENT_INTENT_ID_LEGACY,
+        amount_cents: 300,
+        bundle_id: null,
+        refunded_at: null,
+      },
+      {
+        id: "purchase-legacy-b-preowned",
+        book_id: BOOK_B_LEGACY,
+        reader_id: READER_ID_LEGACY,
+        stripe_checkout_session_id: OLD_SESSION_ID_LEGACY,
+        stripe_payment_intent_id: OLD_PAYMENT_INTENT_ID_LEGACY,
+        amount_cents: 299,
+        bundle_id: null,
+        refunded_at: null,
+      },
+    ];
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLegacyBundle(
+      supabase as never,
+      { id: "evt_p24_all_preowned" } as Stripe.Event,
+      { id: NEW_SESSION_ID_LEGACY } as Stripe.Checkout.Session,
+      BUNDLE_ID_LEGACY,
+      READER_ID_LEGACY,
+      NEW_PAYMENT_INTENT_ID_LEGACY,
+      599,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const sendBundlePurchaseEmails = vi.mocked((await import("@/lib/email")).sendBundlePurchaseEmails);
+    expect(sendBundlePurchaseEmails).not.toHaveBeenCalled();
+    // Neither pre-existing row is touched -- no new entitlement, no
+    // financial state changed by this accepted trade-off.
+    expect(tables.purchases).toHaveLength(2);
+    expect(tables.purchases.find((r) => r.book_id === BOOK_A_LEGACY)?.stripe_checkout_session_id).toBe(
+      OLD_SESSION_ID_LEGACY,
+    );
+    expect(tables.purchases.find((r) => r.book_id === BOOK_B_LEGACY)?.stripe_checkout_session_id).toBe(
+      OLD_SESSION_ID_LEGACY,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------
 // LAUNCH-1 P1-4: fulfillSingleBookPurchase is now a thin wrapper around
 // finalize_book_checkout_intent (migration 032) -- a SECURITY DEFINER
 // SQL RPC that does the classification, the purchases write, and the

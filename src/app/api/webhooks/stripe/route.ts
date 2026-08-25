@@ -1068,7 +1068,15 @@ export async function fulfillLegacyBundle(
     });
   }
 
-  await sendBundlePurchaseEmails(supabase, { bundleId, readerId, amountCents });
+  // LAUNCH-1 P2-4: this legacy shape has no durable per-checkout
+  // fulfillment claim to gate on (unlike fulfilled_at above) -- on an
+  // exact sequential redelivery every book is already same_session, so
+  // eligibleItems is empty and nothing was just written. Only send the
+  // email when this delivery actually wrote at least one newly-eligible
+  // purchase.
+  if (eligibleItems.length > 0) {
+    await sendBundlePurchaseEmails(supabase, { bundleId, readerId, amountCents });
+  }
   return null;
 }
 
