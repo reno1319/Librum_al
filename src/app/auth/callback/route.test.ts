@@ -103,4 +103,144 @@ describe("GET /auth/callback", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(mockExchangeCodeForSession).not.toHaveBeenCalled();
   });
+
+  // LAUNCH-1 P1: `next` is now routed through the same centralized
+  // safe-redirect policy login() uses (src/lib/safe-redirect.ts) rather
+  // than the previous `${origin}${next}` string concatenation, whose
+  // safety against a raw unvalidated `next` was accidental (a property of
+  // how NextResponse.redirect happened to be called, not a designed
+  // guard). These assert on the actual Location header, not just the pure
+  // helper (already covered directly in src/lib/safe-redirect.test.ts).
+  describe("`next` redirect safety", () => {
+    it("a legitimate internal next is honored", async () => {
+      mockExchangeCodeForSession.mockResolvedValue({
+        data: { session: {}, user: {}, redirectType: null },
+        error: null,
+      });
+
+      const response = await GET(
+        new Request("https://librumal.vercel.app/auth/callback?code=abc&next=/library"),
+      );
+
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("https://librumal.vercel.app");
+      expect(location.pathname).toBe("/library");
+    });
+
+    it("a protocol-relative next cannot produce a cross-origin Location", async () => {
+      mockExchangeCodeForSession.mockResolvedValue({
+        data: { session: {}, user: {}, redirectType: null },
+        error: null,
+      });
+
+      const response = await GET(
+        new Request(
+          "https://librumal.vercel.app/auth/callback?code=abc&next=" +
+            encodeURIComponent("//evil.com/phish"),
+        ),
+      );
+
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("https://librumal.vercel.app");
+      expect(location.hostname).not.toBe("evil.com");
+      // Falls back to the route's existing default destination ("/"),
+      // not an error page -- an invalid `next` is ignored, same policy
+      // as login()'s.
+      expect(location.pathname).toBe("/");
+    });
+
+    it("a backslash-host next cannot produce a cross-origin Location", async () => {
+      mockExchangeCodeForSession.mockResolvedValue({
+        data: { session: {}, user: {}, redirectType: null },
+        error: null,
+      });
+
+      const response = await GET(
+        new Request(
+          "https://librumal.vercel.app/auth/callback?code=abc&next=" +
+            encodeURIComponent("/\\evil.com/phish"),
+        ),
+      );
+
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("https://librumal.vercel.app");
+      expect(location.hostname).not.toBe("evil.com");
+      expect(location.pathname).toBe("/");
+    });
+
+    it("a full external URL as next cannot produce a cross-origin Location", async () => {
+      mockExchangeCodeForSession.mockResolvedValue({
+        data: { session: {}, user: {}, redirectType: null },
+        error: null,
+      });
+
+      const response = await GET(
+        new Request(
+          "https://librumal.vercel.app/auth/callback?code=abc&next=" +
+            encodeURIComponent("https://evil.com/phish"),
+        ),
+      );
+
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("https://librumal.vercel.app");
+      expect(location.hostname).not.toBe("evil.com");
+      expect(location.pathname).toBe("/");
+    });
+
+    it("an unsafe next does not weaken P1-11 recovery-marker behavior -- a recovery exchange still sets the marker", async () => {
+      mockExchangeCodeForSession.mockResolvedValue({
+        data: { session: {}, user: {}, redirectType: "recovery" },
+        error: null,
+      });
+
+      const response = await GET(
+        new Request(
+          "https://librumal.vercel.app/auth/callback?code=abc&next=" +
+            encodeURIComponent("//evil.com/phish"),
+        ),
+      );
+
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("https://librumal.vercel.app");
+      const setCookieHeader = response.headers.get("set-cookie") ?? "";
+      expect(setCookieHeader).toContain(`${RECOVERY_COOKIE_NAME}=1`);
+    });
+
+    it("an unsafe next on an ordinary exchange still clears a stale recovery marker", async () => {
+      mockExchangeCodeForSession.mockResolvedValue({
+        data: { session: {}, user: {}, redirectType: null },
+        error: null,
+      });
+
+      const response = await GET(
+        new Request(
+          "https://librumal.vercel.app/auth/callback?code=abc&next=" +
+            encodeURIComponent("https://evil.com/phish"),
+        ),
+      );
+
+      const setCookieHeader = response.headers.get("set-cookie") ?? "";
+      expect(setCookieHeader).toContain(RECOVERY_COOKIE_NAME);
+      expect(setCookieHeader).not.toContain(`${RECOVERY_COOKIE_NAME}=1`);
+    });
+
+    it("a failed exchange with an unsafe next still redirects to /login, unaffected by next validation, and still does not touch the recovery marker", async () => {
+      mockExchangeCodeForSession.mockResolvedValue({
+        data: { session: null, user: null, redirectType: null },
+        error: { message: "invalid code" },
+      });
+
+      const response = await GET(
+        new Request(
+          "https://librumal.vercel.app/auth/callback?code=bad&next=" +
+            encodeURIComponent("//evil.com/phish"),
+        ),
+      );
+
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("https://librumal.vercel.app");
+      expect(location.pathname).toBe("/login");
+      expect(response.headers.get("set-cookie")).toBeNull();
+    });
+  });
 });

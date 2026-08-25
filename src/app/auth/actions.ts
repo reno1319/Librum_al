@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { clearRecoverySession } from "@/lib/recovery-session";
+import { resolveSafeInternalPath } from "@/lib/safe-redirect";
 import type { SignupRole } from "@/lib/types";
 
 // Never widen this beyond "author"/"reader" -- signup must never be
@@ -104,10 +105,16 @@ export async function login(formData: FormData) {
 
   revalidatePath("/", "layout");
 
-  // Only follow same-site relative paths, e.g. "/books/123" — never an
-  // absolute URL, which could redirect a user off the site.
-  if (next.startsWith("/")) {
-    redirect(next);
+  // LAUNCH-1 P1: routed through the centralized safe-redirect policy
+  // (src/lib/safe-redirect.ts) rather than a local `next.startsWith("/")`
+  // check -- that check alone accepted protocol-relative values like
+  // "//evil.com/phish", which browsers resolve cross-origin from a
+  // redirect. An invalid/unsafe `next` is silently ignored, not sent to an
+  // error page -- it just falls through to the normal role-based
+  // destination below, exactly as an absent `next` always has.
+  const safeNext = resolveSafeInternalPath(next);
+  if (safeNext) {
+    redirect(safeNext);
   }
 
   const {

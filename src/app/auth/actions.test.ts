@@ -186,6 +186,106 @@ describe("login: never marked as a recovery session", () => {
     expect(mockCookieStore.delete).not.toHaveBeenCalled();
   });
 
+  // LAUNCH-1 P1: login()'s `next` handling is routed through
+  // resolveSafeInternalPath (src/lib/safe-redirect.ts) rather than a local
+  // `next.startsWith("/")` check -- these regression tests prove the
+  // Server Action itself, end to end, not just the pure helper (already
+  // covered directly in src/lib/safe-redirect.test.ts).
+  describe("post-login `next` redirect safety", () => {
+    it("a legitimate same-site next redirects there", async () => {
+      await expectRedirectTo(
+        login(formData({ email: "reader@example.com", password: "hunter2", next: "/library" })),
+        "/library",
+      );
+    });
+
+    it("a protocol-relative next does NOT redirect off-site -- falls back to the normal role-based destination", async () => {
+      // mockImplementationOnce (not mockResolvedValue/mockImplementation)
+      // deliberately -- it reverts to the module-level default after this
+      // one call, so it can't leak a stale mockSupabaseAuth reference (or
+      // this test's `from()` shape) into any other test in this file.
+      mockCreateClient.mockImplementationOnce(() =>
+        Promise.resolve({
+          auth: mockSupabaseAuth,
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                single: () => Promise.resolve({ data: { role: "reader" } }),
+              }),
+            }),
+          }),
+        } as never),
+      );
+
+      await expectRedirectTo(
+        login(
+          formData({
+            email: "reader@example.com",
+            password: "hunter2",
+            next: "//evil.com/phish",
+          }),
+        ),
+        "/",
+      );
+
+      expect(mockRedirect).not.toHaveBeenCalledWith(expect.stringContaining("evil.com"));
+    });
+
+    it("a backslash-host next does NOT redirect off-site -- falls back to the normal role-based destination", async () => {
+      mockCreateClient.mockImplementationOnce(() =>
+        Promise.resolve({
+          auth: mockSupabaseAuth,
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                single: () => Promise.resolve({ data: { role: "reader" } }),
+              }),
+            }),
+          }),
+        } as never),
+      );
+
+      await expectRedirectTo(
+        login(
+          formData({
+            email: "reader@example.com",
+            password: "hunter2",
+            next: "/\\evil.com/phish",
+          }),
+        ),
+        "/",
+      );
+
+      expect(mockRedirect).not.toHaveBeenCalledWith(expect.stringContaining("evil.com"));
+    });
+
+    it("an invalid next falls back to the author role-based destination, not an error page", async () => {
+      mockCreateClient.mockImplementationOnce(() =>
+        Promise.resolve({
+          auth: mockSupabaseAuth,
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                single: () => Promise.resolve({ data: { role: "author" } }),
+              }),
+            }),
+          }),
+        } as never),
+      );
+
+      await expectRedirectTo(
+        login(
+          formData({
+            email: "author@example.com",
+            password: "hunter2",
+            next: "https://evil.com/phish",
+          }),
+        ),
+        "/dashboard",
+      );
+    });
+  });
+
   // LAUNCH-1 P1-11 STALE-MARKER CORRECTION: the explicit end-to-end
   // regression named in the correction's own spec -- recovery marker
   // exists (an earlier recovery attempt was abandoned) -> a LATER,

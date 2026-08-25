@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { setRecoverySession, clearRecoverySession } from "@/lib/recovery-session";
+import { resolveSafeInternalPath } from "@/lib/safe-redirect";
 
 // LAUNCH-1 P1-11: the installed @supabase/auth-js runtime attaches a
 // `redirectType` field to exchangeCodeForSession()'s resolved data when
@@ -38,7 +39,14 @@ export function isRecoveryExchange(exchangeResult: unknown): boolean {
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  // LAUNCH-1 P1: routed through the same centralized safe-redirect policy
+  // login() uses (src/lib/safe-redirect.ts) rather than trusting the raw
+  // query param. Building the final Location by concatenating `origin`
+  // (this route's own trusted, request-derived value -- never
+  // user-controlled) with a URL-parser-validated internal path is what
+  // actually closes this off, not the previous `${origin}${next}`
+  // concatenation's accidental (and fragile) safety.
+  const next = resolveSafeInternalPath(searchParams.get("next")) ?? "/";
 
   if (code) {
     const supabase = await createClient();
