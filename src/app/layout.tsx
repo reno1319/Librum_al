@@ -5,7 +5,7 @@ import { SiteFooter } from "@/components/site-footer";
 import "./globals.css";
 
 const inter = Inter({
-  variable: "--font-geist-sans",
+  variable: "--font-inter-sans",
   subsets: ["latin"],
 });
 

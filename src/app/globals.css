@@ -1,31 +1,104 @@
 @import "tailwindcss";
 
 @theme inline {
-  /* Librum.al palette — dark blue + orange + light gray. */
-  --color-background: #f5f6f8;
-  --color-surface: #ffffff;
-  --color-surface-hover: #eceef2;
-  --color-foreground: #1a2233;
-  --color-muted: #667085;
-  --color-border: #dbe0e8;
+  /* LIBRUM 2.0 — INK / PAPER / LIBRUM VIOLET. A warm, editorial palette
+     (warm off-white "paper" surfaces, warm near-black "ink" text) in
+     place of the earlier cool-gray "dark blue + orange + light gray"
+     scheme this comment used to describe. Librum Violet (--color-primary)
+     is unchanged — it was already the brand's recognizable accent, just
+     never rationalized as a token on its own (see the UI-1 audit). */
+  --color-background: #f8f6f1;
+  --color-surface: #fffdf9;
+  --color-surface-hover: #f1eee7;
+  --color-foreground: #201c1a;
+  --color-muted: #706a64;
+  --color-border: #ded9d1;
   --color-primary: #6a5cf0;
-  --color-primary-hover: #5445c9;
+  --color-primary-hover: #5849dc;
   --color-primary-foreground: #ffffff;
 
-  /* A second accent for the /bookstore page, so it reads as visually
-     distinct from the dark-blue Home (author pitch) page — a warm orange,
-     paired with the dark blue per the Librum.al brand palette. */
-  --color-accent: #e2751f;
+  /* A restrained warm terracotta accent, replacing the earlier bright
+     orange -- still a second brand color distinct from Librum Violet,
+     but tonally consistent with the warm PAPER/INK palette rather than
+     reading as a bold, separate "second product color." */
+  --color-accent: #9a5b45;
   --color-accent-foreground: #ffffff;
 
   /* Subtle full-bleed background tints — a faint wash of each page's
-     color over the base gray background, not a bold block of color. */
+     color over the base background, not a bold block of color.
+     Unchanged in this pass: neither is a text color, so the PAPER
+     background change doesn't create a new contrast problem for either,
+     and revisiting their exact hues is deferred to whichever page
+     redesign (UI-3+) actually renders them. */
   --color-author-tint: #e9eff8;
   --color-reader-tint: #fdf0e3;
 
-  --font-sans: var(--font-geist-sans);
+  /* LIBRUM 2.0 UI-1 — small structural token layer. Radius/shadow/
+     container are all Tailwind v4's own recognized @theme namespaces,
+     so each of these also becomes a real utility class (rounded-lg,
+     shadow-sm, max-w-content, etc.) — not just a variable to reference
+     manually. --space-section is deliberately NOT one of Tailwind's
+     magic namespaces (there is no auto-utility-generating "--space-*"
+     scale) -- it's a plain custom property, applied via Tailwind's
+     arbitrary-value syntax (e.g. py-[var(--space-section)]) where a
+     page needs the standard section rhythm.
+     Deliberately small: four radii, two shadows, one spacing token,
+     four container widths -- not a full theoretical scale. */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 999px;
+
+  --shadow-sm: 0 1px 2px rgb(32 28 26 / 0.06);
+  --shadow-md: 0 6px 18px rgb(32 28 26 / 0.08);
+
+  --space-section: 4rem;
+
+  --container-form: 24rem;
+  --container-content: 42rem;
+  --container-app: 64rem;
+  --container-wide: 72rem;
+
+  --font-sans: var(--font-inter-sans);
   --font-serif: var(--font-playfair);
   --font-mono: var(--font-geist-mono);
+}
+
+/* LIBRUM 2.0 UI-1 — the reusable keyboard-focus treatment every new
+   interactive primitive uses (Button, and future Input/Select/etc. in
+   later UI phases). Deliberately scoped to elements that opt in via
+   .focus-ring, not a global outline reset: outline is suppressed only
+   on those elements, and only ever paired with the box-shadow ring
+   below at :focus-visible -- never silently removed with nothing to
+   replace it. Based on Librum Violet (--color-primary), with a
+   background-colored inner ring so it reads clearly against either a
+   PAPER surface or a filled primary-colored button. */
+:root {
+  --focus-ring: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-primary);
+}
+
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+/* LIBRUM 2.0 UI-1 — restrained prefers-reduced-motion handling.
+   Deliberately does NOT blanket-disable transition-duration: doing so
+   would also silence ordinary hover/focus color and shadow transitions
+   on interactive elements, which are functional state-change feedback,
+   not gratuitous motion. This only flattens actual animation
+   (keyframe-driven effects -- currently none in the app, but this is
+   the correct default for whatever UI-2+ introduces) and instant
+   in-page scrolling, leaving every existing transition-colors/
+   transition-shadow hover/focus effect intact either way. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 body {
