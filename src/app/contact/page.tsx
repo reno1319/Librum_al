@@ -10,16 +10,11 @@ export default function ContactPage() {
 
       <p className="mt-4">
         <a
-          href="mailto:support@librum.example"
+          href="mailto:support@librum.al"
           className="text-lg font-medium text-primary underline"
         >
-          support@librum.example
+          support@librum.al
         </a>
-      </p>
-
-      <p className="mt-6 text-sm text-muted">
-        (Placeholder address — replace with a real inbox before this
-        platform handles real users.)
       </p>
     </main>
   );
