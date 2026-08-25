@@ -637,10 +637,13 @@ create index bundle_checkout_reservations_book_id_idx on public.bundle_checkout_
 -- reader_id uses ON DELETE RESTRICT, unconditionally, for the same
 -- reason as bundle_checkout_reservations.book_id above -- cleared on
 -- fulfillment or expiry by clear_expired_reader_holds() below, never by
--- a weaker FK. Once fulfilled, the reader is protected instead by
--- purchases.reader_id's own (intentionally CASCADE, not restrict) FK --
--- a reader deleting their account after a genuine purchase is expected
--- to take their purchase history with it, unchanged from today.
+-- a weaker FK. Once fulfilled, this hold row is deleted as part of
+-- fulfillment itself (see fulfillBundleSnapshot's own reservation/hold
+-- cleanup), so it's no longer present to block anything by the time a
+-- reader might later delete their account -- unrelated to how
+-- purchases.reader_id itself now behaves on profile deletion (SET
+-- NULL, not CASCADE, as of migration 038; see the purchases table's
+-- own definition below).
 create table public.bundle_checkout_reader_holds (
   id uuid primary key default gen_random_uuid(),
   snapshot_id uuid not null unique references public.bundle_checkout_snapshots(id) on delete cascade,
@@ -1132,7 +1135,20 @@ create table public.purchases (
   -- purchase's actual subject and must never be severed or allow its
   -- row to be cascaded away.
   book_id uuid not null references public.books(id) on delete restrict,
-  reader_id uuid not null references public.profiles(id) on delete cascade,
+  -- LAUNCH-1: nullable, ON DELETE SET NULL -- not CASCADE. This is a
+  -- financial/audit record: deleting the owning profile must not
+  -- silently delete the record of what was purchased, only detach it
+  -- from the (now-gone) profile, matching bundle_checkout_snapshots.
+  -- reader_id, refund_requests.reader_id, and book_checkout_intents.
+  -- reader_id, which already use this same SET NULL pattern. No
+  -- application code depends on reader_id being non-null here -- RLS
+  -- ("auth.uid() = reader_id") and user_owns_book() are both NULL-safe
+  -- by ordinary SQL three-valued logic, and author-side accounting
+  -- (the "Authors can view purchases of their own books" policy below)
+  -- scopes through books.author_id, never through reader_id. See
+  -- migration 038 and the Purchase History Retention Alignment
+  -- audit/design report for the full reasoning.
+  reader_id uuid references public.profiles(id) on delete set null,
   -- Not unique on its own: a bundle checkout is one Stripe session that
   -- fans out into one purchase row per book in the bundle, so several
   -- rows can share the same session id. (book_id, reader_id) below is
@@ -1684,10 +1700,11 @@ grant execute on function public.is_admin() to authenticated;
 
 create table public.refund_requests (
   id uuid primary key default gen_random_uuid(),
-  -- Nullable, ON DELETE SET NULL -- not RESTRICT, and not the CASCADE
-  -- purchases.reader_id itself uses. This is a financial/audit record:
-  -- deleting the owning profile must not silently delete the record of
-  -- what was requested, only detach it from the (now-gone) profile.
+  -- Nullable, ON DELETE SET NULL -- not RESTRICT. This is a
+  -- financial/audit record: deleting the owning profile must not
+  -- silently delete the record of what was requested, only detach it
+  -- from the (now-gone) profile -- the same pattern purchases.reader_id
+  -- itself now uses as of migration 038 (previously CASCADE).
   -- request_refund() below always populates this from auth.uid() at
   -- creation time -- NULL is only ever reached afterward, as the result
   -- of profile deletion, never inserted directly.
@@ -1819,11 +1836,14 @@ create policy "Admins can view all refund requests"
 create table public.refund_request_items (
   id uuid primary key default gen_random_uuid(),
   refund_request_id uuid not null references public.refund_requests(id) on delete cascade,
-  -- Nullable, ON DELETE SET NULL: purchases.reader_id cascades on
-  -- profile deletion (existing, already-shipped behavior -- see
-  -- schema.sql), so a purchases row this line item points at can be
-  -- deleted out from under it as a side effect of the reader's account
-  -- being deleted. RESTRICT here would then block that entire profile
+  -- Nullable, ON DELETE SET NULL. As of migration 038,
+  -- purchases.reader_id is itself SET NULL (not CASCADE) on profile
+  -- deletion, so a purchases row this line item points at is no longer
+  -- deleted as a side effect of the reader's account being deleted --
+  -- but this column stays SET NULL regardless, on the same general
+  -- financial/audit-record principle applied throughout this schema:
+  -- a purchases row could in principle still be removed some other
+  -- way, and RESTRICT here would then block that entire profile
   -- deletion from completing at all -- exactly the problem
   -- refund_requests.reader_id's own ON DELETE SET NULL exists to avoid,
   -- just one join further away. book_id and amount_cents below are

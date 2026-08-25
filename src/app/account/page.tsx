@@ -39,8 +39,16 @@ export default async function AccountPage({
           This permanently deletes your account
           {profile?.role === "author"
             ? ", every book you've published, and their files"
-            : " and your purchase history"}
+            : " and removes your access to your library"}
           . This can&apos;t be undone.
+          {profile?.role !== "author" && (
+            <>
+              {" "}
+              Some transaction records may be retained, detached from
+              your account, where necessary for payment accounting,
+              refunds, disputes, or legal obligations.
+            </>
+          )}
         </p>
 
         {error && (
