@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import type { createAdminClient } from "@/lib/supabase/admin";
+import { resolveSiteOrigin } from "@/lib/site-url";
 
 const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
 
@@ -25,7 +26,7 @@ export async function sendPurchaseEmails(
   admin: ReturnType<typeof createAdminClient>,
   { bookId, readerId, amountCents }: { bookId: string; readerId: string; amountCents: number },
 ) {
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const origin = resolveSiteOrigin();
 
   const { data: book } = await admin
     .from("books")
@@ -72,7 +73,7 @@ export async function sendBundlePurchaseEmails(
   admin: ReturnType<typeof createAdminClient>,
   { bundleId, readerId, amountCents }: { bundleId: string; readerId: string; amountCents: number },
 ) {
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const origin = resolveSiteOrigin();
 
   const { data: bundle } = await admin
     .from("bundles")
@@ -139,7 +140,7 @@ export async function sendSnapshotBundlePurchaseEmails(
     amountCents: number;
   },
 ) {
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const origin = resolveSiteOrigin();
 
   const [{ data: reader }, { data: author }] = await Promise.all([
     admin.auth.admin.getUserById(readerId),
@@ -189,7 +190,7 @@ export async function sendNewBookEmails(
   admin: ReturnType<typeof createAdminClient>,
   { bookId, authorId }: { bookId: string; authorId: string },
 ) {
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const origin = resolveSiteOrigin();
 
   const [{ data: book }, { data: author }, { data: follows }] = await Promise.all([
     admin.from("books").select("title").eq("id", bookId).single(),

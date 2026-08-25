@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
+import { resolveSiteOrigin } from "@/lib/site-url";
 
 export async function connectStripeAccount() {
   const supabase = await createClient();
@@ -43,7 +44,7 @@ export async function connectStripeAccount() {
       .eq("id", user.id);
   }
 
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const origin = resolveSiteOrigin();
 
   const accountLink = await stripe.accountLinks.create({
     account: accountId,

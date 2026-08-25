@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
 import { platformFeeCents } from "@/lib/pricing";
+import { resolveSiteOrigin } from "@/lib/site-url";
 import {
   classifyLinkBackResult,
   shouldExposeStripeCheckoutSession,
@@ -139,7 +140,7 @@ export async function buyBundle(bundleId: string) {
 
   const stripeExpiresAtSeconds = Math.floor(protectionExpiresAtMs / 1000);
 
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const origin = resolveSiteOrigin();
 
   let session: Awaited<ReturnType<typeof stripe.checkout.sessions.create>>;
   try {

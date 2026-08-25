@@ -10,6 +10,7 @@ import { stripe } from "@/lib/stripe";
 import { platformFeeCents } from "@/lib/pricing";
 import { REPORT_REASONS } from "@/lib/report-reasons";
 import { toStripeExpiresAtSeconds } from "./checkout-logic";
+import { resolveSiteOrigin } from "@/lib/site-url";
 import type { DiscountCode } from "@/lib/types";
 
 type BookForCheckout = {
@@ -159,7 +160,7 @@ export async function buyBook(bookId: string, formData: FormData) {
     redirect(`/books/${bookId}?error=Could+not+start+checkout`);
   }
 
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const origin = resolveSiteOrigin();
 
   let session: Stripe.Checkout.Session;
   try {
