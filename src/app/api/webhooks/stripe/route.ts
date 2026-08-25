@@ -1793,7 +1793,7 @@ export async function processDisputeEvent(
 // ============================================================
 
 const LOST_DISPUTE_RECOVERY_OPERATION = "lost_dispute_recovery";
-const LOST_DISPUTE_RECOVERY_FORMULA_VERSION = "1";
+const LOST_DISPUTE_RECOVERY_FORMULA_VERSION = "2";
 
 // Deterministic idempotency key for a lost-dispute transfer-reversal
 // attempt, mirroring buildRefundIdempotencyKey's own naming convention
@@ -1929,12 +1929,17 @@ async function claimTransferReversalAttempt(
 async function resolveDisputeChargeAndTransfer(
   stripeClient: StripeDisputeVerificationClient,
   dispute: Stripe.Dispute,
-): Promise<{ charge: Stripe.Charge; transferId: string } | { error: string }> {
+): Promise<
+  | { charge: Stripe.Charge; transferId: string; applicationFee: Stripe.ApplicationFee | null }
+  | { error: string }
+> {
   const chargeId = typeof dispute.charge === "string" ? dispute.charge : dispute.charge.id;
 
   let charge: Stripe.Charge;
   try {
-    charge = await stripeClient.charges.retrieve(chargeId, { expand: ["transfer"] });
+    charge = await stripeClient.charges.retrieve(chargeId, {
+      expand: ["transfer", "application_fee"],
+    });
   } catch (error) {
     return {
       error: `failed to retrieve disputed charge: ${
@@ -1950,7 +1955,27 @@ async function resolveDisputeChargeAndTransfer(
     return { error: "disputed charge has no destination transfer id" };
   }
 
-  return { charge, transferId };
+  // The charge's application fee must resolve to a fully expanded object
+  // whenever the charge claims one exists (application_fee_amount is a
+  // genuine number) -- never silently treat an unexpanded id string, or
+  // any other unusable shape, as "no fee refunded yet." A charge with no
+  // fee at all (application_fee_amount null/absent) legitimately has no
+  // ApplicationFee object either -- checked via typeof rather than
+  // `!== null` so an absent field is never mistaken for "has a fee."
+  let applicationFee: Stripe.ApplicationFee | null = null;
+  if (typeof charge.application_fee_amount === "number") {
+    if (!charge.application_fee || typeof charge.application_fee === "string") {
+      return { error: "disputed charge has an application fee amount but no expanded application_fee object" };
+    }
+    applicationFee = charge.application_fee;
+    const feeChargeId =
+      typeof applicationFee.charge === "string" ? applicationFee.charge : applicationFee.charge?.id;
+    if (feeChargeId !== charge.id) {
+      return { error: "resolved application fee does not belong to the disputed charge" };
+    }
+  }
+
+  return { charge, transferId, applicationFee };
 }
 
 // Identifies THIS Librum lost-dispute recovery's own TransferReversal,
@@ -1987,42 +2012,80 @@ async function findExistingLostDisputeReversal(
 }
 
 // The FINAL approved reversal-amount formula (Migration 036 design,
-// round 4 -- externally verified against current Stripe documentation:
-// a partially-refunded payment CAN subsequently be disputed for the
-// full payment amount, so Dispute.amount must never be assumed already
-// netted against a prior refund). Always reads live Stripe values --
-// transfer.amount, transfer.amount_reversed, dispute.amount,
-// charge.amount -- NEVER Librum's own 80/20 platform-fee split
-// (src/lib/pricing.ts's PLATFORM_FEE_PERCENT is not consulted anywhere
-// in this computation).
+// ROUND 5 CORRECTION -- LAUNCH-1 P1 REOPEN). The round-4 formula below
+// this comment used to multiply by transfer.amount directly, treating
+// it as if it already represented the author's economic share. It does
+// not: under Librum's destination-charge model (application_fee_amount
+// + transfer_data.destination, no transfer_data.amount), Stripe
+// transfers the FULL GROSS charge amount to the connected account and
+// separately claws back application_fee_amount to the platform -- so
+// transfer.amount is gross, not net (verified against the installed
+// Stripe SDK's own doc comments: Charges.d.ts's application_fee_amount
+// field, Refunds.d.ts's reverse_transfer/refund_application_fee text,
+// and TransferCreateReversalParams.refund_application_fee's text --
+// reconciled cent-by-cent, including the compound prior-partial-
+// refund-then-dispute case, in the LAUNCH-1 P1 REOPEN audit). The old
+// formula therefore reversed the author's own already-collected
+// platform-fee share right along with their true economic proceeds --
+// on a 1000/200 sale, a full dispute reversed 1000 from an author who
+// had only ever net-received 800. Fixed by introducing
+// authorEconomicShare below; everything else about this function's
+// existing contract (live Stripe values only, never
+// PLATFORM_FEE_PERCENT, remainingTransfer as a hard ceiling, returns
+// null rather than a guessed amount on invalid input) is unchanged.
 //
-// targetAmount: the author's proportional share of what THIS dispute
-// claims, computed against the transfer's ORIGINAL amount (fixed, never
-// shrinks) -- not the current remaining balance, which would
-// double-apply the dispute's proportion against an already-reduced
-// base (see the design report's worked 800/200/50% example for why
-// that alternative over-recovers).
+// authorEconomicShare: the author's true net proceeds from the ENTIRE
+// original charge -- charge.amount minus the HISTORICAL, immutable
+// application_fee_amount actually charged at sale time. Deliberately
+// read from the Charge object itself, never recomputed from today's
+// PLATFORM_FEE_PERCENT: a dispute can arrive long after the sale, and
+// if the platform fee percentage ever changes in between, recomputing
+// it now would silently apply the WRONG, current percentage to an OLD
+// transaction instead of the one actually charged. Capped at
+// transfer.amount itself so a hypothetical charge that used
+// transfer_data.amount directly (no application_fee_amount at all,
+// application_fee_amount null) degrades safely to reversing at most
+// what the transfer itself ever carried.
+//
+// targetAmount: authorEconomicShare's own proportional share of what
+// THIS dispute claims, computed against the transfer's ORIGINAL amount
+// (fixed, never shrinks) -- not the current remaining balance, which
+// would double-apply the dispute's proportion against an already-
+// reduced base (see the design report's worked 800/200/50% example for
+// why that alternative over-recovers). Note the denominator remains
+// charge.amount, not authorEconomicShare -- dispute.amount is always
+// expressed against the original charge, and this ratio is what
+// authorEconomicShare itself is scaled by.
 //
 // remainingTransfer (transfer.amount - transfer.amount_reversed) is
-// used ONLY as a hard ceiling -- the same ceiling Stripe itself enforces
-// (createReversal() "Can only reverse up to the unreversed amount
-// remaining of the transfer") -- amount_reversed is NEVER subtracted
-// from targetAmount itself, regardless of what caused a prior reversal
-// (an earlier refund's reverse_transfer, or a distinct earlier dispute
-// on the same PaymentIntent -- Stripe can exceptionally create multiple
-// disputes for one payment; each is identified and idempotency-guarded
-// independently by its own stripe_dispute_id via claimTransferReversal
-// Attempt/buildTransferReversalIdempotencyKey above, but all of them
-// share this ONE aggregate ceiling, which is exactly what prevents them
-// from cumulatively over-reversing the transfer).
+// still used ONLY as a hard ceiling -- the same ceiling Stripe itself
+// enforces (createReversal() "Can only reverse up to the unreversed
+// amount remaining of the transfer") -- amount_reversed is NEVER
+// subtracted from targetAmount itself, regardless of what caused a
+// prior reversal (an earlier refund's reverse_transfer, or a distinct
+// earlier dispute on the same PaymentIntent -- Stripe can exceptionally
+// create multiple disputes for one payment; each is identified and
+// idempotency-guarded independently by its own stripe_dispute_id via
+// claimTransferReversalAttempt/buildTransferReversalIdempotencyKey
+// above, but all of them share this ONE aggregate ceiling, which is
+// exactly what prevents them from cumulatively over-reversing the
+// transfer). Proven correct even after a prior partial refund's own
+// reverse_transfer in the P1 REOPEN audit's worked ledger: since
+// transfer.amount_reversed already reflects that reversal regardless of
+// its source, and targetAmount's own fee-adjusted numerator is what
+// keeps the pre-clamp value economically correct, the two compose
+// exactly to the author's true remaining share -- no more, no less.
 //
-// Returns null (never a guessed amount) if charge.amount is not usable
-// -- the caller persists a 'failed' state with an explicit reason
-// rather than proceeding on inconsistent data.
+// Every input is validated before use -- a malformed Stripe shape (a
+// negative or over-large application_fee_amount, a negative or
+// inverted transfer/reversal pair, a non-positive dispute amount) fails
+// closed (returns null, the caller persists 'failed' with an explicit
+// reason) rather than deriving a guessed amount from inconsistent data.
 function computeLostDisputeReversalAmountCents(
   transfer: Pick<Stripe.Transfer, "amount" | "amount_reversed">,
   dispute: Pick<Stripe.Dispute, "amount">,
-  charge: Pick<Stripe.Charge, "amount">,
+  charge: Pick<Stripe.Charge, "amount" | "application_fee_amount">,
+  applicationFee: Pick<Stripe.ApplicationFee, "amount" | "amount_refunded"> | null,
 ): number | null {
   if (!Number.isFinite(charge.amount) || charge.amount <= 0) {
     return null;
@@ -2030,12 +2093,75 @@ function computeLostDisputeReversalAmountCents(
   if (!Number.isFinite(transfer.amount) || !Number.isFinite(transfer.amount_reversed)) {
     return null;
   }
+  if (transfer.amount < 0 || transfer.amount_reversed < 0) {
+    return null;
+  }
+  if (transfer.amount_reversed > transfer.amount) {
+    return null;
+  }
+  if (!Number.isFinite(dispute.amount) || dispute.amount <= 0) {
+    return null;
+  }
+  // Stripe's own docs note a dispute's amount can differ from (and in
+  // particular exceed) the disputed charge's amount, e.g. via currency
+  // fluctuation on a currency-converted charge. Rather than clamp the
+  // ratio in that case -- which would silently redefine what "fully
+  // disputed" means -- fail closed. This is an intentional product
+  // policy for now, not a Stripe guarantee we're relying on.
+  if (dispute.amount > charge.amount) {
+    return null;
+  }
 
+  const applicationFeeAmount = charge.application_fee_amount ?? 0;
+  if (!Number.isFinite(applicationFeeAmount) || applicationFeeAmount < 0) {
+    return null;
+  }
+  if (applicationFeeAmount > charge.amount) {
+    return null;
+  }
+
+  if (applicationFee) {
+    if (!Number.isInteger(applicationFee.amount) || applicationFee.amount < 0) {
+      return null;
+    }
+    if (
+      !Number.isInteger(applicationFee.amount_refunded) ||
+      applicationFee.amount_refunded < 0 ||
+      applicationFee.amount_refunded > applicationFee.amount
+    ) {
+      return null;
+    }
+  }
+
+  // originalAuthorEconomicShare: what the author was ever entitled to
+  // from this sale, in gross-transfer terms -- min() guards against a
+  // legacy/foreign transfer whose amount is already net of the fee.
+  const originalAuthorEconomicShare = Math.min(transfer.amount, charge.amount - applicationFeeAmount);
+  // remainingAuthorEconomicProceeds: originalAuthorEconomicShare, minus
+  // every dollar already clawed back via prior transfer reversals
+  // (refunds and/or earlier dispute recoveries alike -- transfer.
+  // amount_reversed is their live, cumulative, mechanism-agnostic
+  // total), plus every dollar of platform-fee refund Librum has ever
+  // credited back to the connected account for this charge (Application
+  // Fee amount_refunded is likewise live and cumulative). This is the
+  // authoritative live-Stripe-state ceiling: it can never be exceeded no
+  // matter how many prior refunds/disputes/reversals already happened,
+  // in any order, from any source.
+  const applicationFeeAmountRefunded = applicationFee?.amount_refunded ?? 0;
+  const remainingAuthorEconomicProceeds = Math.max(
+    0,
+    originalAuthorEconomicShare - transfer.amount_reversed + applicationFeeAmountRefunded,
+  );
+  const proportionalTarget = Math.round(
+    (originalAuthorEconomicShare * dispute.amount) / charge.amount,
+  );
   const remainingTransfer = transfer.amount - transfer.amount_reversed;
-  const targetAmount = Math.round((transfer.amount * dispute.amount) / charge.amount);
-  const amountToReverseNow = Math.min(targetAmount, remainingTransfer);
+  const amountToReverseNow = Math.max(
+    0,
+    Math.min(proportionalTarget, remainingTransfer, remainingAuthorEconomicProceeds),
+  );
 
-  return Math.max(0, amountToReverseNow);
+  return amountToReverseNow;
 }
 
 async function succeedTransferReversalAttempt(
@@ -2127,7 +2253,7 @@ export async function reverseAuthorTransferForLostDispute(
     await failTransferReversalAttempt(supabase, dispute.id, resolved.error);
     return { kind: "failed", message: resolved.error };
   }
-  const { charge, transferId } = resolved;
+  const { charge, transferId, applicationFee } = resolved;
 
   if (!claim.existingTransferId) {
     const { error: linkError } = await supabase
@@ -2164,7 +2290,12 @@ export async function reverseAuthorTransferForLostDispute(
     return { kind: "failed", message };
   }
 
-  const amountToReverseNow = computeLostDisputeReversalAmountCents(transfer, dispute, charge);
+  const amountToReverseNow = computeLostDisputeReversalAmountCents(
+    transfer,
+    dispute,
+    charge,
+    applicationFee,
+  );
   if (amountToReverseNow === null) {
     const message = "unable to compute a safe reversal amount from live Stripe state";
     await failTransferReversalAttempt(supabase, dispute.id, message);

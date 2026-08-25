@@ -2697,11 +2697,55 @@ describe("reverseAuthorTransferForLostDispute", () => {
 
   function makeFakeReversalClient(params: {
     charge?: Partial<Stripe.Charge> | "not_found";
+    // Controls the resolved application_fee field on the fake charge.
+    // Omitted (default): auto-derive a valid, fully-expanded
+    // ApplicationFee from application_fee_amount whenever the charge
+    // sets a non-null application_fee_amount, with amount_refunded
+    // defaulting to 0 unless overridden via a partial object here.
+    // "unexpanded": simulate Stripe returning only the fee's id string
+    // (expansion somehow failed/was dropped) -- must fail closed.
+    // "missing": simulate a null application_fee despite a non-null
+    // application_fee_amount -- must fail closed.
+    // "mismatched_charge": the expanded fee object's own .charge points
+    // at a DIFFERENT charge id -- must fail closed.
+    applicationFee?:
+      | Partial<Stripe.ApplicationFee>
+      | "unexpanded"
+      | "missing"
+      | "mismatched_charge";
     transfer?: Partial<Stripe.Transfer> | "not_found";
     reversals?: Partial<Stripe.TransferReversal>[];
     createReversalResult?: Partial<Stripe.TransferReversal>;
     createReversalError?: Error;
   }) {
+    const chargeOverrides = params.charge === "not_found" ? {} : (params.charge ?? {});
+    const applicationFeeAmount: number | null =
+      "application_fee_amount" in chargeOverrides
+        ? (chargeOverrides.application_fee_amount ?? null)
+        : null;
+
+    let resolvedApplicationFee: Stripe.Charge["application_fee"] = null;
+    if (applicationFeeAmount !== null) {
+      if (params.applicationFee === "unexpanded") {
+        resolvedApplicationFee = "fee_test_reversal";
+      } else if (params.applicationFee === "missing") {
+        resolvedApplicationFee = null;
+      } else {
+        const feeOverrides =
+          params.applicationFee === "mismatched_charge"
+            ? { charge: "ch_some_other_unrelated_charge" }
+            : (params.applicationFee ?? {});
+        resolvedApplicationFee = {
+          id: "fee_test_reversal",
+          object: "fee",
+          amount: applicationFeeAmount,
+          amount_refunded: 0,
+          charge: CHARGE_ID,
+          ...feeOverrides,
+        } as Stripe.ApplicationFee;
+      }
+    }
+
     const chargesRetrieve = vi.fn(() => {
       if (params.charge === "not_found") return Promise.reject(new Error("No such charge"));
       return Promise.resolve({
@@ -2709,7 +2753,9 @@ describe("reverseAuthorTransferForLostDispute", () => {
         object: "charge",
         amount: 500,
         transfer: TRANSFER_ID,
-        ...params.charge,
+        application_fee_amount: null,
+        ...chargeOverrides,
+        application_fee: resolvedApplicationFee,
       } as Stripe.Charge);
     });
 
@@ -2729,7 +2775,12 @@ describe("reverseAuthorTransferForLostDispute", () => {
       autoPagingToArray: () => Promise.resolve(reversalsArray),
     }));
 
-    const createReversal = vi.fn(() => {
+    const createReversal = vi.fn<
+      (
+        transferId: string,
+        params: { amount: number; metadata: Record<string, string> },
+      ) => Promise<Stripe.TransferReversal>
+    >(() => {
       if (params.createReversalError) return Promise.reject(params.createReversalError);
       return Promise.resolve({
         id: "trr_test_reversal",
@@ -2771,6 +2822,10 @@ describe("reverseAuthorTransferForLostDispute", () => {
     );
 
     expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 400 });
+    // Exact (not objectContaining) match -- this also proves
+    // refund_application_fee is never included in the params object at
+    // all (LAUNCH-1 P1 REOPEN requirement #3/#14): any extra key here
+    // would break this exact-match assertion.
     expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
       TRANSFER_ID,
       {
@@ -2779,7 +2834,7 @@ describe("reverseAuthorTransferForLostDispute", () => {
           librum_operation: "lost_dispute_recovery",
           stripe_dispute_id: DISPUTE_ID,
           stripe_payment_intent_id: PAYMENT_INTENT_ID,
-          recovery_formula_version: "1",
+          recovery_formula_version: "2",
         },
       },
       { idempotencyKey: buildTransferReversalIdempotencyKey(DISPUTE_ID, 1) },
@@ -2890,6 +2945,13 @@ describe("reverseAuthorTransferForLostDispute", () => {
             librum_operation: "lost_dispute_recovery",
             stripe_dispute_id: DISPUTE_ID,
             stripe_payment_intent_id: PAYMENT_INTENT_ID,
+            // Deliberately still "1" -- represents a reversal a PRIOR
+            // deploy already created in Stripe before the LAUNCH-1 P1
+            // REOPEN formula fix shipped. findExistingLostDisputeReversal
+            // matches on librum_operation + stripe_dispute_id only, never
+            // on this version tag, so a pre-fix reversal must still be
+            // found and reconciled as-is by the corrected code -- never
+            // re-attempted, never rewritten.
             recovery_formula_version: "1",
           },
         },
@@ -2958,6 +3020,8 @@ describe("reverseAuthorTransferForLostDispute", () => {
             librum_operation: "lost_dispute_recovery",
             stripe_dispute_id: DISPUTE_ID,
             stripe_payment_intent_id: PAYMENT_INTENT_ID,
+            // Deliberately still "1" -- see the identical note on the
+            // metadata-correlation test above.
             recovery_formula_version: "1",
           },
         },
@@ -3107,6 +3171,264 @@ describe("reverseAuthorTransferForLostDispute", () => {
     expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
   });
 
+  // ---------------------------------------------------------------------
+  // LAUNCH-1 P1 REOPEN -- malformed-economic-shape guards. Every one of
+  // these represents a Stripe object shape that should be impossible for
+  // a charge Librum itself created, but the function must fail closed
+  // (return null / persist 'failed') rather than derive a guessed amount
+  // from inconsistent data, exactly like the pre-existing charge.amount
+  // <= 0 guard above.
+  // ---------------------------------------------------------------------
+  it("application_fee_amount < 0: fails closed rather than guessing an amount", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: -1 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  it("application_fee_amount > charge.amount: fails closed rather than guessing an amount", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 1001 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  it("transfer.amount_reversed > transfer.amount: an invalid/inverted reversal state fails closed", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 1001 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  it("transfer.amount < 0: fails closed rather than guessing an amount", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: -1, amount_reversed: 0 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  it("dispute.amount <= 0: fails closed rather than guessing an amount", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 0 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 0 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  // LAUNCH-1 P1 REOPEN, live-Stripe-state ceiling -- dispute.amount can
+  // legitimately exceed charge.amount per Stripe's own documentation
+  // (e.g. currency fluctuation on a currency-converted charge). Rather
+  // than clamp the ratio in that case, fail closed: this is an
+  // intentional product policy, not a Stripe guarantee being relied on.
+  it("dispute.amount > charge.amount: fails closed rather than clamping the ratio", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 0 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1001 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  // ---------------------------------------------------------------------
+  // LAUNCH-1 P1 REOPEN -- malformed/unresolvable ApplicationFee state.
+  // Every one of these represents a Stripe response shape that should be
+  // impossible for a charge Librum itself created with a non-null
+  // application_fee_amount, but the function must fail closed rather
+  // than silently assume amount_refunded=0 (which would be the WRONG
+  // direction to guess in: it would let a real fee refund go unaccounted
+  // for, letting a later dispute over-debit the author).
+  // ---------------------------------------------------------------------
+  it("application fee resolved but not expanded (still a raw id string): fails closed rather than assuming zero fee refund", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 0 },
+      applicationFee: "unexpanded",
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  it("application fee missing entirely despite a non-null application_fee_amount: fails closed", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 0 },
+      applicationFee: "missing",
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  it("expanded application fee belongs to a DIFFERENT charge (inconsistent Stripe state): fails closed", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 0 },
+      applicationFee: "mismatched_charge",
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  it("applicationFee.amount_refunded < 0: fails closed rather than guessing an amount", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 0 },
+      applicationFee: { amount_refunded: -1 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  it("applicationFee.amount_refunded > applicationFee.amount: fails closed rather than guessing an amount", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 0 },
+      applicationFee: { amount: 200, amount_refunded: 201 },
+    });
+
+    const outcome = await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(outcome.kind).toBe("failed");
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_status).toBe("failed");
+  });
+
+  // LAUNCH-1 P1 REOPEN -- confirms the exact expand array requested from
+  // Stripe includes application_fee (not just transfer), and that this
+  // is asserted against the actual call arguments the code sent, not
+  // just against downstream fake object shapes that could pass even if
+  // the real expand parameter were wrong.
+  it("requests both transfer and application_fee expansion on the disputed charge retrieval", async () => {
+    const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+    const supabase = makeFakeSupabase(tables);
+    const stripeClient = makeFakeReversalClient({
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 0 },
+    });
+
+    await reverseAuthorTransferForLostDispute(
+      supabase as never,
+      stripeClient as never,
+      makeFakeDispute({ amount: 1000 }),
+    );
+
+    expect(stripeClient.charges.retrieve).toHaveBeenCalledWith(CHARGE_ID, {
+      expand: ["transfer", "application_fee"],
+    });
+  });
+
   it("fully-reversed transfer -> zero additional reversal, no Stripe mutation call", async () => {
     const tables: Tables = { payment_disputes: [freshDisputeRow()] };
     const supabase = makeFakeSupabase(tables);
@@ -3126,55 +3448,74 @@ describe("reverseAuthorTransferForLostDispute", () => {
     expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(0);
   });
 
-  // LAUNCH-1 P1-8, final approved formula: targetAmount = round(transfer.
-  // amount * dispute.amount / charge.amount), clamped to transfer.amount
-  // - transfer.amount_reversed -- amount_reversed is NEVER subtracted
-  // from targetAmount itself. Worked example from the design report:
-  // transfer=800, already reversed=200 (any cause), dispute.amount=50,
-  // charge.amount=100 -> target = 800*50/100 = 400; remaining = 600;
-  // min(400,600) = 400 (not 300, and not 200).
-  it("partial prior reversal (any cause) + partial dispute: uses the FINAL approved formula, not remaining*proportion and not target-minus-reversed", async () => {
+  // LAUNCH-1 P1 REOPEN, live-Stripe-state ceiling formula:
+  // originalAuthorEconomicShare = min(transfer.amount, charge.amount -
+  // applicationFeeAmount) = 800. remainingAuthorEconomicProceeds =
+  // max(0, originalAuthorEconomicShare - transfer.amount_reversed +
+  // applicationFeeAmountRefunded) = max(0, 800 - 200 + 0) = 600 (the
+  // prior 200-cent reversal is assumed, absent any recorded
+  // ApplicationFee refund, to have come entirely out of the author's own
+  // remaining share -- the worst case for the author, and the only one
+  // the live Stripe state actually attests to). proportionalTarget =
+  // round(800*800/1000) = 640. remainingTransfer = 1000-200 = 800.
+  // amountToReverseNow = min(640, 800, 600) = 600 -- the economic
+  // ceiling, not the proportional target, is what actually binds here.
+  // This supersedes an earlier (uncommitted, never-shipped) intermediate
+  // formula that lacked this ceiling and would have reversed 640 here --
+  // over-debiting the author by 40 cents beyond their true remaining
+  // proceeds whenever a prior reversal wasn't accompanied by a matching
+  // application-fee refund.
+  it("prior partial reversal (any cause, no fee refund) + dispute on the remainder: reverses only the author's true remaining economic proceeds, not the naive proportional target", async () => {
     const tables: Tables = { payment_disputes: [freshDisputeRow()] };
     const supabase = makeFakeSupabase(tables);
     const stripeClient = makeFakeReversalClient({
-      charge: { amount: 100 },
-      transfer: { amount: 800, amount_reversed: 200 },
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 200 },
+      createReversalResult: { amount: 600 },
     });
 
     const outcome = await reverseAuthorTransferForLostDispute(
       supabase as never,
       stripeClient as never,
-      makeFakeDispute({ amount: 50 }),
+      makeFakeDispute({ amount: 800 }),
     );
 
-    expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 400 });
+    expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 600 });
     expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
       TRANSFER_ID,
-      expect.objectContaining({ amount: 400 }),
+      expect.objectContaining({ amount: 600 }),
       expect.anything(),
     );
   });
 
-  it("the computed amount is clamped and never exceeds the live remaining transfer balance", async () => {
+  // Same shape as the old (pre-ceiling) "clamped to the live remaining
+  // transfer balance" scenario, but now demonstrates why that raw
+  // transfer-balance clamp was never sufficient on its own: charge=1000,
+  // fee=200 -> originalAuthorEconomicShare=800. A prior reversal of 900
+  // (again, no recorded fee refund) already exceeds the author's entire
+  // 800-cent share by 100 -- meaning that excess 100 was, in live-Stripe
+  // terms, clawed back from Librum's own fee margin, not from the
+  // author. remainingAuthorEconomicProceeds = max(0, 800-900+0) = 0. A
+  // further dispute must reverse nothing more, even though naive
+  // remainingTransfer (1000-900=100) alone would still allow 100 --
+  // reversing that 100 would over-debit the author a second time.
+  it("author's remaining economic proceeds already exhausted by a prior reversal: a further dispute reverses nothing, even though live remaining transfer balance is still positive", async () => {
     const tables: Tables = { payment_disputes: [freshDisputeRow()] };
     const supabase = makeFakeSupabase(tables);
-    // target = round(800 * 90/100) = 720, but only 100 remains unreversed.
     const stripeClient = makeFakeReversalClient({
-      charge: { amount: 100 },
-      transfer: { amount: 800, amount_reversed: 700 },
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 900 },
     });
 
-    await reverseAuthorTransferForLostDispute(
+    const outcome = await reverseAuthorTransferForLostDispute(
       supabase as never,
       stripeClient as never,
-      makeFakeDispute({ amount: 90 }),
+      makeFakeDispute({ amount: 900 }),
     );
 
-    expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
-      TRANSFER_ID,
-      expect.objectContaining({ amount: 100 }),
-      expect.anything(),
-    );
+    expect(outcome).toEqual({ kind: "nothing_to_reverse" });
+    expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+    expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(0);
   });
 
   // LAUNCH-1 P1-8: Stripe can exceptionally create multiple distinct
@@ -3182,7 +3523,13 @@ describe("reverseAuthorTransferForLostDispute", () => {
   // independently by its OWN stripe_dispute_id, but both share one
   // aggregate ceiling (the live remaining transfer balance), which is
   // what prevents them from cumulatively over-reversing the transfer.
-  it("multiple disputes on the same PaymentIntent/transfer cannot cumulatively reverse more than the live remaining transfer amount", async () => {
+  // Realistic fixture: charge=1000, application_fee_amount=200 (author's
+  // true total economic share = 800), two disputes each independently
+  // claiming half the original charge (500 + 500 = 1000, the full
+  // charge, split across two dispute records) -- cumulative reversal
+  // must total exactly 800, never more, matching the author's true
+  // total economic entitlement across BOTH disputes combined.
+  it("multiple disputes on the same PaymentIntent/transfer cannot cumulatively reverse more than the author's true economic proceeds", async () => {
     const SECOND_DISPUTE_ID = "dp_test_reversal_second";
     const tables: Tables = {
       payment_disputes: [
@@ -3192,42 +3539,45 @@ describe("reverseAuthorTransferForLostDispute", () => {
     };
     const supabase = makeFakeSupabase(tables);
 
-    // First dispute: charge=100, transfer=800, nothing reversed yet,
-    // disputed 50 -> reverses 400 (matches the worked formula above).
+    // First dispute: nothing reversed yet, disputed 500 (50% of the
+    // charge) -> authorEconomicShare=800, target=round(800*500/1000)
+    // =400, remaining=1000, reverse=400.
     const firstStripeClient = makeFakeReversalClient({
-      charge: { amount: 100 },
-      transfer: { amount: 800, amount_reversed: 0 },
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 0 },
       createReversalResult: { id: "trr_first_dispute", amount: 400 },
     });
     await reverseAuthorTransferForLostDispute(
       supabase as never,
       firstStripeClient as never,
-      makeFakeDispute({ amount: 50 }),
+      makeFakeDispute({ amount: 500 }),
     );
     expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(400);
 
-    // Second, DISTINCT dispute on the same transfer: charge=100 again,
-    // but the transfer's LIVE amount_reversed now correctly reflects
-    // the first dispute's own reversal (400) -- disputed 80 would
-    // naively target round(800*80/100)=640, but only 400 remains
-    // (800-400), so the ceiling clamp is what prevents over-reversal.
+    // Second, DISTINCT dispute on the same transfer: the transfer's
+    // LIVE amount_reversed now correctly reflects the first dispute's
+    // own reversal (400). Disputed 500 again -> target=round(800*500/
+    // 1000)=400, remaining=1000-400=600, reverse=min(400,600)=400.
     const secondStripeClient = makeFakeReversalClient({
-      charge: { amount: 100 },
-      transfer: { amount: 800, amount_reversed: 400 },
+      charge: { amount: 1000, application_fee_amount: 200 },
+      transfer: { amount: 1000, amount_reversed: 400 },
       createReversalResult: { id: "trr_second_dispute", amount: 400 },
     });
     const secondOutcome = await reverseAuthorTransferForLostDispute(
       supabase as never,
       secondStripeClient as never,
-      makeFakeDispute({ id: SECOND_DISPUTE_ID, amount: 80 }),
+      makeFakeDispute({ id: SECOND_DISPUTE_ID, amount: 500 }),
     );
 
     expect(secondOutcome).toEqual({ kind: "reversed", reversalId: "trr_second_dispute", amountCents: 400 });
     expect(secondStripeClient.transfers.createReversal).toHaveBeenCalledWith(
       TRANSFER_ID,
-      expect.objectContaining({ amount: 400 }), // clamped to the 400 actually remaining, not 640
+      expect.objectContaining({ amount: 400 }),
       expect.anything(),
     );
+    // Cumulative across both disputes: 400 + 400 = 800 -- exactly the
+    // author's true total economic share, never more.
+    expect(400 + 400).toBe(800);
     // Each dispute claimed and keyed independently -- attempt_count=1
     // on EACH row, not shared/accumulated across the two disputes.
     expect(tables.payment_disputes[0].transfer_reversal_attempt_count).toBe(1);
@@ -3263,5 +3613,384 @@ describe("reverseAuthorTransferForLostDispute", () => {
 
     expect(stripeClient.transfers.createReversal).toHaveBeenCalledOnce();
     expect(tables.payment_disputes).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------
+  // LAUNCH-1 P1 REOPEN -- the economic-correctness suite. Every fixture
+  // below is a REALISTIC Librum destination charge (transfer.amount <=
+  // charge.amount), unlike the impossible charge=100/transfer=800
+  // shapes this suite used before this correction. Production impact
+  // was manually verified before this turn: 0 lost disputes exist in
+  // production, so this is a forward-only correctness fix with no
+  // historical data to remediate.
+  // ---------------------------------------------------------------------
+  describe("economic correctness of the reversal amount (LAUNCH-1 P1 REOPEN)", () => {
+    it("never reverses Librum's application-fee share from the connected author -- full lost dispute on a 1000/200 sale reverses exactly the author's 800 net proceeds, not the 1000 gross transfer", async () => {
+      // This is the exact regression this correction exists for: the
+      // OLD (round-4) formula multiplied transfer.amount (1000, gross)
+      // directly by the dispute proportion, reversing the full 1000 --
+      // debiting the author for the 200 cents of Librum's own platform
+      // fee they never net-received. This test fails against that old
+      // implementation and passes only against the corrected one.
+      const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 200 },
+        transfer: { amount: 1000, amount_reversed: 0 },
+        createReversalResult: { amount: 800 },
+      });
+
+      const outcome = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        stripeClient as never,
+        makeFakeDispute({ amount: 1000 }),
+      );
+
+      expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 800 });
+      expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
+        TRANSFER_ID,
+        expect.objectContaining({ amount: 800 }),
+        expect.anything(),
+      );
+      const calledAmount = stripeClient.transfers.createReversal.mock.calls[0][1].amount;
+      expect(calledAmount).toBe(800);
+      expect(calledAmount).not.toBe(1000);
+    });
+
+    it("50% dispute on a 1000/200 sale reverses exactly 400 -- half of the author's 800 net proceeds", async () => {
+      const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 200 },
+        transfer: { amount: 1000, amount_reversed: 0 },
+        createReversalResult: { amount: 400 },
+      });
+
+      const outcome = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        stripeClient as never,
+        makeFakeDispute({ amount: 500 }),
+      );
+
+      expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 400 });
+      expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
+        TRANSFER_ID,
+        expect.objectContaining({ amount: 400 }),
+        expect.anything(),
+      );
+    });
+
+    it("zero application fee: reverses the full gross amount -- there is no fee to protect the author from", async () => {
+      const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 0 },
+        transfer: { amount: 1000, amount_reversed: 0 },
+        createReversalResult: { amount: 1000 },
+      });
+
+      const outcome = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        stripeClient as never,
+        makeFakeDispute({ amount: 1000 }),
+      );
+
+      expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 1000 });
+      expect(stripeClient.transfers.createReversal).toHaveBeenCalledWith(
+        TRANSFER_ID,
+        expect.objectContaining({ amount: 1000 }),
+        expect.anything(),
+      );
+    });
+
+    it("null application_fee_amount (hypothetical transfer_data.amount-only charge): never reverses more than the transfer's own amount", async () => {
+      // A charge that never used the application_fee_amount mechanism
+      // at all -- application_fee_amount is null, and the Transfer was
+      // created with an explicit, already-net amount (800) via a
+      // hypothetical transfer_data.amount instead. authorEconomicShare
+      // must fall back to min(transfer.amount, charge.amount - 0), which
+      // correctly resolves to transfer.amount (800) here since it's the
+      // smaller of the two.
+      const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: null },
+        transfer: { amount: 800, amount_reversed: 0 },
+        createReversalResult: { amount: 800 },
+      });
+
+      const outcome = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        stripeClient as never,
+        makeFakeDispute({ amount: 1000 }),
+      );
+
+      expect(outcome).toEqual({ kind: "reversed", reversalId: "trr_test_reversal", amountCents: 800 });
+      const calledAmount = stripeClient.transfers.createReversal.mock.calls[0][1].amount;
+      expect(calledAmount).toBeLessThanOrEqual(800);
+    });
+
+    it("fully-reversed transfer -- prior full refund already covered it: zero additional reversal even with a fee-bearing charge", async () => {
+      const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 200 },
+        transfer: { amount: 1000, amount_reversed: 1000 },
+      });
+
+      const outcome = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        stripeClient as never,
+        makeFakeDispute({ amount: 1000 }),
+      );
+
+      expect(outcome).toEqual({ kind: "nothing_to_reverse" });
+      expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+      expect(tables.payment_disputes[0].transfer_reversal_status).toBe("succeeded");
+      expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(0);
+    });
+
+    it("formula metadata reports version 2 on a newly-created reversal, and refund_application_fee is never included in the request params", async () => {
+      const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 200 },
+        transfer: { amount: 1000, amount_reversed: 0 },
+        createReversalResult: { amount: 800 },
+      });
+
+      await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        stripeClient as never,
+        makeFakeDispute({ amount: 1000 }),
+      );
+
+      const [, params] = stripeClient.transfers.createReversal.mock.calls[0];
+      expect(params.metadata.recovery_formula_version).toBe("2");
+      expect(params).not.toHaveProperty("refund_application_fee");
+      expect(Object.keys(params)).toEqual(["amount", "metadata"]);
+    });
+
+    it("3-cent charge with a 1-cent application fee: repeated 1-cent-rounding partial disputes never cumulatively reverse more than the author's 2-cent economic share", async () => {
+      const FIRST_ID = "dp_test_rounding_first";
+      const SECOND_ID = "dp_test_rounding_second";
+      const THIRD_ID = "dp_test_rounding_third";
+      const tables: Tables = {
+        payment_disputes: [
+          freshDisputeRow({ stripe_dispute_id: FIRST_ID }),
+          freshDisputeRow({ stripe_dispute_id: SECOND_ID }),
+          freshDisputeRow({ stripe_dispute_id: THIRD_ID }),
+        ],
+      };
+      const supabase = makeFakeSupabase(tables);
+
+      // Round 1: nothing reversed yet. originalAuthorEconomicShare=2.
+      // proportionalTarget = round(2*1/3) = round(0.667) = 1.
+      const client1 = makeFakeReversalClient({
+        charge: { amount: 3, application_fee_amount: 1 },
+        transfer: { amount: 3, amount_reversed: 0 },
+        createReversalResult: { id: "trr_round_1", amount: 1 },
+      });
+      await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        client1 as never,
+        makeFakeDispute({ id: FIRST_ID, amount: 1 }),
+      );
+      expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(1);
+
+      // Round 2: live amount_reversed=1. proportionalTarget = round(2*1/
+      // 3) = 1 again (rounding is applied per-dispute against the
+      // ORIGINAL share, not against what's left). remainingAuthor
+      // EconomicProceeds = max(0, 2-1+0) = 1 -- still enough to cover it.
+      const client2 = makeFakeReversalClient({
+        charge: { amount: 3, application_fee_amount: 1 },
+        transfer: { amount: 3, amount_reversed: 1 },
+        createReversalResult: { id: "trr_round_2", amount: 1 },
+      });
+      await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        client2 as never,
+        makeFakeDispute({ id: SECOND_ID, amount: 1 }),
+      );
+      expect(tables.payment_disputes[1].transfer_reversal_amount_cents).toBe(1);
+
+      // Round 3: live amount_reversed=2. The same rounding would again
+      // naively produce a target of 1, but remainingAuthorEconomicProceeds
+      // = max(0, 2-2+0) = 0 -- the ceiling correctly reverses 0, not 1,
+      // which is exactly what stops the three 1-cent roundings from
+      // cumulatively exceeding the author's true 2-cent share.
+      const client3 = makeFakeReversalClient({
+        charge: { amount: 3, application_fee_amount: 1 },
+        transfer: { amount: 3, amount_reversed: 2 },
+      });
+      const outcome3 = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        client3 as never,
+        makeFakeDispute({ id: THIRD_ID, amount: 1 }),
+      );
+
+      expect(outcome3).toEqual({ kind: "nothing_to_reverse" });
+      expect(client3.transfers.createReversal).not.toHaveBeenCalled();
+      const cumulative =
+        Number(tables.payment_disputes[0].transfer_reversal_amount_cents) +
+        Number(tables.payment_disputes[1].transfer_reversal_amount_cents) +
+        Number(tables.payment_disputes[2].transfer_reversal_amount_cents);
+      expect(cumulative).toBe(2);
+      expect(cumulative).toBeLessThanOrEqual(2);
+    });
+
+    it("two disputes whose amounts sum to MORE than the charge itself still cannot cumulatively reverse more than the author's true economic share", async () => {
+      const FIRST_ID = "dp_test_oversum_first";
+      const SECOND_ID = "dp_test_oversum_second";
+      const tables: Tables = {
+        payment_disputes: [
+          freshDisputeRow({ stripe_dispute_id: FIRST_ID }),
+          freshDisputeRow({ stripe_dispute_id: SECOND_ID }),
+        ],
+      };
+      const supabase = makeFakeSupabase(tables);
+
+      // First dispute: 800 of the 1000-cent charge (80%).
+      // originalAuthorEconomicShare = 800. target = round(800*800/1000)
+      // = 640. Nothing reversed yet -> reverse 640.
+      const firstClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 200 },
+        transfer: { amount: 1000, amount_reversed: 0 },
+        createReversalResult: { id: "trr_oversum_first", amount: 640 },
+      });
+      await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        firstClient as never,
+        makeFakeDispute({ id: FIRST_ID, amount: 800 }),
+      );
+      expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(640);
+
+      // Second, DISTINCT dispute: another 500 cents (50%) -- 800+500=
+      // 1300, more than the entire 1000-cent charge, and more than the
+      // author's 800-cent true share on its own. Live amount_reversed is
+      // now 640. proportionalTarget = round(800*500/1000) = 400, but
+      // remainingAuthorEconomicProceeds = max(0, 800-640+0) = 160 -- the
+      // ceiling, not the naive proportional target, is what correctly
+      // binds here.
+      const secondClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 200 },
+        transfer: { amount: 1000, amount_reversed: 640 },
+        createReversalResult: { id: "trr_oversum_second", amount: 160 },
+      });
+      const secondOutcome = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        secondClient as never,
+        makeFakeDispute({ id: SECOND_ID, amount: 500 }),
+      );
+
+      expect(secondOutcome).toEqual({
+        kind: "reversed",
+        reversalId: "trr_oversum_second",
+        amountCents: 160,
+      });
+      expect(secondClient.transfers.createReversal).toHaveBeenCalledWith(
+        TRANSFER_ID,
+        expect.objectContaining({ amount: 160 }),
+        expect.anything(),
+      );
+      const cumulative =
+        Number(tables.payment_disputes[0].transfer_reversal_amount_cents) +
+        Number(tables.payment_disputes[1].transfer_reversal_amount_cents);
+      expect(cumulative).toBe(800);
+    });
+
+    it("full refund of both the transfer and its application fee: a later lost dispute reverses nothing further", async () => {
+      const tables: Tables = { payment_disputes: [freshDisputeRow()] };
+      const supabase = makeFakeSupabase(tables);
+      const stripeClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 200 },
+        transfer: { amount: 1000, amount_reversed: 1000 },
+        applicationFee: { amount: 200, amount_refunded: 200 },
+      });
+
+      const outcome = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        stripeClient as never,
+        makeFakeDispute({ amount: 1000 }),
+      );
+
+      expect(outcome).toEqual({ kind: "nothing_to_reverse" });
+      expect(stripeClient.transfers.createReversal).not.toHaveBeenCalled();
+      expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(0);
+    });
+
+    // LAUNCH-1 P1 REOPEN Section 13 -- the dedicated business-invariant
+    // regression test: the author's cumulative economic proceeds must
+    // never be reduced below zero, across a mix of a prior refund (WITH
+    // a matching application-fee refund) and two separate lost-dispute
+    // reversals. This test fails against BOTH prior formulas:
+    //  - the original P1-8 gross-transfer formula (reverses a proportion
+    //    of transfer.amount directly, ignoring the fee and any live fee
+    //    refund entirely) would compute, for the second dispute below,
+    //    round(1000*500/1000)=500 clamped to remainingTransfer=160 -> 160.
+    //  - the intermediate uncommitted formula (authorEconomicShare-aware,
+    //    but with no live-Stripe-state ceiling) would compute
+    //    round(800*500/1000)=400 clamped to remainingTransfer=160 -> 160.
+    // Both wrongly reverse 160 more from an author whose true remaining
+    // economic proceeds are already exactly zero. Only the corrected
+    // formula (with remainingAuthorEconomicProceeds folded into the min())
+    // correctly reverses 0.
+    it("business invariant: cumulative author economic proceeds never goes below zero across a fee-refunding refund plus two lost-dispute reversals", async () => {
+      const FIRST_ID = "dp_test_invariant_first";
+      const SECOND_ID = "dp_test_invariant_second";
+      const tables: Tables = {
+        payment_disputes: [
+          freshDisputeRow({ stripe_dispute_id: FIRST_ID }),
+          freshDisputeRow({ stripe_dispute_id: SECOND_ID }),
+        ],
+      };
+      const supabase = makeFakeSupabase(tables);
+
+      // A prior 200-cent refund already reversed 200 of the transfer,
+      // and correctly refunded 40 of the 200-cent application fee back
+      // to the connected account (an ordinary Stripe refund proportionally
+      // refunds the platform fee too, unlike Librum's own lost-dispute
+      // recovery reversals, which deliberately never do).
+      // remainingAuthorEconomicProceeds = max(0, 800-200+40) = 640.
+      // First dispute (800): proportionalTarget = round(800*800/1000) =
+      // 640. remainingTransfer = 800. reverse min(640,800,640) = 640.
+      const firstClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 200 },
+        transfer: { amount: 1000, amount_reversed: 200 },
+        applicationFee: { amount: 200, amount_refunded: 40 },
+        createReversalResult: { id: "trr_invariant_first", amount: 640 },
+      });
+      const firstOutcome = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        firstClient as never,
+        makeFakeDispute({ id: FIRST_ID, amount: 800 }),
+      );
+      expect(firstOutcome).toEqual({
+        kind: "reversed",
+        reversalId: "trr_invariant_first",
+        amountCents: 640,
+      });
+      expect(tables.payment_disputes[0].transfer_reversal_amount_cents).toBe(640);
+
+      // Live state after: transfer.amount_reversed = 200+640 = 840. The
+      // application-fee refund total is unchanged (Librum's own reversal
+      // never refunds any more of the fee). remainingAuthorEconomicProceeds
+      // = max(0, 800-840+40) = 0 -- the author's entire economic share is
+      // now exhausted between the refund and the first dispute reversal.
+      const secondClient = makeFakeReversalClient({
+        charge: { amount: 1000, application_fee_amount: 200 },
+        transfer: { amount: 1000, amount_reversed: 840 },
+        applicationFee: { amount: 200, amount_refunded: 40 },
+      });
+      const secondOutcome = await reverseAuthorTransferForLostDispute(
+        supabase as never,
+        secondClient as never,
+        makeFakeDispute({ id: SECOND_ID, amount: 500 }),
+      );
+
+      expect(secondOutcome).toEqual({ kind: "nothing_to_reverse" });
+      expect(secondClient.transfers.createReversal).not.toHaveBeenCalled();
+      expect(tables.payment_disputes[1].transfer_reversal_amount_cents).toBe(0);
+    });
   });
 });
