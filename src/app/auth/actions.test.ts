@@ -346,6 +346,12 @@ describe("signup: stale recovery marker", () => {
       password: "hunter2",
       displayName: "New Author",
       role: "reader",
+      // LAUNCH-1 P2: every test below exercises signup()'s ordinary
+      // behavior downstream of the consent gate -- accept_terms defaults
+      // to accepted here so those tests keep proving what they already
+      // proved before the gate existed. The gate itself is covered
+      // separately, in its own describe block below.
+      accept_terms: "on",
       ...overrides,
     });
   }
@@ -415,5 +421,81 @@ describe("signup: stale recovery marker", () => {
     expect(
       shouldRedirectForRecovery("/library", isRecoverySessionActive(statefulCookieStore)),
     ).toBe(false);
+  });
+});
+
+// LAUNCH-1 P2: signup()'s Terms/Privacy clickwrap gate. Routed through a
+// direct FormData check (`formData.get("accept_terms") === "on"`), not
+// the checkbox's own `required` HTML attribute -- a direct POST to this
+// Server Action bypasses browser-level form validation entirely, so the
+// gate must be provably enforced here, before supabase.auth.signUp() is
+// ever reachable.
+describe("signup: Terms/Privacy consent gate", () => {
+  beforeEach(resetMocks);
+
+  function signupFormData(overrides: Record<string, string> = {}) {
+    return formData({
+      email: "newauthor@example.com",
+      password: "hunter2",
+      displayName: "New Author",
+      role: "reader",
+      accept_terms: "on",
+      ...overrides,
+    });
+  }
+
+  it("1. missing accept_terms redirects with the consent error, and signUp is never called", async () => {
+    const fd = signupFormData();
+    fd.delete("accept_terms");
+    await expectRedirectTo(
+      signup(fd),
+      "/signup?error=You%20must%20agree%20to%20the%20Terms%20of%20Service%20before%20creating%20an%20account.",
+    );
+    expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
+  });
+
+  it("2. a false-equivalent accept_terms value ('off') does not satisfy the gate -- signUp is never called", async () => {
+    await expectRedirectTo(signup(signupFormData({ accept_terms: "off" })), "/signup?error=");
+    expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
+  });
+
+  it("3. accept_terms='on' satisfies the gate -- signUp is called normally", async () => {
+    await expectRedirectTo(signup(signupFormData()), "/");
+    expect(mockSupabaseAuth.signUp).toHaveBeenCalledOnce();
+  });
+
+  it("4. reader signup with acceptance: existing reader flow (redirect to '/') is unchanged", async () => {
+    await expectRedirectTo(signup(signupFormData({ role: "reader" })), "/");
+  });
+
+  it("5. author signup with acceptance: existing author flow (redirect to '/dashboard') is unchanged", async () => {
+    await expectRedirectTo(signup(signupFormData({ role: "author" })), "/dashboard");
+  });
+
+  it("6. email-confirmation-required signup with acceptance still redirects to /signup/check-email", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue({ data: { session: null }, error: null });
+    await expectRedirectTo(signup(signupFormData()), "/signup/check-email");
+  });
+
+  it("7. immediate-session signup with acceptance: existing success redirect is unchanged", async () => {
+    await expectRedirectTo(signup(signupFormData()), "/");
+    expect(mockSupabaseAuth.signUp).toHaveBeenCalledOnce();
+  });
+
+  it("8. successful immediate signup with acceptance still clears a stale P1-11 recovery marker", async () => {
+    await expectRedirectTo(signup(signupFormData()), "/");
+    expect(mockCookieStore.delete).toHaveBeenCalledExactlyOnceWith(RECOVERY_COOKIE_NAME);
+  });
+
+  it("9. a Supabase signUp error after acceptance still surfaces the existing Supabase error, not the consent error", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue({
+      data: { session: null },
+      error: { message: "User already registered" },
+    });
+    await expectRedirectTo(
+      signup(signupFormData()),
+      "/signup?error=User%20already%20registered",
+    );
+    expect(mockCookieStore.delete).not.toHaveBeenCalled();
   });
 });

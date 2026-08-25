@@ -35,6 +35,23 @@ export async function signup(formData: FormData) {
     redirect("/signup?error=Please+fill+in+every+field");
   }
 
+  // LAUNCH-1 P2: required, unchecked-by-default signup clickwrap --
+  // enforced here, not merely via the checkbox's own `required` HTML
+  // attribute, since a direct POST to this Server Action bypasses
+  // browser-level form validation entirely. An unchecked checkbox is
+  // simply absent from FormData, so `formData.get("accept_terms")` is
+  // `null` in that case -- `=== "on"` correctly rejects both that and
+  // any other non-"on" value, without needing a separate null check.
+  const acceptedTerms = formData.get("accept_terms") === "on";
+
+  if (!acceptedTerms) {
+    redirect(
+      `/signup?error=${encodeURIComponent(
+        "You must agree to the Terms of Service before creating an account.",
+      )}`,
+    );
+  }
+
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({
     email,

@@ -76,6 +76,27 @@ export default async function SignupPage({
           </label>
         </fieldset>
 
+        <div className="flex items-start gap-2 text-sm">
+          <input
+            id="accept_terms"
+            name="accept_terms"
+            type="checkbox"
+            required
+            className="mt-1"
+          />
+          <label htmlFor="accept_terms">
+            I agree to the{" "}
+            <Link href="/terms" className="font-medium text-primary underline">
+              Terms of Service
+            </Link>{" "}
+            and acknowledge the{" "}
+            <Link href="/privacy" className="font-medium text-primary underline">
+              Privacy Policy
+            </Link>
+            .
+          </label>
+        </div>
+
         <button
           type="submit"
           className="mt-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
