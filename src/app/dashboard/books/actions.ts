@@ -9,6 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { GENRES } from "@/lib/genres";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 import { sendNewBookEmails } from "@/lib/email";
+import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -90,30 +91,6 @@ async function isValidEpubStructure(bytes: Buffer): Promise<boolean> {
   if (!zip.file(opfPath)) return false;
 
   return true;
-}
-
-// Checks the actual file signature (magic bytes), not the filename or
-// browser-reported MIME type -- neither of those can be trusted, and
-// this is the standard, dependency-free way to confirm a file's real
-// format. Only reads the first few bytes, never the whole image.
-async function hasValidImageSignature(file: File): Promise<boolean> {
-  const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());
-
-  const isPng =
-    header.length >= 8 &&
-    header[0] === 0x89 &&
-    header[1] === 0x50 &&
-    header[2] === 0x4e &&
-    header[3] === 0x47 &&
-    header[4] === 0x0d &&
-    header[5] === 0x0a &&
-    header[6] === 0x1a &&
-    header[7] === 0x0a;
-
-  const isJpeg =
-    header.length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
-
-  return isPng || isJpeg;
 }
 
 // Stored as a single comma-separated string (searched the same way as
@@ -218,11 +195,14 @@ export async function createBook(formData: FormData) {
     redirect("/dashboard/books/new?error=Manuscript+must+be+under+50MB");
   }
 
-  if (!(await hasValidImageSignature(cover))) {
+  const coverKind = await detectCoverImageKind(cover);
+  if (!coverKind) {
     redirect(
       "/dashboard/books/new?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image",
     );
   }
+  const { extension: coverExtension, contentType: coverContentType } =
+    resolveVerifiedCoverStorageDetails(coverKind);
 
   // Read once, reused for both validation and the upload below, rather
   // than reading the manuscript twice.
@@ -234,13 +214,14 @@ export async function createBook(formData: FormData) {
   }
 
   const bookId = randomUUID();
-  const coverExt = cover.name.split(".").pop() || "jpg";
-  const coverPath = `${user.id}/${bookId}-cover.${coverExt}`;
+  // LAUNCH-1 P3-1: coverExtension is derived exclusively from the
+  // verified byte signature above -- cover.name never reaches this key.
+  const coverPath = `${user.id}/${bookId}-cover.${coverExtension}`;
   const manuscriptPath = `${user.id}/${bookId}.epub`;
 
   const { error: coverError } = await supabase.storage
     .from("covers")
-    .upload(coverPath, cover, { contentType: cover.type });
+    .upload(coverPath, cover, { contentType: coverContentType });
 
   if (coverError) {
     console.error("createBook: cover upload failed:", coverError);
@@ -344,18 +325,26 @@ export async function updateBook(bookId: string, formData: FormData) {
       redirect(`/dashboard/books/${bookId}/edit?error=Cover+image+must+be+under+5MB`);
     }
 
-    if (!(await hasValidImageSignature(cover))) {
+    const coverKind = await detectCoverImageKind(cover);
+    if (!coverKind) {
       redirect(
         `/dashboard/books/${bookId}/edit?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image`,
       );
     }
+    const { extension: coverExtension, contentType: coverContentType } =
+      resolveVerifiedCoverStorageDetails(coverKind);
 
-    const coverExt = cover.name.split(".").pop() || "jpg";
-    const newCoverPath = `${user.id}/${bookId}-cover.${coverExt}`;
+    // LAUNCH-1 P3-1: coverExtension is derived exclusively from the
+    // verified byte signature above -- cover.name never reaches this
+    // key. An existing.cover_path from before this hardening (e.g.
+    // "...-cover.JPG" or "...-cover.jpeg") is unaffected: it's read
+    // from the DB, not reconstructed here, so it remains removable via
+    // coverPathToRemove below exactly as before.
+    const newCoverPath = `${user.id}/${bookId}-cover.${coverExtension}`;
 
     const { error: coverError } = await supabase.storage
       .from("covers")
-      .upload(newCoverPath, cover, { contentType: cover.type, upsert: true });
+      .upload(newCoverPath, cover, { contentType: coverContentType, upsert: true });
 
     if (coverError) {
       console.error("updateBook: cover upload failed:", coverError);
