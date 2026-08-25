@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { platformFeeCents } from "@/lib/pricing";
-import { collectDistinctPaymentIntentIds, excludeLostDisputedRows } from "./revenue-logic";
+import { excludeLostDisputedRows } from "./revenue-logic";
 import type { Book } from "@/lib/types";
 
 const CHART_DAYS = 14;
@@ -87,30 +87,44 @@ export default async function SalesPage() {
   const rawSnapshots = snapshots ?? [];
   const allViews = views ?? [];
 
-  // LAUNCH-1 P1-8: a lost-disputed purchase must not be represented as
-  // active author revenue -- refunded_at alone (the filter already
+  // LAUNCH-1 P1-8/P2-2: a lost-disputed purchase must not be represented
+  // as active author revenue -- refunded_at alone (the filter already
   // applied to both queries above) never covers this, since a dispute
-  // never sets refunded_at. One batched RPC call, not one per row (this
-  // page can have hundreds/thousands of purchases rows for a successful
-  // author, unlike the Library/bundle pages' own per-book
-  // user_owns_book() checks, which are bounded by a single reader's own
-  // purchase count) -- collects the distinct payment-intent id set from
-  // BOTH purchases and snapshots (a bundle's purchases rows and its own
-  // snapshot row always share one payment intent -- see the P1-7A/P1-8
-  // audits), then excludes any row whose payment intent comes back, so
-  // a disputed bundle transaction is excluded consistently across both
-  // representations, not just one.
-  const candidatePaymentIntentIds = collectDistinctPaymentIntentIds(rawPurchases, rawSnapshots);
+  // never sets refunded_at. LAUNCH-1 P2-2 replaced the caller-supplied-
+  // id RPC this used to call with author_lost_disputed_payment_intents()
+  // -- a zero-argument RPC that re-derives this author's own candidate
+  // payment-intent set (from BOTH purchases and fulfilled bundle
+  // snapshots -- a bundle's purchases rows and its own snapshot row
+  // always share one payment intent, see the P1-7A/P1-8 audits) from
+  // auth.uid() server-side, rather than trusting this page to have
+  // scoped its own input correctly. See the P2-2 audit/design report
+  // for why a caller-supplied text[] of arbitrary payment-intent ids was
+  // an unnecessary privilege surface even though this was its only
+  // legitimate caller.
+  //
+  // A failed RPC call must NOT be treated as "there are zero lost
+  // disputes" -- silently continuing with an empty exclusion set would
+  // overstate this author's revenue by including disputed-and-lost
+  // transactions as if they were still active. Fails safely instead:
+  // logged, then thrown, which Next.js renders as a generic error page
+  // rather than a page showing numbers that may be wrong.
+  const { data: lostDisputed, error: lostDisputedError } = await supabase.rpc(
+    "author_lost_disputed_payment_intents",
+  );
 
-  const lostDisputedPaymentIntentIds = new Set<string>();
-  if (candidatePaymentIntentIds.length > 0) {
-    const { data: lostDisputed } = await supabase.rpc("lost_disputed_payment_intents", {
-      target_payment_intent_ids: candidatePaymentIntentIds,
+  if (lostDisputedError) {
+    console.error("SalesPage: author_lost_disputed_payment_intents RPC failed", {
+      authorId: user!.id,
+      error: lostDisputedError,
     });
-    for (const row of (lostDisputed ?? []) as { stripe_payment_intent_id: string }[]) {
-      lostDisputedPaymentIntentIds.add(row.stripe_payment_intent_id);
-    }
+    throw new Error("Could not load sales data. Please try again.");
   }
+
+  const lostDisputedPaymentIntentIds = new Set(
+    ((lostDisputed ?? []) as { stripe_payment_intent_id: string }[]).map(
+      (row) => row.stripe_payment_intent_id,
+    ),
+  );
 
   const allPurchases = excludeLostDisputedRows(rawPurchases, lostDisputedPaymentIntentIds);
   const filteredSnapshots = excludeLostDisputedRows(rawSnapshots, lostDisputedPaymentIntentIds);

@@ -33,21 +33,3 @@ export function excludeLostDisputedRows<T extends PaymentIntentBearing>(
       !lostDisputedPaymentIntentIds.has(row.stripe_payment_intent_id),
   );
 }
-
-// Collects the distinct, non-null payment intent ids present across any
-// number of arrays -- used to build the single batched
-// lost_disputed_payment_intents() RPC call's input from BOTH the
-// purchases and bundle_checkout_snapshots query results at once.
-export function collectDistinctPaymentIntentIds(
-  ...rowArrays: PaymentIntentBearing[][]
-): string[] {
-  const ids = new Set<string>();
-  for (const rows of rowArrays) {
-    for (const row of rows) {
-      if (row.stripe_payment_intent_id !== null) {
-        ids.add(row.stripe_payment_intent_id);
-      }
-    }
-  }
-  return Array.from(ids);
-}

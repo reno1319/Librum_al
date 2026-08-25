@@ -1,7 +1,22 @@
 -- Committed SQL regression suite for migration 036 (LAUNCH-1 P1-8:
 -- lost-dispute author-transfer recovery -- durable transfer-reversal
--- state on payment_disputes, the reconciliation index, and the
--- lost_disputed_payment_intents() Sales-dashboard helper).
+-- state on payment_disputes and the reconciliation index).
+--
+-- LAUNCH-1 P2-2 correction: this file's original Part 5 functionally
+-- and privilege-tested lost_disputed_payment_intents(), the batched
+-- Sales-dashboard helper migration 036 introduced. Migration 037
+-- (supabase/migrations/037_narrow_lost_dispute_rpc_privileges.sql)
+-- drops that function outright -- its arbitrary-payment-intent-id
+-- signature was an unnecessary privilege surface, replaced by the
+-- zero-argument, auth.uid()-scoped author_lost_disputed_payment_
+-- intents(). Migration 036's own SQL is intentionally NOT rewritten
+-- (it is a true historical record of what that migration did, and it
+-- did grant `authenticated` on that function at the time); this test
+-- file's Part 5 is removed instead, since asserting a capability
+-- against a function that no longer exists cannot mean anything once
+-- migration 037 is applied. The equivalent -- and now stricter --
+-- functional and privilege coverage lives in
+-- supabase/tests/037_narrow_lost_dispute_rpc_privileges.test.sql.
 --
 -- Reuses supabase/tests/00_stub_supabase_platform.sql -- no new test
 -- infrastructure needed. Two equivalent ways to run this:
@@ -180,51 +195,14 @@ begin
 end $$;
 
 -- ============================================================
--- Part 5: lost_disputed_payment_intents() -- the batched Sales-
--- dashboard helper. authenticated-callable (SECURITY DEFINER), reads
--- past the table's own closed ACL.
+-- Part 5: REMOVED (LAUNCH-1 P2-2) -- previously functionally- and
+-- privilege-tested lost_disputed_payment_intents(), including an
+-- explicit assertion that `authenticated` could call it directly.
+-- Migration 037 drops that function; the equivalent, now author-
+-- scoped coverage lives in
+-- supabase/tests/037_narrow_lost_dispute_rpc_privileges.test.sql
+-- instead. See this file's own header comment for the full reasoning.
 -- ============================================================
-do $$
-declare
-  v_result text[];
-begin
-  insert into public.payment_disputes (stripe_dispute_id, stripe_payment_intent_id, status, reason, amount_cents)
-  values
-    ('dp_part5_lost_a', 'pi_part5_lost_a', 'lost', 'fraudulent', 500),
-    ('dp_part5_lost_b', 'pi_part5_lost_b', 'lost', 'fraudulent', 500),
-    ('dp_part5_won', 'pi_part5_won', 'won', 'fraudulent', 500),
-    ('dp_part5_under_review', 'pi_part5_under_review', 'under_review', 'fraudulent', 500);
-
-  -- Empty input -> empty output, no error.
-  select array_agg(stripe_payment_intent_id) into v_result
-  from public.lost_disputed_payment_intents(array[]::text[]);
-  perform pg_temp.assert(v_result is null, 'part5: empty input must return zero rows');
-
-  -- No matches among the supplied ids.
-  select array_agg(stripe_payment_intent_id) into v_result
-  from public.lost_disputed_payment_intents(array['pi_part5_won', 'pi_part5_under_review']);
-  perform pg_temp.assert(v_result is null,
-    'part5: won/under_review payment intents must never be reported as lost-disputed');
-
-  -- Mixed: only the two genuinely lost ones come back, and only those
-  -- explicitly asked about (a third, unrequested lost dispute must not
-  -- leak in).
-  select array_agg(stripe_payment_intent_id order by stripe_payment_intent_id) into v_result
-  from public.lost_disputed_payment_intents(
-    array['pi_part5_lost_a', 'pi_part5_lost_b', 'pi_part5_won', 'pi_part5_nonexistent']
-  );
-  perform pg_temp.assert(v_result = array['pi_part5_lost_a', 'pi_part5_lost_b'],
-    format('part5: expected exactly the two lost payment intents, got %s', v_result));
-
-  -- authenticated can call it (SECURITY DEFINER, granted execute).
-  perform set_config('request.jwt.claim.sub', 'cccccccc-1111-1111-1111-111111111111', true);
-  set local role authenticated;
-  select array_agg(stripe_payment_intent_id) into v_result
-  from public.lost_disputed_payment_intents(array['pi_part5_lost_a']);
-  reset role;
-  perform pg_temp.assert(v_result = array['pi_part5_lost_a'],
-    'part5: authenticated must be able to call lost_disputed_payment_intents() and see the same result');
-end $$;
 
 -- ============================================================
 -- Part 6: a routine dispute-status upsert (the exact shape

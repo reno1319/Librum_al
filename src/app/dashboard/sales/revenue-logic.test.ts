@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectDistinctPaymentIntentIds, excludeLostDisputedRows } from "./revenue-logic";
+import { excludeLostDisputedRows } from "./revenue-logic";
 
 describe("excludeLostDisputedRows", () => {
   it("excludes a row whose payment intent has a lost dispute", () => {
@@ -45,24 +45,5 @@ describe("excludeLostDisputedRows", () => {
     expect(excludeLostDisputedRows(snapshots, excluded)).toEqual([
       { stripe_payment_intent_id: "pi_clean_bundle", total_amount_cents: 500 },
     ]);
-  });
-});
-
-describe("collectDistinctPaymentIntentIds", () => {
-  it("returns the distinct union of payment intent ids across any number of arrays, excluding nulls", () => {
-    const purchases = [
-      { stripe_payment_intent_id: "pi_1" },
-      { stripe_payment_intent_id: "pi_2" },
-      { stripe_payment_intent_id: null },
-    ];
-    const snapshots = [{ stripe_payment_intent_id: "pi_2" }, { stripe_payment_intent_id: "pi_3" }];
-
-    const result = collectDistinctPaymentIntentIds(purchases, snapshots);
-    expect(new Set(result)).toEqual(new Set(["pi_1", "pi_2", "pi_3"]));
-    expect(result).toHaveLength(3);
-  });
-
-  it("returns an empty array when given no payment intents at all", () => {
-    expect(collectDistinctPaymentIntentIds([{ stripe_payment_intent_id: null }], [])).toEqual([]);
   });
 });

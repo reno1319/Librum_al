@@ -1311,6 +1311,14 @@ revoke all on public.payment_disputes from public, anon, authenticated;
 -- reused everywhere the "is this payment intent's dispute lost" fact
 -- is needed, whether or not auth.uid() happens to be meaningful in the
 -- caller's context.
+--
+-- LAUNCH-1 P2-2: no authenticated EXECUTE grant -- every legitimate
+-- caller is another SECURITY DEFINER function's own body (user_owns_
+-- book(), create_book_checkout_intent(), finalize_book_checkout_
+-- intent(), all below), never a direct application RPC call. Those
+-- nested calls keep working via the shared function-owner's own
+-- implicit EXECUTE privilege, unaffected by this revoke -- see the
+-- P2-2 audit for the empirical verification of this exact semantics.
 create or replace function public.payment_intent_has_lost_dispute(
   target_payment_intent_id text
 )
@@ -1331,37 +1339,52 @@ $$;
 revoke all on function public.payment_intent_has_lost_dispute(text) from public;
 revoke all on function public.payment_intent_has_lost_dispute(text) from anon;
 revoke all on function public.payment_intent_has_lost_dispute(text) from authenticated;
-grant execute on function public.payment_intent_has_lost_dispute(text) to authenticated;
 
--- LAUNCH-1 P1-8: lost_disputed_payment_intents() -- batched membership
--- test for the Sales dashboard correction (src/app/dashboard/sales/
--- page.tsx). Returns which of the caller-supplied payment intent ids
--- have a 'lost' dispute -- a single batched call rather than one call
--- per purchases row, since an author's Sales dashboard can have
--- hundreds or thousands of rows, unlike the Library/bundle pages' own
--- per-book payment_intent_has_lost_dispute() calls. Same SECURITY
--- DEFINER / empty search_path / stable posture, and the same security
--- shape: a caller-supplied-subset membership test only, over
--- payment-intent ids the caller must already know to ask about.
-create or replace function public.lost_disputed_payment_intents(
-  target_payment_intent_ids text[]
-)
+-- LAUNCH-1 P2-2: author_lost_disputed_payment_intents() -- the Sales
+-- dashboard's (src/app/dashboard/sales/page.tsx) sole way to learn
+-- which of ITS OWN CALLER's payment intents are lost-disputed. Takes
+-- no arguments at all: authorization is derived exclusively from
+-- auth.uid(), never from a caller-supplied payment-intent id, closing
+-- the arbitrary-membership-oracle shape the P1-8-era lost_disputed_
+-- payment_intents(text[]) RPC had (dropped by this same change,
+-- migration 037 -- its one legitimate caller is fully superseded by
+-- this function). The candidate set is the UNION of this author's own
+-- purchases (via books.author_id) and their own fulfilled bundle_
+-- checkout_snapshots (via author_id directly) -- the same two
+-- author-scoping conditions "Authors can view purchases of their own
+-- books" and "Authors can view their own fulfilled bundle snapshot
+-- transactions" already use, just performed server-side here instead
+-- of by the caller.
+create or replace function public.author_lost_disputed_payment_intents()
 returns table (stripe_payment_intent_id text)
 language sql
 security definer
 set search_path = ''
 stable
 as $$
+  with author_payment_intents as (
+    select p.stripe_payment_intent_id
+    from public.purchases p
+    join public.books b on b.id = p.book_id
+    where b.author_id = auth.uid()
+      and p.stripe_payment_intent_id is not null
+    union
+    select s.stripe_payment_intent_id
+    from public.bundle_checkout_snapshots s
+    where s.author_id = auth.uid()
+      and s.fulfilled_at is not null
+      and s.stripe_payment_intent_id is not null
+  )
   select distinct d.stripe_payment_intent_id
   from public.payment_disputes d
-  where d.stripe_payment_intent_id = any(target_payment_intent_ids)
-    and d.status = 'lost';
+  where d.status = 'lost'
+    and d.stripe_payment_intent_id in (select stripe_payment_intent_id from author_payment_intents);
 $$;
 
-revoke all on function public.lost_disputed_payment_intents(text[]) from public;
-revoke all on function public.lost_disputed_payment_intents(text[]) from anon;
-revoke all on function public.lost_disputed_payment_intents(text[]) from authenticated;
-grant execute on function public.lost_disputed_payment_intents(text[]) to authenticated;
+revoke all on function public.author_lost_disputed_payment_intents() from public;
+revoke all on function public.author_lost_disputed_payment_intents() from anon;
+revoke all on function public.author_lost_disputed_payment_intents() from authenticated;
+grant execute on function public.author_lost_disputed_payment_intents() to authenticated;
 
 -- Lets a reader who legitimately owns a book keep viewing its detail
 -- page after the author unpublishes it (see the Phase 8/8A audit).
