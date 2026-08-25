@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth";
 import { stripe } from "@/lib/stripe";
+import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import {
   mapReviewRpcError,
   validateAdminNotes,
@@ -91,6 +92,14 @@ export async function reviewRefundRequest(
 // here in a "use server" file -- never reachable from client code.
 export async function issueStripeRefund(refundRequestId: string) {
   await requireAdmin();
+  // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks every
+  // /admin/* page while a recovery session is active, so this is the
+  // second layer against a crafted direct POST. Applies even to an
+  // admin's own account: if THIS admin is currently mid-recovery, they
+  // must finish that before performing any action, including this one
+  // -- the security invariant makes no role-based exception. Runs
+  // before the real Stripe refund call below.
+  await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();
   const outcome = await executeApprovedRefund(supabase, stripe, refundRequestId);

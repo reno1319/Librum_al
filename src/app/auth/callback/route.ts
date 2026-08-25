@@ -1,5 +1,37 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { setRecoverySession, clearRecoverySession } from "@/lib/recovery-session";
+
+// LAUNCH-1 P1-11: the installed @supabase/auth-js runtime attaches a
+// `redirectType` field to exchangeCodeForSession()'s resolved data when
+// the exchanged code came from a password-recovery link -- traced end
+// to end through node_modules/@supabase/auth-js/dist/module/
+// GoTrueClient.js and lib/helpers.js by the P1-11 audit:
+// resetPasswordForEmail() stores the PKCE verifier as
+// "<verifier>/recovery", and _exchangeCodeForSession() splits that back
+// apart and attaches `redirectType: "recovery"` onto its return value.
+// exchangeCodeForSession()'s PUBLIC TypeScript return type
+// (AuthTokenResponse) does not declare this field -- it is currently
+// undocumented SDK-internal behavior, not a stable public contract.
+//
+// This is the ONLY place in Librum that knows this field exists.
+// Every other call site (src/proxy.ts, src/lib/supabase/middleware.ts,
+// src/app/auth/actions.ts) works exclusively with the boolean this
+// function returns -- none of them import or reference "redirectType"
+// anywhere. Deliberately narrow and defensive: an unexpected shape (a
+// future SDK version renaming/removing the field, or any value that
+// doesn't look like what this SDK actually returns) is treated as "not
+// a recovery exchange" -- this function's `true` result only ever ADDS
+// a restriction (see the call site below), never removes one, so
+// failing toward `false` on anything unexpected is the safe direction,
+// not a silent trust of an arbitrary value.
+export function isRecoveryExchange(exchangeResult: unknown): boolean {
+  if (typeof exchangeResult !== "object" || exchangeResult === null) {
+    return false;
+  }
+  const redirectType = (exchangeResult as { redirectType?: unknown }).redirectType;
+  return redirectType === "recovery";
+}
 
 // Handles the link Supabase emails out for signup/password-reset
 // confirmation: it exchanges the one-time code for a real session.
@@ -10,9 +42,32 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      const response = NextResponse.redirect(`${origin}${next}`);
+      // LAUNCH-1 P1-11: only a genuine password-recovery exchange marks
+      // the resulting session as recovery-restricted -- an ordinary
+      // signup-confirmation or OAuth exchange never does, since
+      // isRecoveryExchange() only returns true for the exact
+      // redirectType Supabase's own recovery flow produces. Neither
+      // branch below is ever reached when `error` is truthy -- a
+      // failed/unknown exchange touches the recovery marker not at all,
+      // leaving any existing active recovery state exactly as it was.
+      //
+      // LAUNCH-1 P1-11 STALE-MARKER CORRECTION: this route is also used
+      // for ordinary, non-recovery confirmations (its own doc comment
+      // above: "signup/password-reset confirmation") -- a CONFIRMED
+      // successful exchange that is NOT a recovery exchange establishes
+      // an ordinary authenticated session, so any stale recovery marker
+      // left over from an earlier abandoned recovery attempt in this
+      // same browser must be cleared here too, for the same reason
+      // login() clears it on a successful password sign-in.
+      if (isRecoveryExchange(data)) {
+        setRecoverySession(response.cookies);
+      } else {
+        clearRecoverySession(response.cookies);
+      }
+      return response;
     }
   }
 

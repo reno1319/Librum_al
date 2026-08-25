@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
 import { platformFeeCents } from "@/lib/pricing";
 import { resolveSiteOrigin } from "@/lib/site-url";
+import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import {
   classifyLinkBackResult,
   shouldExposeStripeCheckoutSession,
@@ -30,6 +31,12 @@ type SnapshotResult = {
 };
 
 export async function buyBundle(bundleId: string) {
+  // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks the
+  // /bundles/[id] page itself while a recovery session is active, so
+  // this is the second layer against a crafted direct POST. Runs before
+  // any Stripe/Supabase call below.
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },

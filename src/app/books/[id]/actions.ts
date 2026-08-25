@@ -11,6 +11,7 @@ import { platformFeeCents } from "@/lib/pricing";
 import { REPORT_REASONS } from "@/lib/report-reasons";
 import { toStripeExpiresAtSeconds } from "./checkout-logic";
 import { resolveSiteOrigin } from "@/lib/site-url";
+import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import type { DiscountCode } from "@/lib/types";
 
 type BookForCheckout = {
@@ -34,6 +35,12 @@ type CheckoutIntentResult = {
 };
 
 export async function buyBook(bookId: string, formData: FormData) {
+  // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks the
+  // /books/[id] page itself while a recovery session is active, so this
+  // is the second layer against a crafted direct POST. Runs before any
+  // Stripe/Supabase call below.
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },

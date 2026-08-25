@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { watermarkEpub } from "@/lib/watermark";
+import { isRecoverySessionActive } from "@/lib/recovery-session";
 
 // Manuscripts live in a private storage bucket. Nobody gets a permanent
 // link to them — this route checks ownership on every request, then
@@ -11,6 +13,22 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+
+  // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks this route
+  // while a recovery session is active (its matcher covers /api/*), so
+  // this is the second layer against a crafted direct request. A 403
+  // JSON response, not a redirect: this endpoint hands back a file, not
+  // a page, and redirect semantics would be misleading for a
+  // programmatic/download client -- see the P1-11 audit's own
+  // conclusion on this specific boundary.
+  const cookieStore = await cookies();
+  if (isRecoverySessionActive(cookieStore)) {
+    return NextResponse.json(
+      { error: "Finish resetting your password before downloading." },
+      { status: 403 },
+    );
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
