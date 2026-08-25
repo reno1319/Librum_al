@@ -5,7 +5,12 @@ import { stripe } from "@/lib/stripe";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { connectStripeAccount, openStripeExpressDashboard } from "./actions";
 
-export default async function PayoutsPage() {
+export default async function PayoutsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -46,6 +51,12 @@ export default async function PayoutsPage() {
         the actual bank transfer. You keep {100 - PLATFORM_FEE_PERCENT}%
         of each sale.
       </p>
+
+      {error && (
+        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
 
       <div className="mt-8 rounded-lg border border-border bg-surface p-6 shadow-sm">
         {!profile?.stripe_account_id ? (
