@@ -1,9 +1,28 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { publishBook, unpublishBook, deleteBook } from "./books/actions";
 import { getPublishChecklist } from "@/lib/publish-checklist";
-import { DeleteBookButton } from "./delete-book-button";
+import { resolveDashboardAttention } from "@/lib/dashboard-attention";
+import { AuthorBookRow } from "@/components/author-book-row";
+import { PageHeader } from "@/components/ui/page-header";
+import { Alert } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/empty-state";
+import { buttonClasses } from "@/components/ui/button";
 import type { Book } from "@/lib/types";
+
+// LIBRUM 2.0 UI-6: DASHBOARD = AUTHOR OPERATIONS / WORKSPACE. This page
+// is the hub -- one prioritized next action, two cheap/authoritative
+// counts, the author's most recent books, and quiet link-outs to
+// Sales, Payouts, and secondary tools. Deliberately no persistent
+// dashboard subnav in this pass (see dashboard/layout.tsx, untouched)
+// and deliberately no sales/earnings NUMBER here -- see the "Sales &
+// earnings" section below for why.
+//
+// Still exactly 2 queries, same as before this pass (profiles,
+// books) -- the profiles select grew by one column
+// (stripe_account_id, alongside the existing stripe_payouts_enabled)
+// to distinguish "never connected" from "connected but pending" for
+// the payout status block, not a new query.
+const RECENT_BOOKS_LIMIT = 5;
 
 export default async function DashboardPage({
   searchParams,
@@ -18,7 +37,7 @@ export default async function DashboardPage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("stripe_payouts_enabled")
+    .select("stripe_account_id, stripe_payouts_enabled")
     .eq("id", user!.id)
     .single();
 
@@ -29,185 +48,217 @@ export default async function DashboardPage({
     .order("created_at", { ascending: false })
     .returns<Book[]>();
 
+  const allBooks = books ?? [];
+  const payoutsEnabled = !!profile?.stripe_payouts_enabled;
+
+  const attention = resolveDashboardAttention({ books: allBooks, payoutsEnabled });
+
+  const newBookAction = (
+    <Link href="/dashboard/books/new" className={buttonClasses("primary", "md")}>
+      New book
+    </Link>
+  );
+
+  if (attention.kind === "zero-books") {
+    return (
+      <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
+        <PageHeader
+          title="Your dashboard"
+          description="Manage your books, sales, and earnings."
+          actions={newBookAction}
+        />
+
+        {error && (
+          <Alert variant="error" className="mt-4">
+            {error}
+          </Alert>
+        )}
+        {success && (
+          <Alert variant="success" className="mt-4">
+            {success}
+          </Alert>
+        )}
+
+        <EmptyState
+          className="mt-8"
+          title="Your first book starts here."
+          description="Upload your manuscript, set a price, and publish when you're ready."
+          action={
+            <div className="flex flex-wrap items-center justify-center gap-4">
+              <Link href="/dashboard/books/new" className={buttonClasses("primary", "md")}>
+                New book
+              </Link>
+              <Link
+                href="/how-it-works"
+                className="focus-ring rounded-sm text-sm font-medium text-primary hover:underline"
+              >
+                How publishing works
+              </Link>
+            </div>
+          }
+        />
+      </main>
+    );
+  }
+
+  const publishedCount = allBooks.filter((book) => book.status === "published").length;
+  const draftCount = allBooks.filter((book) => book.status === "draft").length;
+  const recentBooks = allBooks.slice(0, RECENT_BOOKS_LIMIT);
+
+  const draftIncompleteCount =
+    attention.kind === "continue-draft"
+      ? getPublishChecklist(
+          allBooks.find((book) => book.id === attention.book.id) ?? allBooks[0],
+        ).filter((item) => !item.done).length
+      : 0;
+
+  const payoutStatus = !profile?.stripe_account_id
+    ? "not-connected"
+    : payoutsEnabled
+      ? "enabled"
+      : "pending";
+  const payoutLabel =
+    payoutStatus === "not-connected"
+      ? "Connect payouts"
+      : payoutStatus === "pending"
+        ? "Finish payout setup"
+        : "Payouts active";
+
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-serif text-3xl font-semibold">Your books</h1>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard/sales"
-            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-          >
-            Sales
+      <PageHeader
+        title="Your dashboard"
+        description="Manage your books, sales, and earnings."
+        actions={newBookAction}
+      />
+
+      {error && (
+        <Alert variant="error" className="mt-4">
+          {error}
+        </Alert>
+      )}
+      {success && (
+        <Alert variant="success" className="mt-4">
+          {success}
+        </Alert>
+      )}
+
+      {attention.kind === "payout-setup" && (
+        <Alert variant="warning" title="Finish payout setup to publish paid books." className="mt-6">
+          <Link href="/dashboard/payouts" className="focus-ring rounded-sm font-medium underline">
+            Manage payouts
           </Link>
+        </Alert>
+      )}
+
+      {attention.kind === "continue-draft" && (
+        <Alert variant="info" title="Continue your draft" className="mt-6">
+          <p>
+            {attention.book.title}
+            {draftIncompleteCount > 0 &&
+              ` — ${draftIncompleteCount} thing${draftIncompleteCount === 1 ? "" : "s"} to consider before publishing.`}
+          </p>
           <Link
-            href="/dashboard/discounts"
-            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+            href={`/dashboard/books/${attention.book.id}/edit`}
+            className="focus-ring rounded-sm font-medium underline"
           >
-            Discounts
+            Continue editing
           </Link>
-          <Link
-            href="/dashboard/series"
-            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-          >
-            Series
-          </Link>
-          <Link
-            href="/dashboard/bundles"
-            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-          >
-            Bundles
-          </Link>
-          <Link
-            href="/dashboard/profile"
-            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-          >
-            Profile
-          </Link>
-          <Link
-            href="/dashboard/payouts"
-            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-          >
-            Payouts
-          </Link>
-          <Link
-            href="/dashboard/books/new"
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-          >
-            Add a book
-          </Link>
+        </Alert>
+      )}
+
+      <div className="mt-8 flex gap-8">
+        <div>
+          <p className="text-sm text-muted">Published</p>
+          <p className="mt-1 font-serif text-2xl font-semibold">{publishedCount}</p>
+        </div>
+        <div>
+          <p className="text-sm text-muted">Drafts</p>
+          <p className="mt-1 font-serif text-2xl font-semibold">{draftCount}</p>
         </div>
       </div>
 
-      {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </p>
-      )}
-
-      {success && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-          {success}
-        </p>
-      )}
-
-      {!profile?.stripe_payouts_enabled && (
-        <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          You need to{" "}
-          <Link href="/dashboard/payouts" className="font-medium underline">
-            connect a payout account
-          </Link>{" "}
-          before you can publish a paid book. Free books can be published
-          without one.
-        </p>
-      )}
-
-      {!books || books.length === 0 ? (
-        <div className="mt-8 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
-          <p>You haven&apos;t added any books yet.</p>
-        </div>
-      ) : (
-        <ul className="mt-8 divide-y divide-border">
-          {books.map((book) => {
+      <section className="mt-10">
+        <h2 className="font-serif text-xl font-semibold">Your books</h2>
+        <ul className="mt-4 divide-y divide-border">
+          {recentBooks.map((book) => {
             const coverUrl = book.cover_path
-              ? supabase.storage.from("covers").getPublicUrl(book.cover_path)
-                  .data.publicUrl
+              ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
               : null;
-
-            const incompleteChecklist =
-              book.status === "draft"
-                ? getPublishChecklist(book).filter((item) => !item.done)
-                : [];
-
-            return (
-              <li
-                key={book.id}
-                className="py-4"
-                style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
-              >
-                <div className="flex flex-wrap items-center gap-4">
-                  {coverUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={coverUrl}
-                      alt=""
-                      className="h-16 w-11 shrink-0 rounded object-cover"
-                    />
-                  ) : (
-                    <div className="h-16 w-11 shrink-0 rounded bg-border" />
-                  )}
-
-                  <div className="min-w-32 flex-1">
-                    <p className="font-serif font-medium">{book.title}</p>
-                    <p className="text-sm text-muted capitalize">
-                      {book.status}
-                    </p>
-                  </div>
-
-                  <span className="text-sm font-semibold text-primary">
-                    ${(book.price_cents / 100).toFixed(2)}
-                  </span>
-
-                  <Link
-                    href={`/dashboard/books/${book.id}/edit`}
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                  >
-                    Edit
-                  </Link>
-
-                  {book.status === "published" && (
-                    <Link
-                      href={`/books/${book.id}`}
-                      className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                    >
-                      View book
-                    </Link>
-                  )}
-
-                  {book.status === "draft" ? (
-                    <form action={publishBook.bind(null, book.id)}>
-                      <button
-                        type="submit"
-                        className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                      >
-                        Publish
-                      </button>
-                    </form>
-                  ) : (
-                    <form action={unpublishBook.bind(null, book.id)}>
-                      <button
-                        type="submit"
-                        className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                      >
-                        Unpublish
-                      </button>
-                    </form>
-                  )}
-
-                  <form action={deleteBook.bind(null, book.id)}>
-                    <DeleteBookButton title={book.title} />
-                  </form>
-                </div>
-
-                {incompleteChecklist.length > 0 && (
-                  <details className="w-full rounded-lg border border-dashed border-border bg-surface px-3 py-2 text-xs text-muted">
-                    <summary className="cursor-pointer font-medium">
-                      {incompleteChecklist.length}{" "}
-                      {incompleteChecklist.length === 1 ? "thing" : "things"}{" "}
-                      to consider before publishing
-                    </summary>
-                    <ul className="mt-2 flex flex-col" style={{ gap: "0.25rem" }}>
-                      {incompleteChecklist.map((item) => (
-                        <li key={item.label}>&middot; {item.label}</li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-              </li>
-            );
+            return <AuthorBookRow key={book.id} book={book} coverUrl={coverUrl} />;
           })}
         </ul>
-      )}
+        <Link
+          href="/dashboard/books"
+          className="focus-ring mt-4 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+        >
+          View all books &rarr;
+        </Link>
+      </section>
+
+      <div className="mt-10 grid gap-4 sm:grid-cols-2">
+        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <h2 className="font-serif text-lg font-semibold">Sales &amp; earnings</h2>
+          <p className="mt-1 text-sm text-muted">See units sold and your net revenue.</p>
+          <Link
+            href="/dashboard/sales"
+            className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+          >
+            View sales and earnings &rarr;
+          </Link>
+        </section>
+
+        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <h2 className="font-serif text-lg font-semibold">Payouts</h2>
+          <p className="mt-1 text-sm">{payoutLabel}</p>
+          <Link
+            href="/dashboard/payouts"
+            className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+          >
+            Manage payouts &rarr;
+          </Link>
+        </section>
+      </div>
+
+      <section className="mt-10 border-t border-border pt-8">
+        <h2 className="font-serif text-lg font-semibold">Tools</h2>
+        <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+          {DASHBOARD_TOOLS.map((tool) => (
+            <li key={tool.href}>
+              <Link
+                href={tool.href}
+                className="focus-ring block rounded-lg border border-border bg-surface px-4 py-3 hover:bg-surface-hover"
+              >
+                <span className="text-sm font-medium">{tool.label}</span>
+                <p className="mt-0.5 text-xs text-muted">{tool.description}</p>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
     </main>
   );
 }
+
+const DASHBOARD_TOOLS: { href: string; label: string; description: string }[] = [
+  {
+    href: "/dashboard/bundles",
+    label: "Bundles",
+    description: "Group multiple books into one offer.",
+  },
+  {
+    href: "/dashboard/series",
+    label: "Series",
+    description: "Organize related books in reading order.",
+  },
+  {
+    href: "/dashboard/discounts",
+    label: "Discounts",
+    description: "Create promotional codes for eligible sales.",
+  },
+  {
+    href: "/dashboard/profile",
+    label: "Profile",
+    description: "Manage your public author information.",
+  },
+];
