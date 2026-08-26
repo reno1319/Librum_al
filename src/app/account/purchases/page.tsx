@@ -14,6 +14,12 @@ import { RefundRequestForm } from "@/app/library/refund-request-form";
 import { CancelRefundButton } from "@/app/library/cancel-refund-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Purchases & refunds",
+  description: "Review your purchases and manage eligible refund requests.",
+};
 
 // LIBRUM 2.0 UI-9 / ACCOUNT-1: the transaction-history home, moved here
 // directly from the Library page (which now owns current-ownership/

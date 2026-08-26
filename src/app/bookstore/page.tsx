@@ -14,6 +14,12 @@ import { BookCard } from "@/components/book-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book, Bundle, Profile } from "@/lib/types";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Bookstore",
+  description: "Discover independent ebooks published by Albanian-language authors on Librum.",
+};
 
 // LIBRUM 2.0 UI-4: this page is the READER/discovery-and-buying
 // marketplace -- permanent product boundary, locked alongside UI-3:

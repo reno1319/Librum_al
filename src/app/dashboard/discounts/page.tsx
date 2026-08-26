@@ -2,6 +2,11 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createDiscountCode, toggleDiscountCode, deleteDiscountCode } from "./actions";
 import type { Book, DiscountCode } from "@/lib/types";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Discounts",
+};
 
 type DiscountCodeWithBook = DiscountCode & { books: Pick<Book, "title"> | null };
 

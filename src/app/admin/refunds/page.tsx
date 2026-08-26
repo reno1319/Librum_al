@@ -7,6 +7,11 @@ import {
   resolveProfileDisplayName,
   REVIEW_STATUS_LABELS,
 } from "./refund-review-logic";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Refund requests",
+};
 
 type AdminRefundRequestRow = {
   id: string;

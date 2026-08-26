@@ -1,5 +1,10 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Admin",
+};
 
 // Minimal admin landing page for Phase REFUND-1A -- proves
 // requireAdmin() actually gates this route (unauthenticated -> /login,

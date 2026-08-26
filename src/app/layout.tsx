@@ -19,8 +19,19 @@ const playfairDisplay = Playfair_Display({
   subsets: ["latin"],
 });
 
+// LIBRUM 2.0 SEO-1: a title TEMPLATE, not a fixed string -- every route's
+// own `metadata.title` (a plain string) automatically becomes
+// "<that string> | Librum" via this template, so each page only ever
+// sets its own short title, never the "| Librum" suffix itself. `default`
+// is what still renders for the rare page with no metadata export of its
+// own. The one deliberate exception is the homepage, which uses
+// `title: { absolute: "..." }` to keep its own full brand title exactly
+// as-is without the template appending a redundant second "| Librum".
 export const metadata: Metadata = {
-  title: "Librum — self-publish your ebooks",
+  title: {
+    default: "Librum — self-publish your ebooks",
+    template: "%s | Librum",
+  },
   description: "A self-publishing platform for digital ebooks.",
 };
 

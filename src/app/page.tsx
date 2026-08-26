@@ -26,8 +26,12 @@ import type { Metadata } from "next";
 // vertical rhythm throughout. No new business logic: resolveHomepageCta()
 // and computeAuthorSharePercent() are reused exactly as before.
 
+// LIBRUM 2.0 SEO-1: `absolute` deliberately opts this one page out of the
+// root layout's "%s | Librum" title template -- the homepage's own title
+// already IS the full brand title, so applying the template on top of it
+// would produce "Librum — Self-Publish Your Ebook | Librum".
 export const metadata: Metadata = {
-  title: "Librum — Self-Publish Your Ebook",
+  title: { absolute: "Librum — Self-Publish Your Ebook" },
   description:
     "The self-publishing platform built for Albanian-language authors. Publish independently, set your own price, and reach readers through Librum.",
 };

@@ -5,6 +5,19 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { BookCard } from "@/components/book-card";
 import { followAuthor, unfollowAuthor } from "./actions";
 import type { Book, Bundle, Profile } from "@/lib/types";
+import type { Metadata } from "next";
+
+// LIBRUM 2.0 SEO-1: static title, not "<author name> | Librum" -- the
+// page component's own author fetch below isn't visible to
+// generateMetadata() (a separate invocation), so a real dynamic title
+// would mean either a second, metadata-only profile fetch here or
+// restructuring the existing fetch to share via React.cache() -- both
+// beyond this pass's "no new query solely for metadata" scope. Worth
+// revisiting alongside a future query-sharing pass.
+export const metadata: Metadata = {
+  title: "Author",
+  description: "Books published by this author on Librum.",
+};
 
 export default async function AuthorProfilePage({
   params,

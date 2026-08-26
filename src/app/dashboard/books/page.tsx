@@ -6,6 +6,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book } from "@/lib/types";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Your books",
+};
 
 // LIBRUM 2.0 UI-6: the full author book list -- what the Dashboard
 // overview's "View all books" links to, since its own list is capped

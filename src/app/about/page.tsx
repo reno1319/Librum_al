@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "About",
+  description: "Librum is a self-publishing platform for digital ebooks, built for Albanian-language authors.",
+};
 
 // LIBRUM 2.0 UI-1: the representative page for the design-system
 // foundation -- proves PageHeader, the new --container-content token,

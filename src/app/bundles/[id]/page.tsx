@@ -5,6 +5,18 @@ import { buyBundle } from "./actions";
 import { BuyBundleButton } from "./buy-bundle-button";
 import { BookCard } from "@/components/book-card";
 import type { Book, Bundle, Profile } from "@/lib/types";
+import type { Metadata } from "next";
+
+// LIBRUM 2.0 SEO-1: static title, not "<bundle title> | Librum" -- same
+// reasoning as the author profile page (generateMetadata() can't see
+// the page component's own already-fetched bundle without a second,
+// metadata-only query or a React.cache() restructure, both out of
+// scope here). Also sidesteps having to independently replicate the
+// page's own unpublished/visibility gate just for a title.
+export const metadata: Metadata = {
+  title: "Bundle",
+  description: "A book bundle available on Librum.",
+};
 
 type BundleWithAuthor = Bundle & { profiles: Pick<Profile, "display_name"> | null };
 type BundleBookRow = { book_id: string; books: Book | null };

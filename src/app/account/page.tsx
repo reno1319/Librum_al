@@ -8,6 +8,12 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Account",
+  description: "Manage your Librum account.",
+};
 
 // LIBRUM 2.0 UI-9: Account is identity / security-adjacent actions /
 // transaction history -- current ownership and download access stay on

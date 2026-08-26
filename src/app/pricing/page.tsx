@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { EarningsCalculator } from "@/components/earnings-calculator";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Earnings",
+  description: "See Librum's platform fee, author share, and payout information.",
+};
 
 const HOW_IT_WORKS = [
   "You set the price for your book — any price you like, including free.",

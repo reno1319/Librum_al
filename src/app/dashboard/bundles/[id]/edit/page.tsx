@@ -3,6 +3,14 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { updateBundle } from "../../actions";
 import type { Book, Bundle } from "@/lib/types";
+import type { Metadata } from "next";
+
+// LIBRUM 2.0 SEO-1: static title, same reasoning as the book-edit route
+// -- avoids a metadata-only query and its own auth/ownership check for
+// a private authenticated page.
+export const metadata: Metadata = {
+  title: "Edit bundle",
+};
 
 export default async function EditBundlePage({
   params,

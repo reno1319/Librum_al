@@ -7,6 +7,12 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { LibraryBookCard } from "@/components/library-book-card";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Your library",
+  description: "The books you've collected on Librum.",
+};
 
 // LIBRUM 2.0 UI-9 / ACCOUNT-1: Library is now current-ownership/download
 // access ONLY -- the Purchases & refunds transaction history that used

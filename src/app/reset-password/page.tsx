@@ -3,6 +3,12 @@ import { translateAuthErrorMessage } from "@/lib/auth-error";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Set a new password",
+  description: "Set a new password to complete your Librum password reset.",
+};
 
 export default async function ResetPasswordPage({
   searchParams,

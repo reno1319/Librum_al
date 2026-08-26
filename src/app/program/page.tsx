@@ -1,3 +1,10 @@
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Partnership program",
+  description: "Librum's upcoming partnership program for readers, bookstores, and schools.",
+};
+
 export default function ProgramPage() {
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">

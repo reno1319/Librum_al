@@ -13,6 +13,16 @@ import {
 import { reviewRefundRequest, issueStripeRefund } from "../actions";
 import { ReviewButtons } from "./review-buttons";
 import { IssueRefundButton } from "./issue-refund-button";
+import type { Metadata } from "next";
+
+// LIBRUM 2.0 SEO-1: static title, not a dynamic one built from the
+// requester/reader's name -- this is an admin-only page, and reusing
+// that data here would mean either a second, metadata-only fetch of
+// admin-scoped personal data, or restructuring the existing fetch to
+// share with generateMetadata(), neither of which this pass does.
+export const metadata: Metadata = {
+  title: "Refund request",
+};
 
 type AdminRefundRequestDetail = {
   id: string;

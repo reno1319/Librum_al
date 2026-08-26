@@ -4,6 +4,12 @@ import { translateAuthErrorMessage } from "@/lib/auth-error";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Create account",
+  description: "Create a Librum account to publish or buy ebooks.",
+};
 
 export default async function SignupPage({
   searchParams,

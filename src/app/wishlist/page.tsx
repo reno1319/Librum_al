@@ -3,6 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { removeFromWishlist } from "@/app/books/[id]/actions";
 import { BookCard } from "@/components/book-card";
 import type { Book, Profile } from "@/lib/types";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Wishlist",
+  description: "Books you've saved to buy later on Librum.",
+};
 
 type WishlistItemWithBook = {
   book_id: string;

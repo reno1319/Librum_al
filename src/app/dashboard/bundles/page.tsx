@@ -8,6 +8,11 @@ import {
   deleteBundle,
 } from "./actions";
 import type { Book, Bundle } from "@/lib/types";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Bundles",
+};
 
 export default async function BundlesPage({
   searchParams,

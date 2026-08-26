@@ -1,5 +1,11 @@
 import Link from "next/link";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Help",
+  description: "Frequently asked questions about publishing and buying ebooks on Librum.",
+};
 
 const faqs = [
   {

@@ -4,6 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { UploadWizard } from "./upload-wizard";
 import { Alert } from "@/components/ui/alert";
 import type { Series } from "@/lib/types";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "New book",
+};
 
 export default async function NewBookPage({
   searchParams,

@@ -3,6 +3,11 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { submitReport } from "../actions";
 import { REPORT_REASONS } from "@/lib/report-reasons";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Report a book",
+};
 
 export default async function ReportBookPage({
   params,

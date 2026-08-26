@@ -1,4 +1,10 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Check your email",
+  description: "Confirm your email to activate your Librum account.",
+};
 
 export default function CheckEmailPage() {
   return (

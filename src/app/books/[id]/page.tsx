@@ -72,7 +72,14 @@ export async function generateMetadata({
     return {};
   }
 
-  const title = `${book.title} — Librum`;
+  // LIBRUM 2.0 SEO-1: `title` is the bare book title, deliberately NOT
+  // suffixed here -- the root layout's "%s | Librum" title template
+  // appends that automatically, so a manual suffix here would render as
+  // "<title> | Librum | Librum". Open Graph's own title is a separate
+  // field the template never touches, so it keeps its existing
+  // "<title> — Librum" form unchanged (no Open Graph format change).
+  const title = book.title;
+  const ogTitle = `${book.title} — Librum`;
   const description = book.description
     ? truncateForMetadata(book.description, METADATA_DESCRIPTION_MAX)
     : undefined;
@@ -84,7 +91,7 @@ export async function generateMetadata({
     title,
     description,
     openGraph: {
-      title,
+      title: ogTitle,
       description,
       type: "book",
       ...(coverUrl ? { images: [{ url: coverUrl }] } : {}),

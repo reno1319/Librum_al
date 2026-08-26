@@ -5,6 +5,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { connectStripeAccount, openStripeExpressDashboard } from "./actions";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Payouts",
+};
 
 export default async function PayoutsPage({
   searchParams,

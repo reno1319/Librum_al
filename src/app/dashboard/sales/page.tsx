@@ -4,6 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { platformFeeCents } from "@/lib/pricing";
 import { excludeLostDisputedRows } from "./revenue-logic";
 import type { Book } from "@/lib/types";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Sales",
+};
 
 const CHART_DAYS = 14;
 

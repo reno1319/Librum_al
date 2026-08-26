@@ -1,5 +1,11 @@
 import Link from "next/link";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Terms of Service",
+  description: "Librum's Terms of Service.",
+};
 
 const AUTHOR_SHARE_PERCENT = 100 - PLATFORM_FEE_PERCENT;
 

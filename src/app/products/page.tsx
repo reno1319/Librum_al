@@ -1,4 +1,10 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Products",
+  description: "What Librum offers today, and what's coming next.",
+};
 
 export default function ProductsPage() {
   return (

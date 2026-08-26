@@ -19,6 +19,18 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book, Series, Contributor } from "@/lib/types";
+import type { Metadata } from "next";
+
+// LIBRUM 2.0 SEO-1: a static title, not "Edit <book title>" -- getting
+// the real title would mean a second query inside generateMetadata()
+// (a separate invocation from the page component below, sharing none of
+// its already-fetched data) purely to label a browser tab, plus its own
+// independent auth/ownership check to avoid leaking a draft's title to
+// an unauthenticated request before the page body's own redirect ever
+// runs. Not worth either cost for a private, authenticated-only route.
+export const metadata: Metadata = {
+  title: "Edit book",
+};
 
 // LIBRUM 2.0 UI-7: single structured Server Component page (no client
 // boundary needed here -- DeleteBookButton is the one small existing
