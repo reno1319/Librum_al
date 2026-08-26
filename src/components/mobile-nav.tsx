@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { IconMenu, IconClose } from "@/components/icons";
 import type { NavItem } from "@/components/nav-links";
+import type { HeaderCta } from "@/components/site-header";
+import { buttonClasses } from "@/components/ui/button";
 
 // Mobile hamburger + collapsible panel. Isolated as its own client
 // component (state: open/closed) so SiteHeader stays a server component.
@@ -16,6 +18,7 @@ export function MobileNav({
   accountHref,
   logoutAction,
   recoveryActive = false,
+  cta = null,
 }: {
   items: NavItem[];
   loggedIn: boolean;
@@ -27,6 +30,11 @@ export function MobileNav({
   // back to the logged-out branch's Sign up link (also a dead end
   // during recovery; see the P2-5 audit's RECOVERY_ALLOWED_PATHS trace).
   recoveryActive?: boolean;
+  // LIBRUM 2.0 UI-2: same HeaderCta shape buildSiteHeaderNav() produces
+  // -- already null for both the reader and recovery states, so this
+  // component doesn't need its own recovery-awareness for the CTA at
+  // all, only to render it when present in the (non-recovery) branch.
+  cta?: HeaderCta;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -50,7 +58,7 @@ export function MobileNav({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  const linkClassName = "text-sm font-medium hover:underline";
+  const linkClassName = "focus-ring rounded-sm text-sm font-medium hover:underline";
 
   return (
     <div className="md:hidden">
@@ -60,27 +68,20 @@ export function MobileNav({
         aria-controls={panelId}
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-center text-foreground"
-        style={{ width: "2.75rem", height: "2.75rem" }}
+        className="focus-ring flex size-11 items-center justify-center rounded-sm text-foreground"
       >
         <span aria-hidden="true">
-          {open ? (
-            <IconClose style={{ width: "1.5rem", height: "1.5rem" }} />
-          ) : (
-            <IconMenu style={{ width: "1.5rem", height: "1.5rem" }} />
-          )}
+          {open ? <IconClose className="size-6" /> : <IconMenu className="size-6" />}
         </span>
       </button>
 
       {open && (
         <div
           id={panelId}
-          className="absolute inset-x-0 top-full border-b border-border bg-surface px-4 py-4 shadow-sm"
+          className="absolute inset-x-0 top-full border-b border-border bg-surface px-4 py-4 shadow-md"
         >
           {recoveryActive ? (
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}
-            >
+            <div className="flex flex-col gap-3.5">
               <span className="text-sm text-muted">Password recovery</span>
               <form action={logoutAction}>
                 <button type="submit" className={linkClassName}>
@@ -90,9 +91,7 @@ export function MobileNav({
             </div>
           ) : (
             <>
-              <nav
-                style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}
-              >
+              <nav className="flex flex-col gap-3.5">
                 {items.map((item) => (
                   <Link key={item.href} href={item.href} className={linkClassName}>
                     {item.label}
@@ -100,10 +99,7 @@ export function MobileNav({
                 ))}
               </nav>
 
-              <div
-                className="mt-4 border-t border-border pt-4"
-                style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}
-              >
+              <div className="mt-4 flex flex-col gap-3.5 border-t border-border pt-4">
                 {loggedIn ? (
                   <>
                     <Link href={accountHref} className={linkClassName}>
@@ -124,6 +120,15 @@ export function MobileNav({
                       Sign up
                     </Link>
                   </>
+                )}
+
+                {cta && (
+                  <Link
+                    href={cta.href}
+                    className={buttonClasses("primary", "sm", "mt-1 justify-center")}
+                  >
+                    {cta.label}
+                  </Link>
                 )}
               </div>
             </>

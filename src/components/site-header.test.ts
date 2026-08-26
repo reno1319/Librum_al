@@ -22,8 +22,9 @@ describe("buildSiteHeaderNav", () => {
     expect(nav.primaryLinks.map((l) => l.label)).toEqual([
       "Home",
       "Bookstore",
-      "About",
+      "How it works",
       "Pricing",
+      "About",
     ]);
     expect(nav.primaryLinks.some((l) => l.label === "Library")).toBe(false);
     expect(nav.primaryLinks.some((l) => l.label === "Dashboard")).toBe(false);
@@ -33,6 +34,10 @@ describe("buildSiteHeaderNav", () => {
     expect(nav.accountHref).toBe("/login");
     expect(nav.accountLabel).toBe("Log in or sign up");
     expect(nav.recoveryLabel).toBeNull();
+    // LIBRUM 2.0 UI-2: logged-out CTA reuses the exact destination
+    // already proven on the homepage (src/app/page.tsx) -- not invented
+    // here.
+    expect(nav.cta).toEqual({ label: "Publish your book", href: "/signup?role=author" });
   });
 
   it("authenticated reader, recovery inactive: Library present, Dashboard absent, display name shown, Account present, Log out present", () => {
@@ -53,6 +58,9 @@ describe("buildSiteHeaderNav", () => {
     expect(nav.accountHref).toBe("/account");
     expect(nav.accountLabel).toBe("Account");
     expect(nav.recoveryLabel).toBeNull();
+    // LIBRUM 2.0 UI-2: no reader -> author conversion feature exists,
+    // so a reader must never see a "publish" CTA.
+    expect(nav.cta).toBeNull();
   });
 
   it("authenticated author, recovery inactive: Dashboard present, Library absent, display name shown, Account present, Log out present", () => {
@@ -71,6 +79,9 @@ describe("buildSiteHeaderNav", () => {
     expect(nav.showAccountLink).toBe(true);
     expect(nav.showLogout).toBe(true);
     expect(nav.recoveryLabel).toBeNull();
+    // LIBRUM 2.0 UI-2: an author's CTA points at the real create-book
+    // flow, not the signup page they're already past.
+    expect(nav.cta).toEqual({ label: "New book", href: "/dashboard/books/new" });
   });
 
   it("recovery active for an authenticated reader: no Library, no ordinary primary links, no Account, no display name, Log out present, recoveryLabel is exactly 'Password recovery'", () => {
@@ -86,6 +97,7 @@ describe("buildSiteHeaderNav", () => {
     expect(nav.showAccountLink).toBe(false);
     expect(nav.showLogout).toBe(true);
     expect(nav.recoveryLabel).toBe("Password recovery");
+    expect(nav.cta).toBeNull();
   });
 
   it("recovery active for an authenticated author: no Dashboard, same recovery-only shape as the reader case", () => {
@@ -102,6 +114,7 @@ describe("buildSiteHeaderNav", () => {
     expect(nav.showAccountLink).toBe(false);
     expect(nav.showLogout).toBe(true);
     expect(nav.recoveryLabel).toBe("Password recovery");
+    expect(nav.cta).toBeNull();
   });
 
   it("recovery active overrides user/role state entirely -- even with a fully populated user/profile, ordinary authenticated nav stays suppressed", () => {

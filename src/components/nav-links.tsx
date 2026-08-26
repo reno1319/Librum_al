@@ -30,6 +30,9 @@ export function NavLinks({
     <>
       {items.map((item) => {
         const active = isActive(pathname, item.href);
+        const stateClassName = active
+          ? "font-semibold text-primary"
+          : "transition-colors hover:underline";
         return (
           <Link
             key={item.href}
@@ -37,10 +40,8 @@ export function NavLinks({
             aria-current={active ? "page" : undefined}
             className={
               className
-                ? `${className} ${active ? "font-semibold text-primary" : "hover:underline"}`
-                : active
-                  ? "font-semibold text-primary"
-                  : "hover:underline"
+                ? `${className} focus-ring rounded-sm ${stateClassName}`
+                : `focus-ring rounded-sm ${stateClassName}`
             }
           >
             {item.label}

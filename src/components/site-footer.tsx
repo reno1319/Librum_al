@@ -5,13 +5,23 @@ import Link from "next/link";
 // no real Librum social URLs exist anywhere in the repo yet — a
 // href="#" placeholder reads as a dead/broken link rather than
 // unimplemented. Re-add once real URLs are available.
+//
+// LIBRUM 2.0 UI-2: IA regrouped from the old single "Platform" bucket
+// into DISCOVER/PUBLISH/SUPPORT/LEGAL -- the same six links as before,
+// just organized by what a reader vs. a prospective author is actually
+// looking for. Contact deliberately sits under SUPPORT, not LEGAL (a
+// support contact isn't a legal document).
 
-const FOOTER_LINKS = {
-  Platform: [
-    { href: "/about", label: "About" },
+const FOOTER_GROUPS = {
+  Discover: [
     { href: "/bookstore", label: "Bookstore" },
+    { href: "/about", label: "About" },
+  ],
+  Publish: [
     { href: "/how-it-works", label: "How it works" },
     { href: "/pricing", label: "Pricing" },
+  ],
+  Support: [
     { href: "/help", label: "Help" },
     { href: "/contact", label: "Contact" },
   ],
@@ -21,73 +31,48 @@ const FOOTER_LINKS = {
   ],
 };
 
-const EXTERNAL_FOOTER_LINKS = {
-  More: [
-    { href: "https://www.lamajkalemi.al", label: "Boto me L&K" },
-  ],
-};
+const SUPPORT_EMAIL = "support@librum.al";
+// Preserved exactly -- a real, working partner destination, not a
+// placeholder. Styled below as a secondary/external link, distinct
+// from Librum's own product links.
+const BOTO_ME_LK_HREF = "https://www.lamajkalemi.al";
 
 export function SiteFooter() {
   return (
     <footer className="border-t border-border bg-surface">
-      <div
-        className="mx-auto w-full max-w-5xl px-4 py-12 sm:px-6"
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          justifyContent: "space-between",
-          gap: "2.5rem",
-        }}
-      >
-        <div style={{ maxWidth: "20rem" }}>
+      <div className="mx-auto flex w-full max-w-wide flex-col gap-10 px-4 py-12 sm:px-6 md:flex-row md:justify-between">
+        <div className="max-w-xs">
           <span className="font-serif text-2xl text-primary">Librum</span>
           <p className="mt-2 text-sm text-muted">
             Independent ebooks, published directly by the people who wrote
             them.
           </p>
+          <p className="mt-4 text-sm text-muted">
+            Questions?{" "}
+            <a
+              href={`mailto:${SUPPORT_EMAIL}`}
+              className="focus-ring rounded-sm text-foreground hover:underline"
+            >
+              {SUPPORT_EMAIL}
+            </a>
+          </p>
         </div>
 
-        <div style={{ display: "flex", gap: "4rem" }}>
-          {Object.entries(FOOTER_LINKS).map(([section, links]) => (
+        <div className="grid grid-cols-2 gap-x-10 gap-y-8 sm:grid-cols-4">
+          {Object.entries(FOOTER_GROUPS).map(([section, links]) => (
             <div key={section}>
               <p className="text-xs font-medium uppercase tracking-wide text-muted">
                 {section}
               </p>
-              <nav
-                className="mt-3 text-sm"
-                style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
-              >
+              <nav className="mt-3 flex flex-col gap-2 text-sm">
                 {links.map((link) => (
                   <Link
                     key={link.href}
                     href={link.href}
-                    className="hover:underline"
+                    className="focus-ring rounded-sm hover:underline"
                   >
                     {link.label}
                   </Link>
-                ))}
-              </nav>
-            </div>
-          ))}
-          {Object.entries(EXTERNAL_FOOTER_LINKS).map(([section, links]) => (
-            <div key={section}>
-              <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                {section}
-              </p>
-              <nav
-                className="mt-3 text-sm"
-                style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
-              >
-                {links.map((link) => (
-                  <a
-                    key={link.href}
-                    href={link.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:underline"
-                  >
-                    {link.label}
-                  </a>
                 ))}
               </nav>
             </div>
@@ -96,8 +81,19 @@ export function SiteFooter() {
       </div>
 
       <div className="border-t border-border">
-        <div className="mx-auto w-full max-w-5xl px-4 py-4 text-xs text-muted sm:px-6">
-          &copy; {new Date().getFullYear()} Librum.
+        <div className="mx-auto flex w-full max-w-wide flex-col gap-3 px-4 py-4 text-xs text-muted sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <span>&copy; {new Date().getFullYear()} Librum.</span>
+          {/* Styled as a secondary partner link -- smaller, muted, an
+              explicit external-link mark -- so it doesn't read as a
+              primary Librum product link. */}
+          <a
+            href={BOTO_ME_LK_HREF}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="focus-ring rounded-sm hover:underline"
+          >
+            Boto me L&amp;K ↗
+          </a>
         </div>
       </div>
     </footer>

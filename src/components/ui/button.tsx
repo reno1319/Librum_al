@@ -38,6 +38,22 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
   lg: "px-6 py-3 text-base",
 };
 
+// LIBRUM 2.0 UI-2: exported so a non-<button> element that needs to
+// look exactly like a Button -- a <Link> styled as a CTA, which is a
+// navigation, not a button semantically -- can share the same variant/
+// size classes without duplicating the literal string at each call
+// site. Button itself uses this internally too, so there is exactly
+// one place either kind of caller's classes come from.
+export function buttonClasses(
+  variant: ButtonVariant = "primary",
+  size: ButtonSize = "md",
+  className?: string,
+): string {
+  return [BASE_CLASSES, VARIANT_CLASSES[variant], variant === "text" ? null : SIZE_CLASSES[size], className]
+    .filter(Boolean)
+    .join(" ");
+}
+
 // A tiny inline spinner rather than a dependency -- this is the only
 // place in the primitive that needs one, and it's a handful of SVG
 // attributes, not worth an icon library for.
@@ -80,14 +96,7 @@ export function Button({
   children,
   ...rest
 }: ButtonProps) {
-  const classes = [
-    BASE_CLASSES,
-    VARIANT_CLASSES[variant],
-    variant === "text" ? null : SIZE_CLASSES[size],
-    className,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const classes = buttonClasses(variant, size, className);
 
   return (
     <button className={classes} disabled={disabled || loading} aria-busy={loading || undefined} {...rest}>
