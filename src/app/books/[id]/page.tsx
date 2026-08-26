@@ -13,8 +13,27 @@ import {
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
+import { formatPrice } from "@/lib/pricing";
+import { resolveBookPurchaseState, type BookPurchaseState } from "@/lib/book-purchase";
+import { buttonClasses } from "@/components/ui/button";
 import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
 
+// LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
+// -- Bookstore (UI-4) owns discovery/browsing, this page owns "should I
+// buy this book." Presentation-only pass: every query below, and every
+// server action bound into a form, is unchanged from before this pass
+// -- see actions.ts/checkout-logic.ts, neither of which this pass
+// touches. Query sequencing is also left exactly as it was (a
+// PERF-1 follow-up to parallelize the independent fetches is tracked
+// separately, deliberately not bundled into this visual pass).
+
+// The book's own author/profile join needs `bio` (for the new "About
+// the Author" section) on top of the `display_name` every other
+// book-with-author query on this page already selects -- kept as its
+// own type, distinct from BookWithAuthor below, so the shelf queries
+// (which only ever need display_name) aren't forced to also carry a
+// bio field they never fetch.
+type BookWithAuthorBio = Book & { profiles: Pick<Profile, "display_name" | "bio"> | null };
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
 type SeriesEntry = Pick<Book, "id" | "title" | "series_position">;
 type ReviewWithReader = Review & {
@@ -70,6 +89,9 @@ export async function generateMetadata({
       type: "book",
       ...(coverUrl ? { images: [{ url: coverUrl }] } : {}),
     },
+    twitter: {
+      card: "summary_large_image",
+    },
   };
 }
 
@@ -108,9 +130,9 @@ export default async function BookDetailPage({
   // reader, for whom RLS will have already returned no row at all.
   const { data: book } = await supabase
     .from("books")
-    .select("*, profiles(display_name)")
+    .select("*, profiles(display_name, bio)")
     .eq("id", id)
-    .single<BookWithAuthor>();
+    .single<BookWithAuthorBio>();
 
   if (!book) {
     notFound();
@@ -237,10 +259,21 @@ export default async function BookDetailPage({
     youMightLike = data ?? [];
   }
 
+  const purchaseState = resolveBookPurchaseState({
+    user: user ? { id: user.id } : null,
+    isAuthor,
+    owned,
+    priceCents: book.price_cents,
+  });
+  const formattedPrice = formatPrice(book.price_cents);
+
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+      {/* ============================================================
+          Main Book Hero
+          ============================================================ */}
       <div className="flex flex-col gap-8 sm:flex-row">
-        <div className="mx-auto w-48 shrink-0 sm:mx-0 sm:w-56">
+        <div className="mx-auto w-56 shrink-0 sm:mx-0 sm:w-72">
           {coverUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -259,112 +292,74 @@ export default async function BookDetailPage({
               {book.genre}
             </span>
           )}
-          <h1 className="font-serif text-3xl font-semibold">{book.title}</h1>
+          <h1 className="font-serif text-3xl font-semibold sm:text-4xl">{book.title}</h1>
+
+          {seriesInfo && (
+            <p className="mt-1 text-sm text-muted">
+              {book.series_position ? `Book ${book.series_position} of ` : "Part of "}
+              <span className="font-medium">{seriesInfo.title}</span>
+            </p>
+          )}
+
           <p className="mt-1 text-sm text-muted">
             by{" "}
             <Link
               href={`/authors/${book.author_id}`}
-              className="hover:underline"
+              className="focus-ring rounded-sm hover:underline"
             >
               {book.profiles?.display_name}
             </Link>
           </p>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <span className="text-xl font-semibold text-primary">
-              {book.price_cents === 0
-                ? "Free"
-                : `$${(book.price_cents / 100).toFixed(2)}`}
-            </span>
-
-            {isAuthor ? (
-              <>
-                <span className="text-sm text-muted">This is your book</span>
-                <a
-                  href={`/api/books/${book.id}/download`}
-                  className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-                >
-                  Download EPUB
-                </a>
-              </>
-            ) : owned ? (
-              <>
-                <span className="rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium">
-                  You own this book
-                </span>
-                <a
-                  href={`/api/books/${book.id}/download`}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-                >
-                  Download EPUB
-                </a>
-              </>
-            ) : user ? (
-              <>
-                {book.price_cents === 0 ? (
-                  <form action={getFreeBook.bind(null, book.id)}>
-                    <button
-                      type="submit"
-                      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-                    >
-                      Get this book
-                    </button>
-                  </form>
-                ) : (
-                  <form
-                    action={buyBook.bind(null, book.id)}
-                    className="flex items-center gap-2"
-                  >
-                    <input
-                      name="code"
-                      type="text"
-                      placeholder="Promo code (optional)"
-                      className="w-40 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-                    />
-                    <button
-                      type="submit"
-                      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-                    >
-                      Buy now
-                    </button>
-                  </form>
-                )}
-                <form
-                  action={(wishlisted ? removeFromWishlist : addToWishlist).bind(
-                    null,
-                    book.id,
-                  )}
-                >
-                  <button
-                    type="submit"
-                    className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-                  >
-                    {wishlisted ? "Remove from wishlist" : "Save for later"}
-                  </button>
-                </form>
-              </>
-            ) : (
-              <Link
-                href={`/login?next=/books/${book.id}`}
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-              >
-                {book.price_cents === 0 ? "Log in to get this book" : "Log in to buy"}
-              </Link>
-            )}
-          </div>
-
-          {!isAuthor && book.status !== "published" && owned && (
-            <p className="mt-2 text-xs font-medium text-amber-700">
-              This book is no longer available for sale. You can still
-              download your copy anytime.
+          {contributors && contributors.length > 0 && (
+            <p className="mt-1 text-sm text-muted">
+              {contributors
+                .map(
+                  (c) =>
+                    `${CONTRIBUTOR_ROLE_VERB[c.role as keyof typeof CONTRIBUTOR_ROLE_VERB] ?? c.role} ${c.name}`,
+                )
+                .join(" · ")}
             </p>
           )}
 
-          {!isAuthor && !owned && (
+          <span className="mt-4 block text-2xl font-semibold text-primary">
+            {formattedPrice}
+          </span>
+
+          <div className="mt-1 flex items-center gap-2 text-sm">
+            <StarRating rating={averageRating} />
+            <span className="text-muted">
+              {reviewCount > 0
+                ? `${averageRating.toFixed(1)} · ${reviewCount} review${reviewCount === 1 ? "" : "s"}`
+                : "No reviews yet"}
+            </span>
+          </div>
+
+          <div className="mt-4">
+            <PurchasePanel
+              state={purchaseState}
+              bookId={book.id}
+              formattedPrice={formattedPrice}
+              wishlisted={wishlisted}
+            />
+          </div>
+
+          {(purchaseState === "anonymous-paid" ||
+            purchaseState === "anonymous-free" ||
+            purchaseState === "paid-unowned" ||
+            purchaseState === "free-unowned") && (
             <p className="mt-2 text-xs text-muted">
               {book.price_cents === 0
                 ? "Free — no payment required. You'll get a DRM-free EPUB you can download anytime from your Librum Library."
                 : "DRM-free EPUB. Download it anytime from your Librum Library."}
+              {book.price_cents > 0 && " Secure checkout with Stripe."}
+            </p>
+          )}
+
+          {purchaseState === "owned" && book.status !== "published" && (
+            <p className="mt-2 text-xs font-medium text-amber-700">
+              This book is no longer available for sale. You can still
+              download your copy anytime.
             </p>
           )}
 
@@ -373,7 +368,7 @@ export default async function BookDetailPage({
               {owned ? (
                 <>
                   Purchase complete — thank you!{" "}
-                  <Link href="/library" className="font-medium underline">
+                  <Link href="/library" className="focus-ring rounded-sm font-medium underline">
                     Go to your library
                   </Link>{" "}
                   to download it anytime.
@@ -388,7 +383,7 @@ export default async function BookDetailPage({
               {owned ? (
                 <>
                   Added to your library!{" "}
-                  <Link href="/library" className="font-medium underline">
+                  <Link href="/library" className="focus-ring rounded-sm font-medium underline">
                     Go to your library
                   </Link>{" "}
                   to download it anytime.
@@ -413,43 +408,34 @@ export default async function BookDetailPage({
               {error}
             </p>
           )}
+        </div>
+      </div>
 
-          {seriesInfo && (
-            <p className="mt-4 text-sm text-muted">
-              {book.series_position ? `Book ${book.series_position} of ` : ""}
-              the <span className="font-medium">{seriesInfo.title}</span> series
+      {/* ============================================================
+          About this book
+          ============================================================ */}
+      {(book.description || book.preview_text || book.keywords) && (
+        <section className="mt-12 border-t border-border pt-8">
+          <h2 className="font-serif text-xl font-semibold">About this book</h2>
+          {book.description && (
+            <p className="mt-4 max-w-prose whitespace-pre-line text-foreground/90">
+              {book.description}
             </p>
           )}
 
-          {contributors && contributors.length > 0 && (
-            <p className="mt-1 text-sm text-muted">
-              {contributors
-                .map(
-                  (c) =>
-                    `${CONTRIBUTOR_ROLE_VERB[c.role as keyof typeof CONTRIBUTOR_ROLE_VERB] ?? c.role} ${c.name}`,
-                )
-                .join(" · ")}
-            </p>
+          {book.preview_text && (
+            <details className="mt-4 max-w-prose rounded-lg border border-border bg-surface p-4 shadow-sm">
+              <summary className="focus-ring cursor-pointer rounded-sm font-serif font-medium">
+                Look inside
+              </summary>
+              <p className="mt-3 whitespace-pre-line text-sm text-foreground/90">
+                {book.preview_text}
+              </p>
+            </details>
           )}
-
-          <div className="mt-2 flex items-center gap-2 text-sm">
-            <StarRating rating={averageRating} />
-            <span className="text-muted">
-              {reviewCount > 0
-                ? `${averageRating.toFixed(1)} · ${reviewCount} review${reviewCount === 1 ? "" : "s"}`
-                : "No reviews yet"}
-            </span>
-          </div>
-
-          <p className="mt-4 whitespace-pre-line text-foreground/90">
-            {book.description}
-          </p>
 
           {book.keywords && (
-            <ul
-              className="mt-3 flex flex-wrap"
-              style={{ gap: "0.5rem" }}
-            >
+            <ul className="mt-4 flex max-w-prose flex-wrap gap-2">
               {book.keywords
                 .split(",")
                 .map((k) => k.trim())
@@ -464,24 +450,63 @@ export default async function BookDetailPage({
                 ))}
             </ul>
           )}
+        </section>
+      )}
 
+      {/* ============================================================
+          Book Details
+          ============================================================ */}
+      <section className="mt-12 border-t border-border pt-8">
+        <h2 className="font-serif text-xl font-semibold">Book Details</h2>
+        <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 text-sm sm:max-w-md">
+          <div>
+            <dt className="text-muted">Format</dt>
+            <dd className="mt-0.5">Ebook · EPUB</dd>
+          </div>
+          {book.genre && (
+            <div>
+              <dt className="text-muted">Genre</dt>
+              <dd className="mt-0.5">{book.genre}</dd>
+            </div>
+          )}
+          {seriesInfo && (
+            <div>
+              <dt className="text-muted">Series</dt>
+              <dd className="mt-0.5">
+                {book.series_position ? `Book ${book.series_position} of ` : ""}
+                {seriesInfo.title}
+              </dd>
+            </div>
+          )}
           {book.isbn && (
-            <p className="mt-3 text-xs text-muted">ISBN: {book.isbn}</p>
+            <div>
+              <dt className="text-muted">ISBN</dt>
+              <dd className="mt-0.5">{book.isbn}</dd>
+            </div>
           )}
+        </dl>
+      </section>
 
-          {book.preview_text && (
-            <details className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
-              <summary className="cursor-pointer font-serif font-medium">
-                Look inside
-              </summary>
-              <p className="mt-3 whitespace-pre-line text-sm text-foreground/90">
-                {book.preview_text}
-              </p>
-            </details>
-          )}
-        </div>
-      </div>
+      {/* ============================================================
+          About the Author
+          ============================================================ */}
+      <section className="mt-12 border-t border-border pt-8">
+        <h2 className="font-serif text-xl font-semibold">About the Author</h2>
+        <p className="mt-3 font-serif text-lg font-medium">{book.profiles?.display_name}</p>
+        {book.profiles?.bio && (
+          <p className="mt-2 max-w-prose text-sm text-foreground/90">{book.profiles.bio}</p>
+        )}
+        <Link
+          href={`/authors/${book.author_id}`}
+          className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+        >
+          View author profile &rarr;
+        </Link>
+      </section>
 
+      {/* ============================================================
+          Reviews
+          ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
         <h2 className="font-serif text-xl font-semibold">Reviews</h2>
 
@@ -499,7 +524,7 @@ export default async function BookDetailPage({
                 name="rating"
                 required
                 defaultValue={myReview?.rating ?? ""}
-                className="rounded-lg border border-border bg-surface px-3 py-2"
+                className="focus-ring rounded-lg border border-border bg-surface px-3 py-2"
               >
                 <option value="" disabled>
                   Choose a rating
@@ -517,12 +542,12 @@ export default async function BookDetailPage({
                 name="body"
                 rows={3}
                 defaultValue={myReview?.body ?? ""}
-                className="rounded-lg border border-border bg-surface px-3 py-2"
+                className="focus-ring rounded-lg border border-border bg-surface px-3 py-2"
               />
             </label>
             <button
               type="submit"
-              className="w-fit rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+              className={buttonClasses("primary", "md", "w-fit")}
             >
               {myReview ? "Update review" : "Submit review"}
             </button>
@@ -552,15 +577,15 @@ export default async function BookDetailPage({
         )}
       </section>
 
+      {/* ============================================================
+          Series entries
+          ============================================================ */}
       {seriesInfo && seriesEntries.length > 1 && (
         <section className="mt-12 border-t border-border pt-8">
           <h2 className="font-serif text-xl font-semibold">
             {seriesInfo.title}
           </h2>
-          <ol
-            className="text-sm"
-            style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "1rem" }}
-          >
+          <ol className="mt-4 flex flex-col gap-2 text-sm">
             {seriesEntries.map((entry) => (
               <li key={entry.id}>
                 {entry.id === book.id ? (
@@ -572,7 +597,7 @@ export default async function BookDetailPage({
                 ) : (
                   <Link
                     href={`/books/${entry.id}`}
-                    className="hover:underline"
+                    className="focus-ring rounded-sm hover:underline"
                   >
                     {entry.series_position != null && `${entry.series_position}. `}
                     {entry.title}
@@ -584,6 +609,9 @@ export default async function BookDetailPage({
         </section>
       )}
 
+      {/* ============================================================
+          More by this author / You might also like
+          ============================================================ */}
       <BookShelf
         title="More by this author"
         books={moreByAuthor ?? []}
@@ -595,13 +623,117 @@ export default async function BookDetailPage({
         supabase={supabase}
       />
 
+      {/* ============================================================
+          Report this book
+          ============================================================ */}
       {user && !isAuthor && (
         <p className="mt-8 text-xs text-muted">
-          <Link href={`/books/${book.id}/report`} className="hover:underline">
+          <Link
+            href={`/books/${book.id}/report`}
+            className="focus-ring rounded-sm hover:underline"
+          >
             Report this book
           </Link>
         </p>
       )}
     </main>
+  );
+}
+
+// ============================================================
+// Purchase / ownership action, by state -- see resolveBookPurchaseState
+// (src/lib/book-purchase.ts) for the pure classification this switches
+// on. Every form/link below binds the exact same server actions that
+// existed before this pass (buyBook, getFreeBook) -- no purchase
+// business logic changes here, only which of these five branches
+// renders and how it's styled.
+// ============================================================
+
+function PurchasePanel({
+  state,
+  bookId,
+  formattedPrice,
+  wishlisted,
+}: {
+  state: BookPurchaseState;
+  bookId: string;
+  formattedPrice: string;
+  wishlisted: boolean;
+}) {
+  if (state === "author") {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm text-muted">This is your book</span>
+        <Link
+          href={`/dashboard/books/${bookId}/edit`}
+          className={buttonClasses("primary", "md")}
+        >
+          Manage book
+        </Link>
+        <a
+          href={`/api/books/${bookId}/download`}
+          className={buttonClasses("outline", "md")}
+        >
+          Download EPUB
+        </a>
+      </div>
+    );
+  }
+
+  if (state === "owned") {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium">
+          You own this book
+        </span>
+        <a
+          href={`/api/books/${bookId}/download`}
+          className={buttonClasses("primary", "md")}
+        >
+          Download EPUB
+        </a>
+      </div>
+    );
+  }
+
+  if (state === "anonymous-paid" || state === "anonymous-free") {
+    return (
+      <Link href={`/login?next=/books/${bookId}`} className={buttonClasses("primary", "md")}>
+        {state === "anonymous-free" ? "Log in to get this book" : "Log in to buy"}
+      </Link>
+    );
+  }
+
+  // free-unowned / paid-unowned: a real reader, not the author, doesn't
+  // already own it -- the only two states where a purchase/acquisition
+  // form and the secondary wishlist action both apply.
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {state === "free-unowned" ? (
+        <form action={getFreeBook.bind(null, bookId)}>
+          <button type="submit" className={buttonClasses("primary", "md")}>
+            Get ebook — Free
+          </button>
+        </form>
+      ) : (
+        <form action={buyBook.bind(null, bookId)} className="flex flex-wrap items-center gap-2">
+          <input
+            name="code"
+            type="text"
+            placeholder="Promo code (optional)"
+            className="focus-ring w-40 rounded-md border border-border bg-surface px-3 py-2 text-sm"
+          />
+          <button type="submit" className={buttonClasses("primary", "md")}>
+            Buy ebook — {formattedPrice}
+          </button>
+        </form>
+      )}
+
+      <form action={(wishlisted ? removeFromWishlist : addToWishlist).bind(null, bookId)}>
+        <button type="submit" className={buttonClasses("outline", "sm")}>
+          {wishlisted ? "Remove from wishlist" : "Save for later"}
+        </button>
+      </form>
+    </div>
   );
 }
