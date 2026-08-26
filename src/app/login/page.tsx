@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { login } from "@/app/auth/actions";
+import { translateAuthErrorMessage } from "@/lib/auth-error";
+import { Alert } from "@/components/ui/alert";
+import { buttonClasses } from "@/components/ui/button";
+import { formControlClasses } from "@/lib/form-styles";
 
 export default async function LoginPage({
   searchParams,
@@ -11,16 +15,17 @@ export default async function LoginPage({
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
       <h1 className="font-serif text-3xl font-semibold">Log in</h1>
+      <p className="mt-1 text-sm text-muted">Welcome back to Librum.</p>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </p>
+        <Alert variant="error" className="mt-4">
+          {translateAuthErrorMessage(error)}
+        </Alert>
       )}
       {success && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+        <Alert variant="success" className="mt-4">
           {success}
-        </p>
+        </Alert>
       )}
 
       <form action={login} className="mt-6 flex flex-col gap-4">
@@ -30,8 +35,9 @@ export default async function LoginPage({
           <input
             name="email"
             type="email"
+            autoComplete="email"
             required
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
         </label>
 
@@ -40,28 +46,26 @@ export default async function LoginPage({
           <input
             name="password"
             type="password"
+            autoComplete="current-password"
             required
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
         </label>
 
-        <button
-          type="submit"
-          className="mt-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-        >
+        <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
           Log in
         </button>
       </form>
 
       <p className="mt-4 text-sm text-muted">
-        <Link href="/forgot-password" className="hover:underline">
+        <Link href="/forgot-password" className="focus-ring rounded-sm hover:underline">
           Forgot your password?
         </Link>
       </p>
 
       <p className="mt-2 text-sm text-muted">
         No account yet?{" "}
-        <Link href="/signup" className="font-medium text-primary underline">
+        <Link href="/signup" className="focus-ring rounded-sm font-medium text-primary underline">
           Sign up
         </Link>
       </p>

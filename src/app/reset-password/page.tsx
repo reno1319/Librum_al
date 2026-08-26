@@ -1,4 +1,8 @@
 import { updatePassword } from "@/app/auth/actions";
+import { translateAuthErrorMessage } from "@/lib/auth-error";
+import { Alert } from "@/components/ui/alert";
+import { buttonClasses } from "@/components/ui/button";
+import { formControlClasses } from "@/lib/form-styles";
 
 export default async function ResetPasswordPage({
   searchParams,
@@ -10,11 +14,14 @@ export default async function ResetPasswordPage({
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
       <h1 className="font-serif text-3xl font-semibold">Set a new password</h1>
+      <p className="mt-1 text-sm text-muted">
+        You&apos;re completing a password reset. Set a new password to continue.
+      </p>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </p>
+        <Alert variant="error" className="mt-4">
+          {translateAuthErrorMessage(error)}
+        </Alert>
       )}
 
       <form action={updatePassword} className="mt-6 flex flex-col gap-4">
@@ -23,9 +30,10 @@ export default async function ResetPasswordPage({
           <input
             name="password"
             type="password"
+            autoComplete="new-password"
             required
             minLength={6}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
         </label>
 
@@ -34,16 +42,14 @@ export default async function ResetPasswordPage({
           <input
             name="confirmPassword"
             type="password"
+            autoComplete="new-password"
             required
             minLength={6}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
         </label>
 
-        <button
-          type="submit"
-          className="mt-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-        >
+        <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
           Update password
         </button>
       </form>

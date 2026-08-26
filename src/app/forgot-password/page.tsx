@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { requestPasswordReset } from "@/app/auth/actions";
+import { translateAuthErrorMessage } from "@/lib/auth-error";
+import { Alert } from "@/components/ui/alert";
+import { buttonClasses } from "@/components/ui/button";
+import { formControlClasses } from "@/lib/form-styles";
 
 export default async function ForgotPasswordPage({
   searchParams,
@@ -13,41 +17,35 @@ export default async function ForgotPasswordPage({
       <h1 className="font-serif text-3xl font-semibold">Reset your password</h1>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </p>
+        <Alert variant="error" className="mt-4">
+          {translateAuthErrorMessage(error)}
+        </Alert>
       )}
 
       {success ? (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-          If that email has an account, we&apos;ve sent a link to reset
-          your password.
-        </p>
+        <Alert variant="success" className="mt-4">
+          If that email has an account, we&apos;ve sent a link to reset your
+          password.
+        </Alert>
       ) : (
         <>
           <p className="mt-1 text-sm text-muted">
-            Enter your email and we&apos;ll send you a link to set a new
-            password.
+            Enter your email and we&apos;ll send you a password reset link.
           </p>
 
-          <form
-            action={requestPasswordReset}
-            className="mt-6 flex flex-col gap-4"
-          >
+          <form action={requestPasswordReset} className="mt-6 flex flex-col gap-4">
             <label className="flex flex-col gap-1 text-sm">
               Email
               <input
                 name="email"
                 type="email"
+                autoComplete="email"
                 required
-                className="rounded-lg border border-border bg-surface px-3 py-2"
+                className={formControlClasses}
               />
             </label>
 
-            <button
-              type="submit"
-              className="mt-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-            >
+            <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
               Send reset link
             </button>
           </form>
@@ -55,7 +53,7 @@ export default async function ForgotPasswordPage({
       )}
 
       <p className="mt-6 text-sm text-muted">
-        <Link href="/login" className="font-medium text-primary underline">
+        <Link href="/login" className="focus-ring rounded-sm font-medium text-primary underline">
           Back to log in
         </Link>
       </p>

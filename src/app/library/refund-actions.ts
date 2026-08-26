@@ -11,8 +11,9 @@ import {
 } from "./refund-logic";
 
 // stripePaymentIntentId is bound server-side (see the .bind(null, ...)
-// call sites in page.tsx) from the reader's own purchases rows fetched
-// in that Server Component -- it is never a raw form field a reader
+// call sites in account/purchases/page.tsx) from the reader's own
+// purchases rows fetched in that Server Component -- it is never a raw
+// form field a reader
 // could type into. request_refund() (migration 029) re-verifies
 // ownership itself regardless (it only ever matches purchases rows
 // where reader_id = auth.uid()), so even a tampered value can't be used
@@ -28,16 +29,16 @@ export async function requestTransactionRefund(
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login?next=/library");
+    redirect("/login?next=/account/purchases");
   }
 
   if (!stripePaymentIntentId) {
-    redirect(`/library?error=${encodeURIComponent(GENERIC_REFUND_ERROR_MESSAGE)}`);
+    redirect(`/account/purchases?error=${encodeURIComponent(GENERIC_REFUND_ERROR_MESSAGE)}`);
   }
 
   const reasonValidation = validateRefundReason(formData.get("reason"));
   if (!reasonValidation.ok) {
-    redirect(`/library?error=${encodeURIComponent(reasonValidation.error)}`);
+    redirect(`/account/purchases?error=${encodeURIComponent(reasonValidation.error)}`);
   }
 
   // request_refund() is the sole authority here: it re-derives
@@ -53,14 +54,14 @@ export async function requestTransactionRefund(
 
   if (error) {
     if (error.message === RPC_NOT_AUTHENTICATED_MESSAGE) {
-      redirect("/login?next=/library");
+      redirect("/login?next=/account/purchases");
     }
-    redirect(`/library?error=${encodeURIComponent(mapRefundRpcError(error))}`);
+    redirect(`/account/purchases?error=${encodeURIComponent(mapRefundRpcError(error))}`);
   }
 
-  revalidatePath("/library");
+  revalidatePath("/account/purchases");
   redirect(
-    `/library?success=${encodeURIComponent("Your refund request has been submitted for review.")}`,
+    `/account/purchases?success=${encodeURIComponent("Your refund request has been submitted for review.")}`,
   );
 }
 
@@ -79,7 +80,7 @@ export async function cancelRefundRequest(refundRequestId: string) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login?next=/library");
+    redirect("/login?next=/account/purchases");
   }
 
   const { error } = await supabase.rpc("cancel_refund_request", {
@@ -88,13 +89,13 @@ export async function cancelRefundRequest(refundRequestId: string) {
 
   if (error) {
     if (error.message === RPC_NOT_AUTHENTICATED_MESSAGE) {
-      redirect("/login?next=/library");
+      redirect("/login?next=/account/purchases");
     }
-    redirect(`/library?error=${encodeURIComponent(mapRefundRpcError(error))}`);
+    redirect(`/account/purchases?error=${encodeURIComponent(mapRefundRpcError(error))}`);
   }
 
-  revalidatePath("/library");
+  revalidatePath("/account/purchases");
   redirect(
-    `/library?success=${encodeURIComponent("Your refund request has been cancelled.")}`,
+    `/account/purchases?success=${encodeURIComponent("Your refund request has been cancelled.")}`,
   );
 }
