@@ -1,5 +1,15 @@
 export const PLATFORM_FEE_PERCENT = 20;
 
+// LIBRUM 2.0 UI-4: the single shared formatter for a book/bundle price
+// as shown to readers -- was previously duplicated independently in
+// BookCard, the bookstore hero, the bundle list, and the book detail
+// page. Currency is fixed at USD to match every other price-facing
+// surface in the app (Stripe Checkout, book detail, dashboard sales) --
+// not a currency-selection feature.
+export function formatPrice(priceCents: number): string {
+  return priceCents === 0 ? "Free" : `$${(priceCents / 100).toFixed(2)}`;
+}
+
 export function platformFeeCents(priceCents: number) {
   return Math.round((priceCents * PLATFORM_FEE_PERCENT) / 100);
 }
