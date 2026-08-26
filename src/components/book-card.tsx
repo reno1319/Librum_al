@@ -18,10 +18,10 @@ export function BookCard({
   authorName?: string | null;
 }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1.5">
       <Link
         href={`/books/${book.id}`}
-        className="focus-ring group flex flex-col gap-2 rounded-sm"
+        className="focus-ring group flex flex-col gap-3 rounded-sm"
       >
         {coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -48,13 +48,13 @@ export function BookCard({
       {authorName && (
         <Link
           href={`/authors/${book.author_id}`}
-          className="focus-ring w-fit rounded-sm text-sm text-muted hover:underline"
+          className="focus-ring w-fit rounded-sm text-xs text-muted hover:underline"
         >
           {authorName}
         </Link>
       )}
 
-      <span className="text-sm font-semibold text-primary">
+      <span className="text-sm font-medium text-primary/80">
         {formatPrice(book.price_cents)}
       </span>
     </div>

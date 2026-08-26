@@ -321,7 +321,7 @@ function BookstoreToolbar({
           name="q"
           defaultValue={q ?? ""}
           placeholder="Search books or authors"
-          className="focus-ring flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm"
+          className="focus-ring flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm"
         />
 
         <label htmlFor="bookstore-sort" className="sr-only">
@@ -331,7 +331,7 @@ function BookstoreToolbar({
           id="bookstore-sort"
           name="sort"
           defaultValue={sort ?? ""}
-          className="focus-ring rounded-md border border-border bg-surface px-3 py-2 text-sm sm:w-48"
+          className="focus-ring rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-muted sm:w-48"
         >
           {BOOKSTORE_SORT_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -348,17 +348,18 @@ function BookstoreToolbar({
         {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
         {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
 
-        <button type="submit" className={buttonClasses("primary", "md")}>
+        <button type="submit" className={buttonClasses("primary", "sm")}>
           Search
         </button>
       </form>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <div className="flex flex-1 flex-nowrap gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
+        <div className="flex flex-1 flex-nowrap gap-1.5 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
           <GenreChip
             label="All genres"
             href={buildBookstoreHref(query, { genre: undefined })}
             active={!genre}
+            subdued
           />
           {GENRES.map((g) => (
             <GenreChip key={g} label={g} href={toggleGenreHref(query, g)} active={genre === g} />
@@ -366,7 +367,7 @@ function BookstoreToolbar({
         </div>
 
         <details className="rounded-md border border-border bg-surface text-sm">
-          <summary className="focus-ring cursor-pointer select-none rounded-md px-3 py-2">
+          <summary className="focus-ring cursor-pointer select-none rounded-md px-3 py-1.5">
             Price range
           </summary>
           <form
@@ -427,15 +428,32 @@ function BookstoreToolbar({
   );
 }
 
-function GenreChip({ label, href, active }: { label: string; href: string; active: boolean }) {
+function GenreChip({
+  label,
+  href,
+  active,
+  subdued = false,
+}: {
+  label: string;
+  href: string;
+  active: boolean;
+  // The default "All genres" chip stays neutral even when it's the
+  // effectively-active state (no genre selected) -- a strongly-filled
+  // violet badge on the default option would read as "a genre is
+  // selected" when none is. Only a real genre selection gets the
+  // clearly-violet active treatment below.
+  subdued?: boolean;
+}) {
+  const activeClasses = subdued
+    ? "border-border bg-surface font-medium text-foreground"
+    : "border-primary bg-primary/10 font-medium text-primary";
+
   return (
     <Link
       href={href}
       aria-current={active ? "true" : undefined}
-      className={`focus-ring shrink-0 rounded-full border px-3 py-1.5 text-sm transition-colors ${
-        active
-          ? "border-primary bg-primary/10 font-medium text-primary"
-          : "border-border text-foreground hover:bg-surface-hover"
+      className={`focus-ring shrink-0 rounded-full border px-2.5 py-1 text-sm transition-colors ${
+        active ? activeClasses : "border-border/60 text-foreground/80 hover:bg-surface-hover"
       }`}
     >
       {label}
@@ -496,12 +514,12 @@ function BookGrid({
 
   return (
     <div className="mt-8">
-      <p className="text-sm text-muted">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted">
         {totalMatched <= SEARCH_RESULT_LIMIT
           ? `${totalMatched} ${totalMatched === 1 ? "book" : "books"}`
           : `Showing the first ${SEARCH_RESULT_LIMIT} books`}
       </p>
-      <ul className="mt-4 grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      <ul className="mt-4 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {books.map((book) => {
           const coverUrl = book.cover_path
             ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data
@@ -527,16 +545,17 @@ function BundlesSection({ bundles }: { bundles: BundleWithAuthor[] }) {
   return (
     <section className="mt-14 border-t border-border pt-10">
       <h2 className="font-serif text-xl font-bold">Bundles</h2>
-      <ul className="mt-4 flex flex-col gap-2">
+      <p className="mt-1 text-sm text-muted">Multiple books in one collection.</p>
+      <ul className="mt-5 flex flex-col gap-2.5">
         {bundles.map((bundle) => (
           <li key={bundle.id}>
             <Link
               href={`/bundles/${bundle.id}`}
-              className="focus-ring flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-4 py-3 text-sm hover:bg-surface-hover"
+              className="focus-ring flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-5 py-4 text-sm transition-colors hover:bg-surface-hover"
             >
-              <span className="font-serif font-medium">{bundle.title}</span>
+              <span className="font-serif text-base font-semibold">{bundle.title}</span>
               {bundle.profiles?.display_name && (
-                <span className="text-muted">by {bundle.profiles.display_name}</span>
+                <span className="text-xs text-muted">by {bundle.profiles.display_name}</span>
               )}
               <span className="ml-auto font-semibold text-primary">
                 {formatPrice(bundle.price_cents)}
