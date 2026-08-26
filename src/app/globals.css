@@ -33,6 +33,16 @@
   --color-author-tint: #e9eff8;
   --color-reader-tint: #fdf0e3;
 
+  /* LIBRUM 2.0 GLOBAL VISUAL POLISH 1 — the homepage's own distinctive
+     section tint: a very pale Librum-violet wash, deliberately lighter
+     and more neutral than --color-primary itself (never used as an
+     action color) so dark Ink text stays comfortably readable and the
+     hero/closing sections read as "tinted paper," not a saturated
+     purple block. Kept as one shared token (not a per-section variant)
+     since the same value intentionally bookends the homepage — hero and
+     final CTA both use it, sections in between stay paper/surface. */
+  --color-violet-tint: #f1eefb;
+
   /* LIBRUM 2.0 UI-1 — small structural token layer. Radius/shadow/
      container are all Tailwind v4's own recognized @theme namespaces,
      so each of these also becomes a real utility class (rounded-lg,

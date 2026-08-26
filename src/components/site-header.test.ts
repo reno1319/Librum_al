@@ -21,10 +21,10 @@ describe("buildSiteHeaderNav", () => {
 
     expect(nav.primaryLinks.map((l) => l.label)).toEqual([
       "Home",
-      "Bookstore",
+      "About",
       "How it works",
       "Earnings",
-      "About",
+      "Bookstore",
     ]);
     expect(nav.primaryLinks.some((l) => l.label === "Library")).toBe(false);
     expect(nav.primaryLinks.some((l) => l.label === "Dashboard")).toBe(false);

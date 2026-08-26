@@ -62,12 +62,17 @@ export function buildSiteHeaderNav(params: {
   // Role-correct label — never "Library" for an author, never "Dashboard"
   // for a reader. Authors can still browse/buy books via Bookstore above;
   // this is just their management-area link.
+  // LIBRUM 2.0 GLOBAL VISUAL POLISH 1: reordered to Home / About / How
+  // it works / Earnings / Bookstore -- Bookstore moved to last since the
+  // public nav otherwise reads author-first (matching the homepage's own
+  // author-acquisition purpose), with the reader-facing marketplace link
+  // still present but no longer leading. Routes/labels unchanged.
   const primaryLinks: NavItem[] = [
     { href: "/", label: "Home" },
-    { href: "/bookstore", label: "Bookstore" },
+    { href: "/about", label: "About" },
     { href: "/how-it-works", label: "How it works" },
     { href: "/pricing", label: "Earnings" },
-    { href: "/about", label: "About" },
+    { href: "/bookstore", label: "Bookstore" },
   ];
   if (user) {
     primaryLinks.push(
