@@ -1,14 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { createBook } from "../actions";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { GENRES } from "@/lib/genres";
+import { formControlClasses, fileInputClasses } from "@/lib/form-styles";
+import { buttonClasses } from "@/components/ui/button";
 import type { Series } from "@/lib/types";
 
-const STEPS = ["Manuscript & cover", "Details", "Price", "Review"];
+// LIBRUM 2.0 UI-7: four steps -- Files, Book Details, Pricing, Review --
+// unchanged in count/order from the pre-UI-7 wizard (the audit found
+// this grouping was already sound); this pass refines labels, adds a
+// cover preview, and applies focus-ring/shared form-control styling.
+// Every field stays mounted across steps (display toggled, not
+// unmounted) so uncontrolled/controlled values survive going back and
+// forth -- exactly as before. This is genuinely one atomic submission:
+// nothing is saved to the server until "Save as draft" on the final
+// step, which is why that step is never called "Publish" -- createBook()
+// always creates status="draft" regardless of how complete the form is.
+const STEPS = ["Files", "Book Details", "Pricing", "Review"];
 
 function SaveButton() {
   const { pending } = useFormStatus();
@@ -16,7 +28,7 @@ function SaveButton() {
     <button
       type="submit"
       disabled={pending}
-      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+      className={buttonClasses("primary", "md", "disabled:cursor-not-allowed disabled:opacity-60")}
     >
       {pending ? "Saving…" : "Save as draft"}
     </button>
@@ -32,6 +44,39 @@ export function UploadWizard({ series }: { series: Series[] }) {
   const [title, setTitle] = useState("");
   const [genre, setGenre] = useState("");
   const [price, setPrice] = useState("0");
+
+  // Object URL lifecycle: URL.createObjectURL() allocates a real
+  // browser resource, so it's created/revoked explicitly in the file
+  // input's own change handler (handleCoverChange below) -- never as a
+  // render-derived computation (useMemo) and never via a setState call
+  // inside an effect. `coverPreviewUrlRef` is the source of truth for
+  // cleanup purposes, and is only ever written inside an event handler
+  // or effect -- never during render (writing a ref's `.current` in the
+  // render body itself is disallowed by this codebase's lint rules).
+  // The only job left for an effect is the one thing effects are
+  // actually for here: revoking whatever URL is still held when the
+  // component unmounts.
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
+  const coverPreviewUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (coverPreviewUrlRef.current) URL.revokeObjectURL(coverPreviewUrlRef.current);
+    };
+  }, []);
+
+  function handleCoverChange(file: File | null) {
+    // Revoke the previous URL (if any) before creating/storing the next
+    // one, or before clearing the preview entirely -- so selecting a
+    // new file, or clearing the input, never leaks the prior URL.
+    if (coverPreviewUrlRef.current) {
+      URL.revokeObjectURL(coverPreviewUrlRef.current);
+    }
+    setCover(file);
+    const nextUrl = file ? URL.createObjectURL(file) : null;
+    coverPreviewUrlRef.current = nextUrl;
+    setCoverPreviewUrl(nextUrl);
+  }
 
   function goNext() {
     if (step === 1 && (!cover || !manuscript)) {
@@ -59,23 +104,13 @@ export function UploadWizard({ series }: { series: Series[] }) {
   }
 
   return (
-    <form
-      action={createBook}
-      className="mt-6"
-      style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}
-    >
-      <ol
-        className="flex flex-wrap text-xs font-medium text-muted"
-        style={{ gap: "0.5rem 1rem" }}
-      >
+    <form action={createBook} className="mt-6 flex flex-col gap-6">
+      <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
         {STEPS.map((label, i) => (
           <li
             key={label}
             aria-current={step === i + 1 ? "step" : undefined}
-            style={{
-              color: step === i + 1 ? "var(--color-primary)" : undefined,
-              fontWeight: step === i + 1 ? 700 : undefined,
-            }}
+            className={step === i + 1 ? "font-semibold text-primary" : undefined}
           >
             {i + 1}. {label}
           </li>
@@ -83,54 +118,56 @@ export function UploadWizard({ series }: { series: Series[] }) {
       </ol>
 
       {stepError && (
-        <p
-          role="status"
-          className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
-        >
+        <p role="status" className="rounded-lg border-l-4 border-red-600 bg-surface px-4 py-3 text-sm text-red-800">
           {stepError}
         </p>
       )}
 
-      {/* Step 1: Manuscript & cover — every field below stays mounted across
-          steps (just hidden via display) so uncontrolled inputs keep their
-          value when you go back and forth between steps. */}
-      <div
-        style={{
-          display: step === 1 ? "flex" : "none",
-          flexDirection: "column",
-          gap: "1.5rem",
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      {/* Step 1: Files */}
+      <div className={step === 1 ? "flex flex-col gap-6" : "hidden"}>
+        <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1 text-sm">
-            Cover image (JPG or PNG, up to 5MB)
+            Cover image
             <input
               name="cover"
               type="file"
               accept="image/png,image/jpeg"
               required
-              className="text-sm"
-              onChange={(e) => setCover(e.target.files?.[0] ?? null)}
+              className={fileInputClasses}
+              onChange={(e) => handleCoverChange(e.target.files?.[0] ?? null)}
             />
+            <span className="text-xs text-muted">JPEG or PNG · up to 5 MB</span>
           </label>
 
+          {coverPreviewUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={coverPreviewUrl}
+              alt=""
+              className="aspect-[2/3] w-32 rounded-md object-cover shadow-sm"
+            />
+          )}
+
           <label className="flex flex-col gap-1 text-sm">
-            Manuscript (EPUB file, up to 50MB)
+            Manuscript
             <input
               name="manuscript"
               type="file"
               accept=".epub,application/epub+zip"
               required
-              className="text-sm"
+              className={fileInputClasses}
               onChange={(e) => setManuscript(e.target.files?.[0] ?? null)}
             />
+            <span className="text-xs text-muted">EPUB · up to 50 MB</span>
           </label>
+          <p className="text-xs text-muted">
+            EPUB is the standard ebook format Librum uses for every book.
+          </p>
         </div>
 
         <aside className="rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted">
           <p className="font-medium text-foreground">Tips</p>
-          <ul className="mt-1 list-disc pl-4" style={{ display: "grid", gap: "0.25rem" }}>
-            <li>Librum currently accepts EPUB manuscripts only.</li>
+          <ul className="mt-1 flex flex-col gap-1 pl-4 list-disc">
             <li>Covers work best as a portrait image, at least 1000px tall.</li>
             <li>
               You can replace either file later from your dashboard before —
@@ -140,14 +177,8 @@ export function UploadWizard({ series }: { series: Series[] }) {
         </aside>
       </div>
 
-      {/* Step 2: Details */}
-      <div
-        style={{
-          display: step === 2 ? "flex" : "none",
-          flexDirection: "column",
-          gap: "1rem",
-        }}
-      >
+      {/* Step 2: Book Details */}
+      <div className={step === 2 ? "flex flex-col gap-4" : "hidden"}>
         <label className="flex flex-col gap-1 text-sm">
           Title
           <input
@@ -156,26 +187,21 @@ export function UploadWizard({ series }: { series: Series[] }) {
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          Description
-          <textarea
-            name="description"
-            rows={4}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
-          />
+          Description (optional)
+          <textarea name="description" rows={4} className={formControlClasses} />
+          <span className="text-xs text-muted">
+            A couple of sentences or more helps readers decide.
+          </span>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
           Preview excerpt (optional)
-          <textarea
-            name="previewText"
-            rows={8}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
-          />
+          <textarea name="previewText" rows={8} className={formControlClasses} />
           <span className="text-xs text-muted">
             Shown to readers under &quot;Look inside&quot; before they buy —
             the opening page or two works well. Leave blank to skip.
@@ -188,7 +214,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
             name="keywords"
             type="text"
             placeholder="e.g. space opera, first contact, hard sci-fi"
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
           <span className="text-xs text-muted">
             Comma-separated. Helps readers find your book by terms beyond its
@@ -202,7 +228,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
             name="isbn"
             type="text"
             placeholder="e.g. 978-3-16-148410-0"
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
           <span className="text-xs text-muted">
             Only if you already own one — Librum doesn&apos;t issue or
@@ -217,7 +243,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
             required
             value={genre}
             onChange={(e) => setGenre(e.target.value)}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           >
             <option value="" disabled>
               Choose a genre
@@ -233,7 +259,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
         {series.length === 0 && (
           <p className="text-xs text-muted">
             Want to group this with other books as a series?{" "}
-            <Link href="/dashboard/series" className="underline">
+            <Link href="/dashboard/series" className="focus-ring rounded-sm underline">
               Create a series first
             </Link>
             , then come back here.
@@ -244,11 +270,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
           <div className="flex gap-3">
             <label className="flex flex-1 flex-col gap-1 text-sm">
               Series (optional)
-              <select
-                name="seriesId"
-                defaultValue=""
-                className="rounded-lg border border-border bg-surface px-3 py-2"
-              >
+              <select name="seriesId" defaultValue="" className={formControlClasses}>
                 <option value="">None</option>
                 {series.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -265,21 +287,15 @@ export function UploadWizard({ series }: { series: Series[] }) {
                 min="1"
                 step="1"
                 placeholder="1"
-                className="w-24 rounded-lg border border-border bg-surface px-3 py-2"
+                className={`w-24 ${formControlClasses}`}
               />
             </label>
           </div>
         )}
       </div>
 
-      {/* Step 3: Price */}
-      <div
-        style={{
-          display: step === 3 ? "flex" : "none",
-          flexDirection: "column",
-          gap: "1rem",
-        }}
-      >
+      {/* Step 3: Pricing */}
+      <div className={step === 3 ? "flex flex-col gap-4" : "hidden"}>
         <label className="flex flex-col gap-1 text-sm">
           Price (USD)
           <input
@@ -290,38 +306,31 @@ export function UploadWizard({ series }: { series: Series[] }) {
             required
             value={price}
             onChange={(e) => setPrice(e.target.value)}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
           <span className="text-xs text-muted">
-            Librum takes a {PLATFORM_FEE_PERCENT}% platform fee — you keep the
-            rest of every sale.
+            Set to $0 for a free ebook. Librum takes a {PLATFORM_FEE_PERCENT}%
+            platform fee — you keep the rest of every sale.
           </span>
         </label>
         <Link
           href="/pricing"
-          className="text-sm font-medium text-primary hover:underline"
+          className="focus-ring w-fit rounded-sm text-sm font-medium text-primary hover:underline"
         >
           Not sure what to charge? See the earnings calculator &rarr;
         </Link>
       </div>
 
-      {/* Step 4: Review */}
-      <div
-        style={{
-          display: step === 4 ? "flex" : "none",
-          flexDirection: "column",
-          gap: "0.75rem",
-        }}
-      >
+      {/* Step 4: Review -- a review of what will be saved as a draft, not
+          of what will be published (those are different moments; see
+          SaveButton above). */}
+      <div className={step === 4 ? "flex flex-col gap-3" : "hidden"}>
         <p className="text-sm text-muted">
           Double check the basics below, then save. Everything — including
           the cover and manuscript — can still be edited from your dashboard
           before you publish.
         </p>
-        <dl
-          className="rounded-lg border border-border bg-surface p-4 text-sm"
-          style={{ display: "grid", gap: "0.5rem" }}
-        >
+        <dl className="grid gap-2 rounded-lg border border-border bg-surface p-4 text-sm">
           <div className="flex justify-between gap-4">
             <dt className="text-muted">Title</dt>
             <dd className="text-right">{title || "—"}</dd>
@@ -354,7 +363,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
           <button
             type="button"
             onClick={goBack}
-            className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+            className={buttonClasses("outline", "md")}
           >
             Back
           </button>
@@ -363,11 +372,7 @@ export function UploadWizard({ series }: { series: Series[] }) {
         )}
 
         {step < STEPS.length ? (
-          <button
-            type="button"
-            onClick={goNext}
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-          >
+          <button type="button" onClick={goNext} className={buttonClasses("primary", "md")}>
             Next
           </button>
         ) : (

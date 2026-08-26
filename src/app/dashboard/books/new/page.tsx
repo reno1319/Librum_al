@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { UploadWizard } from "./upload-wizard";
+import { Alert } from "@/components/ui/alert";
 import type { Series } from "@/lib/types";
 
 export default async function NewBookPage({
@@ -23,7 +24,7 @@ export default async function NewBookPage({
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="text-sm text-muted hover:underline">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
         &larr; Back to dashboard
       </Link>
       <h1 className="mt-2 font-serif text-3xl font-semibold">Add a book</h1>
@@ -33,9 +34,9 @@ export default async function NewBookPage({
       </p>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <Alert variant="error" className="mt-4">
           {error}
-        </p>
+        </Alert>
       )}
 
       <UploadWizard series={series ?? []} />
