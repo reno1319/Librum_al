@@ -147,7 +147,7 @@ function HeroSection({ cta, covers }: { cta: HomepageCta | null; covers: Cover[]
         <div
           className={
             covers.length > 0
-              ? "grid gap-10 lg:grid-cols-2 lg:items-center lg:gap-16"
+              ? "grid gap-10 lg:grid-cols-2 lg:items-center lg:gap-10"
               : ""
           }
         >
@@ -158,7 +158,7 @@ function HeroSection({ cta, covers }: { cta: HomepageCta | null; covers: Cover[]
             <h1 className="mt-3 font-serif text-4xl font-bold leading-tight sm:text-5xl lg:text-6xl">
               Publish your book. Your way.
             </h1>
-            <p className="mt-4 max-w-md text-base text-foreground/80">
+            <p className="mt-4 max-w-md text-base leading-relaxed text-foreground/80 md:text-lg">
               The self-publishing platform built for Albanian-language
               authors. Publish independently, set your own price, and reach
               readers through Librum.
@@ -170,16 +170,23 @@ function HeroSection({ cta, covers }: { cta: HomepageCta | null; covers: Cover[]
               </Link>
             )}
 
-            <div className="mt-6 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+            <div className="mt-6 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm">
               <span className="font-semibold text-foreground">
                 {authorShare}%{" "}
                 <span className="font-normal text-muted">Author share</span>
               </span>
-              <span className="hidden text-muted sm:inline">&middot;</span>
-              <span className="text-muted">
-                You set the price &middot; No setup fee &middot; No monthly
-                subscription
+              <span aria-hidden="true" className="text-muted">
+                &middot;
               </span>
+              <span className="text-muted">You set the price</span>
+              <span aria-hidden="true" className="text-muted">
+                &middot;
+              </span>
+              <span className="text-muted">No setup fee</span>
+              <span aria-hidden="true" className="text-muted">
+                &middot;
+              </span>
+              <span className="text-muted">No monthly subscription</span>
             </div>
           </div>
 
@@ -197,9 +204,9 @@ function HeroSection({ cta, covers }: { cta: HomepageCta | null; covers: Cover[]
 // fewer are available, only that many render (no fabricated
 // placeholders).
 const COLLAGE_LAYOUT = [
-  { top: "1.5rem", left: "0rem", width: "6rem", rotate: -3, z: 1 },
-  { top: "0rem", left: "4.25rem", width: "7.5rem", rotate: 0, z: 3 },
-  { top: "2rem", left: "9.25rem", width: "5.75rem", rotate: 3, z: 2 },
+  { top: "2rem", left: "0rem", width: "7.75rem", rotate: -3, z: 1 },
+  { top: "0rem", left: "5.5rem", width: "9.75rem", rotate: 0, z: 3 },
+  { top: "2.75rem", left: "12rem", width: "7.5rem", rotate: 3, z: 2 },
 ];
 
 function HeroCovers({ covers }: { covers: Cover[] }) {
@@ -221,10 +228,10 @@ function HeroCovers({ covers }: { covers: Cover[] }) {
       </div>
 
       <div
-        className="relative hidden max-w-xs lg:block"
-        style={{ height: "12.5rem" }}
+        className="relative hidden max-w-sm lg:block"
+        style={{ height: "15rem" }}
       >
-        <div className="absolute -inset-4 -z-10 rounded-2xl bg-primary/5" />
+        <div className="absolute -inset-6 -z-10 rounded-3xl bg-primary/10" />
         {shown.map((cover, i) => {
           const layout = COLLAGE_LAYOUT[i];
           return (
@@ -275,13 +282,18 @@ const WHY_LIBRUM_PILLARS: { heading: string; body: string }[] = [
 function WhyLibrumSection() {
   return (
     <section className="border-t border-border">
-      <div className="mx-auto w-full max-w-wide px-4 py-14 sm:px-6">
+      <div className="mx-auto w-full max-w-app px-4 py-14 sm:px-6">
         <h2 className="font-serif text-2xl font-bold sm:text-3xl">Why Librum</h2>
         <div className="mt-8 grid gap-8 sm:grid-cols-3">
-          {WHY_LIBRUM_PILLARS.map((pillar) => (
+          {WHY_LIBRUM_PILLARS.map((pillar, i) => (
             <div key={pillar.heading}>
-              <h3 className="font-serif text-lg font-bold">{pillar.heading}</h3>
-              <p className="mt-2 text-sm text-foreground/90">{pillar.body}</p>
+              <span className="font-serif text-xs font-semibold text-primary/60">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <h3 className="mt-1 font-serif text-lg font-bold">{pillar.heading}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-foreground/90 md:text-base">
+                {pillar.body}
+              </p>
             </div>
           ))}
         </div>
@@ -325,11 +337,11 @@ function PublishInFourStepsSection() {
         <h2 className="text-center font-serif text-2xl font-bold sm:text-3xl">
           Publish in four steps
         </h2>
-        <ol className="mt-10 grid gap-8 sm:grid-cols-2 md:grid-cols-4">
+        <ol className="mt-10 grid gap-6 sm:grid-cols-2 md:grid-cols-4">
           {PUBLISHING_STEPS.map((step, i) => (
             <li key={step.title} className="text-center">
               <IconBadge icon={step.icon} />
-              <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-primary">
+              <p className="mt-3 text-xs font-bold uppercase tracking-[0.08em] text-primary">
                 Step {i + 1}
               </p>
               <h3 className="mt-1 font-serif text-base font-bold">{step.title}</h3>
@@ -352,8 +364,8 @@ function PublishInFourStepsSection() {
 
 function IconBadge({ icon: Icon }: { icon: Icon }) {
   return (
-    <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-primary/10">
-      <Icon className="size-5 text-primary" />
+    <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-primary/10">
+      <Icon className="size-6 text-primary" />
     </div>
   );
 }
@@ -368,7 +380,7 @@ function EarningsSection() {
 
   return (
     <section className="bg-author-tint">
-      <div className="mx-auto grid w-full max-w-wide gap-6 px-4 py-10 sm:grid-cols-2 sm:items-center sm:px-6 md:py-12">
+      <div className="mx-auto grid w-full max-w-app gap-6 px-4 py-10 sm:grid-cols-2 sm:items-center sm:px-6 md:py-12">
         <div>
           <span className="font-serif text-5xl font-bold sm:text-6xl">
             {authorShare}%
@@ -378,7 +390,10 @@ function EarningsSection() {
           </p>
         </div>
         <div>
-          <p className="text-foreground/90">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+            Earnings
+          </p>
+          <p className="mt-1 leading-relaxed text-foreground/90">
             Librum keeps a {PLATFORM_FEE_PERCENT}% platform fee. No setup
             fee. No monthly subscription.
           </p>
@@ -400,6 +415,12 @@ function EarningsSection() {
 // each on desktop.
 // ============================================================
 
+// Restrained editorial vertical stagger, cycling by index -- distinct
+// from PublishedWithLibrumSection's own rotation (kept extremely
+// subtle), so the row reads as composed rather than a flat grid without
+// tipping into a playful/chaotic arrangement.
+const PUBLISHED_STAGGER = ["0.25rem", "-0.25rem", "0.5rem", "-0.25rem", "0.25rem"];
+
 function PublishedWithLibrumSection({ covers }: { covers: Cover[] }) {
   return (
     <section className="border-t border-border">
@@ -411,7 +432,7 @@ function PublishedWithLibrumSection({ covers }: { covers: Cover[] }) {
           Real books, published independently by Librum authors.
         </p>
         <div
-          className="mt-8 flex flex-wrap justify-center gap-4"
+          className="mt-10 flex flex-wrap justify-center gap-4"
           aria-hidden="true"
         >
           {covers.map((cover, i) => (
@@ -423,7 +444,7 @@ function PublishedWithLibrumSection({ covers }: { covers: Cover[] }) {
               loading="lazy"
               className="aspect-[2/3] w-[clamp(6.5rem,20vw,10.5rem)] rounded-lg object-cover shadow-sm"
               style={{
-                transform: i % 2 === 0 ? "rotate(-1deg)" : "rotate(1deg)",
+                transform: `translateY(${PUBLISHED_STAGGER[i % PUBLISHED_STAGGER.length]}) rotate(${i % 2 === 0 ? -1 : 1}deg)`,
               }}
             />
           ))}
@@ -441,31 +462,31 @@ function PublishedWithLibrumSection({ covers }: { covers: Cover[] }) {
 const PROFESSIONAL_TOOLS: { title: string; body: string }[] = [
   {
     title: "Set your own price",
-    body: "You choose your book's price and can change it any time.",
+    body: "You choose your book's price and can change it whenever you need.",
   },
   {
     title: "Track your sales",
-    body: "See sales and revenue from your dashboard as they happen.",
+    body: "Follow units sold and revenue from your author dashboard.",
   },
   {
     title: "Receive payouts through Stripe",
-    body: "Payouts are sent directly to you through Stripe Connect.",
+    body: "Author payouts are handled securely through Stripe.",
   },
 ];
 
 function ProfessionalToolsSection() {
   return (
     <section className="border-t border-border bg-surface">
-      <div className="mx-auto w-full max-w-wide px-4 py-12 sm:px-6 md:py-14">
+      <div className="mx-auto w-full max-w-app px-4 py-12 sm:px-6 md:py-14">
         <h2 className="text-center font-serif text-2xl font-bold sm:text-3xl">
           Simple to start. Built for the long run.
         </h2>
-        <div className="mt-8 grid gap-8 sm:grid-cols-3">
+        <div className="mt-10 grid gap-8 sm:grid-cols-3">
           {PROFESSIONAL_TOOLS.map((tool) => (
             <div key={tool.title}>
-              <IconCheck className="size-5 text-primary" />
-              <h3 className="mt-2 font-serif text-base font-bold">{tool.title}</h3>
-              <p className="mt-1 text-sm text-foreground/90">{tool.body}</p>
+              <IconCheck className="size-8 text-primary" />
+              <h3 className="mt-3 font-serif text-lg font-bold">{tool.title}</h3>
+              <p className="mt-2 text-base text-foreground/90">{tool.body}</p>
             </div>
           ))}
         </div>
@@ -485,7 +506,9 @@ function FinalCtaSection({ cta }: { cta: HomepageCta }) {
         <h2 className="font-serif text-3xl font-bold sm:text-4xl">
           Ready to publish?
         </h2>
-        <p className="mt-2 text-foreground/90">Your book is one upload away.</p>
+        <p className="mt-2 text-foreground/90">
+          Bring your book to readers with Librum.
+        </p>
         <Link
           href={cta.href}
           className={buttonClasses("primary", "lg", "mt-6 inline-flex")}

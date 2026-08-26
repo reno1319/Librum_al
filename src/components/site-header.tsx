@@ -140,6 +140,22 @@ export async function SiteHeader() {
           {nav.showDisplayName && displayName && (
             <span className="text-muted">{displayName}</span>
           )}
+          {/* LIBRUM 2.0 UI-3 final polish: logged-out desktop gets an
+              explicit "Log in" text link rather than relying solely on
+              the person icon below -- purely a presentational split by
+              breakpoint, so it's driven directly off `user` here rather
+              than adding a field to buildSiteHeaderNav()'s state. `user`
+              being falsy already rules out recovery (a recovery session
+              always has a real Supabase user), so no separate
+              recoveryActive check is needed. */}
+          {!user && (
+            <Link
+              href={nav.accountHref}
+              className="focus-ring rounded-sm text-foreground transition-colors hover:underline"
+            >
+              Log in
+            </Link>
+          )}
           {nav.showLogout && (
             <form action={logout}>
               <button
@@ -156,7 +172,7 @@ export async function SiteHeader() {
           <Link
             href={nav.accountHref}
             aria-label={nav.accountLabel}
-            className="focus-ring flex size-11 items-center justify-center rounded-sm text-foreground"
+            className={`focus-ring flex size-11 items-center justify-center rounded-sm text-foreground ${!user ? "md:hidden" : ""}`}
           >
             <span aria-hidden="true">
               <IconPerson className="size-5" />
