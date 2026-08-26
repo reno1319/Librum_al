@@ -68,7 +68,7 @@ export function buildSiteHeaderNav(params: {
     { href: "/", label: "Home" },
     { href: "/bookstore", label: "Bookstore" },
     { href: "/how-it-works", label: "How it works" },
-    { href: "/pricing", label: "Pricing" },
+    { href: "/pricing", label: "Earnings" },
     { href: "/about", label: "About" },
   ];
   if (user) {

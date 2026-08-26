@@ -19,7 +19,7 @@ const FOOTER_GROUPS = {
   ],
   Publish: [
     { href: "/how-it-works", label: "How it works" },
-    { href: "/pricing", label: "Pricing" },
+    { href: "/pricing", label: "Earnings" },
   ],
   Support: [
     { href: "/help", label: "Help" },

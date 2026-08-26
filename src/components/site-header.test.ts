@@ -23,7 +23,7 @@ describe("buildSiteHeaderNav", () => {
       "Home",
       "Bookstore",
       "How it works",
-      "Pricing",
+      "Earnings",
       "About",
     ]);
     expect(nav.primaryLinks.some((l) => l.label === "Library")).toBe(false);
