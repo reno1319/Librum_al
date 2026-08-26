@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Book, RefundRequest } from "@/lib/types";
+import type { Book, Profile, RefundRequest } from "@/lib/types";
 import {
   calculateTotalSpentCents,
   deriveTransactionRefundState,
@@ -12,6 +12,11 @@ import {
 import { requestTransactionRefund, cancelRefundRequest } from "./refund-actions";
 import { RefundRequestForm } from "./refund-request-form";
 import { CancelRefundButton } from "./cancel-refund-button";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Alert } from "@/components/ui/alert";
+import { buttonClasses } from "@/components/ui/button";
+import { LibraryBookCard } from "@/components/library-book-card";
 
 type PurchaseWithBook = {
   book_id: string;
@@ -19,7 +24,7 @@ type PurchaseWithBook = {
   created_at: string;
   refunded_at: string | null;
   stripe_payment_intent_id: string | null;
-  books: Book | null;
+  books: (Book & { profiles: Pick<Profile, "display_name"> | null }) | null;
 };
 
 const REFUND_STATUS_LABELS: Record<string, string> = {
@@ -47,7 +52,9 @@ export default async function LibraryPage({
 
   const { data: purchases } = await supabase
     .from("purchases")
-    .select("book_id, amount_cents, created_at, refunded_at, stripe_payment_intent_id, books(*)")
+    .select(
+      "book_id, amount_cents, created_at, refunded_at, stripe_payment_intent_id, books(*, profiles(display_name))",
+    )
     .eq("reader_id", user.id)
     .order("created_at", { ascending: false })
     .returns<PurchaseWithBook[]>();
@@ -115,6 +122,19 @@ export default async function LibraryPage({
   );
   const ownedByBookId = new Map(ownershipEntries);
 
+  // The new primary Library grid: every currently-owned book, as a flat
+  // list -- never grouped by bundle/transaction (that grouping stays
+  // confined to the Purchases & refunds section below). Derived
+  // entirely from data already fetched above (allPurchases +
+  // ownedByBookId), so this adds zero additional queries. A refunded or
+  // lost-disputed purchase's book_id simply isn't in ownedByBookId (or
+  // maps to false), so it's naturally excluded here -- it still shows
+  // up in the transaction history below, just never as a grid card.
+  const ownedBooks = allPurchases
+    .filter((purchase) => purchase.books && ownedByBookId.get(purchase.book_id))
+    .map((purchase) => purchase.books!)
+    .sort((a, b) => a.title.localeCompare(b.title));
+
   // Merges purchases rows AND fulfilled bundle snapshots into one entry
   // per actual paid transaction -- including a transaction with zero
   // purchases rows (every bundle item was already owned elsewhere), which
@@ -131,18 +151,59 @@ export default async function LibraryPage({
   const totalSpentCents = calculateTotalSpentCents(transactionGroups);
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-3xl font-semibold">Your library</h1>
-      <p className="mt-1 text-sm text-muted">
-        Everything you&apos;ve bought, with purchase details.
-      </p>
+    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
+      <PageHeader title="Your library" description="The books you've collected on Librum." />
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+        <Alert variant="error" className="mt-4">
+          {error}
+        </Alert>
       )}
       {success && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{success}</p>
+        <Alert variant="success" className="mt-4">
+          {success}
+        </Alert>
       )}
+
+      {ownedBooks.length === 0 ? (
+        <EmptyState
+          className="mt-8"
+          title="Your library is empty."
+          description="Books you acquire on Librum will appear here."
+          action={
+            <Link href="/bookstore" className={buttonClasses("primary", "md")}>
+              Browse the Bookstore
+            </Link>
+          }
+        />
+      ) : (
+        <ul className="mt-8 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
+          {ownedBooks.map((book) => {
+            const coverUrl = book.cover_path
+              ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
+              : null;
+
+            return (
+              <LibraryBookCard
+                key={book.id}
+                bookId={book.id}
+                title={book.title}
+                coverUrl={coverUrl}
+                authorId={book.author_id}
+                authorName={book.profiles?.display_name ?? null}
+                isPublished={book.status === "published"}
+                downloadable={ownedByBookId.get(book.id) ?? false}
+              />
+            );
+          })}
+        </ul>
+      )}
+
+      <div className="mx-auto mt-16 max-w-3xl border-t border-border pt-10">
+        <h2 className="font-serif text-xl font-semibold text-muted">Purchases & refunds</h2>
+        <p className="mt-1 text-sm text-muted">
+          Review your purchases and manage eligible refund requests.
+        </p>
 
       {transactionGroups.length === 0 ? (
         <p className="mt-8 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
@@ -302,6 +363,7 @@ export default async function LibraryPage({
           </ul>
         </>
       )}
+      </div>
     </main>
   );
 }
