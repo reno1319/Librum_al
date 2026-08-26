@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AuthorBookRow } from "@/components/author-book-row";
 import { PageHeader } from "@/components/ui/page-header";
@@ -18,10 +19,14 @@ export default async function AllBooksPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) {
+    redirect("/login?next=/dashboard/books");
+  }
+
   const { data: books } = await supabase
     .from("books")
     .select("*")
-    .eq("author_id", user!.id)
+    .eq("author_id", user.id)
     .order("created_at", { ascending: false })
     .returns<Book[]>();
 

@@ -8,7 +8,7 @@ const faqs = [
   },
   {
     q: "How do I get paid?",
-    a: `You connect a Stripe account from Dashboard > Payouts before you can publish. Stripe verifies your identity and pays you directly — you keep ${100 - PLATFORM_FEE_PERCENT}% of every sale, Librum keeps ${PLATFORM_FEE_PERCENT}%. Payout availability and the actual bank-transfer timing depend on your Stripe account status and Stripe's own processing schedule.`,
+    a: `You connect a Stripe account from Dashboard > Payouts before you can publish a paid book. Stripe verifies your identity and pays you directly — you keep ${100 - PLATFORM_FEE_PERCENT}% of every sale, Librum keeps ${PLATFORM_FEE_PERCENT}%. Payout availability and the actual bank-transfer timing depend on your Stripe account status and Stripe's own processing schedule.`,
   },
   {
     q: "What happens to my earnings if a sale is refunded?",

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getPublishChecklist } from "@/lib/publish-checklist";
 import { resolveDashboardAttention } from "@/lib/dashboard-attention";
@@ -35,16 +36,20 @@ export default async function DashboardPage({
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) {
+    redirect("/login?next=/dashboard");
+  }
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("stripe_account_id, stripe_payouts_enabled")
-    .eq("id", user!.id)
+    .eq("id", user.id)
     .single();
 
   const { data: books } = await supabase
     .from("books")
     .select("*")
-    .eq("author_id", user!.id)
+    .eq("author_id", user.id)
     .order("created_at", { ascending: false })
     .returns<Book[]>();
 

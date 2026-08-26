@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { formatPrice } from "@/lib/pricing";
-import { publishBook, unpublishBook, deleteBook } from "@/app/dashboard/books/actions";
+import { deleteBook } from "@/app/dashboard/books/actions";
 import { DeleteBookButton } from "@/app/dashboard/delete-book-button";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book } from "@/lib/types";
@@ -10,20 +10,18 @@ import type { Book } from "@/lib/types";
 // full list -- deliberately NOT the reader BookCard, which is
 // commerce-shaped and inappropriate for author-management UI.
 //
-// Publish/Unpublish/Delete stay reachable from this row rather than
-// moving to the book-edit page, per the UI-6 implementation's own
-// binding rule: src/app/dashboard/books/[id]/edit/page.tsx was
-// inspected and exposes none of the three (only "Save changes" and
-// Contributors add/remove) -- removing them from here without an
-// approved place for them to live instead would be a real feature
-// regression, not a simplification. This pre-commit correction tucks
-// them into a native <details> "More actions" disclosure instead of
-// leaving all 4-5 actions directly on the row, which just reproduced
-// the original action-wall problem UI-6 was meant to reduce -- same
-// forms, same server actions, same DeleteBookButton, purely a
-// presentation change. Edit and View (published only) stay directly
-// visible since those are the two actions the UI-6 design settled on
-// as row-level defaults.
+// LIBRUM 2.0 CLEANUP-1 (UI-7A): Publish/Unpublish were removed from
+// this row. Publishing Studio (src/app/dashboard/books/[id]/edit/page.tsx)
+// now owns those lifecycle decisions with proper context -- the
+// readiness checklist and the payout-gate explanation -- that a bare
+// row-level button can't show; duplicating them here risked a reader
+// hitting Publish and getting an unexplained server-side failure. Only
+// Delete stays in "More actions": unlike Publish/Unpublish it doesn't
+// need that extra context (the confirmation dialog IS the context),
+// and it's a fast, common cleanup action (e.g. deleting an accidental
+// duplicate draft) that shouldn't require a trip into Edit's own
+// Danger zone. Edit and View (published only) stay directly visible,
+// same as before.
 export function AuthorBookRow({
   book,
   coverUrl,
@@ -63,20 +61,6 @@ export function AuthorBookRow({
             More actions
           </summary>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            {book.status === "draft" ? (
-              <form action={publishBook.bind(null, book.id)}>
-                <button type="submit" className={buttonClasses("outline", "sm")}>
-                  Publish
-                </button>
-              </form>
-            ) : (
-              <form action={unpublishBook.bind(null, book.id)}>
-                <button type="submit" className={buttonClasses("outline", "sm")}>
-                  Unpublish
-                </button>
-              </form>
-            )}
-
             <form action={deleteBook.bind(null, book.id)}>
               <DeleteBookButton title={book.title} />
             </form>

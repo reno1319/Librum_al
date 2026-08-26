@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
@@ -16,10 +17,14 @@ export default async function PayoutsPage({
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) {
+    redirect("/login?next=/dashboard/payouts");
+  }
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("stripe_account_id, stripe_payouts_enabled")
-    .eq("id", user!.id)
+    .eq("id", user.id)
     .single();
 
   let payoutsEnabled = profile?.stripe_payouts_enabled ?? false;
@@ -35,7 +40,7 @@ export default async function PayoutsPage({
       await admin
         .from("profiles")
         .update({ stripe_payouts_enabled: payoutsEnabled })
-        .eq("id", user!.id);
+        .eq("id", user.id);
     }
   }
 
@@ -63,7 +68,7 @@ export default async function PayoutsPage({
           <>
             <p className="text-sm">
               You haven&apos;t connected a payout account yet. You&apos;ll
-              need to do this before you can publish a book.
+              need to do this before you can publish a paid book.
             </p>
             <form action={connectStripeAccount} className="mt-4">
               <button

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
   createBundle,
@@ -19,10 +20,14 @@ export default async function BundlesPage({
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) {
+    redirect("/login?next=/dashboard/bundles");
+  }
+
   const { data: books } = await supabase
     .from("books")
     .select("id, title")
-    .eq("author_id", user!.id)
+    .eq("author_id", user.id)
     .eq("status", "published")
     .order("title")
     .returns<Pick<Book, "id" | "title">[]>();
@@ -30,7 +35,7 @@ export default async function BundlesPage({
   const { data: bundles } = await supabase
     .from("bundles")
     .select("*")
-    .eq("author_id", user!.id)
+    .eq("author_id", user.id)
     .order("created_at", { ascending: false })
     .returns<Bundle[]>();
 

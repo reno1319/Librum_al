@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { UploadWizard } from "./upload-wizard";
 import { Alert } from "@/components/ui/alert";
@@ -15,10 +16,14 @@ export default async function NewBookPage({
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) {
+    redirect("/login?next=/dashboard/books/new");
+  }
+
   const { data: series } = await supabase
     .from("series")
     .select("*")
-    .eq("author_id", user!.id)
+    .eq("author_id", user.id)
     .order("title")
     .returns<Series[]>();
 

@@ -8,7 +8,7 @@ const steps = [
   },
   {
     title: "2. Connect a payout account",
-    body: "From Dashboard > Payouts, connect with Stripe. Stripe verifies your identity and collects your bank details directly — Librum never sees or stores them. This is required before you can publish anything.",
+    body: "From Dashboard > Payouts, connect with Stripe. Stripe verifies your identity and collects your bank details directly — Librum never sees or stores them. This is required before you can publish a paid book.",
   },
   {
     title: "3. Upload your book",

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createSeries, deleteSeries } from "./actions";
 import type { Series } from "@/lib/types";
@@ -14,17 +15,21 @@ export default async function SeriesPage({
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) {
+    redirect("/login?next=/dashboard/series");
+  }
+
   const { data: series } = await supabase
     .from("series")
     .select("*")
-    .eq("author_id", user!.id)
+    .eq("author_id", user.id)
     .order("created_at", { ascending: false })
     .returns<Series[]>();
 
   const { data: booksInSeries } = await supabase
     .from("books")
     .select("series_id")
-    .eq("author_id", user!.id)
+    .eq("author_id", user.id)
     .not("series_id", "is", null);
 
   const counts = new Map<string, number>();

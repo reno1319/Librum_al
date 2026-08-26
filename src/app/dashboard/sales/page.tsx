@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { platformFeeCents } from "@/lib/pricing";
 import { excludeLostDisputedRows } from "./revenue-logic";
@@ -38,10 +39,14 @@ export default async function SalesPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) {
+    redirect("/login?next=/dashboard/sales");
+  }
+
   const { data: books } = await supabase
     .from("books")
     .select("id, title, status")
-    .eq("author_id", user!.id)
+    .eq("author_id", user.id)
     .returns<Pick<Book, "id" | "title" | "status">[]>();
 
   const bookIds = (books ?? []).map((book) => book.id);
@@ -69,7 +74,7 @@ export default async function SalesPage() {
   const { data: snapshots } = await supabase
     .from("bundle_checkout_snapshots")
     .select("stripe_checkout_session_id, stripe_payment_intent_id, total_amount_cents, fulfilled_at")
-    .eq("author_id", user!.id)
+    .eq("author_id", user.id)
     .not("fulfilled_at", "is", null)
     .is("refunded_at", null)
     .returns<BundleSnapshotRevenue[]>();
@@ -114,7 +119,7 @@ export default async function SalesPage() {
 
   if (lostDisputedError) {
     console.error("SalesPage: author_lost_disputed_payment_intents RPC failed", {
-      authorId: user!.id,
+      authorId: user.id,
       error: lostDisputedError,
     });
     throw new Error("Could not load sales data. Please try again.");
