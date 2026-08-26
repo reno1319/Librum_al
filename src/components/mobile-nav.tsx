@@ -5,8 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { IconMenu, IconClose } from "@/components/icons";
 import type { NavItem } from "@/components/nav-links";
-import type { HeaderCta } from "@/components/site-header";
-import { buttonClasses } from "@/components/ui/button";
 
 // Mobile hamburger + collapsible panel. Isolated as its own client
 // component (state: open/closed) so SiteHeader stays a server component.
@@ -18,7 +16,6 @@ export function MobileNav({
   accountHref,
   logoutAction,
   recoveryActive = false,
-  cta = null,
 }: {
   items: NavItem[];
   loggedIn: boolean;
@@ -30,11 +27,6 @@ export function MobileNav({
   // back to the logged-out branch's Sign up link (also a dead end
   // during recovery; see the P2-5 audit's RECOVERY_ALLOWED_PATHS trace).
   recoveryActive?: boolean;
-  // LIBRUM 2.0 UI-2: same HeaderCta shape buildSiteHeaderNav() produces
-  // -- already null for both the reader and recovery states, so this
-  // component doesn't need its own recovery-awareness for the CTA at
-  // all, only to render it when present in the (non-recovery) branch.
-  cta?: HeaderCta;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -120,15 +112,6 @@ export function MobileNav({
                       Sign up
                     </Link>
                   </>
-                )}
-
-                {cta && (
-                  <Link
-                    href={cta.href}
-                    className={buttonClasses("primary", "sm", "mt-1 justify-center")}
-                  >
-                    {cta.label}
-                  </Link>
                 )}
               </div>
             </>

@@ -6,7 +6,6 @@ import { isRecoverySessionActive } from "@/lib/recovery-session";
 import { IconPerson } from "@/components/icons";
 import { NavLinks, type NavItem } from "@/components/nav-links";
 import { MobileNav } from "@/components/mobile-nav";
-import { buttonClasses } from "@/components/ui/button";
 
 // LAUNCH-1 P2-5: the render-state decision, extracted as a pure function
 // so it's directly unit-testable (src/components/site-header.test.ts)
@@ -18,8 +17,15 @@ import { buttonClasses } from "@/components/ui/button";
 // primaryLinks entry (not just the role-conditional one) is a dead end
 // during recovery: RECOVERY_ALLOWED_PATHS only ever contains
 // /reset-password, /auth/callback, and /login.
-export type HeaderCta = { label: string; href: string } | null;
-
+//
+// LIBRUM 2.0 UI-3 visual refinement pass: the header's own publishing
+// CTA (UI-2's `cta` field) was removed entirely -- the global header is
+// navigation/account-only now. The homepage owns its own auth-aware
+// publishing CTA independently (src/lib/homepage.ts's
+// resolveHomepageCta()), which was always a separate decision boundary
+// from this one, so removing this field doesn't touch that logic at
+// all. No dead field left behind: SiteHeaderNavState has no `cta`
+// member any more, not merely an unused one.
 export type SiteHeaderNavState = {
   primaryLinks: NavItem[];
   showDisplayName: boolean;
@@ -28,13 +34,6 @@ export type SiteHeaderNavState = {
   recoveryLabel: string | null;
   accountHref: string;
   accountLabel: string;
-  // LIBRUM 2.0 UI-2: additive field -- every existing field above is
-  // unchanged in meaning/shape. null for both the reader state (no
-  // role-conversion feature exists anywhere in this app, so a
-  // "publish" CTA would be misleading -- see the UI-2 audit) and the
-  // recovery state (no CTA of any kind during recovery, matching every
-  // other suppressed affordance there).
-  cta: HeaderCta;
 };
 
 export function buildSiteHeaderNav(params: {
@@ -57,7 +56,6 @@ export function buildSiteHeaderNav(params: {
       recoveryLabel: "Password recovery",
       accountHref,
       accountLabel,
-      cta: null,
     };
   }
 
@@ -79,20 +77,6 @@ export function buildSiteHeaderNav(params: {
     );
   }
 
-  // LIBRUM 2.0 UI-2: the same "Publish your book" -> /signup?role=author
-  // destination already proven on the homepage (src/app/page.tsx) --
-  // reused here, not invented. Authors get the equivalent real
-  // destination (the actual create-book flow). Readers get no CTA at
-  // all: there is no account-role-conversion feature anywhere in this
-  // app, so a "publish" affordance would promise something the product
-  // can't deliver -- see the UI-2 audit's own reasoning.
-  let cta: HeaderCta = null;
-  if (!user) {
-    cta = { label: "Publish your book", href: "/signup?role=author" };
-  } else if (role === "author") {
-    cta = { label: "New book", href: "/dashboard/books/new" };
-  }
-
   return {
     primaryLinks,
     showDisplayName: !!user && !!displayName,
@@ -101,7 +85,6 @@ export function buildSiteHeaderNav(params: {
     recoveryLabel: null,
     accountHref,
     accountLabel,
-    cta,
   };
 }
 
@@ -169,15 +152,6 @@ export async function SiteHeader() {
           )}
         </nav>
 
-        {nav.cta && (
-          <Link
-            href={nav.cta.href}
-            className={buttonClasses("primary", "sm", "hidden md:inline-flex")}
-          >
-            {nav.cta.label}
-          </Link>
-        )}
-
         {nav.showAccountLink && (
           <Link
             href={nav.accountHref}
@@ -196,7 +170,6 @@ export async function SiteHeader() {
           accountHref={nav.accountHref}
           logoutAction={logout}
           recoveryActive={recoveryActive}
-          cta={nav.cta}
         />
       </div>
     </header>
