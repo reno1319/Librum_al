@@ -283,6 +283,12 @@ export default async function AuthorProfilePage({
           covers rather than icons, still capped at 4 and still nowhere
           near BookCard's own size -- not a carousel, no new queries,
           groupPublishedBooksBySeries() itself untouched.
+          LIBRUM 2.0 PRODUCT-3: now that a real /series/[id] page
+          exists, these cards became genuine navigation entry points --
+          the title and a small "View series" link both go there;
+          cover thumbnails keep linking straight to their own book, same
+          as before. Title link and cover links are siblings, not
+          nested, so this stays valid markup.
           ============================================================ */}
       {seriesGroups.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
@@ -293,7 +299,12 @@ export default async function AuthorProfilePage({
                 key={group.id}
                 className="rounded-lg border border-border bg-surface p-4 shadow-sm"
               >
-                <p className="font-serif font-medium text-foreground">{group.title}</p>
+                <Link
+                  href={`/series/${group.id}`}
+                  className="focus-ring rounded-sm font-serif font-medium text-foreground hover:underline"
+                >
+                  {group.title}
+                </Link>
                 <p className="mt-0.5 text-xs text-muted">
                   {group.bookCount} book{group.bookCount === 1 ? "" : "s"}
                 </p>
@@ -324,6 +335,12 @@ export default async function AuthorProfilePage({
                     );
                   })}
                 </div>
+                <Link
+                  href={`/series/${group.id}`}
+                  className="focus-ring mt-3 inline-block rounded-sm text-xs font-medium text-primary hover:underline"
+                >
+                  View series &rarr;
+                </Link>
               </li>
             ))}
           </ul>

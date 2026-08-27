@@ -17,6 +17,7 @@ import { BookSampleReader } from "@/components/book-sample-reader";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { formatPrice } from "@/lib/pricing";
 import { resolveBookPurchaseState, type BookPurchaseState } from "@/lib/book-purchase";
+import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
 
@@ -46,7 +47,13 @@ type BookWithAuthorBio = Book & {
   profiles: Pick<Profile, "display_name" | "bio" | "avatar_path"> | null;
 };
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
-type SeriesEntry = Pick<Book, "id" | "title" | "series_position">;
+// LIBRUM 2.0 PRODUCT-3: `created_at` added to what this already-existing
+// query selects (no new query, no new PERF-1 batch member) so
+// orderSeriesBooks() -- shared with the public Series page -- has the
+// same deterministic tie-break data here that it has there. The `.order()`
+// call below stays as a DB-level head start; orderSeriesBooks() is the
+// actual authoritative order both surfaces agree on.
+type SeriesEntry = Pick<Book, "id" | "title" | "series_position" | "created_at">;
 type ReviewWithReader = Review & {
   profiles: Pick<Profile, "display_name"> | null;
 };
@@ -273,7 +280,7 @@ export default async function BookDetailPage({
     book.series_id
       ? supabase
           .from("books")
-          .select("id, title, series_position")
+          .select("id, title, series_position, created_at")
           .eq("series_id", book.series_id)
           .eq("status", "published")
           .order("series_position", { ascending: true, nullsFirst: false })
@@ -323,7 +330,17 @@ export default async function BookDetailPage({
     : null;
 
   const seriesInfo: Series | null = seriesRow ?? null;
-  const seriesEntries: SeriesEntry[] = seriesEntriesData ?? [];
+  // LIBRUM 2.0 PRODUCT-3: orderSeriesBooks() is the same canonical
+  // ordering the public Series page uses -- see src/lib/series-order.ts.
+  // No extra query: this re-sorts the exact PERF-1 Group B rows already
+  // fetched above, it doesn't fetch anything new.
+  const seriesEntries: SeriesEntry[] = orderSeriesBooks(seriesEntriesData ?? []);
+  // Absent from `seriesEntries` (e.g. the author previewing their own
+  // still-unpublished book, which the published-only query above never
+  // returns) resolves to no neighbors on either side, not a guess.
+  const { previous: previousInSeries, next: nextInSeries } = seriesInfo
+    ? resolveSeriesNeighbors(seriesEntries, book.id)
+    : { previous: null, next: null };
   const youMightLike: BookWithAuthor[] = youMightLikeData ?? [];
 
   const purchaseState = resolveBookPurchaseState({
@@ -381,7 +398,12 @@ export default async function BookDetailPage({
           {seriesInfo && (
             <p className="mt-1 text-sm text-muted">
               {book.series_position ? `Book ${book.series_position} of ` : "Part of "}
-              <span className="font-medium">{seriesInfo.title}</span>
+              <Link
+                href={`/series/${seriesInfo.id}`}
+                className="focus-ring rounded-sm font-medium text-foreground hover:underline"
+              >
+                {seriesInfo.title}
+              </Link>
             </p>
           )}
 
@@ -563,7 +585,12 @@ export default async function BookDetailPage({
               <dt className="text-xs font-medium uppercase tracking-wide text-muted">Series</dt>
               <dd className="mt-1 text-sm font-medium text-foreground">
                 {book.series_position ? `Book ${book.series_position} of ` : ""}
-                {seriesInfo.title}
+                <Link
+                  href={`/series/${seriesInfo.id}`}
+                  className="focus-ring rounded-sm hover:underline"
+                >
+                  {seriesInfo.title}
+                </Link>
               </dd>
             </div>
           )}
@@ -683,13 +710,67 @@ export default async function BookDetailPage({
       </section>
 
       {/* ============================================================
-          Series entries
+          Series entries -- LIBRUM 2.0 PRODUCT-3: now also the home for
+          "View series ->" (the one clear link to the new /series/[id]
+          page from this section) and a Previous/Next continuity block,
+          both derived from the exact same seriesEntries/orderSeriesBooks
+          order this list itself already renders in -- never a second,
+          differently-ordered query.
           ============================================================ */}
       {seriesInfo && seriesEntries.length > 1 && (
         <section className="mt-12 border-t border-border pt-8">
-          <h2 className="font-serif text-xl font-semibold">
-            {seriesInfo.title}
-          </h2>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <h2 className="font-serif text-xl font-semibold">{seriesInfo.title}</h2>
+            <Link
+              href={`/series/${seriesInfo.id}`}
+              className="focus-ring shrink-0 rounded-sm text-sm font-medium text-primary hover:underline"
+            >
+              View series &rarr;
+            </Link>
+          </div>
+
+          {/* Previous/Next -- published-only (seriesEntries is already
+              published-only), never wraps last -> first or first ->
+              last. Absent entirely for a single-book series (this whole
+              section already requires seriesEntries.length > 1) and
+              renders nothing on whichever side has no neighbor. */}
+          {(previousInSeries || nextInSeries) && (
+            <div className="mt-4 flex flex-col gap-3 border-y border-border py-4 sm:flex-row sm:items-start sm:justify-between">
+              {previousInSeries ? (
+                <Link
+                  href={`/books/${previousInSeries.id}`}
+                  className="focus-ring group flex flex-col rounded-sm"
+                >
+                  <span className="text-xs text-muted">&larr; Previous in series</span>
+                  <span className="font-medium text-foreground group-hover:underline">
+                    {previousInSeries.series_position != null
+                      ? `Book ${previousInSeries.series_position} — `
+                      : ""}
+                    {previousInSeries.title}
+                  </span>
+                </Link>
+              ) : (
+                <span />
+              )}
+              {nextInSeries ? (
+                <Link
+                  href={`/books/${nextInSeries.id}`}
+                  className="focus-ring group flex flex-col rounded-sm sm:items-end sm:text-right"
+                >
+                  <span className="text-xs text-muted">Next in series &rarr;</span>
+                  <span className="font-medium text-foreground group-hover:underline">
+                    {nextInSeries.series_position != null
+                      ? `Book ${nextInSeries.series_position} — `
+                      : ""}
+                    {nextInSeries.title}
+                  </span>
+                </Link>
+              ) : (
+                <span />
+              )}
+            </div>
+          )}
+
           <ol className="mt-4 flex flex-col gap-2 text-sm">
             {seriesEntries.map((entry) => (
               <li key={entry.id}>
