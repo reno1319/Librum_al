@@ -280,7 +280,6 @@ export default async function EditBookPage({
                     authorName={profile?.display_name ?? ""}
                     authorId={user.id}
                     existingFilename={manuscriptName ?? undefined}
-                    onManuscriptChange={() => {}}
                   />
                 </div>
               </div>

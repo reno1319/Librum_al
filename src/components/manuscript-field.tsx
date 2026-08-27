@@ -75,8 +75,15 @@ export function ManuscriptField({
   authorId: string;
   // Reports only display metadata now -- never a File (see the
   // top-of-file comment for why). null whenever nothing is ready to
-  // submit yet.
-  onManuscriptChange: (info: { name: string } | null) => void;
+  // submit yet. Optional (matching CoverField's own onCoverChange) --
+  // Edit Book has no use for it and, being a Server Component, cannot
+  // pass an inline function here at all: an "on"-prefixed prop is
+  // detected by React as an event handler and a raw function value
+  // crossing the Server->Client boundary crashes the whole page
+  // (empirically confirmed -- "Event handlers cannot be passed to
+  // Client Component props"). Omitting the prop entirely is the fix,
+  // not passing a no-op closure.
+  onManuscriptChange?: (info: { name: string } | null) => void;
   // Edit-page only: the currently-stored manuscript's own name, shown
   // so "leave blank to keep the existing file" reads correctly instead
   // of implying a manuscript is required on every edit.
@@ -113,7 +120,7 @@ export function ManuscriptField({
     }
     tempPathRef.current = path;
     displayNameRef.current = path ? displayName : null;
-    onManuscriptChange(path && displayName ? { name: displayName } : null);
+    onManuscriptChange?.(path && displayName ? { name: displayName } : null);
   }
 
   // Best-effort only -- see the correction's own report for what this
