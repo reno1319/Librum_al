@@ -166,20 +166,6 @@ export default async function EditBookPage({
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
-                  Preview excerpt (optional)
-                  <textarea
-                    name="previewText"
-                    rows={8}
-                    defaultValue={book.preview_text}
-                    className={formControlClasses}
-                  />
-                  <span className="text-xs text-muted">
-                    Shown to readers under &quot;Look inside&quot; before they buy —
-                    the opening page or two works well. Leave blank to skip.
-                  </span>
-                </label>
-
-                <label className="flex flex-col gap-1 text-sm">
                   Keywords (optional)
                   <input
                     name="keywords"
@@ -313,7 +299,9 @@ export default async function EditBookPage({
                     <span className="text-xs text-muted">
                       EPUB · up to 50 MB. Leave blank to keep the current
                       manuscript. Replacing it updates the file existing
-                      readers receive on their next download.
+                      readers receive on their next download. Readers can
+                      preview approximately the first 10% of your ebook —
+                      generated automatically, no extra steps needed.
                     </span>
                   </label>
                 </div>

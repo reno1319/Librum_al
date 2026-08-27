@@ -73,7 +73,6 @@ export async function createBook(formData: FormData) {
 
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const previewText = String(formData.get("previewText") ?? "").trim();
   const keywords = normalizeKeywords(formData.get("keywords"));
   const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
@@ -163,12 +162,16 @@ export async function createBook(formData: FormData) {
     );
   }
 
+  // LIBRUM 2.0 PRODUCT-1 PRE-COMMIT LEGACY RETIREMENT: preview_text is
+  // deliberately NOT set here -- the Studio no longer collects it (Read
+  // Sample is generated automatically, no author input required), so
+  // this simply lets the column's own `not null default ''` apply, the
+  // same as any other new-row default this insert doesn't override.
   const { error: insertError } = await supabase.from("books").insert({
     id: bookId,
     author_id: user.id,
     title,
     description,
-    preview_text: previewText,
     keywords,
     isbn,
     genre,
@@ -213,7 +216,6 @@ export async function updateBook(bookId: string, formData: FormData) {
 
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const previewText = String(formData.get("previewText") ?? "").trim();
   const keywords = normalizeKeywords(formData.get("keywords"));
   const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
@@ -322,12 +324,21 @@ export async function updateBook(bookId: string, formData: FormData) {
     filePath = newManuscriptPath;
   }
 
+  // LIBRUM 2.0 PRODUCT-1 PRE-COMMIT LEGACY RETIREMENT: preview_text is
+  // deliberately OMITTED from this update payload -- the Studio form no
+  // longer submits it at all, and a Supabase `.update()` only ever
+  // touches the keys actually present in the object passed here (unlike
+  // a full-row PUT/replace). Omitting the key means this column is
+  // simply never written by this call, so any legacy value already
+  // stored for an existing book survives editing untouched. Explicitly
+  // NOT `preview_text: String(formData.get("previewText") ?? "")`,
+  // which would have silently overwritten every existing legacy value
+  // with an empty string the very first time each book was next edited.
   const { error: updateError } = await supabase
     .from("books")
     .update({
       title,
       description,
-      preview_text: previewText,
       keywords,
       isbn,
       genre,

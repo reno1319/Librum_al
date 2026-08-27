@@ -13,6 +13,7 @@ import {
 } from "./actions";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
+import { BookSampleReader } from "@/components/book-sample-reader";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { formatPrice } from "@/lib/pricing";
 import { resolveBookPurchaseState, type BookPurchaseState } from "@/lib/book-purchase";
@@ -32,13 +33,18 @@ import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
 // changed; every query still runs, still returns the same rows it
 // always did, just not all of them one-at-a-time anymore.
 
-// The book's own author/profile join needs `bio` (for the new "About
-// the Author" section) on top of the `display_name` every other
+// The book's own author/profile join needs `bio` (for the "About the
+// Author" section) and, since PRODUCT-1, `avatar_path` (for that same
+// section's avatar thumbnail) on top of the `display_name` every other
 // book-with-author query on this page already selects -- kept as its
 // own type, distinct from BookWithAuthor below, so the shelf queries
-// (which only ever need display_name) aren't forced to also carry a
-// bio field they never fetch.
-type BookWithAuthorBio = Book & { profiles: Pick<Profile, "display_name" | "bio"> | null };
+// (which only ever need display_name) aren't forced to also carry
+// fields they never fetch. Extending this one existing joined select
+// (rather than adding a second, sequential profile query) is exactly
+// what PERF-1's own concurrency work calls for reusing.
+type BookWithAuthorBio = Book & {
+  profiles: Pick<Profile, "display_name" | "bio" | "avatar_path"> | null;
+};
 type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
 type SeriesEntry = Pick<Book, "id" | "title" | "series_position">;
 type ReviewWithReader = Review & {
@@ -74,7 +80,7 @@ const getBookForDetail = cache(async (id: string) => {
   const supabase = await createClient();
   const { data: book } = await supabase
     .from("books")
-    .select("*, profiles(display_name, bio)")
+    .select("*, profiles(display_name, bio, avatar_path)")
     .eq("id", id)
     .single<BookWithAuthorBio>();
   return book;
@@ -328,6 +334,23 @@ export default async function BookDetailPage({
   });
   const formattedPrice = formatPrice(book.price_cents);
 
+  // LIBRUM 2.0 PRODUCT-1: Read Sample is independent of
+  // resolveBookPurchaseState()'s own classification -- this doesn't
+  // change or add a purchase state, it only decides where the CTA
+  // appears. Shown for every state where the reader doesn't already
+  // have full access (anonymous or unowned, paid or free); omitted for
+  // "owned"/"author", who already have Download EPUB, per the
+  // PRODUCT-1 brief's own explicit permission to omit it there.
+  const showSample =
+    purchaseState === "anonymous-paid" ||
+    purchaseState === "anonymous-free" ||
+    purchaseState === "free-unowned" ||
+    purchaseState === "paid-unowned";
+
+  const authorAvatarUrl = book.profiles?.avatar_path
+    ? supabase.storage.from("avatars").getPublicUrl(book.profiles.avatar_path).data.publicUrl
+    : null;
+
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
       {/* ============================================================
@@ -400,8 +423,10 @@ export default async function BookDetailPage({
             <PurchasePanel
               state={purchaseState}
               bookId={book.id}
+              bookTitle={book.title}
               formattedPrice={formattedPrice}
               wishlisted={wishlisted}
+              showSample={showSample}
             />
           </div>
 
@@ -475,41 +500,28 @@ export default async function BookDetailPage({
       {/* ============================================================
           About this book
           ============================================================ */}
-      {(book.description || book.preview_text || book.keywords) && (
+      {/* LIBRUM 2.0 PRODUCT-1: the old preview_text "Look inside"
+          accordion and the raw keywords pill list are both retired from
+          this reader-facing section -- see the PRODUCT-1 audit. Neither
+          field is dropped from the schema or from the Publishing
+          Studio's own edit form; preview_text remains internally/
+          backward-compatibly available (still editable there, still
+          part of the pre-publish recommended checklist), and keywords
+          still drive bookstore/author search exactly as before. This
+          section now shows only the real description, plus a quiet
+          Read Sample entry point (independent of, and in addition to,
+          the hero CTA) when the reader doesn't already have full
+          access. */}
+      {book.description && (
         <section className="mt-12 border-t border-border pt-8">
           <h2 className="font-serif text-xl font-semibold">About this book</h2>
-          {book.description && (
-            <p className="mt-4 max-w-prose whitespace-pre-line text-foreground/90">
-              {book.description}
-            </p>
-          )}
-
-          {book.preview_text && (
-            <details className="mt-4 max-w-prose rounded-lg border border-border bg-surface p-4 shadow-sm">
-              <summary className="focus-ring cursor-pointer rounded-sm font-serif font-medium">
-                Look inside
-              </summary>
-              <p className="mt-3 whitespace-pre-line text-sm text-foreground/90">
-                {book.preview_text}
-              </p>
-            </details>
-          )}
-
-          {book.keywords && (
-            <ul className="mt-4 flex max-w-prose flex-wrap gap-2">
-              {book.keywords
-                .split(",")
-                .map((k) => k.trim())
-                .filter(Boolean)
-                .map((keyword) => (
-                  <li
-                    key={keyword}
-                    className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted"
-                  >
-                    {keyword}
-                  </li>
-                ))}
-            </ul>
+          <p className="mt-4 max-w-prose whitespace-pre-line text-foreground/90">
+            {book.description}
+          </p>
+          {showSample && (
+            <div className="mt-4">
+              <BookSampleReader bookId={book.id} bookTitle={book.title} variant="text" />
+            </div>
           )}
         </section>
       )}
@@ -519,19 +531,33 @@ export default async function BookDetailPage({
           ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
         <h2 className="font-serif text-xl font-semibold">Book Details</h2>
-        <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 text-sm sm:max-w-md">
-          <div>
+        {/* LIBRUM 2.0 PRODUCT-1 PRE-COMMIT CORRECTION: a fixed
+            grid-cols-2 track left a visibly empty cell whenever exactly
+            3 of these 4 possible fields were present (Series but no
+            ISBN, or vice versa) -- the "half-empty specification table"
+            look this section must avoid. flex-wrap has no reserved
+            column tracks, so 2, 3, or 4 items all pack compactly
+            left-to-right with no dangling empty slot, regardless of
+            which optional fields (Series, ISBN) exist for this book.
+            Still only ever the same 4 already-trustworthy fields --
+            Format and Genre are always present (genre is required at
+            creation), Series/ISBN only when the book actually has one;
+            no invented Publisher/Published date/Language/Edition/Page
+            count/Reading time, since none of those exist authoritatively
+            in this schema. */}
+        <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-4 text-sm">
+          <div className="min-w-28">
             <dt className="text-muted">Format</dt>
             <dd className="mt-0.5">Ebook · EPUB</dd>
           </div>
           {book.genre && (
-            <div>
+            <div className="min-w-28">
               <dt className="text-muted">Genre</dt>
               <dd className="mt-0.5">{book.genre}</dd>
             </div>
           )}
           {seriesInfo && (
-            <div>
+            <div className="min-w-28">
               <dt className="text-muted">Series</dt>
               <dd className="mt-0.5">
                 {book.series_position ? `Book ${book.series_position} of ` : ""}
@@ -540,7 +566,7 @@ export default async function BookDetailPage({
             </div>
           )}
           {book.isbn && (
-            <div>
+            <div className="min-w-28">
               <dt className="text-muted">ISBN</dt>
               <dd className="mt-0.5">{book.isbn}</dd>
             </div>
@@ -553,16 +579,30 @@ export default async function BookDetailPage({
           ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
         <h2 className="font-serif text-xl font-semibold">About the Author</h2>
-        <p className="mt-3 font-serif text-lg font-medium">{book.profiles?.display_name}</p>
-        {book.profiles?.bio && (
-          <p className="mt-2 max-w-prose text-sm text-foreground/90">{book.profiles.bio}</p>
-        )}
-        <Link
-          href={`/authors/${book.author_id}`}
-          className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
-        >
-          View author profile &rarr;
-        </Link>
+        <div className="mt-3 flex items-start gap-4">
+          {authorAvatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={authorAvatarUrl}
+              alt=""
+              className="size-14 shrink-0 rounded-full object-cover sm:size-16"
+            />
+          ) : (
+            <div className="size-14 shrink-0 rounded-full bg-border sm:size-16" />
+          )}
+          <div className="min-w-0">
+            <p className="font-serif text-lg font-medium">{book.profiles?.display_name}</p>
+            {book.profiles?.bio && (
+              <p className="mt-2 max-w-prose text-sm text-foreground/90">{book.profiles.bio}</p>
+            )}
+            <Link
+              href={`/authors/${book.author_id}`}
+              className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+            >
+              View author profile &rarr;
+            </Link>
+          </div>
+        </div>
       </section>
 
       {/* ============================================================
@@ -674,7 +714,11 @@ export default async function BookDetailPage({
           More by this author / You might also like
           ============================================================ */}
       <BookShelf
-        title="More by this author"
+        title={
+          book.profiles?.display_name
+            ? `More by ${book.profiles.display_name}`
+            : "More by this author"
+        }
         books={moreByAuthor ?? []}
         supabase={supabase}
       />
@@ -713,13 +757,17 @@ export default async function BookDetailPage({
 function PurchasePanel({
   state,
   bookId,
+  bookTitle,
   formattedPrice,
   wishlisted,
+  showSample,
 }: {
   state: BookPurchaseState;
   bookId: string;
+  bookTitle: string;
   formattedPrice: string;
   wishlisted: boolean;
+  showSample: boolean;
 }) {
   if (state === "author") {
     return (
@@ -759,9 +807,12 @@ function PurchasePanel({
 
   if (state === "anonymous-paid" || state === "anonymous-free") {
     return (
-      <Link href={`/login?next=/books/${bookId}`} className={buttonClasses("primary", "md")}>
-        {state === "anonymous-free" ? "Log in to get this book" : "Log in to buy"}
-      </Link>
+      <div className="flex flex-wrap items-center gap-3">
+        <Link href={`/login?next=/books/${bookId}`} className={buttonClasses("primary", "md")}>
+          {state === "anonymous-free" ? "Log in to get this book" : "Log in to buy"}
+        </Link>
+        {showSample && <BookSampleReader bookId={bookId} bookTitle={bookTitle} />}
+      </div>
     );
   }
 
@@ -795,6 +846,8 @@ function PurchasePanel({
           {wishlisted ? "Remove from wishlist" : "Save for later"}
         </button>
       </form>
+
+      {showSample && <BookSampleReader bookId={bookId} bookTitle={bookTitle} />}
     </div>
   );
 }

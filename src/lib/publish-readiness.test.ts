@@ -4,7 +4,6 @@ import { resolvePublishReadiness } from "./publish-readiness";
 const book = (overrides: Partial<Parameters<typeof resolvePublishReadiness>[0]["book"]> = {}) => ({
   description: "",
   keywords: "",
-  preview_text: "",
   price_cents: 0,
   cover_path: "some/path.jpg",
   ...overrides,
@@ -29,14 +28,25 @@ describe("resolvePublishReadiness", () => {
     expect(result.payoutBlocked).toBe(false);
   });
 
-  it("recommended items reflect description/keywords/preview completeness", () => {
+  it("recommended items reflect description/keywords completeness", () => {
     const result = resolvePublishReadiness({
-      book: book({ description: "a".repeat(60), keywords: "sci-fi", preview_text: "" }),
+      book: book({ description: "a".repeat(60), keywords: "sci-fi" }),
       payoutsEnabled: true,
     });
-    expect(result.recommended).toHaveLength(3);
+    expect(result.recommended).toHaveLength(2);
     const doneCount = result.recommended.filter((item) => item.done).length;
     expect(doneCount).toBe(2);
+  });
+
+  // LIBRUM 2.0 PRODUCT-1 PRE-COMMIT CORRECTION: preview_text is no
+  // longer part of this function's input or output at all -- its only
+  // former purpose (the "Look inside" recommended item) was removed,
+  // not relabeled, once Read Sample replaced that public presentation.
+  it("never recommends a preview-excerpt item -- that surface no longer exists", () => {
+    const result = resolvePublishReadiness({ book: book(), payoutsEnabled: true });
+    const labels = result.recommended.map((item) => item.label.toLowerCase());
+    expect(labels.some((label) => label.includes("look inside"))).toBe(false);
+    expect(labels.some((label) => label.includes("preview"))).toBe(false);
   });
 
   it("advisory items never affect requiredMet, whether complete or not", () => {
@@ -46,7 +56,6 @@ describe("resolvePublishReadiness", () => {
         price_cents: 0,
         description: "a".repeat(60),
         keywords: "x",
-        preview_text: "y",
       }),
       payoutsEnabled: false,
     });

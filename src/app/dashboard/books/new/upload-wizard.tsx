@@ -162,6 +162,8 @@ export function UploadWizard({ series }: { series: Series[] }) {
           </label>
           <p className="text-xs text-muted">
             EPUB is the standard ebook format Librum uses for every book.
+            Readers can preview approximately the first 10% of your ebook —
+            generated automatically, no extra steps needed.
           </p>
         </div>
 
@@ -196,15 +198,6 @@ export function UploadWizard({ series }: { series: Series[] }) {
           <textarea name="description" rows={4} className={formControlClasses} />
           <span className="text-xs text-muted">
             A couple of sentences or more helps readers decide.
-          </span>
-        </label>
-
-        <label className="flex flex-col gap-1 text-sm">
-          Preview excerpt (optional)
-          <textarea name="previewText" rows={8} className={formControlClasses} />
-          <span className="text-xs text-muted">
-            Shown to readers under &quot;Look inside&quot; before they buy —
-            the opening page or two works well. Leave blank to skip.
           </span>
         </label>
 

@@ -42,7 +42,7 @@ const faqs = [
   },
   {
     q: "Can readers preview a book before buying?",
-    a: "If the author added one, yes — click \"Look inside\" on the book's page to read the excerpt they chose.",
+    a: "Yes — click \"Read sample\" on any published book's page for an excerpt from the opening of the book, generated automatically from the manuscript.",
   },
   {
     q: "I found a book that shouldn't be on Librum — what do I do?",

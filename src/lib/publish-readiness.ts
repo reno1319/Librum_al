@@ -21,16 +21,16 @@ export type PublishReadiness = {
   recommended: ChecklistItem[];
 };
 
+// LIBRUM 2.0 PRODUCT-1 PRE-COMMIT CORRECTION: the former "Look inside"
+// preview-excerpt label is gone from this set, not merely renamed --
+// see getPublishChecklist()'s own comment for why that item was removed
+// entirely rather than relabeled.
 const RECOMMENDED_LABELS = new Set([
   "Write a description (a couple of sentences or more)",
   "Add keywords so readers can find it by search",
-  'Add a "Look inside" preview excerpt',
 ]);
 
-type ReadinessBook = Pick<
-  Book,
-  "description" | "keywords" | "preview_text" | "price_cents" | "cover_path"
->;
+type ReadinessBook = Pick<Book, "description" | "keywords" | "price_cents" | "cover_path">;
 
 export function resolvePublishReadiness(params: {
   book: ReadinessBook;
