@@ -13,12 +13,13 @@ import { GENRES } from "@/lib/genres";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { resolvePublishReadiness } from "@/lib/publish-readiness";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
-import { formControlClasses, fileInputClasses } from "@/lib/form-styles";
+import { formControlClasses } from "@/lib/form-styles";
 import { DeleteBookButton } from "@/app/dashboard/delete-book-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
+import { CoverField } from "@/components/cover-field";
 import type { Book, Series, Contributor } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -262,28 +263,7 @@ export default async function EditBookPage({
             <section>
               <h2 className="font-serif text-xl font-semibold">Files</h2>
               <div className="mt-4 flex flex-col gap-6">
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm font-medium">Current cover</p>
-                  {coverUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={coverUrl} alt="" className="h-24 w-16 rounded object-cover" />
-                  ) : (
-                    <div className="h-24 w-16 rounded bg-border" />
-                  )}
-                  <label className="flex flex-col gap-1 text-sm">
-                    Replace cover image
-                    <input
-                      name="cover"
-                      type="file"
-                      accept="image/png,image/jpeg"
-                      className={fileInputClasses}
-                    />
-                    <span className="text-xs text-muted">
-                      JPEG or PNG · up to 5 MB. Leave blank to keep the current
-                      cover.
-                    </span>
-                  </label>
-                </div>
+                <CoverField authorId={user.id} existingCoverUrl={coverUrl ?? undefined} />
 
                 <div className="flex flex-col gap-2">
                   <p className="text-sm font-medium">
@@ -298,6 +278,7 @@ export default async function EditBookPage({
                   <ManuscriptField
                     bookTitle={book.title}
                     authorName={profile?.display_name ?? ""}
+                    authorId={user.id}
                     existingFilename={manuscriptName ?? undefined}
                     onManuscriptChange={() => {}}
                   />

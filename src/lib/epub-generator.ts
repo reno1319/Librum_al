@@ -158,6 +158,57 @@ ${spineItems}
 `;
 }
 
+// LIBRUM 2.0 PRODUCT-5 413 CORRECTION: repackaging on every title
+// keystroke used to mean re-running the FULL generateEpub() (cheap --
+// no Mammoth -- but still a full JSZip rebuild). Now that the
+// generated EPUB is cached server-side in temporary Storage between
+// keystrokes (see docx-actions.ts's repackageWithTitle()) rather than
+// round-tripped through a Server Action response, an even cheaper
+// operation is available: patch just the OPF's own dc:title/
+// dc:creator/dcterms:modified text and leave every other entry
+// (chapters, images, nav, manifest, spine) byte-for-byte untouched.
+//
+// Verified empirically (not assumed) before relying on it: JSZip's
+// loadAsync() -> replace one file's content -> generateAsync() round
+// trip was probed directly against the raw ZIP bytes and confirmed to
+// preserve the mimetype entry's required first-position/STORE-
+// compression invariant and leave every other entry's bytes
+// unchanged -- the same "verify JSZip behavior directly, never assume
+// it" discipline the mimetype-compression test below already follows.
+export async function patchEpubMetadata(
+  epubBytes: Buffer,
+  title: string,
+  authorName: string,
+): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(epubBytes);
+  const opfEntry = zip.file("OEBPS/content.opf");
+  if (!opfEntry) {
+    throw new Error("patchEpubMetadata: OEBPS/content.opf not found in EPUB");
+  }
+  const opf = await opfEntry.async("string");
+  const modifiedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+  const titleMatch = opf.match(/<dc:title>[\s\S]*?<\/dc:title>/);
+  if (!titleMatch) {
+    throw new Error("patchEpubMetadata: dc:title not found in OPF");
+  }
+  const creatorMatch = opf.match(/<dc:creator>[\s\S]*?<\/dc:creator>/);
+  if (!creatorMatch) {
+    throw new Error("patchEpubMetadata: dc:creator not found in OPF");
+  }
+
+  const patched = opf
+    .replace(titleMatch[0], `<dc:title>${escapeXml(title)}</dc:title>`)
+    .replace(creatorMatch[0], `<dc:creator>${escapeXml(authorName)}</dc:creator>`)
+    .replace(
+      /<meta property="dcterms:modified">[\s\S]*?<\/meta>/,
+      `<meta property="dcterms:modified">${modifiedAt}</meta>`,
+    );
+
+  zip.file("OEBPS/content.opf", patched);
+  return zip.generateAsync({ type: "nodebuffer" });
+}
+
 export async function generateEpub(input: EpubGeneratorInput): Promise<Buffer> {
   const zip = new JSZip();
 

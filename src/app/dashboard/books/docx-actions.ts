@@ -1,43 +1,88 @@
 "use server";
 
 import { randomUUID } from "crypto";
-import { convertDocxToDocument, type ConversionWarning, type DocSection } from "@/lib/docx-converter";
-import { generateEpub } from "@/lib/epub-generator";
+import { createClient } from "@/lib/supabase/server";
+import { convertDocxToDocument, type ConversionWarning } from "@/lib/docx-converter";
+import { generateEpub, patchEpubMetadata } from "@/lib/epub-generator";
 import { validateEpubStructure } from "@/lib/epub-validation";
 
-// LIBRUM 2.0 PRODUCT-5: two deliberately narrow, side-effect-free
-// Server Actions -- neither makes a Supabase call, neither writes to
-// the DB or storage. Split into two steps (PRE-COMMIT CORRECTION,
-// see below) rather than one:
+// LIBRUM 2.0 PRODUCT-5 413 CORRECTION: a confirmed production defect --
+// an 8.3MB real-world DOCX (well under the advertised 50MB limit) 413'd
+// before conversion ever started, because Vercel Functions enforce a
+// platform-level request-body ceiling around 4.5MB REGARDLESS of this
+// app's own next.config.ts `serverActions.bodySizeLimit`. The original
+// design sent the DOCX's own bytes straight into a Server Action's
+// FormData -- exactly the payload shape that ceiling blocks.
 //
-//   1. parseDocxToDocument() -- the only step that needs Mammoth. Runs
-//      once, the moment a DOCX is selected, and returns the normalized
-//      sections/images. Never touches book title/author at all.
-//   2. packageEpub() -- pure JSZip packaging (no Mammoth) of an
-//      ALREADY-parsed document into real EPUB bytes with the CURRENT
-//      book title/author baked into its metadata, then the exact same
-//      validateEpubStructure() check every uploaded EPUB goes through.
+// Fix: large binary bytes never cross a Vercel Function request/
+// response body in either direction anymore, in either phase.
 //
-// Why split: the new-book wizard's own step order collects the
-// manuscript (Files, step 1) before the title (Book Details, step 2)
-// -- generating the final distribution EPUB at DOCX-selection time
-// would bake in a placeholder title that's wrong by the time the
-// author actually saves the book. Keeping the parsed document in
-// client state (see manuscript-field.tsx) and re-calling packageEpub()
-// -- cheap, no Mammoth involved -- every time the title/author changes
-// is what lets the EPUB actually submitted always carry the real,
-// final Librum book title. Edit Book already has a real title from
-// page load, so its very first packageEpub() call already uses it.
+//   UPLOAD PHASE (browser -> conversion): the browser uploads the DOCX
+//   directly to Supabase Storage (see manuscript-field.tsx) -- a
+//   separate origin entirely, not subject to Vercel's limit -- into a
+//   TEMPORARY, private, user-id-namespaced path under the EXISTING
+//   "manuscripts" bucket (already private, already RLS-scoped to
+//   auth.uid() via storage.foldername(name)[1] -- see schema.sql's
+//   "storage: cover images (public) and manuscript files (private)"
+//   section). parseDocxToDocument() below receives only that small
+//   path string, downloads the bytes itself (server <-> Supabase
+//   Storage, not through any Vercel request body), and runs the
+//   EXISTING, unmodified conversion pipeline.
 //
-// Both run in this route segment's default Node.js runtime (this app
-// has no Edge runtime anywhere) -- Mammoth and JSZip both need
-// Buffer/zlib, which Edge doesn't provide.
+//   PACKAGING PHASE (conversion -> browser): the normalized
+//   sections/images Mammoth produces, and the generated EPUB itself,
+//   both stay server/storage-side too -- neither has ever round-
+//   tripped through a Server Action response since this correction.
+//   parseDocxToDocument() packages a first EPUB immediately (Mammoth
+//   runs exactly once, same as before) and stores ONLY that generated
+//   EPUB privately, temporarily, in the same bucket. The client
+//   receives just a small storage-path reference plus warnings.
+//
+//   RETITLING (every keystroke on the book title): re-running Mammoth
+//   or re-uploading a whole normalized document just to change a
+//   title would be wasteful and, for an illustrated manuscript, could
+//   itself exceed Vercel's limits again. repackageWithTitle() instead
+//   downloads the ALREADY-GENERATED temporary EPUB and patches only
+//   its OPF metadata (see epub-generator.ts's patchEpubMetadata(),
+//   empirically verified to leave every other entry byte-for-byte
+//   untouched) -- cheaper than the original full-rebuild-per-keystroke
+//   design, and still never sends EPUB bytes through this action's
+//   response.
+//
+//   FINAL SUBMISSION: the browser downloads the finished temporary
+//   EPUB directly from Supabase Storage (again, not through Vercel)
+//   into a real File, and hands it to the EXISTING, completely
+//   unmodified manuscript hidden-input/createBook()/updateBook() path
+//   -- exactly as a directly-uploaded EPUB already works. That last
+//   leg (browser -> createBook()/updateBook()) is unchanged from
+//   before this correction and shares its own pre-existing Vercel
+//   body-size exposure with plain direct EPUB uploads above ~4.5MB --
+//   audited, not fixed, this round (see the correction's own report:
+//   carried forward, since fixing it requires materially modifying
+//   createBook()/updateBook(), which this correction's brief
+//   explicitly reserves for a separate, reviewed change).
+//
+// Both Server Actions below use the SAME per-user Supabase server
+// client every other Server Action in this app already uses (cookie-
+// derived session, RLS-enforced) -- no service-role key, no new
+// authorization mechanism. A caller can only ever download/upload/
+// remove objects under their own "<their-own-uid>/tmp/..." prefix:
+// RLS enforces this at the database level exactly as it already does
+// for permanent manuscripts, and an explicit ownership check below
+// (defense in depth, this codebase's established pattern) rejects any
+// path that doesn't start with the CALLING user's own id before ever
+// touching Storage.
 
+const MANUSCRIPTS_BUCKET = "manuscripts";
 const MAX_DOCX_BYTES = 50 * 1024 * 1024;
 
 const ERROR_MESSAGES: Record<string, string> = {
-  missing_file: "Choose a DOCX file to convert.",
-  wrong_extension: "Please choose a .docx file.",
+  missing_path: "Choose a DOCX file to convert.",
+  not_authenticated: "Your session has expired. Please refresh the page and try again.",
+  unauthorized: "Something went wrong converting this document. Please try again.",
+  temp_upload_failed:
+    "We couldn't upload your manuscript. Please check your connection and try again.",
+  temp_file_missing: "Something went wrong converting this document. Please try again.",
   too_large: "DOCX manuscript must be under 50MB.",
   invalid_zip: "That file doesn't look like a valid DOCX file.",
   not_a_docx: "That file doesn't look like a valid DOCX file.",
@@ -45,117 +90,174 @@ const ERROR_MESSAGES: Record<string, string> = {
     "Macro-enabled documents (.docm) aren't supported. Please save as a standard .docx file and try again.",
   empty_document: "This document doesn't have any readable text to convert.",
   conversion_failed: "Something went wrong converting this document. Please try again.",
-  // LIBRUM 2.0 PRODUCT-5 PRE-COMMIT CORRECTION: the ZIP-bomb preflight's
-  // two rejection reasons (see zip-preflight.ts) -- deliberately never
-  // exposes entry names, byte thresholds, or which specific check
-  // fired. "Too large" (uncompressed size) and "too complex" (entry
-  // count) are kept as distinct, actionable messages rather than one
-  // generic failure, per the correction brief's own wording.
   too_large_uncompressed: "Document is too large to convert.",
   too_complex: "Document is too complex to convert.",
   generated_epub_invalid:
     "Something went wrong generating your ebook. Please try again, or upload an EPUB directly.",
 };
 
-// Server Action return values cross the RSC boundary -- images travel
-// as base64 rather than raw Buffer/Uint8Array, the same well-supported
-// technique the original single-action design already used for the
-// final EPUB bytes.
+async function requireOwnedTempPath(tempPath: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { ok: false as const, error: ERROR_MESSAGES.not_authenticated };
+  }
+  if (!tempPath || !tempPath.startsWith(`${user.id}/tmp/`)) {
+    return { ok: false as const, error: ERROR_MESSAGES.unauthorized };
+  }
+  return { ok: true as const, supabase, userId: user.id };
+}
+
 export type ParseDocxResult =
-  | {
-      success: true;
-      sections: DocSection[];
-      images: { filename: string; mediaType: string; base64: string }[];
-      warnings: ConversionWarning[];
-    }
+  | { success: true; conversionId: string; warnings: ConversionWarning[] }
   | { success: false; error: string };
 
-export async function parseDocxToDocument(formData: FormData): Promise<ParseDocxResult> {
-  const file = formData.get("docx") as File | null;
-  if (!file || file.size === 0) {
-    return { success: false, error: ERROR_MESSAGES.missing_file };
+// Receives only the small temporary-storage path the browser already
+// uploaded the DOCX to -- never the file's own bytes (see the top-of-
+// file comment for why). Downloads it, runs Mammoth exactly once, and
+// immediately packages + stores a first EPUB (title/author not
+// necessarily final yet -- see repackageWithTitle()) so the client
+// never needs the normalized sections/images at all.
+export async function parseDocxToDocument(tempDocxPath: string): Promise<ParseDocxResult> {
+  const auth = await requireOwnedTempPath(tempDocxPath);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const { supabase, userId } = auth;
+
+  const cleanupTempDocx = async () => {
+    const { error } = await supabase.storage.from(MANUSCRIPTS_BUCKET).remove([tempDocxPath]);
+    if (error) {
+      console.error("parseDocxToDocument: failed to remove temporary DOCX:", error);
+    }
+  };
+
+  const { data: fileData, error: downloadError } = await supabase.storage
+    .from(MANUSCRIPTS_BUCKET)
+    .download(tempDocxPath);
+
+  if (downloadError || !fileData) {
+    console.error("parseDocxToDocument: temp DOCX download failed:", downloadError);
+    await cleanupTempDocx();
+    return { success: false, error: ERROR_MESSAGES.temp_file_missing };
   }
-  if (!file.name.toLowerCase().endsWith(".docx")) {
-    return { success: false, error: ERROR_MESSAGES.wrong_extension };
-  }
-  if (file.size > MAX_DOCX_BYTES) {
+
+  const bytes = Buffer.from(await fileData.arrayBuffer());
+
+  // Defense in depth: the browser already rejects a >50MB file before
+  // ever starting the upload (see manuscript-field.tsx), but this
+  // downloaded copy is re-checked rather than trusted.
+  if (bytes.length > MAX_DOCX_BYTES) {
+    await cleanupTempDocx();
     return { success: false, error: ERROR_MESSAGES.too_large };
   }
 
-  const bytes = Buffer.from(await file.arrayBuffer());
   const conversion = await convertDocxToDocument(bytes);
+  // The temporary DOCX is never needed again past this point, success
+  // or failure -- see the correction brief's "temporary DOCX only"
+  // lifecycle rule (upload -> convert -> delete).
+  await cleanupTempDocx();
+
   if (!conversion.success) {
     return { success: false, error: ERROR_MESSAGES[conversion.error] ?? ERROR_MESSAGES.conversion_failed };
   }
 
-  return {
-    success: true,
-    sections: conversion.sections,
-    images: conversion.images.map((img) => ({
-      filename: img.filename,
-      mediaType: img.mediaType,
-      base64: img.bytes.toString("base64"),
-    })),
-    warnings: conversion.warnings,
-  };
-}
-
-export type PackageEpubResult =
-  | { success: true; epubBase64: string }
-  | { success: false; error: string };
-
-// LIBRUM 2.0 PRODUCT-5 PRE-COMMIT CORRECTION: bookTitle/authorName are
-// ALWAYS the caller's current, live values -- never a placeholder --
-// see manuscript-field.tsx, which calls this again on every title/
-// author change while a parsed document is cached, and calls it once
-// immediately with whatever's already known otherwise (Edit Book's
-// real book.title, or the wizard's live title field). No manuscript
-// text is ever used as a metadata source.
-export async function packageEpub(
-  bookTitle: string,
-  authorName: string,
-  sections: DocSection[],
-  images: { filename: string; mediaType: string; base64: string }[],
-): Promise<PackageEpubResult> {
-  const title = bookTitle.trim() || "Untitled manuscript";
-  const author = authorName.trim() || "Unknown author";
-
+  const conversionId = randomUUID();
   const epubBytes = await generateEpub({
-    bookId: randomUUID(),
-    title,
-    authorName: author,
-    sections,
-    images: images.map((img) => ({
-      filename: img.filename,
-      mediaType: img.mediaType as "image/png" | "image/jpeg" | "image/gif",
-      bytes: Buffer.from(img.base64, "base64"),
-    })),
+    bookId: conversionId,
+    // Same trim-or-placeholder fallback repackageWithTitle() uses --
+    // applied here too so no stored EPUB, even this transient first
+    // packaging, ever carries a literally-blank dc:title/dc:creator.
+    // The client always calls repackageWithTitle() immediately after a
+    // successful parse with whatever title/author is actually known
+    // (real, for Edit Book's already-known title; still blank, for the
+    // wizard's Files step, in which case this placeholder is exactly
+    // what would be applied anyway).
+    title: "Untitled manuscript",
+    authorName: "Unknown author",
+    sections: conversion.sections,
+    images: conversion.images,
   });
 
-  // LIBRUM 2.0 PRODUCT-5: the SAME validator every uploaded EPUB
-  // already goes through (src/lib/epub-validation.ts), not a weaker
-  // alternate check, and run again on EVERY re-packaging (not just the
-  // first) -- if a title/author change ever produced something
-  // invalid, this refuses to hand it back rather than silently
-  // offering a broken file. createBook()/updateBook() independently
-  // re-run this exact same validator too once the client submits the
-  // File (defense in depth, not redundant trust).
-  //
-  // Scope, stated precisely (re-audited for the PRODUCT-5 pre-commit
-  // review): validateEpubStructure() checks mimetype's exact value,
-  // that META-INF/container.xml exists and points at a real rootfile,
-  // and that the rootfile exists -- it never parses OPF metadata at
-  // all, so it neither confirms nor denies dc:title/dc:creator/
-  // dc:language/anything else in <metadata>. Passing it is proof this
-  // is a structurally real EPUB (the same bar every uploaded EPUB
-  // already clears), not proof of full EPUB3 metadata conformance --
-  // that standard is met by what generateEpub() itself emits (see its
-  // own dc:language/dc:title/dc:creator handling), not by this check.
+  // The SAME validator every uploaded EPUB already goes through (see
+  // docx-actions.ts's pre-413-correction history / epub-validation.ts)
+  // -- run here on the very first packaging, and again on every
+  // subsequent repackageWithTitle() call below.
   const validation = await validateEpubStructure(epubBytes);
   if (!validation.valid) {
-    console.error("packageEpub: generated EPUB failed validation:", validation.reason);
+    console.error("parseDocxToDocument: generated EPUB failed validation:", validation.reason);
     return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };
   }
 
-  return { success: true, epubBase64: epubBytes.toString("base64") };
+  const tempEpubPath = `${userId}/tmp/epub/${conversionId}.epub`;
+  const { error: uploadError } = await supabase.storage
+    .from(MANUSCRIPTS_BUCKET)
+    .upload(tempEpubPath, epubBytes, { contentType: "application/epub+zip", upsert: true });
+
+  if (uploadError) {
+    console.error("parseDocxToDocument: temp EPUB upload failed:", uploadError);
+    return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };
+  }
+
+  return { success: true, conversionId: tempEpubPath, warnings: conversion.warnings };
+}
+
+export type RepackageResult = { success: true } | { success: false; error: string };
+
+// conversionId is the temporary EPUB's own storage path (returned by
+// parseDocxToDocument above) -- re-validated as owned by the CALLING
+// user on every call, same as parseDocxToDocument. Patches only the
+// OPF's title/creator metadata in the ALREADY-GENERATED temporary
+// EPUB (see epub-generator.ts's patchEpubMetadata()) rather than
+// re-running Mammoth or shipping full EPUB bytes through this
+// action's own request/response -- cheap and repeatable, callable on
+// every title keystroke exactly as the pre-413-correction design's
+// packageEpub() was.
+export async function repackageWithTitle(
+  conversionId: string,
+  bookTitle: string,
+  authorName: string,
+): Promise<RepackageResult> {
+  const auth = await requireOwnedTempPath(conversionId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const { supabase } = auth;
+
+  const { data: fileData, error: downloadError } = await supabase.storage
+    .from(MANUSCRIPTS_BUCKET)
+    .download(conversionId);
+
+  if (downloadError || !fileData) {
+    console.error("repackageWithTitle: temp EPUB download failed:", downloadError);
+    return { success: false, error: ERROR_MESSAGES.temp_file_missing };
+  }
+
+  const epubBytes = Buffer.from(await fileData.arrayBuffer());
+  const title = bookTitle.trim() || "Untitled manuscript";
+  const author = authorName.trim() || "Unknown author";
+
+  let patched: Buffer;
+  try {
+    patched = await patchEpubMetadata(epubBytes, title, author);
+  } catch (err) {
+    console.error("repackageWithTitle: metadata patch failed:", err);
+    return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };
+  }
+
+  const validation = await validateEpubStructure(patched);
+  if (!validation.valid) {
+    console.error("repackageWithTitle: patched EPUB failed validation:", validation.reason);
+    return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };
+  }
+
+  const { error: uploadError } = await supabase.storage
+    .from(MANUSCRIPTS_BUCKET)
+    .upload(conversionId, patched, { contentType: "application/epub+zip", upsert: true });
+
+  if (uploadError) {
+    console.error("repackageWithTitle: temp EPUB re-upload failed:", uploadError);
+    return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };
+  }
+
+  return { success: true };
 }

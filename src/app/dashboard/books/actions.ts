@@ -26,6 +26,172 @@ function normalizeKeywords(raw: FormDataEntryValue | null): string {
     .join(", ");
 }
 
+// LIBRUM 2.0 PRODUCT-5 CB-1: a manuscript can arrive two ways --
+//   A. a plain File in FormData (a small direct upload, or any other
+//      future caller that still posts one this way), or
+//   B. "manuscriptStoragePath", a small reference to an EPUB the
+//      browser ALREADY uploaded directly to the private "manuscripts"
+//      bucket's own "<uid>/tmp/epub/<uuid>.epub" namespace (see
+//      manuscript-field.tsx) -- used for every manuscript the Studio's
+//      own UI submits now, generated-from-DOCX or directly-uploaded
+//      EPUB alike, so neither can ever need to cross this Server
+//      Action's own request body (Vercel's ~4.5MB ceiling) again.
+// Both are normalized into the same validated bytes here, once, before
+// createBook()/updateBook()'s own business rules ever see a
+// difference -- neither function duplicates this logic.
+//
+// The temp-path branch never trusts the path's OWNERSHIP OR its own
+// ".epub" extension as proof of anything: ownership is re-checked
+// against the CALLING user's own id (RLS enforces the same boundary
+// at the database level, this is defense in depth, not the only
+// guard), and the extension is "only a routing guard, not proof of
+// EPUB validity" -- validateEpubStructure() below is what actually
+// proves that, for bytes from EITHER source, exactly as it always has
+// for a directly-uploaded EPUB.
+type ResolvedManuscript =
+  | { present: false }
+  | { present: true; bytes: Buffer; tempPathToCleanup: string | null };
+
+async function resolveManuscriptInput(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  formData: FormData,
+  errorPath: string,
+): Promise<ResolvedManuscript> {
+  const tempPath = String(formData.get("manuscriptStoragePath") ?? "").trim();
+
+  let bytes: Buffer;
+  let tempPathToCleanup: string | null = null;
+
+  if (tempPath) {
+    if (!tempPath.startsWith(`${userId}/tmp/epub/`) || !tempPath.toLowerCase().endsWith(".epub")) {
+      redirect(
+        `${errorPath}?error=That+manuscript+reference+is+no+longer+valid.+Please+choose+your+file+again`,
+      );
+    }
+
+    const { data, error: downloadError } = await supabase.storage
+      .from("manuscripts")
+      .download(tempPath);
+    if (downloadError || !data) {
+      console.error("resolveManuscriptInput: temp manuscript download failed:", downloadError);
+      redirect(`${errorPath}?error=Could+not+read+your+uploaded+manuscript.+Please+try+again`);
+    }
+
+    bytes = Buffer.from(await data!.arrayBuffer());
+    tempPathToCleanup = tempPath;
+  } else {
+    const manuscript = formData.get("manuscript") as File | null;
+    if (!manuscript || manuscript.size === 0) {
+      return { present: false };
+    }
+    if (!manuscript.name.toLowerCase().endsWith(".epub")) {
+      redirect(`${errorPath}?error=The+manuscript+must+be+an+EPUB+file`);
+    }
+    bytes = Buffer.from(await manuscript.arrayBuffer());
+  }
+
+  // Defense in depth -- never trust client-side File.size (or the
+  // browser's own pre-upload check) alone for bytes that came back
+  // from a temp Storage download.
+  if (bytes.length > MAX_MANUSCRIPT_BYTES) {
+    redirect(`${errorPath}?error=Manuscript+must+be+under+50MB`);
+  }
+
+  const manuscriptValidation = await validateEpubStructure(bytes);
+  if (!manuscriptValidation.valid) {
+    redirect(`${errorPath}?error=This+file+doesn%27t+appear+to+be+a+valid+EPUB`);
+  }
+
+  return { present: true, bytes, tempPathToCleanup };
+}
+
+// LIBRUM 2.0 PRODUCT-5 COVER-1: the same normalization pattern as
+// resolveManuscriptInput() above, for covers. A cover between ~4.5MB
+// and the app's own advertised 5MB limit could 413 through the old
+// File-in-FormData path (Vercel's own request-body ceiling is BELOW
+// the app's limit) -- covers now travel the same way manuscripts do:
+// direct browser->Storage upload (see cover-field.tsx), this Server
+// Action receiving only a small "coverStoragePath" reference.
+//
+// Deliberately staged in the PRIVATE "manuscripts" bucket, NOT the
+// public "covers" bucket -- audited directly in schema.sql before
+// writing this: "covers" is a genuinely PUBLIC bucket (its own
+// `select` RLS policy has no owner restriction at all, unlike
+// "manuscripts"). Staging an unvalidated, not-yet-saved cover there
+// would make it publicly addressable before this action ever confirms
+// it's even a real JPEG/PNG under the size limit -- an exposure this
+// correction's own brief explicitly asked to avoid, not ignore.
+// "manuscripts" already has private, owner-scoped RLS on every
+// operation (insert/select/update/delete), so it's reused here as a
+// general private staging area, not something cover-specific.
+type ResolvedCover =
+  | { present: false }
+  | {
+      present: true;
+      bytes: Buffer;
+      extension: "jpg" | "png";
+      contentType: "image/jpeg" | "image/png";
+      tempPathToCleanup: string | null;
+    };
+
+async function resolveCoverInput(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  formData: FormData,
+  errorPath: string,
+): Promise<ResolvedCover> {
+  const tempPath = String(formData.get("coverStoragePath") ?? "").trim();
+
+  let bytes: Buffer;
+  let tempPathToCleanup: string | null = null;
+
+  if (tempPath) {
+    if (!tempPath.startsWith(`${userId}/tmp/cover/`) || !/\.(jpe?g|png)$/i.test(tempPath)) {
+      redirect(`${errorPath}?error=That+cover+reference+is+no+longer+valid.+Please+choose+your+file+again`);
+    }
+
+    const { data, error: downloadError } = await supabase.storage
+      .from("manuscripts")
+      .download(tempPath);
+    if (downloadError || !data) {
+      console.error("resolveCoverInput: temp cover download failed:", downloadError);
+      redirect(`${errorPath}?error=Could+not+read+your+uploaded+cover.+Please+try+again`);
+    }
+
+    bytes = Buffer.from(await data!.arrayBuffer());
+    tempPathToCleanup = tempPath;
+  } else {
+    const cover = formData.get("cover") as File | null;
+    if (!cover || cover.size === 0) {
+      return { present: false };
+    }
+    bytes = Buffer.from(await cover.arrayBuffer());
+  }
+
+  // Defense in depth -- never trust client-side File.size (or the
+  // browser's own pre-upload check) alone for bytes that came back
+  // from a temp Storage download.
+  if (bytes.length > MAX_COVER_BYTES) {
+    redirect(`${errorPath}?error=Cover+image+must+be+under+5MB`);
+  }
+
+  // The SAME authoritative byte-signature check every cover has always
+  // gone through (src/lib/cover-image.ts) -- a temp path's own
+  // ".jpg"/".png" extension is only a routing guard above, never proof
+  // of real format. Node's own File supports slice().arrayBuffer()
+  // (confirmed directly, not assumed) so detectCoverImageKind() needs
+  // no changes at all to accept bytes from either source.
+  const coverFile = new File([new Uint8Array(bytes)], "cover", { type: "application/octet-stream" });
+  const coverKind = await detectCoverImageKind(coverFile);
+  if (!coverKind) {
+    redirect(`${errorPath}?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image`);
+  }
+  const { extension, contentType } = resolveVerifiedCoverStorageDetails(coverKind);
+
+  return { present: true, bytes, extension, contentType, tempPathToCleanup };
+}
+
 // Confirms the chosen series actually belongs to this author (an empty
 // selection is always valid — a book doesn't have to be in a series).
 // Redirects back with an error rather than returning one, matching the
@@ -77,15 +243,17 @@ export async function createBook(formData: FormData) {
   const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
   const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
+  const coverStoragePath = String(formData.get("coverStoragePath") ?? "").trim();
   const cover = formData.get("cover") as File | null;
+  const coverProvided = coverStoragePath !== "" || (!!cover && cover.size > 0);
+  const manuscriptStoragePath = String(formData.get("manuscriptStoragePath") ?? "").trim();
   const manuscript = formData.get("manuscript") as File | null;
+  const manuscriptProvided = manuscriptStoragePath !== "" || (!!manuscript && manuscript.size > 0);
 
   if (
     !title ||
-    !cover ||
-    cover.size === 0 ||
-    !manuscript ||
-    manuscript.size === 0 ||
+    !coverProvided ||
+    !manuscriptProvided ||
     !Number.isFinite(priceCents) ||
     priceCents < 0
   ) {
@@ -103,46 +271,36 @@ export async function createBook(formData: FormData) {
     "/dashboard/books/new",
   );
 
-  if (!manuscript.name.toLowerCase().endsWith(".epub")) {
-    redirect("/dashboard/books/new?error=The+manuscript+must+be+an+EPUB+file");
+  // Normalizes EITHER a direct File OR a coverStoragePath/
+  // manuscriptStoragePath reference into the same validated bytes --
+  // see resolveCoverInput's/resolveManuscriptInput's own comments
+  // above. coverProvided/manuscriptProvided already guarantee
+  // `present: true` here; the checks below only keep each helper's
+  // return type honest.
+  const coverResult = await resolveCoverInput(supabase, user.id, formData, "/dashboard/books/new");
+  if (!coverResult.present) {
+    redirect("/dashboard/books/new?error=Please+fill+in+every+field");
   }
 
-  if (cover.size > MAX_COVER_BYTES) {
-    redirect("/dashboard/books/new?error=Cover+image+must+be+under+5MB");
-  }
-
-  if (manuscript.size > MAX_MANUSCRIPT_BYTES) {
-    redirect("/dashboard/books/new?error=Manuscript+must+be+under+50MB");
-  }
-
-  const coverKind = await detectCoverImageKind(cover);
-  if (!coverKind) {
-    redirect(
-      "/dashboard/books/new?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image",
-    );
-  }
-  const { extension: coverExtension, contentType: coverContentType } =
-    resolveVerifiedCoverStorageDetails(coverKind);
-
-  // Read once, reused for both validation and the upload below, rather
-  // than reading the manuscript twice.
-  const manuscriptBytes = Buffer.from(await manuscript.arrayBuffer());
-  const manuscriptValidation = await validateEpubStructure(manuscriptBytes);
-  if (!manuscriptValidation.valid) {
-    redirect(
-      "/dashboard/books/new?error=This+file+doesn%27t+appear+to+be+a+valid+EPUB",
-    );
+  const manuscriptResult = await resolveManuscriptInput(
+    supabase,
+    user.id,
+    formData,
+    "/dashboard/books/new",
+  );
+  if (!manuscriptResult.present) {
+    redirect("/dashboard/books/new?error=Please+fill+in+every+field");
   }
 
   const bookId = randomUUID();
   // LAUNCH-1 P3-1: coverExtension is derived exclusively from the
   // verified byte signature above -- cover.name never reaches this key.
-  const coverPath = `${user.id}/${bookId}-cover.${coverExtension}`;
+  const coverPath = `${user.id}/${bookId}-cover.${coverResult.extension}`;
   const manuscriptPath = `${user.id}/${bookId}.epub`;
 
   const { error: coverError } = await supabase.storage
     .from("covers")
-    .upload(coverPath, cover, { contentType: coverContentType });
+    .upload(coverPath, coverResult.bytes, { contentType: coverResult.contentType });
 
   if (coverError) {
     console.error("createBook: cover upload failed:", coverError);
@@ -153,7 +311,7 @@ export async function createBook(formData: FormData) {
 
   const { error: manuscriptError } = await supabase.storage
     .from("manuscripts")
-    .upload(manuscriptPath, manuscriptBytes, { contentType: "application/epub+zip" });
+    .upload(manuscriptPath, manuscriptResult.bytes, { contentType: "application/epub+zip" });
 
   if (manuscriptError) {
     console.error("createBook: manuscript upload failed:", manuscriptError);
@@ -190,6 +348,36 @@ export async function createBook(formData: FormData) {
     );
   }
 
+  // Only now, after the book row is fully saved pointing at the
+  // permanent manuscriptPath above, is the temporary upload safe to
+  // remove -- a failure here is an orphaned-object cleanup problem,
+  // never a failed save (logged, not surfaced). Deliberately NOT
+  // removed on any earlier failure path above: keeping it lets a retry
+  // reuse the same already-uploaded/already-converted temp EPUB
+  // instead of forcing the author to re-upload or re-convert from
+  // scratch after e.g. a transient insert failure.
+  if (manuscriptResult.tempPathToCleanup) {
+    const { error: cleanupError } = await supabase.storage
+      .from("manuscripts")
+      .remove([manuscriptResult.tempPathToCleanup]);
+    if (cleanupError) {
+      console.error("createBook: failed to remove temporary manuscript object:", cleanupError);
+    }
+  }
+
+  // Same reasoning as the manuscript temp cleanup above -- the temp
+  // cover lives in the "manuscripts" bucket's private staging area
+  // (see resolveCoverInput's own comment), removed only now that the
+  // book row is confirmed pointing at the permanent coverPath.
+  if (coverResult.tempPathToCleanup) {
+    const { error: cleanupError } = await supabase.storage
+      .from("manuscripts")
+      .remove([coverResult.tempPathToCleanup]);
+    if (cleanupError) {
+      console.error("createBook: failed to remove temporary cover object:", cleanupError);
+    }
+  }
+
   revalidatePath("/dashboard");
   redirect("/dashboard");
 }
@@ -220,8 +408,6 @@ export async function updateBook(bookId: string, formData: FormData) {
   const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
   const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
-  const cover = formData.get("cover") as File | null;
-  const manuscript = formData.get("manuscript") as File | null;
 
   if (!title || !Number.isFinite(priceCents) || priceCents < 0) {
     redirect(`/dashboard/books/${bookId}/edit?error=Please+fill+in+every+field`);
@@ -238,37 +424,37 @@ export async function updateBook(bookId: string, formData: FormData) {
     `/dashboard/books/${bookId}/edit`,
   );
 
+  // Normalizes EITHER a direct File OR a coverStoragePath reference
+  // into the same validated bytes -- see resolveCoverInput's own
+  // comment near the top of this file. `present: false` is a
+  // legitimate, ordinary outcome here: no replacement chosen, keep
+  // the existing cover untouched.
   let coverPath = existing.cover_path;
   // Only set once a replacement cover has actually been uploaded
   // successfully -- the old file is removed AFTER the DB update below
   // succeeds, never before, so a failed update never leaves
   // books.cover_path pointing at a file that's already gone.
   let coverPathToRemove: string | null = null;
-  if (cover && cover.size > 0) {
-    if (cover.size > MAX_COVER_BYTES) {
-      redirect(`/dashboard/books/${bookId}/edit?error=Cover+image+must+be+under+5MB`);
-    }
+  let tempCoverToCleanup: string | null = null;
+  const coverResult = await resolveCoverInput(
+    supabase,
+    user.id,
+    formData,
+    `/dashboard/books/${bookId}/edit`,
+  );
 
-    const coverKind = await detectCoverImageKind(cover);
-    if (!coverKind) {
-      redirect(
-        `/dashboard/books/${bookId}/edit?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image`,
-      );
-    }
-    const { extension: coverExtension, contentType: coverContentType } =
-      resolveVerifiedCoverStorageDetails(coverKind);
-
+  if (coverResult.present) {
     // LAUNCH-1 P3-1: coverExtension is derived exclusively from the
     // verified byte signature above -- cover.name never reaches this
     // key. An existing.cover_path from before this hardening (e.g.
     // "...-cover.JPG" or "...-cover.jpeg") is unaffected: it's read
     // from the DB, not reconstructed here, so it remains removable via
     // coverPathToRemove below exactly as before.
-    const newCoverPath = `${user.id}/${bookId}-cover.${coverExtension}`;
+    const newCoverPath = `${user.id}/${bookId}-cover.${coverResult.extension}`;
 
     const { error: coverError } = await supabase.storage
       .from("covers")
-      .upload(newCoverPath, cover, { contentType: coverContentType, upsert: true });
+      .upload(newCoverPath, coverResult.bytes, { contentType: coverResult.contentType, upsert: true });
 
     if (coverError) {
       console.error("updateBook: cover upload failed:", coverError);
@@ -282,34 +468,37 @@ export async function updateBook(bookId: string, formData: FormData) {
     }
 
     coverPath = newCoverPath;
+    tempCoverToCleanup = coverResult.tempPathToCleanup;
   }
 
+  // Normalizes EITHER a direct File OR a manuscriptStoragePath
+  // reference into the same validated bytes -- see
+  // resolveManuscriptInput's own comment near the top of this file.
+  // `present: false` is a legitimate, ordinary outcome here (unlike
+  // createBook()): it just means "no replacement chosen, keep the
+  // existing manuscript untouched," exactly as an absent/empty
+  // `manuscript` File already meant before this correction.
   let filePath = existing.file_path;
-  if (manuscript && manuscript.size > 0) {
-    if (!manuscript.name.toLowerCase().endsWith(".epub")) {
-      redirect(`/dashboard/books/${bookId}/edit?error=The+manuscript+must+be+an+EPUB+file`);
-    }
+  let tempManuscriptToCleanup: string | null = null;
+  const manuscriptResult = await resolveManuscriptInput(
+    supabase,
+    user.id,
+    formData,
+    `/dashboard/books/${bookId}/edit`,
+  );
 
-    if (manuscript.size > MAX_MANUSCRIPT_BYTES) {
-      redirect(`/dashboard/books/${bookId}/edit?error=Manuscript+must+be+under+50MB`);
-    }
-
-    // Read once, reused for both validation and the upload below.
-    const manuscriptBytes = Buffer.from(await manuscript.arrayBuffer());
-    const manuscriptValidation = await validateEpubStructure(manuscriptBytes);
-    if (!manuscriptValidation.valid) {
-      redirect(
-        `/dashboard/books/${bookId}/edit?error=This+file+doesn%27t+appear+to+be+a+valid+EPUB`,
-      );
-    }
-
+  if (manuscriptResult.present) {
     // Manuscripts always live at the same "<author>/<bookId>.epub" path,
-    // so this simply overwrites the old file in place.
+    // so this simply overwrites the old file in place. Any validation
+    // failure inside resolveManuscriptInput above already redirected
+    // before reaching here, so the existing manuscript is never
+    // partially replaced -- upload success is the only way filePath
+    // (and, further below, books.file_path) ever changes.
     const newManuscriptPath = `${user.id}/${bookId}.epub`;
 
     const { error: manuscriptError } = await supabase.storage
       .from("manuscripts")
-      .upload(newManuscriptPath, manuscriptBytes, {
+      .upload(newManuscriptPath, manuscriptResult.bytes, {
         contentType: "application/epub+zip",
         upsert: true,
       });
@@ -322,6 +511,7 @@ export async function updateBook(bookId: string, formData: FormData) {
     }
 
     filePath = newManuscriptPath;
+    tempManuscriptToCleanup = manuscriptResult.tempPathToCleanup;
   }
 
   // LIBRUM 2.0 PRODUCT-1 PRE-COMMIT LEGACY RETIREMENT: preview_text is
@@ -369,6 +559,30 @@ export async function updateBook(bookId: string, formData: FormData) {
       .remove([coverPathToRemove]);
     if (cleanupError) {
       console.error("updateBook: failed to remove superseded cover file:", cleanupError);
+    }
+  }
+
+  // Same reasoning as coverPathToRemove above -- only removed once the
+  // DB row is confirmed pointing at the new permanent manuscript path.
+  if (tempManuscriptToCleanup) {
+    const { error: cleanupError } = await supabase.storage
+      .from("manuscripts")
+      .remove([tempManuscriptToCleanup]);
+    if (cleanupError) {
+      console.error("updateBook: failed to remove temporary manuscript object:", cleanupError);
+    }
+  }
+
+  // The temp cover lives in the "manuscripts" bucket's private
+  // staging area (see resolveCoverInput's own comment) -- same
+  // reasoning as above, removed only once the DB row is confirmed
+  // pointing at the new permanent cover path.
+  if (tempCoverToCleanup) {
+    const { error: cleanupError } = await supabase.storage
+      .from("manuscripts")
+      .remove([tempCoverToCleanup]);
+    if (cleanupError) {
+      console.error("updateBook: failed to remove temporary cover object:", cleanupError);
     }
   }
 

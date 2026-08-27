@@ -52,7 +52,7 @@ export default async function NewBookPage({
         </Alert>
       )}
 
-      <UploadWizard series={series ?? []} authorName={profile?.display_name ?? ""} />
+      <UploadWizard series={series ?? []} authorName={profile?.display_name ?? ""} authorId={user.id} />
     </main>
   );
 }

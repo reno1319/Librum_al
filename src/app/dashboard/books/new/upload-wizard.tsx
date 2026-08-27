@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { createBook } from "../actions";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { GENRES } from "@/lib/genres";
-import { formControlClasses, fileInputClasses } from "@/lib/form-styles";
+import { formControlClasses } from "@/lib/form-styles";
 import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
+import { CoverField } from "@/components/cover-field";
 import type { Series } from "@/lib/types";
 
 // LIBRUM 2.0 UI-7: four steps -- Files, Book Details, Pricing, Review --
@@ -36,48 +37,34 @@ function SaveButton() {
   );
 }
 
-export function UploadWizard({ series, authorName }: { series: Series[]; authorName: string }) {
+export function UploadWizard({
+  series,
+  authorName,
+  authorId,
+}: {
+  series: Series[];
+  authorName: string;
+  authorId: string;
+}) {
   const [step, setStep] = useState(1);
   const [stepError, setStepError] = useState("");
 
-  const [cover, setCover] = useState<File | null>(null);
-  const [manuscript, setManuscript] = useState<File | null>(null);
+  // LIBRUM 2.0 PRODUCT-5 COVER-1: no longer a File -- CoverField now
+  // uploads directly to Storage and maintains its own small path
+  // reference internally (see its own top-of-file comment), reporting
+  // only display metadata here, just enough for this wizard's own
+  // step-readiness check and Review-step summary below. Its local
+  // preview (Object URL) is now entirely CoverField's own concern too.
+  const [cover, setCover] = useState<{ name: string } | null>(null);
+  // LIBRUM 2.0 PRODUCT-5 CB-1: no longer a File -- ManuscriptField now
+  // maintains a small Storage-path reference internally (see its own
+  // top-of-file comment) and reports only display metadata here, just
+  // enough for this wizard's own step-readiness check and Review-step
+  // summary below.
+  const [manuscript, setManuscript] = useState<{ name: string } | null>(null);
   const [title, setTitle] = useState("");
   const [genre, setGenre] = useState("");
   const [price, setPrice] = useState("0");
-
-  // Object URL lifecycle: URL.createObjectURL() allocates a real
-  // browser resource, so it's created/revoked explicitly in the file
-  // input's own change handler (handleCoverChange below) -- never as a
-  // render-derived computation (useMemo) and never via a setState call
-  // inside an effect. `coverPreviewUrlRef` is the source of truth for
-  // cleanup purposes, and is only ever written inside an event handler
-  // or effect -- never during render (writing a ref's `.current` in the
-  // render body itself is disallowed by this codebase's lint rules).
-  // The only job left for an effect is the one thing effects are
-  // actually for here: revoking whatever URL is still held when the
-  // component unmounts.
-  const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
-  const coverPreviewUrlRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (coverPreviewUrlRef.current) URL.revokeObjectURL(coverPreviewUrlRef.current);
-    };
-  }, []);
-
-  function handleCoverChange(file: File | null) {
-    // Revoke the previous URL (if any) before creating/storing the next
-    // one, or before clearing the preview entirely -- so selecting a
-    // new file, or clearing the input, never leaks the prior URL.
-    if (coverPreviewUrlRef.current) {
-      URL.revokeObjectURL(coverPreviewUrlRef.current);
-    }
-    setCover(file);
-    const nextUrl = file ? URL.createObjectURL(file) : null;
-    coverPreviewUrlRef.current = nextUrl;
-    setCoverPreviewUrl(nextUrl);
-  }
 
   function goNext() {
     if (step === 1 && (!cover || !manuscript)) {
@@ -127,31 +114,12 @@ export function UploadWizard({ series, authorName }: { series: Series[]; authorN
       {/* Step 1: Files */}
       <div className={step === 1 ? "flex flex-col gap-6" : "hidden"}>
         <div className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1 text-sm">
-            Cover image
-            <input
-              name="cover"
-              type="file"
-              accept="image/png,image/jpeg"
-              required
-              className={fileInputClasses}
-              onChange={(e) => handleCoverChange(e.target.files?.[0] ?? null)}
-            />
-            <span className="text-xs text-muted">JPEG or PNG · up to 5 MB</span>
-          </label>
-
-          {coverPreviewUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={coverPreviewUrl}
-              alt=""
-              className="aspect-[2/3] w-32 rounded-md object-cover shadow-sm"
-            />
-          )}
+          <CoverField authorId={authorId} onCoverChange={setCover} />
 
           <ManuscriptField
             bookTitle={title}
             authorName={authorName}
+            authorId={authorId}
             onManuscriptChange={setManuscript}
           />
           <p className="text-xs text-muted">

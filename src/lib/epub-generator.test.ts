@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { randomBytes } from "crypto";
 import JSZip from "jszip";
-import { generateEpub } from "./epub-generator";
+import { generateEpub, patchEpubMetadata } from "./epub-generator";
 import { validateEpubStructure } from "./epub-validation";
 import { extractEpubSample } from "./epub-sample";
 import { convertDocxToDocument } from "./docx-converter";
@@ -153,6 +154,95 @@ describe("generateEpub", () => {
       sections: [{ heading: null, html: "<p>Just one section.</p>" }],
     });
     const result = await validateEpubStructure(bytes);
+    expect(result).toEqual({ valid: true });
+  });
+});
+
+describe("patchEpubMetadata", () => {
+  it("replaces dc:title/dc:creator/dcterms:modified while leaving every other entry byte-for-byte untouched", async () => {
+    const original = await generateEpub({
+      ...BASE_INPUT,
+      images: [{ filename: "img-1.png", mediaType: "image/png", bytes: tinyPngBytes() }],
+      sections: [{ heading: "Chapter One", html: '<p>Text.</p><img src="../images/img-1.png" alt=""/>' }],
+    });
+
+    const patched = await patchEpubMetadata(original, "New Title", "New Author");
+
+    const originalZip = await JSZip.loadAsync(original);
+    const patchedZip = await JSZip.loadAsync(patched);
+
+    const patchedOpf = await patchedZip.file("OEBPS/content.opf")!.async("string");
+    expect(patchedOpf).toContain("<dc:title>New Title</dc:title>");
+    expect(patchedOpf).toContain("<dc:creator>New Author</dc:creator>");
+    expect(patchedOpf).not.toContain(BASE_INPUT.title);
+    expect(patchedOpf).not.toContain(BASE_INPUT.authorName);
+    // dc:language/dc:identifier/manifest/spine survive untouched --
+    // only title/creator/modified were meant to change.
+    expect(patchedOpf).toContain("<dc:language>und</dc:language>");
+    expect(patchedOpf).toContain(`urn:librum:book:${BASE_INPUT.bookId}`);
+
+    const originalChapter = await originalZip.file("OEBPS/chapter-1.xhtml")!.async("string");
+    const patchedChapter = await patchedZip.file("OEBPS/chapter-1.xhtml")!.async("string");
+    expect(patchedChapter).toBe(originalChapter);
+
+    const originalImage = await originalZip.file("OEBPS/images/img-1.png")!.async("nodebuffer");
+    const patchedImage = await patchedZip.file("OEBPS/images/img-1.png")!.async("nodebuffer");
+    expect(patchedImage.equals(originalImage)).toBe(true);
+  });
+
+  it("still passes validateEpubStructure() after patching", async () => {
+    const original = await generateEpub(BASE_INPUT);
+    const patched = await patchEpubMetadata(original, "New Title", "New Author");
+    const result = await validateEpubStructure(patched);
+    expect(result).toEqual({ valid: true });
+  });
+
+  it("preserves mimetype as the first entry, stored uncompressed, at the raw byte level after patching", async () => {
+    const original = await generateEpub(BASE_INPUT);
+    const patched = await patchEpubMetadata(original, "New Title", "New Author");
+    expect(patched.readUInt32LE(0)).toBe(0x04034b50);
+    expect(patched.readUInt16LE(8)).toBe(0); // STORE
+    const nameLength = patched.readUInt16LE(26);
+    expect(patched.subarray(30, 30 + nameLength).toString("ascii")).toBe("mimetype");
+    const mimetypeContent = await (await JSZip.loadAsync(patched)).file("mimetype")!.async("string");
+    expect(mimetypeContent).toBe("application/epub+zip");
+  });
+
+  it("XML-escapes a title/author containing special characters", async () => {
+    const original = await generateEpub(BASE_INPUT);
+    const patched = await patchEpubMetadata(original, `Tom & Jerry <2>`, `O'Brien "Ace"`);
+    const opf = await (await JSZip.loadAsync(patched)).file("OEBPS/content.opf")!.async("string");
+    expect(opf).toContain("<dc:title>Tom &amp; Jerry &lt;2&gt;</dc:title>");
+    expect(opf).toContain(`<dc:creator>O'Brien &quot;Ace&quot;</dc:creator>`);
+  });
+
+  it("handles a generated EPUB well over Vercel's ~4.5MB function payload limit entirely in-process, without any request/response boundary involved", async () => {
+    // A synthetic illustrated manuscript sized to produce a generated
+    // EPUB comfortably over 4.5MB -- proving patchEpubMetadata() (and
+    // by extension repackageWithTitle(), which calls it) never needs
+    // to move an EPUB this size through any Vercel Function body, in
+    // either direction, to do a title change.
+    // Genuinely random (incompressible) bytes -- DEFLATE can't shrink
+    // these the way it would real repeated/structured data, so the
+    // resulting ZIP stays close to the raw byte count. Not real PNG
+    // bytes, but generateEpub() writes image bytes through as-is
+    // without decoding them, so that's irrelevant to this test.
+    const bigImage = randomBytes(3 * 1024 * 1024);
+    const original = await generateEpub({
+      ...BASE_INPUT,
+      images: [
+        { filename: "img-1.png", mediaType: "image/png", bytes: bigImage },
+        { filename: "img-2.png", mediaType: "image/png", bytes: bigImage },
+      ],
+    });
+    expect(original.length).toBeGreaterThan(4.5 * 1024 * 1024);
+
+    const patched = await patchEpubMetadata(original, "Illustrated Title", "Illustrated Author");
+    expect(patched.length).toBeGreaterThan(4.5 * 1024 * 1024);
+
+    const opf = await (await JSZip.loadAsync(patched)).file("OEBPS/content.opf")!.async("string");
+    expect(opf).toContain("<dc:title>Illustrated Title</dc:title>");
+    const result = await validateEpubStructure(patched);
     expect(result).toEqual({ valid: true });
   });
 });
