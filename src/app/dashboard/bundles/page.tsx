@@ -7,6 +7,11 @@ import {
   unpublishBundle,
   deleteBundle,
 } from "./actions";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Alert } from "@/components/ui/alert";
+import { buttonClasses } from "@/components/ui/button";
+import { formControlClasses } from "@/lib/form-styles";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -60,31 +65,33 @@ export default async function BundlesPage({
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="text-sm text-muted hover:underline">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
         &larr; Back to dashboard
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">Bundles</h1>
-      <p className="mt-1 text-sm text-muted">
-        Combine two or more of your published books into a single
-        discounted purchase — one checkout unlocks every book in it.
-      </p>
+
+      <div className="mt-2">
+        <PageHeader
+          title="Bundles"
+          description="Combine two or more of your published books into a single discounted purchase — one checkout unlocks every book in it."
+        />
+      </div>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <Alert variant="error" className="mt-4">
           {error}
-        </p>
+        </Alert>
       )}
       {success && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+        <Alert variant="success" className="mt-4">
           {success}
-        </p>
+        </Alert>
       )}
 
       {!books || books.length < 2 ? (
-        <p className="mt-6 rounded-lg border border-dashed border-border px-6 py-10 text-center text-sm text-muted">
-          You need at least 2 published books before you can create a
-          bundle.
-        </p>
+        <EmptyState
+          className="mt-6"
+          title="You need at least 2 published books before you can create a bundle."
+        />
       ) : (
         <form
           action={createBundle}
@@ -97,17 +104,13 @@ export default async function BundlesPage({
               type="text"
               required
               placeholder="e.g. The Complete Collection"
-              className="rounded-lg border border-border bg-surface px-3 py-2"
+              className={formControlClasses}
             />
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
             Description (optional)
-            <textarea
-              name="description"
-              rows={3}
-              className="rounded-lg border border-border bg-surface px-3 py-2"
-            />
+            <textarea name="description" rows={3} className={formControlClasses} />
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
@@ -118,19 +121,16 @@ export default async function BundlesPage({
               min="0"
               step="0.01"
               required
-              className="w-40 rounded-lg border border-border bg-surface px-3 py-2"
+              className={`w-40 ${formControlClasses}`}
             />
           </label>
 
           <fieldset>
             <legend className="text-sm">Books in this bundle</legend>
-            <div
-              className="mt-2 rounded-lg border border-border p-3"
-              style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
-            >
+            <div className="mt-2 flex flex-col gap-2 rounded-lg border border-border p-3">
               {books.map((book) => (
                 <label key={book.id} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="bookIds" value={book.id} />
+                  <input type="checkbox" name="bookIds" value={book.id} className="focus-ring" />
                   {book.title}
                 </label>
               ))}
@@ -138,10 +138,7 @@ export default async function BundlesPage({
             <span className="text-xs text-muted">Choose at least 2.</span>
           </fieldset>
 
-          <button
-            type="submit"
-            className="w-fit rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-          >
+          <button type="submit" className={buttonClasses("primary", "md", "w-fit")}>
             Create bundle
           </button>
         </form>
@@ -153,7 +150,7 @@ export default async function BundlesPage({
             key={bundle.id}
             className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-4 shadow-sm"
           >
-            <div style={{ flex: "1 1 12rem" }}>
+            <div className="flex-[1_1_12rem]">
               <p className="font-medium">
                 {bundle.title}{" "}
                 <span className="text-muted">
@@ -164,27 +161,18 @@ export default async function BundlesPage({
                 {bundle.status} · {bookCountByBundle.get(bundle.id) ?? 0} books
               </p>
             </div>
-            <Link
-              href={`/dashboard/bundles/${bundle.id}/edit`}
-              className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-            >
+            <Link href={`/dashboard/bundles/${bundle.id}/edit`} className={buttonClasses("outline", "sm")}>
               Edit
             </Link>
             {bundle.status === "draft" ? (
               <form action={publishBundle.bind(null, bundle.id)}>
-                <button
-                  type="submit"
-                  className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                >
+                <button type="submit" className={buttonClasses("outline", "sm")}>
                   Publish
                 </button>
               </form>
             ) : (
               <form action={unpublishBundle.bind(null, bundle.id)}>
-                <button
-                  type="submit"
-                  className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                >
+                <button type="submit" className={buttonClasses("outline", "sm")}>
                   Unpublish
                 </button>
               </form>
@@ -192,7 +180,7 @@ export default async function BundlesPage({
             <form action={deleteBundle.bind(null, bundle.id)}>
               <button
                 type="submit"
-                className="rounded-lg border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                className="focus-ring rounded-lg border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
               >
                 Delete
               </button>

@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createDiscountCode, toggleDiscountCode, deleteDiscountCode } from "./actions";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Alert } from "@/components/ui/alert";
+import { buttonClasses } from "@/components/ui/button";
+import { formControlClasses } from "@/lib/form-styles";
 import type { Book, DiscountCode } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -37,30 +42,33 @@ export default async function DiscountsPage({
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="text-sm text-muted hover:underline">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
         &larr; Back to dashboard
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">Discount codes</h1>
-      <p className="mt-1 text-sm text-muted">
-        Create a promo code for one of your books — readers enter it at
-        checkout for a percentage or fixed amount off.
-      </p>
+
+      <div className="mt-2">
+        <PageHeader
+          title="Discount codes"
+          description="Create a promo code for one of your books — readers enter it at checkout for a percentage or fixed amount off."
+        />
+      </div>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <Alert variant="error" className="mt-4">
           {error}
-        </p>
+        </Alert>
       )}
       {success && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+        <Alert variant="success" className="mt-4">
           {success}
-        </p>
+        </Alert>
       )}
 
       {!books || books.length === 0 ? (
-        <p className="mt-6 rounded-lg border border-dashed border-border px-6 py-10 text-center text-sm text-muted">
-          You need at least one book before you can create a discount code.
-        </p>
+        <EmptyState
+          className="mt-6"
+          title="You need at least one book before you can create a discount code."
+        />
       ) : (
         <form
           action={createDiscountCode}
@@ -68,12 +76,7 @@ export default async function DiscountsPage({
         >
           <label className="flex flex-col gap-1 text-sm">
             Book
-            <select
-              name="bookId"
-              required
-              defaultValue=""
-              className="rounded-lg border border-border bg-surface px-3 py-2"
-            >
+            <select name="bookId" required defaultValue="" className={formControlClasses}>
               <option value="" disabled>
                 Choose a book
               </option>
@@ -92,19 +95,14 @@ export default async function DiscountsPage({
               type="text"
               required
               placeholder="e.g. LAUNCH20"
-              className="rounded-lg border border-border bg-surface px-3 py-2 uppercase"
+              className={`uppercase ${formControlClasses}`}
             />
           </label>
 
           <div className="flex gap-3">
             <label className="flex flex-1 flex-col gap-1 text-sm">
               Discount type
-              <select
-                name="type"
-                required
-                defaultValue="percent"
-                className="rounded-lg border border-border bg-surface px-3 py-2"
-              >
+              <select name="type" required defaultValue="percent" className={formControlClasses}>
                 <option value="percent">Percentage off</option>
                 <option value="amount">Fixed amount off (USD)</option>
               </select>
@@ -119,24 +117,17 @@ export default async function DiscountsPage({
                 step="0.01"
                 required
                 placeholder="e.g. 20"
-                className="rounded-lg border border-border bg-surface px-3 py-2"
+                className={formControlClasses}
               />
             </label>
           </div>
 
           <label className="flex flex-col gap-1 text-sm">
             Expires (optional)
-            <input
-              name="expiresAt"
-              type="date"
-              className="rounded-lg border border-border bg-surface px-3 py-2"
-            />
+            <input name="expiresAt" type="date" className={formControlClasses} />
           </label>
 
-          <button
-            type="submit"
-            className="w-fit rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-          >
+          <button type="submit" className={buttonClasses("primary", "md", "w-fit")}>
             Create code
           </button>
         </form>
@@ -171,7 +162,7 @@ export default async function DiscountsPage({
                 <form action={toggleDiscountCode.bind(null, code.id, code.active)}>
                   <button
                     type="submit"
-                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-surface-hover"
+                    className="focus-ring rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-surface-hover"
                   >
                     {code.active ? "Disable" : "Enable"}
                   </button>
@@ -179,7 +170,7 @@ export default async function DiscountsPage({
                 <form action={deleteDiscountCode.bind(null, code.id)}>
                   <button
                     type="submit"
-                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-surface-hover"
+                    className="focus-ring rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
                   >
                     Delete
                   </button>

@@ -2,6 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { unfollowAuthor } from "@/app/authors/[id]/actions";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { buttonClasses } from "@/components/ui/button";
 import type { Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -42,22 +45,18 @@ export default async function FollowingPage() {
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-3xl font-semibold">
-        Authors you follow
-      </h1>
-      <p className="mt-1 text-sm text-muted">
-        You&apos;ll get an email whenever one of them publishes a new book.
-      </p>
+      <PageHeader
+        title="Authors you follow"
+        description="You'll get an email whenever one of them publishes a new book."
+      />
 
       {orderedAuthors.length === 0 ? (
-        <p className="mt-8 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
-          You&apos;re not following any authors yet.
-        </p>
-      ) : (
-        <ul
+        <EmptyState
           className="mt-8"
-          style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
-        >
+          title="You're not following any authors yet."
+        />
+      ) : (
+        <ul className="mt-8 flex flex-col gap-3">
           {orderedAuthors.map((author) => {
             const avatarUrl = author.avatar_path
               ? supabase.storage.from("avatars").getPublicUrl(author.avatar_path)
@@ -81,16 +80,12 @@ export default async function FollowingPage() {
                 )}
                 <Link
                   href={`/authors/${author.id}`}
-                  className="font-serif font-medium hover:underline"
-                  style={{ flex: "1 1 auto" }}
+                  className="focus-ring flex-1 rounded-sm font-serif font-medium hover:underline"
                 >
                   {author.display_name}
                 </Link>
                 <form action={unfollowAuthor.bind(null, author.id)}>
-                  <button
-                    type="submit"
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                  >
+                  <button type="submit" className={buttonClasses("outline", "sm")}>
                     Unfollow
                   </button>
                 </form>

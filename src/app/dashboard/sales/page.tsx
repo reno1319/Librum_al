@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { platformFeeCents } from "@/lib/pricing";
 import { excludeLostDisputedRows } from "./revenue-logic";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -227,13 +229,13 @@ export default async function SalesPage() {
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="text-sm text-muted hover:underline">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
         &larr; Back to dashboard
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">Sales</h1>
-      <p className="mt-1 text-sm text-muted">
-        Your net revenue, after Librum&apos;s platform fee.
-      </p>
+
+      <div className="mt-2">
+        <PageHeader title="Sales" description="Your net revenue, after Librum's platform fee." />
+      </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
@@ -265,22 +267,11 @@ export default async function SalesPage() {
       <h2 className="mt-10 font-serif text-xl font-semibold">
         Net revenue, last {CHART_DAYS} days
       </h2>
-      <div
-        className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm"
-        style={{ display: "flex", alignItems: "flex-end", height: "8rem", gap: "6px" }}
-      >
+      <div className="mt-4 flex h-32 items-end gap-1.5 rounded-lg border border-border bg-surface p-4 shadow-sm">
         {days.map((day) => (
           <div
             key={day.date.toISOString()}
-            style={{
-              display: "flex",
-              flex: "1 1 0%",
-              height: "100%",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "flex-end",
-              gap: "4px",
-            }}
+            className="flex h-full flex-1 flex-col items-center justify-end gap-1"
             title={`${day.date.toLocaleDateString(undefined, {
               month: "short",
               day: "numeric",
@@ -303,9 +294,7 @@ export default async function SalesPage() {
         By book
       </h2>
       {perBook.length === 0 ? (
-        <p className="mt-4 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
-          No books yet.
-        </p>
+        <EmptyState className="mt-4" title="No books yet." />
       ) : (
         <ul className="mt-4 divide-y divide-border">
           {perBook.map((book) => (

@@ -2,6 +2,10 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { updateBundle } from "../../actions";
+import { PageHeader } from "@/components/ui/page-header";
+import { Alert } from "@/components/ui/alert";
+import { buttonClasses } from "@/components/ui/button";
+import { formControlClasses } from "@/lib/form-styles";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -58,15 +62,18 @@ export default async function EditBundlePage({
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard/bundles" className="text-sm text-muted hover:underline">
+      <Link href="/dashboard/bundles" className="focus-ring rounded-sm text-sm text-muted hover:underline">
         &larr; Back to bundles
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">Edit bundle</h1>
+
+      <div className="mt-2">
+        <PageHeader title="Edit bundle" />
+      </div>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <Alert variant="error" className="mt-4">
           {error}
-        </p>
+        </Alert>
       )}
 
       <form
@@ -80,7 +87,7 @@ export default async function EditBundlePage({
             type="text"
             required
             defaultValue={bundle.title}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
         </label>
 
@@ -90,7 +97,7 @@ export default async function EditBundlePage({
             name="description"
             rows={3}
             defaultValue={bundle.description}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
         </label>
 
@@ -103,16 +110,13 @@ export default async function EditBundlePage({
             step="0.01"
             required
             defaultValue={(bundle.price_cents / 100).toFixed(2)}
-            className="w-40 rounded-lg border border-border bg-surface px-3 py-2"
+            className={`w-40 ${formControlClasses}`}
           />
         </label>
 
         <fieldset>
           <legend className="text-sm">Books in this bundle</legend>
-          <div
-            className="mt-2 rounded-lg border border-border p-3"
-            style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
-          >
+          <div className="mt-2 flex flex-col gap-2 rounded-lg border border-border p-3">
             {(books ?? []).map((book) => (
               <label key={book.id} className="flex items-center gap-2 text-sm">
                 <input
@@ -120,6 +124,7 @@ export default async function EditBundlePage({
                   name="bookIds"
                   value={book.id}
                   defaultChecked={currentBookIds.has(book.id)}
+                  className="focus-ring"
                 />
                 {book.title}
               </label>
@@ -128,10 +133,7 @@ export default async function EditBundlePage({
           <span className="text-xs text-muted">Choose at least 2.</span>
         </fieldset>
 
-        <button
-          type="submit"
-          className="mt-2 w-fit rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-        >
+        <button type="submit" className={buttonClasses("primary", "md", "mt-2 w-fit")}>
           Save changes
         </button>
       </form>

@@ -1,7 +1,11 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { removeFromWishlist } from "@/app/books/[id]/actions";
 import { BookCard } from "@/components/book-card";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { buttonClasses } from "@/components/ui/button";
 import type { Book, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -39,12 +43,19 @@ export default async function WishlistPage() {
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-3xl font-semibold">Your wishlist</h1>
+      <PageHeader title="Your wishlist" />
 
       {validItems.length === 0 ? (
-        <p className="mt-8 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
-          You haven&apos;t saved any books yet.
-        </p>
+        <EmptyState
+          className="mt-8"
+          title="Your wishlist is empty."
+          description="Books you save for later will appear here."
+          action={
+            <Link href="/bookstore" className={buttonClasses("primary", "md")}>
+              Browse the Bookstore
+            </Link>
+          }
+        />
       ) : (
         <ul className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4">
           {validItems.map(({ books: book }) => {
@@ -54,10 +65,7 @@ export default async function WishlistPage() {
               : null;
 
             return (
-              <li
-                key={book.id}
-                style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
-              >
+              <li key={book.id} className="flex flex-col gap-2">
                 <BookCard
                   book={book}
                   coverUrl={coverUrl}
@@ -66,7 +74,7 @@ export default async function WishlistPage() {
                 <form action={removeFromWishlist.bind(null, book.id)}>
                   <button
                     type="submit"
-                    className="w-fit rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                    className="focus-ring w-fit rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-surface-hover"
                   >
                     Remove
                   </button>

@@ -2,6 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { updateProfile } from "./actions";
+import { PageHeader } from "@/components/ui/page-header";
+import { Alert } from "@/components/ui/alert";
+import { buttonClasses } from "@/components/ui/button";
+import { formControlClasses, fileInputClasses } from "@/lib/form-styles";
 import type { Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -37,25 +41,26 @@ export default async function EditProfilePage({
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="text-sm text-muted hover:underline">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
         &larr; Back to dashboard
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">
-        Edit your profile
-      </h1>
-      <p className="mt-1 text-sm text-muted">
-        This is what readers see on your public author page.
-      </p>
+
+      <div className="mt-2">
+        <PageHeader
+          title="Edit your profile"
+          description="This is what readers see on your public author page."
+        />
+      </div>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <Alert variant="error" className="mt-4">
           {error}
-        </p>
+        </Alert>
       )}
       {success && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+        <Alert variant="success" className="mt-4">
           Profile updated.
-        </p>
+        </Alert>
       )}
 
       <form action={updateProfile} className="mt-6 flex flex-col gap-4">
@@ -76,7 +81,7 @@ export default async function EditProfilePage({
               name="avatar"
               type="file"
               accept="image/png,image/jpeg"
-              className="text-sm"
+              className={fileInputClasses}
             />
           </label>
         </div>
@@ -88,7 +93,7 @@ export default async function EditProfilePage({
             type="text"
             required
             defaultValue={profile?.display_name}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
         </label>
 
@@ -99,14 +104,11 @@ export default async function EditProfilePage({
             rows={4}
             defaultValue={profile?.bio ?? ""}
             placeholder="A few sentences about you and what you write."
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className={formControlClasses}
           />
         </label>
 
-        <button
-          type="submit"
-          className="mt-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-        >
+        <button type="submit" className={buttonClasses("primary", "md", "mt-2")}>
           Save
         </button>
       </form>
