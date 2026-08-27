@@ -16,7 +16,7 @@ import { BookShelf } from "@/components/book-shelf";
 import { BookSampleReader } from "@/components/book-sample-reader";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { formatPrice } from "@/lib/pricing";
-import { resolveBookPurchaseState, type BookPurchaseState } from "@/lib/book-purchase";
+import { resolveBookPurchaseState, resolveShowSample, type BookPurchaseState } from "@/lib/book-purchase";
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
@@ -351,18 +351,12 @@ export default async function BookDetailPage({
   });
   const formattedPrice = formatPrice(book.price_cents);
 
-  // LIBRUM 2.0 PRODUCT-1: Read Sample is independent of
-  // resolveBookPurchaseState()'s own classification -- this doesn't
-  // change or add a purchase state, it only decides where the CTA
-  // appears. Shown for every state where the reader doesn't already
-  // have full access (anonymous or unowned, paid or free); omitted for
-  // "owned"/"author", who already have Download EPUB, per the
-  // PRODUCT-1 brief's own explicit permission to omit it there.
-  const showSample =
-    purchaseState === "anonymous-paid" ||
-    purchaseState === "anonymous-free" ||
-    purchaseState === "free-unowned" ||
-    purchaseState === "paid-unowned";
+  // See resolveShowSample's own comment (src/lib/book-purchase.ts) for
+  // the full rule -- omitted for "owned"/"author" (who already have
+  // Download EPUB), shown otherwise, identically regardless of whether
+  // this book's manuscript was uploaded directly as an EPUB or
+  // converted from DOCX.
+  const showSample = resolveShowSample(purchaseState);
 
   const authorAvatarUrl = book.profiles?.avatar_path
     ? supabase.storage.from("avatars").getPublicUrl(book.profiles.avatar_path).data.publicUrl

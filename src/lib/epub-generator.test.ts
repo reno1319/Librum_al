@@ -288,4 +288,76 @@ describe("DOCX -> EPUB -> Read Sample round trip", () => {
     const allSampleText = sample.sections.map((s) => s.html).join(" ");
     expect(allSampleText).toContain("opening line of the story");
   });
+
+  // LIBRUM 2.0 PRODUCT-5 EPUB-SAMPLE-AVAILABILITY CORRECTION: a
+  // production report investigated a published book converted from a
+  // real 8.3MB DOCX ("Nancy Drew KDP Final.docx") apparently showing no
+  // Read Sample -- root cause turned out to be unrelated to DOCX/EPUB
+  // structure at all (see book-purchase.test.ts's own comment: the
+  // report's screenshots were the author's own view, where Read Sample
+  // has always been intentionally omitted). Still, the test directly
+  // above uses a trivially small two-paragraph fixture -- nothing like
+  // a real ~60,000-word novel's chapter count, paragraph volume, or
+  // embedded-image count. This test closes that gap: a synthetic
+  // manuscript sized to genuinely stress the same pipeline (many
+  // chapters, real paragraph volume approaching a real short novel,
+  // multiple embedded images), proving the full DOCX -> EPUB ->
+  // validateEpubStructure() -> extractEpubSample() chain still succeeds
+  // at production scale, not just on a minimal fixture.
+  it("a large, multi-chapter, illustrated DOCX (production-scale, not a trivial fixture) still converts, validates, and extracts a real Read Sample", async () => {
+    const CHAPTER_COUNT = 20;
+    const PARAGRAPHS_PER_CHAPTER = 40;
+    // Generic, non-copyrighted placeholder prose -- long enough per
+    // paragraph, and repeated enough times, that the resulting
+    // manuscript's total readable text approaches a real short novel's
+    // scale (twenty chapters this size is on the order of 60,000+
+    // words), not merely "large enough to not be trivial."
+    const SENTENCE =
+      "The old clock ticked steadily on the mantel while the detective considered every clue " +
+      "gathered so far, turning each detail over as the rain traced long lines down the window " +
+      "and the house settled into its familiar evening quiet.";
+
+    let bodyXml = "";
+    for (let chapter = 1; chapter <= CHAPTER_COUNT; chapter++) {
+      bodyXml += heading(1, `Chapter ${chapter}`);
+      for (let p = 0; p < PARAGRAPHS_PER_CHAPTER; p++) {
+        bodyXml += paragraph(`${SENTENCE} (chapter ${chapter}, paragraph ${p + 1})`);
+      }
+      if (chapter === 1) bodyXml += imageParagraph();
+    }
+
+    const docxBytes = await buildDocxBytes({
+      includeStyles: true,
+      includeImageRel: true,
+      bodyXml,
+    });
+
+    const conversion = await convertDocxToDocument(docxBytes);
+    expect(conversion.success).toBe(true);
+    if (!conversion.success) return;
+    expect(conversion.sections.length).toBe(CHAPTER_COUNT);
+
+    const epubBytes = await generateEpub({
+      bookId: "33333333-3333-3333-3333-333333333333",
+      title: "The Secret of the Old Clock (synthetic, non-copyrighted fixture)",
+      authorName: "Test Author",
+      sections: conversion.sections,
+      images: conversion.images,
+    });
+
+    const validation = await validateEpubStructure(epubBytes);
+    expect(validation).toEqual({ valid: true });
+
+    const sample = await extractEpubSample(epubBytes);
+    expect(sample.available).toBe(true);
+    if (!sample.available) return;
+    expect(sample.sections.length).toBeGreaterThan(0);
+    // A real ~10% sample of a 20-chapter book should land well short of
+    // the whole book, not accidentally include everything.
+    expect(sample.sections.length).toBeLessThan(CHAPTER_COUNT);
+    expect(sample.approximatePercent).toBeGreaterThan(0);
+    expect(sample.approximatePercent).toBeLessThanOrEqual(15);
+    const allSampleText = sample.sections.map((s) => s.html).join(" ");
+    expect(allSampleText).toContain("chapter 1, paragraph 1");
+  }, 20000);
 });

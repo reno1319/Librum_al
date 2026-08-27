@@ -35,3 +35,28 @@ export function resolveBookPurchaseState(params: {
   if (owned) return "owned";
   return priceCents === 0 ? "free-unowned" : "paid-unowned";
 }
+
+// LIBRUM 2.0 PRODUCT-1: Read Sample is independent of the purchase
+// state's own classification above -- this doesn't add a new state, it
+// only decides where the CTA appears. Extracted alongside
+// resolveBookPurchaseState() (previously an untested inline computation
+// directly in Book Detail's Server Component) after a PRODUCT-5 report
+// investigated a published DOCX-converted book showing no Read Sample --
+// root cause confirmed to be this EXACT pre-existing rule (see the
+// PRODUCT-5 EPUB-sample-availability correction's own report), triggered
+// because the report's own screenshots were the book's AUTHOR viewing
+// their OWN page, not a defect in DOCX-generated EPUBs or the sample
+// pipeline. Shown for every state where the reader doesn't already have
+// full access (anonymous or unowned, paid or free); omitted for "owned"/
+// "author", who already have Download EPUB, per the PRODUCT-1 brief's
+// own explicit permission to omit it there -- identical behavior for
+// every book regardless of whether its manuscript was uploaded directly
+// as an EPUB or converted from DOCX.
+export function resolveShowSample(state: BookPurchaseState): boolean {
+  return (
+    state === "anonymous-paid" ||
+    state === "anonymous-free" ||
+    state === "free-unowned" ||
+    state === "paid-unowned"
+  );
+}
