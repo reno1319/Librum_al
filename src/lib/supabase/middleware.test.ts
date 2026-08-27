@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { RECOVERY_COOKIE_NAME, RECOVERY_COOKIE_TTL_SECONDS } from "@/lib/recovery-session";
+import { INTERNAL_PATHNAME_HEADER } from "@/lib/internal-headers";
 
 // LAUNCH-1 P1-11: mocks only the network boundary (@supabase/ssr's own
 // createServerClient, which would otherwise try a real HTTP call via
@@ -239,5 +240,61 @@ describe("updateSession: recovery marker sliding-lifetime renewal", () => {
     // own new ~T+700d expiry is. No Day-400 gap exists: the marker's
     // clock restarted at the same moment the session's did.
     expect(response.cookies.get(RECOVERY_COOKIE_NAME)?.maxAge).toBe(RECOVERY_COOKIE_TTL_SECONDS);
+  });
+});
+
+// LIBRUM 2.0 AUTH-2: proves the internal pathname-forwarding behavior
+// dashboard/layout.tsx depends on to build its `/login?next=` target.
+// NextResponse.next({ request: { headers } }) doesn't expose the
+// forwarded request headers as ordinary response headers -- Next.js
+// encodes them onto the response as `x-middleware-request-<key>` (see
+// node_modules/next/dist/server/web/spec-extension/response.js's
+// handleMiddlewareField, traced directly, not assumed) specifically so
+// the next hop in the pipeline can reconstruct them. Reading that
+// encoded form here is the real, documented mechanism the forwarded
+// header actually rides on -- not a stand-in for it.
+function forwardedPathname(response: Response): string | null {
+  return response.headers.get(`x-middleware-request-${INTERNAL_PATHNAME_HEADER}`);
+}
+
+describe("updateSession: internal pathname forwarding (AUTH-2)", () => {
+  beforeEach(() => {
+    mockGetUser.mockClear();
+    simulateAuthCookieRefresh = false;
+  });
+
+  it("forwards the real pathname for a normal dashboard route", async () => {
+    const response = await updateSession(makeRequest("/dashboard/payouts"));
+    expect(forwardedPathname(response)).toBe("/dashboard/payouts");
+  });
+
+  it("forwards the real pathname for a dynamic dashboard route", async () => {
+    const response = await updateSession(makeRequest("/dashboard/books/abc-123/edit"));
+    expect(forwardedPathname(response)).toBe("/dashboard/books/abc-123/edit");
+  });
+
+  it("forwards the real pathname for a non-dashboard route too -- forwarding is unconditional, not dashboard-specific", async () => {
+    const response = await updateSession(makeRequest("/library"));
+    expect(forwardedPathname(response)).toBe("/library");
+  });
+
+  it("does not include the query string -- AUTH-2's path-only decision", async () => {
+    const request = new NextRequest("https://librumal.vercel.app/dashboard/sales?foo=bar");
+    const response = await updateSession(request);
+    expect(forwardedPathname(response)).toBe("/dashboard/sales");
+  });
+
+  it("a spoofed incoming header is discarded -- the forwarded value is always the request's own real pathname", async () => {
+    const request = new NextRequest("https://librumal.vercel.app/dashboard/payouts");
+    request.headers.set(INTERNAL_PATHNAME_HEADER, "/admin");
+    const response = await updateSession(request);
+    expect(forwardedPathname(response)).toBe("/dashboard/payouts");
+  });
+
+  it("the header still forwards correctly on a request that also triggers a cookie refresh (setAll rebuilds the response)", async () => {
+    simulateAuthCookieRefresh = true;
+    const response = await updateSession(makeRequest("/dashboard/series"));
+    expect(response.cookies.get("sb-project-auth-token")).toBeDefined();
+    expect(forwardedPathname(response)).toBe("/dashboard/series");
   });
 });

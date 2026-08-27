@@ -5,9 +5,32 @@ import {
   shouldRedirectForRecovery,
   setRecoverySession,
 } from "@/lib/recovery-session";
+import { INTERNAL_PATHNAME_HEADER } from "@/lib/internal-headers";
 
+// LIBRUM 2.0 AUTH-2: the only reliable way for a Server Component/Layout
+// to learn the current request's pathname in this Next.js version --
+// there is no server-side equivalent of the client-only usePathname()
+// hook. Proxy already sees `request.nextUrl.pathname` on effectively
+// every request (the shared matcher in src/proxy.ts), so it's forwarded
+// here as a request header dashboard/layout.tsx reads via headers().
+// Deliberately request-header (forwarded upstream to the render), never
+// a response header (which would only reach the browser, not the
+// server-rendered layout) -- see NextResponse.next({ request: { headers } })
+// below, the documented mechanism for this exact purpose
+// (node_modules/next/dist/docs/.../proxy.md "Setting Headers").
+//
+// Spoofing: deleted unconditionally before being set from
+// request.nextUrl.pathname, so any incoming client-supplied value of
+// this same header name is always discarded first -- the forwarded
+// value is only ever this request's own real, Next.js-parsed pathname,
+// never attacker input. No query string is included (see the AUTH-2
+// audit's query-string decision) and no secrets are ever placed on it.
 export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.delete(INTERNAL_PATHNAME_HEADER);
+  requestHeaders.set(INTERNAL_PATHNAME_HEADER, request.nextUrl.pathname);
+
+  let supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,7 +44,7 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
-          supabaseResponse = NextResponse.next({ request });
+          supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options),
           );
