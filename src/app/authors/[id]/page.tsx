@@ -1,23 +1,73 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
+import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { BookCard } from "@/components/book-card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { buttonClasses } from "@/components/ui/button";
+import { formatPrice } from "@/lib/pricing";
 import { followAuthor, unfollowAuthor } from "./actions";
-import type { Book, Bundle, Profile } from "@/lib/types";
-import type { Metadata } from "next";
+import { groupPublishedBooksBySeries } from "@/lib/author-series";
+import { getAuthorInitials } from "@/lib/author-initials";
+import type { Book, Bundle, Profile, Series } from "@/lib/types";
 
-// LIBRUM 2.0 SEO-1: static title, not "<author name> | Librum" -- the
-// page component's own author fetch below isn't visible to
-// generateMetadata() (a separate invocation), so a real dynamic title
-// would mean either a second, metadata-only profile fetch here or
-// restructuring the existing fetch to share via React.cache() -- both
-// beyond this pass's "no new query solely for metadata" scope. Worth
-// revisiting alongside a future query-sharing pass.
-export const metadata: Metadata = {
-  title: "Author",
-  description: "Books published by this author on Librum.",
-};
+// LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
+// dashboard or a social profile -- see the PRODUCT-2 audit. It shows
+// only what the product already treats as public and trustworthy:
+// display_name/bio/avatar_path (the only public-safe profile fields
+// this schema has -- there is no pen_name or website column to show,
+// and none is invented here), published books, and public series
+// grouping derived from those same books. Following stays exactly the
+// system PRODUCT-2 was told to reuse, not redesign: same
+// followAuthor/unfollowAuthor actions, same self-follow exclusion, same
+// admin-client-only follower count (author_follows has no public SELECT
+// policy -- see schema.sql).
+
+type PublicAuthor = Pick<Profile, "id" | "display_name" | "bio" | "avatar_path">;
+type SeriesRow = Pick<Series, "id" | "title">;
+
+// LIBRUM 2.0 PRODUCT-2: mirrors Book Detail's own PERF-1 pattern
+// (getBookForDetail) -- generateMetadata() and the page component are
+// separate invocations that don't otherwise see each other's data, so
+// this narrow, public-columns-only, request-scoped cache() is what lets
+// both share one row instead of two. Deliberately NOT `select("*")`:
+// profiles also carries stripe_account_id/stripe_payouts_enabled (see
+// schema.sql), and neither generateMetadata() nor this page has any
+// reason to ever pull those into a request just because they're on the
+// same row.
+const getPublicAuthor = cache(async (id: string) => {
+  const supabase = await createClient();
+  const { data: author } = await supabase
+    .from("profiles")
+    .select("id, display_name, bio, avatar_path")
+    .eq("id", id)
+    .eq("role", "author")
+    .single<PublicAuthor>();
+  return author;
+});
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const author = await getPublicAuthor(id);
+
+  // No private-profile leak: a missing/non-author id gets the same
+  // generic root-layout metadata a 404 gets anywhere else in this app,
+  // never an author-shaped title/description for an id that isn't one.
+  if (!author) {
+    return {};
+  }
+
+  return {
+    title: author.display_name,
+    description: `Books and author information for ${author.display_name} on Librum.`,
+  };
+}
 
 export default async function AuthorProfilePage({
   params,
@@ -26,102 +76,148 @@ export default async function AuthorProfilePage({
 }) {
   const { id } = await params;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
-  const { data: author } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", id)
-    .eq("role", "author")
-    .single<Profile>();
+  // LIBRUM 2.0 PRODUCT-2: getUser() and the author fetch are
+  // independent of each other (same reasoning as Book Detail's own
+  // PERF-1 pass) -- dispatched together rather than one after another.
+  const [
+    {
+      data: { user },
+    },
+    author,
+  ] = await Promise.all([supabase.auth.getUser(), getPublicAuthor(id)]);
 
+  // Covers both "no profile with this id" and "profile exists but
+  // isn't role='author'" -- a reader/admin id (or any invalid id) 404s
+  // exactly like a nonexistent one, never exposing which case it was.
   if (!author) {
     notFound();
   }
 
   const isSelf = user?.id === id;
-  let isFollowing = false;
-  if (user && !isSelf) {
-    const { data: followRow } = await supabase
-      .from("author_follows")
-      .select("id")
-      .eq("follower_id", user.id)
-      .eq("author_id", id)
-      .maybeSingle();
-    isFollowing = !!followRow;
-  }
-
-  // Follower identities aren't publicly readable (see schema.sql), so
-  // the count is read separately with the service role key.
   const admin = createAdminClient();
-  const { count: followerCount } = await admin
-    .from("author_follows")
-    .select("id", { count: "exact", head: true })
-    .eq("author_id", id);
 
-  const { data: books } = await supabase
-    .from("books")
-    .select("*")
-    .eq("author_id", id)
-    .eq("status", "published")
-    .order("created_at", { ascending: false })
-    .returns<Book[]>();
+  // LIBRUM 2.0 PRODUCT-2: everything below depends only on `id` (known
+  // before this point), never on each other -- dispatched as one
+  // batch instead of four sequential round trips. The follow-state
+  // query is the one genuinely conditional member (only meaningful for
+  // a logged-in visitor viewing someone else's page); it uses
+  // Promise.resolve({ data: null }) to keep the batch's shape uniform
+  // rather than skipping the slot, same convention Book Detail's own
+  // PERF-1 batch uses.
+  const [{ data: books }, { data: bundles }, followerCountResult, followResult] =
+    await Promise.all([
+      supabase
+        .from("books")
+        .select("*")
+        .eq("author_id", id)
+        .eq("status", "published")
+        .order("created_at", { ascending: false })
+        .returns<Book[]>(),
+      supabase
+        .from("bundles")
+        .select("*")
+        .eq("author_id", id)
+        .eq("status", "published")
+        .order("created_at", { ascending: false })
+        .returns<Bundle[]>(),
+      admin.from("author_follows").select("id", { count: "exact", head: true }).eq("author_id", id),
+      user && !isSelf
+        ? supabase
+            .from("author_follows")
+            .select("id")
+            .eq("follower_id", user.id)
+            .eq("author_id", id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
 
-  const { data: bundles } = await supabase
-    .from("bundles")
-    .select("*")
-    .eq("author_id", id)
-    .eq("status", "published")
-    .order("created_at", { ascending: false })
-    .returns<Bundle[]>();
+  const publishedBooks = books ?? [];
+  const followerCount = followerCountResult.count ?? 0;
+  const isFollowing = !!followResult.data;
+
+  // LIBRUM 2.0 PRODUCT-2: the ONLY query here that couldn't join the
+  // batch above -- it needs the series_ids the books query just
+  // returned. Still a single `.in()` lookup regardless of how many
+  // series this author has, never one query per series (see
+  // groupPublishedBooksBySeries's own comment for why the books already
+  // in hand are enough for everything else -- counts, ordering, and the
+  // cover strip).
+  const seriesIds = Array.from(
+    new Set(publishedBooks.map((b) => b.series_id).filter((v): v is string => !!v)),
+  );
+  const { data: seriesRows } =
+    seriesIds.length > 0
+      ? await supabase.from("series").select("id, title").in("id", seriesIds).returns<SeriesRow[]>()
+      : { data: [] as SeriesRow[] };
+
+  const seriesGroups = groupPublishedBooksBySeries(publishedBooks, seriesRows ?? []);
 
   const avatarUrl = author.avatar_path
-    ? supabase.storage.from("avatars").getPublicUrl(author.avatar_path).data
-        .publicUrl
+    ? supabase.storage.from("avatars").getPublicUrl(author.avatar_path).data.publicUrl
     : null;
+  const authorInitials = getAuthorInitials(author.display_name);
 
   return (
-    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
-      <div className="flex flex-wrap items-center gap-6">
+    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+      {/* ============================================================
+          Author hero -- identity, bio, follow. Restrained on purpose:
+          no cover photo, no stat dashboard, no social-profile framing.
+          ============================================================ */}
+      <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-center sm:gap-6">
         {avatarUrl ? (
+          // Decorative: the author's name is always the very next
+          // element, matching how every other avatar in this app
+          // (Book Detail's About the Author, /following) treats alt
+          // text when a name label sits right next to it.
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={avatarUrl}
             alt=""
-            className="h-24 w-24 rounded-full object-cover shadow-sm"
+            className="size-20 shrink-0 rounded-full object-cover shadow-sm sm:size-28"
           />
         ) : (
-          <div className="h-24 w-24 rounded-full bg-border" />
+          // LIBRUM 2.0 PRODUCT-2 PRE-COMMIT CORRECTION: a plain neutral
+          // circle read as a missing/broken image, not an intentional
+          // placeholder. Initials derived from the same public
+          // display_name every other author surface already uses --
+          // aria-hidden because the name itself is the very next
+          // element (same "decorative, name is adjacent" reasoning as
+          // the real-avatar branch's alt="").
+          <div
+            aria-hidden="true"
+            className="flex size-20 shrink-0 items-center justify-center rounded-full bg-border text-lg font-semibold text-foreground/70 sm:size-28 sm:text-2xl"
+          >
+            {authorInitials}
+          </div>
         )}
-        <div>
-          <h1 className="font-serif text-3xl font-semibold">
+        <div className="min-w-0">
+          <h1 className="font-serif text-2xl font-semibold text-foreground sm:text-3xl">
             {author.display_name}
           </h1>
-          <p className="mt-1 text-sm text-muted">
-            {followerCount ?? 0} follower{followerCount === 1 ? "" : "s"}
+          {/* Quiet by design -- a small text line, not a stat card:
+              this page is a discovery surface, not a dashboard. Kept
+              because it's already a real, cheap, authoritative count
+              (admin-client select, see above), not added fresh here. */}
+          <p className="mt-1 text-xs text-muted">
+            {followerCount} follower{followerCount === 1 ? "" : "s"}
           </p>
-          {author.bio && (
-            <p className="mt-2 max-w-xl text-foreground/90">{author.bio}</p>
+
+          {author.bio ? (
+            <p className="mt-3 max-w-xl text-sm text-foreground/90 sm:text-base">{author.bio}</p>
+          ) : (
+            <p className="mt-3 text-sm text-muted">No biography added yet.</p>
           )}
 
           {!isSelf &&
             (user ? (
               <form
-                action={(isFollowing ? unfollowAuthor : followAuthor).bind(
-                  null,
-                  id,
-                )}
-                className="mt-3"
+                action={(isFollowing ? unfollowAuthor : followAuthor).bind(null, id)}
+                className="mt-4"
               >
                 <button
                   type="submit"
-                  className={
-                    isFollowing
-                      ? "rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-                      : "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-                  }
+                  className={buttonClasses(isFollowing ? "outline" : "primary", "md")}
                 >
                   {isFollowing ? "Following" : "Follow"}
                 </button>
@@ -129,59 +225,134 @@ export default async function AuthorProfilePage({
             ) : (
               <Link
                 href={`/login?next=/authors/${id}`}
-                className="mt-3 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+                className={`${buttonClasses("outline", "md")} mt-4`}
               >
-                Follow
+                Log in to follow
               </Link>
             ))}
         </div>
       </div>
 
-      <h2 className="mt-10 font-serif text-xl font-semibold">Books</h2>
+      {/* ============================================================
+          Books by this author -- the page's primary content.
+          ============================================================ */}
+      <section className="mt-12 border-t border-border pt-8">
+        <h2 className="font-serif text-xl font-semibold">Books by {author.display_name}</h2>
 
-      {!books || books.length === 0 ? (
-        <p className="mt-4 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
-          No published books yet.
-        </p>
-      ) : (
-        <ul className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4">
-          {books.map((book) => {
-            const coverUrl = book.cover_path
-              ? supabase.storage.from("covers").getPublicUrl(book.cover_path)
-                  .data.publicUrl
-              : null;
+        {publishedBooks.length === 0 ? (
+          // LIBRUM 2.0 PRODUCT-2 PRE-COMMIT CORRECTION: EmptyState
+          // itself is unchanged (same component, same copy) -- only
+          // constrained to a narrower width here so it doesn't stretch
+          // across the full page width and read as more dominant than
+          // an author with books actually publishing would produce.
+          <div className="mt-6 max-w-2xl">
+            <EmptyState
+              title="No published books yet."
+              description="Books from this author will appear here when they are published."
+            />
+          </div>
+        ) : (
+          <ul className="mt-6 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {publishedBooks.map((book) => {
+              const coverUrl = book.cover_path
+                ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
+                : null;
 
-            return (
-              <li key={book.id}>
-                <BookCard book={book} coverUrl={coverUrl} />
+              return (
+                <li key={book.id}>
+                  {/* No authorName -- we're already on this author's own
+                      page, so BookCard's author byline would just link
+                      back to the page the reader is already on. */}
+                  <BookCard book={book} coverUrl={coverUrl} />
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      {/* ============================================================
+          Series -- only when this author's published books actually
+          form one. LIBRUM 2.0 PRODUCT-2 PRE-COMMIT CORRECTION: a single
+          full-width column previously stretched each series entry
+          nearly as wide as the page for very little content (a title,
+          a count, three small thumbnails). A 2-column grid (1 column on
+          mobile) keeps Series visibly subordinate to the Books grid
+          above it without shrinking any individual card's own content;
+          covers are moderately larger than before so they read as book
+          covers rather than icons, still capped at 4 and still nowhere
+          near BookCard's own size -- not a carousel, no new queries,
+          groupPublishedBooksBySeries() itself untouched.
+          ============================================================ */}
+      {seriesGroups.length > 0 && (
+        <section className="mt-12 border-t border-border pt-8">
+          <h2 className="font-serif text-xl font-semibold">Series</h2>
+          <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {seriesGroups.map((group) => (
+              <li
+                key={group.id}
+                className="rounded-lg border border-border bg-surface p-4 shadow-sm"
+              >
+                <p className="font-serif font-medium text-foreground">{group.title}</p>
+                <p className="mt-0.5 text-xs text-muted">
+                  {group.bookCount} book{group.bookCount === 1 ? "" : "s"}
+                </p>
+                <div className="mt-3 flex gap-2.5">
+                  {group.covers.map((book) => {
+                    const coverUrl = book.cover_path
+                      ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data
+                          .publicUrl
+                      : null;
+                    return (
+                      <Link
+                        key={book.id}
+                        href={`/books/${book.id}`}
+                        aria-label={book.title}
+                        className="focus-ring block w-16 shrink-0 rounded-sm"
+                      >
+                        {coverUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={coverUrl}
+                            alt=""
+                            className="aspect-[2/3] w-full rounded-sm object-cover shadow-sm"
+                          />
+                        ) : (
+                          <div className="aspect-[2/3] w-full rounded-sm bg-border" />
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
               </li>
-            );
-          })}
-        </ul>
+            ))}
+          </ul>
+        </section>
       )}
 
+      {/* ============================================================
+          Bundles -- unchanged query/behavior, restyled only to match
+          this page's section rhythm (border-t + consistent spacing).
+          ============================================================ */}
       {bundles && bundles.length > 0 && (
-        <>
-          <h2 className="mt-10 font-serif text-xl font-semibold">Bundles</h2>
-          <ul
-            className="mt-6"
-            style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
-          >
+        <section className="mt-12 border-t border-border pt-8">
+          <h2 className="font-serif text-xl font-semibold">Bundles</h2>
+          <ul className="mt-6 flex flex-col gap-3">
             {bundles.map((bundle) => (
               <li key={bundle.id}>
                 <Link
                   href={`/bundles/${bundle.id}`}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
+                  className="focus-ring flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
                 >
                   <span className="font-serif font-medium">{bundle.title}</span>
                   <span className="text-sm font-semibold text-primary">
-                    ${(bundle.price_cents / 100).toFixed(2)}
+                    {formatPrice(bundle.price_cents)}
                   </span>
                 </Link>
               </li>
             ))}
           </ul>
-        </>
+        </section>
       )}
     </main>
   );
