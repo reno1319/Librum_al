@@ -18,6 +18,7 @@ import { DeleteBookButton } from "@/app/dashboard/delete-book-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
+import { ManuscriptField } from "@/components/manuscript-field";
 import type { Book, Series, Contributor } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -100,7 +101,7 @@ export default async function EditBookPage({
   // display hint.
   const { data: profile } = await supabase
     .from("profiles")
-    .select("stripe_payouts_enabled")
+    .select("stripe_payouts_enabled, display_name")
     .eq("id", user.id)
     .single();
 
@@ -288,22 +289,18 @@ export default async function EditBookPage({
                   <p className="text-sm font-medium">
                     {manuscriptName ? `Current manuscript: ${manuscriptName}` : "No manuscript on file"}
                   </p>
-                  <label className="flex flex-col gap-1 text-sm">
-                    Replace manuscript
-                    <input
-                      name="manuscript"
-                      type="file"
-                      accept=".epub,application/epub+zip"
-                      className={fileInputClasses}
-                    />
-                    <span className="text-xs text-muted">
-                      EPUB · up to 50 MB. Leave blank to keep the current
-                      manuscript. Replacing it updates the file existing
-                      readers receive on their next download. Readers can
-                      preview approximately the first 10% of your ebook —
-                      generated automatically, no extra steps needed.
-                    </span>
-                  </label>
+                  <p className="text-xs text-muted">
+                    Leave blank to keep your current manuscript. Replacing it updates
+                    the file existing readers receive on their next download. Readers
+                    can preview approximately the first 10% of your ebook — generated
+                    automatically, no extra steps needed.
+                  </p>
+                  <ManuscriptField
+                    bookTitle={book.title}
+                    authorName={profile?.display_name ?? ""}
+                    existingFilename={manuscriptName ?? undefined}
+                    onManuscriptChange={() => {}}
+                  />
                 </div>
               </div>
             </section>

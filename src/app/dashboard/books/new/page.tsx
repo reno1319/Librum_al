@@ -25,12 +25,15 @@ export default async function NewBookPage({
     redirect("/login?next=/dashboard/books/new");
   }
 
-  const { data: series } = await supabase
-    .from("series")
-    .select("*")
-    .eq("author_id", user.id)
-    .order("title")
-    .returns<Series[]>();
+  const [{ data: series }, { data: profile }] = await Promise.all([
+    supabase.from("series").select("*").eq("author_id", user.id).order("title").returns<Series[]>(),
+    // LIBRUM 2.0 PRODUCT-5: the only reason this page needs the
+    // author's own display_name at all -- passed through to
+    // ManuscriptField so a DOCX-converted EPUB's internal dc:creator
+    // metadata uses Librum's authoritative name, never anything
+    // inferred from the manuscript itself.
+    supabase.from("profiles").select("display_name").eq("id", user.id).single(),
+  ]);
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
@@ -49,7 +52,7 @@ export default async function NewBookPage({
         </Alert>
       )}
 
-      <UploadWizard series={series ?? []} />
+      <UploadWizard series={series ?? []} authorName={profile?.display_name ?? ""} />
     </main>
   );
 }

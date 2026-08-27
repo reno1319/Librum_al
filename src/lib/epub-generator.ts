@@ -1,0 +1,198 @@
+import JSZip from "jszip";
+import type { DocImage, DocSection } from "@/lib/docx-converter";
+
+// LIBRUM 2.0 PRODUCT-5: builds a real, minimal, valid EPUB 3 package
+// from the normalized document model docx-converter.ts produces --
+// never a "HTML blob zipped up and called EPUB" (see the PRODUCT-5
+// brief's own core-decision section). Every structural piece EPUB
+// requires is written by hand here (mimetype, container.xml, OPF,
+// nav, XHTML content documents) via JSZip, already a project
+// dependency -- no new EPUB-authoring library, matching this
+// codebase's existing precedent (epub-validation.ts/epub-sample.ts
+// both hand-roll lightweight EPUB XML themselves rather than take on
+// a parsing/generation dependency for it).
+//
+// Deliberately targets exactly what this app's own
+// validateEpubStructure() (src/lib/epub-validation.ts) and
+// extractEpubSample() (src/lib/epub-sample.ts) actually read --
+// confirmed by reading both directly, not assumed -- so a generated
+// book works with Read Sample and the rest of the existing pipeline
+// automatically, with no separate DOCX-aware code path anywhere else
+// in the app.
+
+export type EpubGeneratorInput = {
+  bookId: string;
+  title: string;
+  authorName: string;
+  sections: DocSection[];
+  images: DocImage[];
+};
+
+const XML_ESCAPE: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
+function escapeXml(text: string): string {
+  return text.replace(/[&<>"]/g, (c) => XML_ESCAPE[c]);
+}
+
+// A small, generic reflowable-ebook stylesheet -- paragraph spacing,
+// heading rhythm, blockquote/list/image treatment. Deliberately NOT
+// Word's own generated stylesheet (fixed page widths, absolute
+// positioning, print-layout assumptions all excluded on purpose, per
+// the brief's "no print-layout hacks" rule) -- an ebook is reflowable,
+// this preserves structure/emphasis, not DOCX page geometry.
+const STYLESHEET = `body { font-family: serif; line-height: 1.5; margin: 1em; }
+h1, h2, h3, h4 { font-family: sans-serif; line-height: 1.25; margin: 1.4em 0 0.6em; }
+h1 { font-size: 1.6em; }
+h2 { font-size: 1.3em; }
+h3 { font-size: 1.1em; }
+h4 { font-size: 1em; }
+p { margin: 0 0 1em; }
+blockquote { margin: 1em 2em; font-style: italic; }
+ul, ol { margin: 0 0 1em; padding-left: 1.5em; }
+img { max-width: 100%; }
+table { border-collapse: collapse; width: 100%; margin: 0 0 1em; }
+td, th { border: 1px solid #999; padding: 0.4em; text-align: left; }
+`;
+
+function chapterFilename(index: number): string {
+  return `chapter-${index + 1}.xhtml`;
+}
+
+function renderChapterXhtml(section: DocSection, index: number): string {
+  const headingHtml = section.heading
+    ? `<h1>${escapeXml(section.heading)}</h1>\n`
+    : index === 0
+      ? ""
+      : "";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+<meta charset="utf-8"/>
+<title>${escapeXml(section.heading ?? "Section")}</title>
+<link rel="stylesheet" type="text/css" href="styles.css"/>
+</head>
+<body>
+${headingHtml}${section.html}
+</body>
+</html>
+`;
+}
+
+function renderNavXhtml(sections: DocSection[]): string {
+  const items = sections
+    .map((section, i) =>
+      section.heading
+        ? `<li><a href="${chapterFilename(i)}">${escapeXml(section.heading)}</a></li>`
+        : "",
+    )
+    .filter(Boolean)
+    .join("\n");
+  // Every real EPUB 3 must have a non-empty nav -- a manuscript with
+  // no Heading 1 at all still needs a minimal, valid single entry
+  // rather than an empty <ol>, per the brief's own "if no chapter
+  // headings: use a minimal valid navigation entry" rule.
+  const list = items || `<li><a href="${chapterFilename(0)}">Start</a></li>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+<meta charset="utf-8"/>
+<title>Table of Contents</title>
+</head>
+<body>
+<nav epub:type="toc" id="toc">
+<h1>Table of Contents</h1>
+<ol>
+${list}
+</ol>
+</nav>
+</body>
+</html>
+`;
+}
+
+function renderOpf(input: EpubGeneratorInput, modifiedAt: string): string {
+  const manifestItems = [
+    `<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`,
+    `<item id="css" href="styles.css" media-type="text/css"/>`,
+    ...input.sections.map(
+      (_, i) => `<item id="chapter${i + 1}" href="${chapterFilename(i)}" media-type="application/xhtml+xml"/>`,
+    ),
+    ...input.images.map((img, i) => {
+      const id = `image${i + 1}`;
+      return `<item id="${id}" href="images/${img.filename}" media-type="${img.mediaType}"/>`;
+    }),
+  ].join("\n");
+
+  const spineItems = input.sections.map((_, i) => `<itemref idref="chapter${i + 1}"/>`).join("\n");
+
+  // A generated internal identifier derived from the book's own id --
+  // never a fabricated ISBN (per the brief's explicit "do not invent
+  // ISBN" rule).
+  //
+  // LIBRUM 2.0 PRODUCT-5 PRE-COMMIT CORRECTION: dc:language is EPUB3's
+  // own required metadata element (never optional in the spec) -- the
+  // earlier "omit it" decision was wrong, not merely conservative.
+  // This schema still has no authoritative per-book language field
+  // (re-confirmed: neither `books` nor `profiles` has one -- see
+  // schema.sql), so the fix isn't to guess "en"/"sq"/anything else,
+  // it's to use "und" -- the real, standards-defined ISO 639-2 code
+  // for "undetermined," a genuine value for exactly this situation,
+  // not a placeholder invented for this codebase.
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/">
+<dc:identifier id="book-id">urn:librum:book:${escapeXml(input.bookId)}</dc:identifier>
+<dc:title>${escapeXml(input.title)}</dc:title>
+<dc:creator>${escapeXml(input.authorName)}</dc:creator>
+<dc:language>und</dc:language>
+<meta property="dcterms:modified">${modifiedAt}</meta>
+</metadata>
+<manifest>
+${manifestItems}
+</manifest>
+<spine>
+${spineItems}
+</spine>
+</package>
+`;
+}
+
+export async function generateEpub(input: EpubGeneratorInput): Promise<Buffer> {
+  const zip = new JSZip();
+
+  // EPUB OCF requirement: mimetype must be the very first entry,
+  // stored uncompressed, with exactly this content and no trailing
+  // newline. validateEpubStructure() doesn't enforce STORE compression
+  // (see its own audit comment for why), but a real, spec-correct
+  // EPUB does this regardless of what this app's own lightweight
+  // validator happens to check -- "must be a real valid EPUB," not
+  // merely one that satisfies this one validator.
+  zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+
+  zip.file(
+    "META-INF/container.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles>
+<rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+</rootfiles>
+</container>
+`,
+  );
+
+  const modifiedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  zip.file("OEBPS/content.opf", renderOpf(input, modifiedAt));
+  zip.file("OEBPS/nav.xhtml", renderNavXhtml(input.sections));
+  zip.file("OEBPS/styles.css", STYLESHEET);
+
+  input.sections.forEach((section, i) => {
+    zip.file(`OEBPS/${chapterFilename(i)}`, renderChapterXhtml(section, i));
+  });
+
+  for (const image of input.images) {
+    zip.file(`OEBPS/images/${image.filename}`, image.bytes);
+  }
+
+  return zip.generateAsync({ type: "nodebuffer" });
+}

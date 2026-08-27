@@ -8,6 +8,7 @@ import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { GENRES } from "@/lib/genres";
 import { formControlClasses, fileInputClasses } from "@/lib/form-styles";
 import { buttonClasses } from "@/components/ui/button";
+import { ManuscriptField } from "@/components/manuscript-field";
 import type { Series } from "@/lib/types";
 
 // LIBRUM 2.0 UI-7: four steps -- Files, Book Details, Pricing, Review --
@@ -35,7 +36,7 @@ function SaveButton() {
   );
 }
 
-export function UploadWizard({ series }: { series: Series[] }) {
+export function UploadWizard({ series, authorName }: { series: Series[]; authorName: string }) {
   const [step, setStep] = useState(1);
   const [stepError, setStepError] = useState("");
 
@@ -148,20 +149,12 @@ export function UploadWizard({ series }: { series: Series[] }) {
             />
           )}
 
-          <label className="flex flex-col gap-1 text-sm">
-            Manuscript
-            <input
-              name="manuscript"
-              type="file"
-              accept=".epub,application/epub+zip"
-              required
-              className={fileInputClasses}
-              onChange={(e) => setManuscript(e.target.files?.[0] ?? null)}
-            />
-            <span className="text-xs text-muted">EPUB · up to 50 MB</span>
-          </label>
+          <ManuscriptField
+            bookTitle={title}
+            authorName={authorName}
+            onManuscriptChange={setManuscript}
+          />
           <p className="text-xs text-muted">
-            EPUB is the standard ebook format Librum uses for every book.
             Readers can preview approximately the first 10% of your ebook —
             generated automatically, no extra steps needed.
           </p>
