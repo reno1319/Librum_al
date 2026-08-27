@@ -531,35 +531,37 @@ export default async function BookDetailPage({
           ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
         <h2 className="font-serif text-xl font-semibold">Book Details</h2>
-        {/* LIBRUM 2.0 PRODUCT-1 PRE-COMMIT CORRECTION: a fixed
-            grid-cols-2 track left a visibly empty cell whenever exactly
-            3 of these 4 possible fields were present (Series but no
-            ISBN, or vice versa) -- the "half-empty specification table"
-            look this section must avoid. flex-wrap has no reserved
-            column tracks, so 2, 3, or 4 items all pack compactly
-            left-to-right with no dangling empty slot, regardless of
-            which optional fields (Series, ISBN) exist for this book.
+        {/* LIBRUM 2.0 PRODUCT-1 PRE-COMMIT CORRECTION: previously plain
+            labels floating in whitespace -- now a single compact,
+            bordered/tinted editorial band, which is what actually reads
+            as "an intentional metadata treatment" rather than an
+            unfinished table, at every field count. flex-wrap (no
+            reserved grid column tracks) means 2, 3, or 4 items always
+            pack left-to-right with no dangling empty slot; the
+            `:not(:last-child)` divider rule adapts automatically to
+            however many fields this particular book actually has, never
+            leaving a stray trailing rule after the true last item.
             Still only ever the same 4 already-trustworthy fields --
             Format and Genre are always present (genre is required at
             creation), Series/ISBN only when the book actually has one;
             no invented Publisher/Published date/Language/Edition/Page
             count/Reading time, since none of those exist authoritatively
             in this schema. */}
-        <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-4 text-sm">
+        <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-5 rounded-lg border border-border bg-surface px-6 py-5 sm:[&>div:not(:last-child)]:border-r sm:[&>div:not(:last-child)]:border-border sm:[&>div:not(:last-child)]:pr-8">
           <div className="min-w-28">
-            <dt className="text-muted">Format</dt>
-            <dd className="mt-0.5">Ebook · EPUB</dd>
+            <dt className="text-xs font-medium uppercase tracking-wide text-muted">Format</dt>
+            <dd className="mt-1 text-sm font-medium text-foreground">Ebook · EPUB</dd>
           </div>
           {book.genre && (
             <div className="min-w-28">
-              <dt className="text-muted">Genre</dt>
-              <dd className="mt-0.5">{book.genre}</dd>
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">Genre</dt>
+              <dd className="mt-1 text-sm font-medium text-foreground">{book.genre}</dd>
             </div>
           )}
           {seriesInfo && (
             <div className="min-w-28">
-              <dt className="text-muted">Series</dt>
-              <dd className="mt-0.5">
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">Series</dt>
+              <dd className="mt-1 text-sm font-medium text-foreground">
                 {book.series_position ? `Book ${book.series_position} of ` : ""}
                 {seriesInfo.title}
               </dd>
@@ -567,8 +569,8 @@ export default async function BookDetailPage({
           )}
           {book.isbn && (
             <div className="min-w-28">
-              <dt className="text-muted">ISBN</dt>
-              <dd className="mt-0.5">{book.isbn}</dd>
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">ISBN</dt>
+              <dd className="mt-1 text-sm font-medium text-foreground">{book.isbn}</dd>
             </div>
           )}
         </dl>
@@ -591,7 +593,9 @@ export default async function BookDetailPage({
             <div className="size-14 shrink-0 rounded-full bg-border sm:size-16" />
           )}
           <div className="min-w-0">
-            <p className="font-serif text-lg font-medium">{book.profiles?.display_name}</p>
+            <p className="font-serif text-xl font-semibold text-foreground">
+              {book.profiles?.display_name}
+            </p>
             {book.profiles?.bio && (
               <p className="mt-2 max-w-prose text-sm text-foreground/90">{book.profiles.bio}</p>
             )}
