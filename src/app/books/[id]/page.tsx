@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -20,12 +21,16 @@ import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
 
 // LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
 // -- Bookstore (UI-4) owns discovery/browsing, this page owns "should I
-// buy this book." Presentation-only pass: every query below, and every
-// server action bound into a form, is unchanged from before this pass
-// -- see actions.ts/checkout-logic.ts, neither of which this pass
-// touches. Query sequencing is also left exactly as it was (a
-// PERF-1 follow-up to parallelize the independent fetches is tracked
-// separately, deliberately not bundled into this visual pass).
+// buy this book." Every server action bound into a form here is
+// unchanged since UI-5 -- see actions.ts/checkout-logic.ts, neither of
+// which any pass touching this file has ever modified.
+//
+// LIBRUM 2.0 PERF-1: query CONCURRENCY was revisited in this pass (see
+// getBookForDetail's own comment, and the two Promise.all groupings
+// below) -- purely a scheduling change. No query's actual filter
+// conditions, no visibility rule, and no business/purchase logic
+// changed; every query still runs, still returns the same rows it
+// always did, just not all of them one-at-a-time anymore.
 
 // The book's own author/profile join needs `bio` (for the new "About
 // the Author" section) on top of the `display_name` every other
@@ -47,19 +52,41 @@ function truncateForMetadata(text: string, max: number) {
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
+// LIBRUM 2.0 PERF-1: generateMetadata() and the page component below are
+// separate invocations Next.js calls for the same request -- neither
+// automatically sees the other's already-fetched data. Before this pass
+// each ran its own independent `books` fetch (metadata's narrower,
+// title/description/status/cover_path only; the page's wider `*,
+// profiles(display_name,bio)`), meaning every single Book Detail view
+// paid for the book row twice. `cache()` (React's own per-request
+// memoization, NOT a persistent/cross-request cache -- it's cleared once
+// this request finishes) makes both callers share the one, wider fetch:
+// whichever runs first (generateMetadata, per Next's own render order)
+// populates it, the page component's own call just reuses the resolved
+// value. Each caller still applies its OWN visibility rule against the
+// shared row -- metadata's own "published only" gate and the page's own
+// "author OR owner OR published" gate are both untouched below, so this
+// changes nothing about what either caller does with the data, only how
+// many times the row is fetched. No user-specific data (ownership,
+// wishlist, auth) is ever part of this cached call -- those stay
+// separate, uncached, per-request queries exactly as before.
+const getBookForDetail = cache(async (id: string) => {
+  const supabase = await createClient();
+  const { data: book } = await supabase
+    .from("books")
+    .select("*, profiles(display_name, bio)")
+    .eq("id", id)
+    .single<BookWithAuthorBio>();
+  return book;
+});
+
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const supabase = await createClient();
-
-  const { data: book } = await supabase
-    .from("books")
-    .select("title, description, status, cover_path")
-    .eq("id", id)
-    .maybeSingle<Pick<Book, "title" | "description" | "status" | "cover_path">>();
+  const book = await getBookForDetail(id);
 
   // Draft/unpublished/nonexistent books never get book-specific public
   // metadata. An author can still view their own draft's page body, but
@@ -83,6 +110,10 @@ export async function generateMetadata({
   const description = book.description
     ? truncateForMetadata(book.description, METADATA_DESCRIPTION_MAX)
     : undefined;
+  // Local URL construction only -- getPublicUrl() makes no network call,
+  // so creating a client here purely for this doesn't reintroduce a
+  // second `books` fetch.
+  const supabase = await createClient();
   const coverUrl = book.cover_path
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
@@ -125,21 +156,22 @@ export default async function BookDetailPage({
   } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
-  // With migration 024 applied, RLS itself now permits fetching an
-  // unpublished book's row for its author OR a legitimate (non-refunded)
-  // owner -- not just the author, as before. So the fetch below can
-  // succeed for either, and ownership has to be known before the
-  // visibility gate can tell them apart from an unrelated authenticated
-  // reader, for whom RLS will have already returned no row at all.
-  const { data: book } = await supabase
-    .from("books")
-    .select("*, profiles(display_name, bio)")
-    .eq("id", id)
-    .single<BookWithAuthorBio>();
+  // LIBRUM 2.0 PERF-1: getUser() and the book fetch are INDEPENDENT of
+  // each other in this codebase -- the book select below doesn't filter
+  // on `user` at all (RLS enforces visibility server-side from the
+  // request's own cookies, already attached to `supabase` regardless of
+  // whether getUser() has resolved yet), and getUser() doesn't need
+  // anything from `book`. Previously sequential; now dispatched together.
+  // `getBookForDetail` is the same React.cache()-memoized fetch
+  // generateMetadata() already ran for this request -- see its own
+  // comment above for why sharing it is safe here.
+  const [
+    {
+      data: { user },
+    },
+    book,
+  ] = await Promise.all([supabase.auth.getUser(), getBookForDetail(id)]);
 
   if (!book) {
     notFound();
@@ -155,6 +187,13 @@ export default async function BookDetailPage({
   // correct ownership predicate (the same one the download route and
   // submitReview now also use). This is a display/UX check, not a
   // security boundary -- the download route independently re-verifies.
+  //
+  // LIBRUM 2.0 PERF-1: kept sequential and ahead of the visibility gate,
+  // unchanged -- `wishlisted` is only meaningful (and only queried) once
+  // `owned` is known (DEPENDENT), and the gate right below needs `owned`
+  // itself. Neither depends on any of the presentation data fetched
+  // further down, so this short chain doesn't block the parallel batch
+  // from starting as soon as it's done.
   let owned = false;
   let wishlisted = false;
   if (user) {
@@ -183,12 +222,89 @@ export default async function BookDetailPage({
     notFound();
   }
 
-  const { data: reviews } = await supabase
-    .from("reviews")
-    .select("*, profiles(display_name)")
-    .eq("book_id", id)
-    .order("created_at", { ascending: false })
-    .returns<ReviewWithReader[]>();
+  const coverUrl = book.cover_path
+    ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
+    : null;
+
+  // LIBRUM 2.0 PERF-1: everything below is INDEPENDENT -- each query
+  // depends only on fields already known from `book` itself (id,
+  // author_id, genre, series_id, status), never on `owned`/`wishlisted`
+  // or on each other's results. Previously six-plus sequential round
+  // trips (reviews, contributors, series row, series entries, more-by-
+  // author, you-might-like, plus a synchronously-awaited book_views
+  // insert in between); now one batch bounded by the slowest single
+  // query. Series entries only need `book.series_id` -- confirmed by
+  // reading its own query below, which never references the series
+  // row's own fetched data -- so it runs alongside the series row
+  // fetch, not after it. `book_views`' insert result is never read, so
+  // it joins the batch too instead of blocking ahead of it.
+  // Conditional members use `Promise.resolve({ data: null })` (a
+  // resolved value, not a query) to keep positions/shapes uniform --
+  // never a real query run just to fill a slot.
+  const [
+    { data: reviews },
+    { data: contributors },
+    { data: seriesRow },
+    { data: seriesEntriesData },
+    { data: moreByAuthor },
+    { data: youMightLikeData },
+  ] = await Promise.all([
+    supabase
+      .from("reviews")
+      .select("*, profiles(display_name)")
+      .eq("book_id", id)
+      .order("created_at", { ascending: false })
+      .returns<ReviewWithReader[]>(),
+    supabase
+      .from("book_contributors")
+      .select("*")
+      .eq("book_id", id)
+      .order("created_at")
+      .returns<Contributor[]>(),
+    book.series_id
+      ? supabase.from("series").select("*").eq("id", book.series_id).maybeSingle<Series>()
+      : Promise.resolve({ data: null }),
+    book.series_id
+      ? supabase
+          .from("books")
+          .select("id, title, series_position")
+          .eq("series_id", book.series_id)
+          .eq("status", "published")
+          .order("series_position", { ascending: true, nullsFirst: false })
+          .returns<SeriesEntry[]>()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("books")
+      .select("*, profiles(display_name)")
+      .eq("status", "published")
+      .eq("author_id", book.author_id)
+      .neq("id", id)
+      .order("created_at", { ascending: false })
+      .limit(8)
+      .returns<BookWithAuthor[]>(),
+    book.genre
+      ? supabase
+          .from("books")
+          .select("*, profiles(display_name)")
+          .eq("status", "published")
+          .eq("genre", book.genre)
+          .neq("id", id)
+          .neq("author_id", book.author_id)
+          .order("created_at", { ascending: false })
+          .limit(8)
+          .returns<BookWithAuthor[]>()
+      : Promise.resolve({ data: null }),
+    // A basic view count, not deduplicated unique visitors — a reload
+    // or a repeat visit counts again. Only published books, and never
+    // the author's own visits (so previewing/editing doesn't inflate
+    // it). Admin client because this is a system-recorded event, not
+    // something tied to the viewer's own RLS-governed rows. Its result
+    // is never read -- it rides along in this batch purely so its
+    // latency doesn't sit ahead of the rest.
+    book.status === "published" && !isAuthor
+      ? createAdminClient().from("book_views").insert({ book_id: id })
+      : Promise.resolve(null),
+  ]);
 
   const allReviews = reviews ?? [];
   const reviewCount = allReviews.length;
@@ -200,71 +316,9 @@ export default async function BookDetailPage({
     ? (allReviews.find((r) => r.reader_id === user.id) ?? null)
     : null;
 
-  const coverUrl = book.cover_path
-    ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
-    : null;
-
-  // A basic view count, not deduplicated unique visitors — a reload or
-  // a repeat visit counts again. Only published books, and never the
-  // author's own visits (so previewing/editing doesn't inflate it).
-  // Admin client because this is a system-recorded event, not something
-  // tied to the viewer's own RLS-governed rows.
-  if (book.status === "published" && !isAuthor) {
-    const admin = createAdminClient();
-    await admin.from("book_views").insert({ book_id: id });
-  }
-
-  const { data: contributors } = await supabase
-    .from("book_contributors")
-    .select("*")
-    .eq("book_id", id)
-    .order("created_at")
-    .returns<Contributor[]>();
-
-  let seriesInfo: Series | null = null;
-  let seriesEntries: SeriesEntry[] = [];
-  if (book.series_id) {
-    const { data: seriesRow } = await supabase
-      .from("series")
-      .select("*")
-      .eq("id", book.series_id)
-      .maybeSingle<Series>();
-    seriesInfo = seriesRow;
-
-    const { data: entries } = await supabase
-      .from("books")
-      .select("id, title, series_position")
-      .eq("series_id", book.series_id)
-      .eq("status", "published")
-      .order("series_position", { ascending: true, nullsFirst: false })
-      .returns<SeriesEntry[]>();
-    seriesEntries = entries ?? [];
-  }
-
-  const { data: moreByAuthor } = await supabase
-    .from("books")
-    .select("*, profiles(display_name)")
-    .eq("status", "published")
-    .eq("author_id", book.author_id)
-    .neq("id", id)
-    .order("created_at", { ascending: false })
-    .limit(8)
-    .returns<BookWithAuthor[]>();
-
-  let youMightLike: BookWithAuthor[] = [];
-  if (book.genre) {
-    const { data } = await supabase
-      .from("books")
-      .select("*, profiles(display_name)")
-      .eq("status", "published")
-      .eq("genre", book.genre)
-      .neq("id", id)
-      .neq("author_id", book.author_id)
-      .order("created_at", { ascending: false })
-      .limit(8)
-      .returns<BookWithAuthor[]>();
-    youMightLike = data ?? [];
-  }
+  const seriesInfo: Series | null = seriesRow ?? null;
+  const seriesEntries: SeriesEntry[] = seriesEntriesData ?? [];
+  const youMightLike: BookWithAuthor[] = youMightLikeData ?? [];
 
   const purchaseState = resolveBookPurchaseState({
     user: user ? { id: user.id } : null,
