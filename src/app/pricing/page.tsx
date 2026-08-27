@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { computeAuthorSharePercent } from "@/lib/homepage";
 import { EarningsCalculator } from "@/components/earnings-calculator";
 import type { Metadata } from "next";
 
@@ -17,12 +18,15 @@ const HOW_IT_WORKS = [
 ];
 
 export default function PricingPage() {
+  const authorSharePercent = computeAuthorSharePercent();
+
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-4xl font-semibold">Pricing</h1>
+      <h1 className="font-serif text-4xl font-semibold">Earnings</h1>
       <p className="mt-3 text-muted">
-        No setup fees, no monthly subscription, no minimum sales. Librum
-        only makes money when you do.
+        You keep {authorSharePercent}% of every sale — Librum keeps{" "}
+        {PLATFORM_FEE_PERCENT}%. No setup fees, no monthly subscription, no
+        minimum sales. Librum only makes money when you do.
       </p>
 
       <div className="mt-8">
@@ -38,6 +42,24 @@ export default function PricingPage() {
           <li key={line}>&middot; {line}</li>
         ))}
       </ul>
+
+      {/* LIBRUM 2.0 PRODUCT-4: /pricing previously never mentioned the
+          payout-setup requirement at all -- COPY-1's own rule (a paid
+          book needs Stripe Connect set up first; a free book never
+          does) already lives on Help/How It Works/Dashboard, but not
+          here, where an author deciding whether to price a book is
+          most likely to want it. Same wording/timing discipline as
+          those pages: no specific payout schedule is asserted, because
+          none is authoritative in this codebase -- only "per sale,
+          timing depends on your Stripe account status." */}
+      <h2 className="mt-10 font-serif text-xl font-semibold">Payouts</h2>
+      <p className="mt-3 text-foreground/90">
+        Paid books require a connected Stripe account — set this up anytime
+        from Dashboard &gt; Payouts before you publish your first paid book.
+        Stripe verifies your identity and pays you directly; Librum never
+        sees or stores your bank details. Free books can be published
+        without connecting Stripe at all.
+      </p>
 
       <h2 className="mt-10 font-serif text-xl font-semibold">
         What the fee covers
