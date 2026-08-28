@@ -82,23 +82,39 @@ jobs:
           echo "==== supabase migration list --linked (READ-ONLY) ===="
           supabase migration list --linked
 
-      - name: Optional structured-output probe (read-only, non-fatal if unsupported)
+      - name: Structured-output probe (read-only, non-fatal if unsupported)
         run: |
           set -uo pipefail
-          echo "==== OPTIONAL STRUCTURED OUTPUT PROBE ===="
-          echo "Testing: supabase migration list --linked --output json"
-          echo "This probe is read-only. Its output is NOT parsed or trusted by this workflow -- it exists only so a human can inspect the real JSON shape (if any) before a future repair workflow is built to parse it."
+          echo "==== STRUCTURED OUTPUT PROBE ===="
+          echo "Testing: supabase migration list --linked --output-format json"
+          echo "(PART 4A used '--output json', a different, incorrect global flag, which silently fell back to the normal table -- this is the corrected flag.)"
+          echo "This probe is read-only. Its output is NOT parsed or trusted for any gating decision here -- it exists only so a human can learn the exact JSON field names from the real CLI before a future repair workflow is built to parse it."
 
-          if probe_output="$(supabase migration list --linked --output json 2>&1)"; then
-            echo "Probe command exited successfully. Raw output:"
-            printf '%s\n' "$probe_output"
+          if probe_output="$(supabase migration list --linked --output-format json 2>&1)"; then
+            echo "Probe command exited successfully."
+
+            if printf '%s' "$probe_output" | jq empty >/dev/null 2>&1; then
+              echo "---- Raw JSON response (migration metadata only -- no secrets are ever part of this output) ----"
+              printf '%s\n' "$probe_output"
+
+              echo "---- JSON shape summary (diagnostic only, no gating logic built on this yet) ----"
+              echo "Top-level type:"
+              printf '%s' "$probe_output" | jq 'type'
+              echo "Top-level length (if array) or keys (if object):"
+              printf '%s' "$probe_output" | jq 'if type == "array" then length else keys end'
+              echo "First element's keys (if top-level is an array):"
+              printf '%s' "$probe_output" | jq '.[0] // {} | keys'
+            else
+              echo "Probe command exited successfully but did not return valid JSON -- '--output-format json' may not behave as expected on this CLI version. Raw output captured below (read-only, still no secrets):"
+              printf '%s\n' "$probe_output"
+            fi
           else
             probe_status=$?
-            echo "Probe command exited non-zero (status ${probe_status}) -- '--output json' may be unsupported by this CLI version, or another read-only error occurred. This is a KNOWN POSSIBLE outcome and does not fail this diagnostic workflow."
+            echo "Probe command exited non-zero (status ${probe_status}) -- '--output-format json' may be unsupported by this CLI version, or another read-only error occurred. This is a KNOWN POSSIBLE outcome and does not fail this diagnostic workflow."
             echo "Captured output/error text:"
             printf '%s\n' "$probe_output"
           fi
-          echo "==== END OPTIONAL STRUCTURED OUTPUT PROBE ===="
+          echo "==== END STRUCTURED OUTPUT PROBE ===="
 
       - name: Local migration inventory (filenames only, no modification)
         run: |
@@ -109,4 +125,4 @@ jobs:
       - name: Diagnostic summary
         run: |
           set -euo pipefail
-          echo "Diagnostic complete. No migration history, schema, or data was modified."
+          echo "Structured migration-list diagnostic complete. No Supabase state was modified."
