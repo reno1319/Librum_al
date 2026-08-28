@@ -809,7 +809,11 @@ export async function addContributor(bookId: string, formData: FormData) {
   });
 
   if (error) {
-    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(error.message)}`);
+    // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: was error.message -- see the
+    // identical correction in src/app/books/[id]/actions.ts for why.
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("We couldn't add the contributor. Please try again.")}`,
+    );
   }
 
   revalidatePath(`/dashboard/books/${bookId}/edit`);

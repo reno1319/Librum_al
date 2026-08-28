@@ -380,7 +380,15 @@ export async function submitReview(bookId: string, formData: FormData) {
     );
 
   if (error) {
-    redirect(`/books/${bookId}?error=${encodeURIComponent(error.message)}`);
+    // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: was error.message -- the raw
+    // Postgres/PostgREST error passed straight through to the URL and
+    // rendered verbatim (e.g. an RLS rejection or constraint violation
+    // in developer-facing English). Every OTHER redirect in this
+    // function uses a Librum-authored string; this is the one that
+    // didn't.
+    redirect(
+      `/books/${bookId}?error=${encodeURIComponent("We couldn't save your review. Please try again.")}`,
+    );
   }
 
   redirect(`/books/${bookId}?review=success`);
@@ -450,7 +458,11 @@ export async function submitReport(bookId: string, formData: FormData) {
   });
 
   if (error) {
-    redirect(`/books/${bookId}/report?error=${encodeURIComponent(error.message)}`);
+    // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: same correction as the review
+    // upsert above -- was error.message.
+    redirect(
+      `/books/${bookId}/report?error=${encodeURIComponent("We couldn't submit your report. Please try again.")}`,
+    );
   }
 
   redirect(`/books/${bookId}?report=success`);

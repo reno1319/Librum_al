@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -43,8 +44,9 @@ export default function AboutPage() {
       <section className="mt-12">
         <h2 className="font-serif text-xl font-semibold">How the money works</h2>
         <p className="mt-3 text-foreground/90">
-          Librum takes a 20% platform fee on every sale. The remaining 80%
-          is transferred to the author&apos;s bank account by Stripe,
+          Librum takes a {PLATFORM_FEE_PERCENT}% platform fee on every sale.
+          The remaining {100 - PLATFORM_FEE_PERCENT}% is transferred to the
+          author&apos;s bank account by Stripe,
           automatically per sale — actual timing depends on Stripe&apos;s own
           processing schedule. We never see or store payment card details.
           See{" "}

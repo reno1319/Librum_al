@@ -5,7 +5,8 @@ import { updateProfile } from "./actions";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
-import { formControlClasses, fileInputClasses } from "@/lib/form-styles";
+import { AvatarField } from "@/components/avatar-field";
+import { formControlClasses } from "@/lib/form-styles";
 import type { Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -64,27 +65,7 @@ export default async function EditProfilePage({
       )}
 
       <form action={updateProfile} className="mt-6 flex flex-col gap-4">
-        <div className="flex items-center gap-4">
-          {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={avatarUrl}
-              alt=""
-              className="h-16 w-16 rounded-full object-cover"
-            />
-          ) : (
-            <div className="h-16 w-16 rounded-full bg-border" />
-          )}
-          <label className="flex flex-1 flex-col gap-1 text-sm">
-            Photo (JPG or PNG, up to 5MB)
-            <input
-              name="avatar"
-              type="file"
-              accept="image/png,image/jpeg"
-              className={fileInputClasses}
-            />
-          </label>
-        </div>
+        <AvatarField userId={user.id} existingAvatarUrl={avatarUrl} />
 
         <label className="flex flex-col gap-1 text-sm">
           Name

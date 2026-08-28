@@ -18,7 +18,7 @@ const steps = [
   },
   {
     title: "3. Upload your book",
-    body: "From your dashboard, add a title, description, genre, price, a cover image (JPG or PNG, up to 5MB), and your manuscript as an EPUB file (up to 50MB). It's saved as a draft.",
+    body: "From your dashboard, add a title, description, genre, price, a cover image (JPG or PNG, up to 5MB), and your manuscript — an EPUB file, or a DOCX file that Librum converts into an EPUB for you (either way, up to 50MB). It's saved as a draft.",
   },
   {
     title: "4. Publish",
@@ -53,7 +53,7 @@ export default function HowItWorksPage() {
         File requirements
       </h2>
       <ul className="mt-3 list-disc pl-5 text-foreground/90">
-        <li>Manuscript: EPUB format only, up to 50MB</li>
+        <li>Manuscript: EPUB, or DOCX (Librum converts it into an EPUB for you), up to 50MB</li>
         <li>Cover image: JPG or PNG, up to 5MB</li>
       </ul>
 

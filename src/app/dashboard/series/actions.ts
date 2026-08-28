@@ -26,7 +26,11 @@ export async function createSeries(formData: FormData) {
   });
 
   if (error) {
-    redirect(`/dashboard/series?error=${encodeURIComponent(error.message)}`);
+    // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: was error.message -- see the
+    // identical correction in src/app/books/[id]/actions.ts for why.
+    redirect(
+      `/dashboard/series?error=${encodeURIComponent("We couldn't create the series. Please try again.")}`,
+    );
   }
 
   revalidatePath("/dashboard/series");

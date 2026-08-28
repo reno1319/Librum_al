@@ -282,7 +282,7 @@ function WhyLibrumSection() {
 const PUBLISHING_STEPS: { title: string; body: string }[] = [
   {
     title: "Prepare your manuscript",
-    body: "Have your finished book ready as an EPUB file, along with a cover image.",
+    body: "Have your finished book ready as an EPUB file — or a DOCX file, which Librum converts into an EPUB for you — along with a cover image.",
   },
   {
     title: "Create your book",

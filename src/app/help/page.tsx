@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 const faqs = [
   {
     q: "What file formats can I upload?",
-    a: "EPUB only, up to 50MB, plus a JPG or PNG cover image up to 5MB.",
+    a: "EPUB, or DOCX (Librum converts it into an EPUB for you), up to 50MB, plus a JPG or PNG cover image up to 5MB.",
   },
   {
     q: "How do I get paid?",
