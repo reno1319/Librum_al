@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireStaff } from "@/lib/staff";
 import { stripe } from "@/lib/stripe";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import {
@@ -15,22 +15,27 @@ import {
 } from "./refund-review-logic";
 import { executeApprovedRefund } from "./issue-refund";
 
-// requireAdmin() here is defense in depth, not the actual security
-// boundary -- Server Actions are independent server-side entry points
-// that do NOT re-run the page/layout tree that rendered the form
-// calling them, so src/app/admin/layout.tsx's own requireAdmin() gate
-// (which protects every /admin/* page render) has no bearing on this
-// function being invoked directly. The real authority is
-// review_refund_request() itself (migration 029), which independently
-// re-checks public.is_admin() before doing anything -- this call exists
-// so a non-admin caller gets the same clean redirect experience as
-// browsing to /admin directly, rather than a raw RPC rejection.
+// requireStaff("refunds.resolve") here is defense in depth, not the
+// actual security boundary -- Server Actions are independent server-side
+// entry points that do NOT re-run the page/layout tree that rendered the
+// form calling them, so src/app/admin/layout.tsx's own
+// requireStaff("admin.access") gate (which protects every /admin/* page
+// render) has no bearing on this function being invoked directly. The
+// real authority is review_refund_request() itself (migration 029,
+// re-gated to refunds.resolve by migration 040), which independently
+// re-checks public.staff_has_permission('refunds.resolve') before doing
+// anything -- this call exists so a staff member who lacks that specific
+// permission (e.g. 'moderator', or 'support' who has refunds.view but not
+// refunds.resolve) gets the same clean redirect experience as browsing to
+// /admin directly, rather than a raw RPC rejection.
+// ADMIN-1A: migrated from requireAdmin() to
+// requireStaff("refunds.resolve").
 export async function reviewRefundRequest(
   refundRequestId: string,
   decision: "approved" | "rejected",
   formData: FormData,
 ) {
-  await requireAdmin();
+  await requireStaff("refunds.resolve");
 
   const supabase = await createClient();
 
@@ -46,11 +51,12 @@ export async function reviewRefundRequest(
   }
 
   // review_refund_request() is the sole authority here: it independently
-  // re-derives the admin's identity from auth.uid(), re-checks
-  // public.is_admin(), re-validates the decision value, re-checks the
-  // request is still in 'requested' status, and writes reviewed_at/
-  // reviewed_by itself -- nothing computed client-side (or in this
-  // action) is trusted for any of that. See migration 029.
+  // re-derives the caller's identity from auth.uid(), re-checks
+  // public.staff_has_permission('refunds.resolve'), re-validates the
+  // decision value, re-checks the request is still in 'requested' status,
+  // and writes reviewed_at/reviewed_by itself -- nothing computed
+  // client-side (or in this action) is trusted for any of that. See
+  // migrations 029 and 040.
   const { error } = await supabase.rpc("review_refund_request", {
     p_id: refundRequestId,
     p_decision: decision,
@@ -75,23 +81,31 @@ export async function reviewRefundRequest(
   );
 }
 
-// requireAdmin() here is the same defense-in-depth pattern as
-// reviewRefundRequest() above, for the same reason (Server Actions
-// bypass the page/layout tree). The actual gate against a non-admin
-// executing a real Stripe refund is executeApprovedRefund() re-fetching
-// the request through the request-scoped, RLS-respecting client below
-// -- no service-role/admin Supabase client is used anywhere in this
-// action. It was audited and found unnecessary: this action never
-// writes to any Supabase table (Stripe execution and Librum's own
-// refund-request/entitlement bookkeeping are deliberately kept
-// separate -- see issue-refund.ts's own documentation), and the one
-// read it performs (refund_requests by id) is already covered by
-// migration 029's "Admins can view all refund requests" RLS policy plus
-// its accompanying `grant select ... to authenticated`. Stripe's secret
-// key is only ever read server-side via src/lib/stripe.ts, imported
-// here in a "use server" file -- never reachable from client code.
+// requireStaff("refunds.resolve") here is the same defense-in-depth
+// pattern as reviewRefundRequest() above, for the same reason (Server
+// Actions bypass the page/layout tree). The actual gate against a staff
+// member without refunds.resolve executing a real Stripe refund is
+// executeApprovedRefund() re-fetching the request through the
+// request-scoped, RLS-respecting client below -- no service-role/admin
+// Supabase client is used anywhere in this action. It was audited and
+// found unnecessary: this action never writes to any Supabase table
+// (Stripe execution and Librum's own refund-request/entitlement
+// bookkeeping are deliberately kept separate -- see issue-refund.ts's own
+// documentation), and the one read it performs (refund_requests by id) is
+// already covered by migration 040's "Staff with refunds.view can view
+// all refund requests" RLS policy plus its accompanying
+// `grant select ... to authenticated`. refunds.resolve is used here
+// (not refunds.view alone) because issuing the actual Stripe refund is
+// the money-moving completion of the same review action reviewRefundRequest()
+// gates -- a staff member who can only view refund requests must not be
+// able to trigger the Stripe call merely by reaching this action
+// directly. Stripe's secret key is only ever read server-side via
+// src/lib/stripe.ts, imported here in a "use server" file -- never
+// reachable from client code.
+// ADMIN-1A: migrated from requireAdmin() to
+// requireStaff("refunds.resolve").
 export async function issueStripeRefund(refundRequestId: string) {
-  await requireAdmin();
+  await requireStaff("refunds.resolve");
   // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks every
   // /admin/* page while a recovery session is active, so this is the
   // second layer against a crafted direct POST. Applies even to an

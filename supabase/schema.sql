@@ -86,6 +86,80 @@ grant update (display_name, bio, avatar_path)
   on public.profiles
   to authenticated;
 
+-- ============================================================
+-- staff_members: ADMIN-1A's staff/RBAC foundation, replacing binary
+-- profiles.role = 'admin' authorization. One row per staff member, keyed
+-- by profile id -- a staff member is always also a profile. role is a
+-- single persisted string; permissions are NOT persisted here or
+-- anywhere in the database -- they are defined exactly once, in
+-- TypeScript, at src/lib/staff-permissions.ts. The only database-side
+-- copy of the role->permission matrix is the small, explicitly
+-- synchronized CASE expression inside staff_has_permission() further
+-- below (placed after is_admin(), for the same dependency-order reason
+-- is_admin() itself is placed after profiles: nothing in this file may
+-- be referenced before it is created).
+--
+-- profiles.role and is_admin() (below) are deliberately left in place,
+-- unused by any remaining application call site as of this migration --
+-- an explicit temporary compatibility layer, not a decision that nothing
+-- ever depends on them; removal is future cleanup work, not part of
+-- ADMIN-1A.
+-- ============================================================
+
+create table public.staff_members (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  role text not null check (role in ('owner', 'admin', 'editor', 'moderator', 'support')),
+  created_at timestamptz not null default now(),
+  created_by uuid references public.profiles(id) on delete set null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.staff_members enable row level security;
+
+revoke all on public.staff_members from anon, authenticated;
+grant select on public.staff_members to authenticated;
+
+create policy "Staff can view their own staff_members row"
+  on public.staff_members
+  for select
+  using (auth.uid() = user_id);
+
+-- The broader "staff.view can see every row" policy is deferred to
+-- later in this file, alongside staff_has_permission()'s own definition
+-- -- CREATE POLICY's USING expression is resolved at creation time, and
+-- that function does not exist yet at this point in the file. Same
+-- ordering rule already established for book_reports' admin policy; see
+-- that table's own comment for the fuller explanation of why this file
+-- is laid out this way instead of moving is_admin()/staff_has_permission()
+-- earlier.
+
+-- Deliberately no insert/update/delete policy for any role, anywhere --
+-- combined with the revoke above (no table-level grant for those
+-- commands either), self-promotion is structurally impossible: no
+-- client request of any kind can create or modify a row here. The only
+-- writer, ever, is this schema's own owner-bootstrap backfill directly
+-- below (running as the migration-applying/schema-setup role, which
+-- bypasses RLS) -- and, in the future, a service-role or SECURITY
+-- DEFINER staff-management RPC (ADMIN-1B).
+--
+-- Owner bootstrap: every existing profiles.role = 'admin' row becomes an
+-- 'owner' in staff_members, not merely 'admin' -- deliberate, not the
+-- narrowest possible mapping. An 'admin'-role staff member has every
+-- permission an 'owner' has except staff.manage, which did not exist as
+-- a concept before this table -- but staff.manage is meaningless for the
+-- platform's whole future if zero rows can ever hold it, since there is
+-- no self-promotion path and no staff-management UI exists yet to grant
+-- it to anyone. Backfilling as 'owner' avoids that bootstrapping
+-- deadlock. No email or UUID is hardcoded -- every currently-trusted
+-- admin is carried forward automatically from profiles.role. created_by
+-- is left NULL: this row was not granted by any staff member's action,
+-- it was inherited from legacy state by this schema itself.
+insert into public.staff_members (user_id, role, created_by)
+select id, 'owner', null
+from public.profiles
+where role = 'admin'
+on conflict (user_id) do nothing;
+
 -- Auto-create a profile row whenever someone signs up, using the
 -- role/display_name passed in from the signup form's metadata. Role
 -- resolution is a WHITELIST, not a passthrough (tightened by migration
@@ -1629,7 +1703,10 @@ create index author_follows_author_id_idx on public.author_follows(author_id);
 -- review_book_report() RPC, in a LATER section of this file (after
 -- is_admin() is defined) -- see that section's own comment for why the
 -- policy/RPC can't live inline here despite conceptually belonging to
--- this table.
+-- this table. ADMIN-1A (migration 040) later re-gated that same policy
+-- and RPC to staff_has_permission('reports.view'/'reports.resolve')
+-- instead of is_admin() -- the placement/ordering reasoning is unchanged,
+-- only which function is being waited for.
 -- ============================================================
 
 create table public.book_reports (
@@ -1697,6 +1774,79 @@ revoke all on function public.is_admin() from public;
 revoke all on function public.is_admin() from anon;
 revoke all on function public.is_admin() from authenticated;
 grant execute on function public.is_admin() to authenticated;
+
+-- ============================================================
+-- staff_has_permission(): ADMIN-1A's SQL-side authorization primitive,
+-- superseding is_admin() above for every staff-gated RLS policy and RPC
+-- in this file from this point on. is_admin() is left defined but
+-- unused -- see this file's own staff_members section for why.
+--
+-- SECURITY DEFINER / empty search_path / stable, same hardening posture
+-- as is_admin() -- and, like is_admin() querying profiles internally,
+-- this function's own query against staff_members runs as this
+-- function's owner, not subject to staff_members' RLS policies, the same
+-- established, working precedent as every other SECURITY DEFINER helper
+-- in this schema.
+--
+-- Deliberate design choice: a generic is_staff() existence check was
+-- considered and rejected -- it cannot express "moderator may resolve
+-- reports but not refunds," which review_book_report()/
+-- review_refund_request() further below both need.
+-- staff_has_permission(text) was chosen instead, accepting the one
+-- deliberate duplication this creates: this CASE expression is a second,
+-- explicitly synchronized copy of the canonical role->permission matrix
+-- in src/lib/staff-permissions.ts, verified by
+-- supabase/tests/040_staff_rbac_foundation.test.sql, which walks every
+-- (role, permission) pair.
+--
+-- 'editor' has no branch below -- it is granted zero permissions in the
+-- current matrix.
+-- ============================================================
+
+create or replace function public.staff_has_permission(p_permission text)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.staff_members sm
+    where sm.user_id = auth.uid()
+      and (
+        sm.role = 'owner'
+        or (
+          sm.role = 'admin'
+          and p_permission in (
+            'admin.access', 'reports.view', 'reports.resolve',
+            'refunds.view', 'refunds.resolve', 'staff.view'
+          )
+        )
+        or (
+          sm.role = 'moderator'
+          and p_permission in ('admin.access', 'reports.view', 'reports.resolve')
+        )
+        or (
+          sm.role = 'support'
+          and p_permission in ('admin.access', 'refunds.view')
+        )
+      )
+  );
+$$;
+
+revoke all on function public.staff_has_permission(text) from public;
+revoke all on function public.staff_has_permission(text) from anon;
+revoke all on function public.staff_has_permission(text) from authenticated;
+grant execute on function public.staff_has_permission(text) to authenticated;
+
+-- Deferred from staff_members' own section above -- see that section's
+-- comment for why this couldn't be created until staff_has_permission()
+-- existed.
+create policy "Staff with staff.view can view all staff_members rows"
+  on public.staff_members
+  for select
+  using (public.staff_has_permission('staff.view'));
 
 -- ============================================================
 -- refund_requests: one durable row per reader-initiated refund request,
@@ -1800,10 +1950,10 @@ create policy "Readers can view their own refund requests"
   for select
   using (auth.uid() = reader_id);
 
-create policy "Admins can view all refund requests"
+create policy "Staff with refunds.view can view all refund requests"
   on public.refund_requests
   for select
-  using (public.is_admin());
+  using (public.staff_has_permission('refunds.view'));
 
 -- Deliberately NO update policy for authenticated (or anyone) here
 -- either. An earlier draft of this migration allowed direct
@@ -1893,10 +2043,10 @@ create policy "Readers can view items on their own refund requests"
     )
   );
 
-create policy "Admins can view all refund request items"
+create policy "Staff with refunds.view can view all refund request items"
   on public.refund_request_items
   for select
-  using (public.is_admin());
+  using (public.staff_has_permission('refunds.view'));
 
 -- ============================================================
 -- request_refund(): the sole path by which a refund_requests row (and
@@ -2160,7 +2310,7 @@ begin
     raise exception 'not authenticated';
   end if;
 
-  if not public.is_admin() then
+  if not public.staff_has_permission('refunds.resolve') then
     raise exception 'not authorized';
   end if;
 
@@ -2508,22 +2658,25 @@ grant execute on function public.finalize_book_checkout_intent(uuid, text, text,
 -- LIBRUM 2.0 LAUNCH-FIX-1B MOD-1 (migration 039): admin-only read/
 -- disposition path for book_reports (its own CREATE TABLE is far above,
 -- near book_reports' original write-only introduction) -- placed here,
--- not there, because is_admin() is not yet defined at that earlier
--- point in this consolidated file. Same dependency-order reasoning as
--- "Admins can view all refund requests" above: is_admin() must already
--- exist for CREATE POLICY's USING expression to resolve. Mirrors
+-- not there, because the authorization primitive it depends on is not
+-- yet defined at that earlier point in this consolidated file (originally
+-- is_admin(); as of ADMIN-1A/migration 040, staff_has_permission()).
+-- Same dependency-order reasoning as "Staff with refunds.view can view
+-- all refund requests" above: that function must already exist for
+-- CREATE POLICY's USING expression to resolve. Mirrors
 -- review_refund_request() verbatim in structure and hardening, adapted
 -- only for book_reports' own two-value decision and 'open' starting
--- status. See migration 039's own header comment for the full MOD-1
--- rationale (root cause, why the base table-level grant is
--- deliberately left untouched, why staff_members/requireStaff/author
--- suspension are explicitly out of scope here).
+-- status. See migration 039's own header comment for the original MOD-1
+-- rationale (root cause, why the base table-level grant is deliberately
+-- left untouched) -- staff_members/requireStaff, explicitly out of scope
+-- for MOD-1, were subsequently built by ADMIN-1A (migration 040); author
+-- suspension remains out of scope, deferred to later work.
 -- ============================================================
 
-create policy "Admins can view all book reports"
+create policy "Staff with reports.view can view all book reports"
   on public.book_reports
   for select
-  using (public.is_admin());
+  using (public.staff_has_permission('reports.view'));
 
 create or replace function public.review_book_report(
   p_id uuid,
@@ -2544,7 +2697,7 @@ begin
     raise exception 'not authenticated';
   end if;
 
-  if not public.is_admin() then
+  if not public.staff_has_permission('reports.resolve') then
     raise exception 'not authorized';
   end if;
 

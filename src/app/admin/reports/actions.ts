@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireStaff } from "@/lib/staff";
 import {
   mapReviewRpcError,
   validateAdminNotes,
@@ -11,16 +11,21 @@ import {
   REVIEW_RPC_NOT_AUTHENTICATED_MESSAGE,
 } from "./report-review-logic";
 
-// requireAdmin() here is defense in depth, not the actual security
-// boundary -- Server Actions are independent server-side entry points
-// that do NOT re-run the page/layout tree that rendered the form
-// calling them, so src/app/admin/layout.tsx's own requireAdmin() gate
-// has no bearing on this function being invoked directly. The real
-// authority is review_book_report() itself (migration 039), which
-// independently re-derives the admin's identity from auth.uid() and
-// re-checks public.is_admin() before doing anything -- this call
-// exists so a non-admin caller gets the same clean redirect experience
-// as browsing to /admin directly, rather than a raw RPC rejection.
+// requireStaff("reports.resolve") here is defense in depth, not the
+// actual security boundary -- Server Actions are independent server-side
+// entry points that do NOT re-run the page/layout tree that rendered the
+// form calling them, so src/app/admin/layout.tsx's own
+// requireStaff("admin.access") gate has no bearing on this function being
+// invoked directly. The real authority is review_book_report() itself
+// (migration 039, re-gated to reports.resolve by migration 040), which
+// independently re-derives the caller's identity from auth.uid() and
+// re-checks public.staff_has_permission('reports.resolve') before doing
+// anything -- this call exists so a staff member who lacks that specific
+// permission (e.g. 'support') gets the same clean redirect experience as
+// browsing to /admin directly, rather than a raw RPC rejection.
+// ADMIN-1A: migrated from requireAdmin() to
+// requireStaff("reports.resolve") -- narrower than the old admin.access
+// gate could ever express, matching this action's actual authority.
 // Exact mirror of reviewRefundRequest() (src/app/admin/refunds/
 // actions.ts) -- see that file's own comment for the fuller reasoning,
 // not repeated here.
@@ -36,7 +41,7 @@ export async function reviewBookReport(
   decision: "resolved" | "dismissed",
   formData: FormData,
 ) {
-  await requireAdmin();
+  await requireStaff("reports.resolve");
 
   const supabase = await createClient();
 
@@ -50,11 +55,11 @@ export async function reviewBookReport(
   }
 
   // review_book_report() is the sole authority here: it independently
-  // re-derives the admin's identity, re-checks public.is_admin(),
-  // re-validates the decision value, re-checks the report is still
-  // 'open', and writes reviewed_at/reviewed_by itself -- nothing
-  // computed client-side (or in this action) is trusted for any of
-  // that. See migration 039.
+  // re-derives the caller's identity, re-checks
+  // public.staff_has_permission('reports.resolve'), re-validates the
+  // decision value, re-checks the report is still 'open', and writes
+  // reviewed_at/reviewed_by itself -- nothing computed client-side (or in
+  // this action) is trusted for any of that. See migrations 039 and 040.
   const { error } = await supabase.rpc("review_book_report", {
     p_id: reportId,
     p_decision: decision,

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff";
 import type { RefundRequestStatus } from "@/lib/types";
 import {
   abbreviatePaymentIntentId,
@@ -41,12 +42,18 @@ const STATUS_CLASS: Record<RefundRequestStatus, string> = {
 };
 
 export default async function AdminRefundsPage() {
-  // src/app/admin/layout.tsx already gates this whole route -- no
-  // requireAdmin() call needed here. The RLS policy actually doing the
-  // scoping is "Admins can view all refund requests" (public.is_admin(),
-  // migration 029), so -- unlike the reader-facing Library query --
-  // there's no .eq("reader_id", ...) here: an admin is meant to see
-  // every reader's requests, not just their own.
+  // ADMIN-1A pre-finalize correction: src/app/admin/layout.tsx's
+  // requireStaff("admin.access") only proves the caller is SOME staff
+  // member, not that they hold refunds.view specifically (e.g.
+  // 'moderator' has admin.access but not refunds.view) -- this route's
+  // own explicit check is the actual gate. The RLS policy "Staff with
+  // refunds.view can view all refund requests"
+  // (public.staff_has_permission('refunds.view'), migration 040) is
+  // defense-in-depth behind it -- and, unlike the reader-facing Library
+  // query, there's no .eq("reader_id", ...) here: staff with refunds.view
+  // are meant to see every reader's requests, not just their own.
+  await requireStaff("refunds.view");
+
   const supabase = await createClient();
 
   const { data: requests } = await supabase

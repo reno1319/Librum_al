@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import type { BookReportStatus } from "@/lib/types";
@@ -37,10 +38,16 @@ export default async function AdminBookReportsPage({
 }: {
   searchParams: Promise<{ status?: string }>;
 }) {
-  // src/app/admin/layout.tsx already gates this whole route -- no
-  // requireAdmin() call needed here. The RLS policy actually doing the
-  // scoping is "Admins can view all book reports" (public.is_admin(),
-  // migration 039), same pattern as the refund queue.
+  // ADMIN-1A pre-finalize correction: src/app/admin/layout.tsx's
+  // requireStaff("admin.access") only proves the caller is SOME staff
+  // member -- it does not imply reports.view (e.g. 'support' has
+  // admin.access but not reports.view). This route's own explicit check
+  // is the actual gate; the RLS policy "Staff with reports.view can view
+  // all book reports" (public.staff_has_permission('reports.view'),
+  // migration 040) is defense-in-depth behind it, same relationship
+  // requireAdmin()/is_admin() always had.
+  await requireStaff("reports.view");
+
   const supabase = await createClient();
   const { status: statusParam } = await searchParams;
   const activeFilter: BookReportStatus | "all" =

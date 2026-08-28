@@ -4,10 +4,12 @@ import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 // LAUNCH-1 P1-11: minimal, focused coverage of ONLY the new recovery
 // guard added to issueStripeRefund -- see buyBook's equivalent test
 // (src/app/books/[id]/actions.test.ts) for the full rationale.
-// requireAdmin() is mocked to always succeed so this test isolates the
-// recovery guard specifically -- proving the invariant applies even to
-// an admin's own account, not conflating it with admin-authorization
-// testing (already covered separately by src/lib/auth.test.ts).
+// requireStaff() is mocked to always succeed so this test isolates the
+// recovery guard specifically -- proving the invariant applies even to a
+// staff member's own account, not conflating it with staff-authorization
+// testing (already covered separately by src/lib/staff.test.ts).
+// ADMIN-1A: mock updated from @/lib/auth's requireAdmin() to
+// @/lib/staff's requireStaff().
 class RedirectSignal extends Error {
   constructor(public target: string) {
     super(`REDIRECT:${target}`);
@@ -19,10 +21,8 @@ const mockRedirect = vi.fn((url: string) => {
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-vi.mock("@/lib/auth", () => ({
-  requireAdmin: vi.fn(() =>
-    Promise.resolve({ user: { id: "admin-1" }, profile: { role: "admin" } }),
-  ),
+vi.mock("@/lib/staff", () => ({
+  requireStaff: vi.fn(() => Promise.resolve({ userId: "admin-1", role: "admin" })),
 }));
 
 const mockCookieStore = {

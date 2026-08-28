@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff";
 import type { RefundRequestStatus } from "@/lib/types";
 import {
   abbreviatePaymentIntentId,
@@ -66,7 +67,13 @@ export default async function AdminRefundRequestDetailPage({
   const { id } = await params;
   const { error, success } = await searchParams;
 
-  // src/app/admin/layout.tsx already gates this whole route.
+  // ADMIN-1A final pre-commit correction: src/app/admin/layout.tsx's
+  // requireStaff("admin.access") only proves the caller is SOME staff
+  // member, not that they hold refunds.view specifically -- this route's
+  // own explicit check is the actual gate, matching its sibling list page
+  // (src/app/admin/refunds/page.tsx) and both report pages.
+  await requireStaff("refunds.view");
+
   const supabase = await createClient();
 
   const { data: request } = await supabase

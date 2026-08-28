@@ -119,3 +119,28 @@ export type RefundRequest = {
 // unchanged by LAUNCH-FIX-1B MOD-1's migration 039 -- only new columns
 // were added, not a new status value).
 export type BookReportStatus = "open" | "resolved" | "dismissed";
+
+// Mirrors staff_members.role's CHECK constraint (migration 040, ADMIN-1A).
+// A staff role is persisted; permissions are not -- see Permission below
+// and src/lib/staff-permissions.ts for the canonical role->permission
+// matrix. Distinct from Role above: a profile's Role ('author' | 'reader'
+// | 'admin') describes what kind of platform USER someone is, while
+// StaffRole describes an entirely separate internal operator grant a
+// profile may additionally hold, recorded in staff_members, not profiles.
+export type StaffRole = "owner" | "admin" | "editor" | "moderator" | "support";
+
+// Explicit permission identifiers, not vague role checks -- every
+// staff-gated authorization decision in this app (TypeScript and SQL
+// alike) is expressed in terms of one of these, never a bare role name.
+// Kept intentionally small: only permissions with a concrete use in
+// current or near-term (ADMIN-1B) admin work exist here -- see the
+// ADMIN-1A design brief's own "do not create dozens of speculative
+// permissions" instruction.
+export type Permission =
+  | "admin.access"
+  | "reports.view"
+  | "reports.resolve"
+  | "refunds.view"
+  | "refunds.resolve"
+  | "staff.view"
+  | "staff.manage";

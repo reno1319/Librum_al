@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff";
 import type { BookReportStatus } from "@/lib/types";
 import {
   ADMIN_NOTES_MAX_LENGTH,
@@ -53,7 +54,13 @@ export default async function AdminBookReportDetailPage({
   const { id } = await params;
   const { error, success } = await searchParams;
 
-  // src/app/admin/layout.tsx already gates this whole route.
+  // ADMIN-1A pre-finalize correction: src/app/admin/layout.tsx's
+  // requireStaff("admin.access") only proves the caller is SOME staff
+  // member, not that they hold reports.view specifically (e.g. 'support'
+  // has admin.access but not reports.view) -- this route's own explicit
+  // check is the actual gate for this page.
+  await requireStaff("reports.view");
+
   const supabase = await createClient();
 
   const { data: report } = await supabase
