@@ -1842,7 +1842,12 @@ grant execute on function public.staff_has_permission(text) to authenticated;
 
 -- Deferred from staff_members' own section above -- see that section's
 -- comment for why this couldn't be created until staff_has_permission()
--- existed.
+-- existed. This file has always had this ordering correct; migration
+-- 040_staff_rbac_foundation.sql originally did not (it placed this exact
+-- policy before staff_has_permission()'s own definition and failed in
+-- production with "function ... does not exist", SQLSTATE 42883) -- that
+-- migration file has since been corrected to match this file's ordering
+-- exactly.
 create policy "Staff with staff.view can view all staff_members rows"
   on public.staff_members
   for select

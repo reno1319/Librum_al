@@ -20,6 +20,31 @@
 -- was available. It is a reviewed contract, not a confirmed-passing
 -- result; run it before this migration is ever applied anywhere real.
 --
+-- IMPORTANT LIMITATION, discovered the hard way (production apply
+-- failure, corrected in this migration file): everything below runs
+-- against schema.sql's already-fully-applied END STATE, exactly like
+-- every other suite in this directory. This can only prove the final
+-- database is internally consistent -- it CANNOT prove that
+-- 040_staff_rbac_foundation.sql's own internal statement ORDER is safe
+-- to apply standalone (via `supabase db push`), because schema.sql is a
+-- separately-maintained, hand-verified consolidated file, not a replay
+-- of the migration files in sequence. That is exactly how the original
+-- version of this migration passed a review of schema.sql's ordering
+-- while still containing a real ordering bug in the standalone migration
+-- file itself (a CREATE POLICY referencing staff_has_permission() before
+-- that function was defined -- see this migration file's own header
+-- comment for the full incident). The only test that actually exercises
+-- 040_staff_rbac_foundation.sql's own statement order is applying it
+-- standalone, in isolation, against a pre-040 baseline:
+--
+--   createdb librum_test_040
+--   psql -d librum_test_040 -f supabase/tests/00_stub_supabase_platform.sql
+--   <apply migrations 002 through 039, or an equivalent pre-040 schema>
+--   psql -d librum_test_040 -v ON_ERROR_STOP=1 -f supabase/migrations/040_staff_rbac_foundation.sql
+--
+-- Run that standalone-replay command -- not just this file -- before
+-- 040_staff_rbac_foundation.sql is ever applied to production again.
+--
 -- Everything below runs inside one transaction and is rolled back at the
 -- end, so this file is fully repeatable with no manual cleanup between
 -- runs.
@@ -34,6 +59,44 @@ begin
   end if;
 end;
 $$;
+
+-- ============================================================
+-- Part 0: completeness check on staff_has_permission()-gated policies --
+-- not a proof of statement ORDER (see the limitation documented in this
+-- file's own header above), but a real, executable guard against a
+-- different regression: a future edit accidentally dropping or
+-- misnaming one of these policies without dropping its reference to
+-- staff_has_permission(), or referencing it via a different, unreviewed
+-- expression shape. Enumerates every policy across the four
+-- staff_has_permission()-gated tables whose USING clause mentions the
+-- function by name, and asserts the count is exactly the four this
+-- migration is known to create (staff_members.staff.view,
+-- book_reports.reports.view, refund_requests.refunds.view,
+-- refund_request_items.refunds.view) -- Part 1/6/7 below each already
+-- check one of these individually; this is the cross-cutting total.
+-- ============================================================
+do $$
+declare
+  gated_policy_count integer;
+begin
+  select count(*) into gated_policy_count
+  from pg_policy
+  where polrelid = any(array[
+    'public.staff_members'::regclass,
+    'public.book_reports'::regclass,
+    'public.refund_requests'::regclass,
+    'public.refund_request_items'::regclass
+  ])
+  and pg_get_expr(polqual, polrelid) like '%staff_has_permission%';
+
+  perform pg_temp.assert(
+    gated_policy_count = 4,
+    format(
+      'part0: expected exactly 4 staff_has_permission()-gated policies across staff_members/book_reports/refund_requests/refund_request_items, found %s',
+      gated_policy_count
+    )
+  );
+end $$;
 
 -- ============================================================
 -- Part 1: staff_members RLS policy definition -- exactly the two SELECT

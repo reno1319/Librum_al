@@ -15,6 +15,22 @@
 --
 -- If you're setting up a fresh project, just run schema.sql instead --
 -- it already includes all of this.
+--
+-- ORDERING INVARIANT (added after a production apply failure): every
+-- function this file's CREATE POLICY/REVOKE/GRANT statements reference
+-- must already be defined earlier in this same file. A plpgsql/SQL
+-- function BODY (e.g. review_book_report() calling staff_has_permission())
+-- is safe regardless of order -- Postgres resolves those references
+-- lazily, at first execution, not at CREATE FUNCTION time. A CREATE
+-- POLICY's USING/WITH CHECK expression is NOT safe regardless of order --
+-- it is parsed and resolved immediately, as part of the DDL statement
+-- itself. The first version of this migration violated this for exactly
+-- one statement (the staff.view-gated staff_members policy, originally
+-- placed before staff_has_permission()'s own definition) and failed in
+-- production with "function public.staff_has_permission(unknown) does
+-- not exist" (SQLSTATE 42883) -- corrected below. This file's statement
+-- order now matches supabase/schema.sql's own (already-correct) ordering
+-- exactly.
 
 -- ============================================================
 -- staff_members: the new canonical source of staff identity. One row per
@@ -76,17 +92,18 @@ create policy "Staff can view their own staff_members row"
   for select
   using (auth.uid() = user_id);
 
--- Broader visibility, gated by the staff.view permission itself rather
--- than by any specific role -- this is the RLS foundation ADMIN-1B's
--- staff-directory UI will read through directly, added now (not deferred)
--- so that landing it later needs no further migration purely for RLS.
--- This is NOT the staff-directory UI itself (explicitly out of scope for
--- ADMIN-1A) -- it is inert until a page or Server Action actually queries
--- this table for that purpose.
-create policy "Staff with staff.view can view all staff_members rows"
-  on public.staff_members
-  for select
-  using (public.staff_has_permission('staff.view'));
+-- The broader "staff.view can see every row" policy is deferred to
+-- later in this file, immediately after staff_has_permission() itself is
+-- defined -- CREATE POLICY's USING expression is parsed and resolved
+-- immediately as part of the DDL statement (unlike a plpgsql/SQL
+-- function body, whose internal references are resolved lazily, at
+-- first execution, not at CREATE FUNCTION time). staff_has_permission()
+-- does not exist yet at this point in the file, so a CREATE POLICY here
+-- referencing it would fail with "function ... does not exist"
+-- (SQLSTATE 42883) -- exactly the production failure this migration was
+-- corrected to avoid. See that later policy's own comment for the rest
+-- of its rationale (RLS foundation for ADMIN-1B, not the staff-directory
+-- UI itself).
 
 -- Deliberately NO insert/update/delete policy for any role, anywhere in
 -- this file. Combined with the revoke above (no table-level grant for
@@ -168,6 +185,20 @@ revoke all on function public.staff_has_permission(text) from public;
 revoke all on function public.staff_has_permission(text) from anon;
 revoke all on function public.staff_has_permission(text) from authenticated;
 grant execute on function public.staff_has_permission(text) to authenticated;
+
+-- Deferred from staff_members' own section above -- see that section's
+-- comment for why this couldn't be created until staff_has_permission()
+-- existed. Broader visibility, gated by the staff.view permission itself
+-- rather than by any specific role -- this is the RLS foundation
+-- ADMIN-1B's staff-directory UI will read through directly, added now
+-- (not deferred to a later migration) so that landing it later needs no
+-- further migration purely for RLS. This is NOT the staff-directory UI
+-- itself (explicitly out of scope for ADMIN-1A) -- it is inert until a
+-- page or Server Action actually queries this table for that purpose.
+create policy "Staff with staff.view can view all staff_members rows"
+  on public.staff_members
+  for select
+  using (public.staff_has_permission('staff.view'));
 
 -- ============================================================
 -- Owner bootstrap: backfill every existing profiles.role = 'admin' row
