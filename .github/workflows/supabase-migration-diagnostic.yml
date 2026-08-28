@@ -1,0 +1,112 @@
+name: Supabase Migration Diagnostic (read-only, one-off)
+
+# LIBRUM 2.0 -- DB-MIG-BASELINE PART 4A
+#
+# Temporary, manual-only, strictly READ-ONLY diagnostic workflow. Its sole
+# purpose is to observe, in a real GitHub Actions runner, exactly what the
+# installed Supabase CLI supports before any production-mutating
+# migration-history-repair workflow is built on top of assumptions about
+# its output format or flags.
+#
+# This workflow must never mutate remote database state or migration
+# history. It never calls `supabase migration repair` for real (only
+# `--help` on that command, which prints usage text and does not touch the
+# project), never runs `supabase db push`, `supabase migration up`,
+# `supabase db pull`, `supabase db reset`, or any raw SQL.
+#
+# Intended to be run once, by hand, via workflow_dispatch, to capture real
+# CLI output for review, then deleted (or superseded by a repair workflow
+# built from what this run actually reports).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_ID: pwkukotgpsegieshulpj
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Initialize and link Supabase project (ephemeral, not committed, read-only intent)
+        run: |
+          set -euo pipefail
+
+          if [ ! -f supabase/config.toml ]; then
+            echo "No supabase/config.toml found -- running supabase init to create ephemeral runner-local project state (this state is never committed)."
+            # Answers any optional interactive prompt (e.g. generating
+            # editor settings) with a blank line so this never hangs on a
+            # non-interactive runner. Exact prompt behavior is one of the
+            # things this diagnostic run exists to observe.
+            printf '\n' | supabase init --workdir .
+          else
+            echo "supabase/config.toml already present -- skipping init."
+          fi
+
+          supabase link --project-ref "$PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Print installed Supabase CLI version
+        run: |
+          set -euo pipefail
+          echo "==== supabase --version ===="
+          supabase --version
+
+      - name: Print 'migration list' help (usage text only, not executed)
+        run: |
+          set -euo pipefail
+          echo "==== supabase migration list --help ===="
+          supabase migration list --help
+
+      - name: Print 'migration repair' help (usage text only -- repair is NOT executed)
+        run: |
+          set -euo pipefail
+          echo "==== supabase migration repair --help ===="
+          echo "NOTE: this prints usage/help text only. No repair operation runs in this workflow."
+          supabase migration repair --help
+
+      - name: Read-only remote migration list (human-readable)
+        run: |
+          set -euo pipefail
+          echo "==== supabase migration list --linked (READ-ONLY) ===="
+          supabase migration list --linked
+
+      - name: Optional structured-output probe (read-only, non-fatal if unsupported)
+        run: |
+          set -uo pipefail
+          echo "==== OPTIONAL STRUCTURED OUTPUT PROBE ===="
+          echo "Testing: supabase migration list --linked --output json"
+          echo "This probe is read-only. Its output is NOT parsed or trusted by this workflow -- it exists only so a human can inspect the real JSON shape (if any) before a future repair workflow is built to parse it."
+
+          if probe_output="$(supabase migration list --linked --output json 2>&1)"; then
+            echo "Probe command exited successfully. Raw output:"
+            printf '%s\n' "$probe_output"
+          else
+            probe_status=$?
+            echo "Probe command exited non-zero (status ${probe_status}) -- '--output json' may be unsupported by this CLI version, or another read-only error occurred. This is a KNOWN POSSIBLE outcome and does not fail this diagnostic workflow."
+            echo "Captured output/error text:"
+            printf '%s\n' "$probe_output"
+          fi
+          echo "==== END OPTIONAL STRUCTURED OUTPUT PROBE ===="
+
+      - name: Local migration inventory (filenames only, no modification)
+        run: |
+          set -euo pipefail
+          echo "==== supabase/migrations/ contents (local, read-only) ===="
+          ls -1 supabase/migrations/
+
+      - name: Diagnostic summary
+        run: |
+          set -euo pipefail
+          echo "Diagnostic complete. No migration history, schema, or data was modified."
