@@ -114,3 +114,8 @@ export type RefundRequest = {
   reason: string | null;
   requested_at: string;
 };
+
+// Mirrors book_reports.status's CHECK constraint (migration 009,
+// unchanged by LAUNCH-FIX-1B MOD-1's migration 039 -- only new columns
+// were added, not a new status value).
+export type BookReportStatus = "open" | "resolved" | "dismissed";

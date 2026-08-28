@@ -1621,11 +1621,15 @@ create index author_follows_follower_id_idx on public.author_follows(follower_id
 create index author_follows_author_id_idx on public.author_follows(author_id);
 
 -- ============================================================
--- book_reports: readers flag a book for review. Write-only from the
--- app's perspective — there's no in-app moderation UI yet, so there's
--- deliberately no select policy for regular users (not even the
--- reported book's own author). Review reports directly in the
--- Supabase dashboard's Table Editor for now.
+-- book_reports: readers flag a book for review. Write-only from an
+-- ordinary reader's perspective -- there is deliberately no select
+-- policy for regular users (not even the reported book's own author).
+-- LIBRUM 2.0 LAUNCH-FIX-1B MOD-1 (migration 039) added an admin-only
+-- SELECT policy plus reviewed_at/reviewed_by/admin_notes and the
+-- review_book_report() RPC, in a LATER section of this file (after
+-- is_admin() is defined) -- see that section's own comment for why the
+-- policy/RPC can't live inline here despite conceptually belonging to
+-- this table.
 -- ============================================================
 
 create table public.book_reports (
@@ -1635,6 +1639,9 @@ create table public.book_reports (
   reason text not null,
   details text not null default '',
   status text not null default 'open' check (status in ('open', 'resolved', 'dismissed')),
+  reviewed_at timestamptz,
+  reviewed_by uuid references public.profiles(id) on delete set null,
+  admin_notes text,
   created_at timestamptz not null default now()
 );
 
@@ -2496,3 +2503,75 @@ grant execute on function public.finalize_book_checkout_intent(uuid, text, text,
 -- from public.book_checkout_intents i
 -- where i.completed_at is not null and i.fulfilled_at is null
 -- order by i.completed_at desc;
+
+-- ============================================================
+-- LIBRUM 2.0 LAUNCH-FIX-1B MOD-1 (migration 039): admin-only read/
+-- disposition path for book_reports (its own CREATE TABLE is far above,
+-- near book_reports' original write-only introduction) -- placed here,
+-- not there, because is_admin() is not yet defined at that earlier
+-- point in this consolidated file. Same dependency-order reasoning as
+-- "Admins can view all refund requests" above: is_admin() must already
+-- exist for CREATE POLICY's USING expression to resolve. Mirrors
+-- review_refund_request() verbatim in structure and hardening, adapted
+-- only for book_reports' own two-value decision and 'open' starting
+-- status. See migration 039's own header comment for the full MOD-1
+-- rationale (root cause, why the base table-level grant is
+-- deliberately left untouched, why staff_members/requireStaff/author
+-- suspension are explicitly out of scope here).
+-- ============================================================
+
+create policy "Admins can view all book reports"
+  on public.book_reports
+  for select
+  using (public.is_admin());
+
+create or replace function public.review_book_report(
+  p_id uuid,
+  p_decision text,
+  p_admin_notes text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_admin_id uuid;
+  v_updated_id uuid;
+begin
+  v_admin_id := auth.uid();
+  if v_admin_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.is_admin() then
+    raise exception 'not authorized';
+  end if;
+
+  if p_decision not in ('resolved', 'dismissed') then
+    raise exception 'p_decision must be ''resolved'' or ''dismissed''';
+  end if;
+
+  if p_admin_notes is not null and pg_catalog.char_length(p_admin_notes) > 2000 then
+    raise exception 'p_admin_notes must be 2000 characters or fewer';
+  end if;
+
+  update public.book_reports
+  set status = p_decision,
+      reviewed_at = pg_catalog.now(),
+      reviewed_by = v_admin_id,
+      admin_notes = nullif(trim(coalesce(p_admin_notes, '')), '')
+  where id = p_id
+    and status = 'open'
+  returning id into v_updated_id;
+
+  if v_updated_id is null then
+    raise exception 'no reviewable report found for this id';
+  end if;
+end;
+$$;
+
+revoke all on function public.review_book_report(uuid, text, text) from public;
+revoke all on function public.review_book_report(uuid, text, text) from anon;
+revoke all on function public.review_book_report(uuid, text, text) from authenticated;
+grant execute on function public.review_book_report(uuid, text, text) to authenticated;

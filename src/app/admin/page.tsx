@@ -24,12 +24,18 @@ export default async function AdminPage() {
         Signed in as {profile.display_name}.
       </p>
 
-      <div className="mt-6">
+      <div className="mt-6 flex flex-wrap gap-3">
         <Link
           href="/admin/refunds"
           className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
         >
           Refund requests
+        </Link>
+        <Link
+          href="/admin/reports"
+          className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+        >
+          Book reports
         </Link>
       </div>
     </main>
