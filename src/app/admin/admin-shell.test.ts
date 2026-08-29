@@ -49,6 +49,27 @@ function collectItems(node: ReactNode): NavItemLike[] {
   return [...own, ...collectItems(element.props.children)];
 }
 
+// MOBILE ADMIN SHELL CORRECTION: unlike NavLinks/AdminMobileNav (separate
+// component functions, never invoked by an inert <Component .../>
+// descriptor -- see this file's own header comment), a DOM-tag element
+// like <header> has a plain string `.type`, so its actual className IS
+// directly inspectable here without rendering anything.
+function findFirstByTagName(node: ReactNode, tagName: string): ReactElement<{ className?: string; children?: ReactNode }> | null {
+  if (node === null || node === undefined || typeof node === "boolean") return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findFirstByTagName(child, tagName);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof node !== "object") return null;
+  const element = node as ReactElement<{ className?: string; children?: ReactNode }>;
+  if (!("props" in element)) return null;
+  if (element.type === tagName) return element;
+  return findFirstByTagName(element.props.children, tagName);
+}
+
 describe("AdminShell", () => {
   beforeEach(() => {
     mockSingle.mockClear();
@@ -99,5 +120,21 @@ describe("AdminShell", () => {
     const text = collectText(shell).join(" | ");
 
     expect(text).toContain("Staff member");
+  });
+
+  // MOBILE ADMIN SHELL CORRECTION: root-cause regression guard. The
+  // reported bug (X visible, no usable nav on a real phone) traced to
+  // this <header> missing `relative` -- AdminMobileNav's open drawer is
+  // `absolute inset-x-0 top-full`, which without a positioned ancestor
+  // anchors against the viewport instead of the header, rendering the
+  // drawer roughly a screen-height below where it visually belongs. This
+  // asserts the actual returned element carries the fix, not just that
+  // the source file happens to contain the string "relative" somewhere.
+  it("header carries `relative` so AdminMobileNav's absolute drawer anchors under it, not the viewport", async () => {
+    const shell = await AdminShell({ userId: "user-1", role: "owner", children: "content" });
+    const header = findFirstByTagName(shell, "header");
+
+    expect(header).not.toBeNull();
+    expect(header?.props.className?.split(/\s+/)).toContain("relative");
   });
 });

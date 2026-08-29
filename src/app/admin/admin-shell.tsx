@@ -63,7 +63,18 @@ export async function AdminShell({
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface px-4 py-4 sm:px-6">
+      {/* MOBILE ADMIN SHELL CORRECTION: `relative` is not decorative --
+          AdminMobileNav's open drawer is `absolute inset-x-0 top-full`,
+          which needs a positioned ancestor to anchor "100% down from"
+          to. Without one, its containing block falls back to the
+          viewport, so `top-full` computes 100% of the *viewport's*
+          height rather than this header's -- the drawer still opens
+          (the toggle/aria-expanded/icon state is untouched) but renders
+          roughly a full screen-height below the header, invisible
+          without scrolling. site-header.tsx's own header already
+          carries this exact class for the exact same reason; this one
+          had drifted from that precedent. */}
+      <header className="relative flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface px-4 py-4 sm:px-6">
         <Link
           href="/admin"
           className="focus-ring flex items-center gap-2 rounded-sm font-serif text-lg font-semibold text-primary"

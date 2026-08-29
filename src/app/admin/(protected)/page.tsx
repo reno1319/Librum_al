@@ -61,11 +61,15 @@ export default async function AdminPage() {
       </p>
 
       {showReports || showRefunds ? (
-        <div className="mt-6 flex flex-wrap gap-3">
+        // MOBILE ADMIN SHELL CORRECTION: stacked by default (a narrow
+        // phone width squeezed these two side-by-side), back to the
+        // original flex-row + wrap layout from `sm:` up -- unchanged at
+        // every width this already rendered correctly at.
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           {showRefunds && (
             <Link
               href="/admin/refunds"
-              className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+              className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
             >
               Refund requests
             </Link>
@@ -73,7 +77,7 @@ export default async function AdminPage() {
           {showReports && (
             <Link
               href="/admin/reports"
-              className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+              className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
             >
               Book reports
             </Link>
