@@ -1,4 +1,4 @@
-import { updatePassword } from "@/app/auth/actions";
+import { updatePassword } from "@/app/(public)/auth/actions";
 import { translateAuthErrorMessage } from "@/lib/auth-error";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";

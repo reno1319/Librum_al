@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { parseDocxToDocument, repackageWithTitle } from "@/app/dashboard/books/docx-actions";
+import { parseDocxToDocument, repackageWithTitle } from "@/app/(public)/dashboard/books/docx-actions";
 import { createClient } from "@/lib/supabase/client";
 import type { ConversionWarning } from "@/lib/docx-converter";
 import { fileInputClasses } from "@/lib/form-styles";

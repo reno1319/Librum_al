@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono, Playfair_Display } from "next/font/google";
-import { SiteHeader } from "@/components/site-header";
-import { SiteFooter } from "@/components/site-footer";
 import "./globals.css";
 
 const inter = Inter({
@@ -35,25 +33,30 @@ export const metadata: Metadata = {
   description: "A self-publishing platform for digital ebooks.",
 };
 
+// ADMIN-1A.5 FINAL PRE-COMMIT ADMIN LAYOUT CORRECTION: SiteHeader/
+// SiteFooter used to render directly here, unconditionally, for every
+// route in the app -- including /admin/*. They now live one level
+// down, in src/app/(public)/layout.tsx, which only every existing
+// public/product route is nested under; src/app/admin/layout.tsx sits
+// outside that group and never inherits them. This file stays the
+// single, unmoved root layout (still the only one defining <html>/
+// <body> -- there is no second root layout, so error.tsx/global-error.tsx/
+// not-found.tsx all keep behaving exactly as Next.js's own single-root-
+// layout model already documents, and every route in the app still
+// gets a full page reload only on an actual server navigation, never
+// on client-side transitions within either the public or admin tree).
+// The "#main-content" skip-link target and its wrapping div moved into
+// (public)/layout.tsx along with SiteHeader/SiteFooter, since the
+// skip-link is specifically for jumping past a site header that only
+// exists there now; src/app/admin/admin-shell.tsx's own header/content
+// structure doesn't need it (no comparable long nav to skip past yet).
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
       className={`${inter.variable} ${geistMono.variable} ${playfairDisplay.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">
-        <a
-          href="#main-content"
-          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground"
-        >
-          Skip to content
-        </a>
-        <SiteHeader />
-        <div id="main-content" className="flex flex-1 flex-col">
-          {children}
-        </div>
-        <SiteFooter />
-      </body>
+      <body className="flex min-h-full flex-col">{children}</body>
     </html>
   );
 }

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { formatPrice } from "@/lib/pricing";
-import { deleteBook } from "@/app/dashboard/books/actions";
-import { DeleteBookButton } from "@/app/dashboard/delete-book-button";
+import { deleteBook } from "@/app/(public)/dashboard/books/actions";
+import { DeleteBookButton } from "@/app/(public)/dashboard/delete-book-button";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book } from "@/lib/types";
 

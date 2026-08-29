@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireStaff } from "@/lib/staff";
 import { roleHasPermission } from "@/lib/staff-permissions";
 import { createClient } from "@/lib/supabase/server";
-import { resolveAdminLandingVisibility } from "./admin-landing-logic";
+import { resolveAdminLandingVisibility } from "../admin-landing-logic";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {

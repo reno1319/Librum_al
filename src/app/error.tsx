@@ -16,12 +16,20 @@ import { buttonClasses } from "@/components/ui/button";
 // Must be a Client Component -- this is a Next.js requirement for
 // error.tsx, not a stylistic choice (it receives `error` and `reset`
 // as props and needs client-side interactivity for the Retry button).
-// Deliberately renders inside the root layout's own <body>, so
-// SiteHeader/SiteFooter are still present -- same reasoning as
-// not-found.tsx, which takes the identical approach for the 404 case.
-// This intentionally does NOT catch errors thrown BY SiteHeader/
-// SiteFooter/RootLayout itself -- see global-error.tsx and this
-// pass's own report for that decision.
+//
+// ADMIN-1A.5 FINAL PRE-COMMIT ADMIN LAYOUT CORRECTION: SiteHeader/
+// SiteFooter no longer render here or anywhere above this boundary --
+// they moved into src/app/(public)/layout.tsx, which now has its own
+// matching src/app/(public)/error.tsx that catches public-route errors
+// (including SiteHeader's own) while still inheriting them. This file
+// is what's left for the true root layout's direct children: errors
+// inside src/app/admin/layout.tsx or AdminShell (no admin-specific
+// error.tsx exists yet, so this bare boundary -- no SiteHeader/Footer,
+// no AdminShell -- is what an admin-page crash falls back to; that's
+// unchanged from before this correction, not a new gap it introduces),
+// plus a general safety net. This intentionally does NOT catch errors
+// thrown BY the true root layout itself -- see global-error.tsx and
+// this pass's own report for that decision.
 export default function Error({
   error,
   reset,

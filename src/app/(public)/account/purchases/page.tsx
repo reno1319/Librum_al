@@ -8,10 +8,10 @@ import {
   groupPurchasesByTransaction,
   isWithinRefundEligibilityWindow,
   type BundleSnapshotForGrouping,
-} from "@/app/library/refund-logic";
-import { requestTransactionRefund, cancelRefundRequest } from "@/app/library/refund-actions";
-import { RefundRequestForm } from "@/app/library/refund-request-form";
-import { CancelRefundButton } from "@/app/library/cancel-refund-button";
+} from "@/app/(public)/library/refund-logic";
+import { requestTransactionRefund, cancelRefundRequest } from "@/app/(public)/library/refund-actions";
+import { RefundRequestForm } from "@/app/(public)/library/refund-request-form";
+import { CancelRefundButton } from "@/app/(public)/library/cancel-refund-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import type { Metadata } from "next";

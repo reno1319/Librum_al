@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { logout } from "@/app/auth/actions";
+import { logout } from "@/app/(public)/auth/actions";
 import { isRecoverySessionActive } from "@/lib/recovery-session";
 import { IconPerson } from "@/components/icons";
 import { NavLinks, type NavItem } from "@/components/nav-links";

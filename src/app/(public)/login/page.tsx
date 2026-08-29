@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { login } from "@/app/auth/actions";
+import { login } from "@/app/(public)/auth/actions";
 import { translateAuthErrorMessage } from "@/lib/auth-error";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";

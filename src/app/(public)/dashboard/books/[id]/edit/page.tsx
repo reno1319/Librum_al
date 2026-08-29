@@ -14,7 +14,7 @@ import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { resolvePublishReadiness } from "@/lib/publish-readiness";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 import { formControlClasses } from "@/lib/form-styles";
-import { DeleteBookButton } from "@/app/dashboard/delete-book-button";
+import { DeleteBookButton } from "@/app/(public)/dashboard/delete-book-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { removeFromWishlist } from "@/app/books/[id]/actions";
+import { removeFromWishlist } from "@/app/(public)/books/[id]/actions";
 import { BookCard } from "@/components/book-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";

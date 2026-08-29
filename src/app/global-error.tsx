@@ -3,18 +3,26 @@
 import { useEffect } from "react";
 
 // LIBRUM 2.0 LAUNCH-FIX-1A ERR-1: root/global-error.tsx are NOT
-// redundant here -- confirmed by reading src/app/layout.tsx and
-// src/components/site-header.tsx directly before adding this file.
-// SiteHeader is rendered as a SIBLING of {children} inside RootLayout,
-// not a descendant of it, and it does real per-request async work that
-// can fail (createClient() + supabase.auth.getUser(), on every single
-// route). A failure there throws from inside the root layout itself --
-// outside the subtree src/app/error.tsx can catch, since a segment
-// error boundary only wraps what's below it, never its own parent
+// redundant here. A segment error boundary (error.tsx, at any nesting
+// level) only ever wraps what's BELOW it -- never its own parent
 // layout. Only global-error.tsx, which replaces the ENTIRE root layout
-// including <html>/<body>, can catch that class of failure. This isn't
-// added reflexively: it's the one gap root error.tsx structurally
-// cannot cover in this app.
+// including <html>/<body>, can catch a failure thrown by the true root
+// layout itself (src/app/layout.tsx) -- font loading, metadata
+// generation, or the <html>/<body> shell's own render.
+//
+// ADMIN-1A.5 FINAL PRE-COMMIT ADMIN LAYOUT CORRECTION: this file's
+// original justification specifically named SiteHeader (previously a
+// SIBLING of {children} inside the true root layout, doing real
+// per-request async work -- createClient() + supabase.auth.getUser()
+// -- that could fail from a position no nested error.tsx could reach).
+// SiteHeader has since moved into src/app/(public)/layout.tsx, nested
+// below the true root, so a SiteHeader failure is now caught by that
+// group's own src/app/(public)/error.tsx instead -- a strictly better
+// outcome (SiteHeader/SiteFooter and normal public navigation survive
+// the recovery UI, where global-error.tsx's own bare inline-styled
+// shell cannot provide them). This file remains necessary regardless,
+// for the true-root-layout-itself failure class described above, which
+// no amount of nested error boundaries can ever cover.
 //
 // Deliberately minimal and self-contained -- does NOT import
 // SiteHeader/SiteFooter/globals.css/next/font (any of which could be
