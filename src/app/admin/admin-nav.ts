@@ -19,15 +19,20 @@ export type AdminNavItem = {
 // role->permission matrix (src/lib/staff-permissions.ts), nothing else
 // to update.
 //
-// Deliberately does NOT include a Staff/Audit entry -- ADMIN-1A already
-// defines staff.view/staff.manage permissions for future use, but no
-// staff-directory or audit-log UI exists yet (explicitly out of scope
-// for ADMIN-1A.5, deferred to ADMIN-1B/1C) -- an entry with no
-// destination to navigate to would be a dead link, not a feature.
+// ADMIN-1B PART C: Staff added, gated by staff.view (the same
+// permission src/app/admin/(protected)/staff/page.tsx itself requires)
+// -- a staff.view holder without staff.manage still gets the link, and
+// the page renders in its own read-only mode for them, exactly like
+// this codebase's every other permission-driven surface. Audit is
+// deliberately still NOT added here -- no /admin/audit UI exists yet
+// (ADMIN-1C's own scope) -- an entry with no destination would be a
+// dead link, not a feature, same reasoning this file already applied
+// to Staff before this pass.
 export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   { href: "/admin", label: "Dashboard", permission: "admin.access" },
   { href: "/admin/reports", label: "Book reports", permission: "reports.view" },
   { href: "/admin/refunds", label: "Refund requests", permission: "refunds.view" },
+  { href: "/admin/staff", label: "Staff", permission: "staff.view" },
 ];
 
 // Pure visibility resolver -- every /admin/* role's nav is derived from

@@ -54,7 +54,7 @@ describe("AdminShell", () => {
     mockSingle.mockClear();
   });
 
-  it("owner: passes Dashboard/Book reports/Refund requests to its nav components, plus identity and Sign out", async () => {
+  it("owner: passes Dashboard/Book reports/Refund requests/Staff to its nav components, plus identity and Sign out", async () => {
     const shell = await AdminShell({ userId: "user-1", role: "owner", children: "content" });
     const text = collectText(shell).join(" | ");
     const labels = collectItems(shell).map((i) => i.label);
@@ -67,25 +67,28 @@ describe("AdminShell", () => {
     expect(labels).toContain("Dashboard");
     expect(labels).toContain("Book reports");
     expect(labels).toContain("Refund requests");
+    expect(labels).toContain("Staff");
   });
 
-  it("moderator: Book reports is passed to nav, Refund requests is not", async () => {
+  it("moderator: Book reports is passed to nav, Refund requests and Staff are not", async () => {
     const shell = await AdminShell({ userId: "user-2", role: "moderator", children: "content" });
     const labels = collectItems(shell).map((i) => i.label);
     const text = collectText(shell).join(" | ");
 
     expect(labels).toContain("Book reports");
     expect(labels).not.toContain("Refund requests");
+    expect(labels).not.toContain("Staff");
     expect(text).toContain("Moderator");
   });
 
-  it("support: Refund requests is passed to nav, Book reports is not", async () => {
+  it("support: Refund requests is passed to nav, Book reports and Staff are not", async () => {
     const shell = await AdminShell({ userId: "user-3", role: "support", children: "content" });
     const labels = collectItems(shell).map((i) => i.label);
     const text = collectText(shell).join(" | ");
 
     expect(labels).toContain("Refund requests");
     expect(labels).not.toContain("Book reports");
+    expect(labels).not.toContain("Staff");
     expect(text).toContain("Support");
   });
 
