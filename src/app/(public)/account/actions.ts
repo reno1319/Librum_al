@@ -15,6 +15,48 @@ export async function deleteAccount(formData: FormData) {
     redirect("/login");
   }
 
+  // LIBRUM 2.0 ADMIN-1B PART B, FAIL-OPEN CORRECTION: an active staff
+  // member (any role -- owner/admin/editor/moderator/support, no
+  // exception) cannot delete their own Librum account through this
+  // ordinary self-service path. Checked FIRST, before the
+  // confirmation-text check below, so a staff member learns this
+  // immediately rather than after typing "DELETE" -- and deliberately
+  // does nothing else: no auto-removal from staff_members, no silent
+  // mutation of anything, just a stable redirect either way.
+  //
+  // A direct, narrow lookup here -- not getStaffMember() -- specifically
+  // so this destructive action can distinguish "confirmed not staff"
+  // from "the lookup itself failed" (a Postgres/network error mid-query,
+  // not merely an absent row). getStaffMember() (src/lib/staff.ts)
+  // discards its own query's error and collapses both cases to null,
+  // which is the correct, safe default for every READ-time gate that
+  // already uses it (requireStaff() simply redirects either way, and an
+  // over-cautious false "not staff" there costs nothing worse than an
+  // extra login prompt) -- but is NOT an acceptable ambiguity for a
+  // guard whose failure mode is "irreversibly delete an active staff
+  // member's account." getStaffMember() itself is deliberately left
+  // unmodified: this fix is scoped to the one call site where the
+  // distinction is safety-critical, not a broad redesign of the shared
+  // helper every other admin surface already depends on.
+  const { data: staffRow, error: staffLookupError } = await supabase
+    .from("staff_members")
+    .select("role")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (staffLookupError) {
+    console.error("deleteAccount: staff status lookup failed:", staffLookupError);
+    redirect(
+      "/account?error=Unable+to+verify+account+eligibility+for+deletion.+Try+again.",
+    );
+  }
+
+  if (staffRow) {
+    redirect(
+      "/account?error=Remove+this+account+from+Librum+staff+before+deleting+the+account.",
+    );
+  }
+
   const confirmation = String(formData.get("confirmation") ?? "");
   if (confirmation !== "DELETE") {
     redirect("/account?error=Type+DELETE+to+confirm");

@@ -51,10 +51,19 @@ alter default privileges in schema public grant all on sequences to anon, authen
 -- them to auto-create the matching public.profiles row -- tests insert
 -- into auth.users with these populated rather than inserting into
 -- public.profiles directly, exactly mirroring how a real signup works.
+--
+-- email_confirmed_at (ADMIN-1B Part B): added because
+-- add_staff_member_by_email() (migration 041) reads it to require a
+-- verified account. Nullable, no default -- deliberately does NOT
+-- auto-confirm every fixture user, since 041's own test suite needs to
+-- exercise both a confirmed and an unconfirmed fixture explicitly. Every
+-- OTHER existing test file's auth.users inserts predate this column and
+-- never reference it, so they are unaffected by it defaulting to null.
 create schema if not exists auth;
 create table if not exists auth.users (
   id uuid primary key,
   email text,
+  email_confirmed_at timestamptz,
   raw_user_meta_data jsonb not null default '{}'::jsonb
 );
 

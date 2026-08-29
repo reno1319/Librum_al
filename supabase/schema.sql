@@ -2733,3 +2733,286 @@ revoke all on function public.review_book_report(uuid, text, text) from public;
 revoke all on function public.review_book_report(uuid, text, text) from anon;
 revoke all on function public.review_book_report(uuid, text, text) from authenticated;
 grant execute on function public.review_book_report(uuid, text, text) to authenticated;
+
+-- ============================================================
+-- LIBRUM 2.0 ADMIN-1B PART B (migration 041): the staff-management
+-- mutation surface deferred by ADMIN-1A (migration 040) -- add/
+-- change-role/remove RPCs, an append-only audit log, and a hard,
+-- trigger-enforced last-owner invariant. Placed here, at the tail, for
+-- the same reason migration 039's block above is: every object this
+-- section creates is new and self-contained, depending only on
+-- staff_members/staff_has_permission()/profiles, all already defined
+-- earlier in this file -- there is no earlier "logical" position this
+-- needs to occupy. See supabase/migrations/041_staff_management.sql's
+-- own header and inline comments for the full design reasoning
+-- (concurrency, anti-enumeration, atomicity, audit-log ACL) -- not
+-- repeated in full here to avoid the two copies drifting apart in
+-- prose while schema.sql and the migration file stay byte-identical in
+-- the SQL itself.
+-- ============================================================
+
+create or replace function public.staff_members_protect_last_owner()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner_count integer;
+begin
+  if (tg_op = 'DELETE' and old.role = 'owner')
+     or (tg_op = 'UPDATE' and old.role = 'owner' and new.role <> 'owner') then
+
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtext('staff_members:owner_invariant')
+    );
+
+    select count(*) into v_owner_count
+    from public.staff_members
+    where role = 'owner';
+
+    if v_owner_count <= 1 then
+      raise exception 'at least one owner is required';
+    end if;
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  else
+    return new;
+  end if;
+end;
+$$;
+
+revoke all on function public.staff_members_protect_last_owner() from public;
+revoke all on function public.staff_members_protect_last_owner() from anon;
+revoke all on function public.staff_members_protect_last_owner() from authenticated;
+
+create trigger staff_members_protect_last_owner
+  before update of role or delete on public.staff_members
+  for each row execute function public.staff_members_protect_last_owner();
+
+create table public.admin_audit_log (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid references public.profiles(id) on delete set null,
+  action text not null,
+  target_type text not null,
+  target_id uuid,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table public.admin_audit_log enable row level security;
+
+revoke all on public.admin_audit_log from anon, authenticated;
+
+create index admin_audit_log_actor_id_idx on public.admin_audit_log (actor_id);
+create index admin_audit_log_target_idx on public.admin_audit_log (target_type, target_id);
+
+create or replace function public.list_staff_members()
+returns table (
+  user_id uuid,
+  display_name text,
+  email text,
+  role text,
+  created_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+stable
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('staff.view') then
+    raise exception 'not authorized';
+  end if;
+
+  return query
+    select sm.user_id, p.display_name, au.email::text, sm.role, sm.created_at
+    from public.staff_members sm
+    join public.profiles p on p.id = sm.user_id
+    join auth.users au on au.id = sm.user_id
+    order by sm.created_at asc;
+end;
+$$;
+
+revoke all on function public.list_staff_members() from public;
+revoke all on function public.list_staff_members() from anon;
+revoke all on function public.list_staff_members() from authenticated;
+grant execute on function public.list_staff_members() to authenticated;
+
+create or replace function public.add_staff_member_by_email(
+  target_email text,
+  new_role text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_normalized_email text;
+  v_target_user_id uuid;
+  v_email_confirmed_at timestamptz;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('staff.manage') then
+    raise exception 'not authorized';
+  end if;
+
+  if new_role not in ('owner', 'admin', 'editor', 'moderator', 'support') then
+    raise exception 'invalid role';
+  end if;
+
+  v_normalized_email := lower(trim(coalesce(target_email, '')));
+  if v_normalized_email = '' then
+    raise exception 'invalid email';
+  end if;
+
+  select id, email_confirmed_at
+  into v_target_user_id, v_email_confirmed_at
+  from auth.users
+  where lower(email) = v_normalized_email
+  limit 1;
+
+  if v_target_user_id is null or v_email_confirmed_at is null then
+    raise exception 'no verified Librum account was found for that email';
+  end if;
+
+  if not exists (select 1 from public.profiles where id = v_target_user_id) then
+    raise exception 'no verified Librum account was found for that email';
+  end if;
+
+  if exists (select 1 from public.staff_members where user_id = v_target_user_id) then
+    raise exception 'already staff';
+  end if;
+
+  insert into public.staff_members (user_id, role, created_by)
+  values (v_target_user_id, new_role, v_actor_id);
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (
+    v_actor_id, 'staff.added', 'staff_members', v_target_user_id,
+    jsonb_build_object('role', new_role)
+  );
+end;
+$$;
+
+revoke all on function public.add_staff_member_by_email(text, text) from public;
+revoke all on function public.add_staff_member_by_email(text, text) from anon;
+revoke all on function public.add_staff_member_by_email(text, text) from authenticated;
+grant execute on function public.add_staff_member_by_email(text, text) to authenticated;
+
+create or replace function public.change_staff_role(
+  target_user_id uuid,
+  new_role text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_old_role text;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('staff.manage') then
+    raise exception 'not authorized';
+  end if;
+
+  if new_role not in ('owner', 'admin', 'editor', 'moderator', 'support') then
+    raise exception 'invalid role';
+  end if;
+
+  if target_user_id = v_actor_id then
+    raise exception 'cannot change your own role';
+  end if;
+
+  select role into v_old_role
+  from public.staff_members
+  where user_id = target_user_id;
+
+  if v_old_role is null then
+    raise exception 'staff member not found';
+  end if;
+
+  if v_old_role = new_role then
+    return;
+  end if;
+
+  update public.staff_members
+  set role = new_role,
+      updated_at = pg_catalog.now()
+  where user_id = target_user_id;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (
+    v_actor_id, 'staff.role_changed', 'staff_members', target_user_id,
+    jsonb_build_object('old_role', v_old_role, 'new_role', new_role)
+  );
+end;
+$$;
+
+revoke all on function public.change_staff_role(uuid, text) from public;
+revoke all on function public.change_staff_role(uuid, text) from anon;
+revoke all on function public.change_staff_role(uuid, text) from authenticated;
+grant execute on function public.change_staff_role(uuid, text) to authenticated;
+
+create or replace function public.remove_staff_member(
+  target_user_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_role text;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('staff.manage') then
+    raise exception 'not authorized';
+  end if;
+
+  if target_user_id = v_actor_id then
+    raise exception 'cannot remove yourself';
+  end if;
+
+  select role into v_role
+  from public.staff_members
+  where user_id = target_user_id;
+
+  if v_role is null then
+    raise exception 'staff member not found';
+  end if;
+
+  delete from public.staff_members where user_id = target_user_id;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'staff.removed', 'staff_members', target_user_id, jsonb_build_object('role', v_role));
+end;
+$$;
+
+revoke all on function public.remove_staff_member(uuid) from public;
+revoke all on function public.remove_staff_member(uuid) from anon;
+revoke all on function public.remove_staff_member(uuid) from authenticated;
+grant execute on function public.remove_staff_member(uuid) to authenticated;

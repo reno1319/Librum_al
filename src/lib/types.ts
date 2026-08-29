@@ -144,3 +144,17 @@ export type Permission =
   | "refunds.resolve"
   | "staff.view"
   | "staff.manage";
+
+// Mirrors list_staff_members()'s exact return shape (migration 041,
+// ADMIN-1B Part B) -- the ONLY place a staff member's email is ever
+// exposed to application code, resolved server-side by that single
+// joined SECURITY DEFINER query (staff_members + profiles + auth.users)
+// rather than any per-row auth.admin lookup. Server-side only: nothing
+// in this app ever queries auth.users directly from a browser client.
+export type StaffListRow = {
+  user_id: string;
+  display_name: string;
+  email: string;
+  role: StaffRole;
+  created_at: string;
+};
