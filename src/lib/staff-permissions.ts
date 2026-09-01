@@ -44,6 +44,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "refunds.resolve",
     "staff.view",
     "staff.manage",
+    "audit.view",
   ],
   admin: [
     "admin.access",
@@ -52,6 +53,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "refunds.view",
     "refunds.resolve",
     "staff.view",
+    "audit.view",
   ],
   moderator: ["admin.access", "reports.view", "reports.resolve"],
   support: ["admin.access", "refunds.view"],

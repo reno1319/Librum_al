@@ -143,7 +143,8 @@ export type Permission =
   | "refunds.view"
   | "refunds.resolve"
   | "staff.view"
-  | "staff.manage";
+  | "staff.manage"
+  | "audit.view";
 
 // Mirrors list_staff_members()'s exact return shape (migration 041,
 // ADMIN-1B Part B) -- the ONLY place a staff member's email is ever
@@ -156,5 +157,52 @@ export type StaffListRow = {
   display_name: string;
   email: string;
   role: StaffRole;
+  created_at: string;
+};
+
+// ADMIN-1C Part B: the closed vocabulary migration 042's
+// list_admin_audit_events() RPC validates its p_action/p_target_type
+// filters against (supabase/migrations/042_admin_audit_visibility.sql).
+// Deliberately separate from AuditEventRow.action/target_type below,
+// which stay plain `string`: a row already IN the table is a fact that
+// happened, and must render even if a future migration's vocabulary has
+// moved on since -- these two types exist for the places that need to
+// validate or label a KNOWN value (filter UI, ACTION_LABELS), not for
+// narrowing what a raw DB row is allowed to contain.
+// ADMIN-1C Part B PRE-FINALIZE CORRECTION: 'refund.review_rejected', not
+// the first draft's 'refund.review_denied' -- matches
+// refund_requests.status's own actual value ('rejected', migration 029's
+// CHECK constraint) exactly, the same discipline report.dismissed
+// already follows (book_reports.status's own 'dismissed' value, not a
+// softer synonym).
+export type AuditAction =
+  | "staff.added"
+  | "staff.role_changed"
+  | "staff.removed"
+  | "report.resolved"
+  | "report.dismissed"
+  | "refund.review_approved"
+  | "refund.review_rejected"
+  | "refund.issuance_submitted";
+
+export type AuditTargetType = "staff_members" | "book_reports" | "refund_requests";
+
+// Mirrors list_admin_audit_events()'s exact return shape. actor_id/
+// actor_display_name are both nullable -- admin_audit_log.actor_id is
+// ON DELETE SET NULL (migration 041), and the RPC's own LEFT JOIN to
+// profiles means a still-present actor_id whose profile row is gone
+// resolves actor_display_name to null rather than dropping the row.
+// metadata is intentionally untyped beyond Record<string, unknown> --
+// its shape varies per action and is never rendered raw (see
+// formatAuditDetails in audit-log-logic.ts), so there is no value in a
+// discriminated-union metadata type here.
+export type AuditEventRow = {
+  id: string;
+  actor_id: string | null;
+  actor_display_name: string | null;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  metadata: Record<string, unknown>;
   created_at: string;
 };

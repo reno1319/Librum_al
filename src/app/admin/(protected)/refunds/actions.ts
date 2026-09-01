@@ -134,7 +134,17 @@ export async function issueStripeRefund(refundRequestId: string) {
         `/admin/refunds/${refundRequestId}?error=${encodeURIComponent(outcome.message)}`,
       );
       break;
-    case "submitted":
+    case "issued":
+    case "blocked":
+      // ADMIN-1C Part B: issueStripeRefund()'s own user-visible behavior
+      // is UNCHANGED by the "issued"/"blocked" split -- both cases still
+      // redirect with the identical success message below, exactly as
+      // the single "submitted" outcome always did. The split exists
+      // purely so executeApprovedRefund() itself can decide, internally,
+      // whether to write a refund.issuance_submitted audit event
+      // (only ever for "issued" -- see that function's own comment);
+      // it is not a new user-facing state.
+      //
       // Deliberately does NOT say "Refunded" -- Stripe accepting this
       // call means only that the refund was initiated. The Stripe
       // webhook (processChargeRefund, gated by
@@ -157,9 +167,9 @@ export async function issueStripeRefund(refundRequestId: string) {
       // banner and the badge can never visibly disagree.
       //
       // This same "waiting for confirmation" wording is used for EVERY
-      // "submitted" outcome, including an immediate refund.status ===
-      // 'succeeded' response from Stripe (see executeApprovedRefund in
-      // issue-refund.ts) -- explicitly confirmed correct, not an
+      // "issued"/"blocked" outcome, including an immediate refund.status
+      // === 'succeeded' response from Stripe (see executeApprovedRefund
+      // in issue-refund.ts) -- explicitly confirmed correct, not an
       // oversight: even a refund Stripe reports as already 'succeeded'
       // at creation time has not yet been confirmed by Librum's own
       // webhook, which independently re-verifies terminal success before

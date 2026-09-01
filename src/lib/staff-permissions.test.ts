@@ -11,6 +11,7 @@ const ALL_PERMISSIONS: Permission[] = [
   "refunds.resolve",
   "staff.view",
   "staff.manage",
+  "audit.view",
 ];
 
 // Exhaustive stress test of the full role x permission matrix -- every
@@ -29,6 +30,7 @@ const EXPECTED: Record<StaffRole, Permission[]> = {
     "refunds.resolve",
     "staff.view",
     "staff.manage",
+    "audit.view",
   ],
   admin: [
     "admin.access",
@@ -37,6 +39,7 @@ const EXPECTED: Record<StaffRole, Permission[]> = {
     "refunds.view",
     "refunds.resolve",
     "staff.view",
+    "audit.view",
   ],
   moderator: ["admin.access", "reports.view", "reports.resolve"],
   support: ["admin.access", "refunds.view"],
@@ -91,6 +94,14 @@ describe("roleHasPermission -- named scenarios from the ADMIN-1A design brief", 
       expect(roleHasPermission("editor", permission)).toBe(false);
     }
     expect(ROLE_PERMISSIONS.editor).toEqual([]);
+  });
+
+  it("audit.view is granted to owner and admin only (ADMIN-1C Part B)", () => {
+    expect(roleHasPermission("owner", "audit.view")).toBe(true);
+    expect(roleHasPermission("admin", "audit.view")).toBe(true);
+    for (const role of ["moderator", "support", "editor"] as const) {
+      expect(roleHasPermission(role, "audit.view")).toBe(false);
+    }
   });
 
   it("admin has every permission owner has except staff.manage", () => {
