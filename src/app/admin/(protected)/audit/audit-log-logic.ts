@@ -89,6 +89,30 @@ export function validateAuditDateFilter(raw: string | null | undefined): DateFil
   return { ok: true, value: parsed.toISOString() };
 }
 
+// ADMIN-1C Part C: the "to" date filter's own endpoint semantics --
+// converts a plain date-only "to" value into the EXCLUSIVE upper bound
+// list_admin_audit_events()'s own p_created_before parameter expects
+// (`aal.created_at < p_created_before`, migration 042). Reuses
+// validateAuditDateFilter's own parsing (a date-only "YYYY-MM-DD" string
+// parses as UTC midnight per the ECMAScript Date Time String Format
+// spec -- deterministic, no server-locale dependency, no timezone claim
+// this app can't actually guarantee), then advances exactly one day so
+// every event ON the selected "to" date itself is included -- the "from"
+// side is already inclusive (>=) at that same UTC midnight, so together
+// they give the intuitive "both endpoints included" range a date-range
+// picker implies, even though the RPC's own comparison underneath is
+// >=/< across adjacent-day boundaries. setUTCDate (not manual millisecond
+// math) correctly rolls over month/year boundaries.
+export function resolveAuditToDateFilter(raw: string | null | undefined): DateFilterValidation {
+  const parsed = validateAuditDateFilter(raw);
+  if (!parsed.ok || parsed.value === null) {
+    return parsed;
+  }
+  const nextDay = new Date(parsed.value);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  return { ok: true, value: nextDay.toISOString() };
+}
+
 export type DateRangeValidation = { ok: true } | { ok: false; error: string };
 
 // Only meaningful once both individual dates have already parsed
@@ -216,6 +240,109 @@ function displayStatus(status: unknown): string {
     return STATUS_DISPLAY_LABELS[status];
   }
   return "Unknown";
+}
+
+// ADMIN-1C Part C: actor display -- the RPC's own LEFT JOIN to profiles
+// (list_admin_audit_events(), migration 042) already resolves
+// actor_display_name to null for an actor whose profile row is gone
+// (actor_id itself is ON DELETE SET NULL, but even a still-present
+// actor_id can outlive its profile in principle) -- this is the single
+// place that null becomes a safe, neutral UI label. Never fetches email,
+// never queries auth.users, never falls back to the raw UUID: the RPC
+// simply doesn't hand this layer anything to fall back to beyond this
+// fixed string.
+const FORMER_STAFF_ACTOR_LABEL = "Former/deleted staff account";
+
+export function resolveAuditActorDisplay(actorDisplayName: string | null): string {
+  return actorDisplayName ?? FORMER_STAFF_ACTOR_LABEL;
+}
+
+// ADMIN-1C Part C: target display -- deliberately simple, per the design
+// brief's own "no polymorphic database joins" instruction. Derives
+// everything from the row's own target_type/target_id alone (already
+// present on every AuditEventRow) -- no per-row lookup, so this never
+// introduces an N+1 query regardless of how many rows a page renders.
+// The short reference is the target_id's own leading UUID group (the 8
+// hex characters before its first hyphen) -- deterministic, and long
+// enough for an admin to visually cross-reference the same id shown on
+// the destination detail page.
+const AUDIT_TARGET_TYPE_LABELS: Record<AuditTargetType, string> = {
+  staff_members: "Staff member",
+  book_reports: "Book report",
+  refund_requests: "Refund request",
+};
+
+export type AuditTargetDisplay = { label: string; href: string | null };
+
+export function shortAuditTargetRef(targetId: string | null): string {
+  if (!targetId) return "unknown";
+  return targetId.split("-")[0] || targetId;
+}
+
+// ADMIN-1C Part C FINAL PRE-COMMIT UI CORRECTION: the actor filter's own
+// synthetic-option fix. A valid ?actor=<uuid> belonging to a former/
+// deleted staff member (removed from staff_members, so absent from
+// listStaffMembers()'s own roster) is still a legitimate, RPC-accepted
+// filter -- list_admin_audit_events() matches admin_audit_log.actor_id
+// verbatim, with no notion of "current" staff. Without this, the actor
+// <select> would show no option matching that value, silently rendering
+// as though "All actors" were selected while results were actually
+// filtered -- a real correctness bug (the visible control state
+// disagreeing with the active query), not a cosmetic one.
+//
+// Purely a function of the roster already fetched (staff.view-gated,
+// unchanged) and the already-validated actorId already in hand -- no new
+// query, no auth.users lookup, no widened permission. Reuses
+// shortAuditTargetRef's own "leading UUID group" convention rather than
+// inventing a second short-reference format.
+export type ActorFilterOption = { value: string; label: string };
+
+export function resolveActorFilterOptions(
+  roster: { user_id: string; display_name: string }[],
+  activeActorId: string | null,
+): ActorFilterOption[] {
+  const options: ActorFilterOption[] = roster.map((member) => ({
+    value: member.user_id,
+    label: member.display_name,
+  }));
+
+  const isActiveInRoster = activeActorId != null && roster.some((member) => member.user_id === activeActorId);
+  if (activeActorId && !isActiveInRoster) {
+    options.push({
+      value: activeActorId,
+      label: `${FORMER_STAFF_ACTOR_LABEL} · ${shortAuditTargetRef(activeActorId)}`,
+    });
+  }
+
+  return options;
+}
+
+// staff_members intentionally never gets an href -- no individual
+// staff-detail route exists in this app (ADMIN-1B never built one, and
+// Part C's own brief explicitly says not to invent one here). book_reports
+// and refund_requests link to their existing admin detail pages
+// (src/app/admin/(protected)/reports/[id]/page.tsx,
+// .../refunds/[id]/page.tsx) using target_id directly -- the same id
+// those routes already key off of, so no extra lookup is needed to
+// confirm the link is valid; a target_id that no longer resolves on the
+// destination page is that page's own existing "not found" handling to
+// deal with, same as a stale bookmark to either route would already be.
+export function resolveAuditTargetDisplay(targetType: string, targetId: string | null): AuditTargetDisplay {
+  const shortRef = shortAuditTargetRef(targetId);
+
+  if (!isValidAuditTargetType(targetType)) {
+    return { label: `Unknown target · ${shortRef}`, href: null };
+  }
+
+  const label = `${AUDIT_TARGET_TYPE_LABELS[targetType]} · ${shortRef}`;
+
+  if (targetId && targetType === "book_reports") {
+    return { label, href: `/admin/reports/${targetId}` };
+  }
+  if (targetId && targetType === "refund_requests") {
+    return { label, href: `/admin/refunds/${targetId}` };
+  }
+  return { label, href: null };
 }
 
 export function formatAuditDetails(action: string, metadata: unknown): string | null {

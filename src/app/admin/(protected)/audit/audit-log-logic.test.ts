@@ -10,11 +10,16 @@ import {
   clampAuditLimit,
   validateAuditDateFilter,
   validateAuditDateRange,
+  resolveAuditToDateFilter,
   encodeAuditCursor,
   decodeAuditCursor,
   ACTION_LABELS,
   getActionLabel,
   formatAuditDetails,
+  resolveAuditActorDisplay,
+  resolveAuditTargetDisplay,
+  resolveActorFilterOptions,
+  shortAuditTargetRef,
   mapAuditRpcError,
   GENERIC_AUDIT_ERROR_MESSAGE,
   AUDIT_RPC_NOT_AUTHENTICATED_MESSAGE,
@@ -265,6 +270,152 @@ describe("formatAuditDetails", () => {
     expect(() => formatAuditDetails("staff.added", undefined)).not.toThrow();
     expect(() => formatAuditDetails("staff.added", "not an object")).not.toThrow();
     expect(formatAuditDetails("staff.added", {})).toBe("Added as Unknown role");
+  });
+});
+
+describe("resolveAuditToDateFilter", () => {
+  it("returns null for an absent/empty filter", () => {
+    expect(resolveAuditToDateFilter(null)).toEqual({ ok: true, value: null });
+    expect(resolveAuditToDateFilter(undefined)).toEqual({ ok: true, value: null });
+    expect(resolveAuditToDateFilter("")).toEqual({ ok: true, value: null });
+  });
+
+  it("advances a valid date by exactly one UTC day (the exclusive upper bound)", () => {
+    const result = resolveAuditToDateFilter("2026-01-15");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(new Date("2026-01-16T00:00:00.000Z").toISOString());
+    }
+  });
+
+  it("correctly rolls over a month boundary", () => {
+    const result = resolveAuditToDateFilter("2026-01-31");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(new Date("2026-02-01T00:00:00.000Z").toISOString());
+    }
+  });
+
+  it("correctly rolls over a year boundary", () => {
+    const result = resolveAuditToDateFilter("2026-12-31");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(new Date("2027-01-01T00:00:00.000Z").toISOString());
+    }
+  });
+
+  it("propagates the same rejection as validateAuditDateFilter for an unparseable date", () => {
+    const result = resolveAuditToDateFilter("not-a-date");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("Enter a valid date.");
+    }
+  });
+});
+
+describe("resolveAuditActorDisplay", () => {
+  it("returns the display name when present", () => {
+    expect(resolveAuditActorDisplay("Renato Kalemi")).toBe("Renato Kalemi");
+  });
+
+  it("falls back to a neutral label when the actor is null, never a raw UUID or email", () => {
+    expect(resolveAuditActorDisplay(null)).toBe("Former/deleted staff account");
+  });
+});
+
+describe("shortAuditTargetRef", () => {
+  it("returns the leading UUID group before the first hyphen", () => {
+    expect(shortAuditTargetRef("f0000000-0000-0000-0000-000000000030")).toBe("f0000000");
+  });
+
+  it("returns 'unknown' for a null target id", () => {
+    expect(shortAuditTargetRef(null)).toBe("unknown");
+  });
+});
+
+describe("resolveAuditTargetDisplay", () => {
+  it("staff_members: labeled, but never linked -- no staff-detail route exists", () => {
+    const result = resolveAuditTargetDisplay("staff_members", "f0000000-0000-0000-0000-000000000006");
+    expect(result.label).toBe("Staff member · f0000000");
+    expect(result.href).toBeNull();
+  });
+
+  it("book_reports: labeled and linked to /admin/reports/<target_id>", () => {
+    const result = resolveAuditTargetDisplay("book_reports", "f0000000-0000-0000-0000-000000000020");
+    expect(result.label).toBe("Book report · f0000000");
+    expect(result.href).toBe("/admin/reports/f0000000-0000-0000-0000-000000000020");
+  });
+
+  it("refund_requests: labeled and linked to /admin/refunds/<target_id>", () => {
+    const result = resolveAuditTargetDisplay("refund_requests", "f0000000-0000-0000-0000-000000000030");
+    expect(result.label).toBe("Refund request · f0000000");
+    expect(result.href).toBe("/admin/refunds/f0000000-0000-0000-0000-000000000030");
+  });
+
+  it("an unknown target_type gets a safe fallback label and no link, never throwing", () => {
+    const result = resolveAuditTargetDisplay("purchases", "f0000000-0000-0000-0000-000000000099");
+    expect(result.label).toBe("Unknown target · f0000000");
+    expect(result.href).toBeNull();
+  });
+
+  it("a null target_id never produces a link, even for a linkable target_type", () => {
+    const result = resolveAuditTargetDisplay("book_reports", null);
+    expect(result.label).toBe("Book report · unknown");
+    expect(result.href).toBeNull();
+  });
+});
+
+describe("resolveActorFilterOptions", () => {
+  const ROSTER = [
+    { user_id: "f0000000-0000-0000-0000-000000000001", display_name: "Owner One" },
+    { user_id: "f0000000-0000-0000-0000-000000000002", display_name: "Admin Two" },
+  ];
+
+  it("no active actor: returns exactly the roster, no synthetic option", () => {
+    const options = resolveActorFilterOptions(ROSTER, null);
+    expect(options).toEqual([
+      { value: "f0000000-0000-0000-0000-000000000001", label: "Owner One" },
+      { value: "f0000000-0000-0000-0000-000000000002", label: "Admin Two" },
+    ]);
+  });
+
+  it("current-staff actor: the matching roster option is returned, no synthetic option added", () => {
+    const options = resolveActorFilterOptions(ROSTER, "f0000000-0000-0000-0000-000000000002");
+    expect(options).toHaveLength(2);
+    expect(options).toContainEqual({
+      value: "f0000000-0000-0000-0000-000000000002",
+      label: "Admin Two",
+    });
+  });
+
+  it("former/unknown valid actor UUID: appends one synthetic selected option, preserving the real UUID as its value", () => {
+    const formerId = "f0000000-0000-0000-0000-000000000099";
+    const options = resolveActorFilterOptions(ROSTER, formerId);
+
+    expect(options).toHaveLength(3);
+    const synthetic = options.find((o) => o.value === formerId);
+    expect(synthetic).toBeTruthy();
+    expect(synthetic?.label).toBe("Former/deleted staff account · f0000000");
+  });
+
+  it("the synthetic option's label never contains an email address", () => {
+    const formerId = "f0000000-0000-0000-0000-000000000099";
+    const options = resolveActorFilterOptions(ROSTER, formerId);
+    const synthetic = options.find((o) => o.value === formerId);
+
+    expect(synthetic?.label).not.toContain("@");
+  });
+
+  it("an empty roster with a former actor still produces exactly one synthetic option", () => {
+    const formerId = "f0000000-0000-0000-0000-000000000099";
+    const options = resolveActorFilterOptions([], formerId);
+    expect(options).toEqual([
+      { value: formerId, label: "Former/deleted staff account · f0000000" },
+    ]);
+  });
+
+  it("an empty roster with no active actor returns no options at all", () => {
+    expect(resolveActorFilterOptions([], null)).toEqual([]);
   });
 });
 
