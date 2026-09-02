@@ -35,6 +35,18 @@ import type { Permission, StaffRole } from "@/lib/types";
 //   meaningless access the design brief warns against. The role is
 //   persisted so it's available the moment a real editorial surface is
 //   built, without a schema change.
+//
+// ADMIN-1D Part B adds finance.view, granted to owner and admin only --
+// exactly the same two roles that already hold audit.view, refunds.view,
+// and refunds.resolve. moderator/support/editor get none of it:
+// moderator's domain (content reports) has no financial relevance,
+// support already sees refund requests via refunds.view but has never
+// been granted refunds.resolve, so it gains no new financial capability
+// or visibility here either, and editor still holds nothing. Explicitly
+// NOT added here: finance.reconcile, finance.recover_orphaned,
+// finance.export -- ADMIN-1D Part B is read-only primitives only; a
+// mutation permission is added in the same change that adds the RPC it
+// guards, in a later part, never speculatively ahead of one.
 export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>> = {
   owner: [
     "admin.access",
@@ -45,6 +57,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "staff.view",
     "staff.manage",
     "audit.view",
+    "finance.view",
   ],
   admin: [
     "admin.access",
@@ -54,6 +67,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "refunds.resolve",
     "staff.view",
     "audit.view",
+    "finance.view",
   ],
   moderator: ["admin.access", "reports.view", "reports.resolve"],
   support: ["admin.access", "refunds.view"],

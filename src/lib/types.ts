@@ -144,7 +144,8 @@ export type Permission =
   | "refunds.resolve"
   | "staff.view"
   | "staff.manage"
-  | "audit.view";
+  | "audit.view"
+  | "finance.view";
 
 // Mirrors list_staff_members()'s exact return shape (migration 041,
 // ADMIN-1B Part B) -- the ONLY place a staff member's email is ever
@@ -205,4 +206,154 @@ export type AuditEventRow = {
   target_id: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
+};
+
+// ADMIN-1D Part B: the closed vocabulary
+// refund_reconciliation_rows()/list_refund_reconciliation_states()
+// (supabase/migrations/043_finance_reconciliation_reads.sql) computes
+// and validates its p_operational_state filter against. Deliberately
+// NOT the same set as RefundRequestStatus above -- this is a derived
+// operational classification (refund_requests.status combined with the
+// LATEST refund_issuance_attempts row for that request), not a raw
+// column value. Critically, 'approved_attempt_stale_initiated' and
+// 'approved_attempt_unknown' are both DISTINCT from "Stripe was never
+// called" -- the refund-issuance durability ordering (a durable
+// 'initiated' row commits BEFORE stripe.refunds.create() ever runs)
+// means a stale 'initiated' row can equally mean the call never started,
+// is still running past all plausible bounds, or even succeeded on
+// Stripe's side before the local completion write landed. Nothing in
+// this codebase may ever treat 'approved_attempt_stale_initiated' as
+// "safe, nothing happened yet" -- see that migration's own Part 2
+// comment for the full reasoning.
+export type RefundOperationalState =
+  | "requested"
+  | "rejected"
+  | "refunded"
+  | "cancelled"
+  | "approved_unattempted"
+  | "approved_attempt_initiated"
+  | "approved_attempt_stale_initiated"
+  | "approved_attempt_unknown"
+  | "approved_attempt_failed"
+  | "approved_attempt_submitted";
+
+// Mirrors list_refund_reconciliation_states()'s exact return shape.
+// reader_id/reader_display_name and latest_attempt_* are all nullable --
+// reader_id is ON DELETE SET NULL (migration 038), and a request with
+// operational_state 'requested'/'rejected'/'cancelled', or 'approved_
+// unattempted', legitimately has no refund_issuance_attempts row at all
+// yet. stripe_refund_id/stripe_status are populated only once the
+// latest attempt has actually reached Stripe (status 'submitted') --
+// null for every earlier state, never fabricated.
+export type FinanceRefundReconciliationRow = {
+  refund_request_id: string;
+  reader_id: string | null;
+  reader_display_name: string | null;
+  amount_cents: number;
+  refund_request_status: RefundRequestStatus;
+  requested_at: string;
+  reviewed_at: string | null;
+  latest_attempt_id: string | null;
+  latest_attempt_status: string | null;
+  latest_attempt_created_at: string | null;
+  latest_attempt_updated_at: string | null;
+  stripe_refund_id: string | null;
+  stripe_status: string | null;
+  operational_state: RefundOperationalState;
+  needs_attention: boolean;
+};
+
+// Mirrors list_finance_disputes()'s exact return shape.
+// transfer_reversal_failure_message is DELIBERATELY never part of this
+// type -- that column can hold a raw, unbounded Stripe SDK error string
+// (see failTransferReversalAttempt() in
+// src/app/api/webhooks/stripe/route.ts), and the RPC itself never
+// returns it. transfer_reversal_failure_code IS included -- Stripe's own
+// short, bounded error-code taxonomy, safe to surface. status/reason are
+// plain strings, not narrowed unions -- payment_disputes.status carries
+// no CHECK constraint (Stripe's own vocabulary is open-ended, migration
+// 035), so a row already in the table must always render even if it
+// carries a value this file's own "known terminal statuses" allow-list
+// (used only for the needs_attention computation, entirely inside SQL)
+// hasn't seen before.
+export type FinanceDisputeRow = {
+  id: string;
+  stripe_dispute_id: string;
+  stripe_payment_intent_id: string;
+  reader_id: string | null;
+  reader_display_name: string | null;
+  status: string;
+  reason: string;
+  amount_cents: number;
+  created_at: string;
+  updated_at: string;
+  transfer_reversal_status: string;
+  stripe_transfer_reversal_id: string | null;
+  transfer_reversal_attempt_count: number;
+  transfer_reversal_attempted_at: string | null;
+  transfer_reversal_succeeded_at: string | null;
+  transfer_reversal_failure_code: string | null;
+  needs_attention: boolean;
+};
+
+// Mirrors list_finance_checkout_exceptions()'s exact return shape --
+// single-book checkout reconciliation only (book_checkout_intents). See
+// that RPC's own migration comment for why no bundle equivalent exists:
+// bundle_checkout_snapshots has no completed_at-equivalent column, so
+// "Stripe confirmed payment but Librum failed to fulfill" cannot be
+// safely distinguished from "the reader never paid" for a bundle
+// checkout with the current schema. reconciliation_reason is always
+// non-null for every row this RPC returns (the underlying CHECK
+// constraint guarantees it whenever completed_at is set and fulfilled_at
+// is null) -- typed as a plain string here anyway, matching
+// AuditEventRow.action/target_type's own "a row already in the table is
+// a fact that happened" precedent, so a future migration widening the
+// reconciliation_reason vocabulary never requires a type change here.
+export type FinanceCheckoutExceptionRow = {
+  intent_id: string;
+  book_id: string | null;
+  book_title: string;
+  reader_id: string | null;
+  reader_display_name: string | null;
+  price_cents_at_checkout: number;
+  stripe_checkout_session_id: string | null;
+  stripe_payment_intent_id: string | null;
+  completed_at: string;
+  reconciliation_reason: string;
+  created_at: string;
+};
+
+// Mirrors list_finance_refund_entitlement_mismatches()'s exact return
+// shape. Each of the three mismatch_type values is a SAFE-DIRECTION-ONLY
+// signal (an EXISTS-based positive finding, never inferred from an
+// absence of rows) -- see that RPC's own migration comment for exactly
+// why the absence direction is unsafe (a repurchase of the same book
+// silently overwrites that book's purchases row's own
+// stripe_payment_intent_id, so "zero matching purchases rows" does not
+// reliably mean anything by itself).
+export type RefundEntitlementMismatchType =
+  | "refunded_request_active_purchase"
+  | "refunded_request_active_bundle_snapshot"
+  | "purchase_refunded_request_unresolved";
+
+export type FinanceRefundEntitlementMismatchRow = {
+  mismatch_type: RefundEntitlementMismatchType;
+  refund_request_id: string | null;
+  purchase_id: string | null;
+  bundle_checkout_snapshot_id: string | null;
+  reader_id: string | null;
+  reader_display_name: string | null;
+  stripe_payment_intent_id: string;
+  amount_cents: number;
+};
+
+// Mirrors get_finance_summary_counts()'s exact return shape -- counts
+// only, deliberately no monetary aggregate (see that RPC's own migration
+// comment: no SUM(amount_cents) anywhere, since none of these counts
+// have a concrete operational use for a dollar total).
+export type FinanceSummaryCounts = {
+  refund_needs_attention_count: number;
+  dispute_needs_attention_count: number;
+  checkout_exception_count: number;
+  refund_entitlement_mismatch_count: number;
 };
