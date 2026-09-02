@@ -33,8 +33,13 @@ const {
   listFinanceCheckoutExceptions,
   listFinanceRefundEntitlementMismatches,
   getFinanceSummaryCounts,
-  mapFinanceRpcError,
 } = await import("./actions");
+
+// ADMIN-1D PART C compliance correction: mapFinanceRpcError moved from
+// ./actions.ts to ./finance-logic.ts -- see that file's own "RPC error
+// mapping" comment for why (a "use server" module may only export async
+// functions; this is a plain sync function).
+const { mapFinanceRpcError } = await import("./finance-logic");
 
 describe("finance server primitives: source-level guards", () => {
   it("never imports createAdminClient/the service-role client", () => {

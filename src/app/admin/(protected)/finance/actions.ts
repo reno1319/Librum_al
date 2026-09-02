@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
+import { mapFinanceRpcError, GENERIC_FINANCE_ERROR_MESSAGE } from "./finance-logic";
 import type {
   FinanceRefundReconciliationRow,
   FinanceDisputeRow,
@@ -34,29 +35,12 @@ import type {
 // reviewed RPC. See supabase/migrations/043_finance_reconciliation_
 // reads.sql for the full design reasoning behind each RPC's shape.
 
-export const GENERIC_FINANCE_ERROR_MESSAGE = "Something went wrong. Please try again.";
-
-// The exact `raise exception '...'` strings every migration-043 RPC can
-// produce, mapped to admin-facing copy. Deliberately NOT a passthrough
-// of error.message -- anything not in this list falls through to
-// GENERIC_FINANCE_ERROR_MESSAGE rather than ever reaching the browser,
-// the same discipline mapAuditRpcError/mapReviewRpcError already
-// establish in this codebase.
-export const FINANCE_RPC_NOT_AUTHENTICATED_MESSAGE = "not authenticated";
-
-const KNOWN_FINANCE_RPC_ERROR_MESSAGES: Record<string, string> = {
-  "not authorized": "You don't have permission to view finance data.",
-  "invalid operational_state filter": "That's not a valid refund state filter.",
-  "invalid cursor": "That pagination link is no longer valid.",
-};
-
-export function mapFinanceRpcError(error: { message?: string | null } | null | undefined): string {
-  const message = error?.message?.trim();
-  if (!message) {
-    return GENERIC_FINANCE_ERROR_MESSAGE;
-  }
-  return KNOWN_FINANCE_RPC_ERROR_MESSAGES[message] ?? GENERIC_FINANCE_ERROR_MESSAGE;
-}
+// GENERIC_FINANCE_ERROR_MESSAGE, FINANCE_RPC_NOT_AUTHENTICATED_MESSAGE,
+// and mapFinanceRpcError moved to ./finance-logic.ts (ADMIN-1D PART C
+// compliance correction) -- this file's own top-of-file comment and
+// finance-logic.ts's own "RPC error mapping" section explain why: a
+// "use server" module may only export async functions, and these three
+// are not. See finance-logic.ts for the full explanation.
 
 export type FinanceListResult<T> = { ok: true; data: T[] } | { ok: false; error: string };
 export type FinanceSummaryResult =

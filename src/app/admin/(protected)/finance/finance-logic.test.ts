@@ -4,6 +4,7 @@ import {
   describeRefundOperationalState,
   describeNeedsAttention,
   describeDisputeStatus,
+  describeTransferReversalStatus,
   describeCheckoutReconciliationReason,
   describeRefundEntitlementMismatch,
 } from "./finance-logic";
@@ -141,6 +142,27 @@ describe("describeCheckoutReconciliationReason", () => {
     const disputedLabel = describeCheckoutReconciliationReason("disputed_lost");
     const otherLabel = describeCheckoutReconciliationReason("active_other_session");
     expect(disputedLabel).not.toBe(otherLabel);
+  });
+});
+
+describe("describeTransferReversalStatus", () => {
+  it("labels every value the transfer_reversal_status CHECK constraint allows (migration 036)", () => {
+    expect(describeTransferReversalStatus("not_attempted")).toBe("No reversal required");
+    expect(describeTransferReversalStatus("attempting")).toBe("Reversal attempting");
+    expect(describeTransferReversalStatus("succeeded")).toBe("Reversal completed");
+    expect(describeTransferReversalStatus("failed")).toBe("Reversal failed");
+  });
+
+  it("fails safe for an unrecognized value, never crashing or inventing a new state", () => {
+    expect(describeTransferReversalStatus("some_future_status")).toBe("Reversal status unknown");
+  });
+
+  it("never implies a Retry action in any label", () => {
+    for (const status of ["not_attempted", "attempting", "succeeded", "failed", "unknown"]) {
+      const label = describeTransferReversalStatus(status);
+      expect(label.toLowerCase()).not.toContain("retry");
+      expect(label.toLowerCase()).not.toContain("click");
+    }
   });
 });
 

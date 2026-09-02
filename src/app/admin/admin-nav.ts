@@ -30,12 +30,17 @@ export type AdminNavItem = {
 // Only owner/admin currently hold audit.view, so this is the first entry
 // in this list moderator/support never see, same visibility rule as
 // every other entry: driven entirely by the matrix, not a special case.
+//
+// ADMIN-1D PART C: Finance added, gated by finance.view -- the same
+// permission src/app/admin/(protected)/finance/page.tsx itself requires.
+// Owner/admin only, same as audit.view.
 export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   { href: "/admin", label: "Dashboard", permission: "admin.access" },
   { href: "/admin/reports", label: "Book reports", permission: "reports.view" },
   { href: "/admin/refunds", label: "Refund requests", permission: "refunds.view" },
   { href: "/admin/staff", label: "Staff", permission: "staff.view" },
   { href: "/admin/audit", label: "Audit log", permission: "audit.view" },
+  { href: "/admin/finance", label: "Finance", permission: "finance.view" },
 ];
 
 // Pure visibility resolver -- every /admin/* role's nav is derived from

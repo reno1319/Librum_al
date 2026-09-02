@@ -14,6 +14,56 @@ import type { RefundOperationalState, RefundEntitlementMismatchType } from "@/li
 // /admin/audit page that came later.
 
 // ============================================================
+// RPC error mapping (ADMIN-1D PART C compliance correction).
+// ============================================================
+//
+// These three exports originally lived in ./actions.ts, mirroring that
+// file's own inline comment reasoning at the time. That placement was a
+// real defect, not just a style choice: ./actions.ts starts with
+// "use server", and Next.js requires every top-level export of a
+// "use server" module to be an async function -- a plain string constant
+// or a synchronous function is not a valid server-action export. This
+// went undetected through all of Part B because no page.tsx imported the
+// module through Next's actual build pipeline yet (only vitest, which
+// does not enforce this rule); ADMIN-1D Part C's own required `npm run
+// build` validation step is what surfaced it -- confirmed via a
+// reversible local experiment (stripping `export` from these three items
+// let the build succeed; the file was then restored byte-for-byte from a
+// backup before this fix was made intentionally, in its own right).
+//
+// Moving them here instead restores this codebase's own established
+// convention -- ../audit/audit-log-logic.ts already keeps its own
+// equivalent trio (GENERIC_AUDIT_ERROR_MESSAGE/AUDIT_RPC_NOT_
+// AUTHENTICATED_MESSAGE/mapAuditRpcError) in its own pure-logic module,
+// never in the "use server" actions.ts beside it. No RPC signature,
+// permission check, or read/error-mapping BEHAVIOR changes here --
+// ./actions.ts now imports mapFinanceRpcError from this file instead of
+// defining it inline.
+export const GENERIC_FINANCE_ERROR_MESSAGE = "Something went wrong. Please try again.";
+
+// The exact `raise exception '...'` strings every migration-043 RPC can
+// produce, mapped to admin-facing copy. Deliberately NOT a passthrough
+// of error.message -- anything not in this list falls through to
+// GENERIC_FINANCE_ERROR_MESSAGE rather than ever reaching the browser,
+// the same discipline mapAuditRpcError/mapReviewRpcError already
+// establish in this codebase.
+export const FINANCE_RPC_NOT_AUTHENTICATED_MESSAGE = "not authenticated";
+
+const KNOWN_FINANCE_RPC_ERROR_MESSAGES: Record<string, string> = {
+  "not authorized": "You don't have permission to view finance data.",
+  "invalid operational_state filter": "That's not a valid refund state filter.",
+  "invalid cursor": "That pagination link is no longer valid.",
+};
+
+export function mapFinanceRpcError(error: { message?: string | null } | null | undefined): string {
+  const message = error?.message?.trim();
+  if (!message) {
+    return GENERIC_FINANCE_ERROR_MESSAGE;
+  }
+  return KNOWN_FINANCE_RPC_ERROR_MESSAGES[message] ?? GENERIC_FINANCE_ERROR_MESSAGE;
+}
+
+// ============================================================
 // Refund operational-state labels.
 // ============================================================
 
@@ -100,6 +150,27 @@ const TERMINAL_DISPUTE_STATUS_LABELS: Record<string, string> = {
 // due" or "Response required by <date>".
 export function describeDisputeStatus(status: string): string {
   return TERMINAL_DISPUTE_STATUS_LABELS[status] ?? "Open dispute — review in Stripe";
+}
+
+// ============================================================
+// Transfer-reversal status labels (ADMIN-1D Part C addition -- reversal
+// state stays part of dispute presentation, never a standalone page, per
+// this part's own design brief). Uses only the vocabulary payment_
+// disputes.transfer_reversal_status's own CHECK constraint allows
+// (migration 036: 'not_attempted' | 'attempting' | 'succeeded' |
+// 'failed') -- no new state invented, no Retry action implied by any of
+// these labels.
+// ============================================================
+
+const TRANSFER_REVERSAL_STATUS_LABELS: Record<string, string> = {
+  not_attempted: "No reversal required",
+  attempting: "Reversal attempting",
+  succeeded: "Reversal completed",
+  failed: "Reversal failed",
+};
+
+export function describeTransferReversalStatus(status: string): string {
+  return TRANSFER_REVERSAL_STATUS_LABELS[status] ?? "Reversal status unknown";
 }
 
 // ============================================================
