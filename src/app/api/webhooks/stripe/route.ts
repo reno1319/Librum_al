@@ -2429,6 +2429,76 @@ export async function processAccountUpdatedEvent(
   return null;
 }
 
+// ============================================================
+// LIBRUM 2.0 CONNECT-HARDEN-2: this one URL now receives deliveries from
+// TWO separate Stripe event destinations. The pre-existing platform
+// destination (STRIPE_WEBHOOK_SECRET, "Events from: Your account") keeps
+// working exactly as before. A second, Connected-accounts destination
+// (STRIPE_CONNECT_WEBHOOK_SECRET, "Events from: Connected accounts") is
+// required to receive account.updated at all -- Stripe's Workbench UI
+// does not allow changing an existing destination's "Events from"
+// source after creation, so a second destination is the only way to add
+// Connect-scoped events, and each destination signs its own deliveries
+// with its own, different secret. This tries each approved secret in
+// turn; there is no fallback that skips verification, matches on event
+// type, or trusts an unsigned payload -- every accepted event is
+// cryptographically verified against one of these two specific,
+// server-configured secrets before anything below ever sees it.
+// ============================================================
+
+type StripeWebhookConstructClient = Pick<Stripe, "webhooks">;
+
+export type StripeEventVerificationResult =
+  | { ok: true; event: Stripe.Event }
+  | { ok: false };
+
+// Exported (only) for the same reason as every other handler in this
+// file: direct testability with a fake { webhooks: { constructEvent } }
+// client (src/app/api/webhooks/stripe/route.test.ts) -- never invoked
+// with anything but the raw, unmodified request body Stripe itself
+// requires for signature verification.
+export function constructStripeEventFromApprovedSecrets(
+  stripeClient: StripeWebhookConstructClient,
+  body: string,
+  signature: string,
+): StripeEventVerificationResult {
+  try {
+    return {
+      ok: true,
+      event: stripeClient.webhooks.constructEvent(
+        body,
+        signature,
+        process.env.STRIPE_WEBHOOK_SECRET!,
+      ),
+    };
+  } catch {
+    // Falls through to the Connect destination's secret below, if one is
+    // configured -- this function never assumes WHY the platform secret
+    // failed to verify (wrong secret, or simply a delivery signed by the
+    // other destination), it only tries the next approved secret.
+  }
+
+  const connectSecret = process.env.STRIPE_CONNECT_WEBHOOK_SECRET;
+  if (!connectSecret) {
+    // Not configured yet -- e.g. before the second Stripe destination
+    // exists. Existing platform-webhook behavior is completely
+    // unaffected: this is exactly the same failure result POST() would
+    // have produced before this change existed for a signature that
+    // fails STRIPE_WEBHOOK_SECRET. Never a startup/module-load failure
+    // -- this is only read here, at request time.
+    return { ok: false };
+  }
+
+  try {
+    return {
+      ok: true,
+      event: stripeClient.webhooks.constructEvent(body, signature, connectSecret),
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
 // Stripe calls this URL directly (not a browser), so it must read the
 // raw request body to verify the signature — no cookies/session involved.
 export async function POST(request: Request) {
@@ -2439,16 +2509,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing signature" }, { status: 400 });
   }
 
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET!,
-    );
-  } catch {
+  const verification = constructStripeEventFromApprovedSecrets(stripe, body, signature);
+  if (!verification.ok) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
+  const event = verification.event;
 
   // A failure here means Stripe was paid but Librum failed to persist the
   // entitlement/refund it's supposed to represent -- that must never be

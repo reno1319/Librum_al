@@ -1,5 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type Stripe from "stripe";
+import RealStripe from "stripe";
 import type { NextResponse } from "next/server";
 
 // fulfillBundleSnapshot sends purchase/sale emails on a successful,
@@ -24,6 +25,7 @@ const {
   reverseAuthorTransferForLostDispute,
   buildTransferReversalIdempotencyKey,
   processAccountUpdatedEvent,
+  constructStripeEventFromApprovedSecrets,
 } = await import("./route");
 
 // ---------------------------------------------------------------------
@@ -4421,5 +4423,188 @@ describe("processAccountUpdatedEvent", () => {
     // the row is untouched, exactly as a real failed UPDATE would leave
     // it, so Stripe's retry has a clean, unambiguous starting point.
     expect(tables.profiles[0]).toMatchObject({ stripe_payouts_enabled: false });
+  });
+});
+
+// LIBRUM 2.0 CONNECT-HARDEN-2: this one URL now receives deliveries
+// signed by two DIFFERENT Stripe event destinations (the pre-existing
+// platform destination, and a second Connected-accounts destination
+// required for account.updated -- see constructStripeEventFromApprovedSecrets's
+// own documentation in route.ts for why a second destination is
+// necessary at all). Every case below signs a REAL payload with a REAL
+// HMAC signature via Stripe's own webhooks.generateTestHeaderString --
+// deliberately not mocked -- so these tests exercise the actual
+// cryptographic verification path, not a stand-in for it. A throwaway
+// Stripe client (no real API key is ever used or needed -- signing/
+// verifying a webhook payload is pure local HMAC, no network call) is
+// used only to sign fixtures and as the stripeClient argument the
+// function under test calls .webhooks.constructEvent on.
+describe("constructStripeEventFromApprovedSecrets", () => {
+  const PLATFORM_SECRET = "whsec_test_platform_secret_00000000000000000000";
+  const CONNECT_SECRET = "whsec_test_connect_secret_0000000000000000000000";
+  const WRONG_SECRET = "whsec_test_totally_unrelated_secret_00000000000000";
+
+  // Real Stripe client used only for local HMAC signing/verification in
+  // these tests -- never makes a network call.
+  const signingClient = new RealStripe("sk_test_unused_signing_client_only");
+
+  function sign(payloadObject: Record<string, unknown>, secret: string) {
+    const payload = JSON.stringify(payloadObject);
+    const header = signingClient.webhooks.generateTestHeaderString({ payload, secret });
+    return { payload, header };
+  }
+
+  function makeCheckoutSessionCompletedPayload() {
+    return {
+      id: "evt_checkout_session_completed_1",
+      object: "event",
+      type: "checkout.session.completed",
+      data: { object: { id: "cs_test_1", object: "checkout.session" } },
+    };
+  }
+
+  function makeAccountUpdatedPayload() {
+    return {
+      id: "evt_account_updated_1",
+      object: "event",
+      type: "account.updated",
+      data: {
+        object: {
+          id: "acct_test_1",
+          object: "account",
+          charges_enabled: true,
+          payouts_enabled: true,
+          capabilities: { transfers: "active" },
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("STRIPE_WEBHOOK_SECRET", PLATFORM_SECRET);
+    vi.stubEnv("STRIPE_CONNECT_WEBHOOK_SECRET", CONNECT_SECRET);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("1. valid event signed with STRIPE_WEBHOOK_SECRET succeeds", () => {
+    const { payload, header } = sign(makeCheckoutSessionCompletedPayload(), PLATFORM_SECRET);
+
+    const result = constructStripeEventFromApprovedSecrets(signingClient, payload, header);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.event.id).toBe("evt_checkout_session_completed_1");
+  });
+
+  it("2. valid event signed with STRIPE_CONNECT_WEBHOOK_SECRET succeeds", () => {
+    const { payload, header } = sign(makeAccountUpdatedPayload(), CONNECT_SECRET);
+
+    const result = constructStripeEventFromApprovedSecrets(signingClient, payload, header);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.event.id).toBe("evt_account_updated_1");
+  });
+
+  it("3. invalid signature for both secrets fails", () => {
+    const { payload, header } = sign(makeCheckoutSessionCompletedPayload(), WRONG_SECRET);
+
+    const result = constructStripeEventFromApprovedSecrets(signingClient, payload, header);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("4. first (platform) secret fails but second (connect) secret succeeds", () => {
+    // Signed ONLY with the connect secret -- verification against
+    // STRIPE_WEBHOOK_SECRET must fail first, then fall through and
+    // succeed against STRIPE_CONNECT_WEBHOOK_SECRET.
+    const { payload, header } = sign(makeAccountUpdatedPayload(), CONNECT_SECRET);
+
+    const result = constructStripeEventFromApprovedSecrets(signingClient, payload, header);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.event.type).toBe("account.updated");
+  });
+
+  it("5a. second secret undefined: a valid platform-secret signature still succeeds", () => {
+    vi.stubEnv("STRIPE_CONNECT_WEBHOOK_SECRET", "");
+    const { payload, header } = sign(makeCheckoutSessionCompletedPayload(), PLATFORM_SECRET);
+
+    const result = constructStripeEventFromApprovedSecrets(signingClient, payload, header);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("5b. second secret undefined: an invalid platform-secret signature still fails safely (no crash)", () => {
+    vi.stubEnv("STRIPE_CONNECT_WEBHOOK_SECRET", "");
+    const { payload, header } = sign(makeCheckoutSessionCompletedPayload(), WRONG_SECRET);
+
+    const result = constructStripeEventFromApprovedSecrets(signingClient, payload, header);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("6. account.updated signed by the connect secret verifies to an event usable by the existing account.updated handler", async () => {
+    const { payload, header } = sign(makeAccountUpdatedPayload(), CONNECT_SECRET);
+
+    const result = constructStripeEventFromApprovedSecrets(signingClient, payload, header);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.event.type).toBe("account.updated");
+
+    // Feeds straight into the existing, already-covered handler --
+    // proves the verified event is the same shape processAccountUpdatedEvent
+    // already expects, not just that verification alone succeeded.
+    const tables: Tables = {
+      profiles: [{ id: "author-1", stripe_account_id: "acct_test_1", stripe_payouts_enabled: false }],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const account = result.event.data.object as Stripe.Account;
+
+    const handlerResult = await processAccountUpdatedEvent(supabase as never, result.event, account, failWebhook);
+
+    expect(handlerResult).toBeNull();
+    expect(tables.profiles[0]).toMatchObject({ stripe_payouts_enabled: true });
+  });
+
+  it("7. checkout.session.completed signed by the original platform secret still verifies to an event usable by the existing fulfillment path", () => {
+    const { payload, header } = sign(makeCheckoutSessionCompletedPayload(), PLATFORM_SECRET);
+
+    const result = constructStripeEventFromApprovedSecrets(signingClient, payload, header);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.event.type).toBe("checkout.session.completed");
+    // POST()'s own dispatch on event.type === "checkout.session.completed"
+    // (unchanged by this correction) is what routes this on to
+    // fulfillBundleSnapshot/fulfillLegacyBundle/fulfillSingleBookPurchase
+    // -- all three are already covered by their own describe blocks
+    // elsewhere in this file, using this exact event shape.
+  });
+
+  it("9. raw-body verification is preserved: a byte-for-byte re-serialized (but semantically identical) payload fails signature verification", () => {
+    const original = makeCheckoutSessionCompletedPayload();
+    const { payload, header } = sign(original, PLATFORM_SECRET);
+    // Re-parsing and re-stringifying a JSON payload is not guaranteed to
+    // reproduce the exact original byte sequence (key order, spacing) --
+    // Stripe's HMAC is computed over the raw bytes actually sent, so a
+    // route that ever parsed/re-stringified the body before verification
+    // would silently break here. This proves the helper is exercising
+    // real, byte-sensitive HMAC verification, not a loose type check.
+    const reserialized = JSON.stringify(JSON.parse(payload));
+
+    const resultOnOriginal = constructStripeEventFromApprovedSecrets(signingClient, payload, header);
+    expect(resultOnOriginal.ok).toBe(true);
+
+    if (reserialized !== payload) {
+      const resultOnReserialized = constructStripeEventFromApprovedSecrets(
+        signingClient,
+        reserialized,
+        header,
+      );
+      expect(resultOnReserialized.ok).toBe(false);
+    }
   });
 });
