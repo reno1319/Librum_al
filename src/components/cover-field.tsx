@@ -63,13 +63,18 @@ export function CoverField({
   // as the fallback preview. Omit entirely for New Book.
   existingCoverUrl?: string;
   // Display-only info for the caller's own step-readiness/review UI --
-  // never a File (see the top-of-file comment for why).
-  onCoverChange?: (info: { name: string } | null) => void;
+  // never a File (see the top-of-file comment for why). LIBRUM 2.0
+  // PUBLISHING-UX-1 PART C: now also carries the same local
+  // Object-URL preview this field already renders itself, so a caller
+  // (the new wizard's Review step) can show an actual thumbnail
+  // without introducing a second upload/preview implementation.
+  onCoverChange?: (info: { name: string; previewUrl: string } | null) => void;
 }) {
   const isReplaceMode = existingCoverUrl !== undefined;
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [readyFileName, setReadyFileName] = useState<string | null>(null);
 
   const hiddenPathInputRef = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
@@ -132,6 +137,7 @@ export function CoverField({
     }
     setHiddenPath(null);
     setErrorMessage("");
+    setReadyFileName(null);
 
     if (!file) {
       setStatus("idle");
@@ -185,7 +191,8 @@ export function CoverField({
 
         setStatus("success");
         setHiddenPath(tempPath);
-        onCoverChange?.({ name: file.name });
+        setReadyFileName(file.name);
+        onCoverChange?.({ name: file.name, previewUrl: nextPreviewUrl });
       } catch (err) {
         console.error("CoverField: cover upload failed:", err);
         void removeTempObject(tempPath);
@@ -243,7 +250,7 @@ export function CoverField({
       )}
 
       <label className="flex flex-col gap-1 text-sm">
-        {isReplaceMode ? "Replace cover image" : "Cover image"}
+        {status === "success" ? "Replace cover" : isReplaceMode ? "Replace cover image" : "Cover image"}
         <input
           type="file"
           accept="image/png,image/jpeg"
@@ -264,6 +271,12 @@ export function CoverField({
       {status === "uploading" && (
         <p role="status" className="text-sm text-muted">
           Uploading cover…
+        </p>
+      )}
+
+      {status === "success" && readyFileName && (
+        <p role="status" className="text-sm text-primary">
+          Cover ready — {readyFileName}
         </p>
       )}
 

@@ -214,10 +214,21 @@ export type RepackageResult = { success: true } | { success: false; error: strin
 // action's own request/response -- cheap and repeatable, callable on
 // every title keystroke exactly as the pre-413-correction design's
 // packageEpub() was.
+// LIBRUM 2.0 PUBLISHING-UX-1 PART C: `language` is a new optional
+// parameter, passed straight through to patchEpubMetadata()'s own
+// (also optional) fourth parameter -- omitted here means omitted
+// there, which leaves the generated EPUB's dc:language exactly as
+// parseDocxToDocument() first packaged it (always "und" today, since
+// that function's own generateEpub() call never supplies a language
+// either -- see this function's own top-of-file comment for why that
+// stays unchanged: mirrors the pre-existing title/author bootstrap
+// pattern exactly, where the FIRST packaging is always a placeholder
+// and this repackage call is what supplies the real value once known).
 export async function repackageWithTitle(
   conversionId: string,
   bookTitle: string,
   authorName: string,
+  language?: string | null,
 ): Promise<RepackageResult> {
   const auth = await requireOwnedTempPath(conversionId);
   if (!auth.ok) return { success: false, error: auth.error };
@@ -238,7 +249,7 @@ export async function repackageWithTitle(
 
   let patched: Buffer;
   try {
-    patched = await patchEpubMetadata(epubBytes, title, author);
+    patched = await patchEpubMetadata(epubBytes, title, author, language);
   } catch (err) {
     console.error("repackageWithTitle: metadata patch failed:", err);
     return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };

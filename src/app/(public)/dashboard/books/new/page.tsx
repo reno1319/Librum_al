@@ -27,12 +27,21 @@ export default async function NewBookPage({
 
   const [{ data: series }, { data: profile }] = await Promise.all([
     supabase.from("series").select("*").eq("author_id", user.id).order("title").returns<Series[]>(),
-    // LIBRUM 2.0 PRODUCT-5: the only reason this page needs the
-    // author's own display_name at all -- passed through to
+    // LIBRUM 2.0 PRODUCT-5: display_name is passed through to
     // ManuscriptField so a DOCX-converted EPUB's internal dc:creator
     // metadata uses Librum's authoritative name, never anything
     // inferred from the manuscript itself.
-    supabase.from("profiles").select("display_name").eq("id", user.id).single(),
+    //
+    // LIBRUM 2.0 PUBLISHING-UX-1 PART C: stripe_payouts_enabled is the
+    // ONE new column this pass reads, mirroring the Edit Book page's own
+    // identical read (see its page.tsx) -- display-only context for the
+    // Review step's readiness section (resolvePublishReadiness()), never
+    // a pre-submit gate: Publish book can still be pressed regardless,
+    // since performPublish() (actions.ts) remains the one real
+    // server-side enforcement point. Never used to build a pre-submit
+    // link to /dashboard/payouts -- that would risk losing unsaved
+    // wizard state.
+    supabase.from("profiles").select("display_name, stripe_payouts_enabled").eq("id", user.id).single(),
   ]);
 
   return (
@@ -52,7 +61,12 @@ export default async function NewBookPage({
         </Alert>
       )}
 
-      <UploadWizard series={series ?? []} authorName={profile?.display_name ?? ""} authorId={user.id} />
+      <UploadWizard
+        series={series ?? []}
+        authorName={profile?.display_name ?? ""}
+        authorId={user.id}
+        payoutsEnabled={!!profile?.stripe_payouts_enabled}
+      />
     </main>
   );
 }

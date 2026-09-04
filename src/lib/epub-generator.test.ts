@@ -271,6 +271,52 @@ describe("patchEpubMetadata", () => {
     const result = await validateEpubStructure(patched);
     expect(result).toEqual({ valid: true });
   });
+
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART C: the new, optional fourth
+  // `language` parameter. The omitted-parameter case is already the
+  // real-world regression the tests above protect (every call above
+  // passes only title+author, and dc:language still reads "und") --
+  // these cover the parameter's own contract directly: an explicit
+  // code patches dc:language, an explicit null/blank falls back to
+  // "und" via the same resolveEpubLanguageCode() generateEpub() itself
+  // already uses (one resolution rule, shared, never two independently
+  // invented ones).
+  describe("language parameter", () => {
+    it.each(["sq", "en", "it"])("patches dc:language to '%s' when explicitly supplied", async (code) => {
+      const original = await generateEpub(BASE_INPUT);
+      const patched = await patchEpubMetadata(original, "New Title", "New Author", code);
+      const opf = await (await JSZip.loadAsync(patched)).file("OEBPS/content.opf")!.async("string");
+      expect(opf).toContain(`<dc:language>${code}</dc:language>`);
+    });
+
+    it("falls back to 'und' when language is explicitly null", async () => {
+      const original = await generateEpub(BASE_INPUT);
+      const patched = await patchEpubMetadata(original, "New Title", "New Author", null);
+      const opf = await (await JSZip.loadAsync(patched)).file("OEBPS/content.opf")!.async("string");
+      expect(opf).toContain("<dc:language>und</dc:language>");
+    });
+
+    it("falls back to 'und' when language is explicitly blank/whitespace-only", async () => {
+      const original = await generateEpub(BASE_INPUT);
+      const patched = await patchEpubMetadata(original, "New Title", "New Author", "   ");
+      const opf = await (await JSZip.loadAsync(patched)).file("OEBPS/content.opf")!.async("string");
+      expect(opf).toContain("<dc:language>und</dc:language>");
+    });
+
+    it("leaves a previously-patched dc:language completely untouched when a later call omits the parameter", async () => {
+      const original = await generateEpub(BASE_INPUT);
+      const firstPatch = await patchEpubMetadata(original, "First Title", "First Author", "en");
+      const firstOpf = await (await JSZip.loadAsync(firstPatch)).file("OEBPS/content.opf")!.async("string");
+      expect(firstOpf).toContain("<dc:language>en</dc:language>");
+
+      // No fourth argument at all -- the omitted case, not an explicit
+      // undefined -- must leave the "en" set by the first patch alone.
+      const secondPatch = await patchEpubMetadata(firstPatch, "Second Title", "Second Author");
+      const secondOpf = await (await JSZip.loadAsync(secondPatch)).file("OEBPS/content.opf")!.async("string");
+      expect(secondOpf).toContain("<dc:language>en</dc:language>");
+      expect(secondOpf).toContain("<dc:title>Second Title</dc:title>");
+    });
+  });
 });
 
 describe("DOCX -> EPUB -> Read Sample round trip", () => {

@@ -200,10 +200,20 @@ ${spineItems}
 // compression invariant and leave every other entry's bytes
 // unchanged -- the same "verify JSZip behavior directly, never assume
 // it" discipline the mimetype-compression test below already follows.
+// LIBRUM 2.0 PUBLISHING-UX-1 PART C: `language` is a fourth, optional
+// parameter -- omitted (the exact shape every pre-Part-C caller already
+// uses) leaves the EPUB's existing dc:language entry byte-for-byte
+// untouched, exactly as before this parameter existed. Only a caller
+// that explicitly passes it (Part C's own wizard, once Book Details
+// collects a real Language before Files is ever reached) gets its
+// dc:language patched too, via the same resolveEpubLanguageCode()
+// fallback-to-"und" resolution generateEpub() already uses -- one
+// resolution rule, shared, never two independently-invented ones.
 export async function patchEpubMetadata(
   epubBytes: Buffer,
   title: string,
   authorName: string,
+  language?: string | null,
 ): Promise<Buffer> {
   const zip = await JSZip.loadAsync(epubBytes);
   const opfEntry = zip.file("OEBPS/content.opf");
@@ -222,13 +232,24 @@ export async function patchEpubMetadata(
     throw new Error("patchEpubMetadata: dc:creator not found in OPF");
   }
 
-  const patched = opf
+  let patched = opf
     .replace(titleMatch[0], `<dc:title>${escapeXml(title)}</dc:title>`)
     .replace(creatorMatch[0], `<dc:creator>${escapeXml(authorName)}</dc:creator>`)
     .replace(
       /<meta property="dcterms:modified">[\s\S]*?<\/meta>/,
       `<meta property="dcterms:modified">${modifiedAt}</meta>`,
     );
+
+  if (language !== undefined) {
+    const languageMatch = opf.match(/<dc:language>[\s\S]*?<\/dc:language>/);
+    if (!languageMatch) {
+      throw new Error("patchEpubMetadata: dc:language not found in OPF");
+    }
+    patched = patched.replace(
+      languageMatch[0],
+      `<dc:language>${escapeXml(resolveEpubLanguageCode(language))}</dc:language>`,
+    );
+  }
 
   zip.file("OEBPS/content.opf", patched);
   return zip.generateAsync({ type: "nodebuffer" });

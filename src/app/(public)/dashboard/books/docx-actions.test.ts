@@ -216,4 +216,34 @@ describe("repackageWithTitle", () => {
       error: "Something went wrong converting this document. Please try again.",
     });
   });
+
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART C: the new, optional fourth
+  // `language` parameter -- passed straight through to
+  // patchEpubMetadata()'s own optional fourth parameter (see
+  // epub-generator.test.ts for that function's own direct contract
+  // tests). These cover the pass-through itself: a real code reaches
+  // the stored temp EPUB's dc:language, and omitting the argument
+  // (the shape every call above already uses) leaves dc:language at
+  // "und" -- parseDocxToDocument()'s own placeholder packaging, which
+  // this function's own top-of-file comment says is deliberately never
+  // supplied a language either.
+  it.each(["sq", "en", "it"])("threads language '%s' into the repackaged temp EPUB's dc:language", async (code) => {
+    const conversionId = await storedTempEpub();
+    const result = await repackageWithTitle(conversionId, "The Maltese Falcon", "Dashiell Hammett", code);
+    expect(result).toEqual({ success: true });
+
+    const zip = await JSZip.loadAsync(fakeStorage.objects.get(conversionId)!);
+    const opf = await zip.file("OEBPS/content.opf")!.async("string");
+    expect(opf).toContain(`<dc:language>${code}</dc:language>`);
+  });
+
+  it("leaves dc:language at 'und' when the language argument is omitted", async () => {
+    const conversionId = await storedTempEpub();
+    const result = await repackageWithTitle(conversionId, "The Maltese Falcon", "Dashiell Hammett");
+    expect(result).toEqual({ success: true });
+
+    const zip = await JSZip.loadAsync(fakeStorage.objects.get(conversionId)!);
+    const opf = await zip.file("OEBPS/content.opf")!.async("string");
+    expect(opf).toContain("<dc:language>und</dc:language>");
+  });
 });

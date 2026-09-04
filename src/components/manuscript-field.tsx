@@ -53,6 +53,7 @@ const UPLOAD_FAILED_ERROR =
 
 export function ManuscriptField({
   bookTitle,
+  bookLanguage,
   authorName,
   authorId,
   onManuscriptChange,
@@ -61,6 +62,16 @@ export function ManuscriptField({
   // Initial seed only -- see the title-input listener effect below for
   // why this isn't the ongoing source of truth once mounted.
   bookTitle: string;
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART C: same "initial seed only" role as
+  // bookTitle, mirrored exactly -- the ongoing source of truth, once
+  // mounted, is the surrounding form's own "language" field, tracked
+  // live the same way the title already is (see the shared listener
+  // effect below). Optional: Edit Book does not pass this prop and has
+  // no "language" form field for the listener to find, which the
+  // listener already tolerates (see the null-check there) -- a
+  // directly-uploaded/converted manuscript's language metadata on Edit
+  // Book is unaffected, exactly as before this parameter existed.
+  bookLanguage?: string;
   // Never live-edited anywhere in either book form (no author-name
   // field exists in Book Details -- it's profiles.display_name, only
   // ever changed from Dashboard > Profile, a different page/session
@@ -93,9 +104,17 @@ export function ManuscriptField({
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [warnings, setWarnings] = useState<ConversionWarning[]>([]);
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART C: a persistent "Manuscript ready"
+  // state, mirroring CoverField's own readyFileName -- every non-null
+  // call to setHiddenPath() below already corresponds exactly to "this
+  // manuscript is ready to submit" (see its own comment), so tracking
+  // it there keeps this in lockstep for both EPUB and DOCX modes alike,
+  // not just DOCX's pre-existing "converted successfully" message.
+  const [readyName, setReadyName] = useState<string | null>(null);
 
   const hiddenPathInputRef = useRef<HTMLInputElement>(null);
   const liveTitleRef = useRef(bookTitle);
+  const liveLanguageRef = useRef(bookLanguage ?? "");
   const modeRef = useRef<"epub" | "docx">("epub");
   // The authoritative small reference this field maintains: whichever
   // temp EPUB Storage path (direct upload OR DOCX-generated, kept
@@ -120,6 +139,7 @@ export function ManuscriptField({
     }
     tempPathRef.current = path;
     displayNameRef.current = path ? displayName : null;
+    setReadyName(path ? displayName : null);
     onManuscriptChange?.(path && displayName ? { name: displayName } : null);
   }
 
@@ -154,7 +174,12 @@ export function ManuscriptField({
 
     const run = (async () => {
       try {
-        const result = await repackageWithTitle(conversionId, liveTitleRef.current, authorName);
+        const result = await repackageWithTitle(
+          conversionId,
+          liveTitleRef.current,
+          authorName,
+          liveLanguageRef.current || null,
+        );
         if (isStale(myRequestId)) return;
 
         if (!result.success) {
@@ -181,13 +206,19 @@ export function ManuscriptField({
     await run;
   }
 
-  // Live title: reads the surrounding form's own "title" field
-  // directly -- works identically for the wizard's React-controlled
-  // title input and Edit Book's plain defaultValue-uncontrolled one.
-  // Only a DOCX-generated manuscript needs repackaging on a title
-  // change -- a directly-uploaded EPUB's own internal metadata is
-  // whatever the author's own EPUB-authoring tool already wrote;
-  // Librum has never rewritten a directly-uploaded EPUB's metadata.
+  // Live title + language: reads the surrounding form's own "title"
+  // and "language" fields directly -- works identically for the
+  // wizard's React-controlled inputs and Edit Book's plain
+  // defaultValue-uncontrolled ones. Only a DOCX-generated manuscript
+  // needs repackaging on a title/language change -- a
+  // directly-uploaded EPUB's own internal metadata is whatever the
+  // author's own EPUB-authoring tool already wrote; Librum has never
+  // rewritten a directly-uploaded EPUB's metadata. The "language"
+  // field is optional here (Edit Book passes no bookLanguage prop and
+  // has no such field for this to find yet) -- when absent, the
+  // listener is simply never attached and liveLanguageRef keeps its
+  // seeded value, so a repackage triggered by title alone still runs,
+  // unaffected.
   useEffect(() => {
     const form = hiddenPathInputRef.current?.form;
     const rawTitleInput = form?.elements.namedItem("title");
@@ -198,17 +229,37 @@ export function ManuscriptField({
     // reverting to the pre-narrowed Element | RadioNodeList union.
     const titleInput: HTMLInputElement = rawTitleInput;
 
-    liveTitleRef.current = titleInput.value;
+    const rawLanguageInput = form?.elements.namedItem("language");
+    const languageInput =
+      rawLanguageInput instanceof HTMLSelectElement || rawLanguageInput instanceof HTMLInputElement
+        ? rawLanguageInput
+        : null;
 
-    function handleTitleInput() {
-      liveTitleRef.current = titleInput.value;
+    liveTitleRef.current = titleInput.value;
+    if (languageInput) liveLanguageRef.current = languageInput.value;
+
+    function triggerRepackageIfReady() {
       if (modeRef.current === "docx" && tempPathRef.current && displayNameRef.current) {
         void repackageAndFinalize(tempPathRef.current, displayNameRef.current);
       }
     }
 
+    function handleTitleInput() {
+      liveTitleRef.current = titleInput.value;
+      triggerRepackageIfReady();
+    }
+
+    function handleLanguageChange() {
+      if (languageInput) liveLanguageRef.current = languageInput.value;
+      triggerRepackageIfReady();
+    }
+
     titleInput.addEventListener("input", handleTitleInput);
-    return () => titleInput.removeEventListener("input", handleTitleInput);
+    languageInput?.addEventListener("change", handleLanguageChange);
+    return () => {
+      titleInput.removeEventListener("input", handleTitleInput);
+      languageInput?.removeEventListener("change", handleLanguageChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -436,7 +487,7 @@ export function ManuscriptField({
       {mode === "epub" ? (
         <div className="flex flex-col gap-2">
           <label className="flex flex-col gap-1 text-sm">
-            Manuscript file
+            {status === "success" ? "Replace manuscript" : "Manuscript file"}
             <input
               type="file"
               accept=".epub,application/epub+zip"
@@ -456,6 +507,12 @@ export function ManuscriptField({
             </p>
           )}
 
+          {status === "success" && readyName && (
+            <p role="status" className="text-sm text-primary">
+              Manuscript ready — {readyName}
+            </p>
+          )}
+
           {status === "error" && (
             <p
               role="alert"
@@ -468,7 +525,7 @@ export function ManuscriptField({
       ) : (
         <div className="flex flex-col gap-2">
           <label className="flex flex-col gap-1 text-sm">
-            Manuscript file
+            {status === "success" ? "Replace manuscript" : "Manuscript file"}
             <input
               type="file"
               accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -501,7 +558,9 @@ export function ManuscriptField({
 
           {status === "success" && (
             <div role="status" className="rounded-lg border-l-4 border-primary bg-surface px-3 py-2 text-sm">
-              <p className="font-medium text-foreground">DOCX converted successfully.</p>
+              <p className="font-medium text-foreground">
+                Manuscript ready{readyName ? ` — ${readyName}` : ""}
+              </p>
               <p className="mt-1 text-muted">
                 Your generated EPUB passed Librum&apos;s validation. Review the ebook
                 before publishing.
