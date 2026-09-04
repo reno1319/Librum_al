@@ -1,0 +1,290 @@
+name: Supabase Apply Migration 044 (one-off)
+
+# LIBRUM 2.0 -- PUBLISHING-UX-1 PART E STAGE A
+#
+# Temporary, manual-only workflow. Applies exactly the already-committed
+# supabase/migrations/044_book_bibliographic_metadata.sql through the
+# normal Supabase migration mechanism (`supabase db push --linked`),
+# once remote migration history 002-043 has been independently verified
+# and 044 is the sole remaining pending migration. Modeled directly on
+# supabase-apply-migration-043.yml (ADMIN-1D PART E STAGE A, since
+# removed after 043 was applied and verified) -- same gates, same
+# discipline, only the version numbers differ.
+#
+# This workflow's only mutating Supabase call, anywhere, is the single
+# `supabase db push --linked` invocation in the "Apply" step -- and it is
+# gated so it can only ever run once a pre-apply structured check has
+# proven 044 is the sole pending local migration. It never runs
+# `supabase migration repair`, never runs raw SQL / psql, never runs
+# `supabase migration up` or `supabase db reset`, and never touches
+# anything beyond migration-history state for 044.
+#
+# Verification is structured JSON, read from the diagnosed real shape of
+# `supabase migration list --linked --output-format json`:
+#   { "migrations": [ { "local": "002", "remote": "002", "time": "002" }, ... ],
+#     "message": "Migrations listed" }
+# `supabase migration list --linked` (human-readable) is also run once at
+# the end purely for an operator-readable log entry; it gates nothing --
+# every pass/fail decision in this workflow is made from the parsed JSON.
+#
+# Intended to be run once, by hand, via workflow_dispatch, then deleted
+# from the repository.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply-migration-044:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_ID: pwkukotgpsegieshulpj
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI (pinned to the diagnostic-verified version)
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+
+      - name: Verify jq availability
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq not found on this runner -- installing via apt (ubuntu-latest normally ships jq preinstalled)."
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+          jq --version
+
+      - name: Initialize and link Supabase project (ephemeral, not committed)
+        run: |
+          set -euo pipefail
+
+          if [ ! -f supabase/config.toml ]; then
+            echo "No supabase/config.toml found -- running supabase init to create ephemeral runner-local project state (this state is never committed)."
+            printf '\n' | supabase init --workdir .
+          else
+            echo "supabase/config.toml already present -- skipping init."
+          fi
+
+          supabase link \
+            --project-ref "$PROJECT_ID" \
+            --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Local migration-file safety gate
+        run: |
+          set -euo pipefail
+
+          echo "Verifying local migration file contract before any remote mutation..."
+
+          count_matches() {
+            ls supabase/migrations/"${1}"_*.sql 2>/dev/null | wc -l | tr -d ' '
+          }
+
+          if [ "$(count_matches 001)" -ne 0 ]; then
+            echo "SAFETY GATE FAILED: a migration 001 file exists. This repository is known to have no 001 -- refusing to proceed." >&2
+            exit 1
+          fi
+
+          failed=0
+          for v in $(seq -f "%03g" 2 44); do
+            n="$(count_matches "$v")"
+            if [ "$n" -ne 1 ]; then
+              echo "SAFETY GATE FAILED: expected exactly one migration file for version ${v}, found ${n}." >&2
+              failed=1
+            fi
+          done
+
+          # Anything numbered beyond 044 means the repository has advanced
+          # past the baseline this workflow was reviewed against. Decimal-
+          # safe parsing (10#$ver) avoids a zero-padded prefix like "008"
+          # being misread as an invalid octal literal.
+          for f in supabase/migrations/*.sql; do
+            base="$(basename "$f")"
+            if [[ "$base" =~ ^([0-9]{3})_ ]]; then
+              ver="${BASH_REMATCH[1]}"
+              ver_num=$((10#$ver))
+              if [ "$ver_num" -gt 44 ]; then
+                echo "SAFETY GATE FAILED: unexpected migration version ${ver} (${base}) found beyond the reviewed 002-044 baseline." >&2
+                failed=1
+              fi
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "Local safety gate failed -- refusing to apply anything. See errors above." >&2
+            exit 1
+          fi
+
+          echo "Local safety gate passed: 001 absent, 002-044 each present exactly once, nothing beyond 044."
+
+      - name: Structured pre-apply read (stdout only, JSON)
+        run: |
+          set -euo pipefail
+
+          # Deliberately NOT using 2>&1 here: the CLI can print status text
+          # (e.g. "Connecting to remote database...") to stderr, which must
+          # never be mixed into the file being parsed as JSON. stderr still
+          # flows to the normal Actions log on its own, unredirected.
+          supabase migration list --linked --output-format json > "$RUNNER_TEMP/pre.json"
+
+          if ! jq empty "$RUNNER_TEMP/pre.json" >/dev/null 2>&1; then
+            echo "PRE-APPLY READ FAILED: 'supabase migration list --linked --output-format json' did not return valid JSON on stdout." >&2
+            exit 1
+          fi
+
+          if ! jq -e 'type == "object"' "$RUNNER_TEMP/pre.json" >/dev/null; then
+            echo "PRE-APPLY READ FAILED: expected top-level JSON object." >&2
+            exit 1
+          fi
+
+          if ! jq -e 'has("migrations")' "$RUNNER_TEMP/pre.json" >/dev/null; then
+            echo "PRE-APPLY READ FAILED: expected top-level \"migrations\" key." >&2
+            exit 1
+          fi
+
+          if ! jq -e '.migrations | type == "array"' "$RUNNER_TEMP/pre.json" >/dev/null; then
+            echo "PRE-APPLY READ FAILED: \"migrations\" is not an array." >&2
+            exit 1
+          fi
+
+          if ! jq -e '[.migrations[] | (has("local") and has("remote") and has("time"))] | all' "$RUNNER_TEMP/pre.json" >/dev/null; then
+            echo "PRE-APPLY READ FAILED: one or more migration entries are missing \"local\"/\"remote\"/\"time\"." >&2
+            exit 1
+          fi
+
+          echo "Pre-apply structured read valid: JSON object with a \"migrations\" array, every entry has local/remote/time."
+
+      - name: Pre-apply remote history gate -- 002-043 applied, 044 pending
+        run: |
+          set -euo pipefail
+
+          if ! jq -e '[.migrations[] | select(.local >= "002" and .local <= "043") | (.remote == .local)] | all' "$RUNNER_TEMP/pre.json" >/dev/null; then
+            echo "PRE-APPLY GATE FAILED: one or more of 002-043 is not marked applied (remote != local) on the remote ledger. Refusing to push." >&2
+            echo "Affected rows:" >&2
+            jq -r '.migrations[] | select(.local >= "002" and .local <= "043") | select(.remote != .local) | "local=\(.local) remote=\(.remote)"' "$RUNNER_TEMP/pre.json" >&2
+            exit 1
+          fi
+
+          row_044="$(jq -c '.migrations[] | select(.local == "044")' "$RUNNER_TEMP/pre.json")"
+          if [ -z "$row_044" ]; then
+            echo "PRE-APPLY GATE FAILED: no migration row with local == \"044\" was found." >&2
+            exit 1
+          fi
+
+          remote_044="$(printf '%s' "$row_044" | jq -r '.remote')"
+          if [ "$remote_044" != "" ]; then
+            echo "PRE-APPLY GATE FAILED: migration 044 already shows remote=\"${remote_044}\" -- it appears already applied. Refusing to push." >&2
+            exit 1
+          fi
+
+          echo "Pre-apply remote history gate passed: 002-043 all show remote == local, 044 shows remote == \"\" (pending)."
+
+      - name: Prove 044 is the sole pending migration
+        run: |
+          set -euo pipefail
+
+          pending="$(jq -r '.migrations[] | select(.local != "" and .remote == "") | .local' "$RUNNER_TEMP/pre.json" | sort)"
+
+          if [ "$pending" != "044" ]; then
+            echo "SOLE-PENDING GATE FAILED: expected the only pending local migration to be exactly 044." >&2
+            echo "Actual pending set:" >&2
+            printf '%s\n' "$pending" >&2
+            exit 1
+          fi
+
+          echo "Sole-pending gate passed: 044 is the only pending migration. Safe to run 'supabase db push --linked'."
+
+      - name: Apply migration 044 (supabase db push --linked -- the only mutating command in this workflow)
+        run: |
+          set -euo pipefail
+          echo "Applying via the normal Supabase migration mechanism. The prior gate has already proven 044 is the sole pending migration, so this cannot apply anything else."
+          supabase db push --linked
+          echo "supabase db push --linked complete."
+
+      - name: Structured post-apply read (stdout only, JSON)
+        run: |
+          set -euo pipefail
+
+          supabase migration list --linked --output-format json > "$RUNNER_TEMP/post.json"
+
+          if ! jq empty "$RUNNER_TEMP/post.json" >/dev/null 2>&1; then
+            echo "POST-APPLY READ FAILED: 'supabase migration list --linked --output-format json' did not return valid JSON on stdout." >&2
+            exit 1
+          fi
+
+          if ! jq -e 'type == "object"' "$RUNNER_TEMP/post.json" >/dev/null; then
+            echo "POST-APPLY READ FAILED: expected top-level JSON object." >&2
+            exit 1
+          fi
+
+          if ! jq -e 'has("migrations")' "$RUNNER_TEMP/post.json" >/dev/null; then
+            echo "POST-APPLY READ FAILED: expected top-level \"migrations\" key." >&2
+            exit 1
+          fi
+
+          if ! jq -e '.migrations | type == "array"' "$RUNNER_TEMP/post.json" >/dev/null; then
+            echo "POST-APPLY READ FAILED: \"migrations\" is not an array." >&2
+            exit 1
+          fi
+
+          if ! jq -e '[.migrations[] | (has("local") and has("remote") and has("time"))] | all' "$RUNNER_TEMP/post.json" >/dev/null; then
+            echo "POST-APPLY READ FAILED: one or more migration entries are missing \"local\"/\"remote\"/\"time\"." >&2
+            exit 1
+          fi
+
+          echo "Post-apply structured read valid: JSON object with a \"migrations\" array, every entry has local/remote/time."
+
+      - name: Post-apply history gate -- 002-044 all applied, no pending
+        run: |
+          set -euo pipefail
+
+          expected_local="$(seq -f "%03g" 2 44)"
+          actual_local="$(jq -r '.migrations[].local' "$RUNNER_TEMP/post.json" | sort)"
+
+          if [ "$actual_local" != "$(printf '%s\n' $expected_local | sort)" ]; then
+            echo "POST-APPLY GATE FAILED: local migration versions reported by the CLI are not exactly 002-044." >&2
+            echo "Expected:" >&2
+            printf '%s\n' $expected_local >&2
+            echo "Actual:" >&2
+            printf '%s\n' "$actual_local" >&2
+            exit 1
+          fi
+
+          if ! jq -e '[.migrations[] | (.remote == .local)] | all' "$RUNNER_TEMP/post.json" >/dev/null; then
+            echo "POST-APPLY GATE FAILED: not every migration shows remote == local after applying 044." >&2
+            echo "Affected rows:" >&2
+            jq -r '.migrations[] | select(.remote != .local) | "local=\(.local) remote=\(.remote)"' "$RUNNER_TEMP/post.json" >&2
+            exit 1
+          fi
+
+          row_044_post="$(jq -c '.migrations[] | select(.local == "044")' "$RUNNER_TEMP/post.json")"
+          if [ -z "$row_044_post" ]; then
+            echo "POST-APPLY GATE FAILED: no migration row with local == \"044\" was found after applying." >&2
+            exit 1
+          fi
+
+          remote_044_post="$(printf '%s' "$row_044_post" | jq -r '.remote')"
+          if [ "$remote_044_post" != "044" ]; then
+            echo "POST-APPLY GATE FAILED: migration 044 does not show remote == \"044\" after applying (remote=\"${remote_044_post}\")." >&2
+            exit 1
+          fi
+
+          echo "Post-apply history gate passed: 002-044 all show remote == local (044 | 044 confirmed). No pending local migrations remain."
+
+      - name: Human-readable final list (informational only)
+        run: |
+          set -euo pipefail
+          echo "---- supabase migration list --linked (informational only, not a gate) ----"
+          supabase migration list --linked
+
+      - name: Final status
+        run: |
+          set -euo pipefail
+          echo "Migration 044 applied successfully and verified. Remote migration history is exactly 002-044."
