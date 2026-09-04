@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isConnectedAccountPayoutReady } from "@/lib/connect-account";
 import {
   sendPurchaseEmails,
   sendBundlePurchaseEmails,
@@ -2348,6 +2349,86 @@ export async function reverseAuthorTransferForLostDispute(
   return { kind: "reversed", reversalId: reversal.id, amountCents: reversal.amount };
 }
 
+// ============================================================
+// LIBRUM 2.0 CONNECT-HARDEN-1: keeps profiles.stripe_payouts_enabled in
+// sync with a connected account's live Stripe state whenever Stripe
+// tells us it changed. This is NEVER the authority checkout relies on --
+// checkConnectedAccountReadyForCheckout (src/lib/connect-account.ts)
+// always re-verifies live at checkout time regardless of what this
+// column says, precisely because the production incident this closes
+// was caused by trusting a cached boolean instead of live Stripe state.
+// This handler exists only so the DB-cached column stays close to
+// reality for display purposes (dashboard/payouts, author profile pages)
+// and so an author who finishes onboarding sees stripe_payouts_enabled
+// flip on without needing a checkout attempt to trigger it.
+// ============================================================
+
+// Stripe sends the full, current Account object as event.data.object for
+// every account.updated event -- no extra stripe.accounts.retrieve() call
+// is needed here. A plain "set stripe_payouts_enabled to whatever is true
+// right now, for whichever profile has this stripe_account_id" is
+// naturally idempotent: replaying the same event, or an out-of-order
+// redelivery of an older account.updated for the same account, converges
+// on whatever this handler is given -- no separate event-id ledger is
+// needed, the same reasoning already applied to every other handler in
+// this file. Deliberately touches only stripe_payouts_enabled -- never
+// stripe_account_id itself (that column is only ever written by
+// connectStripeAccount(), src/app/dashboard/payouts/actions.ts) and never
+// any other profiles column.
+//
+// CONNECT-HARDEN-1 REVIEW CORRECTION: a failed DB write is now reported
+// through the same failWebhook() path every other critical handler in
+// this file uses -- NOT swallowed. Idempotency (see above) is exactly
+// what makes this safe to let Stripe retry: a redelivery of the same
+// event, or a later account.updated for the same account, converges on
+// the same stored boolean either way, so there is no double-apply risk
+// to guard against. Silently swallowing a transient DB outage here would
+// let this cache drift stale indefinitely with no automatic recovery --
+// Stripe's own retry mechanism is the cheapest available fix, and only
+// costs something if the caller returns a non-2xx to ask for it. A
+// "no matching profile" result is NOT treated as this kind of failure --
+// see below.
+export async function processAccountUpdatedEvent(
+  supabase: ReturnType<typeof createAdminClient>,
+  event: Stripe.Event,
+  account: Stripe.Account,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  const payoutsReady = isConnectedAccountPayoutReady(account);
+
+  const { data: updatedRows, error } = await supabase
+    .from("profiles")
+    .update({ stripe_payouts_enabled: payoutsReady })
+    .eq("stripe_account_id", account.id)
+    .select("id");
+
+  if (error) {
+    return failWebhook({
+      eventId: event.id,
+      stripeAccountId: account.id,
+      reason: "failed to sync stripe_payouts_enabled from account.updated",
+      error,
+    });
+  }
+
+  if (!updatedRows || updatedRows.length === 0) {
+    // Not necessarily a problem -- Stripe sends account.updated for
+    // every state change on every connected account, including ones no
+    // Librum profile currently references (e.g. an account an author
+    // disconnected from, or a stale test-mode account already reset by
+    // an operator). Logged for visibility, not treated as a failure --
+    // there is nothing a retry could resolve differently: the row still
+    // won't exist on redelivery either, so this does NOT go through
+    // failWebhook.
+    console.warn(
+      "Stripe webhook: account.updated for an account with no matching profile",
+      { stripeAccountId: account.id, payoutsReady },
+    );
+  }
+
+  return null;
+}
+
 // Stripe calls this URL directly (not a browser), so it must read the
 // raw request body to verify the signature — no cookies/session involved.
 export async function POST(request: Request) {
@@ -2527,6 +2608,26 @@ export async function POST(request: Request) {
       stripe,
       event,
       dispute.id,
+      failWebhook,
+    );
+    if (failureResponse) {
+      return failureResponse;
+    }
+  }
+
+  // LIBRUM 2.0 CONNECT-HARDEN-1: keeps profiles.stripe_payouts_enabled in
+  // sync with live Stripe account state -- see processAccountUpdatedEvent's
+  // own documentation above. Never gates checkout (that always
+  // re-verifies live via checkConnectedAccountReadyForCheckout), but a
+  // failed DB write here still goes through failWebhook -- a transient
+  // outage should be retried by Stripe, not silently drop the sync.
+  if (event.type === "account.updated") {
+    const account = event.data.object as Stripe.Account;
+    const supabase = createAdminClient();
+    const failureResponse = await processAccountUpdatedEvent(
+      supabase,
+      event,
+      account,
       failWebhook,
     );
     if (failureResponse) {

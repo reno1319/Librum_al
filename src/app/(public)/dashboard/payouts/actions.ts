@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
 import { resolveSiteOrigin } from "@/lib/site-url";
+import { retrieveConnectedAccount } from "@/lib/connect-account";
 
 // LAUNCH-1 P2-1: shown for every failure mode below where the
 // underlying cause (a DB read/write anomaly, a Stripe API error) isn't
@@ -15,6 +16,19 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 // string.
 const GENERIC_CONNECT_FAILURE_REDIRECT =
   "/dashboard/payouts?error=Something+went+wrong+connecting+your+payout+account.+Please+try+again.";
+
+// LIBRUM 2.0 CONNECT-HARDEN-1: distinct from GENERIC_CONNECT_FAILURE_REDIRECT
+// above -- this is specifically for a stored stripe_account_id that
+// Stripe no longer recognizes under the CURRENT platform/mode (the same
+// production incident checkConnectedAccountReadyForCheckout guards
+// against at checkout time). Deliberately NOT the same message: a
+// transient Stripe/network failure is worth a bare retry, but a
+// resource_missing account id never resolves itself on retry -- the
+// author needs to know reconnecting is the actual next step, and an
+// operator needs to know a reset may be required (this action never
+// clears stripe_account_id itself -- see the comment at its call site).
+const RECONNECT_REQUIRED_REDIRECT =
+  "/dashboard/payouts?error=Your+payout+account+needs+to+be+reconnected.+Please+contact+support.";
 
 // LAUNCH-1 P2-1: a permanent, deterministic idempotency key -- derived
 // only from Librum's own stable user id, no timestamp or random
@@ -174,6 +188,45 @@ export async function connectStripeAccount() {
   }
 
   const origin = resolveSiteOrigin();
+
+  // LIBRUM 2.0 CONNECT-HARDEN-1: a stored stripe_account_id can go stale
+  // relative to the CURRENT platform/mode -- exactly the production
+  // incident this closes (see src/lib/connect-account.ts). Never pass a
+  // stored id straight to accountLinks.create() without confirming
+  // Stripe still recognizes it first: doing so for a resource_missing id
+  // would throw the same opaque Stripe error buyBook/buyBundle used to
+  // leak. This branch runs whether accountId was just freshly created
+  // above (always retrievable -- effectively a no-op pass) or was
+  // already on file (where staleness is actually possible), so there's
+  // only one check, not two.
+  //
+  // Deliberately does NOT auto-clear stripe_account_id on a "missing"
+  // result: this action has no reliable way to distinguish "the author
+  // needs to reconnect" from "something is currently wrong with Stripe
+  // itself," and silently clearing a stored id mid-request risks
+  // masking a real operator-facing data problem instead of surfacing
+  // it. The safe reset workflow is the same one already used to recover
+  // Renato Kalemi's account: an operator explicitly nulls
+  // stripe_account_id/stripe_payouts_enabled after confirming the
+  // account is genuinely stale, then the author reconnects through this
+  // same action, which at that point takes the `!accountId` branch
+  // above and mints a brand-new account under the current platform.
+  const accountCheck = await retrieveConnectedAccount(stripe, accountId);
+  if (!accountCheck.ok) {
+    if (accountCheck.reason === "missing") {
+      console.error(
+        "connectStripeAccount: the stored Stripe account id is no longer valid under the current platform/mode -- author-safe reconnect required, NOT auto-cleared",
+        { userId: user.id, stripeAccountId: accountId, detail: accountCheck.detail },
+      );
+      redirect(RECONNECT_REQUIRED_REDIRECT);
+    }
+    console.error("connectStripeAccount: failed to verify the existing Stripe account", {
+      userId: user.id,
+      stripeAccountId: accountId,
+      detail: accountCheck.detail,
+    });
+    redirect(GENERIC_CONNECT_FAILURE_REDIRECT);
+  }
 
   let accountLink;
   try {

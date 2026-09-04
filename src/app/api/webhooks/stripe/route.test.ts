@@ -23,6 +23,7 @@ const {
   processDisputeEvent,
   reverseAuthorTransferForLostDispute,
   buildTransferReversalIdempotencyKey,
+  processAccountUpdatedEvent,
 } = await import("./route");
 
 // ---------------------------------------------------------------------
@@ -4221,5 +4222,204 @@ describe("reverseAuthorTransferForLostDispute", () => {
       expect(secondClient.transfers.createReversal).not.toHaveBeenCalled();
       expect(tables.payment_disputes[1].transfer_reversal_amount_cents).toBe(0);
     });
+  });
+});
+
+// LIBRUM 2.0 CONNECT-HARDEN-1: keeps profiles.stripe_payouts_enabled in
+// sync with live Stripe connected-account state. Never the authority
+// checkout relies on (checkConnectedAccountReadyForCheckout,
+// src/lib/connect-account.ts, always re-verifies live) -- this is purely
+// a display/cache sync, covered here for its own contract: it updates
+// the right row, touches only the one column, degrades safely when
+// nothing matches, and converges under replay. REVIEW CORRECTION: a DB
+// write failure is no longer swallowed -- it now goes through
+// failWebhook() (a non-2xx response) so Stripe retries a transient
+// outage, exactly like every other critical handler in this file. Only
+// the "no matching profile" case is NOT treated as a failure -- a retry
+// can never produce a different outcome for that one.
+describe("processAccountUpdatedEvent", () => {
+  const FAKE_EVENT = { id: "evt_account_updated_1" } as Stripe.Event;
+
+  // LIBRUM 2.0 CONNECT-HARDEN-1 REVIEW CORRECTION: capabilities.transfers
+  // defaults to "active" here (Stripe's actual account shape) so every
+  // pre-existing test below that doesn't care about it stays a
+  // fully-ready fixture under the corrected predicate
+  // (payouts_enabled && capabilities.transfers === "active").
+  function makeFakeAccount(overrides: Partial<Stripe.Account> = {}): Stripe.Account {
+    return {
+      id: "acct_test",
+      object: "account",
+      charges_enabled: true,
+      payouts_enabled: true,
+      details_submitted: true,
+      capabilities: { transfers: "active" },
+      ...overrides,
+    } as Stripe.Account;
+  }
+
+  it("account.updated reports both capabilities enabled: sets stripe_payouts_enabled = true for the matching profile, webhook succeeds", async () => {
+    const tables: Tables = {
+      profiles: [{ id: "author-1", stripe_account_id: "acct_test", stripe_payouts_enabled: false }],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await processAccountUpdatedEvent(
+      supabase as never,
+      FAKE_EVENT,
+      makeFakeAccount(),
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.profiles[0]).toMatchObject({ stripe_payouts_enabled: true });
+  });
+
+  it("account.updated reports payouts_enabled false: flips stripe_payouts_enabled back to false even if it was previously true", async () => {
+    const tables: Tables = {
+      profiles: [{ id: "author-1", stripe_account_id: "acct_test", stripe_payouts_enabled: true }],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await processAccountUpdatedEvent(
+      supabase as never,
+      FAKE_EVENT,
+      makeFakeAccount({ payouts_enabled: false }),
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(tables.profiles[0]).toMatchObject({ stripe_payouts_enabled: false });
+  });
+
+  it("account.updated reports capabilities.transfers not active: not ready, stripe_payouts_enabled set to false", async () => {
+    const tables: Tables = {
+      profiles: [{ id: "author-1", stripe_account_id: "acct_test", stripe_payouts_enabled: true }],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await processAccountUpdatedEvent(
+      supabase as never,
+      FAKE_EVENT,
+      makeFakeAccount({ capabilities: { transfers: "pending" } }),
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(tables.profiles[0]).toMatchObject({ stripe_payouts_enabled: false });
+  });
+
+  // LIBRUM 2.0 CONNECT-HARDEN-1 REVIEW CORRECTION regression: proves the
+  // removed charges_enabled dependency stays removed in the webhook sync
+  // too, not just at checkout.
+  it("account.updated reports charges_enabled false but payouts_enabled + transfers=active: stripe_payouts_enabled set to TRUE", async () => {
+    const tables: Tables = {
+      profiles: [{ id: "author-1", stripe_account_id: "acct_test", stripe_payouts_enabled: false }],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await processAccountUpdatedEvent(
+      supabase as never,
+      FAKE_EVENT,
+      makeFakeAccount({ charges_enabled: false }),
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(tables.profiles[0]).toMatchObject({ stripe_payouts_enabled: true });
+  });
+
+  it("only ever writes stripe_payouts_enabled -- every other profile column is untouched", async () => {
+    const tables: Tables = {
+      profiles: [
+        {
+          id: "author-1",
+          stripe_account_id: "acct_test",
+          stripe_payouts_enabled: false,
+          display_name: "Renato Kalemi",
+          email: "renato@example.com",
+        },
+      ],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    await processAccountUpdatedEvent(supabase as never, FAKE_EVENT, makeFakeAccount(), failWebhook);
+
+    expect(tables.profiles[0]).toMatchObject({
+      display_name: "Renato Kalemi",
+      email: "renato@example.com",
+    });
+  });
+
+  it("no profile currently references this account id: succeeds (webhook returns 2xx), logs a warning, never calls failWebhook", async () => {
+    const tables: Tables = { profiles: [] };
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await processAccountUpdatedEvent(
+      supabase as never,
+      FAKE_EVENT,
+      makeFakeAccount(),
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("no matching profile"),
+      expect.objectContaining({ stripeAccountId: "acct_test" }),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("idempotent: processing the same account.updated payload twice converges to the same stored value, both succeed", async () => {
+    const tables: Tables = {
+      profiles: [{ id: "author-1", stripe_account_id: "acct_test", stripe_payouts_enabled: false }],
+    };
+    const supabase = makeFakeSupabase(tables);
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const account = makeFakeAccount();
+
+    const firstResult = await processAccountUpdatedEvent(supabase as never, FAKE_EVENT, account, failWebhook);
+    const secondResult = await processAccountUpdatedEvent(supabase as never, FAKE_EVENT, account, failWebhook);
+
+    expect(firstResult).toBeNull();
+    expect(secondResult).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(tables.profiles[0]).toMatchObject({ stripe_payouts_enabled: true });
+  });
+
+  it("DB update error: propagates through failWebhook so Stripe receives a non-2xx and retries -- REVIEW CORRECTION, no longer swallowed", async () => {
+    const tables: Tables = {
+      profiles: [{ id: "author-1", stripe_account_id: "acct_test", stripe_payouts_enabled: false }],
+    };
+    const supabase = makeFakeSupabase(tables, { profiles: { message: "write failed" } });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await processAccountUpdatedEvent(
+      supabase as never,
+      FAKE_EVENT,
+      makeFakeAccount(),
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: FAKE_EVENT.id,
+        stripeAccountId: "acct_test",
+        reason: expect.stringContaining("failed to sync stripe_payouts_enabled"),
+      }),
+    );
+    // The failed write must not have silently applied a partial state --
+    // the row is untouched, exactly as a real failed UPDATE would leave
+    // it, so Stripe's retry has a clean, unambiguous starting point.
+    expect(tables.profiles[0]).toMatchObject({ stripe_payouts_enabled: false });
   });
 });

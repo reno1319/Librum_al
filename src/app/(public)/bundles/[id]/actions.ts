@@ -8,6 +8,10 @@ import { platformFeeCents } from "@/lib/pricing";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import {
+  checkConnectedAccountReadyForCheckout,
+  BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE,
+} from "@/lib/connect-account";
+import {
   classifyLinkBackResult,
   shouldExposeStripeCheckoutSession,
   type LinkBackOutcome,
@@ -64,8 +68,25 @@ export async function buyBundle(bundleId: string) {
   }
 
   const authorAccount = bundle.profiles?.stripe_account_id;
-  if (!bundle.profiles?.stripe_payouts_enabled || !authorAccount) {
-    redirect(`/bundles/${bundleId}?error=This+bundle+isn%27t+available+for+purchase+right+now`);
+  if (!authorAccount) {
+    redirect(`/bundles/${bundleId}?error=${encodeURIComponent(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+  }
+
+  // LIBRUM 2.0 CONNECT-HARDEN-1: same live re-verification buyBook now
+  // performs -- never trust profiles.stripe_payouts_enabled alone (a
+  // webhook-synchronized cache, not a live guarantee). Runs before any
+  // checkout snapshot is minted or Stripe is asked to use this account as
+  // a transfer destination. Real reason logged server-side only.
+  const accountCheck = await checkConnectedAccountReadyForCheckout(stripe, authorAccount);
+  if (!accountCheck.ok) {
+    console.error("buyBundle: author's connected Stripe account is not ready for checkout", {
+      bundleId,
+      authorId: bundle.author_id,
+      readerId: user.id,
+      reason: accountCheck.reason,
+      detail: accountCheck.detail,
+    });
+    redirect(`/bundles/${bundleId}?error=${encodeURIComponent(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
   }
 
   // Advisory only -- an early, friendlier "you already own this" exit.

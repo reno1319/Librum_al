@@ -12,6 +12,10 @@ import { REPORT_REASONS } from "@/lib/report-reasons";
 import { toStripeExpiresAtSeconds } from "./checkout-logic";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
+import {
+  checkConnectedAccountReadyForCheckout,
+  BOOK_CHECKOUT_UNAVAILABLE_MESSAGE,
+} from "@/lib/connect-account";
 import type { DiscountCode } from "@/lib/types";
 
 type BookForCheckout = {
@@ -71,8 +75,30 @@ export async function buyBook(bookId: string, formData: FormData) {
   }
 
   const authorAccount = book.profiles?.stripe_account_id;
-  if (!book.profiles?.stripe_payouts_enabled || !authorAccount) {
-    redirect(`/books/${bookId}?error=This+book+isn%27t+available+for+purchase+right+now`);
+  if (!authorAccount) {
+    redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+  }
+
+  // LIBRUM 2.0 CONNECT-HARDEN-1: never trust profiles.stripe_payouts_enabled
+  // alone -- it's a webhook-synchronized cache (see
+  // processAccountUpdatedEvent in the Stripe webhook route), not a live
+  // guarantee. A stored account id that's stale, wrong-platform, or
+  // wrong-mode must be caught HERE, before any checkout intent is minted
+  // or Stripe is ever asked to use it as a transfer destination -- this
+  // is the direct fix for the production incident where Stripe rejected
+  // checkout with "No such destination" for exactly this reason. The
+  // real Stripe/DB reason is logged server-side only; the reader only
+  // ever sees the same generic, pre-existing unavailability message.
+  const accountCheck = await checkConnectedAccountReadyForCheckout(stripe, authorAccount);
+  if (!accountCheck.ok) {
+    console.error("buyBook: author's connected Stripe account is not ready for checkout", {
+      bookId,
+      authorId: book.author_id,
+      readerId: user.id,
+      reason: accountCheck.reason,
+      detail: accountCheck.detail,
+    });
+    redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
   }
 
   // Cheap, non-authoritative early check for a friendlier redirect --

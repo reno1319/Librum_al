@@ -56,10 +56,14 @@ const mockCreateAdminClient = vi.fn(() => ({
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));
 
 const mockAccountsCreate = vi.fn();
+const mockAccountsRetrieve = vi.fn();
 const mockAccountLinksCreate = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   stripe: {
-    accounts: { create: (...args: unknown[]) => mockAccountsCreate(...args) },
+    accounts: {
+      create: (...args: unknown[]) => mockAccountsCreate(...args),
+      retrieve: (...args: unknown[]) => mockAccountsRetrieve(...args),
+    },
     accountLinks: { create: (...args: unknown[]) => mockAccountLinksCreate(...args) },
   },
 }));
@@ -80,6 +84,9 @@ function resetMocks() {
     .mockResolvedValue({ data: [{ stripe_account_id: "acct_new" }], error: null });
   mockAdminReReadMaybeSingle.mockReset().mockResolvedValue({ data: null, error: null });
   mockAccountsCreate.mockReset().mockResolvedValue({ id: "acct_new" });
+  mockAccountsRetrieve.mockReset().mockImplementation((id: string) =>
+    Promise.resolve({ id, charges_enabled: true, payouts_enabled: true, details_submitted: true }),
+  );
   mockAccountLinksCreate
     .mockReset()
     .mockResolvedValue({ url: "https://connect.stripe.com/setup/acct_new" });
@@ -263,6 +270,69 @@ describe("connectStripeAccount", () => {
     const secondKey = mockAccountsCreate.mock.calls[0][1].idempotencyKey;
 
     expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("15. LIBRUM 2.0 CONNECT-HARDEN-1: existing account resolves resource_missing under the current platform -- reconnect-required redirect, id NOT auto-cleared, never reaches accountLinks.create", async () => {
+    mockProfileSingle.mockResolvedValue({
+      data: { stripe_account_id: "acct_stale_other_platform" },
+      error: null,
+    });
+    const stripeError = Object.assign(
+      new Error(
+        "No such destination: 'acct_stale_other_platform'; a similar object exists in test mode, but a live mode key was used to make this request.",
+      ),
+      { code: "resource_missing" },
+    );
+    mockAccountsRetrieve.mockRejectedValue(stripeError);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expectRedirectTo(connectStripeAccount(), "reconnected");
+
+    expect(mockAccountsCreate).not.toHaveBeenCalled();
+    expect(mockAccountLinksCreate).not.toHaveBeenCalled();
+    // Never writes to the admin client from this branch -- the stored id
+    // is deliberately left exactly as it was; only an explicit operator
+    // reset (the same workflow already used for Renato Kalemi's account)
+    // clears it.
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+    // The real Stripe reason IS expected here -- server-side logging is
+    // explicitly where the operational detail belongs (see requirement
+    // 4's "continue logging the real operational error server-side").
+    // What must never leak is the BUYER/author-facing redirect, checked
+    // separately below.
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("NOT auto-cleared"),
+      expect.objectContaining({
+        stripeAccountId: "acct_stale_other_platform",
+        detail: expect.stringContaining("test mode"),
+      }),
+    );
+
+    const redirectedUrl = mockRedirect.mock.calls[0][0] as string;
+    expect(redirectedUrl).not.toContain("acct_");
+    expect(redirectedUrl).not.toContain("test mode");
+    errorSpy.mockRestore();
+  });
+
+  it("16. LIBRUM 2.0 CONNECT-HARDEN-1: existing account lookup fails with a transient Stripe error -- generic retryable failure, never reaches accountLinks.create", async () => {
+    mockProfileSingle.mockResolvedValue({
+      data: { stripe_account_id: "acct_existing" },
+      error: null,
+    });
+    mockAccountsRetrieve.mockRejectedValue(new Error("Stripe is temporarily unavailable"));
+
+    await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
+
+    expect(mockAccountLinksCreate).not.toHaveBeenCalled();
+  });
+
+  it("17. LIBRUM 2.0 CONNECT-HARDEN-1: a freshly-created account is always retrieved and passes -- Account Link still created normally", async () => {
+    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
+
+    expect(mockAccountsRetrieve).toHaveBeenCalledWith("acct_new");
+    expect(mockAccountLinksCreate).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ account: "acct_new" }),
+    );
   });
 
   it("14. no secret values appear in operational log payloads", async () => {
