@@ -15,6 +15,8 @@ import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
 import { BookSampleReader } from "@/components/book-sample-reader";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
+import { getLanguageLabel } from "@/lib/languages";
+import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { formatPrice } from "@/lib/pricing";
 import { resolveBookPurchaseState, resolveShowSample, type BookPurchaseState } from "@/lib/book-purchase";
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
@@ -388,6 +390,18 @@ export default async function BookDetailPage({
             </span>
           )}
           <h1 className="font-serif text-3xl font-semibold sm:text-4xl">{book.title}</h1>
+          {/* LIBRUM 2.0 PUBLISHING-UX-1 PART D: rendered as its own,
+              visually secondary element -- never joined into the h1's
+              own text -- so a screen reader's page-title/heading
+              structure stays exactly "book.title," matching every
+              existing consumer of this page's <h1> (generateMetadata's
+              own title is unaffected too; see this file's own note on
+              why that's deliberately left alone). Omitted entirely
+              when null, same "render nothing, not an empty row" rule
+              every other optional field on this page already follows. */}
+          {book.subtitle && (
+            <p className="mt-1 text-lg text-muted">{book.subtitle}</p>
+          )}
 
           {seriesInfo && (
             <p className="mt-1 text-sm text-muted">
@@ -552,22 +566,33 @@ export default async function BookDetailPage({
             bordered/tinted editorial band, which is what actually reads
             as "an intentional metadata treatment" rather than an
             unfinished table, at every field count. flex-wrap (no
-            reserved grid column tracks) means 2, 3, or 4 items always
-            pack left-to-right with no dangling empty slot; the
+            reserved grid column tracks) means any number of items
+            always pack left-to-right with no dangling empty slot; the
             `:not(:last-child)` divider rule adapts automatically to
             however many fields this particular book actually has, never
             leaving a stray trailing rule after the true last item.
-            Still only ever the same 4 already-trustworthy fields --
-            Format and Genre are always present (genre is required at
-            creation), Series/ISBN only when the book actually has one;
-            no invented Publisher/Published date/Language/Edition/Page
-            count/Reading time, since none of those exist authoritatively
-            in this schema. */}
+            Format and Genre remain always/near-always present (genre is
+            required at creation); every other row -- Series, ISBN, and
+            (LIBRUM 2.0 PUBLISHING-UX-1 PART D) Language/Publisher/
+            Edition/Originally published/Published on Librum -- renders
+            only when the book actually carries a real, authoritative
+            value. No field here is ever guessed, defaulted, or
+            substituted -- e.g. Publisher never falls back to "Librum"
+            or the author's own name; it renders only book.publisher
+            itself, or not at all. */}
         <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-5 rounded-lg border border-border bg-surface px-6 py-5 sm:[&>div:not(:last-child)]:border-r sm:[&>div:not(:last-child)]:border-border sm:[&>div:not(:last-child)]:pr-8">
           <div className="min-w-28">
             <dt className="text-xs font-medium uppercase tracking-wide text-muted">Format</dt>
             <dd className="mt-1 text-sm font-medium text-foreground">Ebook · EPUB</dd>
           </div>
+          {book.language && (
+            <div className="min-w-28">
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">Language</dt>
+              <dd className="mt-1 text-sm font-medium text-foreground">
+                {getLanguageLabel(book.language)}
+              </dd>
+            </div>
+          )}
           {book.genre && (
             <div className="min-w-28">
               <dt className="text-xs font-medium uppercase tracking-wide text-muted">Genre</dt>
@@ -585,6 +610,48 @@ export default async function BookDetailPage({
                 >
                   {seriesInfo.title}
                 </Link>
+              </dd>
+            </div>
+          )}
+          {book.publisher && (
+            <div className="min-w-28">
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">Publisher</dt>
+              <dd className="mt-1 text-sm font-medium text-foreground">{book.publisher}</dd>
+            </div>
+          )}
+          {book.edition && (
+            <div className="min-w-28">
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">Edition</dt>
+              <dd className="mt-1 text-sm font-medium text-foreground">{book.edition}</dd>
+            </div>
+          )}
+          {book.original_publication_date && (
+            <div className="min-w-28">
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">
+                Originally published
+              </dt>
+              <dd className="mt-1 text-sm font-medium text-foreground">
+                {formatDateOnly(book.original_publication_date)}
+              </dd>
+            </div>
+          )}
+          {/* LIBRUM 2.0 PUBLISHING-UX-1 PART D: published_at only --
+              never created_at/updated_at, which mean something entirely
+              different (row creation/last edit, not "first went live").
+              Requires BOTH a published book AND a real published_at --
+              a legacy book published before migration 044 existed has
+              status="published" but published_at=null (performPublish()
+              only ever sets it going forward, no backfill -- see that
+              migration's own comment), and this row is omitted for
+              exactly that book rather than guessing a date it doesn't
+              actually have. */}
+          {book.status === "published" && book.published_at && (
+            <div className="min-w-28">
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted">
+                Published on Librum
+              </dt>
+              <dd className="mt-1 text-sm font-medium text-foreground">
+                {formatTimestampAsDate(book.published_at)}
               </dd>
             </div>
           )}

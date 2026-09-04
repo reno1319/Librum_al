@@ -10,6 +10,7 @@ import {
   deleteBook,
 } from "../../actions";
 import { GENRES } from "@/lib/genres";
+import { LANGUAGES, isSupportedLanguage } from "@/lib/languages";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { resolvePublishReadiness } from "@/lib/publish-readiness";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
@@ -33,6 +34,17 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Edit book",
 };
+
+// LIBRUM 2.0 PUBLISHING-UX-1 PART D: client-side-only bounds, purely a
+// UX nicety mirroring actions.ts's own authoritative
+// SUBTITLE_MAX_LENGTH/PUBLISHER_MAX_LENGTH/EDITION_MAX_LENGTH constants
+// (not imported -- those are module-private to a "use server" file this
+// task's own instructions protect from edits). A mismatch here has no
+// security implication: the server re-validates and rejects an
+// over-limit value independently, regardless of what a client sends.
+const SUBTITLE_MAX_LENGTH = 300;
+const PUBLISHER_MAX_LENGTH = 200;
+const EDITION_MAX_LENGTH = 100;
 
 // LIBRUM 2.0 UI-7: single structured Server Component page (no client
 // boundary needed here -- DeleteBookButton is the one small existing
@@ -155,6 +167,17 @@ export default async function EditBookPage({
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
+                  Subtitle (optional)
+                  <input
+                    name="subtitle"
+                    type="text"
+                    defaultValue={book.subtitle ?? ""}
+                    maxLength={SUBTITLE_MAX_LENGTH}
+                    className={formControlClasses}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm">
                   Description (optional)
                   <textarea
                     name="description"
@@ -167,34 +190,74 @@ export default async function EditBookPage({
                   </span>
                 </label>
 
-                <label className="flex flex-col gap-1 text-sm">
-                  Keywords (optional)
-                  <input
-                    name="keywords"
-                    type="text"
-                    defaultValue={book.keywords}
-                    placeholder="e.g. space opera, first contact, hard sci-fi"
-                    className={formControlClasses}
-                  />
-                  <span className="text-xs text-muted">
-                    Comma-separated. Helps readers find your book by terms beyond
-                    its genre — up to 15.
-                  </span>
-                </label>
+                {/* LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT
+                    LANGUAGE PRESERVATION CORRECTION: no defaultValue
+                    falls back to "sq" here -- see the historical-book-
+                    safety note on resolveLanguage() (actions.ts). An
+                    existing book with language=null shows the neutral
+                    "Select language" prompt; saving without touching
+                    this field resubmits that same empty selection,
+                    which resolveLanguage() treats as "still no
+                    language," never as a write of "sq."
 
+                    books.language carries no DB CHECK (migration 044's
+                    own comment explains why: the supported UI language
+                    set may grow without a migration), so a book can
+                    legitimately already hold a code this deployed
+                    LANGUAGES doesn't (yet) recognize. The earlier
+                    version of this field collapsed that case to the
+                    same blank defaultValue as a genuinely-null book --
+                    indistinguishable from "no language" once rendered,
+                    so saving ANY unrelated field (e.g. Description)
+                    would silently submit language="" and
+                    resolveLanguage() would clear the real stored value
+                    to null. That's the defect this correction fixes:
+                    the synthetic <option> below (rendered only for a
+                    non-null, unrecognized code) preserves the exact
+                    stored value as a real, selectable option instead,
+                    so an untouched save keeps submitting that same
+                    code, not blank.
+
+                    A native, plain <select>'s own defaultValue only
+                    takes effect if some <option> in the list actually
+                    has that value -- without the synthetic option, a
+                    browser given no matching option falls back to
+                    selecting the FIRST option ("Select language"),
+                    silently reproducing the exact bug this correction
+                    exists to fix. The synthetic option is therefore
+                    load-bearing, not cosmetic.
+
+                    KNOWN, EXPLICITLY REPORTED LIMITATION (see this
+                    task's own required trace): resolveLanguage()
+                    itself still rejects any non-empty value outside
+                    LANGUAGES with a redirect, BEFORE updateBook()'s own
+                    .update() call runs -- so resubmitting an untouched
+                    unsupported code no longer silently clears it, but
+                    it does still block that entire save (including
+                    whatever unrelated field the author actually meant
+                    to change) behind a "Please choose a supported
+                    language" error. Fixing that fully needs a
+                    server-side decision (a narrow preserve-unchanged-
+                    value rule in updateBook()) explicitly out of scope
+                    for this pass -- see this correction's own final
+                    report. */}
                 <label className="flex flex-col gap-1 text-sm">
-                  ISBN (optional)
-                  <input
-                    name="isbn"
-                    type="text"
-                    defaultValue={book.isbn ?? ""}
-                    placeholder="e.g. 978-3-16-148410-0"
+                  Language (optional)
+                  <select
+                    name="language"
+                    defaultValue={book.language ?? ""}
                     className={formControlClasses}
-                  />
-                  <span className="text-xs text-muted">
-                    Only if you already own one — Librum doesn&apos;t issue or
-                    register ISBNs. Leave blank to skip.
-                  </span>
+                  >
+                    <option value="">Select language</option>
+                    {book.language && !isSupportedLanguage(book.language) && (
+                      <option value={book.language}>Current language · {book.language}</option>
+                    )}
+                    {LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>
+                        {l.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
@@ -216,47 +279,124 @@ export default async function EditBookPage({
                   </select>
                 </label>
 
-                {series && series.length === 0 && (
-                  <p className="text-xs text-muted">
-                    Want to group this with other books as a series?{" "}
-                    <Link href="/dashboard/series" className="focus-ring rounded-sm underline">
-                      Create a series first
-                    </Link>
-                    , then come back here.
-                  </p>
-                )}
-
-                {series && series.length > 0 && (
-                  <div className="flex gap-3">
-                    <label className="flex flex-1 flex-col gap-1 text-sm">
-                      Series (optional)
-                      <select
-                        name="seriesId"
-                        defaultValue={book.series_id ?? ""}
-                        className={formControlClasses}
-                      >
-                        <option value="">None</option>
-                        {series.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.title}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                <details className="rounded-lg border border-border px-4 py-3">
+                  <summary className="cursor-pointer text-sm font-medium text-foreground">
+                    Additional book details
+                  </summary>
+                  <div className="mt-4 flex flex-col gap-4">
                     <label className="flex flex-col gap-1 text-sm">
-                      Position
+                      Keywords (optional)
                       <input
-                        name="seriesPosition"
-                        type="number"
-                        min="1"
-                        step="1"
-                        defaultValue={book.series_position ?? ""}
-                        placeholder="1"
-                        className={`w-24 ${formControlClasses}`}
+                        name="keywords"
+                        type="text"
+                        defaultValue={book.keywords}
+                        placeholder="e.g. space opera, first contact, hard sci-fi"
+                        className={formControlClasses}
+                      />
+                      <span className="text-xs text-muted">
+                        Comma-separated. Helps readers find your book by terms
+                        beyond its genre — up to 15.
+                      </span>
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-sm">
+                      ISBN (optional)
+                      <input
+                        name="isbn"
+                        type="text"
+                        defaultValue={book.isbn ?? ""}
+                        placeholder="e.g. 978-3-16-148410-0"
+                        className={formControlClasses}
+                      />
+                      <span className="text-xs text-muted">
+                        Only if you already own one — Librum doesn&apos;t issue
+                        or register ISBNs. Leave blank to skip.
+                      </span>
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-sm">
+                      Publisher / imprint (optional)
+                      <input
+                        name="publisher"
+                        type="text"
+                        defaultValue={book.publisher ?? ""}
+                        maxLength={PUBLISHER_MAX_LENGTH}
+                        className={formControlClasses}
+                      />
+                      <span className="text-xs text-muted">
+                        The publishing name for this edition, if applicable.
+                      </span>
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-sm">
+                      Edition (optional)
+                      <input
+                        name="edition"
+                        type="text"
+                        defaultValue={book.edition ?? ""}
+                        placeholder="e.g. First edition, Revised edition"
+                        maxLength={EDITION_MAX_LENGTH}
+                        className={formControlClasses}
                       />
                     </label>
+
+                    <label className="flex flex-col gap-1 text-sm">
+                      Originally published (optional)
+                      <input
+                        name="originalPublicationDate"
+                        type="date"
+                        defaultValue={book.original_publication_date ?? ""}
+                        className={formControlClasses}
+                      />
+                      <span className="text-xs text-muted">
+                        Only if this edition was first published elsewhere
+                        before arriving on Librum.
+                      </span>
+                    </label>
+
+                    {series && series.length === 0 && (
+                      <p className="text-xs text-muted">
+                        Want to group this with other books as a series?{" "}
+                        <Link href="/dashboard/series" className="focus-ring rounded-sm underline">
+                          Create a series first
+                        </Link>
+                        , then come back here.
+                      </p>
+                    )}
+
+                    {series && series.length > 0 && (
+                      <div className="flex gap-3">
+                        <label className="flex flex-1 flex-col gap-1 text-sm">
+                          Series (optional)
+                          <select
+                            name="seriesId"
+                            defaultValue={book.series_id ?? ""}
+                            className={formControlClasses}
+                          >
+                            <option value="">None</option>
+                            {series.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.title}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1 text-sm">
+                          Position
+                          <input
+                            name="seriesPosition"
+                            type="number"
+                            min="1"
+                            step="1"
+                            defaultValue={book.series_position ?? ""}
+                            placeholder="1"
+                            className={`w-24 ${formControlClasses}`}
+                          />
+                        </label>
+                      </div>
+                    )}
                   </div>
-                )}
+                </details>
               </div>
             </section>
 

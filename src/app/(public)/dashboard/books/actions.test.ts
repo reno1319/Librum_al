@@ -209,6 +209,7 @@ function resetMocks() {
       cover_path: "author-1/book-1-cover.png",
       file_path: "author-1/book-1.epub",
       author_id: USER_ID,
+      language: null,
     },
   });
   mockUploadCover.mockReset().mockResolvedValue({ error: null });
@@ -685,6 +686,180 @@ describe("updateBook: bibliographic metadata (PUBLISHING-UX-1 Part B FINAL PRE-C
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty("published_at");
+  });
+});
+
+// LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT SERVER-SIDE
+// UNCHANGED-LANGUAGE PRESERVATION CORRECTION: books.language carries no
+// DB CHECK, so a row may already legitimately hold a code outside the
+// currently-deployed LANGUAGES (e.g. a future/legacy "fr"). The tests
+// above already prove resolveLanguage()'s own strict behavior is
+// unchanged for createBook() and for a genuinely-new submitted value on
+// update; these are the dedicated tests for the new, narrow
+// updateBook()-only exception: an UNCHANGED unsupported value survives
+// an unrelated edit instead of being silently cleared or blocking the
+// whole save.
+describe("updateBook: unchanged-language preservation (PUBLISHING-UX-1 Part D FINAL PRE-COMMIT SERVER-SIDE CORRECTION)", () => {
+  beforeEach(resetMocks);
+
+  function withExistingLanguage(language: string | null) {
+    mockExistingSingle.mockReset().mockResolvedValue({
+      data: {
+        cover_path: "author-1/book-1-cover.png",
+        file_path: "author-1/book-1.epub",
+        author_id: USER_ID,
+        language,
+      },
+    });
+  }
+
+  // Matrix item 1 -- the most important regression this correction
+  // exists for: stored "fr", submitted "fr" (an untouched resubmission
+  // of the Edit form's own synthetic option), alongside a genuine,
+  // unrelated field edit. The unrelated edit must succeed, and
+  // "language" must not appear in the update payload at all --
+  // omission (Part D's own preferred invariant) rather than
+  // re-submitting the same value, so "no change" is structurally
+  // explicit, not just behaviorally equivalent.
+  it("stored \"fr\", submitted \"fr\" + an unrelated Description edit: the edit succeeds, no language key in the payload, no validation redirect", async () => {
+    withExistingLanguage("fr");
+    const formData = await buildFormData({ description: "Updated description." });
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "fr");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    // The only redirect is the successful-save redirect to the Edit
+    // page (no error query param) -- never the "Please choose a
+    // supported language" rejection.
+    expect(mockRedirect).not.toHaveBeenCalledWith(
+      expect.stringContaining("Please+choose+a+supported+language"),
+    );
+    expect(mockUpdate).toHaveBeenCalledOnce();
+    const payload = mockUpdate.mock.calls[0][0];
+    expect(payload).toMatchObject({ description: "Updated description." });
+    expect(payload).not.toHaveProperty("language");
+  });
+
+  it("stored \"fr\", submitted \"sq\": treated as a genuine change -- language: \"sq\" in the payload", async () => {
+    withExistingLanguage("fr");
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "sq");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ language: "sq" });
+  });
+
+  it("stored \"fr\", submitted \"\": an intentional clear -- language: null", async () => {
+    withExistingLanguage("fr");
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ language: null });
+  });
+
+  it("stored \"fr\", submitted \"de\": still rejected -- preservation never widens to \"any unsupported value\"", async () => {
+    withExistingLanguage("fr");
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "de");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/${BOOK_ID}/edit?error=Please+choose+a+supported+language`,
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("stored \"sq\" (currently supported), submitted \"fr\": still rejected -- an already-supported value can't be changed TO an unsupported one", async () => {
+    withExistingLanguage("sq");
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "fr");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/${BOOK_ID}/edit?error=Please+choose+a+supported+language`,
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("stored \"sq\", submitted \"sq\": normal supported-value behavior, unaffected by this correction", async () => {
+    withExistingLanguage("sq");
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "sq");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ language: "sq" });
+  });
+
+  it("language absent from FormData: still absent from the payload regardless of the existing stored value", async () => {
+    withExistingLanguage("fr");
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty("language");
+  });
+
+  it("the existing row's language is read from the authoritative, already-ownership-scoped DB query -- not from any client-supplied hint", async () => {
+    withExistingLanguage("fr");
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "fr");
+    // A client can't smuggle in a different "existing language" via an
+    // arbitrary extra field -- there is no such field this resolver
+    // reads at all.
+    formData.set("existingLanguage", "de");
+    formData.set("previousLanguage", "de");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate).toHaveBeenCalledOnce();
+    expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty("language");
+  });
+});
+
+describe("createBook: language remains strict -- unaffected by updateBook's preservation exception", () => {
+  beforeEach(resetMocks);
+
+  it("still rejects an unsupported language code on create", async () => {
+    const formData = await buildFormData();
+    formData.set("language", "fr");
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=Please+choose+a+supported+language",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it.each(["sq", "en", "it"])("still accepts currently supported language %s on create", async (code) => {
+    const formData = await buildFormData();
+    formData.set("language", code);
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockInsert.mock.calls[0][0]).toMatchObject({ language: code });
   });
 });
 

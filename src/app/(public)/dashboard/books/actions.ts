@@ -97,6 +97,55 @@ function resolveLanguage(formData: FormData, errorPath: string): ResolvedOptiona
   return { present, value };
 }
 
+// LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT SERVER-SIDE
+// UNCHANGED-LANGUAGE PRESERVATION CORRECTION: updateBook()-ONLY
+// exception to resolveLanguage()'s own strict "must be in LANGUAGES"
+// rule -- createBook() keeps calling resolveLanguage() directly, with
+// no knowledge of this function, and can never accept an unsupported
+// value for a brand-new row.
+//
+// books.language carries no DB CHECK (a book may already legitimately
+// hold a code this deployed LANGUAGES doesn't recognize -- see
+// migration 044's own comment), so an unrelated Edit save (e.g. fixing
+// a typo in Description) must not force the author to either "fix" or
+// silently lose that value merely by resubmitting the Edit form's own
+// pre-populated select. This encodes ONLY "the author resubmitted the
+// exact value already on this row, untouched" -- never "any
+// unsupported value is now acceptable." A submitted value that differs
+// from the existing row's own value is still rejected exactly as
+// resolveLanguage() already does, whether it's unsupported OUTRIGHT
+// (stored "sq", submitted "de") or unsupported and merely DIFFERENT
+// from another already-unsupported stored value (stored "fr",
+// submitted "de") -- preservation is never confused with "unsupported
+// values are now validated."
+//
+// `existingLanguage` MUST come from the authoritative DB row already
+// read for this update's own ownership check (see updateBook()'s own
+// comment at that query) -- never from a hidden form field, client
+// state, or query parameter, none of which a client could be trusted
+// to report honestly.
+type LanguageUpdateResolution =
+  | { action: "omit" } // formData has no "language" key -- column untouched
+  | { action: "clear" } // present, empty -- intentional clear to null
+  | { action: "set"; value: string } // present, currently supported
+  | { action: "preserve" }; // present, unsupported, === existing row's own value -- no-op
+
+function resolveLanguageForUpdate(
+  formData: FormData,
+  existingLanguage: string | null,
+  errorPath: string,
+): LanguageUpdateResolution {
+  if (!formData.has("language")) return { action: "omit" };
+
+  const value = String(formData.get("language") ?? "").trim();
+  if (!value) return { action: "clear" };
+  if (isSupportedLanguage(value)) return { action: "set", value };
+
+  if (value === existingLanguage) return { action: "preserve" };
+
+  redirect(`${errorPath}?error=Please+choose+a+supported+language`);
+}
+
 // The author-supplied "originally published" date -- a genuinely
 // different fact from published_at (Librum's own system-authoritative
 // first-publish timestamp, set only by performPublish(), never read
@@ -578,9 +627,15 @@ export async function updateBook(bookId: string, formData: FormData) {
     redirect("/login");
   }
 
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT SERVER-SIDE
+  // UNCHANGED-LANGUAGE PRESERVATION CORRECTION: `language` added to
+  // this existing, already-ownership-scoped read -- no second query --
+  // so resolveLanguageForUpdate() below has an authoritative source for
+  // "what does this row already have" that a client can never spoof
+  // (unlike a hidden form field or query parameter).
   const { data: existing } = await supabase
     .from("books")
-    .select("cover_path, file_path, author_id")
+    .select("cover_path, file_path, author_id, language")
     .eq("id", bookId)
     .single();
 
@@ -624,7 +679,17 @@ export async function updateBook(bookId: string, formData: FormData) {
     "Subtitle",
     `/dashboard/books/${bookId}/edit`,
   );
-  const languageResolved = resolveLanguage(formData, `/dashboard/books/${bookId}/edit`);
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT SERVER-SIDE
+  // UNCHANGED-LANGUAGE PRESERVATION CORRECTION: updateBook()'s own
+  // narrow resolver, not the shared resolveLanguage() createBook()
+  // still uses unmodified -- see resolveLanguageForUpdate()'s own
+  // comment for why. `existing.language` is the authoritative DB value
+  // this update's own ownership-check query already fetched.
+  const languageResolution = resolveLanguageForUpdate(
+    formData,
+    existing.language,
+    `/dashboard/books/${bookId}/edit`,
+  );
   const publisherResolved = resolveBoundedOptionalText(
     formData,
     "publisher",
@@ -778,7 +843,15 @@ export async function updateBook(bookId: string, formData: FormData) {
       cover_path: coverPath,
       file_path: filePath,
       ...(subtitleResolved.present ? { subtitle: subtitleResolved.value } : {}),
-      ...(languageResolved.present ? { language: languageResolved.value } : {}),
+      // "omit" (absent) and "preserve" (unchanged unsupported value)
+      // both spread in nothing -- see resolveLanguageForUpdate()'s own
+      // comment for why "preserve" is a deliberate no-op, not merely
+      // an oversight sharing "omit"'s own code path.
+      ...(languageResolution.action === "set"
+        ? { language: languageResolution.value }
+        : languageResolution.action === "clear"
+          ? { language: null }
+          : {}),
       ...(publisherResolved.present ? { publisher: publisherResolved.value } : {}),
       ...(editionResolved.present ? { edition: editionResolved.value } : {}),
       ...(originalPublicationDateResolved.present
