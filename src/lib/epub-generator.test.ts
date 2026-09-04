@@ -76,6 +76,32 @@ describe("generateEpub", () => {
     expect(opf).not.toMatch(/<dc:language>(en|sq|und-.+)<\/dc:language>/);
   });
 
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART B: `language` is a new, optional
+  // EpubGeneratorInput field -- no current caller (docx-actions.ts)
+  // supplies it yet, so the "omitted" case above is the real-world
+  // regression to protect; these three cover the field's own contract
+  // directly, for whenever a future caller does start supplying it.
+  it("writes the real language code when supplied", async () => {
+    const bytes = await generateEpub({ ...BASE_INPUT, language: "sq" });
+    const zip = await JSZip.loadAsync(bytes);
+    const opf = await zip.file("OEBPS/content.opf")!.async("string");
+    expect(opf).toContain("<dc:language>sq</dc:language>");
+  });
+
+  it("falls back to 'und' for an explicit null language -- never crashes", async () => {
+    const bytes = await generateEpub({ ...BASE_INPUT, language: null });
+    const zip = await JSZip.loadAsync(bytes);
+    const opf = await zip.file("OEBPS/content.opf")!.async("string");
+    expect(opf).toContain("<dc:language>und</dc:language>");
+  });
+
+  it("falls back to 'und' for a blank/whitespace-only language", async () => {
+    const bytes = await generateEpub({ ...BASE_INPUT, language: "   " });
+    const zip = await JSZip.loadAsync(bytes);
+    const opf = await zip.file("OEBPS/content.opf")!.async("string");
+    expect(opf).toContain("<dc:language>und</dc:language>");
+  });
+
   it("lists every chapter in the manifest and spine, in section order", async () => {
     const bytes = await generateEpub(BASE_INPUT);
     const zip = await JSZip.loadAsync(bytes);

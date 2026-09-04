@@ -26,7 +26,26 @@ export type EpubGeneratorInput = {
   authorName: string;
   sections: DocSection[];
   images: DocImage[];
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART B: optional -- omitted, null, or
+  // blank all resolve to "und" exactly as every caller already got
+  // before this field existed (see resolveEpubLanguageCode() below).
+  // No caller in this codebase passes a real value yet (books.language
+  // did not exist until migration 044, and threading a live value from
+  // the wizard's own eventual Language field through docx-actions.ts/
+  // manuscript-field.tsx is Part C's UI work, not this signature
+  // change) -- this only makes doing so possible later without a
+  // second signature change.
+  language?: string | null;
 };
+
+// Falls back to "und" (the real, standards-defined ISO 639-2 code for
+// "undetermined") for an absent/null/blank language -- never guesses,
+// never crashes. See renderOpf()'s own PRE-COMMIT CORRECTION comment
+// below for why "und" specifically, not omission.
+function resolveEpubLanguageCode(language: string | null | undefined): string {
+  const trimmed = language?.trim();
+  return trimmed ? trimmed : "und";
+}
 
 const XML_ESCAPE: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 function escapeXml(text: string): string {
@@ -132,20 +151,26 @@ function renderOpf(input: EpubGeneratorInput, modifiedAt: string): string {
   //
   // LIBRUM 2.0 PRODUCT-5 PRE-COMMIT CORRECTION: dc:language is EPUB3's
   // own required metadata element (never optional in the spec) -- the
-  // earlier "omit it" decision was wrong, not merely conservative.
-  // This schema still has no authoritative per-book language field
-  // (re-confirmed: neither `books` nor `profiles` has one -- see
-  // schema.sql), so the fix isn't to guess "en"/"sq"/anything else,
-  // it's to use "und" -- the real, standards-defined ISO 639-2 code
-  // for "undetermined," a genuine value for exactly this situation,
-  // not a placeholder invented for this codebase.
+  // earlier "omit it" decision was wrong, not merely conservative. At
+  // the time this was written, books had no authoritative per-book
+  // language field at all, so the fix was to use "und" -- the real,
+  // standards-defined ISO 639-2 code for "undetermined," a genuine
+  // value for exactly that situation, never a guessed "en"/"sq".
+  //
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART B: books.language now exists
+  // (migration 044) -- resolveEpubLanguageCode() above still falls
+  // back to "und" for every caller that omits/nulls `input.language`
+  // (which is every current caller; see this input type's own comment),
+  // so this remains byte-for-byte the same output as before for any
+  // book without a real language value, and only emits a real code once
+  // a caller actually starts supplying one.
   return `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/">
 <dc:identifier id="book-id">urn:librum:book:${escapeXml(input.bookId)}</dc:identifier>
 <dc:title>${escapeXml(input.title)}</dc:title>
 <dc:creator>${escapeXml(input.authorName)}</dc:creator>
-<dc:language>und</dc:language>
+<dc:language>${escapeXml(resolveEpubLanguageCode(input.language))}</dc:language>
 <meta property="dcterms:modified">${modifiedAt}</meta>
 </metadata>
 <manifest>

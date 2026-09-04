@@ -252,10 +252,23 @@ create table public.books (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references public.profiles(id) on delete cascade,
   title text not null,
+  -- LIBRUM 2.0 PUBLISHING-UX-1 PART B (migration 044): subtitle/
+  -- publisher/edition each carry a conservative length CHECK -- new
+  -- public-facing bibliographic fields with no existing length
+  -- precedent on this table to inherit.
+  subtitle text check (subtitle is null or char_length(subtitle) <= 300),
   description text not null default '',
   preview_text text not null default '',
   keywords text not null default '',
   isbn text,
+  -- language is deliberately NOT constrained by a DB CHECK -- the
+  -- launch language set (sq/en/it -- see src/lib/languages.ts) is
+  -- product configuration, validated in TypeScript at every write path
+  -- (createBook()/updateBook()), not a permanent database invariant.
+  language text,
+  publisher text check (publisher is null or char_length(publisher) <= 200),
+  edition text check (edition is null or char_length(edition) <= 100),
+  original_publication_date date,
   genre text check (genre in (
     'Fiction', 'Non-Fiction', 'Mystery & Thriller', 'Romance', 'Fantasy',
     'Science Fiction', 'Horror', 'Biography & Memoir', 'Self-Help',
@@ -267,6 +280,11 @@ create table public.books (
   cover_path text,
   file_path text,
   status text not null default 'draft' check (status in ('draft', 'published')),
+  -- system-authoritative -- set exactly once by performPublish() on a
+  -- genuine draft -> published transition, never accepted from author-
+  -- submitted form data, never overwritten by a later unpublish/
+  -- republish cycle. See migration 044's own comment for full semantics.
+  published_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

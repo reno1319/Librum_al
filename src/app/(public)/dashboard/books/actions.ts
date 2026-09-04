@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { GENRES } from "@/lib/genres";
+import { isSupportedLanguage } from "@/lib/languages";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 import { sendNewBookEmails } from "@/lib/email";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
@@ -13,6 +14,13 @@ import { validateEpubStructure } from "@/lib/epub-validation";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
+
+// LIBRUM 2.0 PUBLISHING-UX-1 PART B: mirrors migration 044's own CHECK
+// constraints exactly (see that migration's comment) -- a value that
+// passes this can never fail at the database layer.
+const SUBTITLE_MAX_LENGTH = 300;
+const PUBLISHER_MAX_LENGTH = 200;
+const EDITION_MAX_LENGTH = 100;
 
 // Stored as a single comma-separated string (searched the same way as
 // title/description) rather than a Postgres array — simpler to search
@@ -24,6 +32,100 @@ function normalizeKeywords(raw: FormDataEntryValue | null): string {
     .filter(Boolean)
     .slice(0, 15)
     .join(", ");
+}
+
+// LIBRUM 2.0 PUBLISHING-UX-1 PART B FINAL PRE-COMMIT ROLLOUT-
+// COMPATIBILITY CORRECTION: every one of the three resolvers below now
+// reports `present` (formData.has(fieldName), never inferred from
+// formData.get()'s own result) alongside the normalized `value` --
+// same shape as this file's own pre-existing ResolvedManuscript/
+// ResolvedCover types. createBook() only ever reads `.value` (absent
+// and empty both legitimately mean "no value yet" for a brand-new
+// row); updateBook() reads BOTH, since PUBLISHING-UX-1 is staged
+// across three parts (Part B: server persistence, Part C: wizard UI
+// for new books, Part D: Edit UI parity) -- an old Edit form that
+// doesn't submit these fields yet must never wipe a value the Part-C
+// wizard already saved, which formData.get()-only absent/empty
+// conflation would have silently done the moment ANY existing field
+// was edited through the old form. See updateBook()'s own comment at
+// its update-payload call site for how `present` is actually used.
+type ResolvedOptionalText = { present: boolean; value: string | null };
+
+// Shared trim/empty-becomes-null/length-bound normalization for
+// subtitle, publisher, and edition -- all three are optional free text
+// with the exact same shape. Mirrors migration 044's own CHECK
+// constraints exactly (see that migration's comment for why
+// 300/200/100), so a value that passes here can never fail at the
+// database layer -- an over-limit value is a controlled, author-facing
+// rejection here instead.
+function resolveBoundedOptionalText(
+  formData: FormData,
+  fieldName: string,
+  maxLength: number,
+  fieldLabel: string,
+  errorPath: string,
+): ResolvedOptionalText {
+  const present = formData.has(fieldName);
+  const value = String(formData.get(fieldName) ?? "").trim();
+  if (!value) return { present, value: null };
+  if (value.length > maxLength) {
+    // A literal "+"-joined query string, matching every other redirect
+    // in this file (e.g. "Please+fill+in+every+field") -- fieldLabel is
+    // always one of this file's own hardcoded call-site labels
+    // ("Subtitle"/"Publisher"/"Edition"), never user input, so no
+    // encoding is needed here.
+    redirect(`${errorPath}?error=${fieldLabel}+must+be+${maxLength}+characters+or+fewer`);
+  }
+  return { present, value };
+}
+
+// Empty/absent is always valid -- this is the current wizard's own
+// transitional-compatibility requirement (it doesn't submit a
+// "language" field at all yet, and must keep working exactly as before
+// until Part C adds one). A non-empty value must match the current
+// LANGUAGES vocabulary (src/lib/languages.ts) -- never silently stored
+// unrecognized. books.language itself carries no DB CHECK (see
+// migration 044's own comment for why); this is the one real
+// enforcement point.
+function resolveLanguage(formData: FormData, errorPath: string): ResolvedOptionalText {
+  const present = formData.has("language");
+  const value = String(formData.get("language") ?? "").trim();
+  if (!value) return { present, value: null };
+  if (!isSupportedLanguage(value)) {
+    redirect(`${errorPath}?error=Please+choose+a+supported+language`);
+  }
+  return { present, value };
+}
+
+// The author-supplied "originally published" date -- a genuinely
+// different fact from published_at (Librum's own system-authoritative
+// first-publish timestamp, set only by performPublish(), never read
+// from form data at all -- see that function's own comment). Empty is
+// always valid; a non-empty value must be a real calendar date,
+// matching a native <input type="date">'s own "YYYY-MM-DD" shape, and
+// may not be in the future -- "originally published" has no
+// meaningful future value, and this field is explicitly not a
+// scheduled-release mechanism (out of scope for PUBLISHING-UX-1
+// entirely).
+function resolveOriginalPublicationDate(formData: FormData, errorPath: string): ResolvedOptionalText {
+  const present = formData.has("originalPublicationDate");
+  const raw = String(formData.get("originalPublicationDate") ?? "").trim();
+  if (!raw) return { present, value: null };
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    redirect(`${errorPath}?error=Enter+a+valid+original+publication+date`);
+  }
+
+  const parsed = new Date(`${raw}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw) {
+    redirect(`${errorPath}?error=Enter+a+valid+original+publication+date`);
+  }
+
+  if (parsed.getTime() > Date.now()) {
+    redirect(`${errorPath}?error=Original+publication+date+can%27t+be+in+the+future`);
+  }
+
+  return { present, value: raw };
 }
 
 // LIBRUM 2.0 PRODUCT-5 CB-1: a manuscript can arrive two ways --
@@ -264,6 +366,38 @@ export async function createBook(formData: FormData) {
     redirect("/dashboard/books/new?error=Please+choose+a+genre");
   }
 
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART B: every one of these five is
+  // optional and absent entirely from the current (pre-Part-C) wizard's
+  // own FormData -- formData.get() simply returns null for a field the
+  // form never submits. Unlike updateBook() below, createBook() only
+  // ever reads `.value` here, never `.present`: a brand-new row has no
+  // prior value to preserve, so absent and empty both legitimately mean
+  // "no value yet," collapsing to `null` either way -- exactly the
+  // pre-correction behavior, unchanged.
+  const subtitle = resolveBoundedOptionalText(
+    formData,
+    "subtitle",
+    SUBTITLE_MAX_LENGTH,
+    "Subtitle",
+    "/dashboard/books/new",
+  ).value;
+  const language = resolveLanguage(formData, "/dashboard/books/new").value;
+  const publisher = resolveBoundedOptionalText(
+    formData,
+    "publisher",
+    PUBLISHER_MAX_LENGTH,
+    "Publisher",
+    "/dashboard/books/new",
+  ).value;
+  const edition = resolveBoundedOptionalText(
+    formData,
+    "edition",
+    EDITION_MAX_LENGTH,
+    "Edition",
+    "/dashboard/books/new",
+  ).value;
+  const originalPublicationDate = resolveOriginalPublicationDate(formData, "/dashboard/books/new").value;
+
   const { seriesId, seriesPosition } = await resolveSeriesSelection(
     supabase,
     user.id,
@@ -329,15 +463,25 @@ export async function createBook(formData: FormData) {
     id: bookId,
     author_id: user.id,
     title,
+    subtitle,
     description,
     keywords,
     isbn,
+    language,
+    publisher,
+    edition,
+    original_publication_date: originalPublicationDate,
     genre,
     series_id: seriesId,
     series_position: seriesPosition,
     price_cents: priceCents,
     cover_path: coverPath,
     file_path: manuscriptPath,
+    // Always inserted as a draft, regardless of the submitted intent
+    // (see below) -- the draft-first transition is intentional
+    // (PUBLISHING-UX-1 Part B's own brief): a book is never inserted
+    // directly as status='published', so a subsequent publish failure
+    // always has an already-safely-saved draft to fall back to.
     status: "draft",
   });
 
@@ -379,7 +523,49 @@ export async function createBook(formData: FormData) {
   }
 
   revalidatePath("/dashboard");
-  redirect("/dashboard");
+
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART B: prepares createBook() for Part
+  // C's eventual two final-step buttons (Save as draft / Publish book)
+  // without changing anything about today's wizard, which never
+  // submits an "intent" field at all -- formData.get("intent") is then
+  // simply null, String(null ?? "draft") is "draft", and every branch
+  // below behaves EXACTLY as before this change: redirect("/dashboard")
+  // with the book already safely saved as a draft.
+  const intent = String(formData.get("intent") ?? "draft");
+  if (intent !== "publish") {
+    redirect("/dashboard");
+  }
+
+  // The book row above is already a fully-saved, permanent draft at
+  // this point -- performPublish() only ever ADVANCES its status, and
+  // its own failure paths never touch the row at all, so every branch
+  // below leaves a real, safe Draft behind even when publishing itself
+  // doesn't succeed (see performPublish()'s own comment).
+  const publishResult = await performPublish(supabase, bookId, user.id);
+
+  if (publishResult.ok) {
+    if (publishResult.wasNewlyPublished) {
+      const admin = createAdminClient();
+      await sendNewBookEmails(admin, { bookId, authorId: user.id });
+    }
+    revalidatePath("/");
+    redirect("/dashboard?success=Your+book+is+now+live");
+  }
+
+  // Publish failed -- the draft inserted above remains exactly as
+  // saved. Only two controlled, non-leaking reasons exist here (see
+  // performPublish()'s own result type); "not_found" is not reachable
+  // in practice (this is the row this same request just inserted) but
+  // still falls safely into the same generic branch rather than being
+  // treated as exhaustive.
+  if (publishResult.reason === "payout_required") {
+    redirect(
+      "/dashboard?success=Saved+as+draft&error=Connect+your+payout+account+before+publishing",
+    );
+  }
+  redirect(
+    "/dashboard?success=Saved+as+draft&error=We+couldn%27t+publish+your+book+yet.+Please+try+again+from+your+dashboard",
+  );
 }
 
 export async function updateBook(bookId: string, formData: FormData) {
@@ -416,6 +602,47 @@ export async function updateBook(bookId: string, formData: FormData) {
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
     redirect(`/dashboard/books/${bookId}/edit?error=Please+choose+a+genre`);
   }
+
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART B FINAL PRE-COMMIT ROLLOUT-
+  // COMPATIBILITY CORRECTION: same five author-editable fields as
+  // createBook(), but this function keeps each resolver's full
+  // `{present, value}` result (never collapsing to just `.value` the
+  // way createBook() does) -- see the update-payload call site further
+  // below for exactly why: PUBLISHING-UX-1 is staged across three
+  // parts, and the still-old (pre-Part-D) Edit form does not submit
+  // these fields at all yet, so "the form didn't send this key" must
+  // be distinguished from "the author cleared this field," and only
+  // the latter may ever write `null` over an existing value.
+  //
+  // Never published_at regardless: no "publishedAt" form field is ever
+  // read here, present or not -- see performPublish()'s own comment for
+  // why that stays entirely outside author-submitted form data.
+  const subtitleResolved = resolveBoundedOptionalText(
+    formData,
+    "subtitle",
+    SUBTITLE_MAX_LENGTH,
+    "Subtitle",
+    `/dashboard/books/${bookId}/edit`,
+  );
+  const languageResolved = resolveLanguage(formData, `/dashboard/books/${bookId}/edit`);
+  const publisherResolved = resolveBoundedOptionalText(
+    formData,
+    "publisher",
+    PUBLISHER_MAX_LENGTH,
+    "Publisher",
+    `/dashboard/books/${bookId}/edit`,
+  );
+  const editionResolved = resolveBoundedOptionalText(
+    formData,
+    "edition",
+    EDITION_MAX_LENGTH,
+    "Edition",
+    `/dashboard/books/${bookId}/edit`,
+  );
+  const originalPublicationDateResolved = resolveOriginalPublicationDate(
+    formData,
+    `/dashboard/books/${bookId}/edit`,
+  );
 
   const { seriesId, seriesPosition } = await resolveSeriesSelection(
     supabase,
@@ -524,6 +751,19 @@ export async function updateBook(bookId: string, formData: FormData) {
   // NOT `preview_text: String(formData.get("previewText") ?? "")`,
   // which would have silently overwritten every existing legacy value
   // with an empty string the very first time each book was next edited.
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART B FINAL PRE-COMMIT ROLLOUT-
+  // COMPATIBILITY CORRECTION: each of the five new metadata fields is
+  // spread in ONLY when its own resolver reports `present: true` --
+  // exactly the same "a Supabase `.update()` only ever touches keys
+  // actually present in the object passed here" mechanism the comment
+  // above already relies on for preview_text, now applied deliberately
+  // to these five instead of by omission. A field the still-old
+  // (pre-Part-D) Edit form never submits is simply never a key on this
+  // object at all, so its existing database value -- however it got
+  // there, including from the Part-C wizard's own eventual create flow
+  // -- survives untouched. A field the form DOES submit, even as an
+  // empty string, IS included, as `null` -- an intentional clear, not
+  // an accidental one.
   const { error: updateError } = await supabase
     .from("books")
     .update({
@@ -537,6 +777,13 @@ export async function updateBook(bookId: string, formData: FormData) {
       price_cents: priceCents,
       cover_path: coverPath,
       file_path: filePath,
+      ...(subtitleResolved.present ? { subtitle: subtitleResolved.value } : {}),
+      ...(languageResolved.present ? { language: languageResolved.value } : {}),
+      ...(publisherResolved.present ? { publisher: publisherResolved.value } : {}),
+      ...(editionResolved.present ? { edition: editionResolved.value } : {}),
+      ...(originalPublicationDateResolved.present
+        ? { original_publication_date: originalPublicationDateResolved.value }
+        : {}),
     })
     .eq("id", bookId)
     .eq("author_id", user.id);
@@ -592,25 +839,54 @@ export async function updateBook(bookId: string, formData: FormData) {
   redirect("/dashboard?success=Book+updated");
 }
 
-export async function publishBook(bookId: string) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+// LIBRUM 2.0 PUBLISHING-UX-1 PART B: the ONE authoritative, non-
+// redirecting publish gate -- extracted from what was previously
+// publishBook()'s own inline body, byte-for-byte the same rules,
+// so createBook()'s new "intent=publish" path (below) and the public
+// publishBook() Server Action (further below) can never drift apart
+// into two independently-maintained copies of the payout/status rule.
+// Deliberately NOT exported and NOT itself a Server Action -- this
+// file already starts with "use server", which requires every
+// EXPORTED top-level value to be an async function; keeping this
+// helper internal (Option A from the brief) is the smallest correct
+// architecture, and sidesteps that class of defect entirely rather
+// than needing a second module (this codebase hit exactly this defect
+// once already -- see finance/finance-logic.ts's own "RPC error
+// mapping" comment for the ADMIN-1D PART C precedent).
+//
+// Ownership is enforced by the `eq("author_id", userId)` filters below,
+// not by trusting the caller -- both call sites already independently
+// re-derive `userId` from their own auth.getUser() before reaching
+// here, but this function re-checks it anyway rather than assuming.
+//
+// published_at semantics (migration 044's own comment has the full
+// rationale): read alongside status/price_cents so "set it only if
+// currently null" can be decided in the SAME update payload as the
+// status transition -- never a separate write, never re-evaluated
+// after the fact. A book that was already published once (published_at
+// already non-null) keeps that original timestamp through any later
+// unpublish/republish cycle or edit -- this function's update payload
+// simply omits the key whenever published_at is already set, and a
+// Supabase `.update()` never touches a key that isn't present in the
+// payload object it's given.
+type PerformPublishResult =
+  | { ok: true; wasNewlyPublished: boolean }
+  | { ok: false; reason: "not_found" | "payout_required" | "update_failed" };
 
-  if (!user) {
-    redirect("/login");
-  }
-
+async function performPublish(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  bookId: string,
+  userId: string,
+): Promise<PerformPublishResult> {
   const { data: book } = await supabase
     .from("books")
-    .select("status, price_cents")
+    .select("status, price_cents, published_at")
     .eq("id", bookId)
-    .eq("author_id", user.id)
+    .eq("author_id", userId)
     .single();
 
   if (!book) {
-    redirect("/dashboard");
+    return { ok: false, reason: "not_found" };
   }
 
   // Free books never touch Stripe (see getFreeBook), so payout
@@ -622,24 +898,68 @@ export async function publishBook(bookId: string) {
     const { data: profile } = await supabase
       .from("profiles")
       .select("stripe_payouts_enabled")
-      .eq("id", user.id)
+      .eq("id", userId)
       .single();
 
     if (!profile?.stripe_payouts_enabled) {
-      redirect("/dashboard?error=Connect+your+payout+account+before+publishing");
+      return { ok: false, reason: "payout_required" };
     }
   }
 
   // Only a genuine draft -> published transition should notify
   // followers — otherwise every unpublish/republish toggle would spam
-  // them again.
-  await supabase
-    .from("books")
-    .update({ status: "published" })
-    .eq("id", bookId)
-    .eq("author_id", user.id);
+  // them again. Read BEFORE the update below (which changes it).
+  const wasNewlyPublished = book.status === "draft";
 
-  if (book.status === "draft") {
+  const updatePayload: { status: "published"; published_at?: string } = { status: "published" };
+  if (book.published_at == null) {
+    updatePayload.published_at = new Date().toISOString();
+  }
+
+  const { error } = await supabase
+    .from("books")
+    .update(updatePayload)
+    .eq("id", bookId)
+    .eq("author_id", userId);
+
+  if (error) {
+    return { ok: false, reason: "update_failed" };
+  }
+
+  return { ok: true, wasNewlyPublished };
+}
+
+export async function publishBook(bookId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  // Thin wrapper around the one authoritative helper above -- auth,
+  // then a redirect chosen from its small controlled result, nothing
+  // else. External behavior (redirect targets, notification timing) is
+  // unchanged from before this extraction.
+  const result = await performPublish(supabase, bookId, user.id);
+
+  if (!result.ok) {
+    if (result.reason === "payout_required") {
+      redirect("/dashboard?error=Connect+your+payout+account+before+publishing");
+    }
+    // "not_found" (no such book, or not owned by this user) and
+    // "update_failed" both redirect back to the dashboard -- the
+    // former matches this function's own pre-extraction behavior
+    // exactly (`if (!book) { redirect("/dashboard"); }`); the latter is
+    // a new, previously-unhandled case (the update call was never
+    // checked for an error before this extraction) getting the same
+    // safe fallback rather than being silently ignored.
+    redirect("/dashboard");
+  }
+
+  if (result.wasNewlyPublished) {
     const admin = createAdminClient();
     await sendNewBookEmails(admin, { bookId, authorId: user.id });
   }

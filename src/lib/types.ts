@@ -28,10 +28,28 @@ export type Book = {
   id: string;
   author_id: string;
   title: string;
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART B (migration 044): subtitle,
+  // publisher, edition, and original_publication_date are all
+  // author-editable, optional, bibliographic metadata -- see
+  // migration 044's own comment for exact semantics/constraints.
+  subtitle: string | null;
   description: string;
   preview_text: string;
   keywords: string;
   isbn: string | null;
+  // A LanguageCode (src/lib/languages.ts) when set, but typed as a
+  // plain string here -- same "a row already in the table is a fact
+  // that happened" precedent AuditEventRow.action and
+  // FinanceCheckoutExceptionRow.reconciliation_reason already
+  // establish -- a future addition to LANGUAGES should never require a
+  // type change here, and books.language itself carries no DB CHECK
+  // (see migration 044's own comment for why).
+  language: string | null;
+  publisher: string | null;
+  edition: string | null;
+  // A `date` column -- serializes as a plain "YYYY-MM-DD" string via
+  // supabase-js, same as every other date/timestamp field on this type.
+  original_publication_date: string | null;
   genre: string | null;
   series_id: string | null;
   series_position: number | null;
@@ -39,6 +57,12 @@ export type Book = {
   cover_path: string | null;
   file_path: string | null;
   status: BookStatus;
+  // System-authoritative: the moment this book first genuinely
+  // transitioned from draft to published, set exactly once by
+  // performPublish() (src/app/(public)/dashboard/books/actions.ts).
+  // Never author-editable, never re-set by an unpublish/republish
+  // cycle. null for a book that has never been published.
+  published_at: string | null;
   created_at: string;
   updated_at: string;
 };

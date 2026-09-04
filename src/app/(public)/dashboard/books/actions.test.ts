@@ -245,6 +245,449 @@ describe("createBook: preview_text is no longer collected", () => {
   });
 });
 
+// LIBRUM 2.0 PUBLISHING-UX-1 PART B: subtitle/language/publisher/
+// edition/original_publication_date -- the five new author-editable
+// bibliographic fields. buildFormData() never sets any of these, so
+// every existing test above already covers "absent -> null" for the
+// preview_text scenarios it exists for; these describe blocks are the
+// dedicated coverage for the new fields themselves.
+describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
+  beforeEach(resetMocks);
+
+  it("persists subtitle/language/publisher/edition/original_publication_date when supplied", async () => {
+    const formData = await buildFormData();
+    formData.set("subtitle", "A Subtitle");
+    formData.set("language", "sq");
+    formData.set("publisher", "Some Press");
+    formData.set("edition", "First edition");
+    formData.set("originalPublicationDate", "2020-01-01");
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockInsert.mock.calls[0][0]).toMatchObject({
+      subtitle: "A Subtitle",
+      language: "sq",
+      publisher: "Some Press",
+      edition: "First edition",
+      original_publication_date: "2020-01-01",
+    });
+  });
+
+  it("stores null for every new field when absent -- the current (pre-Part-C) wizard's own FormData shape", async () => {
+    const formData = await buildFormData();
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockInsert.mock.calls[0][0]).toMatchObject({
+      subtitle: null,
+      language: null,
+      publisher: null,
+      edition: null,
+      original_publication_date: null,
+    });
+  });
+
+  it("trims whitespace and treats an empty/whitespace-only value as null", async () => {
+    const formData = await buildFormData();
+    formData.set("subtitle", "   ");
+    formData.set("publisher", "  ");
+    formData.set("edition", "");
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockInsert.mock.calls[0][0]).toMatchObject({
+      subtitle: null,
+      publisher: null,
+      edition: null,
+    });
+  });
+
+  it("rejects a subtitle over 300 characters", async () => {
+    const formData = await buildFormData();
+    formData.set("subtitle", "x".repeat(301));
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=Subtitle+must+be+300+characters+or+fewer",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("accepts a subtitle at exactly the 300 character limit", async () => {
+    const formData = await buildFormData();
+    formData.set("subtitle", "x".repeat(300));
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockInsert).toHaveBeenCalledOnce();
+    expect(mockInsert.mock.calls[0][0]).toMatchObject({ subtitle: "x".repeat(300) });
+  });
+
+  it("rejects a publisher over 200 characters", async () => {
+    const formData = await buildFormData();
+    formData.set("publisher", "x".repeat(201));
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=Publisher+must+be+200+characters+or+fewer",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("accepts a publisher at exactly the 200 character limit", async () => {
+    const formData = await buildFormData();
+    formData.set("publisher", "x".repeat(200));
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockInsert.mock.calls[0][0]).toMatchObject({ publisher: "x".repeat(200) });
+  });
+
+  it("rejects an edition over 100 characters", async () => {
+    const formData = await buildFormData();
+    formData.set("edition", "x".repeat(101));
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=Edition+must+be+100+characters+or+fewer",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("accepts an edition at exactly the 100 character limit", async () => {
+    const formData = await buildFormData();
+    formData.set("edition", "x".repeat(100));
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockInsert.mock.calls[0][0]).toMatchObject({ edition: "x".repeat(100) });
+  });
+
+  it("accepts every currently supported language code", async () => {
+    for (const code of ["sq", "en", "it"]) {
+      resetMocks();
+      const formData = await buildFormData();
+      formData.set("language", code);
+
+      await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+      expect(mockInsert.mock.calls[0][0]).toMatchObject({ language: code });
+    }
+  });
+
+  it("rejects an unsupported language code, distinctly from a missing one", async () => {
+    const formData = await buildFormData();
+    formData.set("language", "fr");
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=Please+choose+a+supported+language",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid original publication date", async () => {
+    const formData = await buildFormData();
+    formData.set("originalPublicationDate", "1999-12-31");
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockInsert.mock.calls[0][0]).toMatchObject({
+      original_publication_date: "1999-12-31",
+    });
+  });
+
+  it("rejects a malformed original publication date", async () => {
+    const formData = await buildFormData();
+    formData.set("originalPublicationDate", "not-a-date");
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=Enter+a+valid+original+publication+date",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid calendar date shaped like a real date (e.g. February 30th)", async () => {
+    const formData = await buildFormData();
+    formData.set("originalPublicationDate", "2024-02-30");
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=Enter+a+valid+original+publication+date",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects a future original publication date", async () => {
+    const formData = await buildFormData();
+    const oneYearFromNow = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365);
+    formData.set("originalPublicationDate", oneYearFromNow.toISOString().slice(0, 10));
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=Original+publication+date+can%27t+be+in+the+future",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("never accepts published_at from FormData -- no such form field is ever read by createBook()", async () => {
+    const formData = await buildFormData();
+    formData.set("published_at", "2020-01-01T00:00:00.000Z");
+    formData.set("publishedAt", "2020-01-01T00:00:00.000Z");
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockInsert.mock.calls[0][0]).not.toHaveProperty("published_at");
+  });
+});
+
+describe("updateBook: bibliographic metadata (PUBLISHING-UX-1 Part B FINAL PRE-COMMIT ROLLOUT-COMPATIBILITY CORRECTION)", () => {
+  beforeEach(resetMocks);
+
+  it("persists supplied metadata on update", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("subtitle", "Updated Subtitle");
+    formData.set("language", "en");
+    formData.set("publisher", "New Press");
+    formData.set("edition", "Second edition");
+    formData.set("originalPublicationDate", "2010-06-15");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({
+      subtitle: "Updated Subtitle",
+      language: "en",
+      publisher: "New Press",
+      edition: "Second edition",
+      original_publication_date: "2010-06-15",
+    });
+  });
+
+  // Test A: all five new fields absent entirely from FormData (the
+  // exact shape of the still-old, pre-Part-D Edit form) -- none of the
+  // five keys may appear in the update payload at all, so a Supabase
+  // `.update()` (which only ever touches keys actually present in the
+  // object it's given) can never overwrite an existing value for any
+  // of them.
+  it("none of the five new metadata keys appear in the update payload when all five are absent from FormData", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    // subtitle/language/publisher/edition/originalPublicationDate are
+    // never set on this FormData at all -- buildFormData() doesn't add
+    // them, and nothing here does either.
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const payload = mockUpdate.mock.calls[0][0];
+    expect(payload).not.toHaveProperty("subtitle");
+    expect(payload).not.toHaveProperty("language");
+    expect(payload).not.toHaveProperty("publisher");
+    expect(payload).not.toHaveProperty("edition");
+    expect(payload).not.toHaveProperty("original_publication_date");
+  });
+
+  // Test B: this is the staged-rollout scenario the correction exists
+  // for, spelled out explicitly (PUBLISHING-UX-1 Part B brief section
+  // 1): a book conceptually already has bibliographic metadata (set by
+  // some earlier save this test doesn't need to simulate directly,
+  // since payload behavior alone proves the guarantee) -- the
+  // still-old Edit form submits none of the five new fields, and edits
+  // only an ordinary legacy field (title). The update payload must
+  // touch title but must not include ANY of the five new keys -- so
+  // updateBook() can never erase them, regardless of what value they
+  // actually hold in the database.
+  it("staged rollout: an old Edit form editing only a legacy field never touches any new metadata column", async () => {
+    const formData = await buildFormData({ title: "A Retitled Book" });
+    formData.delete("cover");
+    formData.delete("manuscript");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const payload = mockUpdate.mock.calls[0][0];
+    expect(payload).toMatchObject({ title: "A Retitled Book" });
+    expect(payload).not.toHaveProperty("subtitle");
+    expect(payload).not.toHaveProperty("language");
+    expect(payload).not.toHaveProperty("publisher");
+    expect(payload).not.toHaveProperty("edition");
+    expect(payload).not.toHaveProperty("original_publication_date");
+  });
+
+  // Test B (partial-absence variant): only ONE field absent, the rest
+  // supplied -- proves the presence check is genuinely per-field, not
+  // an all-or-nothing shortcut.
+  it("one field absent while the others are supplied: only the absent one is left out of the payload", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("subtitle", "Present Subtitle");
+    formData.set("publisher", "Present Press");
+    formData.set("edition", "Present Edition");
+    formData.set("originalPublicationDate", "2015-05-05");
+    // language deliberately left unset -- the one absent field.
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const payload = mockUpdate.mock.calls[0][0];
+    expect(payload).not.toHaveProperty("language");
+    expect(payload).toMatchObject({
+      subtitle: "Present Subtitle",
+      publisher: "Present Press",
+      edition: "Present Edition",
+      original_publication_date: "2015-05-05",
+    });
+  });
+
+  // Test C: present as an empty string is an INTENTIONAL clear, and
+  // must be distinguished from absence above -- the whole point of the
+  // correction is that these two are no longer conflated.
+  it("clears an optional field back to null when the field is submitted as an empty string (an intentional clear, distinct from absence)", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    // Each field explicitly SET to an empty string -- formData.has()
+    // is true for all five, unlike the "absent" tests above.
+    formData.set("subtitle", "");
+    formData.set("language", "");
+    formData.set("publisher", "");
+    formData.set("edition", "");
+    formData.set("originalPublicationDate", "");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({
+      subtitle: null,
+      language: null,
+      publisher: null,
+      edition: null,
+      original_publication_date: null,
+    });
+  });
+
+  // Tests E/F/G: language specifically -- absent (no update), present
+  // empty (cleared to null), present valid (updated).
+  it("language: absent from FormData -- no language key in the payload", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty("language");
+  });
+
+  it("language: present but empty -- cleared to null", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ language: null });
+  });
+
+  it("language: present and valid -- updated to the submitted code", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "it");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ language: "it" });
+  });
+
+  // Tests H/I: original_publication_date -- absent (no update),
+  // present empty (cleared to null). "present valid" is already
+  // covered by "persists supplied metadata on update" above.
+  it("original_publication_date: absent from FormData -- no date key in the payload", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty("original_publication_date");
+  });
+
+  it("original_publication_date: present but empty -- cleared to null", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("originalPublicationDate", "");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ original_publication_date: null });
+  });
+
+  it("rejects an over-limit subtitle on update, the same as on create", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("subtitle", "x".repeat(301));
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/${BOOK_ID}/edit?error=Subtitle+must+be+300+characters+or+fewer`,
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unsupported language code on update", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("language", "de");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/${BOOK_ID}/edit?error=Please+choose+a+supported+language`,
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a future original publication date on update", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    const oneYearFromNow = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365);
+    formData.set("originalPublicationDate", oneYearFromNow.toISOString().slice(0, 10));
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/${BOOK_ID}/edit?error=Original+publication+date+can%27t+be+in+the+future`,
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("never accepts published_at from FormData -- no such form field is ever read by updateBook(), regardless of what's submitted", async () => {
+    const formData = await buildFormData();
+    formData.delete("cover");
+    formData.delete("manuscript");
+    formData.set("published_at", "2020-01-01T00:00:00.000Z");
+    formData.set("publishedAt", "2099-01-01T00:00:00.000Z");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty("published_at");
+  });
+});
+
 describe("updateBook: editing never erases a legacy preview_text value", () => {
   beforeEach(resetMocks);
 
