@@ -6,6 +6,7 @@ import { BookCard } from "@/components/book-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Book, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -14,9 +15,13 @@ export const metadata: Metadata = {
   description: "Books you've saved to buy later on Librum.",
 };
 
+// LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
+// AUTHOR-1C moved this join onto the safe public_author_profiles VIEW
+// (migration 045, aliased back to `profiles`), which physically has no
+// display_name column.
 type WishlistItemWithBook = {
   book_id: string;
-  books: (Book & { profiles: Pick<Profile, "display_name"> | null }) | null;
+  books: (Book & { profiles: Pick<Profile, "public_author_name"> | null }) | null;
 };
 
 export default async function WishlistPage() {
@@ -31,7 +36,7 @@ export default async function WishlistPage() {
 
   const { data: items } = await supabase
     .from("wishlist_items")
-    .select("book_id, books(*, profiles(display_name))")
+    .select("book_id, books(*, profiles:public_author_profiles(public_author_name))")
     .eq("reader_id", user.id)
     .order("created_at", { ascending: false })
     .returns<WishlistItemWithBook[]>();
@@ -69,7 +74,7 @@ export default async function WishlistPage() {
                 <BookCard
                   book={book}
                   coverUrl={coverUrl}
-                  authorName={book.profiles?.display_name}
+                  authorName={resolvePublicAuthorName(book.profiles)}
                 />
                 <form action={removeFromWishlist.bind(null, book.id)}>
                   <button

@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { buyBundle } from "./actions";
 import { BuyBundleButton } from "./buy-bundle-button";
 import { BookCard } from "@/components/book-card";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Book, Bundle, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -18,7 +19,13 @@ export const metadata: Metadata = {
   description: "A book bundle available on Librum.",
 };
 
-type BundleWithAuthor = Bundle & { profiles: Pick<Profile, "display_name"> | null };
+// LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
+// AUTHOR-1C moved this join onto the safe public_author_profiles VIEW
+// (migration 045, aliased back to `profiles`), which physically has no
+// display_name column.
+type BundleWithAuthor = Bundle & {
+  profiles: Pick<Profile, "public_author_name"> | null;
+};
 type BundleBookRow = { book_id: string; books: Book | null };
 
 export default async function BundleDetailPage({
@@ -38,7 +45,7 @@ export default async function BundleDetailPage({
 
   const { data: bundle } = await supabase
     .from("bundles")
-    .select("*, profiles(display_name)")
+    .select("*, profiles:public_author_profiles(public_author_name)")
     .eq("id", id)
     .single<BundleWithAuthor>();
 
@@ -83,7 +90,7 @@ export default async function BundleDetailPage({
       <p className="mt-1 text-sm text-muted">
         by{" "}
         <Link href={`/authors/${bundle.author_id}`} className="hover:underline">
-          {bundle.profiles?.display_name}
+          {resolvePublicAuthorName(bundle.profiles)}
         </Link>
       </p>
 

@@ -5,6 +5,15 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
 
+// LIBRUM 2.0 AUTHOR-1A: mirrors migration 045's own CHECK constraint
+// exactly (see that migration's comment) -- a value that passes this can
+// never fail at the database layer. Kept as its own local constant,
+// matching the existing convention for short-text-field limits (see
+// SUBTITLE_MAX_LENGTH/PUBLISHER_MAX_LENGTH/EDITION_MAX_LENGTH in
+// src/app/dashboard/books/actions.ts) -- deliberately not imported
+// across the profile/books module boundary.
+const PUBLIC_AUTHOR_NAME_MAX_LENGTH = 120;
+
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const AVATARS_BUCKET = "avatars";
 // Private staging area for an unvalidated, not-yet-saved avatar -- the
@@ -102,6 +111,48 @@ async function resolveAvatarInput(
   return { present: true, bytes, extension, contentType, tempPathToCleanup };
 }
 
+// LIBRUM 2.0 AUTHOR-1A: whether the CURRENT request may write
+// public_author_name at all, and if so, the validated value to write.
+// Deliberately re-derives role from the authenticated profile's own row
+// (never a client-submitted role) -- a reader crafting a
+// publicAuthorName field into their FormData must be silently ignored,
+// not rejected with an error that would leak that the field exists for
+// authors, and never accidentally written. `absent` (the field wasn't
+// submitted at all) and `blank` (submitted but empty/whitespace-only)
+// are deliberately distinct: an author's own form always includes this
+// field with a real defaultValue (see dashboard/profile/page.tsx), so a
+// genuinely blank submission from an author is a mistake worth
+// rejecting -- but the field being entirely ABSENT (a reader's form
+// never renders it, or a legitimate partial FormData) must never be
+// treated as "clear it", only "leave it untouched".
+type PublicAuthorNameResolution =
+  | { action: "skip" }
+  | { action: "set"; value: string }
+  | { action: "reject"; message: string };
+
+function resolvePublicAuthorNameSubmission(
+  formData: FormData,
+  isAuthor: boolean,
+): PublicAuthorNameResolution {
+  if (!isAuthor || !formData.has("publicAuthorName")) {
+    return { action: "skip" };
+  }
+
+  const value = String(formData.get("publicAuthorName") ?? "").trim();
+
+  if (!value) {
+    return { action: "reject", message: "Public author name can't be empty" };
+  }
+  if (value.length > PUBLIC_AUTHOR_NAME_MAX_LENGTH) {
+    return {
+      action: "reject",
+      message: `Public author name must be ${PUBLIC_AUTHOR_NAME_MAX_LENGTH} characters or fewer`,
+    };
+  }
+
+  return { action: "set", value };
+}
+
 export async function updateProfile(formData: FormData) {
   const supabase = await createClient();
   const {
@@ -112,12 +163,36 @@ export async function updateProfile(formData: FormData) {
     redirect("/login");
   }
 
+  // LIBRUM 2.0 AUTHOR-1A: the authorization source of truth for whether
+  // this request may touch public_author_name -- read fresh from the
+  // caller's own row, never from anything the form submitted. A profile
+  // read failure here fails closed (isAuthor = false): a reader-shaped
+  // outcome (public_author_name silently skipped) is always the safe
+  // default when role can't be confirmed, never the reverse.
+  const { data: currentProfile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  const isAuthor = currentProfile?.role === "author";
+
   const displayName = String(formData.get("displayName") ?? "").trim();
   const bio = String(formData.get("bio") ?? "").trim();
 
   if (!displayName) {
     redirect("/dashboard/profile?error=Name+can%27t+be+empty");
   }
+
+  const publicAuthorNameResolution = resolvePublicAuthorNameSubmission(formData, isAuthor);
+  if (publicAuthorNameResolution.action === "reject") {
+    redirect(
+      `/dashboard/profile?error=${encodeURIComponent(publicAuthorNameResolution.message)}`,
+    );
+  }
+  const publicAuthorNameUpdate =
+    publicAuthorNameResolution.action === "set"
+      ? { public_author_name: publicAuthorNameResolution.value }
+      : {};
 
   const avatarResult = await resolveAvatarInput(supabase, user.id, formData, "/dashboard/profile");
 
@@ -147,7 +222,7 @@ export async function updateProfile(formData: FormData) {
 
     await supabase
       .from("profiles")
-      .update({ display_name: displayName, bio, avatar_path: avatarPath })
+      .update({ display_name: displayName, bio, avatar_path: avatarPath, ...publicAuthorNameUpdate })
       .eq("id", user.id);
 
     // Only now that the canonical avatar object is written is it safe
@@ -167,7 +242,7 @@ export async function updateProfile(formData: FormData) {
   } else {
     await supabase
       .from("profiles")
-      .update({ display_name: displayName, bio })
+      .update({ display_name: displayName, bio, ...publicAuthorNameUpdate })
       .eq("id", user.id);
   }
 

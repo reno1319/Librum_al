@@ -18,7 +18,12 @@ const JSZip = (await import("jszip")).default;
 const BOOK_ID = "book-1";
 
 function makeFakeSupabase(overrides: {
-  book?: { title: string; status: string; file_path: string | null; profiles: { display_name: string } | null } | null;
+  book?: {
+    title: string;
+    status: string;
+    file_path: string | null;
+    profiles: { display_name: string; public_author_name?: string | null } | null;
+  } | null;
 } = {}) {
   const {
     book = {
@@ -96,6 +101,52 @@ describe("GET /api/books/[id]/sample", () => {
       expect(body.sections.length).toBeGreaterThan(0);
       expect(body.sections[0].html).toContain("real sample content");
       expect(typeof body.approximatePercent).toBe("number");
+    });
+
+    // LIBRUM 2.0 AUTHOR-1B: this route's "author" field is the one and
+    // only place a pseudonymous author's identity is exposed here -- it
+    // must be the reader-facing public_author_name, never the private
+    // account display_name, whenever the two differ.
+    it("author has set a public author name (pen name) -> JSON 'author' is the pen name, never the account display_name", async () => {
+      const fileBytes = await buildValidEpubBytes();
+      mockCreateClient.mockResolvedValue(
+        makeFakeSupabase({
+          book: {
+            title: "Test Book",
+            status: "published",
+            file_path: "author-1/book-1.epub",
+            profiles: { display_name: "Renata Author", public_author_name: "R. A. Nightingale" },
+          },
+        }),
+      );
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes }));
+
+      const response = await GET(makeRequest(), { params: Promise.resolve({ id: BOOK_ID }) });
+      const body = await response.json();
+
+      expect(body.author).toBe("R. A. Nightingale");
+      const serialized = JSON.stringify(body);
+      expect(serialized).not.toContain("Renata Author");
+    });
+
+    it("no public author name set -> falls back to the account display_name", async () => {
+      const fileBytes = await buildValidEpubBytes();
+      mockCreateClient.mockResolvedValue(
+        makeFakeSupabase({
+          book: {
+            title: "Test Book",
+            status: "published",
+            file_path: "author-1/book-1.epub",
+            profiles: { display_name: "Renata Author", public_author_name: null },
+          },
+        }),
+      );
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes }));
+
+      const response = await GET(makeRequest(), { params: Promise.resolve({ id: BOOK_ID }) });
+      const body = await response.json();
+
+      expect(body.author).toBe("Renata Author");
     });
 
     it("draft/unpublished book -> 404, never reaches storage", async () => {

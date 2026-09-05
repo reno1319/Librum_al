@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { resolveSiteOrigin } from "@/lib/site-url";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 
 const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
 
@@ -194,12 +195,20 @@ export async function sendNewBookEmails(
 
   const [{ data: book }, { data: author }, { data: follows }] = await Promise.all([
     admin.from("books").select("title").eq("id", bookId).single(),
-    admin.from("profiles").select("display_name").eq("id", authorId).single(),
+    admin
+      .from("profiles")
+      .select("display_name, public_author_name")
+      .eq("id", authorId)
+      .single(),
     admin.from("author_follows").select("follower_id").eq("author_id", authorId),
   ]);
 
   if (!book || !author || !follows || follows.length === 0) return;
 
+  // LIBRUM 2.0 AUTHOR-1B: never the private/account display_name here --
+  // this email is reader-facing, so it uses the same public identity a
+  // reader sees everywhere else (book byline, author page, EPUB dc:creator).
+  const authorName = resolvePublicAuthorName(author);
   const bookUrl = `${origin}/books/${bookId}`;
 
   await Promise.all(
@@ -209,9 +218,9 @@ export async function sendNewBookEmails(
 
       await sendEmail(
         follower.user.email,
-        `${author.display_name} just published a new book`,
+        `${authorName} just published a new book`,
         `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-          <h1 style="font-size: 20px;">New from ${author.display_name}</h1>
+          <h1 style="font-size: 20px;">New from ${authorName}</h1>
           <p><strong>${book.title}</strong> just went live.</p>
           <p><a href="${bookUrl}">View the book</a></p>
         </div>`,

@@ -12,6 +12,25 @@
 
 create extension if not exists pgcrypto;
 
+-- LIBRUM 2.0 AUTHOR-1C: a real Supabase project pre-provisions the
+-- `extensions` schema with USAGE already granted to anon/authenticated
+-- platform-wide, before any user migration ever runs -- schema.sql's own
+-- `create schema if not exists extensions` (where search_books() puts
+-- unaccent()) relies on that ambient grant already being in place; it
+-- never re-grants USAGE itself, since on the real platform it never
+-- needs to. Pre-creating the schema and granting USAGE here, before
+-- schema.sql runs, mirrors that real platform precondition -- without
+-- this, search_books() called AS anon/authenticated in a test (the only
+-- way that actually exercises the RLS/grant boundary these functions
+-- run under, since SECURITY INVOKER means they run as the CALLING
+-- role) fails with "permission denied for schema extensions" before
+-- ever reaching the table-level privileges this suite exists to test,
+-- silently masking a real, separate privilege bug underneath it -- this
+-- was caught and confirmed exactly that way while building the
+-- AUTHOR-1C profiles-privacy fix.
+create schema if not exists extensions;
+grant usage on schema extensions to anon, authenticated;
+
 do $$
 begin
   if not exists (select 1 from pg_roles where rolname = 'anon') then

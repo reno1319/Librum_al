@@ -66,10 +66,13 @@ export default async function AdminRefundsPage() {
 
   const allRequests = requests ?? [];
 
-  // profiles is publicly readable ("Profiles are viewable by everyone",
-  // schema.sql) -- no admin-specific privilege needed for this read.
-  // reader_id can be null (migration 029: ON DELETE SET NULL on account
-  // deletion), so only the non-null ids actually present are looked up.
+  // LIBRUM 2.0 AUTHOR-1C: profiles no longer has a blanket "viewable by
+  // everyone" policy -- this read is authorized instead by profiles'
+  // own "Staff with an authorized permission can view any profile" RLS
+  // policy (migration 045), which this page's own requireStaff("refunds.
+  // view") call above already satisfies. reader_id can be null
+  // (migration 029: ON DELETE SET NULL on account deletion), so only the
+  // non-null ids actually present are looked up.
   const readerIds = Array.from(
     new Set(allRequests.map((r) => r.reader_id).filter((id): id is string => id !== null)),
   );

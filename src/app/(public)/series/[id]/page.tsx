@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
 import { orderSeriesBooks } from "@/lib/series-order";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Book, Profile } from "@/lib/types";
 
 // LIBRUM 2.0 PRODUCT-3: the public series page didn't exist before this
@@ -16,11 +17,15 @@ import type { Book, Profile } from "@/lib/types";
 // per-visitor data -- BookCard already renders each book's real price
 // with no purchase logic attached.
 
+// LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName()
+// at every render site below. AUTHOR-1C moved this join onto the safe
+// public_author_profiles VIEW (migration 045, aliased back to
+// `profiles`), which physically has no display_name column.
 type PublicSeries = {
   id: string;
   title: string;
   author_id: string;
-  profiles: Pick<Profile, "display_name"> | null;
+  profiles: Pick<Profile, "public_author_name"> | null;
 };
 
 type PublicSeriesPageData = {
@@ -46,17 +51,18 @@ type PublicSeriesPageData = {
 // but has no public content" instead of only the former. Because this
 // is wrapped in React.cache(), calling it from both generateMetadata()
 // and the page component within the same request still only runs its
-// two queries once each -- not once per caller. `profiles(display_name)`
-// stays narrow (never `profiles(*)`), same discipline as the author
-// page's own getPublicAuthor -- no Stripe/private profile columns ride
-// along on the join.
+// two queries once each -- not once per caller. The profiles join
+// stays narrow (never `profiles(*)`) -- AUTHOR-1C: it now targets the
+// safe public_author_profiles view rather than the base table, so
+// there is no display_name/Stripe/private profile column to even
+// accidentally select here any more.
 const getPublicSeriesPageData = cache(
   async (id: string): Promise<PublicSeriesPageData | null> => {
     const supabase = await createClient();
 
     const { data: series } = await supabase
       .from("series")
-      .select("id, title, author_id, profiles(display_name)")
+      .select("id, title, author_id, profiles:public_author_profiles(public_author_name)")
       .eq("id", id)
       .single<PublicSeries>();
 
@@ -106,7 +112,7 @@ export async function generateMetadata({
     return {};
   }
 
-  const authorName = data.series.profiles?.display_name;
+  const authorName = resolvePublicAuthorName(data.series.profiles);
   return {
     title: data.series.title,
     description: authorName
@@ -145,14 +151,14 @@ export default async function SeriesPage({
       <h1 className="mt-1 font-serif text-3xl font-semibold text-foreground sm:text-4xl">
         {series.title}
       </h1>
-      {series.profiles?.display_name && (
+      {resolvePublicAuthorName(series.profiles) && (
         <p className="mt-2 text-sm text-muted">
           by{" "}
           <Link
             href={`/authors/${series.author_id}`}
             className="focus-ring rounded-sm font-medium text-foreground hover:underline"
           >
-            {series.profiles.display_name}
+            {resolvePublicAuthorName(series.profiles)}
           </Link>
         </p>
       )}

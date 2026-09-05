@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { BookReportStatus } from "@/lib/types";
 import {
   ADMIN_NOTES_MAX_LENGTH,
@@ -92,11 +93,19 @@ export default async function AdminBookReportDetailPage({
       ),
     ),
   );
+  // LIBRUM 2.0 AUTHOR-1A: public_author_name added to this same lookup
+  // -- reporter/reviewer identity stays account-only (staff/reader
+  // identity, never a pseudonym concern), but the REPORTED BOOK's author
+  // now needs both: which pen name the public sees on the book being
+  // moderated, and which account is actually responsible for it. See
+  // this file's own audit finding -- this is the one admin surface that
+  // already showed a single author name before AUTHOR-1A existed.
   const { data: profiles } =
     profileIds.length > 0
-      ? await supabase.from("profiles").select("id, display_name").in("id", profileIds)
+      ? await supabase.from("profiles").select("id, display_name, public_author_name").in("id", profileIds)
       : { data: [] };
   const displayNameById = new Map((profiles ?? []).map((p) => [p.id, p.display_name]));
+  const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
 
   // reporter_id is not-null and ON DELETE CASCADE (migration 009): a
   // report row can never outlive its reporter's profile, so
@@ -115,13 +124,23 @@ export default async function AdminBookReportDetailPage({
     whenNull: "Not yet reviewed",
     whenMissing: "Unknown reviewer (account no longer available)",
   });
-  const authorDisplayName = report.books
+  const authorAccountName = report.books
     ? resolveProfileDisplayName({
         profileId: report.books.author_id,
         displayNameById,
         whenNull: "Unknown author",
         whenMissing: "Unknown author (account no longer available)",
       })
+    : null;
+  // LIBRUM 2.0 AUTHOR-1A: the public name resolution runs through the
+  // shared resolver, not resolveProfileDisplayName -- that helper only
+  // ever knows about display_name (correct for reporter/reviewer, which
+  // stay account-only), so the reported book's author gets its own,
+  // separate resolution here. Falls back to authorAccountName's own
+  // already-resolved missing/unknown copy when there's no profile row at
+  // all, so the two lines never contradict each other.
+  const authorPublicName = report.books
+    ? (resolvePublicAuthorName(profileById.get(report.books.author_id)) ?? authorAccountName)
     : null;
 
   const reviewable = canReview(report.status);
@@ -144,7 +163,19 @@ export default async function AdminBookReportDetailPage({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="font-medium">{report.books?.title ?? "Book unavailable"}</p>
-            {authorDisplayName && <p className="text-xs text-muted">by {authorDisplayName}</p>}
+            {/* LIBRUM 2.0 AUTHOR-1A: both shown, explicitly labeled --
+                staff-only surface, never rendered on any reader-facing
+                page. Collapses to one line when the two values are
+                identical (the common case: an author who hasn't set a
+                pen name, or whose pen name equals their account name),
+                since a moderator gains nothing from seeing the same
+                string twice. */}
+            {authorPublicName && (
+              <p className="text-xs text-muted">Public author name: {authorPublicName}</p>
+            )}
+            {authorAccountName && authorAccountName !== authorPublicName && (
+              <p className="text-xs text-muted">Account name: {authorAccountName}</p>
+            )}
           </div>
           <span className="text-sm font-semibold">{REPORT_STATUS_LABELS[report.status]}</span>
         </div>

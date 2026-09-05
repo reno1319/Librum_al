@@ -20,6 +20,7 @@ import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { formatPrice } from "@/lib/pricing";
 import { resolveBookPurchaseState, resolveShowSample, type BookPurchaseState } from "@/lib/book-purchase";
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
 
@@ -38,17 +39,41 @@ import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
 
 // The book's own author/profile join needs `bio` (for the "About the
 // Author" section) and, since PRODUCT-1, `avatar_path` (for that same
-// section's avatar thumbnail) on top of the `display_name` every other
-// book-with-author query on this page already selects -- kept as its
-// own type, distinct from BookWithAuthor below, so the shelf queries
-// (which only ever need display_name) aren't forced to also carry
-// fields they never fetch. Extending this one existing joined select
-// (rather than adding a second, sequential profile query) is exactly
-// what PERF-1's own concurrency work calls for reusing.
+// section's avatar thumbnail) on top of the `display_name`/
+// `public_author_name` pair every other book-with-author query on this
+// page already selects -- kept as its own type, distinct from
+// BookWithAuthor below, so the shelf queries (which only ever need the
+// name pair) aren't forced to also carry fields they never fetch.
+// Extending this one existing joined select (rather than adding a
+// second, sequential profile query) is exactly what PERF-1's own
+// concurrency work calls for reusing.
+//
+// LIBRUM 2.0 AUTHOR-1B: every render site below resolves author
+// attribution through resolvePublicAuthorName(), never a raw
+// display_name read, so a pseudonymous author's private account name
+// never leaks here.
+//
+// LIBRUM 2.0 AUTHOR-1C: all four profiles joins on this page (this one,
+// the reviews join, and the moreByAuthor/youMightLike joins further
+// below) now read the safe public_author_profiles VIEW (migration 045),
+// aliased back to `profiles` in every select string so property access
+// (`book.profiles`, `review.profiles`) needs no further changes. That
+// view physically has no display_name column, so every one of these
+// types drops "display_name" from its Pick<Profile, ...>. This
+// includes ReviewWithReader, previously left deliberately untouched by
+// AUTHOR-1B (a reviewer's own account identity was treated as a
+// separate concept from author attribution) -- AUTHOR-1C's database-level
+// fix necessarily changes that: display_name is now a private column no
+// ordinary reader/anon query can read for ANYONE else's row, author or
+// reviewer alike, so this join can no longer request it at all without
+// breaking the whole page with a hard permission error. See the reviews
+// render site further below for the resulting fallback behavior.
 type BookWithAuthorBio = Book & {
-  profiles: Pick<Profile, "display_name" | "bio" | "avatar_path"> | null;
+  profiles: Pick<Profile, "public_author_name" | "bio" | "avatar_path"> | null;
 };
-type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
+type BookWithAuthor = Book & {
+  profiles: Pick<Profile, "public_author_name"> | null;
+};
 // LIBRUM 2.0 PRODUCT-3: `created_at` added to what this already-existing
 // query selects (no new query, no new PERF-1 batch member) so
 // orderSeriesBooks() -- shared with the public Series page -- has the
@@ -57,7 +82,7 @@ type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
 // actual authoritative order both surfaces agree on.
 type SeriesEntry = Pick<Book, "id" | "title" | "series_position" | "created_at">;
 type ReviewWithReader = Review & {
-  profiles: Pick<Profile, "display_name"> | null;
+  profiles: Pick<Profile, "public_author_name"> | null;
 };
 
 const METADATA_DESCRIPTION_MAX = 160;
@@ -89,7 +114,7 @@ const getBookForDetail = cache(async (id: string) => {
   const supabase = await createClient();
   const { data: book } = await supabase
     .from("books")
-    .select("*, profiles(display_name, bio, avatar_path)")
+    .select("*, profiles:public_author_profiles(public_author_name, bio, avatar_path)")
     .eq("id", id)
     .single<BookWithAuthorBio>();
   return book;
@@ -266,7 +291,7 @@ export default async function BookDetailPage({
   ] = await Promise.all([
     supabase
       .from("reviews")
-      .select("*, profiles(display_name)")
+      .select("*, profiles:public_author_profiles(public_author_name)")
       .eq("book_id", id)
       .order("created_at", { ascending: false })
       .returns<ReviewWithReader[]>(),
@@ -290,7 +315,7 @@ export default async function BookDetailPage({
       : Promise.resolve({ data: null }),
     supabase
       .from("books")
-      .select("*, profiles(display_name)")
+      .select("*, profiles:public_author_profiles(public_author_name)")
       .eq("status", "published")
       .eq("author_id", book.author_id)
       .neq("id", id)
@@ -300,7 +325,7 @@ export default async function BookDetailPage({
     book.genre
       ? supabase
           .from("books")
-          .select("*, profiles(display_name)")
+          .select("*, profiles:public_author_profiles(public_author_name)")
           .eq("status", "published")
           .eq("genre", book.genre)
           .neq("id", id)
@@ -421,7 +446,7 @@ export default async function BookDetailPage({
               href={`/authors/${book.author_id}`}
               className="focus-ring rounded-sm hover:underline"
             >
-              {book.profiles?.display_name}
+              {resolvePublicAuthorName(book.profiles)}
             </Link>
           </p>
 
@@ -682,7 +707,7 @@ export default async function BookDetailPage({
           )}
           <div className="min-w-0">
             <p className="font-serif text-xl font-semibold text-foreground">
-              {book.profiles?.display_name}
+              {resolvePublicAuthorName(book.profiles)}
             </p>
             {book.profiles?.bio && (
               <p className="mt-2 max-w-prose text-sm text-foreground/90">{book.profiles.bio}</p>
@@ -756,7 +781,7 @@ export default async function BookDetailPage({
                 <div className="flex items-center gap-2">
                   <StarRating rating={review.rating} />
                   <span className="text-sm font-medium">
-                    {review.profiles?.display_name}
+                    {resolvePublicAuthorName(review.profiles) ?? "A Librum reader"}
                   </span>
                 </div>
                 {review.body && (
@@ -861,8 +886,8 @@ export default async function BookDetailPage({
           ============================================================ */}
       <BookShelf
         title={
-          book.profiles?.display_name
-            ? `More by ${book.profiles.display_name}`
+          resolvePublicAuthorName(book.profiles)
+            ? `More by ${resolvePublicAuthorName(book.profiles)}`
             : "More by this author"
         }
         books={moreByAuthor ?? []}

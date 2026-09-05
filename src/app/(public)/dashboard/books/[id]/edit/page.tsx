@@ -21,6 +21,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CoverField } from "@/components/cover-field";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Book, Series, Contributor } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -112,9 +113,14 @@ export default async function EditBookPage({
   // publishBook() independently re-derives this same value server-side
   // and remains the sole authority; this read can never be more than a
   // display hint.
+  // LIBRUM 2.0 AUTHOR-1B: public_author_name added alongside
+  // display_name -- resolved via resolvePublicAuthorName() below, so the
+  // name threaded into ManuscriptField (and from there into the EPUB's
+  // dc:creator) is the same reader-facing identity shown on the book's
+  // own page, never the private account name.
   const { data: profile } = await supabase
     .from("profiles")
-    .select("stripe_payouts_enabled, display_name")
+    .select("stripe_payouts_enabled, display_name, public_author_name")
     .eq("id", user.id)
     .single();
 
@@ -417,7 +423,7 @@ export default async function EditBookPage({
                   </p>
                   <ManuscriptField
                     bookTitle={book.title}
-                    authorName={profile?.display_name ?? ""}
+                    authorName={resolvePublicAuthorName(profile) ?? ""}
                     authorId={user.id}
                     existingFilename={manuscriptName ?? undefined}
                   />

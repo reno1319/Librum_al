@@ -17,6 +17,10 @@ export type Profile = {
   id: string;
   role: Role;
   display_name: string;
+  // LIBRUM 2.0 AUTHOR-1A: reader-facing author name / pen name. Null
+  // means "not set yet" -- resolve through resolvePublicAuthorName()
+  // (src/lib/author-name.ts), never read directly on a public surface.
+  public_author_name: string | null;
   bio: string | null;
   avatar_path: string | null;
   created_at: string;

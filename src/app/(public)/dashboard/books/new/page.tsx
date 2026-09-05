@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { UploadWizard } from "./upload-wizard";
 import { Alert } from "@/components/ui/alert";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Series } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -32,6 +33,11 @@ export default async function NewBookPage({
     // metadata uses Librum's authoritative name, never anything
     // inferred from the manuscript itself.
     //
+    // LIBRUM 2.0 AUTHOR-1B: public_author_name added alongside
+    // display_name -- resolved via resolvePublicAuthorName() below, so
+    // the name baked into dc:creator is the same reader-facing identity
+    // shown on the book's own page, never the private account name.
+    //
     // LIBRUM 2.0 PUBLISHING-UX-1 PART C: stripe_payouts_enabled is the
     // ONE new column this pass reads, mirroring the Edit Book page's own
     // identical read (see its page.tsx) -- display-only context for the
@@ -41,7 +47,11 @@ export default async function NewBookPage({
     // server-side enforcement point. Never used to build a pre-submit
     // link to /dashboard/payouts -- that would risk losing unsaved
     // wizard state.
-    supabase.from("profiles").select("display_name, stripe_payouts_enabled").eq("id", user.id).single(),
+    supabase
+      .from("profiles")
+      .select("display_name, public_author_name, stripe_payouts_enabled")
+      .eq("id", user.id)
+      .single(),
   ]);
 
   return (
@@ -63,7 +73,7 @@ export default async function NewBookPage({
 
       <UploadWizard
         series={series ?? []}
-        authorName={profile?.display_name ?? ""}
+        authorName={resolvePublicAuthorName(profile) ?? ""}
         authorId={user.id}
         payoutsEnabled={!!profile?.stripe_payouts_enabled}
       />

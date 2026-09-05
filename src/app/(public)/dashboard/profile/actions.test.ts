@@ -36,6 +36,10 @@ const mockDownload = vi.fn();
 const mockRemove = vi.fn();
 const mockUploadAvatar = vi.fn();
 const mockUpdateProfile = vi.fn();
+// LIBRUM 2.0 AUTHOR-1A: the role lookup updateProfile() now does before
+// anything else, to decide (server-side, never trusting the form) whether
+// this request may touch public_author_name at all.
+const mockCurrentProfileSingle = vi.fn();
 
 function makeFakeBlob(bytes: Buffer) {
   return { arrayBuffer: () => Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)) };
@@ -58,6 +62,9 @@ const mockCreateClient = vi.fn(() =>
     from: (table: string) => {
       if (table !== "profiles") throw new Error(`unexpected table in this focused test: ${table}`);
       return {
+        select: () => ({
+          eq: () => ({ single: () => mockCurrentProfileSingle() }),
+        }),
         update: (payload: unknown) => ({
           eq: () => mockUpdateProfile(payload),
         }),
@@ -83,6 +90,7 @@ describe("updateProfile / resolveAvatarInput: AVATAR-1 direct-Storage transport"
     mockRemove.mockReset().mockResolvedValue({ error: null });
     mockUploadAvatar.mockReset().mockResolvedValue({ error: null });
     mockUpdateProfile.mockReset().mockResolvedValue({ error: null });
+    mockCurrentProfileSingle.mockReset().mockResolvedValue({ data: { role: "author" }, error: null });
   });
 
   it("resolves a valid temp reference: downloads, uploads to the canonical avatars path, updates the profile, and cleans up the temp object", async () => {
@@ -173,5 +181,168 @@ describe("updateProfile / resolveAvatarInput: AVATAR-1 direct-Storage transport"
       expect.objectContaining({ display_name: "Jane Author", bio: "Writes things." }),
     );
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/profile?success=1");
+  });
+});
+
+// LIBRUM 2.0 AUTHOR-1A: updateProfile()'s new public_author_name
+// authorization + validation branch. Role is always re-derived from the
+// authenticated profile's own row (mockCurrentProfileSingle), never from
+// anything the form submits -- every "reader" case here still submits
+// whatever FormData it likes, proving the server ignores it regardless.
+describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID } } });
+    mockDownload.mockReset();
+    mockRemove.mockReset().mockResolvedValue({ error: null });
+    mockUploadAvatar.mockReset().mockResolvedValue({ error: null });
+    mockUpdateProfile.mockReset().mockResolvedValue({ error: null });
+    mockCurrentProfileSingle.mockReset().mockResolvedValue({ data: { role: "author" }, error: null });
+  });
+
+  it("author can update account name and public author name independently, in one request", async () => {
+    const formData = formDataWith({
+      displayName: "Renato Kalemi",
+      bio: "Writes things.",
+      publicAuthorName: "R. Kalemi",
+    });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        display_name: "Renato Kalemi",
+        bio: "Writes things.",
+        public_author_name: "R. Kalemi",
+      }),
+    );
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/profile?success=1");
+  });
+
+  it("account name change alone (publicAuthorName field absent) never touches public_author_name -- no accidental overwrite", async () => {
+    const formData = formDataWith({ displayName: "Renato Kalemi Jr.", bio: "" });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const payload = mockUpdateProfile.mock.calls[0][0];
+    expect(payload).toHaveProperty("display_name", "Renato Kalemi Jr.");
+    expect(payload).not.toHaveProperty("public_author_name");
+  });
+
+  it("author submitting a blank public author name is rejected -- account name is NOT saved either (atomic failure, not a partial save)", async () => {
+    const formData = formDataWith({ displayName: "Renato Kalemi", publicAuthorName: "" });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      expect.stringContaining(encodeURIComponent("Public author name can't be empty")),
+    );
+    expect(mockUpdateProfile).not.toHaveBeenCalled();
+  });
+
+  it("whitespace-only public author name is rejected the same way as blank", async () => {
+    const formData = formDataWith({ displayName: "Renato Kalemi", publicAuthorName: "   " });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      expect.stringContaining(encodeURIComponent("Public author name can't be empty")),
+    );
+    expect(mockUpdateProfile).not.toHaveBeenCalled();
+  });
+
+  it("public author name over 120 characters is rejected", async () => {
+    const formData = formDataWith({
+      displayName: "Renato Kalemi",
+      publicAuthorName: "x".repeat(121),
+    });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      expect.stringContaining(
+        encodeURIComponent("Public author name must be 120 characters or fewer"),
+      ),
+    );
+    expect(mockUpdateProfile).not.toHaveBeenCalled();
+  });
+
+  it("public author name at exactly 120 characters is accepted", async () => {
+    const exactly120 = "x".repeat(120);
+    const formData = formDataWith({ displayName: "Renato Kalemi", publicAuthorName: exactly120 });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ public_author_name: exactly120 }),
+    );
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/profile?success=1");
+  });
+
+  it("trims leading/trailing whitespace before validating and saving", async () => {
+    const formData = formDataWith({
+      displayName: "Renato Kalemi",
+      publicAuthorName: "  R. Kalemi  ",
+    });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ public_author_name: "R. Kalemi" }),
+    );
+  });
+
+  it("a reader's crafted FormData including publicAuthorName is silently ignored -- never written, never an error", async () => {
+    mockCurrentProfileSingle.mockResolvedValue({ data: { role: "reader" }, error: null });
+    const formData = formDataWith({
+      displayName: "A Reader",
+      publicAuthorName: "Sneaky Pen Name",
+    });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const payload = mockUpdateProfile.mock.calls[0][0];
+    expect(payload).not.toHaveProperty("public_author_name");
+    expect(payload).toHaveProperty("display_name", "A Reader");
+    // No rejection either -- the field is just silently irrelevant for a
+    // reader, not an error condition.
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/profile?success=1");
+  });
+
+  it("a reader can still update the profile fields they ARE permitted to change", async () => {
+    mockCurrentProfileSingle.mockResolvedValue({ data: { role: "reader" }, error: null });
+    const formData = formDataWith({ displayName: "A Reader", bio: "I like reading." });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ display_name: "A Reader", bio: "I like reading." }),
+    );
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/profile?success=1");
+  });
+
+  it("a profile-role read failure fails closed: public_author_name is never written even if the form includes it", async () => {
+    mockCurrentProfileSingle.mockResolvedValue({ data: null, error: { message: "read failed" } });
+    const formData = formDataWith({ displayName: "Renato Kalemi", publicAuthorName: "R. Kalemi" });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const payload = mockUpdateProfile.mock.calls[0][0];
+    expect(payload).not.toHaveProperty("public_author_name");
+  });
+
+  it("the DB update touches only the intended columns -- no unrelated column (role, stripe_account_id, id) is ever included", async () => {
+    const formData = formDataWith({
+      displayName: "Renato Kalemi",
+      bio: "Writes things.",
+      publicAuthorName: "R. Kalemi",
+    });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const payload = mockUpdateProfile.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.keys(payload).sort()).toEqual(
+      ["bio", "display_name", "public_author_name"].sort(),
+    );
   });
 });

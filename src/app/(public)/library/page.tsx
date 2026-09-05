@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { LibraryBookCard } from "@/components/library-book-card";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -23,9 +24,13 @@ export const metadata: Metadata = {
 // user_owns_book() ownership loop below stay -- the owned-book grid
 // still needs both -- but nothing about grouping transactions, "Total
 // spent," or refund status/actions is fetched or rendered here anymore.
+// LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
+// AUTHOR-1C moved this join onto the safe public_author_profiles VIEW
+// (migration 045, aliased back to `profiles`), which physically has no
+// display_name column.
 type PurchaseWithBook = {
   book_id: string;
-  books: (Book & { profiles: Pick<Profile, "display_name"> | null }) | null;
+  books: (Book & { profiles: Pick<Profile, "public_author_name"> | null }) | null;
 };
 
 export default async function LibraryPage({
@@ -45,7 +50,7 @@ export default async function LibraryPage({
 
   const { data: purchases } = await supabase
     .from("purchases")
-    .select("book_id, books(*, profiles(display_name))")
+    .select("book_id, books(*, profiles:public_author_profiles(public_author_name))")
     .eq("reader_id", user.id)
     .returns<PurchaseWithBook[]>();
 
@@ -120,7 +125,7 @@ export default async function LibraryPage({
                 title={book.title}
                 coverUrl={coverUrl}
                 authorId={book.author_id}
-                authorName={book.profiles?.display_name ?? null}
+                authorName={resolvePublicAuthorName(book.profiles)}
                 isPublished={book.status === "published"}
                 downloadable={ownedByBookId.get(book.id) ?? false}
               />

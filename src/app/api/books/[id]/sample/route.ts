@@ -2,10 +2,19 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractEpubSample } from "@/lib/epub-sample";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Book, Profile } from "@/lib/types";
 
+// LIBRUM 2.0 AUTHOR-1B: the JSON response's own "author" field resolves
+// through resolvePublicAuthorName(). Only the resolved string ever
+// leaves this route; the profile object itself never rides along in the
+// response.
+//
+// LIBRUM 2.0 AUTHOR-1C: reads the safe public_author_profiles VIEW
+// (migration 045, aliased back to `profiles`), not the base profiles
+// table -- physically has no display_name column.
 type SampleBookRow = Pick<Book, "title" | "status" | "file_path"> & {
-  profiles: Pick<Profile, "display_name"> | null;
+  profiles: Pick<Profile, "public_author_name"> | null;
 };
 
 // LIBRUM 2.0 PRODUCT-1: "Read sample" -- a genuine excerpt of the
@@ -33,7 +42,7 @@ export async function GET(
   const supabase = await createClient();
   const { data: book } = await supabase
     .from("books")
-    .select("title, status, file_path, profiles(display_name)")
+    .select("title, status, file_path, profiles:public_author_profiles(public_author_name)")
     .eq("id", id)
     .maybeSingle<SampleBookRow>();
 
@@ -73,7 +82,7 @@ export async function GET(
   return NextResponse.json({
     bookId: id,
     title: book.title,
-    author: book.profiles?.display_name ?? null,
+    author: resolvePublicAuthorName(book.profiles),
     sections: sample.sections,
     approximatePercent: sample.approximatePercent,
   });

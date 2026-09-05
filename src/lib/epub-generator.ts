@@ -164,6 +164,16 @@ function renderOpf(input: EpubGeneratorInput, modifiedAt: string): string {
   // so this remains byte-for-byte the same output as before for any
   // book without a real language value, and only emits a real code once
   // a caller actually starts supplying one.
+  // LIBRUM 2.0 AUTHOR-1B: `input.authorName` MUST already be the caller's
+  // resolved reader-facing name (resolvePublicAuthorName(profile) --
+  // public_author_name ?? display_name), never a raw display_name read.
+  // dc:creator is embedded directly into this EPUB's own OPF bytes at
+  // generation time -- once a reader has downloaded the file, that text
+  // is permanently part of an artifact this app no longer controls. If
+  // the author later sets or changes their public author name, every
+  // copy already generated/downloaded keeps whatever name was baked in
+  // at the time; this function intentionally snapshots the public name
+  // at generation time and never retroactively rewrites past downloads.
   return `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/">
@@ -209,6 +219,15 @@ ${spineItems}
 // dc:language patched too, via the same resolveEpubLanguageCode()
 // fallback-to-"und" resolution generateEpub() already uses -- one
 // resolution rule, shared, never two independently-invented ones.
+// LIBRUM 2.0 AUTHOR-1B: `authorName` MUST already be the caller's
+// resolved reader-facing name (resolvePublicAuthorName(profile) --
+// public_author_name ?? display_name), never a raw display_name read --
+// same requirement, same durable-artifact reasoning, as generateEpub()'s
+// own dc:creator write above (see renderOpf()'s comment). Repackaging on
+// a later keystroke re-patches dc:creator with whatever name is passed
+// THEN, but a copy already downloaded before that repackage keeps the
+// name that was baked in at the time; there is no way to reach back into
+// a reader's already-saved file.
 export async function patchEpubMetadata(
   epubBytes: Buffer,
   title: string,

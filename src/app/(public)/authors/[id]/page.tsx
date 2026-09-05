@@ -11,21 +11,33 @@ import { formatPrice } from "@/lib/pricing";
 import { followAuthor, unfollowAuthor } from "./actions";
 import { groupPublishedBooksBySeries } from "@/lib/author-series";
 import { getAuthorInitials } from "@/lib/author-initials";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Book, Bundle, Profile, Series } from "@/lib/types";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
 // dashboard or a social profile -- see the PRODUCT-2 audit. It shows
 // only what the product already treats as public and trustworthy:
-// display_name/bio/avatar_path (the only public-safe profile fields
-// this schema has -- there is no pen_name or website column to show,
-// and none is invented here), published books, and public series
+// public_author_name/bio/avatar_path (AUTHOR-1C: via the safe
+// public_author_profiles view, which guarantees public_author_name is
+// never null for an author row), published books, and public series
 // grouping derived from those same books. Following stays exactly the
-// system PRODUCT-2 was told to reuse, not redesign: same
-// followAuthor/unfollowAuthor actions, same self-follow exclusion, same
-// admin-client-only follower count (author_follows has no public SELECT
-// policy -- see schema.sql).
-
-type PublicAuthor = Pick<Profile, "id" | "display_name" | "bio" | "avatar_path">;
+// system PRODUCT-2 was told to reuse, not redesign: same followAuthor/
+// unfollowAuthor actions, same self-follow exclusion, same
+// admin-client-only follower count (author_follows has no public
+// SELECT policy -- see schema.sql).
+//
+// LIBRUM 2.0 AUTHOR-1C: reads the safe public_author_profiles VIEW
+// (migration 045), not the base profiles table -- that view physically
+// has no display_name column (and is already filtered to role='author'
+// internally, so the explicit .eq("role", "author") this query used to
+// need is gone too -- a reader id simply has no row in the view at
+// all, same "not found" outcome as before). There is no display_name to
+// accidentally fall back to or leak here any more; the resolved public
+// name is computed exactly once, right after this fetch resolves (see
+// authorPublicName in the page component below), and every render site
+// (H1, initials, metadata, "Books by", series/bundle copy) reads that
+// one resolved string.
+type PublicAuthor = Pick<Profile, "id" | "public_author_name" | "bio" | "avatar_path">;
 type SeriesRow = Pick<Series, "id" | "title">;
 
 // LIBRUM 2.0 PRODUCT-2: mirrors Book Detail's own PERF-1 pattern
@@ -33,17 +45,15 @@ type SeriesRow = Pick<Series, "id" | "title">;
 // separate invocations that don't otherwise see each other's data, so
 // this narrow, public-columns-only, request-scoped cache() is what lets
 // both share one row instead of two. Deliberately NOT `select("*")`:
-// profiles also carries stripe_account_id/stripe_payouts_enabled (see
-// schema.sql), and neither generateMetadata() nor this page has any
-// reason to ever pull those into a request just because they're on the
-// same row.
+// even the safe view could in principle grow columns later that this
+// page has no reason to pull into a request just because they're on
+// the same row.
 const getPublicAuthor = cache(async (id: string) => {
   const supabase = await createClient();
   const { data: author } = await supabase
-    .from("profiles")
-    .select("id, display_name, bio, avatar_path")
+    .from("public_author_profiles")
+    .select("id, public_author_name, bio, avatar_path")
     .eq("id", id)
-    .eq("role", "author")
     .single<PublicAuthor>();
   return author;
 });
@@ -63,9 +73,11 @@ export async function generateMetadata({
     return {};
   }
 
+  const authorPublicName = resolvePublicAuthorName(author);
+
   return {
-    title: author.display_name,
-    description: `Books and author information for ${author.display_name} on Librum.`,
+    title: authorPublicName,
+    description: `Books and author information for ${authorPublicName} on Librum.`,
   };
 }
 
@@ -156,7 +168,14 @@ export default async function AuthorProfilePage({
   const avatarUrl = author.avatar_path
     ? supabase.storage.from("avatars").getPublicUrl(author.avatar_path).data.publicUrl
     : null;
-  const authorInitials = getAuthorInitials(author.display_name);
+  // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: the one resolved public name every
+  // render site below reads from. `author` no longer even HAS a
+  // display_name field to fall back to (see PublicAuthor's own comment
+  // above) -- the "Unknown author" fallback here is purely a defensive
+  // placeholder for the CHECK-constraint-guaranteed-impossible case of a
+  // null public_author_name, never a path back to a private name.
+  const authorPublicName = resolvePublicAuthorName(author) ?? "Unknown author";
+  const authorInitials = getAuthorInitials(authorPublicName);
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
@@ -179,8 +198,8 @@ export default async function AuthorProfilePage({
         ) : (
           // LIBRUM 2.0 PRODUCT-2 PRE-COMMIT CORRECTION: a plain neutral
           // circle read as a missing/broken image, not an intentional
-          // placeholder. Initials derived from the same public
-          // display_name every other author surface already uses --
+          // placeholder. Initials derived from the same resolved public
+          // name every other author surface already uses --
           // aria-hidden because the name itself is the very next
           // element (same "decorative, name is adjacent" reasoning as
           // the real-avatar branch's alt="").
@@ -193,7 +212,7 @@ export default async function AuthorProfilePage({
         )}
         <div className="min-w-0">
           <h1 className="font-serif text-2xl font-semibold text-foreground sm:text-3xl">
-            {author.display_name}
+            {authorPublicName}
           </h1>
           {/* Quiet by design -- a small text line, not a stat card:
               this page is a discovery surface, not a dashboard. Kept
@@ -237,7 +256,7 @@ export default async function AuthorProfilePage({
           Books by this author -- the page's primary content.
           ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
-        <h2 className="font-serif text-xl font-semibold">Books by {author.display_name}</h2>
+        <h2 className="font-serif text-xl font-semibold">Books by {authorPublicName}</h2>
 
         {publishedBooks.length === 0 ? (
           // LIBRUM 2.0 PRODUCT-2 PRE-COMMIT CORRECTION: EmptyState

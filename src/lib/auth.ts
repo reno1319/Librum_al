@@ -26,10 +26,11 @@ export function decideAdminAccess(params: {
 // (refund administration, content moderation, support tooling, and any
 // future admin functionality) -- see migration 028 and the Phase
 // REFUND-1A audit. Uses the request-scoped, RLS-respecting client, not
-// the admin/service-role client -- profiles are publicly readable
-// ("Profiles are viewable by everyone", schema.sql), so reading the
-// caller's own role needs no elevated privilege, and there is no reason
-// for this check itself to hold service-role credentials. Mirrors the
+// the admin/service-role client -- this only ever reads the CALLER's
+// own row (`.eq("id", user.id)` below), which profiles' "Users can view
+// their own full profile" RLS policy (migration 045) already permits
+// with no elevated privilege, and there is no reason for this check
+// itself to hold service-role credentials. Mirrors the
 // exact pattern already used by src/app/dashboard/layout.tsx for
 // author-only routes -- unauthenticated and non-admin callers are
 // redirected server-side before any admin-only content or data is ever

@@ -13,6 +13,7 @@ import {
 import { BookCard } from "@/components/book-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Book, Bundle, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -36,9 +37,21 @@ export const metadata: Metadata = {
 // renders the same way -- the unfiltered case is just "Newest, no
 // filters applied", not a separate page.
 
-type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
+// LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: the reader-facing byline resolves
+// through resolvePublicAuthorName() -- never a raw display_name read.
+// AUTHOR-1C moved every public author-attribution query (this file
+// included) off the base `profiles` table entirely, onto the safe
+// public_author_profiles VIEW (migration 045) -- aliased back to
+// `profiles` in every select string below so this file's own property
+// access (`book.profiles`, `bundle.profiles`) needs no further changes.
+// That view physically has no display_name column, so `Pick<Profile,
+// "display_name" | ...>` would be a lie about what these rows can ever
+// contain -- dropped from both types below.
+type BookWithAuthor = Book & {
+  profiles: Pick<Profile, "public_author_name"> | null;
+};
 type BundleWithAuthor = Pick<Bundle, "id" | "title" | "price_cents"> & {
-  profiles: Pick<Profile, "display_name"> | null;
+  profiles: Pick<Profile, "public_author_name"> | null;
 };
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -89,7 +102,7 @@ async function fetchSearchResults(
   const baseQuery = () => {
     let query = supabase
       .from("books")
-      .select("*, profiles(display_name)")
+      .select("*, profiles:public_author_profiles(public_author_name)")
       .eq("status", "published");
     if (genre) query = query.eq("genre", genre);
     if (minPriceCents != null) query = query.gte("price_cents", minPriceCents);
@@ -146,7 +159,7 @@ async function fetchSearchResults(
         // RPC only ever hands back ids, never book/profile data itself.
         const { data: fetchedBooks, error: fetchError } = await supabase
           .from("books")
-          .select("*, profiles(display_name)")
+          .select("*, profiles:public_author_profiles(public_author_name)")
           .eq("status", "published")
           .in("id", matchedIds)
           .returns<BookWithAuthor[]>();
@@ -225,7 +238,7 @@ async function fetchPublishedBundles(
 ): Promise<BundleWithAuthor[]> {
   const { data, error } = await supabase
     .from("bundles")
-    .select("id, title, price_cents, profiles(display_name)")
+    .select("id, title, price_cents, profiles:public_author_profiles(public_author_name)")
     .eq("status", "published")
     .order("created_at", { ascending: false })
     .limit(BUNDLE_LIMIT)
@@ -537,7 +550,7 @@ function BookGrid({
               <BookCard
                 book={book}
                 coverUrl={coverUrl}
-                authorName={book.profiles?.display_name}
+                authorName={resolvePublicAuthorName(book.profiles)}
               />
             </li>
           );
@@ -560,8 +573,10 @@ function BundlesSection({ bundles }: { bundles: BundleWithAuthor[] }) {
               className="focus-ring flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-5 py-4 text-sm transition-colors hover:bg-surface-hover"
             >
               <span className="font-serif text-base font-semibold">{bundle.title}</span>
-              {bundle.profiles?.display_name && (
-                <span className="text-xs text-muted">by {bundle.profiles.display_name}</span>
+              {resolvePublicAuthorName(bundle.profiles) && (
+                <span className="text-xs text-muted">
+                  by {resolvePublicAuthorName(bundle.profiles)}
+                </span>
               )}
               <span className="ml-auto font-semibold text-primary">
                 {formatPrice(bundle.price_cents)}

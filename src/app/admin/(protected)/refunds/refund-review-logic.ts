@@ -126,10 +126,12 @@ export function abbreviatePaymentIntentId(id: string): string {
 // Shared resolution for both reader_id and reviewed_by -- both are
 // nullable references to profiles (ON DELETE SET NULL, migration 029),
 // and both can also point at a still-referenced id whose profiles row
-// PostgREST simply won't return if it was somehow filtered out (it
-// won't be here in practice, since profiles is fully public-readable --
-// "Profiles are viewable by everyone" -- but this stays defensive
-// either way rather than assuming a Map.get() always hits). whenNull
+// PostgREST simply won't return if it was somehow filtered out (won't
+// happen here in practice -- the caller's own requireStaff() permission
+// is exactly what profiles' "Staff with an authorized permission can
+// view any profile" RLS policy (migration 045) requires -- but this
+// stays defensive either way rather than assuming a Map.get() always
+// hits). whenNull
 // and whenMissing are separate messages on purpose: a null id is a
 // different, more definite fact ("no reviewer yet" / "account deleted")
 // than an id that's set but didn't resolve (which shouldn't normally

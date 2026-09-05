@@ -17,8 +17,38 @@ create table public.profiles (
   -- privileged database operation.
   role text not null check (role in ('author', 'reader', 'admin')),
   display_name text not null,
+  -- LIBRUM 2.0 AUTHOR-1A (migration 045): display_name is the account/
+  -- private identity -- signed-in greetings, admin/staff views, the
+  -- profile owner's own settings. It is NOT a verified legal name
+  -- (Librum has no KYC/legal-name verification) and, once
+  -- public_author_name is set, is no longer what readers see attributed
+  -- to a book/bundle/series or matched in search -- see
+  -- public_author_name below and resolvePublicAuthorName()
+  -- (src/lib/author-name.ts).
   bio text,
   avatar_path text,
+  -- The reader-facing author name / pen name. Nullable and additive:
+  -- null means "no pen name chosen yet," resolved at read time via
+  -- coalesce(public_author_name, display_name) (search_books() below,
+  -- and resolvePublicAuthorName() in application code) -- never backfilled
+  -- for non-authors (a reader has no public attribution surface), and
+  -- deliberately not unique -- authors may share a public name; every
+  -- public author URL is UUID-keyed (/authors/[id]), never name-keyed.
+  public_author_name text
+    check (public_author_name is null or char_length(public_author_name) <= 120),
+  -- LIBRUM 2.0 AUTHOR-1C (migration 045): makes "every author has a public name" a real,
+  -- database-enforced invariant, not merely a convention the app and
+  -- migration backfill happen to maintain. handle_new_user() below sets
+  -- public_author_name = display_name for every new author at signup,
+  -- and migration 045's own backfill did the same for every pre-existing
+  -- author -- this constraint is what makes it permanently impossible
+  -- for that state to regress, which is what lets search_books() and
+  -- every public reader-facing query stop treating display_name as a
+  -- fallback source at all (see both further below). Never applies to
+  -- readers -- they have no public attribution surface, so their
+  -- public_author_name stays null forever, exactly as before.
+  constraint public_author_name_required_for_authors
+    check (role <> 'author' or public_author_name is not null),
   stripe_account_id text,
   stripe_payouts_enabled boolean not null default false,
   created_at timestamptz not null default now()
@@ -26,9 +56,27 @@ create table public.profiles (
 
 alter table public.profiles enable row level security;
 
-create policy "Profiles are viewable by everyone"
+-- LIBRUM 2.0 AUTHOR-1D (migration 046): replaces the original "Profiles
+-- are viewable by everyone" (using (true)) policy -- a real, confirmed
+-- privacy hole (see the AUTHOR-1C audit): with that policy in place, ANY
+-- anon or ordinary authenticated client could directly SELECT any column
+-- of any row, including a pseudonymous author's private display_name and
+-- even stripe_account_id/stripe_payouts_enabled, completely bypassing
+-- every application-layer fix AUTHOR-1B made. RLS restricts ROWS, never
+-- columns, so there is no way to keep "using (true)" and still hide
+-- display_name for someone else's row while showing it for your own --
+-- self-only visibility here, combined with the safe public_author_
+-- profiles VIEW (migration 045, below -- created a full stage earlier so
+-- the new app could already read through it before this lockdown ever
+-- ran; see that view's own comment and migration 046's header for the
+-- two-stage AUTHOR-1D rollout this schema.sql file's single consolidated
+-- pass collapses into one), is what actually closes this. The second
+-- permissive policy staff needs is deferred to alongside staff_has_
+-- permission()'s own definition further below -- same ordering rule
+-- already established for staff_members' own deferred broader policy.
+create policy "Users can view their own full profile"
   on public.profiles for select
-  using (true);
+  using (auth.uid() = id);
 
 create policy "Users can update their own profile"
   on public.profiles for update
@@ -78,13 +126,72 @@ create policy "Users can update their own profile"
 -- no legitimate reason to update anything on this table.
 revoke all on public.profiles from anon, authenticated;
 
+-- LIBRUM 2.0 AUTHOR-1D (migration 046): anon no longer gets any SELECT
+-- grant on the base table at all -- it never legitimately reads a row of
+-- its own (it has no auth.uid()), so the only thing a table-level SELECT
+-- grant to anon ever did was let it read display_name/stripe_account_id/
+-- stripe_payouts_enabled etc. for EVERY OTHER user's row too, since RLS
+-- restricts which ROWS are visible, never which COLUMNS -- exactly the
+-- hole the AUTHOR-1C audit found. authenticated keeps SELECT (its own
+-- row, or another row where the staff policy below applies -- see the
+-- two profiles SELECT policies above/below); for any other row it now
+-- gets zero rows back, not merely fewer columns. Public reader-facing
+-- access to safe columns for ANY author -- the actual replacement for
+-- what the old "viewable by everyone" policy provided -- is the
+-- public_author_profiles view immediately below (migration 045 --
+-- already live a full rollout stage before this lockdown runs, per
+-- AUTHOR-1D), which is unaffected by either of these grants (a view runs
+-- with its owner's privileges, not the querying role's, unless created
+-- with security_invoker -- not used here, deliberately).
 grant select
   on public.profiles
-  to anon, authenticated;
+  to authenticated;
 
-grant update (display_name, bio, avatar_path)
+-- LIBRUM 2.0 AUTHOR-1A (migration 045): public_author_name added to this
+-- grant, alongside the three columns it has always covered -- confirmed
+-- by tracing every authenticated-client write against profiles
+-- (src/app/dashboard/profile/actions.ts's updateProfile()), which is
+-- also the only place that ever writes this new column.
+grant update (display_name, bio, avatar_path, public_author_name)
   on public.profiles
   to authenticated;
+
+-- LIBRUM 2.0 AUTHOR-1C (migration 045): the safe, reader-facing replacement for direct
+-- public access to profiles -- exposes ONLY the columns a reader ever
+-- legitimately needs for author attribution (never display_name, never
+-- role, never any Stripe/internal column). Deliberately a plain view,
+-- not `security_invoker` -- Postgres runs a non-security-invoker view
+-- with the privileges of the view's OWNER (this migration-applying
+-- role, the same owner as public.profiles itself), which is NOT subject
+-- to profiles' own RLS (RLS never applies to a table's owner unless
+-- FORCE ROW LEVEL SECURITY is set, which it isn't here) -- so this view
+-- can see every author's row regardless of the caller's own identity,
+-- while still only ever returning these four columns. Verified directly
+-- against a real local Postgres instance (not merely reasoned about):
+-- anon and an ordinary authenticated reader can both read another
+-- author's public_author_name/bio/avatar_path through this view, while
+-- neither can read one byte of that same author's display_name through
+-- either this view (the column isn't in it) or the base table (RLS+grant
+-- above now block it).
+--
+-- Filtered to role = 'author' -- mirrors public_author_name's own
+-- "never populated for a reader" invariant (see the column's own
+-- comment and the CHECK constraint above): a reader's row simply isn't
+-- in this view at all, which is exactly the right behavior everywhere
+-- this view is embedded, including reviews' reviewer-identity join
+-- (src/app/(public)/books/[id]/page.tsx) -- a plain reader-reviewer
+-- resolves to no public name (never their private display_name), and a
+-- reviewer who is ALSO an author with a pen name resolves to that pen
+-- name, through the exact same mechanism as any other author
+-- attribution on the site.
+create view public.public_author_profiles as
+  select id, public_author_name, bio, avatar_path
+  from public.profiles
+  where role = 'author';
+
+grant select
+  on public.public_author_profiles
+  to anon, authenticated;
 
 -- ============================================================
 -- staff_members: ADMIN-1A's staff/RBAC foundation, replacing binary
@@ -180,17 +287,33 @@ on conflict (user_id) do nothing;
 -- non-exploitable even under the previous `search_path = public`
 -- setting by the P1-6 audit; the change is for consistency/auditability,
 -- not a live exploit closure.
+-- LIBRUM 2.0 AUTHOR-1C (migration 045): a new author now gets public_author_name
+-- initialized to their own submitted display_name at signup, the same
+-- value migration 045's own backfill gave every pre-existing author --
+-- required by profiles' own public_author_name_required_for_authors
+-- CHECK constraint above, and what makes it safe for search_books() and
+-- every public reader-facing query to read ONLY public_author_name (via
+-- the public_author_profiles view) and never fall back to the private
+-- display_name at all. A reader gets null, exactly as before -- they
+-- have no public attribution surface.
 create or replace function public.handle_new_user()
 returns trigger as $$
+declare
+  v_role text;
+  v_display_name text;
 begin
-  insert into public.profiles (id, role, display_name)
+  v_role := case
+    when new.raw_user_meta_data->>'role' = 'author' then 'author'
+    else 'reader'
+  end;
+  v_display_name := coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email, '@', 1));
+
+  insert into public.profiles (id, role, display_name, public_author_name)
   values (
     new.id,
-    case
-      when new.raw_user_meta_data->>'role' = 'author' then 'author'
-      else 'reader'
-    end,
-    coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email, '@', 1))
+    v_role,
+    v_display_name,
+    case when v_role = 'author' then v_display_name else null end
   );
   return new;
 end;
@@ -386,11 +509,30 @@ as $$
       or extensions.unaccent(books.description) ilike extensions.unaccent('%' || search_term || '%')
       or extensions.unaccent(books.keywords) ilike extensions.unaccent('%' || search_term || '%')
       or exists (
+        -- LIBRUM 2.0 AUTHOR-1C (migration 045): reads public_author_profiles (the safe
+        -- view), never public.profiles directly. This function is
+        -- SECURITY INVOKER (deliberately -- see this function's own
+        -- long-standing posture, unchanged), meaning it runs with the
+        -- CALLING role's own privileges -- anon or an ordinary
+        -- authenticated reader included. Since AUTHOR-1C now restricts
+        -- direct SELECT on public.profiles to a caller's own row (or an
+        -- authorized staff permission), a public search call from anon/
+        -- an ordinary reader would get "permission denied for table
+        -- profiles" (confirmed directly against a real local Postgres
+        -- instance while building this fix) if this EXISTS clause still
+        -- queried the base table -- the view is what makes this
+        -- function work at all post-AUTHOR-1C, not merely what keeps it
+        -- private. public_author_profiles is already scoped to
+        -- role = 'author' and already only ever contains a non-null
+        -- public_author_name (see that view's own comment and the
+        -- profiles table's public_author_name_required_for_authors
+        -- CHECK) -- so this matches ONLY the public pen name, with no
+        -- coalesce and no possible path to a private display_name.
         select 1
-        from public.profiles
-        where profiles.id = books.author_id
-          and profiles.role = 'author'
-          and extensions.unaccent(profiles.display_name) ilike extensions.unaccent('%' || search_term || '%')
+        from public.public_author_profiles p
+        where p.id = books.author_id
+          and extensions.unaccent(p.public_author_name)
+            ilike extensions.unaccent('%' || search_term || '%')
       )
     )
   -- SEARCH CANDIDATE LIMIT (500) -- see the comment block above. NOT the
@@ -1870,6 +2012,33 @@ create policy "Staff with staff.view can view all staff_members rows"
   on public.staff_members
   for select
   using (public.staff_has_permission('staff.view'));
+
+-- LIBRUM 2.0 AUTHOR-1D (migration 046): the second permissive SELECT
+-- policy profiles needs, deferred here for the exact same reason as
+-- staff_members' own policy immediately above -- it references
+-- staff_has_permission(), which doesn't exist yet back at profiles' own
+-- table definition.
+-- Preserves every existing admin/moderation surface that reads another
+-- user's account identity via the ordinary request-scoped client (never
+-- the service-role/admin client) -- traced directly against every such
+-- call site in the app: reports/[id]/page.tsx (reports.view), staff/
+-- page.tsx (staff.view), refunds/page.tsx and refunds/[id]/page.tsx
+-- (refunds.view), and the audit log's actor names (audit.view).
+-- admin-shell.tsx and admin/(protected)/page.tsx's own greetings read
+-- the SIGNED-IN staff member's own row (already covered by "Users can
+-- view their own full profile" above) and need no entry here. A staff
+-- role with none of these permissions (e.g. 'editor', which
+-- staff_has_permission() grants nothing to today) gets exactly the same
+-- zero-rows-for-another-user result as any ordinary reader.
+create policy "Staff with an authorized permission can view any profile"
+  on public.profiles
+  for select
+  using (
+    public.staff_has_permission('reports.view')
+    or public.staff_has_permission('staff.view')
+    or public.staff_has_permission('refunds.view')
+    or public.staff_has_permission('audit.view')
+  );
 
 -- ============================================================
 -- refund_requests: one durable row per reader-initiated refund request,

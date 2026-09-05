@@ -1,8 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
+import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Book, Profile } from "@/lib/types";
 
-type BookWithAuthor = Book & { profiles: Pick<Profile, "display_name"> | null };
+// LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved here at the render boundary
+// via resolvePublicAuthorName(), never a raw display_name read. BookCard
+// itself is untouched: it only ever receives the already-resolved
+// string, never a profile object. AUTHOR-1C: every caller now queries
+// the safe public_author_profiles view (aliased as `profiles`), which
+// physically has no display_name column -- dropped from this type too.
+type BookWithAuthor = Book & {
+  profiles: Pick<Profile, "public_author_name"> | null;
+};
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 export function BookShelf({
@@ -37,7 +46,7 @@ export function BookShelf({
               <BookCard
                 book={book}
                 coverUrl={coverUrl}
-                authorName={book.profiles?.display_name}
+                authorName={resolvePublicAuthorName(book.profiles)}
               />
             </div>
           );

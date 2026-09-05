@@ -73,11 +73,12 @@ export function ManuscriptField({
   // Book is unaffected, exactly as before this parameter existed.
   bookLanguage?: string;
   // Never live-edited anywhere in either book form (no author-name
-  // field exists in Book Details -- it's profiles.display_name, only
-  // ever changed from Dashboard > Profile, a different page/session
-  // entirely), so unlike title this genuinely has no equivalent
-  // staleness/race to guard against -- a plain, stable prop is
-  // correct as-is.
+  // field exists in Book Details -- it's the caller's already-resolved
+  // reader-facing name, profiles.public_author_name ?? display_name via
+  // resolvePublicAuthorName(), only ever changed from Dashboard >
+  // Profile, a different page/session entirely), so unlike title this
+  // genuinely has no equivalent staleness/race to guard against -- a
+  // plain, stable prop is correct as-is.
   authorName: string;
   // The signed-in author's own id -- used only to namespace this
   // upload's temporary Storage path ("<authorId>/tmp/..."), the same
