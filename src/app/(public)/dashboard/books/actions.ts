@@ -10,7 +10,7 @@ import { isSupportedLanguage } from "@/lib/languages";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 import { sendNewBookEmails } from "@/lib/email";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
-import { validateEpubStructure } from "@/lib/epub-validation";
+import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -203,11 +203,45 @@ type ResolvedManuscript =
   | { present: false }
   | { present: true; bytes: Buffer; tempPathToCleanup: string | null };
 
+// LIBRUM 2.0 EPUB-VALIDATION-1B: the redirect-query fragment for each
+// validateEpubStructure() rejection reason. The pre-existing generic
+// fallback string is kept byte-for-byte identical to what every
+// rejection redirected to before this pass (a hardcoded, already-"+"-
+// encoded literal, matching this file's own established convention
+// for redirect messages elsewhere) -- every reason this validator
+// already had before EPUB-VALIDATION-1B still falls through to it
+// unchanged. The two genuinely new, more specific messages use
+// encodeURIComponent() instead, matching this file's own existing
+// precedent for a dynamic-content message (see addContributor()'s own
+// redirect further below) -- never exposing a ZIP-parser error, a
+// stack trace, or an archive path either way.
+function epubValidationErrorQuery(
+  reason: Extract<EpubValidationResult, { valid: false }>["reason"],
+): string {
+  switch (reason) {
+    case "too_many_entries":
+    case "too_large_uncompressed":
+    case "entry_too_large":
+      return encodeURIComponent("The EPUB is too large or contains too many files.");
+    case "encrypted_or_drm":
+      return encodeURIComponent("This EPUB uses encryption/DRM that Librum does not support.");
+    default:
+      return "This+file+doesn%27t+appear+to+be+a+valid+EPUB";
+  }
+}
+
 async function resolveManuscriptInput(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   formData: FormData,
   errorPath: string,
+  // LIBRUM 2.0 EPUB-VALIDATION-1B: optional -- known and passed by
+  // updateBook() (its own bookId parameter, available before this is
+  // ever called), omitted by createBook() (bookId isn't generated
+  // until after this resolves). Used only for the safe diagnostic log
+  // below on a rejection; never affects validation or storage
+  // behavior.
+  bookId?: string,
 ): Promise<ResolvedManuscript> {
   const tempPath = String(formData.get("manuscriptStoragePath") ?? "").trim();
 
@@ -251,7 +285,20 @@ async function resolveManuscriptInput(
 
   const manuscriptValidation = await validateEpubStructure(bytes);
   if (!manuscriptValidation.valid) {
-    redirect(`${errorPath}?error=This+file+doesn%27t+appear+to+be+a+valid+EPUB`);
+    // LIBRUM 2.0 EPUB-VALIDATION-1B: the EPUB-VALIDATION-1A audit found
+    // this rejection path never logged WHICH reason fired (unlike the
+    // DOCX-generated-EPUB validation failure in docx-actions.ts, which
+    // already did) -- closed here. Safe diagnostics only: userId,
+    // bookId if known, the validation reason, and the compressed byte
+    // size actually uploaded. Never the manuscript's own bytes/content,
+    // never an archive path, never a raw ZIP/XML parser error.
+    console.error("resolveManuscriptInput: EPUB validation failed", {
+      userId,
+      ...(bookId ? { bookId } : {}),
+      reason: manuscriptValidation.reason,
+      compressedBytes: bytes.length,
+    });
+    redirect(`${errorPath}?error=${epubValidationErrorQuery(manuscriptValidation.reason)}`);
   }
 
   return { present: true, bytes, tempPathToCleanup };
@@ -777,6 +824,7 @@ export async function updateBook(bookId: string, formData: FormData) {
     user.id,
     formData,
     `/dashboard/books/${bookId}/edit`,
+    bookId,
   );
 
   if (manuscriptResult.present) {

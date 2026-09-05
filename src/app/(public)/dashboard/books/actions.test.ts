@@ -961,6 +961,35 @@ describe("createBook: manuscriptStoragePath reference (CB-1)", () => {
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
+
+  // LIBRUM 2.0 EPUB-VALIDATION-1B: proves the new reason-specific
+  // redirect message actually reaches the author, not the generic
+  // fallback the previous test above still pins for every OTHER
+  // rejection reason.
+  it("gives the specific DRM message for an EPUB containing META-INF/encryption.xml", async () => {
+    const zip = new JSZip();
+    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+    zip.file(
+      "META-INF/container.xml",
+      `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`,
+    );
+    zip.file("META-INF/encryption.xml", "irrelevant content");
+    zip.file(
+      "content.opf",
+      `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata><manifest></manifest><spine></spine></package>`,
+    );
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+    const tempPath = `${USER_ID}/tmp/epub/drm.epub`;
+    mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
+
+    const formData = await buildFormDataWithManuscriptPath(tempPath);
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=This%20EPUB%20uses%20encryption%2FDRM%20that%20Librum%20does%20not%20support.",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
 });
 
 describe("createBook: create atomicity when the final manuscript write fails (CB-1)", () => {

@@ -208,3 +208,143 @@ describe("validateEpubStructure: rejects malformed/non-EPUB input", () => {
     });
   });
 });
+
+// LIBRUM 2.0 EPUB-VALIDATION-1B: proves the preflight/DRM/path-safety
+// additions actually run through validateEpubStructure() itself using
+// its REAL, non-configurable EPUB_ZIP_PREFLIGHT_LIMITS -- not
+// preflightZipEntries() called directly with custom smaller limits
+// (that's zip-preflight.test.ts's own job). Zip-bomb-shaped fixtures
+// below use real, DEFLATE-compressible all-zero content (the same
+// technique zip-preflight.test.ts's own bomb test already
+// established) -- tiny actual compressed footprint, fast to generate,
+// while still exercising the real declared-size thresholds.
+describe("validateEpubStructure: resource limits (EPUB-VALIDATION-1B)", () => {
+  it("rejects an archive with more entries than EPUB_ZIP_PREFLIGHT_LIMITS.maxEntries", async () => {
+    const zip = new JSZip();
+    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+    zip.file("META-INF/container.xml", containerXmlFor("OEBPS/content.opf"), { compression: "DEFLATE" });
+    zip.file("OEBPS/content.opf", OPF, { compression: "DEFLATE" });
+    for (let i = 0; i < 5001; i++) {
+      zip.file(`OEBPS/filler-${i}.txt`, "x");
+    }
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+
+    expect(await validateEpubStructure(bytes)).toEqual({
+      valid: false,
+      reason: "too_many_entries",
+    });
+  });
+
+  it(
+    "rejects an archive whose declared TOTAL uncompressed size exceeds the aggregate limit, even though every individual entry stays within the per-entry limit",
+    async () => {
+      const zip = new JSZip();
+      zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+      zip.file("META-INF/container.xml", containerXmlFor("OEBPS/content.opf"), { compression: "DEFLATE" });
+      zip.file("OEBPS/content.opf", OPF, { compression: "DEFLATE" });
+
+      // 7 entries at 50MB each (the per-entry cap itself, so none of
+      // them individually trips entry_too_large) sum to 350MB, over the
+      // 300MB aggregate cap. One shared buffer reference keeps peak
+      // memory to ~50MB rather than ~350MB; compression level 1
+      // (fastest) is plenty for content this trivially compressible
+      // (all zeros) and keeps this test fast despite the large declared
+      // size.
+      const chunk = Buffer.alloc(50 * 1024 * 1024, 0);
+      for (let i = 0; i < 7; i++) {
+        zip.file(`OEBPS/bomb-${i}.bin`, chunk, { compression: "DEFLATE", compressionOptions: { level: 1 } });
+      }
+      const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+
+      expect(await validateEpubStructure(bytes)).toEqual({
+        valid: false,
+        reason: "too_large_uncompressed",
+      });
+    },
+    20_000,
+  );
+
+  it("rejects an archive containing a single entry whose declared uncompressed size exceeds the per-entry limit -- the exact zip-bomb shape EPUB-VALIDATION-1A found unbounded (tiny compressed, enormous declared uncompressed)", async () => {
+    const zip = new JSZip();
+    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+    zip.file("META-INF/container.xml", containerXmlFor("OEBPS/content.opf"), { compression: "DEFLATE" });
+    zip.file("OEBPS/content.opf", OPF, { compression: "DEFLATE" });
+
+    const bomb = Buffer.alloc(51 * 1024 * 1024, 0);
+    zip.file("OEBPS/bomb.bin", bomb, { compression: "DEFLATE", compressionOptions: { level: 9 } });
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+
+    // Prove the compressed archive itself stays small -- the whole
+    // point of both this test and the fix it verifies.
+    expect(bytes.length).toBeLessThan(1024 * 1024);
+
+    expect(await validateEpubStructure(bytes)).toEqual({
+      valid: false,
+      reason: "entry_too_large",
+    });
+  });
+});
+
+describe("validateEpubStructure: DRM/encryption (EPUB-VALIDATION-1B)", () => {
+  it("rejects an EPUB containing META-INF/encryption.xml, presence alone, content never parsed", async () => {
+    const zip = new JSZip();
+    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+    zip.file("META-INF/container.xml", containerXmlFor("OEBPS/content.opf"), { compression: "DEFLATE" });
+    zip.file("META-INF/encryption.xml", "this is not even valid XML {{{", { compression: "DEFLATE" });
+    zip.file("OEBPS/content.opf", OPF, { compression: "DEFLATE" });
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+
+    expect(await validateEpubStructure(bytes)).toEqual({
+      valid: false,
+      reason: "encrypted_or_drm",
+    });
+  });
+
+  it("an EPUB with no META-INF/encryption.xml is unaffected -- the ordinary valid-EPUB path still passes", async () => {
+    const bytes = await buildEpub();
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: true });
+  });
+});
+
+describe("validateEpubStructure: archive-path safety (EPUB-VALIDATION-1B)", () => {
+  it("rejects a rootfile full-path that resolves outside the archive root via '../' traversal", async () => {
+    const bytes = await buildEpub({
+      containerXml: containerXmlFor("../../etc/passwd"),
+      opfEntryPath: "OEBPS/content.opf",
+    });
+    expect(await validateEpubStructure(bytes)).toEqual({
+      valid: false,
+      reason: "unsafe_path",
+    });
+  });
+
+  it("still accepts the existing approved leading-slash rootfile compatibility case -- resolveArchivePath never sees the leading slash, since it's stripped before reaching it, unchanged from before this pass", async () => {
+    const bytes = await buildEpub({
+      containerXml: containerXmlFor("/OEBPS/content.opf"),
+      opfEntryPath: "OEBPS/content.opf",
+    });
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: true });
+  });
+});
+
+// LIBRUM 2.0 EPUB-VALIDATION-1B: Librum's own generated EPUBs must
+// keep passing after every addition above. Direct, not indirect --
+// exercises the REAL generateEpub() output, not a hand-built fixture
+// shaped like it.
+describe("validateEpubStructure: Librum-generated EPUB regression (EPUB-VALIDATION-1B)", () => {
+  it("accepts the exact bytes generateEpub() produces", async () => {
+    const { generateEpub } = await import("./epub-generator");
+    const bytes = await generateEpub({
+      bookId: "book-1",
+      title: "Test Book",
+      authorName: "Test Author",
+      sections: [
+        { heading: "Chapter One", html: "<p>Once upon a time.</p>" },
+        { heading: "Chapter Two", html: "<p>The end.</p>" },
+      ],
+      images: [],
+    });
+
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: true });
+  });
+});

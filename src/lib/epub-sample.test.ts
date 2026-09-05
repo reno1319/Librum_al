@@ -328,6 +328,72 @@ describe("extractEpubSample: malformed EPUB / missing structure", () => {
   });
 });
 
+// LIBRUM 2.0 EPUB-VALIDATION-1B: this is the CRITICAL call site --
+// /api/books/[id]/sample is public and unauthenticated, so a resource-
+// abuse fixture here proves the same preflight validateEpubStructure()
+// already enforces at ingestion (EPUB_ZIP_PREFLIGHT_LIMITS,
+// epub-validation.ts) also gates this function, on every request, not
+// just once at upload.
+describe("extractEpubSample: resource limits (EPUB-VALIDATION-1B)", () => {
+  it("rejects an archive that fails the EPUB preflight BEFORE any entry is ever decompressed -- proven cleanly (no mocking) by an otherwise fully valid, normally-extractable EPUB still being rejected once one entry's declared uncompressed size exceeds the shared per-entry limit", async () => {
+    const zip = new JSZip();
+    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+    zip.file("META-INF/container.xml", containerXmlFor("OEBPS/content.opf"), { compression: "DEFLATE" });
+    zip.file(
+      "OEBPS/content.opf",
+      opfFor([{ id: "c1", href: "c1.xhtml", body: "<p>real content</p>" }]),
+      { compression: "DEFLATE" },
+    );
+    zip.file("OEBPS/c1.xhtml", xhtmlDoc("<p>" + "real ".repeat(50) + "</p>"), { compression: "DEFLATE" });
+    // An extra entry, never referenced by any manifest item, with a
+    // declared uncompressed size over the shared per-entry cap (50MB)
+    // -- real, DEFLATE-compressible all-zero content, tiny actual
+    // compressed footprint. If preflight did NOT run before any
+    // decompression, this entry's mere presence would have zero effect
+    // on extraction (sample-building never reads an unreferenced
+    // entry) -- extraction would succeed normally, exactly like the
+    // "still samples a normal valid EPUB" test below. That this
+    // archive is instead rejected is the proof preflight ran, against
+    // the whole archive's central directory, before JSZip.loadAsync()
+    // or any entry.async() call.
+    const bomb = Buffer.alloc(51 * 1024 * 1024, 0);
+    zip.file("OEBPS/unused-bomb.bin", bomb, { compression: "DEFLATE", compressionOptions: { level: 9 } });
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+
+    const result = await extractEpubSample(bytes);
+    expect(result).toEqual({ available: false, reason: "invalid_zip" });
+  });
+
+  it("rejects an archive with more entries than the shared preflight limit, returning the existing safe unavailable result rather than throwing", async () => {
+    const zip = new JSZip();
+    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+    zip.file("META-INF/container.xml", containerXmlFor("OEBPS/content.opf"), { compression: "DEFLATE" });
+    zip.file("OEBPS/content.opf", opfFor([{ id: "c1", href: "c1.xhtml", body: "<p>x</p>" }]), {
+      compression: "DEFLATE",
+    });
+    zip.file("OEBPS/c1.xhtml", xhtmlDoc("<p>x</p>"), { compression: "DEFLATE" });
+    for (let i = 0; i < 5001; i++) {
+      zip.file(`OEBPS/filler-${i}.txt`, "x");
+    }
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+
+    await expect(extractEpubSample(bytes)).resolves.toEqual({
+      available: false,
+      reason: "invalid_zip",
+    });
+  });
+
+  it("still samples a normal valid EPUB -- no regression from adding the preflight step", async () => {
+    const bytes = await buildEpub({
+      docs: [{ id: "c1", href: "c1.xhtml", body: "<p>" + "hello ".repeat(50) + "</p>" }],
+    });
+    const result = await extractEpubSample(bytes);
+    expect(result.available).toBe(true);
+    if (!result.available) return;
+    expect(result.sections[0].html).toContain("hello");
+  });
+});
+
 describe("extractEpubSample: sanitization security", () => {
   it("strips <script> tags and their content entirely", async () => {
     const bytes = await buildEpub({

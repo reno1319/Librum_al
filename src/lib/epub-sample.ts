@@ -1,5 +1,8 @@
 import JSZip from "jszip";
 import { posix } from "node:path";
+import { preflightZipEntries } from "@/lib/zip-preflight";
+import { EPUB_ZIP_PREFLIGHT_LIMITS } from "@/lib/epub-validation";
+import { resolveArchivePath } from "@/lib/epub-archive-paths";
 
 // LIBRUM 2.0 PRODUCT-1: derives a genuine "Read sample" excerpt from a
 // book's own EPUB manuscript, on demand, entirely server-side. Chosen
@@ -356,6 +359,26 @@ function parseSpineIdrefs(opfXml: string): string[] {
 const CONTENT_MEDIA_TYPES = new Set(["application/xhtml+xml", "text/html"]);
 
 export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult> {
+  // LIBRUM 2.0 EPUB-VALIDATION-1B: this is the CRITICAL call site --
+  // /api/books/[id]/sample is public and unauthenticated, so this
+  // function's own decompression calls below run on every request for
+  // every published book, not just once at upload. Preflight runs
+  // FIRST, against the raw buffer, before JSZip.loadAsync() -- and
+  // therefore before any entry.async() call below (the OPF, or any
+  // spine content document) -- using the SAME limits
+  // validateEpubStructure() already enforces at ingestion
+  // (EPUB_ZIP_PREFLIGHT_LIMITS, epub-validation.ts). A manuscript that
+  // already passed that ingestion check will always pass this same
+  // preflight again here too; this is a second, independent
+  // enforcement of the same bound at the one other place raw archive
+  // bytes are decompressed, not a new or different one. On failure,
+  // this returns the existing safe "invalid_zip" unavailable result --
+  // never a raw ZIP-parser error, never a 500.
+  const preflight = preflightZipEntries(bytes, EPUB_ZIP_PREFLIGHT_LIMITS);
+  if (!preflight.ok) {
+    return { available: false, reason: "invalid_zip" };
+  }
+
   let zip: JSZip;
   try {
     zip = await JSZip.loadAsync(bytes);
@@ -368,6 +391,8 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
 
   let containerXml: string;
   try {
+    // Safe to decompress fully -- bounded by the preflight above,
+    // same as every other entry in this archive.
     containerXml = await containerFile.async("string");
   } catch {
     return { available: false, reason: "missing_container" };
@@ -378,12 +403,23 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
   );
   if (!rootfileMatch) return { available: false, reason: "missing_container" };
 
-  const opfPath = rootfileMatch[2].trim().replace(/^\/+/, "");
-  const opfFile = opfPath ? zip.file(opfPath) : null;
+  // Leading-slash stripped first, exactly matching
+  // epub-validation.ts's own approved compatibility tolerance for this
+  // one field, before the shared resolver (which rejects a leading
+  // slash outright for every OTHER path) ever sees it -- see
+  // epub-archive-paths.ts's own comment for why the two behave
+  // differently on purpose.
+  const opfPathRaw = rootfileMatch[2].trim().replace(/^\/+/, "");
+  const resolvedOpfPath = opfPathRaw ? resolveArchivePath("", opfPathRaw) : ({ safe: false } as const);
+  if (!resolvedOpfPath.safe) return { available: false, reason: "missing_opf" };
+
+  const opfFile = zip.file(resolvedOpfPath.path);
   if (!opfFile) return { available: false, reason: "missing_opf" };
+  const opfPath = resolvedOpfPath.path;
 
   let opfXml: string;
   try {
+    // Safe to decompress fully -- bounded by the preflight above.
     opfXml = await opfFile.async("string");
   } catch {
     return { available: false, reason: "missing_opf" };
@@ -415,7 +451,15 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
     if (item.isNav) continue;
     if (item.mediaType && !CONTENT_MEDIA_TYPES.has(item.mediaType)) continue;
 
-    const resolvedPath = posix.normalize(posix.join(opfDir, item.href)).replace(/^\/+/, "");
+    // LIBRUM 2.0 EPUB-VALIDATION-1B: routed through the shared
+    // resolver (epub-archive-paths.ts) -- an unsafe manifest href
+    // (absolute, NUL-containing, or escaping above archive root) is
+    // simply skipped, same as a not-found file already was before this
+    // change; a malformed/hostile href never aborts the whole sample,
+    // it just means that one spine item contributes nothing.
+    const resolvedHref = resolveArchivePath(opfDir, item.href);
+    if (!resolvedHref.safe) continue;
+    const resolvedPath = resolvedHref.path;
     if (seenPaths.has(resolvedPath)) continue;
     seenPaths.add(resolvedPath);
 
@@ -424,6 +468,8 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
 
     let docXml: string;
     try {
+      // Safe to decompress fully -- bounded by the preflight above,
+      // same as every other entry in this archive.
       docXml = await docFile.async("string");
     } catch {
       continue;

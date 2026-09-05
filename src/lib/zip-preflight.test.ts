@@ -62,3 +62,57 @@ describe("preflightZipEntries", () => {
     expect(result.ok).toBe(true);
   });
 });
+
+// LIBRUM 2.0 EPUB-VALIDATION-1B: maxSingleEntryUncompressedBytes is a
+// new, OPTIONAL bound -- these tests prove it works when supplied, and
+// prove every pre-existing caller (DOCX conversion, which never
+// supplies it) keeps behaving exactly as it did before this option
+// existed.
+describe("preflightZipEntries: maxSingleEntryUncompressedBytes (single-entry bound)", () => {
+  it("rejects a single entry whose OWN declared uncompressed size exceeds the per-entry limit, even though the archive's aggregate total is still within the aggregate limit", async () => {
+    const zip = new JSZip();
+    // Highly repetitive content compresses extremely well -- one entry
+    // alone, well under a generous aggregate cap, but over a tight
+    // per-entry one. This is the exact shape a real zip-bomb entry
+    // takes: tiny compressed, enormous declared uncompressed.
+    const bombContent = Buffer.alloc(2 * 1024 * 1024, 0);
+    zip.file("bomb.bin", bombContent, { compression: "DEFLATE", compressionOptions: { level: 9 } });
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+
+    const result = preflightZipEntries(bytes, {
+      maxEntries: 100,
+      maxTotalUncompressedBytes: 100 * 1024 * 1024, // generous aggregate bound
+      maxSingleEntryUncompressedBytes: 1024 * 1024, // tight per-entry bound
+    });
+    expect(result).toEqual({ ok: false, reason: "entry_too_large" });
+  });
+
+  it("accepts every entry when each one, individually, is within the per-entry limit", async () => {
+    const zip = new JSZip();
+    zip.file("a.txt", Buffer.alloc(1024, 1));
+    zip.file("b.txt", Buffer.alloc(1024, 2));
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+
+    const result = preflightZipEntries(bytes, {
+      maxEntries: 100,
+      maxTotalUncompressedBytes: 10 * 1024 * 1024,
+      maxSingleEntryUncompressedBytes: 2048,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("omitting the option entirely preserves prior behavior -- an archive that would fail a per-entry check, if one were configured, still passes when none is given (the exact shape every pre-existing DOCX caller relies on)", async () => {
+    const zip = new JSZip();
+    const bombContent = Buffer.alloc(2 * 1024 * 1024, 0);
+    zip.file("bomb.bin", bombContent, { compression: "DEFLATE", compressionOptions: { level: 9 } });
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+
+    // Same limits object shape docx-converter.ts actually passes today
+    // -- no maxSingleEntryUncompressedBytes key at all.
+    const result = preflightZipEntries(bytes, {
+      maxEntries: 100,
+      maxTotalUncompressedBytes: 100 * 1024 * 1024,
+    });
+    expect(result.ok).toBe(true);
+  });
+});

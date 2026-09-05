@@ -41,7 +41,10 @@ export type ZipPreflightEntry = {
 
 export type ZipPreflightResult =
   | { ok: true; entries: ZipPreflightEntry[] }
-  | { ok: false; reason: "not_a_zip" | "too_many_entries" | "too_large_uncompressed" };
+  | {
+      ok: false;
+      reason: "not_a_zip" | "too_many_entries" | "too_large_uncompressed" | "entry_too_large";
+    };
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
@@ -60,7 +63,26 @@ const ZIP64_MARKER = 0xffffffff;
 
 export function preflightZipEntries(
   buffer: Buffer,
-  limits: { maxEntries: number; maxTotalUncompressedBytes: number },
+  limits: {
+    maxEntries: number;
+    maxTotalUncompressedBytes: number;
+    // LIBRUM 2.0 EPUB-VALIDATION-1B: optional -- omitted, the exact
+    // shape every pre-existing DOCX caller already uses, skips this
+    // check entirely, leaving DOCX behavior byte-for-byte unchanged.
+    // Added for EPUB validation, which needs a bound on any SINGLE
+    // entry's declared uncompressed size (not just the aggregate) --
+    // see epub-validation.ts's own comment for why: a single
+    // pathological entry (tiny compressed, enormous declared
+    // uncompressed) is the actual zip-bomb shape that mattered there,
+    // and the aggregate-only check alone doesn't catch it until AFTER
+    // that one entry has already been added to the running total (by
+    // which point, for a real zip bomb, the aggregate check would also
+    // fire -- but only after reading that entry's own header, still
+    // before any decompression; this option makes the specific entry
+    // responsible identifiable via its own dedicated reason instead of
+    // an aggregate one).
+    maxSingleEntryUncompressedBytes?: number;
+  },
 ): ZipPreflightResult {
   const eocdOffset = findEndOfCentralDirectory(buffer);
   if (eocdOffset === null) {
@@ -98,6 +120,18 @@ export function preflightZipEntries(
 
     if (uncompressedSize === ZIP64_MARKER) {
       return { ok: false, reason: "too_large_uncompressed" };
+    }
+
+    // Checked BEFORE folding into the running aggregate, and against
+    // the declared size straight from the central directory header --
+    // same "before any inflation happens" guarantee the aggregate
+    // check below already provides, just scoped to one entry rather
+    // than the whole archive.
+    if (
+      limits.maxSingleEntryUncompressedBytes !== undefined &&
+      uncompressedSize > limits.maxSingleEntryUncompressedBytes
+    ) {
+      return { ok: false, reason: "entry_too_large" };
     }
 
     totalUncompressed += uncompressedSize;
