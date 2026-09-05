@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 // LIBRUM 2.0 ADMIN-1B PART B, FAIL-OPEN CORRECTION: regression coverage
 // for deleteAccount()'s active-staff self-deletion guard and its
@@ -28,6 +29,11 @@ vi.mock("next/navigation", () => ({
   },
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+
+const mockCookieStore = {
+  get: vi.fn((_name: string) => undefined as { value: string } | undefined),
+};
+vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(mockCookieStore) }));
 
 const mockGetUser = vi.fn();
 const mockStaffLookup = vi.fn(() => Promise.resolve({ data: null as { role: string } | null, error: null as { message: string } | null }));
@@ -65,6 +71,26 @@ describe("deleteAccount: active-staff self-service deletion guard", () => {
     mockStaffLookup.mockResolvedValue({ data: null, error: null });
     mockDeleteUser.mockReset();
     mockCreateAdminClient.mockClear();
+    mockCookieStore.get.mockReset().mockImplementation(() => undefined);
+  });
+
+  // AUTH-1C: defense-in-depth -- account deletion is irreversible
+  // (auth.admin.deleteUser() plus every authored book/file), so a
+  // hijacked recovery-window session must not be able to delete the
+  // account before the legitimate owner finishes resetting their
+  // password. Placed before every other check in deleteAccount(),
+  // including the staff-status guard above, so it's proven here first.
+  it("recovery-session defense-in-depth: redirects to /reset-password and never queries staff_members when a recovery session is active", async () => {
+    mockCookieStore.get.mockImplementation((name: string) =>
+      name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
+    );
+
+    await expect(deleteAccount(formData({ confirmation: "DELETE" }))).rejects.toMatchObject({
+      target: expect.stringContaining("/reset-password"),
+    });
+
+    expect(mockStaffLookup).not.toHaveBeenCalled();
+    expect(mockDeleteUser).not.toHaveBeenCalled();
   });
 
   it("unauthenticated: redirects to /login before ever querying staff_members", async () => {

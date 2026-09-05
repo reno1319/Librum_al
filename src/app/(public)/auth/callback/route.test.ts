@@ -1,4 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { readFileSync } from "fs";
+import { createRequire } from "module";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 const mockExchangeCodeForSession = vi.fn();
@@ -33,6 +35,53 @@ describe("isRecoveryExchange", () => {
     expect(isRecoveryExchange("recovery")).toBe(false);
     expect(isRecoveryExchange(42)).toBe(false);
     expect(isRecoveryExchange([])).toBe(false);
+  });
+});
+
+// AUTH-1C: isRecoveryExchange() reads `redirectType`, a field
+// exchangeCodeForSession()'s PUBLIC TypeScript type does NOT declare --
+// confirmed SDK-internal behavior (see route.ts's own comment, and the
+// trace through node_modules/@supabase/auth-js/dist/module/
+// GoTrueClient.js: resetPasswordForEmail() stores the PKCE verifier as
+// "<verifier>/recovery", and _exchangeCodeForSession() splits that back
+// apart into `redirectType`). The describe block above only proves
+// isRecoveryExchange() itself is correct given a FABRICATED result
+// shape -- it can't catch a future @supabase/auth-js upgrade that
+// changes what shape the SDK actually produces, since nothing there
+// touches the installed package.
+//
+// This reads the ACTUAL installed @supabase/auth-js source from
+// node_modules at test-run time (same "assert on the real installed
+// file" technique already used by
+// src/app/admin/(protected)/staff/actions.test.ts's own source-contract
+// tests) and asserts the two facts isRecoveryExchange()'s entire
+// correctness depends on: that exchangeCodeForSession() still resolves
+// its data object with a `redirectType` key, and that the SDK still
+// derives it by comparing to the literal string "recovery". A future
+// `npm update` that renames the field, changes the comparison, or
+// restructures the method breaks THIS test loudly in CI -- not merely
+// a mocked assumption that could quietly drift from reality.
+describe("isRecoveryExchange: pinned against the installed @supabase/auth-js SDK's actual behavior (AUTH-1C)", () => {
+  it("the installed @supabase/auth-js still derives redirectType from a 'recovery' comparison inside exchangeCodeForSession's implementation", () => {
+    const require = createRequire(import.meta.url);
+    const authJsPackageJsonPath = require.resolve("@supabase/auth-js/package.json");
+    const authJsDir = authJsPackageJsonPath.replace(/package\.json$/, "");
+    const goTrueClientSource = readFileSync(
+      `${authJsDir}dist/module/GoTrueClient.js`,
+      "utf8",
+    );
+
+    // The exact runtime mechanism route.ts's own comment documents:
+    // _exchangeCodeForSession() splits a stored "<verifier>/recovery"
+    // string apart, then compares the resulting redirectType to the
+    // literal string 'recovery' when deciding what to return/notify.
+    expect(goTrueClientSource).toContain("_exchangeCodeForSession");
+    expect(goTrueClientSource).toMatch(/redirectType\s*===\s*['"]recovery['"]/);
+    // The resolved data object exchangeCodeForSession() ultimately
+    // returns still carries a `redirectType` key at all -- not just the
+    // internal comparison above, but the field actually reaching
+    // isRecoveryExchange()'s caller.
+    expect(goTrueClientSource).toMatch(/redirectType\s*:/);
   });
 });
 

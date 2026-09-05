@@ -8,6 +8,18 @@ describe("translateAuthErrorMessage", () => {
     );
   });
 
+  // AUTH-1C: closes the login user-enumeration signal AUTH-1A found --
+  // "Email not confirmed" must be indistinguishable from an ordinary
+  // wrong-password failure, not a distinct, more-informative message.
+  it("translates Email not confirmed to the exact same generic message as invalid credentials (no enumeration signal)", () => {
+    expect(translateAuthErrorMessage("Email not confirmed")).toBe(
+      translateAuthErrorMessage("Invalid login credentials"),
+    );
+    expect(translateAuthErrorMessage("Email not confirmed")).toBe(
+      "That email or password isn't right. Please try again.",
+    );
+  });
+
   it("translates User already registered", () => {
     expect(translateAuthErrorMessage("User already registered")).toBe(
       "An account with that email already exists. Try logging in instead.",

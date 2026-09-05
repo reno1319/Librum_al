@@ -26,6 +26,15 @@ import { resolveSafeInternalPath } from "@/lib/safe-redirect";
 // a restriction (see the call site below), never removes one, so
 // failing toward `false` on anything unexpected is the safe direction,
 // not a silent trust of an arbitrary value.
+//
+// AUTH-1C: because this reads an undocumented internal field rather
+// than a stable public API contract, it must be RE-AUDITED on every
+// @supabase/ssr/@supabase/auth-js upgrade -- do not assume this still
+// holds after a dependency bump. route.test.ts's "installed SDK still
+// derives redirectType the way this function assumes" test reads the
+// installed @supabase/auth-js source directly and fails loudly if a
+// future version stops matching this contract, so an upgrade that
+// silently breaks recovery detection fails CI instead of shipping.
 export function isRecoveryExchange(exchangeResult: unknown): boolean {
   if (typeof exchangeResult !== "object" || exchangeResult === null) {
     return false;

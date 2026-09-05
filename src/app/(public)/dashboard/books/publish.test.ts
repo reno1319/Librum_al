@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import JSZip from "jszip";
+import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART B: dedicated coverage for the ONE
 // authoritative publish gate (performPublish(), exercised here only
@@ -24,6 +25,17 @@ const mockRedirect = vi.fn((url: string) => {
 });
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+
+// AUTH-1C: performPublish() (the shared helper both publishBook() and
+// createBook()'s own intent=publish branch call into) now guards
+// against an active recovery session -- see the dedicated describe
+// block near the bottom of this file. Defaults to "no active recovery
+// session" so every pre-existing test in this file keeps exercising
+// exactly the behavior it always has.
+const mockCookieStore = {
+  get: vi.fn((_name: string) => undefined as { value: string } | undefined),
+};
+vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(mockCookieStore) }));
 
 const mockGetUser = vi.fn();
 const mockBookSelectResult = vi.fn();
@@ -154,6 +166,7 @@ function resetMocks() {
   mockUploadManuscript.mockReset().mockResolvedValue({ error: null });
   mockCreateAdminClient.mockClear();
   mockSendNewBookEmails.mockClear().mockResolvedValue(undefined);
+  mockCookieStore.get.mockReset().mockImplementation(() => undefined);
 }
 
 describe("publishBook: draft -> published", () => {
@@ -391,5 +404,61 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
     // it happens at all) is always a separate, subsequent UPDATE.
     expect(mockBookInsert).toHaveBeenCalledOnce();
     expect(mockBookInsert.mock.calls[0][0].status).toBe("draft");
+  });
+});
+
+// AUTH-1C: performPublish() -- the ONE shared publish helper both
+// publishBook() and createBook()'s own intent=publish branch call into
+// -- now guards against an active recovery session. Proven here, once,
+// against BOTH call sites, rather than duplicated per call site: this
+// is exactly why the guard lives in the shared helper instead of being
+// copy-pasted into publishBook() and createBook() separately.
+describe("performPublish: recovery-session defense-in-depth (AUTH-1C)", () => {
+  beforeEach(resetMocks);
+
+  it("publishBook: never advances status when a recovery session is active", async () => {
+    mockCookieStore.get.mockImplementation((name: string) =>
+      name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
+    );
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+
+    await expect(publishBook(BOOK_ID)).rejects.toMatchObject({
+      target: expect.stringContaining("/reset-password"),
+    });
+
+    expect(mockBookSelectResult).not.toHaveBeenCalled();
+    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("createBook intent=publish: the draft is still inserted, but the publish step itself never advances status", async () => {
+    mockCookieStore.get.mockImplementation((name: string) =>
+      name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
+    );
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+    const formData = await buildFormData({ intent: "publish", price: "0" });
+
+    await expect(createBook(formData)).rejects.toMatchObject({
+      target: expect.stringContaining("/reset-password"),
+    });
+
+    // createBook()'s own draft-creation path is unguarded (see the
+    // AUTH-1C classification report) -- only the SUBSEQUENT publish
+    // step is blocked, so the book is still safely saved as a draft
+    // rather than the whole create failing.
+    expect(mockBookInsert).toHaveBeenCalledOnce();
+    expect(mockBookInsert.mock.calls[0][0]).toMatchObject({ status: "draft" });
+    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+  });
+
+  it("no active recovery session: publishBook proceeds past the guard exactly as before", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockBookUpdatePayload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+    );
   });
 });

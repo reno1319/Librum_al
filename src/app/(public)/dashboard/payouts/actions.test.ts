@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 // LAUNCH-1 P2-1: connectStripeAccount() get-or-creates a Stripe Connect
 // Express account and persists its id onto the author's own profiles
@@ -7,8 +8,13 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // key, the conditional (WHERE stripe_account_id IS NULL) persistence
 // write and its zero-row/conflicting-account reconciliation branch, and
 // the Account Link failure behavior -- not Stripe/Supabase's own
-// pre-existing semantics. openStripeExpressDashboard() is out of scope
-// for this turn and is not covered here.
+// pre-existing semantics.
+//
+// AUTH-1C added a recovery-session defense-in-depth guard to BOTH
+// connectStripeAccount() and openStripeExpressDashboard() -- see the
+// dedicated describe blocks near the bottom of this file, which are
+// also openStripeExpressDashboard()'s first-ever coverage (it was
+// explicitly out of scope for the LAUNCH-1 P2-1 turn above).
 class RedirectSignal extends Error {
   constructor(public target: string) {
     super(`REDIRECT:${target}`);
@@ -18,6 +24,11 @@ const mockRedirect = vi.fn((url: string) => {
   throw new RedirectSignal(url);
 });
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
+
+const mockCookieStore = {
+  get: vi.fn((_name: string) => undefined as { value: string } | undefined),
+};
+vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(mockCookieStore) }));
 
 const mockGetUser = vi.fn();
 const mockProfileSingle = vi.fn();
@@ -58,17 +69,19 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdmi
 const mockAccountsCreate = vi.fn();
 const mockAccountsRetrieve = vi.fn();
 const mockAccountLinksCreate = vi.fn();
+const mockCreateLoginLink = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   stripe: {
     accounts: {
       create: (...args: unknown[]) => mockAccountsCreate(...args),
       retrieve: (...args: unknown[]) => mockAccountsRetrieve(...args),
+      createLoginLink: (...args: unknown[]) => mockCreateLoginLink(...args),
     },
     accountLinks: { create: (...args: unknown[]) => mockAccountLinksCreate(...args) },
   },
 }));
 
-const { connectStripeAccount } = await import("./actions");
+const { connectStripeAccount, openStripeExpressDashboard } = await import("./actions");
 
 const USER_ID = "user-1";
 
@@ -76,6 +89,7 @@ function resetMocks() {
   mockRedirect.mockClear();
   mockCreateClient.mockClear();
   mockCreateAdminClient.mockClear();
+  mockCookieStore.get.mockReset().mockImplementation(() => undefined);
 
   mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID, email: "a@b.co" } } });
   mockProfileSingle.mockReset().mockResolvedValue({ data: { stripe_account_id: null }, error: null });
@@ -352,5 +366,76 @@ describe("connectStripeAccount", () => {
       expect(serialized).not.toContain(secret);
     }
     errorSpy.mockRestore();
+  });
+});
+
+// AUTH-1C: connectStripeAccount() controls where an author's future
+// earnings are routed -- a payout-account-onboarding/connection action,
+// exactly the kind of high-value mutation the recovery guard exists to
+// block during a hijacked recovery window. Mirrors the "recovery-session
+// defense-in-depth" pattern already established for buyBundle
+// (src/app/bundles/[id]/actions.test.ts).
+describe("connectStripeAccount: recovery-session defense-in-depth (AUTH-1C)", () => {
+  beforeEach(resetMocks);
+
+  it("redirects to /reset-password and never reaches Supabase or Stripe when a recovery session is active", async () => {
+    mockCookieStore.get.mockImplementation((name: string) =>
+      name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
+    );
+
+    await expectRedirectTo(connectStripeAccount(), "/reset-password");
+
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(mockAccountsCreate).not.toHaveBeenCalled();
+    expect(mockAccountLinksCreate).not.toHaveBeenCalled();
+  });
+
+  it("no active recovery session: proceeds past the guard exactly as before this pass", async () => {
+    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
+
+    expect(mockCreateClient).toHaveBeenCalled();
+  });
+});
+
+// AUTH-1C: openStripeExpressDashboard()'s first-ever test coverage
+// (explicitly out of scope for the earlier LAUNCH-1 P2-1 turn -- see
+// this file's own top comment). Deliberately narrow: only the new
+// recovery guard and the pre-existing happy-path/no-account behavior,
+// not a general audit of the function.
+describe("openStripeExpressDashboard (AUTH-1C)", () => {
+  beforeEach(resetMocks);
+
+  it("recovery-session defense-in-depth: redirects to /reset-password and never reaches Supabase or Stripe when a recovery session is active", async () => {
+    mockCookieStore.get.mockImplementation((name: string) =>
+      name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
+    );
+
+    await expectRedirectTo(openStripeExpressDashboard(), "/reset-password");
+
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(mockCreateLoginLink).not.toHaveBeenCalled();
+  });
+
+  it("no stripe_account_id on file: redirects back to /dashboard/payouts without calling Stripe", async () => {
+    mockProfileSingle.mockResolvedValue({ data: { stripe_account_id: null }, error: null });
+
+    await expectRedirectTo(openStripeExpressDashboard(), "/dashboard/payouts");
+
+    expect(mockCreateLoginLink).not.toHaveBeenCalled();
+  });
+
+  it("existing stripe_account_id: creates a login link and redirects to it", async () => {
+    mockProfileSingle.mockResolvedValue({
+      data: { stripe_account_id: "acct_existing" },
+      error: null,
+    });
+    mockCreateLoginLink.mockResolvedValue({ url: "https://connect.stripe.com/express/acct_existing" });
+
+    await expectRedirectTo(
+      openStripeExpressDashboard(),
+      "https://connect.stripe.com/express/acct_existing",
+    );
+
+    expect(mockCreateLoginLink).toHaveBeenCalledWith("acct_existing");
   });
 });

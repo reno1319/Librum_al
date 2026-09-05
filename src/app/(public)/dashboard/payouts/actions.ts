@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { retrieveConnectedAccount } from "@/lib/connect-account";
+import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 
 // LAUNCH-1 P2-1: shown for every failure mode below where the
 // underlying cause (a DB read/write anomaly, a Stripe API error) isn't
@@ -56,6 +57,14 @@ function buildConnectAccountIdempotencyKey(userId: string): string {
 }
 
 export async function connectStripeAccount() {
+  // AUTH-1C: defense-in-depth -- Proxy already blocks /dashboard/*
+  // while a recovery session is active, so this is the second layer
+  // against a crafted direct POST. Payout-account onboarding controls
+  // where an author's future earnings are routed -- exactly the kind of
+  // account-takeover-during-the-recovery-window action this guard
+  // exists to block. Runs before any Supabase/Stripe call.
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -252,6 +261,13 @@ export async function connectStripeAccount() {
 }
 
 export async function openStripeExpressDashboard() {
+  // AUTH-1C: defense-in-depth, same reasoning as connectStripeAccount()
+  // above -- Stripe's own Express Dashboard is where an already-
+  // connected author can view/change bank details and payout
+  // destination, so this is just as materially sensitive as the
+  // onboarding link itself. Runs before any Supabase/Stripe call.
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },

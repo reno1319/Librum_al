@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
+import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { mapStaffRpcError, normalizeEmail, isValidStaffRole } from "./staff-management-logic";
 import type { StaffListRow, StaffRole } from "@/lib/types";
 
@@ -61,6 +62,14 @@ export async function addStaffMemberByEmail(
   role: StaffRole,
 ): Promise<StaffMutationResult> {
   await requireStaff("staff.manage");
+  // AUTH-1C: defense-in-depth, same posture as issueStripeRefund()
+  // (src/app/admin/refunds/actions.ts) -- granting staff access is a
+  // privilege-escalation-capable mutation (unlike reviewBookReport()/
+  // reviewRefundRequest(), which only ever write administrative status
+  // and deliberately have no recovery guard -- see their own comments),
+  // so a hijacked recovery-window session belonging to an existing
+  // staff member must not be able to add a durable backdoor account.
+  await redirectIfRecoverySessionActive();
 
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) {
@@ -87,6 +96,11 @@ export async function changeStaffRole(
   role: StaffRole,
 ): Promise<StaffMutationResult> {
   await requireStaff("staff.manage");
+  // AUTH-1C: defense-in-depth, same reasoning as
+  // addStaffMemberByEmail() above -- elevating an existing staff
+  // member's role (e.g. to 'owner') is just as privilege-escalation-
+  // capable as adding a brand-new one.
+  await redirectIfRecoverySessionActive();
 
   if (!isValidStaffRole(role)) {
     return { ok: false, error: "That's not a valid staff role." };
@@ -106,6 +120,11 @@ export async function changeStaffRole(
 
 export async function removeStaffMember(targetUserId: string): Promise<StaffMutationResult> {
   await requireStaff("staff.manage");
+  // AUTH-1C: defense-in-depth -- removing a staff member (e.g. every
+  // other owner/admin) is a destructive, sabotage-capable mutation of a
+  // security-relevant record, same tier as addStaffMemberByEmail()/
+  // changeStaffRole() above.
+  await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();
   const { error } = await supabase.rpc("remove_staff_member", {

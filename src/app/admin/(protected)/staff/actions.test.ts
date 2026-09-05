@@ -1,6 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
+import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 // LIBRUM 2.0 ADMIN-1B PART B: same mocking convention already
 // established by src/app/admin/(protected)/reports/actions.test.ts --
@@ -23,6 +24,11 @@ vi.mock("next/navigation", () => ({
 
 const mockRequireStaff = vi.fn();
 vi.mock("@/lib/staff", () => ({ requireStaff: (permission: string) => mockRequireStaff(permission) }));
+
+const mockCookieStore = {
+  get: vi.fn((_name: string) => undefined as { value: string } | undefined),
+};
+vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(mockCookieStore) }));
 
 const mockRpc = vi.fn();
 const mockCreateClient = vi.fn(() => Promise.resolve({ rpc: mockRpc }));
@@ -312,5 +318,52 @@ describe("removeStaffMember", () => {
     const result = await removeStaffMember("target-1");
 
     expect(result).toEqual({ ok: true });
+  });
+});
+
+// AUTH-1C: staff-privilege mutations (add/change/remove) grant or
+// revoke admin access itself -- a hijacked recovery-window session
+// belonging to an existing staff member must not be able to add a
+// durable backdoor account, self-elevate an accomplice, or sabotage the
+// staff roster. Deliberately after requireStaff() has already passed in
+// every test below (mockRequireStaff resolves normally), mirroring
+// issueStripeRefund()'s own guard placement
+// (src/app/admin/refunds/actions.ts) -- the guard runs after
+// authorization, before the RPC. listStaffMembers() is read-only and
+// deliberately has no guard, so it isn't covered here.
+describe("addStaffMemberByEmail/changeStaffRole/removeStaffMember: recovery-session defense-in-depth (AUTH-1C)", () => {
+  beforeEach(() => {
+    mockRequireStaff.mockReset().mockResolvedValue({ userId: "owner-1", role: "owner" });
+    mockRpc.mockReset();
+    mockCookieStore.get.mockReset().mockImplementation((name: string) =>
+      name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
+    );
+  });
+
+  afterEach(() => {
+    // Restore the module-level default ("no active recovery session")
+    // so no later describe block in this file is affected.
+    mockCookieStore.get.mockReset().mockImplementation(() => undefined);
+  });
+
+  it("addStaffMemberByEmail: redirects to /reset-password and never calls the RPC when a recovery session is active", async () => {
+    await expect(addStaffMemberByEmail("a@test.com", "support")).rejects.toMatchObject({
+      target: expect.stringContaining("/reset-password"),
+    });
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("changeStaffRole: redirects to /reset-password and never calls the RPC when a recovery session is active", async () => {
+    await expect(changeStaffRole("target-1", "admin")).rejects.toMatchObject({
+      target: expect.stringContaining("/reset-password"),
+    });
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("removeStaffMember: redirects to /reset-password and never calls the RPC when a recovery session is active", async () => {
+    await expect(removeStaffMember("target-1")).rejects.toMatchObject({
+      target: expect.stringContaining("/reset-password"),
+    });
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 });

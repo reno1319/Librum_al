@@ -4,8 +4,18 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 
 export async function deleteAccount(formData: FormData) {
+  // AUTH-1C: defense-in-depth -- Proxy already blocks /account itself
+  // while a recovery session is active, so this is the second layer
+  // against a crafted direct POST. Account deletion is irreversible
+  // (auth.admin.deleteUser() below, plus every authored book/file), so
+  // this runs before any Supabase call at all, matching buyBook's/
+  // buyBundle's own placement (src/app/books/[id]/actions.ts,
+  // src/app/bundles/[id]/actions.ts).
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },

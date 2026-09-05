@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 
 async function resolveBookSelection(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -144,6 +145,11 @@ export async function updateBundle(bundleId: string, formData: FormData) {
 }
 
 export async function publishBundle(bundleId: string) {
+  // AUTH-1C: defense-in-depth, mirroring publishBook()/unpublishBook()
+  // (src/app/dashboard/books/actions.ts) -- a bundle's publish state is
+  // a public, buyer-facing change. Runs before any Supabase call.
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -163,6 +169,10 @@ export async function publishBundle(bundleId: string) {
 }
 
 export async function unpublishBundle(bundleId: string) {
+  // AUTH-1C: defense-in-depth, mirroring publishBook()/unpublishBook()
+  // -- same reasoning as publishBundle() above.
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -182,6 +192,10 @@ export async function unpublishBundle(bundleId: string) {
 }
 
 export async function deleteBundle(bundleId: string) {
+  // AUTH-1C: defense-in-depth, mirroring deleteBook() -- bundle
+  // deletion is irreversible. Runs before any Supabase call.
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },

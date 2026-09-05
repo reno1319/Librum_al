@@ -11,6 +11,7 @@ import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 import { sendNewBookEmails } from "@/lib/email";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
 import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
+import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -999,6 +1000,15 @@ async function performPublish(
   bookId: string,
   userId: string,
 ): Promise<PerformPublishResult> {
+  // AUTH-1C: defense-in-depth -- Proxy already blocks /dashboard/* while
+  // a recovery session is active, so this is the second layer against a
+  // crafted direct POST. Placed in this single shared helper (not
+  // duplicated in publishBook() and createBook()'s own intent=publish
+  // branch) so both callers get it for free and can't drift. Runs
+  // before the status mutation below -- a book's publish state is a
+  // publicly-visible, buyer-facing change.
+  await redirectIfRecoverySessionActive();
+
   const { data: book } = await supabase
     .from("books")
     .select("status, price_cents, published_at")
@@ -1091,6 +1101,13 @@ export async function publishBook(bookId: string) {
 }
 
 export async function unpublishBook(bookId: string) {
+  // AUTH-1C: defense-in-depth -- Proxy already blocks /dashboard/*
+  // while a recovery session is active, so this is the second layer
+  // against a crafted direct POST. A book's publish state is a public,
+  // buyer-facing change, so this runs before any Supabase call, matching
+  // buyBook's/buyBundle's own placement.
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -1111,6 +1128,13 @@ export async function unpublishBook(bookId: string) {
 }
 
 export async function deleteBook(bookId: string) {
+  // AUTH-1C: defense-in-depth -- Proxy already blocks /dashboard/*
+  // while a recovery session is active, so this is the second layer
+  // against a crafted direct POST. Book deletion is irreversible, so
+  // this runs before any Supabase call, matching buyBook's/buyBundle's
+  // own placement.
+  await redirectIfRecoverySessionActive();
+
   const supabase = await createClient();
   const {
     data: { user },
