@@ -67,12 +67,16 @@ export function buildSiteHeaderNav(params: {
   // public nav otherwise reads author-first (matching the homepage's own
   // author-acquisition purpose), with the reader-facing marketplace link
   // still present but no longer leading. Routes/labels unchanged.
+  // LIBRUM 2.0 BLOG-1D: Blog added directly after Bookstore, per the
+  // BLOG-1 design report's own preferred ordering -- every other entry
+  // and their relative order is unchanged.
   const primaryLinks: NavItem[] = [
     { href: "/", label: "Home" },
     { href: "/about", label: "About" },
     { href: "/how-it-works", label: "How it works" },
     { href: "/pricing", label: "Earnings" },
     { href: "/bookstore", label: "Bookstore" },
+    { href: "/blog", label: "Blog" },
   ];
   if (user) {
     primaryLinks.push(

@@ -25,6 +25,7 @@ describe("buildSiteHeaderNav", () => {
       "How it works",
       "Earnings",
       "Bookstore",
+      "Blog",
     ]);
     expect(nav.primaryLinks.some((l) => l.label === "Library")).toBe(false);
     expect(nav.primaryLinks.some((l) => l.label === "Dashboard")).toBe(false);
@@ -47,6 +48,7 @@ describe("buildSiteHeaderNav", () => {
     expect(nav.primaryLinks.some((l) => l.href === "/library" && l.label === "Library")).toBe(
       true,
     );
+    expect(nav.primaryLinks.some((l) => l.href === "/blog" && l.label === "Blog")).toBe(true);
     expect(nav.primaryLinks.some((l) => l.label === "Dashboard")).toBe(false);
     expect(nav.showDisplayName).toBe(true);
     expect(nav.showAccountLink).toBe(true);

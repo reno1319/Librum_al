@@ -12,9 +12,14 @@ import Link from "next/link";
 // looking for. Contact deliberately sits under SUPPORT, not LEGAL (a
 // support contact isn't a legal document).
 
-const FOOTER_GROUPS = {
+// Exported so BLOG-1D's own footer test can assert Blog's presence in
+// Discover directly -- this repo has no component-rendering test
+// infrastructure (see site-header.test.ts's own header comment), so
+// testing footer content means testing the data it renders from.
+export const FOOTER_GROUPS = {
   Discover: [
     { href: "/bookstore", label: "Bookstore" },
+    { href: "/blog", label: "Blog" },
     { href: "/about", label: "About" },
   ],
   Publish: [
