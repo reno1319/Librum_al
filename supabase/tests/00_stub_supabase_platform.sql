@@ -95,7 +95,22 @@ create or replace function auth.uid() returns uuid
   language sql stable
   as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 
+-- BLOG-1B.1: a real Supabase project pre-provisions the `storage`
+-- schema with USAGE already granted to anon/authenticated/service_role
+-- platform-wide, the same ambient grant this file already replicates
+-- for `extensions` above (see that grant's own comment) -- no migration
+-- in this repo has ever needed to grant it itself, since it's always
+-- already there on the real platform. This was never stubbed because
+-- no test file before migration 047's own storage-policy suite ever
+-- exercised storage.objects as a real non-superuser role; without it, a
+-- real INSERT/SELECT/UPDATE/DELETE against storage.objects as anon/
+-- authenticated fails with "permission denied for schema storage"
+-- before ever reaching this schema's own RLS policies, masking the
+-- exact policy behavior the affected suite exists to prove -- found and
+-- confirmed the same way the analogous extensions-schema gap was
+-- originally found (see that comment).
 create schema if not exists storage;
+grant usage on schema storage to anon, authenticated, service_role;
 create table if not exists storage.buckets (
   id text primary key,
   name text not null,
@@ -107,6 +122,14 @@ create table if not exists storage.objects (
   name text,
   owner uuid
 );
+-- Same ambient-privilege pattern as `alter default privileges in schema
+-- public grant all ... to anon, authenticated, service_role` above,
+-- extended to storage's own tables -- the real platform grants this
+-- broadly too (Supabase Storage's bucket policies are RLS-only, exactly
+-- like this repo's own covers/manuscripts/avatars/blog policies, which
+-- all assume the table grant is already ambiently present and RLS
+-- alone does the real narrowing).
+grant all on storage.buckets, storage.objects to anon, authenticated, service_role;
 create or replace function storage.foldername(name text) returns text[]
   language sql immutable as $$ select string_to_array(name, '/') $$;
 alter table storage.objects enable row level security;

@@ -39,11 +39,11 @@ describe("admin route access, by role", () => {
     expect(allow("owner", "refunds.view")).toBe(true);
   });
 
-  it("editor cannot enter /admin at all", () => {
-    expect(allow("editor", "admin.access")).toBe(false);
-    // Consequently editor can reach neither sub-route either, though the
-    // layout gate is what actually stops them before either page's own
-    // check would even run.
+  it("editor can enter /admin (BLOG-1B) but holds neither reports.view nor refunds.view", () => {
+    expect(allow("editor", "admin.access")).toBe(true);
+    // Each sub-route's OWN check is still what actually stops editor
+    // from reaching reports/refunds -- admin.access alone never implies
+    // either, same as every other role in this matrix.
     expect(allow("editor", "reports.view")).toBe(false);
     expect(allow("editor", "refunds.view")).toBe(false);
   });

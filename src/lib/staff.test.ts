@@ -54,11 +54,20 @@ describe("decideStaffAccess", () => {
     expect(decision).toEqual({ kind: "allow" });
   });
 
-  it("editor -> denied for admin.access (editor currently has zero permissions)", () => {
+  it("editor -> allowed for admin.access (BLOG-1B: the structural prerequisite to reach /admin/blog)", () => {
     const decision = decideStaffAccess({
       userId: "user-1",
       staffRole: "editor",
       permission: "admin.access",
+    });
+    expect(decision).toEqual({ kind: "allow" });
+  });
+
+  it("editor -> denied for a permission it doesn't hold (reports.view)", () => {
+    const decision = decideStaffAccess({
+      userId: "user-1",
+      staffRole: "editor",
+      permission: "reports.view",
     });
     expect(decision).toEqual({ kind: "forbidden" });
   });

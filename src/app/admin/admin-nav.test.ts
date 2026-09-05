@@ -44,8 +44,9 @@ describe("resolveVisibleAdminNavItems", () => {
     expect(hrefs).toEqual(["/admin", "/admin/refunds"]);
   });
 
-  it("editor sees nothing -- editor currently lacks admin.access entirely", () => {
-    expect(resolveVisibleAdminNavItems("editor")).toEqual([]);
+  it("editor sees dashboard only -- BLOG-1B grants admin.access, but no reports/refunds/staff/audit/finance view", () => {
+    const hrefs = resolveVisibleAdminNavItems("editor").map((i) => i.href);
+    expect(hrefs).toEqual(["/admin"]);
   });
 
   it("includes a Staff entry, an Audit log entry, and a Finance entry", () => {

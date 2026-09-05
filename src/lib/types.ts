@@ -173,7 +173,14 @@ export type Permission =
   | "staff.view"
   | "staff.manage"
   | "audit.view"
-  | "finance.view";
+  | "finance.view"
+  // LIBRUM 2.0 BLOG-1B: blog.view (read any post, including drafts) and
+  // blog.manage (create/edit/publish/unpublish/delete, always through
+  // the SECURITY DEFINER RPCs in migration 047 -- see that migration's
+  // own header for why blog_posts carries no direct table-level write
+  // grant for either permission to act through instead).
+  | "blog.view"
+  | "blog.manage";
 
 // Mirrors list_staff_members()'s exact return shape (migration 041,
 // ADMIN-1B Part B) -- the ONLY place a staff member's email is ever

@@ -2,8 +2,9 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactElement, ReactNode } from "react";
 import type { StaffRole } from "@/lib/types";
 
-// ADMIN-1A.5 "Admin login" test bullets: valid owner/admin/moderator/
-// support authentication, editor denied, ordinary author/reader denied,
+// ADMIN-1A.5 "Admin login" test bullets: valid owner/admin/editor/
+// moderator/support authentication (BLOG-1B added editor to this list --
+// it now holds admin.access), ordinary author/reader denied,
 // already-authenticated staff redirects, already-authenticated non-staff
 // denied. All of these are decided entirely by this page's own render
 // logic (staffLogin() itself never decides staff authorization -- see
@@ -68,7 +69,7 @@ describe("AdminLoginPage: already authenticated", () => {
     mockGetStaffMember.mockReset();
   });
 
-  const staffRolesWithAdminAccess: StaffRole[] = ["owner", "admin", "moderator", "support"];
+  const staffRolesWithAdminAccess: StaffRole[] = ["owner", "admin", "editor", "moderator", "support"];
 
   for (const role of staffRolesWithAdminAccess) {
     it(`${role}: redirects to /admin (has admin.access)`, async () => {
@@ -100,18 +101,6 @@ describe("AdminLoginPage: already authenticated", () => {
     ).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith("/admin");
-  });
-
-  it("editor: denied -- editor currently lacks admin.access, never redirected into /admin", async () => {
-    mockGetStaffMember.mockResolvedValue({ userId: "user-1", role: "editor" });
-
-    const page = await AdminLoginPage({ searchParams: Promise.resolve({}) });
-    const text = collectText(page).join(" ");
-
-    expect(mockRedirect).not.toHaveBeenCalled();
-    expect(text).toContain("This account does not have access to Librum Administration.");
-    expect(text).toContain("Return to Librum");
-    expect(text).toContain("Sign out");
   });
 
   it("ordinary author/reader (no staff_members row at all): denied, same message, no staff details leaked", async () => {

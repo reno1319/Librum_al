@@ -199,8 +199,20 @@ begin
 
   perform pg_temp.assert(func.prosecdef is not null, 'part1b: staff_has_permission(text) must exist');
   perform pg_temp.assert(func.prosecdef = true, 'part1b: staff_has_permission must be SECURITY DEFINER');
+  -- BLOG-1B.1: corrected against a real Postgres 16 instance -- an empty
+  -- SET search_path = '' is serialized in pg_proc.proconfig as the
+  -- literal array element 'search_path=""' (with quote characters), not
+  -- the bare 'search_path=' this assertion originally checked for. This
+  -- file's own header already disclosed it had never actually been run
+  -- against a real database; 034_harden_remaining_table_acls.test.sql
+  -- and 037_narrow_lost_dispute_rpc_privileges.test.sql already use the
+  -- correct quoted form (`proconfig @> array['search_path=""']`) --
+  -- this brings this one assertion in line with that same, already-
+  -- verified-correct convention. Scoped to exactly this line: several
+  -- other test files (039/041/042/043) carry the identical pre-existing
+  -- bug and were left untouched, out of BLOG-1B's own scope.
   perform pg_temp.assert(
-    exists (select 1 from unnest(coalesce(func.proconfig, '{}'::text[])) c where c = 'search_path='),
+    func.proconfig @> array['search_path=""']::text[],
     'part1b: staff_has_permission must SET search_path = '''' (empty)'
   );
 
@@ -208,9 +220,22 @@ begin
     has_function_privilege('authenticated', 'public.staff_has_permission(text)', 'EXECUTE'),
     'part1b: authenticated must have EXECUTE on staff_has_permission'
   );
+  -- BLOG-1B.1: deliberately widened, not a regression -- confirmed
+  -- against a real Postgres instance that blog_posts' "Staff with
+  -- blog.view can read any blog post" policy is OR'd with anon's own
+  -- "published only" policy, so anon must be able to EVALUATE (not
+  -- just fail) staff_has_permission() for the RLS check on a draft row
+  -- to resolve at all; without this grant, anon's read of even the
+  -- PUBLISHED row raised "permission denied for function" outright.
+  -- Safe because auth.uid() is always null for anon, so this remains
+  -- deterministically false for every permission regardless of
+  -- staff_members' contents -- see migration 047's own header for the
+  -- full reasoning. staff_members/book_reports/refund_requests still
+  -- grant anon no table-level SELECT at all, so this widened grant is
+  -- never reachable from their own RLS evaluation.
   perform pg_temp.assert(
-    not has_function_privilege('anon', 'public.staff_has_permission(text)', 'EXECUTE'),
-    'part1b: anon must NOT have EXECUTE on staff_has_permission'
+    has_function_privilege('anon', 'public.staff_has_permission(text)', 'EXECUTE'),
+    'part1b: anon must have EXECUTE on staff_has_permission (BLOG-1B: required to evaluate the blog.view policy)'
   );
   perform pg_temp.assert(
     not exists (
@@ -228,9 +253,17 @@ end $$;
 -- actual safeguard against this SQL-side copy of the role->permission
 -- matrix silently drifting from the canonical TypeScript copy in
 -- src/lib/staff-permissions.ts. One fixture profile per role, one
--- assertion per (role, permission) cell -- 5 roles x 7 permissions = 35
--- assertions, mirroring src/lib/staff-permissions.test.ts's own
--- exhaustive coverage exactly.
+-- assertion per (role, permission) cell, mirroring
+-- src/lib/staff-permissions.test.ts's own exhaustive coverage.
+--
+-- LIBRUM 2.0 BLOG-1B: adds blog.view/blog.manage (owner/admin/editor)
+-- and flips editor's admin.access from false to true -- the one
+-- pre-existing cell this migration's own change actually alters; every
+-- other cell for every other role is untouched. audit.view/finance.view
+-- are still not covered by this fixture matrix (a pre-existing gap from
+-- migrations 042/043, out of BLOG-1B's own scope -- see
+-- src/lib/staff-permissions.test.ts for the exhaustive, currently-
+-- accurate TypeScript-side equivalent, which does cover both).
 -- ============================================================
 insert into auth.users (id, email, raw_user_meta_data) values
   ('a0000000-0000-0000-0000-000000000001', 'p040-owner@test', '{"role":"reader","display_name":"Owner"}'),
@@ -252,23 +285,28 @@ declare
   matrix jsonb := '{
     "a0000000-0000-0000-0000-000000000001": {
       "admin.access": true, "reports.view": true, "reports.resolve": true,
-      "refunds.view": true, "refunds.resolve": true, "staff.view": true, "staff.manage": true
+      "refunds.view": true, "refunds.resolve": true, "staff.view": true, "staff.manage": true,
+      "blog.view": true, "blog.manage": true
     },
     "a0000000-0000-0000-0000-000000000002": {
       "admin.access": true, "reports.view": true, "reports.resolve": true,
-      "refunds.view": true, "refunds.resolve": true, "staff.view": true, "staff.manage": false
+      "refunds.view": true, "refunds.resolve": true, "staff.view": true, "staff.manage": false,
+      "blog.view": true, "blog.manage": true
     },
     "a0000000-0000-0000-0000-000000000003": {
-      "admin.access": false, "reports.view": false, "reports.resolve": false,
-      "refunds.view": false, "refunds.resolve": false, "staff.view": false, "staff.manage": false
+      "admin.access": true, "reports.view": false, "reports.resolve": false,
+      "refunds.view": false, "refunds.resolve": false, "staff.view": false, "staff.manage": false,
+      "blog.view": true, "blog.manage": true
     },
     "a0000000-0000-0000-0000-000000000004": {
       "admin.access": true, "reports.view": true, "reports.resolve": true,
-      "refunds.view": false, "refunds.resolve": false, "staff.view": false, "staff.manage": false
+      "refunds.view": false, "refunds.resolve": false, "staff.view": false, "staff.manage": false,
+      "blog.view": false, "blog.manage": false
     },
     "a0000000-0000-0000-0000-000000000005": {
       "admin.access": true, "reports.view": false, "reports.resolve": false,
-      "refunds.view": true, "refunds.resolve": false, "staff.view": false, "staff.manage": false
+      "refunds.view": true, "refunds.resolve": false, "staff.view": false, "staff.manage": false,
+      "blog.view": false, "blog.manage": false
     }
   }'::jsonb;
   uid text;
@@ -303,11 +341,23 @@ begin
   );
   reset role;
 
+  -- BLOG-1B.1: corrected twice against a real Postgres 16 instance.
+  -- First correction (superseded): anon never held EXECUTE on
+  -- staff_has_permission before BLOG-1B, so this originally asserted a
+  -- "permission denied" outcome. BLOG-1B itself then deliberately
+  -- widened that grant to anon (migration 047's own header has the full
+  -- reasoning: blog_posts' blog.view-gated policy is OR'd with anon's
+  -- own "published only" policy, and Postgres must evaluate BOTH
+  -- disjuncts for a draft row, so anon needs to be able to at least
+  -- CALL this function, not merely fail to). Safe because auth.uid()
+  -- is always null for anon, so the call is deterministically false
+  -- for every permission -- this second correction asserts exactly
+  -- that real behavior instead.
   perform set_config('request.jwt.claim.sub', '', true);
   set local role anon;
   perform pg_temp.assert(
-    coalesce(public.staff_has_permission('admin.access'), false) = false,
-    'part2: anon must get false (or a denied call), never true'
+    public.staff_has_permission('admin.access') = false,
+    'part2: anon must get false, never null/error/true (BLOG-1B: anon now has EXECUTE, but the result is always false)'
   );
   reset role;
 end $$;
@@ -348,13 +398,24 @@ begin
   );
   reset role;
 
-  -- anon: sees nothing.
+  -- BLOG-1B.1: corrected against a real Postgres 16 instance -- anon
+  -- has never held a table-level SELECT grant on staff_members at all
+  -- (confirmed unchanged at HEAD before BLOG-1B: `revoke all ... from
+  -- anon, authenticated; grant select ... to authenticated` only), so a
+  -- real anon query raises "permission denied for table," not a
+  -- successful empty result. This is the stronger of the two ways to
+  -- guarantee "anon sees nothing" (Part 1's own table-privilege check
+  -- already proves the grant is absent statically); this proves it
+  -- behaviorally, exactly like the staff_has_permission() correction
+  -- immediately above.
   perform set_config('request.jwt.claim.sub', '', true);
   set local role anon;
-  perform pg_temp.assert(
-    (select count(*) from public.staff_members) = 0,
-    'part3: anon must see zero staff_members rows'
-  );
+  begin
+    perform count(*) from public.staff_members;
+    perform pg_temp.assert(false, 'part3: anon must NOT be able to query staff_members at all -- it has no table-level SELECT grant');
+  exception when insufficient_privilege then
+    null; -- expected: anon has no SELECT grant on staff_members
+  end;
   reset role;
 end $$;
 
@@ -403,6 +464,23 @@ begin
     'part4: the rejected self-escalation attempt must not have changed the row'
   );
 end $$;
+
+-- BLOG-1B.1: corrected against a real Postgres 16 instance --
+-- staff_members_protect_last_owner() (migration 041, a real trigger
+-- that did not exist when this Part 3 cleanup was originally written)
+-- forbids deleting the sole remaining 'owner' row, and uid ...001 is
+-- this fixture's ONLY owner -- the delete below would otherwise always
+-- raise 'at least one owner is required', regardless of statement
+-- order, since the owner count can only ever be 0 or 1 here. A
+-- placeholder second owner, scoped to a uuid namespace no other part of
+-- this file ever asserts a global staff_members count against, keeps
+-- the invariant satisfied while the real fixture rows are removed --
+-- left in place rather than separately cleaned up, since this entire
+-- file's own closing `rollback` removes it regardless.
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('a0000000-0000-0000-0000-00000000000f', 'p040-placeholder-owner@test', '{"role":"reader","display_name":"Placeholder Owner"}');
+insert into public.staff_members (user_id, role) values
+  ('a0000000-0000-0000-0000-00000000000f', 'owner');
 
 delete from public.staff_members where user_id in (
   'a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002',
@@ -640,9 +718,15 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('d0000000-0000-0000-0000-00000000000b', 'd0000000-0000-0000-0000-000000000004',
    'Test Book (040 refunds)', '', '', '', 999, 'published');
 
-insert into public.purchases (id, book_id, reader_id, amount_cents, stripe_payment_intent_id, created_at) values
+-- BLOG-1B.1: corrected against a real Postgres 16 instance --
+-- stripe_checkout_session_id gained a NOT NULL constraint in a later
+-- migration than the one this fixture insert was originally written
+-- against; a synthetic test-only value is added here (no real Stripe
+-- session is ever created by this suite) rather than changing the
+-- column's own constraint.
+insert into public.purchases (id, book_id, reader_id, amount_cents, stripe_checkout_session_id, stripe_payment_intent_id, created_at) values
   ('d0000000-0000-0000-0000-00000000000c', 'd0000000-0000-0000-0000-00000000000b',
-   'd0000000-0000-0000-0000-000000000003', 999, 'pi_040_test', now());
+   'd0000000-0000-0000-0000-000000000003', 999, 'cs_040_test', 'pi_040_test', now());
 
 insert into public.refund_requests (id, reader_id, stripe_payment_intent_id, amount_cents, status) values
   ('d0000000-0000-0000-0000-00000000000d', 'd0000000-0000-0000-0000-000000000003', 'pi_040_test', 999, 'requested');

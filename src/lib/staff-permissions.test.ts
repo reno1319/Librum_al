@@ -13,6 +13,8 @@ const ALL_PERMISSIONS: Permission[] = [
   "staff.manage",
   "audit.view",
   "finance.view",
+  "blog.view",
+  "blog.manage",
 ];
 
 // Exhaustive stress test of the full role x permission matrix -- every
@@ -33,6 +35,8 @@ const EXPECTED: Record<StaffRole, Permission[]> = {
     "staff.manage",
     "audit.view",
     "finance.view",
+    "blog.view",
+    "blog.manage",
   ],
   admin: [
     "admin.access",
@@ -43,10 +47,12 @@ const EXPECTED: Record<StaffRole, Permission[]> = {
     "staff.view",
     "audit.view",
     "finance.view",
+    "blog.view",
+    "blog.manage",
   ],
   moderator: ["admin.access", "reports.view", "reports.resolve"],
   support: ["admin.access", "refunds.view"],
-  editor: [],
+  editor: ["admin.access", "blog.view", "blog.manage"],
 };
 
 describe("ROLE_PERMISSIONS matrix", () => {
@@ -92,11 +98,23 @@ describe("roleHasPermission -- named scenarios from the ADMIN-1A design brief", 
     }
   });
 
-  it("editor has zero permissions -- no admin surface exists yet to justify any grant", () => {
+  it("editor holds exactly admin.access + blog.view + blog.manage (BLOG-1B) -- nothing else", () => {
+    const editorGranted = new Set(["admin.access", "blog.view", "blog.manage"]);
     for (const permission of ALL_PERMISSIONS) {
-      expect(roleHasPermission("editor", permission)).toBe(false);
+      expect(roleHasPermission("editor", permission)).toBe(editorGranted.has(permission));
     }
-    expect(ROLE_PERMISSIONS.editor).toEqual([]);
+    expect(ROLE_PERMISSIONS.editor).toEqual(["admin.access", "blog.view", "blog.manage"]);
+  });
+
+  it("blog.view/blog.manage are granted to owner, admin, and editor only (BLOG-1B)", () => {
+    for (const role of ["owner", "admin", "editor"] as const) {
+      expect(roleHasPermission(role, "blog.view")).toBe(true);
+      expect(roleHasPermission(role, "blog.manage")).toBe(true);
+    }
+    for (const role of ["moderator", "support"] as const) {
+      expect(roleHasPermission(role, "blog.view")).toBe(false);
+      expect(roleHasPermission(role, "blog.manage")).toBe(false);
+    }
   });
 
   it("audit.view is granted to owner and admin only (ADMIN-1C Part B)", () => {
