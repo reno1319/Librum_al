@@ -10,7 +10,7 @@ import type { StaffRole } from "@/lib/types";
 // for the new Audit log entry (audit.view-gated), without touching the
 // existing Dashboard/Book reports/Refund requests/Staff expectations.
 describe("resolveVisibleAdminNavItems", () => {
-  it("owner sees dashboard, reports, refunds, staff, audit log, and finance", () => {
+  it("owner sees dashboard, reports, refunds, staff, audit log, finance, and blog", () => {
     const hrefs = resolveVisibleAdminNavItems("owner").map((i) => i.href);
     expect(hrefs).toEqual([
       "/admin",
@@ -19,10 +19,11 @@ describe("resolveVisibleAdminNavItems", () => {
       "/admin/staff",
       "/admin/audit",
       "/admin/finance",
+      "/admin/blog",
     ]);
   });
 
-  it("admin sees dashboard, reports, refunds, staff, audit log, and finance", () => {
+  it("admin sees dashboard, reports, refunds, staff, audit log, finance, and blog", () => {
     const hrefs = resolveVisibleAdminNavItems("admin").map((i) => i.href);
     expect(hrefs).toEqual([
       "/admin",
@@ -31,29 +32,43 @@ describe("resolveVisibleAdminNavItems", () => {
       "/admin/staff",
       "/admin/audit",
       "/admin/finance",
+      "/admin/blog",
     ]);
   });
 
-  it("moderator sees dashboard and reports only -- not refunds, staff, audit log, or finance", () => {
+  it("moderator sees dashboard and reports only -- not refunds, staff, audit log, finance, or blog", () => {
     const hrefs = resolveVisibleAdminNavItems("moderator").map((i) => i.href);
     expect(hrefs).toEqual(["/admin", "/admin/reports"]);
   });
 
-  it("support sees dashboard and refunds only -- not reports, staff, audit log, or finance", () => {
+  it("support sees dashboard and refunds only -- not reports, staff, audit log, finance, or blog", () => {
     const hrefs = resolveVisibleAdminNavItems("support").map((i) => i.href);
     expect(hrefs).toEqual(["/admin", "/admin/refunds"]);
   });
 
-  it("editor sees dashboard only -- BLOG-1B grants admin.access, but no reports/refunds/staff/audit/finance view", () => {
+  it("editor sees dashboard and blog -- BLOG-1B/C grants admin.access + blog.view, nothing else", () => {
     const hrefs = resolveVisibleAdminNavItems("editor").map((i) => i.href);
-    expect(hrefs).toEqual(["/admin"]);
+    expect(hrefs).toEqual(["/admin", "/admin/blog"]);
   });
 
-  it("includes a Staff entry, an Audit log entry, and a Finance entry", () => {
+  it("editor does not gain any unrelated admin link (reports, refunds, staff, audit, finance)", () => {
+    const hrefs = resolveVisibleAdminNavItems("editor").map((i) => i.href);
+    for (const unrelated of ["/admin/reports", "/admin/refunds", "/admin/staff", "/admin/audit", "/admin/finance"]) {
+      expect(hrefs).not.toContain(unrelated);
+    }
+  });
+
+  it("includes a Staff entry, an Audit log entry, a Finance entry, and a Blog entry", () => {
     const labels = ADMIN_NAV_ITEMS.map((i) => i.label.toLowerCase());
     expect(labels).toContain("staff");
     expect(labels).toContain("audit log");
     expect(labels).toContain("finance");
+    expect(labels).toContain("blog");
+  });
+
+  it("the Blog entry is gated by blog.view, not a role-name check", () => {
+    const blogItem = ADMIN_NAV_ITEMS.find((i) => i.href === "/admin/blog");
+    expect(blogItem?.permission).toBe("blog.view");
   });
 
   it("the Staff entry is gated by staff.view, not a role-name check", () => {
@@ -85,6 +100,7 @@ describe("resolveVisibleAdminNavItems", () => {
       "/admin/staff": "staff.view",
       "/admin/audit": "audit.view",
       "/admin/finance": "finance.view",
+      "/admin/blog": "blog.view",
     };
     for (const item of ADMIN_NAV_ITEMS) {
       expect(item.permission).toBe(expected[item.href]);

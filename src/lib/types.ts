@@ -28,6 +28,36 @@ export type Profile = {
 
 export type BookStatus = "draft" | "published";
 
+// LIBRUM 2.0 BLOG-1: mirrors migration 047's blog_posts CHECK
+// constraints exactly. Only two states -- no scheduled/archived state
+// exists yet (see the BLOG-1 design report's own explicit scope
+// boundary).
+export type BlogPostStatus = "draft" | "published";
+
+// Exactly the four fixed V1 categories (migration 047's own CHECK
+// constraint) -- src/lib/blog-categories.ts is the single place these
+// are paired with a display label; this type alone is what the DB and
+// every RPC parameter are typed against.
+export type BlogCategory = "publishing" | "writing" | "authors-books" | "librum-guides";
+
+export type BlogPost = {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  content_markdown: string;
+  cover_image_path: string | null;
+  category: BlogCategory;
+  status: BlogPostStatus;
+  featured: boolean;
+  seo_title: string | null;
+  seo_description: string | null;
+  published_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Book = {
   id: string;
   author_id: string;

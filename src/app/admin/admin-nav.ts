@@ -34,6 +34,13 @@ export type AdminNavItem = {
 // ADMIN-1D PART C: Finance added, gated by finance.view -- the same
 // permission src/app/admin/(protected)/finance/page.tsx itself requires.
 // Owner/admin only, same as audit.view.
+//
+// BLOG-1C: Blog added, gated by blog.view -- the same permission
+// /admin/blog itself requires. This is the first entry `editor` ever
+// sees: owner/admin/editor all hold blog.view (migration 047/
+// staff-permissions.ts), moderator/support do not, so this link
+// appears for exactly the three roles that can actually use it, same
+// visibility rule as every other entry here.
 export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   { href: "/admin", label: "Dashboard", permission: "admin.access" },
   { href: "/admin/reports", label: "Book reports", permission: "reports.view" },
@@ -41,6 +48,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   { href: "/admin/staff", label: "Staff", permission: "staff.view" },
   { href: "/admin/audit", label: "Audit log", permission: "audit.view" },
   { href: "/admin/finance", label: "Finance", permission: "finance.view" },
+  { href: "/admin/blog", label: "Blog", permission: "blog.view" },
 ];
 
 // Pure visibility resolver -- every /admin/* role's nav is derived from

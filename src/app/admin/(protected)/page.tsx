@@ -47,9 +47,10 @@ export default async function AdminPage() {
   // src/app/admin/refunds/page.tsx requires refunds.view) -- a staff
   // member is never shown a link that would immediately redirect them
   // away.
-  const { showReports, showRefunds } = resolveAdminLandingVisibility({
+  const { showReports, showRefunds, showBlog } = resolveAdminLandingVisibility({
     reportsView: roleHasPermission(role, "reports.view"),
     refundsView: roleHasPermission(role, "refunds.view"),
+    blogView: roleHasPermission(role, "blog.view"),
   });
 
   return (
@@ -60,7 +61,7 @@ export default async function AdminPage() {
         Signed in as {profile?.display_name ?? "staff member"}.
       </p>
 
-      {showReports || showRefunds ? (
+      {showReports || showRefunds || showBlog ? (
         // MOBILE ADMIN SHELL CORRECTION: stacked by default (a narrow
         // phone width squeezed these two side-by-side), back to the
         // original flex-row + wrap layout from `sm:` up -- unchanged at
@@ -80,6 +81,17 @@ export default async function AdminPage() {
               className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
             >
               Book reports
+            </Link>
+          )}
+          {/* BLOG-1C: editor's first real admin destination -- fixes the
+              "no admin tools" fallback this page used to show it before
+              /admin/blog existed (BLOG-1B deliberately deferred this). */}
+          {showBlog && (
+            <Link
+              href="/admin/blog"
+              className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
+            >
+              Blog
             </Link>
           )}
         </div>

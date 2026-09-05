@@ -82,4 +82,20 @@ describe("AdminPage", () => {
     expect(hrefs).toContain("/admin/reports");
     expect(hrefs).toContain("/admin/refunds");
   });
+
+  it("editor: shows only the Blog link (BLOG-1C) -- no reports/refunds", async () => {
+    mockRequireStaff.mockResolvedValueOnce({ userId: "staff-1", role: "editor" });
+    const page = await AdminPage();
+    const hrefs = collectLinkHrefs(page);
+    expect(hrefs).toContain("/admin/blog");
+    expect(hrefs).not.toContain("/admin/reports");
+    expect(hrefs).not.toContain("/admin/refunds");
+  });
+
+  it("owner: also shows the Blog link", async () => {
+    mockRequireStaff.mockResolvedValueOnce({ userId: "staff-1", role: "owner" });
+    const page = await AdminPage();
+    const hrefs = collectLinkHrefs(page);
+    expect(hrefs).toContain("/admin/blog");
+  });
 });
