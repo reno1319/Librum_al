@@ -6837,6 +6837,101 @@ grant execute on function public.list_author_financial_activity(integer, timesta
 -- which is exactly the right uniform shape for a batch caller.
 -- ============================================================
 
+-- LEDGER-1E-D-B (migration 053): the canonical eligibility/payoutable-
+-- amount calculation, extracted out of reserve_author_payout()'s own
+-- previously-inline logic so dry_run_scheduled_payouts() (further down
+-- this file) can never drift into a second formula. See migration
+-- 053's own Part 1 comment for the full priority-order/active-
+-- reservation reasoning.
+create or replace function public.author_payout_eligibility(
+  p_author_id uuid,
+  p_currency text
+)
+returns table (
+  author_id uuid,
+  currency text,
+  ledger_available_minor bigint,
+  reserved_minor bigint,
+  payoutable_minor bigint,
+  threshold_configured boolean,
+  threshold_minor bigint,
+  active_reservation boolean,
+  eligible boolean,
+  ineligible_reason text
+)
+language plpgsql
+security definer
+set search_path = ''
+stable
+as $$
+declare
+  v_available bigint;
+  v_threshold bigint;
+  v_reserved bigint;
+  v_payoutable bigint;
+  v_active_reservation boolean;
+begin
+  select balance.available_minor into v_available
+  from public.author_ledger_balance(p_author_id) balance
+  where balance.currency = p_currency;
+
+  select aps.threshold_minor into v_threshold
+  from public.author_payout_settings aps
+  where aps.author_id = p_author_id and aps.currency = p_currency;
+
+  select coalesce(sum(ap.amount_minor), 0) into v_reserved
+  from public.author_payouts ap
+  where ap.author_id = p_author_id
+    and ap.currency = p_currency
+    and ap.status in ('pending', 'processing', 'reconciling');
+
+  v_active_reservation := exists (
+    select 1
+    from public.author_payouts ap
+    where ap.author_id = p_author_id
+      and ap.currency = p_currency
+      and ap.status in ('pending', 'processing', 'reconciling')
+  );
+
+  if v_available is null then
+    v_payoutable := null;
+  else
+    v_payoutable := v_available - v_reserved;
+  end if;
+
+  author_id := p_author_id;
+  currency := p_currency;
+  ledger_available_minor := v_available;
+  reserved_minor := v_reserved;
+  payoutable_minor := v_payoutable;
+  threshold_configured := v_threshold is not null;
+  threshold_minor := v_threshold;
+  active_reservation := v_active_reservation;
+
+  if v_threshold is null then
+    eligible := false;
+    ineligible_reason := 'no_settings';
+  elsif v_available is null then
+    eligible := false;
+    ineligible_reason := 'no_available_balance';
+  elsif v_active_reservation then
+    eligible := false;
+    ineligible_reason := 'active_reservation';
+  elsif v_payoutable < v_threshold then
+    eligible := false;
+    ineligible_reason := 'below_threshold';
+  else
+    eligible := true;
+    ineligible_reason := null;
+  end if;
+
+  return next;
+end;
+$$;
+
+revoke all on function public.author_payout_eligibility(uuid, text) from public, anon, authenticated;
+grant execute on function public.author_payout_eligibility(uuid, text) to service_role;
+
 create or replace function public.reserve_author_payout(
   p_author_id uuid,
   p_currency text,
@@ -6852,47 +6947,19 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_available bigint;
-  v_threshold bigint;
-  v_reserved bigint;
-  v_payoutable bigint;
+  v_eligibility record;
   v_payout_id uuid;
 begin
-  select balance.available_minor into v_available
-  from public.author_ledger_balance(p_author_id) balance
-  where balance.currency = p_currency;
+  select * into v_eligibility
+  from public.author_payout_eligibility(p_author_id, p_currency);
 
-  if v_available is null then
-    -- No ledger activity at all for this author in this currency --
-    -- an entirely ordinary case, not an error.
-    return;
-  end if;
-
-  select aps.threshold_minor into v_threshold
-  from public.author_payout_settings aps
-  where aps.author_id = p_author_id and aps.currency = p_currency;
-
-  if v_threshold is null then
-    -- No settings row for this exact author+currency: not eligible
-    -- (Section 7's approved V1 rule). Never invent a default.
-    return;
-  end if;
-
-  select coalesce(sum(ap.amount_minor), 0) into v_reserved
-  from public.author_payouts ap
-  where ap.author_id = p_author_id
-    and ap.currency = p_currency
-    and ap.status in ('pending', 'processing', 'reconciling');
-
-  v_payoutable := v_available - v_reserved;
-
-  if v_payoutable < v_threshold then
+  if not v_eligibility.eligible then
     return;
   end if;
 
   begin
     insert into public.author_payouts (author_id, amount_minor, currency, status, payout_run_id)
-    values (p_author_id, v_payoutable, p_currency, 'pending', p_payout_run_id)
+    values (p_author_id, v_eligibility.payoutable_minor, p_currency, 'pending', p_payout_run_id)
     returning id into v_payout_id;
   exception
     when unique_violation then
@@ -6914,7 +6981,7 @@ begin
   end;
 
   payout_id := v_payout_id;
-  amount_minor := v_payoutable;
+  amount_minor := v_eligibility.payoutable_minor;
   currency := p_currency;
   return next;
 end;
@@ -7437,3 +7504,160 @@ $$;
 
 revoke all on function public.list_author_payout_history(integer, timestamptz, uuid) from public, anon, authenticated;
 grant execute on function public.list_author_payout_history(integer, timestamptz, uuid) to authenticated;
+
+-- ============================================================
+-- LIBRUM 2.0 LEDGER-1E-D-B (migration 053): payout scheduler database
+-- foundation -- pure dry-run preview and idempotent scheduled-run
+-- create/complete, both built on author_payout_eligibility() above.
+-- No scheduler HTTP route, no cron configuration, no feature switch,
+-- no provider, and no real payout execution exist anywhere here.
+-- ============================================================
+
+create or replace function public.dry_run_scheduled_payouts()
+returns table (
+  author_id uuid,
+  currency text,
+  ledger_available_minor bigint,
+  reserved_minor bigint,
+  payoutable_minor bigint,
+  threshold_configured boolean,
+  threshold_minor bigint,
+  active_reservation boolean,
+  eligible boolean,
+  ineligible_reason text
+)
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select e.*
+  from public.author_payout_settings aps
+  cross join lateral public.author_payout_eligibility(aps.author_id, aps.currency) e;
+$$;
+
+revoke all on function public.dry_run_scheduled_payouts() from public, anon, authenticated;
+grant execute on function public.dry_run_scheduled_payouts() to service_role;
+
+create or replace function public.start_scheduled_payout_run(
+  p_target_month date
+)
+returns table (
+  payout_run_id uuid,
+  payout_run_key text,
+  payout_run_scheduled_for date,
+  payout_run_status text,
+  payout_run_started_at timestamptz,
+  payout_run_completed_at timestamptz,
+  is_new boolean
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_run_key text;
+  v_current_month_start date;
+  v_inserted_id uuid;
+  v_existing public.payout_runs%rowtype;
+begin
+  if p_target_month is null then
+    raise exception 'start_scheduled_payout_run: p_target_month is required';
+  end if;
+
+  if p_target_month <> date_trunc('month', p_target_month)::date then
+    raise exception
+      'start_scheduled_payout_run: p_target_month must be the first day of a month, got %',
+      p_target_month;
+  end if;
+
+  v_current_month_start := date_trunc('month', (now() at time zone 'Europe/Tirane'))::date;
+  if p_target_month > v_current_month_start then
+    raise exception
+      'start_scheduled_payout_run: p_target_month % is in the future (current Europe/Tirane month is %)',
+      p_target_month, v_current_month_start;
+  end if;
+
+  v_run_key := 'monthly:' || to_char(p_target_month, 'YYYY-MM');
+
+  insert into public.payout_runs (run_type, run_key, scheduled_for, status, started_at)
+  values ('scheduled', v_run_key, p_target_month, 'running', now())
+  on conflict (run_type, run_key) where run_key is not null do nothing
+  returning payout_runs.id into v_inserted_id;
+
+  select pr.* into v_existing
+  from public.payout_runs pr
+  where pr.run_type = 'scheduled' and pr.run_key = v_run_key;
+
+  if v_existing.status = 'failed' then
+    raise exception
+      'start_scheduled_payout_run: scheduled payout run % (target month %) is failed and requires explicit recovery',
+      v_run_key, p_target_month;
+  end if;
+
+  payout_run_id := v_existing.id;
+  payout_run_key := v_existing.run_key;
+  payout_run_scheduled_for := v_existing.scheduled_for;
+  payout_run_status := v_existing.status;
+  payout_run_started_at := v_existing.started_at;
+  payout_run_completed_at := v_existing.completed_at;
+  is_new := (v_inserted_id is not null);
+  return next;
+end;
+$$;
+
+revoke all on function public.start_scheduled_payout_run(date) from public, anon, authenticated;
+grant execute on function public.start_scheduled_payout_run(date) to service_role;
+
+create or replace function public.complete_scheduled_payout_run(
+  p_run_id uuid
+)
+returns table (
+  payout_run_id uuid,
+  payout_run_key text,
+  payout_run_status text,
+  payout_run_completed_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_existing public.payout_runs%rowtype;
+begin
+  select pr.* into v_existing
+  from public.payout_runs pr
+  where pr.id = p_run_id
+  for update;
+
+  if not found then
+    raise exception 'complete_scheduled_payout_run: run % not found', p_run_id;
+  end if;
+
+  if v_existing.status = 'completed' then
+    payout_run_id := v_existing.id;
+    payout_run_key := v_existing.run_key;
+    payout_run_status := v_existing.status;
+    payout_run_completed_at := v_existing.completed_at;
+    return next;
+    return;
+  end if;
+
+  if v_existing.status <> 'running' then
+    raise exception
+      'complete_scheduled_payout_run: run % is not running (current status %)',
+      p_run_id, v_existing.status;
+  end if;
+
+  update public.payout_runs as pr
+  set status = 'completed', completed_at = now()
+  where pr.id = p_run_id
+  returning pr.id, pr.run_key, pr.status, pr.completed_at
+  into payout_run_id, payout_run_key, payout_run_status, payout_run_completed_at;
+
+  return next;
+end;
+$$;
+
+revoke all on function public.complete_scheduled_payout_run(uuid) from public, anon, authenticated;
+grant execute on function public.complete_scheduled_payout_run(uuid) to service_role;
