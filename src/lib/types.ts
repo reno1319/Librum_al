@@ -422,3 +422,44 @@ export type FinanceSummaryCounts = {
   checkout_exception_count: number;
   refund_entitlement_mismatch_count: number;
 };
+
+// LEDGER-1D: mirrors get_author_financial_summary()'s exact return shape
+// (migration 050) -- one row per currency the author has ever earned in,
+// never a cross-currency total. Every *_minor field is an integer minor-
+// unit amount (cents); paid_out_minor and lifetime_refund_minor are both
+// reported as positive magnitudes even though the underlying ledger rows
+// are negative, matching the RPC's own sign-flipping convention.
+// available_minor/current_balance_minor may be legitimately NEGATIVE
+// (e.g. a paid-out sale later refunded) and must never be clamped to
+// zero for display. No payment/payout/refund/provider identifier, and no
+// buyer identity, appears anywhere in this shape.
+export type AuthorFinancialSummaryRow = {
+  currency: string;
+  lifetime_sale_minor: number;
+  lifetime_refund_minor: number;
+  lifetime_adjustment_minor: number;
+  net_earnings_minor: number;
+  paid_out_minor: number;
+  pending_minor: number;
+  available_minor: number;
+  current_balance_minor: number;
+};
+
+// LEDGER-1D: mirrors list_author_financial_activity()'s exact return
+// shape (migration 050) -- keyset-paginated, own-ledger-rows-only. Never
+// carries payment_id, payout_id, payment_refund_id, reference_type,
+// reference_id, or any provider/buyer identifier. book_id/book_title are
+// null for entries with no purchase_id (payout, adjustment).
+export type AuthorFinancialActivityRow = {
+  id: string;
+  entry_type: "sale" | "refund" | "payout" | "adjustment";
+  amount_minor: number;
+  currency: string;
+  gross_amount_minor: number | null;
+  librum_amount_minor: number | null;
+  royalty_rate_bps: number | null;
+  available_at: string | null;
+  created_at: string;
+  book_id: string | null;
+  book_title: string | null;
+};

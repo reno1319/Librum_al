@@ -237,6 +237,15 @@ export default async function SalesPage() {
         <PageHeader title="Sales" description="Your net revenue, after Librum's platform fee." />
       </div>
 
+      <p className="mt-3 text-sm text-muted">
+        This is an estimate from your order history. For your official ledger
+        balance, pending settlement, and payout history, see{" "}
+        <Link href="/dashboard/balance" className="font-medium text-primary hover:underline">
+          Financial Balance
+        </Link>
+        .
+      </p>
+
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
           <p className="text-sm text-muted">Net revenue</p>

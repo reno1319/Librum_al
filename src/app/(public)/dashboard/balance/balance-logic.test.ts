@@ -1,0 +1,126 @@
+import { describe, expect, it } from "vitest";
+import {
+  formatMinorAmount,
+  entryTypeLabel,
+  hasAnyLedgerActivity,
+  resolveActivityPage,
+  ACTIVITY_DISPLAY_PAGE_SIZE,
+} from "./balance-logic";
+import type { AuthorFinancialSummaryRow, AuthorFinancialActivityRow } from "@/lib/types";
+
+function makeSummaryRow(overrides: Partial<AuthorFinancialSummaryRow> = {}): AuthorFinancialSummaryRow {
+  return {
+    currency: "USD",
+    lifetime_sale_minor: 0,
+    lifetime_refund_minor: 0,
+    lifetime_adjustment_minor: 0,
+    net_earnings_minor: 0,
+    paid_out_minor: 0,
+    pending_minor: 0,
+    available_minor: 0,
+    current_balance_minor: 0,
+    ...overrides,
+  };
+}
+
+function makeActivityRow(overrides: Partial<AuthorFinancialActivityRow> = {}): AuthorFinancialActivityRow {
+  return {
+    id: "00000000-0000-0000-0000-000000000000",
+    entry_type: "sale",
+    amount_minor: 100,
+    currency: "USD",
+    gross_amount_minor: 125,
+    librum_amount_minor: 25,
+    royalty_rate_bps: 8000,
+    available_at: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
+    book_id: null,
+    book_title: null,
+    ...overrides,
+  };
+}
+
+describe("formatMinorAmount", () => {
+  it("formats positive USD minor units as dollars, display-only", () => {
+    expect(formatMinorAmount(640, "USD")).toBe("$6.40");
+  });
+
+  it("formats EUR with its own currency symbol, never mixed with USD", () => {
+    const formatted = formatMinorAmount(500, "EUR");
+    expect(formatted).toContain("5.00");
+    expect(formatted).not.toContain("$");
+  });
+
+  it("never clamps a negative balance to zero -- renders the negative sign", () => {
+    const formatted = formatMinorAmount(-800, "USD");
+    expect(formatted).toMatch(/-/);
+    expect(formatted).toContain("8.00");
+  });
+
+  it("formats zero without throwing", () => {
+    expect(formatMinorAmount(0, "USD")).toBe("$0.00");
+  });
+});
+
+describe("entryTypeLabel", () => {
+  it("labels every known entry_type", () => {
+    expect(entryTypeLabel("sale")).toBe("Sale");
+    expect(entryTypeLabel("refund")).toBe("Refund");
+    expect(entryTypeLabel("payout")).toBe("Payout");
+    expect(entryTypeLabel("adjustment")).toBe("Adjustment");
+  });
+});
+
+describe("hasAnyLedgerActivity", () => {
+  it("is false for an empty summary (fresh production state, zero ledger rows)", () => {
+    expect(hasAnyLedgerActivity([])).toBe(false);
+  });
+
+  it("is false when every lifetime/paid_out field is zero", () => {
+    expect(hasAnyLedgerActivity([makeSummaryRow()])).toBe(false);
+  });
+
+  it("is true when any currency row has a nonzero lifetime_sale_minor", () => {
+    expect(hasAnyLedgerActivity([makeSummaryRow({ lifetime_sale_minor: 640 })])).toBe(true);
+  });
+
+  it("is true when only paid_out_minor is nonzero", () => {
+    expect(hasAnyLedgerActivity([makeSummaryRow({ paid_out_minor: 640 })])).toBe(true);
+  });
+
+  it("is true when at least one of several currency rows has activity", () => {
+    expect(
+      hasAnyLedgerActivity([makeSummaryRow({ currency: "EUR" }), makeSummaryRow({ currency: "USD", lifetime_refund_minor: 200 })]),
+    ).toBe(true);
+  });
+});
+
+describe("resolveActivityPage", () => {
+  it("shows every row and no next cursor when fewer than displayPageSize+1 were fetched", () => {
+    const rows = [makeActivityRow({ id: "1" }), makeActivityRow({ id: "2" })];
+    const result = resolveActivityPage(rows, 25);
+    expect(result.rows).toHaveLength(2);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("shows exactly displayPageSize rows and no next cursor when exactly displayPageSize were fetched", () => {
+    const rows = Array.from({ length: 25 }, (_, i) => makeActivityRow({ id: String(i) }));
+    const result = resolveActivityPage(rows, 25);
+    expect(result.rows).toHaveLength(25);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("drops the lookahead row and derives the cursor from the last DISPLAYED row", () => {
+    const rows = Array.from({ length: 26 }, (_, i) =>
+      makeActivityRow({ id: String(i), created_at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z` }),
+    );
+    const result = resolveActivityPage(rows, 25);
+    expect(result.rows).toHaveLength(25);
+    expect(result.rows[24].id).toBe("24");
+    expect(result.nextCursor).toEqual({ createdAt: "2026-01-25T00:00:00Z", id: "24" });
+  });
+
+  it("uses ACTIVITY_DISPLAY_PAGE_SIZE (25) as the default page size", () => {
+    expect(ACTIVITY_DISPLAY_PAGE_SIZE).toBe(25);
+  });
+});

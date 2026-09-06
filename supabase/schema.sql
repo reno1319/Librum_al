@@ -5961,10 +5961,13 @@ alter table public.author_ledger_entries enable row level security;
 revoke all on public.author_ledger_entries from anon, authenticated;
 grant select on public.author_ledger_entries to authenticated;
 
-create policy "Authors can view their own ledger entries"
-  on public.author_ledger_entries for select
-  using (auth.uid() = author_id);
-
+-- LEDGER-1D (migration 050) dropped the original author-own SELECT
+-- policy this table shipped with in migration 048 -- authors now read
+-- their own ledger data exclusively through get_author_financial_
+-- summary()/list_author_financial_activity() (both further down this
+-- file), which are SECURITY DEFINER and expose no internal correlation
+-- identifiers. The table-level grant above is kept only so the
+-- remaining staff policy below still has a privilege to narrow.
 create policy "Staff with finance.view can view all ledger entries"
   on public.author_ledger_entries for select
   using (public.staff_has_permission('finance.view'));
@@ -6472,3 +6475,155 @@ $$;
 
 revoke all on function public.record_refund(uuid, text) from public, anon, authenticated;
 grant execute on function public.record_refund(uuid, text) to service_role;
+
+-- ============================================================
+-- LIBRUM 2.0 LEDGER-1D (migration 050): author-facing financial
+-- reporting + safe read model, built on migrations 048/049. Adds two
+-- SECURITY DEFINER functions -- get_author_financial_summary() and
+-- list_author_financial_activity() -- authenticated to auth.uid() alone
+-- (no p_author_id parameter exists on either), grantable to
+-- authenticated since both are read-only, self-scoped, and expose no
+-- internal correlation identifiers (payment_id, payout_id,
+-- payment_refund_id, reference_type, reference_id, buyer identity, or
+-- any provider id are never selected). The original author-own RLS
+-- policy on author_ledger_entries (migration 048) was removed above --
+-- authors now read their own ledger data exclusively through these two
+-- functions; finance.view staff access is entirely unaffected.
+--
+-- PENDING/AVAILABLE: a 'refund' entry is attributed to the same
+-- settlement bucket as the ORIGINAL SALE it reverses (looked up via the
+-- shared purchase_id, always 1:1 by construction), not its own
+-- available_at (which migration 048 always sets to "immediate") --
+-- otherwise reversing a not-yet-settled sale would wrongly show
+-- pending=800/available=-800 instead of the correct pending=0/
+-- available=0. 'payout'/'adjustment' entries use their own available_at,
+-- with NULL treated as immediately available (coalesced to created_at) --
+-- an explicit rule for a case migration 048 only ever documented as an
+-- expectation for future callers. available_minor = current_balance_minor
+-- - pending_minor; negative balances (e.g. a paid-out sale later
+-- refunded) are reported as-is, never clamped to zero.
+-- ============================================================
+
+create or replace function public.get_author_financial_summary()
+returns table (
+  currency text,
+  lifetime_sale_minor bigint,
+  lifetime_refund_minor bigint,
+  lifetime_adjustment_minor bigint,
+  net_earnings_minor bigint,
+  paid_out_minor bigint,
+  pending_minor bigint,
+  available_minor bigint,
+  current_balance_minor bigint
+)
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  with entries as (
+    select
+      ale.currency,
+      ale.entry_type,
+      ale.amount_minor,
+      case
+        when ale.entry_type = 'sale' then ale.available_at
+        when ale.entry_type = 'refund' then coalesce(
+          (
+            select sib.available_at
+            from public.author_ledger_entries sib
+            where sib.purchase_id = ale.purchase_id and sib.entry_type = 'sale'
+            limit 1
+          ),
+          ale.available_at
+        )
+        else coalesce(ale.available_at, ale.created_at)
+      end as effective_available_at
+    from public.author_ledger_entries ale
+    where ale.author_id = auth.uid()
+  )
+  select
+    currency,
+    coalesce(sum(amount_minor) filter (where entry_type = 'sale'), 0)::bigint as lifetime_sale_minor,
+    coalesce(-sum(amount_minor) filter (where entry_type = 'refund'), 0)::bigint as lifetime_refund_minor,
+    coalesce(sum(amount_minor) filter (where entry_type = 'adjustment'), 0)::bigint as lifetime_adjustment_minor,
+    coalesce(sum(amount_minor) filter (where entry_type in ('sale', 'refund', 'adjustment')), 0)::bigint as net_earnings_minor,
+    coalesce(-sum(amount_minor) filter (where entry_type = 'payout'), 0)::bigint as paid_out_minor,
+    coalesce(sum(amount_minor) filter (where effective_available_at > now()), 0)::bigint as pending_minor,
+    (
+      coalesce(sum(amount_minor), 0)
+      - coalesce(sum(amount_minor) filter (where effective_available_at > now()), 0)
+    )::bigint as available_minor,
+    coalesce(sum(amount_minor), 0)::bigint as current_balance_minor
+  from entries
+  group by currency;
+$$;
+
+revoke all on function public.get_author_financial_summary() from public, anon, authenticated;
+grant execute on function public.get_author_financial_summary() to authenticated;
+
+create or replace function public.list_author_financial_activity(
+  p_limit integer default 25,
+  p_cursor_created_at timestamptz default null,
+  p_cursor_id uuid default null
+)
+returns table (
+  id uuid,
+  entry_type text,
+  amount_minor bigint,
+  currency text,
+  gross_amount_minor bigint,
+  librum_amount_minor bigint,
+  royalty_rate_bps integer,
+  available_at timestamptz,
+  created_at timestamptz,
+  book_id uuid,
+  book_title text
+)
+language plpgsql
+security definer
+set search_path = ''
+stable
+as $$
+declare
+  v_limit integer;
+begin
+  if (p_cursor_created_at is null) <> (p_cursor_id is null) then
+    raise exception 'invalid cursor';
+  end if;
+
+  v_limit := coalesce(p_limit, 25);
+  if v_limit < 1 then
+    v_limit := 1;
+  elsif v_limit > 100 then
+    v_limit := 100;
+  end if;
+
+  return query
+    select
+      ale.id,
+      ale.entry_type,
+      ale.amount_minor,
+      ale.currency,
+      ale.gross_amount_minor,
+      ale.librum_amount_minor,
+      ale.royalty_rate_bps,
+      ale.available_at,
+      ale.created_at,
+      b.id as book_id,
+      b.title as book_title
+    from public.author_ledger_entries ale
+    left join public.purchases pu on pu.id = ale.purchase_id
+    left join public.books b on b.id = pu.book_id
+    where ale.author_id = auth.uid()
+      and (
+        p_cursor_created_at is null
+        or (ale.created_at, ale.id) < (p_cursor_created_at, p_cursor_id)
+      )
+    order by ale.created_at desc, ale.id desc
+    limit v_limit;
+end;
+$$;
+
+revoke all on function public.list_author_financial_activity(integer, timestamptz, uuid) from public, anon, authenticated;
+grant execute on function public.list_author_financial_activity(integer, timestamptz, uuid) to authenticated;

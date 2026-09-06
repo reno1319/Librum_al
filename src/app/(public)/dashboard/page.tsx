@@ -206,7 +206,7 @@ export default async function DashboardPage({
         </Link>
       </section>
 
-      <div className="mt-10 grid gap-4 sm:grid-cols-2">
+      <div className="mt-10 grid gap-4 sm:grid-cols-3">
         <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
           <h2 className="font-serif text-lg font-semibold">Sales &amp; earnings</h2>
           <p className="mt-1 text-sm text-muted">See units sold and your net revenue.</p>
@@ -215,6 +215,17 @@ export default async function DashboardPage({
             className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
           >
             View sales and earnings &rarr;
+          </Link>
+        </section>
+
+        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <h2 className="font-serif text-lg font-semibold">Financial Balance</h2>
+          <p className="mt-1 text-sm text-muted">Your ledger balance, pending settlement, and payout history.</p>
+          <Link
+            href="/dashboard/balance"
+            className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+          >
+            View financial balance &rarr;
           </Link>
         </section>
 
