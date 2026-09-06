@@ -5839,13 +5839,57 @@ create policy "Staff with finance.view can view all payment events"
   on public.payment_events for select
   using (public.staff_has_permission('finance.view'));
 
+-- LEDGER-1E-B (migration 051): provider-neutral payout-run grouping/
+-- audit table. Defined here, before author_payouts, purely so
+-- author_payouts.payout_run_id can reference it directly in that
+-- table's own CREATE TABLE below. NOT the money-safety mechanism --
+-- see author_payouts_one_active_per_author_currency_idx further down
+-- for that. run_type is deliberately restricted to 'scheduled' only;
+-- no manual-payout feature exists yet.
+--
+-- LEDGER-1E-B.1: run_key is REQUIRED and non-blank for every
+-- 'scheduled' row (the CHECK below) -- scheduler-invocation
+-- idempotency (the unique index further down) only actually holds if
+-- every scheduled run is forced to supply a key that can collide with
+-- a duplicate/concurrent firing; an optional key would let a caller
+-- silently skip that protection.
+create table public.payout_runs (
+  id uuid primary key default gen_random_uuid(),
+  run_type text not null default 'scheduled' check (run_type in ('scheduled')),
+  run_key text,
+  scheduled_for date,
+  started_at timestamptz,
+  completed_at timestamptz,
+  status text not null default 'pending'
+    check (status in ('pending', 'running', 'completed', 'failed')),
+  created_at timestamptz not null default now(),
+
+  constraint payout_runs_scheduled_run_key_required check (
+    run_type <> 'scheduled'
+    or (run_key is not null and btrim(run_key) <> '')
+  )
+);
+
+create unique index payout_runs_run_type_run_key_idx
+  on public.payout_runs (run_type, run_key)
+  where run_key is not null;
+
+alter table public.payout_runs enable row level security;
+revoke all on public.payout_runs from anon, authenticated;
+
+-- LEDGER-1E-B.1: service_role's DEFAULT-PRIVILEGES-derived direct
+-- INSERT/UPDATE/DELETE is revoked here too -- no legitimate direct-DML
+-- path exists onto this table in this phase either. SELECT retained.
+revoke all on public.payout_runs from service_role;
+grant select on public.payout_runs to service_role;
+
 create table public.author_payouts (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references public.profiles(id) on delete restrict,
   amount_minor bigint not null check (amount_minor > 0),
   currency text not null check (currency ~ '^[A-Z]{3}$'),
   status text not null default 'pending'
-    check (status in ('pending', 'processing', 'paid', 'failed', 'cancelled')),
+    check (status in ('pending', 'processing', 'paid', 'failed', 'cancelled', 'reconciling')),
   provider text,
   provider_reference text,
   period_start timestamptz,
@@ -5855,6 +5899,12 @@ create table public.author_payouts (
   paid_at timestamptz,
   failed_at timestamptz,
   failure_code text,
+  -- LEDGER-1E-B.1: ON DELETE RESTRICT, not SET NULL -- payout_run_id is
+  -- immutable from insert (the trigger below), so it is permanent audit
+  -- history; a run with any historical payouts referencing it must
+  -- never be deletable, matching the same RESTRICT posture already used
+  -- for author_id itself.
+  payout_run_id uuid references public.payout_runs(id) on delete restrict,
 
   check (period_start is null or period_end is null or period_end >= period_start)
 );
@@ -5863,6 +5913,24 @@ create index author_payouts_author_currency_created_idx
   on public.author_payouts (author_id, currency, created_at desc);
 create index author_payouts_status_created_idx
   on public.author_payouts (status, created_at);
+create index author_payouts_payout_run_id_idx
+  on public.author_payouts (payout_run_id)
+  where payout_run_id is not null;
+
+-- LEDGER-1E-B (migration 051): the money-safety invariant -- at most
+-- ONE active reservation (status pending/processing/reconciling) per
+-- (author_id, currency). See that migration's own comment for the full
+-- reasoning; this single partial unique index is the entire
+-- concurrency mechanism reserve_author_payout() relies on.
+create unique index author_payouts_one_active_per_author_currency_idx
+  on public.author_payouts (author_id, currency)
+  where status in ('pending', 'processing', 'reconciling');
+
+-- LEDGER-1E-B: once a provider+provider_reference pair is known, it
+-- must correlate to exactly one payout.
+create unique index author_payouts_provider_reference_idx
+  on public.author_payouts (provider, provider_reference)
+  where provider is not null and provider_reference is not null;
 
 alter table public.author_payouts enable row level security;
 
@@ -5877,12 +5945,72 @@ create policy "Staff with finance.view can view all payouts"
   on public.author_payouts for select
   using (public.staff_has_permission('finance.view'));
 
+-- LEDGER-1E-B.1: service_role's DEFAULT-PRIVILEGES-derived direct
+-- INSERT/UPDATE/DELETE is revoked -- the only legal mutation path is
+-- EXECUTE on the six payout RPCs below (each SECURITY DEFINER, so it
+-- runs as its OWNER regardless of the caller's own table grants).
+-- SELECT retained.
+revoke all on public.author_payouts from service_role;
+grant select on public.author_payouts to service_role;
+
+-- LEDGER-1E-B.1: database-enforced economic-identity immutability, FROM
+-- INSERT ONWARD (not merely "once a payout leaves pending"). There is
+-- no legitimate resize/reassignment path at ANY lifecycle stage in this
+-- architecture -- a stale pending reservation is cancelled and a fresh
+-- one created, never mutated in place. status/provider/
+-- provider_reference/the lifecycle timestamps remain freely updatable
+-- by the legal-transition RPCs further below.
+create or replace function public.enforce_author_payouts_immutability()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.amount_minor is distinct from old.amount_minor
+    or new.currency is distinct from old.currency
+    or new.author_id is distinct from old.author_id
+    or new.payout_run_id is distinct from old.payout_run_id
+  then
+    raise exception
+      'author_payouts: amount_minor/currency/author_id/payout_run_id are immutable from the moment a payout is created (payout id %, current status %)',
+      old.id, old.status;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger author_payouts_enforce_immutability
+  before update on public.author_payouts
+  for each row
+  execute function public.enforce_author_payouts_immutability();
+
+-- LEDGER-1E-B.1: a 'paid' row must always carry a non-blank provider, a
+-- non-blank provider_reference, and a non-null paid_at -- structurally
+-- impossible otherwise, not merely RPC-discouraged. One-directional
+-- only (says nothing about non-paid rows' own provider/timestamp
+-- combinations, which legitimately vary).
+alter table public.author_payouts
+  add constraint author_payouts_paid_requires_provider_and_reference
+  check (
+    status <> 'paid'
+    or (
+      provider is not null and btrim(provider) <> ''
+      and provider_reference is not null and btrim(provider_reference) <> ''
+      and paid_at is not null
+    )
+  );
+
 create table public.author_payout_settings (
-  author_id uuid primary key references public.profiles(id) on delete cascade,
+  author_id uuid references public.profiles(id) on delete cascade,
   threshold_minor bigint not null check (threshold_minor > 0),
   currency text not null check (currency ~ '^[A-Z]{3}$'),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+
+  -- LEDGER-1E-B (migration 051): composite PK, not PRIMARY KEY(author_id)
+  -- -- an author earning in multiple currencies needs one threshold row
+  -- PER currency, not a single one for their whole account.
+  primary key (author_id, currency)
 );
 
 alter table public.author_payout_settings enable row level security;
@@ -6504,7 +6632,18 @@ grant execute on function public.record_refund(uuid, text) to service_role;
 -- refunded) are reported as-is, never clamped to zero.
 -- ============================================================
 
-create or replace function public.get_author_financial_summary()
+-- LEDGER-1E-B (migration 051): the accounting formula above now lives
+-- in exactly ONE place -- author_ledger_balance(p_author_id uuid),
+-- parameterized so the service-role payout engine can compute an
+-- ARBITRARY author's balance, not just auth.uid()'s. SECURITY DEFINER,
+-- EXECUTE granted ONLY to service_role (never PUBLIC/anon/authenticated,
+-- not even finance.view staff -- finance.view stays read-only via its
+-- own RLS policy, never an arbitrary-author balance RPC).
+-- get_author_financial_summary() below is now a one-line, auth.uid()-
+-- scoped wrapper around it -- byte-identical external contract to the
+-- original migration 050 version (same columns, same semantics, same
+-- authenticated-only grant).
+create or replace function public.author_ledger_balance(p_author_id uuid)
 returns table (
   currency text,
   lifetime_sale_minor bigint,
@@ -6540,7 +6679,7 @@ as $$
         else coalesce(ale.available_at, ale.created_at)
       end as effective_available_at
     from public.author_ledger_entries ale
-    where ale.author_id = auth.uid()
+    where ale.author_id = p_author_id
   )
   select
     currency,
@@ -6557,6 +6696,29 @@ as $$
     coalesce(sum(amount_minor), 0)::bigint as current_balance_minor
   from entries
   group by currency;
+$$;
+
+revoke all on function public.author_ledger_balance(uuid) from public, anon, authenticated;
+grant execute on function public.author_ledger_balance(uuid) to service_role;
+
+create or replace function public.get_author_financial_summary()
+returns table (
+  currency text,
+  lifetime_sale_minor bigint,
+  lifetime_refund_minor bigint,
+  lifetime_adjustment_minor bigint,
+  net_earnings_minor bigint,
+  paid_out_minor bigint,
+  pending_minor bigint,
+  available_minor bigint,
+  current_balance_minor bigint
+)
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select * from public.author_ledger_balance(auth.uid());
 $$;
 
 revoke all on function public.get_author_financial_summary() from public, anon, authenticated;
@@ -6627,3 +6789,513 @@ $$;
 
 revoke all on function public.list_author_financial_activity(integer, timestamptz, uuid) from public, anon, authenticated;
 grant execute on function public.list_author_financial_activity(integer, timestamptz, uuid) to authenticated;
+
+-- ============================================================
+-- LIBRUM 2.0 LEDGER-1E-B (migration 051): the six payout-mutation
+-- RPCs -- reserve/start/mark_reconciling/finalize/fail/cancel.
+-- Every one is SECURITY DEFINER, search_path='', EXECUTE granted
+-- ONLY to service_role (never PUBLIC/anon/authenticated -- not
+-- even finance.view staff, which stays strictly read-only).
+-- No payout provider, scheduler, or manual-payout capability
+-- exists anywhere in this file. See that migration's own header
+-- comment for the full state-machine/reservation design.
+-- ============================================================
+
+-- Part 5: reserve_author_payout() -- the one entry point that ever
+-- creates a payout reservation.
+--
+-- Caller supplies ONLY author_id + currency (+ optional payout_run_id
+-- for a future scheduler's own grouping) -- NEVER an amount (Section 11
+-- of the task: "Caller must NOT supply payout amount"). The database
+-- computes it, deterministically, from the canonical balance (Part 4)
+-- minus every currently-active reservation for this exact
+-- author+currency, compared against that exact currency's own
+-- threshold row (Section 7's V1 rule: no settings row for this exact
+-- currency means NOT eligible, full stop -- never a guessed default).
+--
+-- On success: reserves the FULL payoutable balance (Section 11's own
+-- worked example -- threshold 50, payoutable 73, reserves 73, not 50),
+-- inserts one 'pending' author_payouts row, returns exactly one row
+-- (payout_id, amount_minor, currency).
+--
+-- On "not eligible" (no ledger balance in this currency at all; no
+-- settings row for this exact currency; payoutable below threshold):
+-- returns ZERO rows -- a deterministic, ordinary, expected outcome, NOT
+-- an exception. A batch scheduler processing many authors will see this
+-- constantly and should never need to catch an error for it.
+--
+-- On a genuine concurrent race (Part 3c's unique index rejects a second
+-- simultaneous reservation attempt for the same author+currency): the
+-- resulting unique_violation is caught and folded into the SAME "zero
+-- rows returned" outcome -- from the caller's point of view, "another
+-- process already reserved this author+currency" and "this author
+-- isn't eligible right now" are both simply "nothing to do here,"
+-- which is exactly the right uniform shape for a batch caller.
+-- ============================================================
+
+create or replace function public.reserve_author_payout(
+  p_author_id uuid,
+  p_currency text,
+  p_payout_run_id uuid default null
+)
+returns table (
+  payout_id uuid,
+  amount_minor bigint,
+  currency text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_available bigint;
+  v_threshold bigint;
+  v_reserved bigint;
+  v_payoutable bigint;
+  v_payout_id uuid;
+begin
+  select balance.available_minor into v_available
+  from public.author_ledger_balance(p_author_id) balance
+  where balance.currency = p_currency;
+
+  if v_available is null then
+    -- No ledger activity at all for this author in this currency --
+    -- an entirely ordinary case, not an error.
+    return;
+  end if;
+
+  select aps.threshold_minor into v_threshold
+  from public.author_payout_settings aps
+  where aps.author_id = p_author_id and aps.currency = p_currency;
+
+  if v_threshold is null then
+    -- No settings row for this exact author+currency: not eligible
+    -- (Section 7's approved V1 rule). Never invent a default.
+    return;
+  end if;
+
+  select coalesce(sum(ap.amount_minor), 0) into v_reserved
+  from public.author_payouts ap
+  where ap.author_id = p_author_id
+    and ap.currency = p_currency
+    and ap.status in ('pending', 'processing', 'reconciling');
+
+  v_payoutable := v_available - v_reserved;
+
+  if v_payoutable < v_threshold then
+    return;
+  end if;
+
+  begin
+    insert into public.author_payouts (author_id, amount_minor, currency, status, payout_run_id)
+    values (p_author_id, v_payoutable, p_currency, 'pending', p_payout_run_id)
+    returning id into v_payout_id;
+  exception
+    when unique_violation then
+      -- LEDGER-1E-B.1: only the active-reservation index is treated as
+      -- an expected losing concurrency race -- GET STACKED DIAGNOSTICS
+      -- confirms which constraint actually fired; any OTHER uniqueness
+      -- violation re-raises rather than being silently reinterpreted as
+      -- "not eligible."
+      declare
+        v_constraint_name text;
+      begin
+        get stacked diagnostics v_constraint_name = constraint_name;
+        if v_constraint_name = 'author_payouts_one_active_per_author_currency_idx' then
+          return;
+        else
+          raise;
+        end if;
+      end;
+  end;
+
+  payout_id := v_payout_id;
+  amount_minor := v_payoutable;
+  currency := p_currency;
+  return next;
+end;
+$$;
+
+revoke all on function public.reserve_author_payout(uuid, text, uuid) from public, anon, authenticated;
+grant execute on function public.reserve_author_payout(uuid, text, uuid) to service_role;
+
+-- ============================================================
+-- Part 6: start_author_payout() -- pending -> processing, WITH
+-- REVALIDATION (Section 18 of the task).
+--
+-- This is the last DB-side checkpoint before a future provider call
+-- would ever be made, and the moment amount/currency/author become
+-- immutable (Part 3e's trigger takes effect the instant status leaves
+-- 'pending'). Before transitioning, it recomputes the canonical balance
+-- FRESH and confirms the reservation is still economically supportable
+-- -- a refund or other debit may have posted since reserve_author_payout()
+-- computed this amount.
+--
+-- If the reservation no longer fits: DO NOT resize it (Section 18's own
+-- explicit instruction) -- cancel it outright (pending -> cancelled,
+-- itself a legal transition) and return that as the deterministic
+-- result. A future run's reserve_author_payout() call will compute a
+-- fresh, correctly-sized reservation from the now-current balance. This
+-- keeps "the reserved amount is always exactly what was true either at
+-- reservation time or is now being explicitly re-decided" true, rather
+-- than ever silently mutating a number this whole design otherwise
+-- treats as sacred.
+--
+-- SELECT ... FOR UPDATE locks the specific payout row for the duration
+-- of this check-then-transition, so a concurrent cancel_author_payout()
+-- or a second start_author_payout() retry on the SAME row cannot race
+-- with this one.
+-- ============================================================
+
+create or replace function public.start_author_payout(p_payout_id uuid)
+returns table (
+  payout_id uuid,
+  status text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_payout record;
+  v_available bigint;
+  v_reserved_excluding_self bigint;
+  v_payoutable bigint;
+begin
+  select * into v_payout
+  from public.author_payouts
+  where id = p_payout_id
+  for update;
+
+  if not found then
+    raise exception 'start_author_payout: payout % not found', p_payout_id;
+  end if;
+
+  if v_payout.status <> 'pending' then
+    raise exception
+      'start_author_payout: payout % is not pending (current status %)',
+      p_payout_id, v_payout.status;
+  end if;
+
+  select balance.available_minor into v_available
+  from public.author_ledger_balance(v_payout.author_id) balance
+  where balance.currency = v_payout.currency;
+
+  select coalesce(sum(ap.amount_minor), 0) into v_reserved_excluding_self
+  from public.author_payouts ap
+  where ap.author_id = v_payout.author_id
+    and ap.currency = v_payout.currency
+    and ap.status in ('pending', 'processing', 'reconciling')
+    and ap.id <> p_payout_id;
+
+  v_payoutable := coalesce(v_available, 0) - v_reserved_excluding_self;
+
+  if v_payoutable < v_payout.amount_minor then
+    -- Table alias required: this function's own OUT parameter is also
+    -- named "status" (RETURNS TABLE(payout_id uuid, status text)
+    -- above), which otherwise makes a bare "status" reference in the
+    -- WHERE clause ambiguous between the PL/pgSQL variable and the
+    -- table column -- the same class of bug already fixed once this
+    -- session in record_payment_event()'s ON CONFLICT target list.
+    update public.author_payouts ap
+    set status = 'cancelled'
+    where ap.id = p_payout_id and ap.status = 'pending';
+
+    payout_id := p_payout_id;
+    status := 'cancelled';
+    return next;
+    return;
+  end if;
+
+  update public.author_payouts ap
+  set status = 'processing', processing_at = now()
+  where ap.id = p_payout_id and ap.status = 'pending';
+
+  payout_id := p_payout_id;
+  status := 'processing';
+  return next;
+end;
+$$;
+
+revoke all on function public.start_author_payout(uuid) from public, anon, authenticated;
+grant execute on function public.start_author_payout(uuid) to service_role;
+
+-- ============================================================
+-- Part 7: mark_author_payout_reconciling() -- processing -> reconciling
+-- only. No ledger movement whatsoever. Idempotent if already
+-- reconciling (a retried "I don't know what happened" signal is a
+-- safe no-op, not an error). See Part 3a's comment for why this state
+-- exists at all: it exists precisely so a genuinely ambiguous provider
+-- outcome is never conflated with either a confirmed success or a
+-- confirmed failure.
+-- ============================================================
+
+create or replace function public.mark_author_payout_reconciling(p_payout_id uuid)
+returns table (
+  payout_id uuid,
+  status text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+begin
+  select ap.status into v_status
+  from public.author_payouts ap
+  where ap.id = p_payout_id
+  for update;
+
+  if not found then
+    raise exception 'mark_author_payout_reconciling: payout % not found', p_payout_id;
+  end if;
+
+  if v_status = 'reconciling' then
+    payout_id := p_payout_id;
+    status := 'reconciling';
+    return next;
+    return;
+  end if;
+
+  if v_status <> 'processing' then
+    raise exception
+      'mark_author_payout_reconciling: payout % is not processing (current status %)',
+      p_payout_id, v_status;
+  end if;
+
+  update public.author_payouts ap
+  set status = 'reconciling'
+  where ap.id = p_payout_id and ap.status = 'processing';
+
+  payout_id := p_payout_id;
+  status := 'reconciling';
+  return next;
+end;
+$$;
+
+revoke all on function public.mark_author_payout_reconciling(uuid) from public, anon, authenticated;
+grant execute on function public.mark_author_payout_reconciling(uuid) to service_role;
+
+-- ============================================================
+-- Part 8: finalize_author_payout() -- processing/reconciling -> paid.
+-- The ONE place a payout ledger debit is ever created.
+--
+-- Creates exactly one author_ledger_entries row (entry_type='payout',
+-- amount_minor = -author_payouts.amount_minor, payout_id set) --
+-- already backed by an EXISTING migration-048 invariant confirmed still
+-- live: author_ledger_entries_one_entry_per_payout_idx, a partial
+-- unique index on (payout_id) WHERE entry_type='payout'. A second
+-- ledger debit for the same payout is structurally impossible even
+-- before considering this function's own idempotency handling.
+--
+-- IDEMPOTENT RETRY (Section 24): called again for an already-'paid' row
+-- with the SAME provider+provider_reference is a safe no-op, returning
+-- the existing ledger entry id -- tolerates a webhook/API retry.
+-- Called again with a DIFFERENT provider+provider_reference on an
+-- already-'paid' row is treated as a financial anomaly and REJECTED
+-- (raises) rather than silently overwritten -- that shape would mean
+-- either a duplicate external send or data corruption, and either way
+-- needs a human, not an automatic acceptance.
+--
+-- provider/provider_reference are both required (NOT NULL enforced in
+-- the function body) -- a "success" with no way to correlate it back to
+-- an external transfer is not a state this design accepts.
+--
+-- PAYOUT REVERSAL -- explicitly NOT built here (Section 29 of the
+-- task). Confirmed: migration 048's author_ledger_entries.entry_type
+-- CHECK still only permits ('sale', 'refund', 'adjustment', 'payout').
+-- Before any real payout provider is ever enabled, a future migration
+-- MUST add a payout_reversal entry_type (a positive compensating entry,
+-- mirroring exactly how 'refund' was added alongside 'sale' in 048/049)
+-- so a provider-returned/reversed transfer can be represented WITHOUT
+-- ever mutating the original payout debit. This is a hard
+-- pre-real-money requirement, flagged here, not implemented.
+-- ============================================================
+
+create or replace function public.finalize_author_payout(
+  p_payout_id uuid,
+  p_provider text,
+  p_provider_reference text
+)
+returns table (
+  payout_id uuid,
+  status text,
+  ledger_entry_id uuid
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_payout record;
+  v_ledger_id uuid;
+begin
+  -- LEDGER-1E-B.1: reject blank/whitespace-only inputs, not merely NULL.
+  if p_provider is null or btrim(p_provider) = ''
+    or p_provider_reference is null or btrim(p_provider_reference) = ''
+  then
+    raise exception 'finalize_author_payout: provider and provider_reference are both required and must not be blank';
+  end if;
+
+  select * into v_payout
+  from public.author_payouts
+  where id = p_payout_id
+  for update;
+
+  if not found then
+    raise exception 'finalize_author_payout: payout % not found', p_payout_id;
+  end if;
+
+  if v_payout.status = 'paid' then
+    if v_payout.provider = p_provider and v_payout.provider_reference = p_provider_reference then
+      select ale.id into v_ledger_id
+      from public.author_ledger_entries ale
+      where ale.payout_id = p_payout_id and ale.entry_type = 'payout';
+
+      payout_id := p_payout_id;
+      status := 'paid';
+      ledger_entry_id := v_ledger_id;
+      return next;
+      return;
+    else
+      raise exception
+        'finalize_author_payout: payout % is already paid with a DIFFERENT provider reference (existing %/%, received %/%) -- refusing to overwrite; this requires operator investigation, not an automatic retry',
+        p_payout_id, v_payout.provider, v_payout.provider_reference, p_provider, p_provider_reference;
+    end if;
+  end if;
+
+  if v_payout.status not in ('processing', 'reconciling') then
+    raise exception
+      'finalize_author_payout: payout % is not processing/reconciling (current status %)',
+      p_payout_id, v_payout.status;
+  end if;
+
+  insert into public.author_ledger_entries
+    (author_id, payout_id, entry_type, amount_minor, currency, available_at, created_at)
+  values
+    (v_payout.author_id, p_payout_id, 'payout', -v_payout.amount_minor, v_payout.currency, now(), now())
+  returning id into v_ledger_id;
+
+  update public.author_payouts
+  set status = 'paid',
+      provider = p_provider,
+      provider_reference = p_provider_reference,
+      paid_at = now()
+  where id = p_payout_id;
+
+  payout_id := p_payout_id;
+  status := 'paid';
+  ledger_entry_id := v_ledger_id;
+  return next;
+end;
+$$;
+
+revoke all on function public.finalize_author_payout(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.finalize_author_payout(uuid, text, text) to service_role;
+
+-- ============================================================
+-- Part 9: fail_author_payout() -- processing/reconciling -> failed,
+-- for a CONFIRMED provider failure only (never for an ambiguous/
+-- timeout outcome -- that goes to mark_author_payout_reconciling()
+-- instead, Part 7). No ledger debit is ever created. The reservation
+-- releases automatically: 'failed' no longer matches
+-- author_payouts_one_active_per_author_currency_idx's predicate
+-- (Part 3c), so the amount becomes payoutable again the instant this
+-- commits, with zero additional code needed. This function never
+-- creates a new payout row itself -- a future run's own
+-- reserve_author_payout() call is what may reserve again.
+-- ============================================================
+
+create or replace function public.fail_author_payout(
+  p_payout_id uuid,
+  p_failure_code text
+)
+returns table (
+  payout_id uuid,
+  status text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+begin
+  select ap.status into v_status
+  from public.author_payouts ap
+  where ap.id = p_payout_id
+  for update;
+
+  if not found then
+    raise exception 'fail_author_payout: payout % not found', p_payout_id;
+  end if;
+
+  if v_status not in ('processing', 'reconciling') then
+    raise exception
+      'fail_author_payout: payout % is not processing/reconciling (current status %)',
+      p_payout_id, v_status;
+  end if;
+
+  update public.author_payouts
+  set status = 'failed', failed_at = now(), failure_code = p_failure_code
+  where id = p_payout_id;
+
+  payout_id := p_payout_id;
+  status := 'failed';
+  return next;
+end;
+$$;
+
+revoke all on function public.fail_author_payout(uuid, text) from public, anon, authenticated;
+grant execute on function public.fail_author_payout(uuid, text) to service_role;
+
+-- ============================================================
+-- Part 10: cancel_author_payout() -- pending -> cancelled ONLY. Once
+-- start_author_payout() has moved a row to 'processing', cancellation
+-- through this function is refused -- a provider call may already be
+-- in flight and there is no reliable way to un-send it (Section 26's
+-- own V1 boundary). No ledger debit. Reservation releases the same way
+-- fail_author_payout()'s does: 'cancelled' falls outside the active-
+-- payout index's predicate automatically.
+-- ============================================================
+
+create or replace function public.cancel_author_payout(p_payout_id uuid)
+returns table (
+  payout_id uuid,
+  status text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+begin
+  select ap.status into v_status
+  from public.author_payouts ap
+  where ap.id = p_payout_id
+  for update;
+
+  if not found then
+    raise exception 'cancel_author_payout: payout % not found', p_payout_id;
+  end if;
+
+  if v_status <> 'pending' then
+    raise exception
+      'cancel_author_payout: payout % is not pending (current status %)',
+      p_payout_id, v_status;
+  end if;
+
+  update public.author_payouts ap
+  set status = 'cancelled'
+  where ap.id = p_payout_id and ap.status = 'pending';
+
+  payout_id := p_payout_id;
+  status := 'cancelled';
+  return next;
+end;
+$$;
+
+revoke all on function public.cancel_author_payout(uuid) from public, anon, authenticated;
+grant execute on function public.cancel_author_payout(uuid) to service_role;
