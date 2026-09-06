@@ -5968,3 +5968,507 @@ create policy "Authors can view their own ledger entries"
 create policy "Staff with finance.view can view all ledger entries"
   on public.author_ledger_entries for select
   using (public.staff_has_permission('finance.view'));
+
+-- ============================================================
+-- LIBRUM 2.0 LEDGER-1C / LEDGER-1C.1 (migration 049): provider-neutral
+-- transactional sale/refund accounting primitives, built on migration
+-- 048's schema. CRITICAL: Librum's CURRENT checkout still uses Stripe
+-- Connect destination charges -- the author's share is transferred
+-- directly to the author's own connected account, so Librum's own
+-- balance never holds it. NOTHING in this section is called by any
+-- existing application code path; no Stripe checkout/webhook/refund/
+-- dispute file is touched or wired to any function here. Every function
+-- below is SECURITY DEFINER, granted to service_role only.
+--
+-- LEDGER-1C.1 corrected LEDGER-1C in place (049 was never applied
+-- before this correction): record_successful_sale() now freezes the
+-- entire canonical purchase set a payment funds (a retry must supply
+-- exactly that set, order-independent, never a substitute/subset/
+-- superset) and derives payments.buyer_id from the unanimous
+-- purchases.reader_id across that set (never a raw caller claim,
+-- though an optional p_buyer_id is cross-checked against it when
+-- supplied); a new payment_refunds table now records the canonical,
+-- provider-neutral fact of buyer money returned (one row per refunded
+-- purchase, V1 full-refund-only) with payments.status now derived
+-- truthfully from the sum of its own confirmed refunds; author_ledger_
+-- entries gains a payment_refund_id correlation column (this migration,
+-- not 048) with its own idempotency-enforcing partial unique index; and
+-- record_payment_event() now rejects a retry that supplies a different
+-- event_type for an already-seen (provider, provider_event_id) pair.
+-- ============================================================
+
+alter table public.purchases
+  add column payment_id uuid references public.payments(id) on delete restrict;
+
+create index purchases_payment_id_idx on public.purchases (payment_id);
+
+create table public.payment_refunds (
+  id uuid primary key default gen_random_uuid(),
+  payment_id uuid not null references public.payments(id) on delete restrict,
+  purchase_id uuid not null references public.purchases(id) on delete restrict,
+  provider text not null,
+  provider_refund_id text not null,
+  amount_minor bigint not null check (amount_minor > 0),
+  currency text not null check (currency ~ '^[A-Z]{3}$'),
+  created_at timestamptz not null default now(),
+  refunded_at timestamptz,
+  unique (provider, provider_refund_id),
+  unique (purchase_id)
+);
+
+create index payment_refunds_payment_id_idx on public.payment_refunds (payment_id);
+
+alter table public.payment_refunds enable row level security;
+
+revoke all on public.payment_refunds from anon, authenticated;
+grant select on public.payment_refunds to authenticated;
+
+create policy "Staff with finance.view can view all payment refunds"
+  on public.payment_refunds for select
+  using (public.staff_has_permission('finance.view'));
+
+alter table public.author_ledger_entries
+  add column payment_refund_id uuid references public.payment_refunds(id) on delete set null;
+
+alter table public.author_ledger_entries
+  add constraint author_ledger_entries_refund_requires_payment_refund_id
+  check (entry_type <> 'refund' or payment_refund_id is not null);
+
+create unique index author_ledger_entries_one_refund_per_payment_refund_idx
+  on public.author_ledger_entries (payment_refund_id)
+  where entry_type = 'refund';
+
+create or replace function public.record_payment_event(
+  p_provider text,
+  p_provider_event_id text,
+  p_event_type text
+)
+returns table (
+  id uuid,
+  provider text,
+  provider_event_id text,
+  event_type text,
+  status text,
+  received_at timestamptz,
+  processed_at timestamptz,
+  last_error_code text,
+  created_at timestamptz,
+  already_existed boolean
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_new record;
+  v_existing record;
+begin
+  insert into public.payment_events (provider, provider_event_id, event_type)
+    values (p_provider, p_provider_event_id, p_event_type)
+    on conflict on constraint payment_events_provider_provider_event_id_key do nothing
+    returning
+      payment_events.id, payment_events.provider, payment_events.provider_event_id,
+      payment_events.event_type, payment_events.status, payment_events.received_at,
+      payment_events.processed_at, payment_events.last_error_code, payment_events.created_at
+    into v_new;
+
+  if v_new.id is not null then
+    id := v_new.id;
+    provider := v_new.provider;
+    provider_event_id := v_new.provider_event_id;
+    event_type := v_new.event_type;
+    status := v_new.status;
+    received_at := v_new.received_at;
+    processed_at := v_new.processed_at;
+    last_error_code := v_new.last_error_code;
+    created_at := v_new.created_at;
+    already_existed := false;
+    return next;
+    return;
+  end if;
+
+  select pe.id, pe.provider, pe.provider_event_id, pe.event_type, pe.status,
+         pe.received_at, pe.processed_at, pe.last_error_code, pe.created_at
+    into v_existing
+    from public.payment_events pe
+    where pe.provider = p_provider and pe.provider_event_id = p_provider_event_id;
+
+  if v_existing.event_type <> p_event_type then
+    raise exception
+      'payment event %/% already recorded with a different event_type (existing=%, requested=%)',
+      p_provider, p_provider_event_id, v_existing.event_type, p_event_type;
+  end if;
+
+  id := v_existing.id;
+  provider := v_existing.provider;
+  provider_event_id := v_existing.provider_event_id;
+  event_type := v_existing.event_type;
+  status := v_existing.status;
+  received_at := v_existing.received_at;
+  processed_at := v_existing.processed_at;
+  last_error_code := v_existing.last_error_code;
+  created_at := v_existing.created_at;
+  already_existed := true;
+  return next;
+end;
+$$;
+
+revoke all on function public.record_payment_event(text, text, text) from public, anon, authenticated;
+grant execute on function public.record_payment_event(text, text, text) to service_role;
+
+create or replace function public.mark_payment_event_processed(p_event_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not exists (select 1 from public.payment_events where id = p_event_id) then
+    raise exception 'payment event not found: %', p_event_id;
+  end if;
+
+  update public.payment_events
+    set status = 'processed', processed_at = now()
+    where id = p_event_id and status <> 'processed';
+end;
+$$;
+
+revoke all on function public.mark_payment_event_processed(uuid) from public, anon, authenticated;
+grant execute on function public.mark_payment_event_processed(uuid) to service_role;
+
+create or replace function public.mark_payment_event_failed(p_event_id uuid, p_error_code text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not exists (select 1 from public.payment_events where id = p_event_id) then
+    raise exception 'payment event not found: %', p_event_id;
+  end if;
+
+  update public.payment_events
+    set status = 'failed', last_error_code = p_error_code, processed_at = now()
+    where id = p_event_id and status <> 'processed';
+end;
+$$;
+
+revoke all on function public.mark_payment_event_failed(uuid, text) from public, anon, authenticated;
+grant execute on function public.mark_payment_event_failed(uuid, text) to service_role;
+
+create or replace function public.record_successful_sale(
+  p_provider text,
+  p_provider_payment_id text,
+  p_currency text,
+  p_purchase_ids uuid[],
+  p_royalty_rate_bps integer,
+  p_available_at timestamptz,
+  p_buyer_id uuid default null
+)
+returns table (
+  purchase_id uuid,
+  ledger_entry_id uuid,
+  created boolean
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_purchase_ids uuid[];
+  v_canonical_ids uuid[];
+  v_payment_id uuid;
+  v_existing_amount bigint;
+  v_existing_currency text;
+  v_total_gross bigint;
+  v_distinct_reader_count integer;
+  v_derived_reader_id uuid;
+  v_pid uuid;
+  v_purchase record;
+  v_gross bigint;
+  v_librum bigint;
+  v_author_amount bigint;
+  v_existing_entry record;
+  v_entry_id uuid;
+  v_created boolean;
+begin
+  if p_provider is null or length(trim(p_provider)) = 0 then
+    raise exception 'p_provider is required';
+  end if;
+  if p_provider_payment_id is null or length(trim(p_provider_payment_id)) = 0 then
+    raise exception 'p_provider_payment_id is required';
+  end if;
+  if p_currency is null or p_currency !~ '^[A-Z]{3}$' then
+    raise exception 'p_currency must be a 3-letter uppercase code';
+  end if;
+  if p_royalty_rate_bps is null or p_royalty_rate_bps < 0 or p_royalty_rate_bps > 10000 then
+    raise exception 'p_royalty_rate_bps must be between 0 and 10000';
+  end if;
+  if p_available_at is null then
+    raise exception 'p_available_at is required';
+  end if;
+
+  select array_agg(distinct x order by x) into v_purchase_ids from unnest(p_purchase_ids) x;
+  if v_purchase_ids is null or array_length(v_purchase_ids, 1) is null then
+    raise exception 'p_purchase_ids must contain at least one purchase id';
+  end if;
+
+  if (select count(*) from public.purchases pu where pu.id = any(v_purchase_ids))
+     <> array_length(v_purchase_ids, 1) then
+    raise exception 'one or more purchase ids do not exist';
+  end if;
+
+  select count(distinct coalesce(pu.reader_id::text, '00000000-0000-0000-0000-000000000000'))
+    into v_distinct_reader_count
+    from public.purchases pu
+    where pu.id = any(v_purchase_ids);
+
+  if v_distinct_reader_count > 1 then
+    raise exception 'the supplied purchases do not all belong to the same reader (mixed buyers)';
+  end if;
+
+  select pu.reader_id into v_derived_reader_id
+    from public.purchases pu
+    where pu.id = v_purchase_ids[1];
+
+  if p_buyer_id is not null and v_derived_reader_id is not null and p_buyer_id <> v_derived_reader_id then
+    raise exception
+      'p_buyer_id (%) does not match the reader derived from the supplied purchases (%)',
+      p_buyer_id, v_derived_reader_id;
+  end if;
+
+  select coalesce(sum(pu.amount_cents), 0) into v_total_gross
+    from public.purchases pu
+    where pu.id = any(v_purchase_ids);
+
+  if v_total_gross <= 0 then
+    raise exception 'total gross amount for the supplied purchases must be positive';
+  end if;
+
+  insert into public.payments (provider, provider_payment_id, buyer_id, amount_minor, currency, status, paid_at)
+    values (p_provider, p_provider_payment_id, v_derived_reader_id, v_total_gross, p_currency, 'succeeded', now())
+    on conflict (provider, provider_payment_id) do nothing
+    returning payments.id, payments.amount_minor, payments.currency
+    into v_payment_id, v_existing_amount, v_existing_currency;
+
+  if v_payment_id is null then
+    select p.id, p.amount_minor, p.currency
+      into v_payment_id, v_existing_amount, v_existing_currency
+      from public.payments p
+      where p.provider = p_provider and p.provider_payment_id = p_provider_payment_id;
+
+    select array_agg(pu.id order by pu.id) into v_canonical_ids
+      from public.purchases pu
+      where pu.payment_id = v_payment_id;
+
+    if v_canonical_ids is distinct from v_purchase_ids then
+      raise exception
+        'payment %/% is already linked to a different set of purchases and cannot be reassigned',
+        p_provider, p_provider_payment_id;
+    end if;
+
+    if v_existing_amount <> v_total_gross or v_existing_currency <> p_currency then
+      raise exception
+        'payment %/% already recorded with different economics (retry mismatch): existing amount_minor=% currency=%, requested amount_minor=% currency=%',
+        p_provider, p_provider_payment_id, v_existing_amount, v_existing_currency, v_total_gross, p_currency;
+    end if;
+  end if;
+
+  foreach v_pid in array v_purchase_ids loop
+    select pu.id as purchase_id, pu.amount_cents, pu.payment_id, b.author_id
+      into v_purchase
+      from public.purchases pu
+      join public.books b on b.id = pu.book_id
+      where pu.id = v_pid;
+
+    if v_purchase.payment_id is not null and v_purchase.payment_id <> v_payment_id then
+      raise exception 'purchase % is already linked to a different payment (%), not %',
+        v_pid, v_purchase.payment_id, v_payment_id;
+    end if;
+
+    if v_purchase.payment_id is null then
+      update public.purchases set payment_id = v_payment_id where id = v_pid;
+    end if;
+
+    v_gross := v_purchase.amount_cents;
+    v_librum := round(v_gross * (10000 - p_royalty_rate_bps) / 10000.0)::bigint;
+    v_author_amount := v_gross - v_librum;
+
+    select ale.id, ale.amount_minor, ale.gross_amount_minor, ale.librum_amount_minor,
+           ale.royalty_rate_bps, ale.currency
+      into v_existing_entry
+      from public.author_ledger_entries ale
+      where ale.purchase_id = v_pid and ale.entry_type = 'sale';
+
+    if v_existing_entry.id is not null then
+      if v_existing_entry.amount_minor <> v_author_amount
+         or v_existing_entry.gross_amount_minor <> v_gross
+         or v_existing_entry.librum_amount_minor <> v_librum
+         or v_existing_entry.royalty_rate_bps <> p_royalty_rate_bps
+         or v_existing_entry.currency <> p_currency then
+        raise exception
+          'purchase % already has a sale ledger entry with different economics (retry mismatch)', v_pid;
+      end if;
+      v_entry_id := v_existing_entry.id;
+      v_created := false;
+    else
+      insert into public.author_ledger_entries
+        (author_id, purchase_id, payment_id, entry_type, amount_minor, currency,
+         royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at)
+      values
+        (v_purchase.author_id, v_pid, v_payment_id, 'sale', v_author_amount, p_currency,
+         p_royalty_rate_bps, v_gross, v_librum, p_available_at)
+      returning id into v_entry_id;
+      v_created := true;
+    end if;
+
+    purchase_id := v_pid;
+    ledger_entry_id := v_entry_id;
+    created := v_created;
+    return next;
+  end loop;
+end;
+$$;
+
+revoke all on function public.record_successful_sale(text, text, text, uuid[], integer, timestamptz, uuid)
+  from public, anon, authenticated;
+grant execute on function public.record_successful_sale(text, text, text, uuid[], integer, timestamptz, uuid)
+  to service_role;
+
+create or replace function public.record_refund(
+  p_purchase_id uuid,
+  p_provider_refund_id text
+)
+returns table (
+  payment_refund_id uuid,
+  ledger_entry_id uuid,
+  created boolean
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_purchase record;
+  v_payment record;
+  v_sale record;
+  v_existing_refund record;
+  v_refund_id uuid;
+  v_ledger_id uuid;
+  v_refunded_sum bigint;
+  v_new_status text;
+begin
+  if p_purchase_id is null then
+    raise exception 'p_purchase_id is required';
+  end if;
+  if p_provider_refund_id is null or length(trim(p_provider_refund_id)) = 0 then
+    raise exception 'p_provider_refund_id is required';
+  end if;
+
+  select pu.id, pu.payment_id into v_purchase
+    from public.purchases pu
+    where pu.id = p_purchase_id;
+
+  if v_purchase.id is null then
+    raise exception 'purchase % does not exist', p_purchase_id;
+  end if;
+  if v_purchase.payment_id is null then
+    raise exception 'purchase % has no canonical payment; cannot record a refund', p_purchase_id;
+  end if;
+
+  select p.id, p.provider, p.amount_minor, p.currency into v_payment
+    from public.payments p
+    where p.id = v_purchase.payment_id;
+
+  select ale.id, ale.author_id, ale.amount_minor, ale.gross_amount_minor into v_sale
+    from public.author_ledger_entries ale
+    where ale.purchase_id = p_purchase_id and ale.entry_type = 'sale';
+
+  if v_sale.id is null then
+    raise exception 'no sale ledger entry found for purchase %; cannot record a refund', p_purchase_id;
+  end if;
+
+  select pr.id, pr.provider, pr.provider_refund_id into v_existing_refund
+    from public.payment_refunds pr
+    where pr.purchase_id = p_purchase_id;
+
+  if v_existing_refund.id is not null then
+    if v_existing_refund.provider = v_payment.provider
+       and v_existing_refund.provider_refund_id = p_provider_refund_id then
+      select ale.id into v_ledger_id
+        from public.author_ledger_entries ale
+        where ale.payment_refund_id = v_existing_refund.id and ale.entry_type = 'refund';
+      payment_refund_id := v_existing_refund.id;
+      ledger_entry_id := v_ledger_id;
+      created := false;
+      return next;
+      return;
+    else
+      raise exception
+        'purchase % has already been refunded under a different provider refund id (%/%); full-refund-only V1 does not support a second refund',
+        p_purchase_id, v_existing_refund.provider, v_existing_refund.provider_refund_id;
+    end if;
+  end if;
+
+  begin
+    insert into public.payment_refunds
+      (payment_id, purchase_id, provider, provider_refund_id, amount_minor, currency, refunded_at)
+    values
+      (v_purchase.payment_id, p_purchase_id, v_payment.provider, p_provider_refund_id,
+       v_sale.gross_amount_minor, v_payment.currency, now())
+    returning id into v_refund_id;
+  exception when unique_violation then
+    select pr.id, pr.purchase_id into v_existing_refund
+      from public.payment_refunds pr
+      where pr.provider = v_payment.provider and pr.provider_refund_id = p_provider_refund_id;
+
+    if v_existing_refund.id is not null and v_existing_refund.purchase_id = p_purchase_id then
+      select ale.id into v_ledger_id
+        from public.author_ledger_entries ale
+        where ale.payment_refund_id = v_existing_refund.id and ale.entry_type = 'refund';
+      payment_refund_id := v_existing_refund.id;
+      ledger_entry_id := v_ledger_id;
+      created := false;
+      return next;
+      return;
+    end if;
+
+    raise exception
+      'provider refund id %/% is already recorded against a different purchase',
+      v_payment.provider, p_provider_refund_id;
+  end;
+
+  insert into public.author_ledger_entries
+    (author_id, purchase_id, payment_id, payment_refund_id, entry_type, amount_minor, currency, available_at)
+  values
+    (v_sale.author_id, p_purchase_id, v_purchase.payment_id, v_refund_id, 'refund',
+     -v_sale.amount_minor, v_payment.currency, now())
+  returning id into v_ledger_id;
+
+  select coalesce(sum(pr.amount_minor), 0) into v_refunded_sum
+    from public.payment_refunds pr
+    where pr.payment_id = v_purchase.payment_id;
+
+  if v_refunded_sum > v_payment.amount_minor then
+    raise exception
+      'payment % refunded sum % exceeds payment total % -- data integrity violation',
+      v_purchase.payment_id, v_refunded_sum, v_payment.amount_minor;
+  elsif v_refunded_sum = v_payment.amount_minor then
+    v_new_status := 'refunded';
+  elsif v_refunded_sum > 0 then
+    v_new_status := 'partially_refunded';
+  else
+    v_new_status := 'succeeded';
+  end if;
+
+  update public.payments set status = v_new_status, updated_at = now() where id = v_purchase.payment_id;
+
+  payment_refund_id := v_refund_id;
+  ledger_entry_id := v_ledger_id;
+  created := true;
+  return next;
+end;
+$$;
+
+revoke all on function public.record_refund(uuid, text) from public, anon, authenticated;
+grant execute on function public.record_refund(uuid, text) to service_role;
