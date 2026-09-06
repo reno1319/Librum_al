@@ -5745,3 +5745,226 @@ revoke all on function public.list_admin_audit_events(
 grant execute on function public.list_admin_audit_events(
   text, uuid, text, timestamptz, timestamptz, timestamptz, uuid, integer
 ) to authenticated;
+
+-- ============================================================
+-- LIBRUM 2.0 LEDGER-1B (migration 048): provider-neutral financial
+-- ledger foundation -- SCHEMA AND INVARIANTS ONLY. Five new tables
+-- (payments, payment_events, author_payouts, author_payout_settings,
+-- author_ledger_entries); nothing existing is altered, and nothing here
+-- writes a single row -- every existing purchases/refund_requests/
+-- payment_disputes row is a synthetic pre-launch test transaction, so
+-- there is deliberately no backfill of historical ledger entries,
+-- payments, or payouts. The new ledger starts at financial zero; real
+-- sale/refund recording is wired in by a later LEDGER-1C phase.
+--
+-- amount_minor columns are integer minor units (bigint, never a float,
+-- never "_cents") and currency is bounded uppercase ISO-4217-shaped text
+-- (`currency ~ '^[A-Z]{3}$'`), never summed across currencies, no FX
+-- conversion. author_ledger_entries is append-only by the same
+-- trigger-free, two-layer pattern this schema already uses for
+-- admin_audit_log/payment_disputes/book_checkout_intents: every ambient
+-- anon/authenticated grant is revoked and only SELECT is handed back,
+-- and zero INSERT/UPDATE/DELETE policies exist for any role. Amounts are
+-- signed per entry_type (sale > 0, refund/payout < 0, adjustment either
+-- sign but never 0), a 'sale' entry must reference a purchase, and a
+-- sale's gross/librum/author snapshot amounts must reconcile exactly
+-- when populated. Idempotency is enforced with partial unique indexes:
+-- one 'sale' entry per purchase_id, one 'payout' entry per payout_id,
+-- and one entry per (author_id, entry_type, reference_type,
+-- reference_id) whenever both reference columns are populated.
+--
+-- author_id on author_ledger_entries/author_payouts references
+-- profiles(id) ON DELETE RESTRICT -- real financial history must never
+-- silently disappear when an account is deleted, the same reasoning
+-- purchases.book_id's own RESTRICT already applies. author_payout_
+-- settings (a preference, not history) uses ON DELETE CASCADE instead,
+-- and payments.buyer_id (a buyer-side audit record) uses ON DELETE SET
+-- NULL, matching purchases.reader_id's own existing precedent.
+--
+-- RLS: payments/payment_events are staff-only (finance.view, the same
+-- permission migration 043 already introduced) -- no buyer-facing UI
+-- reads them yet, so no buyer SELECT policy is added prematurely.
+-- author_payouts/author_payout_settings/author_ledger_entries add an
+-- author-own SELECT policy in addition to the staff finance.view policy.
+-- No admin-adjustment RPC and no sale/refund-recording RPC are added in
+-- this migration -- both are explicitly deferred to a later phase.
+-- ============================================================
+
+create table public.payments (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null,
+  provider_payment_id text not null,
+  buyer_id uuid references public.profiles(id) on delete set null,
+  amount_minor bigint not null check (amount_minor > 0),
+  currency text not null check (currency ~ '^[A-Z]{3}$'),
+  status text not null default 'pending'
+    check (status in ('pending', 'succeeded', 'failed', 'cancelled', 'partially_refunded', 'refunded')),
+  paid_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (provider, provider_payment_id)
+);
+
+create index payments_buyer_id_created_at_idx on public.payments (buyer_id, created_at desc);
+
+alter table public.payments enable row level security;
+
+revoke all on public.payments from anon, authenticated;
+grant select on public.payments to authenticated;
+
+create policy "Staff with finance.view can view all payments"
+  on public.payments for select
+  using (public.staff_has_permission('finance.view'));
+
+create table public.payment_events (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null,
+  provider_event_id text not null,
+  event_type text not null,
+  status text not null default 'received'
+    check (status in ('received', 'processed', 'failed', 'ignored')),
+  received_at timestamptz not null default now(),
+  processed_at timestamptz,
+  last_error_code text,
+  created_at timestamptz not null default now(),
+  unique (provider, provider_event_id)
+);
+
+alter table public.payment_events enable row level security;
+
+revoke all on public.payment_events from anon, authenticated;
+grant select on public.payment_events to authenticated;
+
+create policy "Staff with finance.view can view all payment events"
+  on public.payment_events for select
+  using (public.staff_has_permission('finance.view'));
+
+create table public.author_payouts (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.profiles(id) on delete restrict,
+  amount_minor bigint not null check (amount_minor > 0),
+  currency text not null check (currency ~ '^[A-Z]{3}$'),
+  status text not null default 'pending'
+    check (status in ('pending', 'processing', 'paid', 'failed', 'cancelled')),
+  provider text,
+  provider_reference text,
+  period_start timestamptz,
+  period_end timestamptz,
+  created_at timestamptz not null default now(),
+  processing_at timestamptz,
+  paid_at timestamptz,
+  failed_at timestamptz,
+  failure_code text,
+
+  check (period_start is null or period_end is null or period_end >= period_start)
+);
+
+create index author_payouts_author_currency_created_idx
+  on public.author_payouts (author_id, currency, created_at desc);
+create index author_payouts_status_created_idx
+  on public.author_payouts (status, created_at);
+
+alter table public.author_payouts enable row level security;
+
+revoke all on public.author_payouts from anon, authenticated;
+grant select on public.author_payouts to authenticated;
+
+create policy "Authors can view their own payouts"
+  on public.author_payouts for select
+  using (auth.uid() = author_id);
+
+create policy "Staff with finance.view can view all payouts"
+  on public.author_payouts for select
+  using (public.staff_has_permission('finance.view'));
+
+create table public.author_payout_settings (
+  author_id uuid primary key references public.profiles(id) on delete cascade,
+  threshold_minor bigint not null check (threshold_minor > 0),
+  currency text not null check (currency ~ '^[A-Z]{3}$'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.author_payout_settings enable row level security;
+
+revoke all on public.author_payout_settings from anon, authenticated;
+grant select on public.author_payout_settings to authenticated;
+
+create policy "Authors can view their own payout settings"
+  on public.author_payout_settings for select
+  using (auth.uid() = author_id);
+
+create table public.author_ledger_entries (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.profiles(id) on delete restrict,
+  purchase_id uuid references public.purchases(id) on delete set null,
+  payment_id uuid references public.payments(id) on delete set null,
+  payout_id uuid references public.author_payouts(id) on delete set null,
+
+  entry_type text not null check (entry_type in ('sale', 'refund', 'adjustment', 'payout')),
+
+  amount_minor bigint not null check (amount_minor <> 0),
+  currency text not null check (currency ~ '^[A-Z]{3}$'),
+
+  royalty_rate_bps integer check (royalty_rate_bps is null or (royalty_rate_bps >= 0 and royalty_rate_bps <= 10000)),
+  gross_amount_minor bigint check (gross_amount_minor is null or gross_amount_minor > 0),
+  librum_amount_minor bigint check (librum_amount_minor is null or librum_amount_minor >= 0),
+
+  available_at timestamptz,
+
+  reference_type text,
+  reference_id text,
+
+  description text,
+
+  created_at timestamptz not null default now(),
+
+  check (entry_type <> 'sale' or amount_minor > 0),
+  check (entry_type <> 'refund' or amount_minor < 0),
+  check (entry_type <> 'payout' or amount_minor < 0),
+
+  check (entry_type <> 'sale' or purchase_id is not null),
+  check (entry_type <> 'payout' or payout_id is not null),
+
+  check (entry_type <> 'sale' or gross_amount_minor is not null),
+  check (entry_type <> 'sale' or gross_amount_minor > 0),
+  check (entry_type <> 'sale' or librum_amount_minor is not null),
+  check (entry_type <> 'sale' or librum_amount_minor >= 0),
+  check (entry_type <> 'sale' or royalty_rate_bps is not null),
+  check (entry_type <> 'sale' or available_at is not null),
+
+  check (
+    entry_type <> 'sale'
+    or gross_amount_minor = amount_minor + librum_amount_minor
+  )
+);
+
+create unique index author_ledger_entries_one_sale_per_purchase_idx
+  on public.author_ledger_entries (purchase_id)
+  where entry_type = 'sale';
+
+create unique index author_ledger_entries_one_entry_per_payout_idx
+  on public.author_ledger_entries (payout_id)
+  where entry_type = 'payout';
+
+create unique index author_ledger_entries_reference_idempotency_idx
+  on public.author_ledger_entries (author_id, entry_type, reference_type, reference_id)
+  where reference_type is not null and reference_id is not null;
+
+create index author_ledger_entries_author_currency_created_idx
+  on public.author_ledger_entries (author_id, currency, created_at desc);
+create index author_ledger_entries_author_currency_available_idx
+  on public.author_ledger_entries (author_id, currency, available_at);
+
+alter table public.author_ledger_entries enable row level security;
+
+revoke all on public.author_ledger_entries from anon, authenticated;
+grant select on public.author_ledger_entries to authenticated;
+
+create policy "Authors can view their own ledger entries"
+  on public.author_ledger_entries for select
+  using (auth.uid() = author_id);
+
+create policy "Staff with finance.view can view all ledger entries"
+  on public.author_ledger_entries for select
+  using (public.staff_has_permission('finance.view'));
