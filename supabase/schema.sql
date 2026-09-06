@@ -6949,7 +6949,30 @@ as $$
 declare
   v_eligibility record;
   v_payout_id uuid;
+  v_run_status text;
 begin
+  if p_payout_run_id is not null then
+    -- Closed-run reservation barrier (LEDGER-1E-D-D.1): FOR SHARE
+    -- conflicts with complete_scheduled_payout_run()'s own FOR UPDATE
+    -- on the same payout_runs row, serializing the two operations.
+    -- The lock is held for the remainder of this transaction, i.e.
+    -- until this RPC call commits or rolls back.
+    select pr.status into v_run_status
+    from public.payout_runs pr
+    where pr.id = p_payout_run_id
+    for share;
+
+    if not found then
+      raise exception 'reserve_author_payout: payout run % does not exist', p_payout_run_id;
+    end if;
+
+    if v_run_status <> 'running' then
+      -- Deterministic, silent no-op -- never mutates payout_runs,
+      -- never reopens it, never raises for this specific case.
+      return;
+    end if;
+  end if;
+
   select * into v_eligibility
   from public.author_payout_eligibility(p_author_id, p_currency);
 

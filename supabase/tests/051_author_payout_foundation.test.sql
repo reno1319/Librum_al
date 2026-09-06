@@ -959,7 +959,14 @@ declare
   v_b record;
   v_grouped_count integer;
 begin
-  insert into public.payout_runs (run_key, scheduled_for) values ('2026-12', '2026-12-01') returning id into v_run_id;
+  -- LEDGER-1E-D-D.1 (migration 054): reserve_author_payout() now
+  -- requires a non-null p_payout_run_id to reference a 'running' run
+  -- (the closed-run reservation barrier) -- this fixture predates that
+  -- invariant and must explicitly set status='running' (rather than
+  -- the table's own default 'pending') to keep testing what this part
+  -- has always tested: two independent reservations correctly grouped
+  -- under one shared run.
+  insert into public.payout_runs (run_key, scheduled_for, status) values ('2026-12', '2026-12-01', 'running') returning id into v_run_id;
 
   set local role service_role;
   select * into v_a from public.reserve_author_payout('e0510008-0000-0000-0000-000000000001', 'USD', v_run_id);
@@ -1651,7 +1658,12 @@ declare
   v_run_id uuid;
   v_payout_id uuid;
 begin
-  insert into public.payout_runs (run_key) values ('p051h-restrict-run') returning id into v_run_id;
+  -- LEDGER-1E-D-D.1 (migration 054): explicit status='running', same
+  -- reasoning as part8's own fixture above -- this test is about the
+  -- ON DELETE RESTRICT behavior below, not about run-state validation,
+  -- so the reservation itself must still succeed as originally
+  -- intended.
+  insert into public.payout_runs (run_key, status) values ('p051h-restrict-run', 'running') returning id into v_run_id;
 
   set local role service_role;
   select payout_id into v_payout_id from public.reserve_author_payout('e0510011-0000-0000-0000-000000000050', 'USD', v_run_id);
