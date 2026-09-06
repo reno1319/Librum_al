@@ -620,8 +620,16 @@ begin
   select amount_minor into v_author_sale_amount
     from public.author_ledger_entries where id = v_result.ledger_entry_id;
 
-  insert into public.author_payouts (id, author_id, amount_minor, currency, status)
-    values (gen_random_uuid(), 'c0490000-0000-0000-0000-000000000001', v_author_sale_amount, 'USD', 'paid')
+  -- LEDGER-1E-C.1: provider/provider_reference/paid_at are populated
+  -- here (synthetic test values) so this fixture stays valid under
+  -- migration 051's later-added
+  -- author_payouts_paid_requires_provider_and_reference CHECK -- a rule
+  -- that did not exist when this file was originally written. Fixture-
+  -- validity fix only: amount_minor/currency/status and the net-balance
+  -- assertion below are unchanged.
+  insert into public.author_payouts (id, author_id, amount_minor, currency, status, paid_at, provider, provider_reference)
+    values (gen_random_uuid(), 'c0490000-0000-0000-0000-000000000001', v_author_sale_amount, 'USD', 'paid',
+      now(), 'test', 'ref-p049-payout-balance-001')
     returning id into v_payout_id;
 
   insert into public.author_ledger_entries (author_id, payout_id, entry_type, amount_minor, currency, available_at)

@@ -10,7 +10,12 @@ const mockRpc = vi.fn();
 const mockCreateClient = vi.fn(() => Promise.resolve({ rpc: mockRpc }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
-const { getAuthorFinancialSummary, listAuthorFinancialActivity } = await import("./actions");
+const {
+  getAuthorFinancialSummary,
+  listAuthorFinancialActivity,
+  getAuthorPayoutOverview,
+  listAuthorPayoutHistory,
+} = await import("./actions");
 
 describe("balance server primitives: source-level guards", () => {
   it("never imports createAdminClient/the service-role client", () => {
@@ -91,6 +96,76 @@ describe("listAuthorFinancialActivity", () => {
   it("returns ok:false with a safe message on RPC error", async () => {
     mockRpc.mockResolvedValue({ data: null, error: { message: "invalid cursor" } });
     const result = await listAuthorFinancialActivity();
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("getAuthorPayoutOverview", () => {
+  beforeEach(() => {
+    mockRpc.mockReset();
+  });
+
+  it("calls get_author_payout_overview with no arguments (identity comes from auth.uid() alone)", async () => {
+    mockRpc.mockResolvedValue({ data: [], error: null });
+    await getAuthorPayoutOverview();
+    expect(mockRpc).toHaveBeenCalledWith("get_author_payout_overview");
+  });
+
+  it("returns ok:true with the rows on success", async () => {
+    const rows = [{ currency: "USD", available_for_payout_minor: 0 }];
+    mockRpc.mockResolvedValue({ data: rows, error: null });
+    const result = await getAuthorPayoutOverview();
+    expect(result).toEqual({ ok: true, data: rows });
+  });
+
+  it("returns ok:true with an empty array when data is null", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    const result = await getAuthorPayoutOverview();
+    expect(result).toEqual({ ok: true, data: [] });
+  });
+
+  it("returns ok:false with a safe message on RPC error, never leaking the raw error", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: "internal detail" } });
+    const result = await getAuthorPayoutOverview();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).not.toContain("internal detail");
+    }
+  });
+});
+
+describe("listAuthorPayoutHistory", () => {
+  beforeEach(() => {
+    mockRpc.mockReset();
+  });
+
+  it("defaults to limit 25 and null cursor", async () => {
+    mockRpc.mockResolvedValue({ data: [], error: null });
+    await listAuthorPayoutHistory();
+    expect(mockRpc).toHaveBeenCalledWith("list_author_payout_history", {
+      p_limit: 25,
+      p_cursor_created_at: null,
+      p_cursor_id: null,
+    });
+  });
+
+  it("forwards an explicit limit and cursor", async () => {
+    mockRpc.mockResolvedValue({ data: [], error: null });
+    await listAuthorPayoutHistory({
+      limit: 10,
+      cursorCreatedAt: "2026-01-01T00:00:00Z",
+      cursorId: "abc",
+    });
+    expect(mockRpc).toHaveBeenCalledWith("list_author_payout_history", {
+      p_limit: 10,
+      p_cursor_created_at: "2026-01-01T00:00:00Z",
+      p_cursor_id: "abc",
+    });
+  });
+
+  it("returns ok:false with a safe message on RPC error", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: "invalid cursor" } });
+    const result = await listAuthorPayoutHistory();
     expect(result.ok).toBe(false);
   });
 });

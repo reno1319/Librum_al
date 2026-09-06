@@ -463,3 +463,41 @@ export type AuthorFinancialActivityRow = {
   book_id: string | null;
   book_title: string | null;
 };
+
+// LEDGER-1E-C: mirrors get_author_payout_overview()'s exact return shape
+// (migration 052) -- a reservation-aware payoutability snapshot layered
+// on top of author_ledger_balance(), never a redefinition of it.
+// available_for_payout_minor is deliberately NOT clamped to zero (a
+// processing/reconciling reservation can outlive the ledger debit that
+// funded it, e.g. a refund posted after the reservation was made) -- it
+// must render as a real negative number, never floored. threshold_minor
+// is null exactly when threshold_configured is false; never a fabricated
+// default. No provider/reference/internal identifier appears anywhere in
+// this shape.
+export type AuthorPayoutOverviewRow = {
+  currency: string;
+  ledger_available_minor: number;
+  reserved_minor: number;
+  available_for_payout_minor: number;
+  threshold_configured: boolean;
+  threshold_minor: number | null;
+  threshold_reached: boolean;
+};
+
+// LEDGER-1E-C: mirrors list_author_payout_history()'s exact return shape
+// (migration 052) -- keyset-paginated, own-payout-rows-only. Never
+// carries provider, provider_reference, failure_code, payout_run_id, or
+// any other internal correlation identifier -- those remain
+// finance.view/staff-only via the raw author_payouts table. `status`
+// passes through verbatim (never collapsed/relabeled); the UI owns
+// mapping each of the 6 values to safe, factual copy.
+export type AuthorPayoutHistoryRow = {
+  id: string;
+  amount_minor: number;
+  currency: string;
+  status: "pending" | "processing" | "paid" | "failed" | "cancelled" | "reconciling";
+  created_at: string;
+  processing_at: string | null;
+  paid_at: string | null;
+  failed_at: string | null;
+};

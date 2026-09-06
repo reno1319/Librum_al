@@ -5937,10 +5937,14 @@ alter table public.author_payouts enable row level security;
 revoke all on public.author_payouts from anon, authenticated;
 grant select on public.author_payouts to authenticated;
 
-create policy "Authors can view their own payouts"
-  on public.author_payouts for select
-  using (auth.uid() = author_id);
-
+-- LEDGER-1E-C (migration 052) dropped the original author-own SELECT
+-- policy this table shipped with in migration 048 -- authors now read
+-- their own payout data exclusively through get_author_payout_overview()/
+-- list_author_payout_history() (both further down this file), which are
+-- SECURITY DEFINER and expose no internal correlation identifiers
+-- (provider/provider_reference/failure_code/payout_run_id). The
+-- table-level grant above is kept only so the remaining staff policy
+-- below still has a privilege to narrow.
 create policy "Staff with finance.view can view all payouts"
   on public.author_payouts for select
   using (public.staff_has_permission('finance.view'));
@@ -7299,3 +7303,137 @@ $$;
 
 revoke all on function public.cancel_author_payout(uuid) from public, anon, authenticated;
 grant execute on function public.cancel_author_payout(uuid) to service_role;
+
+-- ============================================================
+-- LIBRUM 2.0 LEDGER-1E-C (migration 052): author-facing payout
+-- reporting + safe payout history read model. Reservation-aware
+-- payoutability snapshot layered on top of author_ledger_balance()
+-- (pure ledger truth, untouched) and author_payouts' own active-
+-- reservation rows -- see that migration's own comments for the full
+-- formula/reconciliation-invariant/currency-universe/threshold
+-- reasoning. Neither function below is called by any Stripe checkout/
+-- webhook/refund/dispute/payout-mutation code path, and no payout
+-- mutation RPC is touched by anything here.
+-- ============================================================
+
+create or replace function public.get_author_payout_overview()
+returns table (
+  currency text,
+  ledger_available_minor bigint,
+  reserved_minor bigint,
+  available_for_payout_minor bigint,
+  threshold_configured boolean,
+  threshold_minor bigint,
+  threshold_reached boolean
+)
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  with ledger as (
+    select balance.currency, balance.available_minor
+    from public.author_ledger_balance(auth.uid()) balance
+  ),
+  reservations as (
+    select ap.currency, sum(ap.amount_minor)::bigint as reserved_minor
+    from public.author_payouts ap
+    where ap.author_id = auth.uid()
+      and ap.status in ('pending', 'processing', 'reconciling')
+    group by ap.currency
+  ),
+  settings as (
+    select aps.currency, aps.threshold_minor
+    from public.author_payout_settings aps
+    where aps.author_id = auth.uid()
+  ),
+  payout_currencies as (
+    select distinct ap.currency
+    from public.author_payouts ap
+    where ap.author_id = auth.uid()
+  ),
+  currencies as (
+    select currency from ledger
+    union
+    select currency from settings
+    union
+    select currency from payout_currencies
+  )
+  select
+    c.currency,
+    coalesce(l.available_minor, 0)::bigint as ledger_available_minor,
+    coalesce(r.reserved_minor, 0)::bigint as reserved_minor,
+    (coalesce(l.available_minor, 0) - coalesce(r.reserved_minor, 0))::bigint as available_for_payout_minor,
+    (s.threshold_minor is not null) as threshold_configured,
+    s.threshold_minor as threshold_minor,
+    (
+      s.threshold_minor is not null
+      and (coalesce(l.available_minor, 0) - coalesce(r.reserved_minor, 0)) >= s.threshold_minor
+    ) as threshold_reached
+  from currencies c
+  left join ledger l on l.currency = c.currency
+  left join reservations r on r.currency = c.currency
+  left join settings s on s.currency = c.currency
+  order by c.currency;
+$$;
+
+revoke all on function public.get_author_payout_overview() from public, anon, authenticated;
+grant execute on function public.get_author_payout_overview() to authenticated;
+
+create or replace function public.list_author_payout_history(
+  p_limit integer default 25,
+  p_cursor_created_at timestamptz default null,
+  p_cursor_id uuid default null
+)
+returns table (
+  id uuid,
+  amount_minor bigint,
+  currency text,
+  status text,
+  created_at timestamptz,
+  processing_at timestamptz,
+  paid_at timestamptz,
+  failed_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+stable
+as $$
+declare
+  v_limit integer;
+begin
+  if (p_cursor_created_at is null) <> (p_cursor_id is null) then
+    raise exception 'invalid cursor';
+  end if;
+
+  v_limit := coalesce(p_limit, 25);
+  if v_limit < 1 then
+    v_limit := 1;
+  elsif v_limit > 100 then
+    v_limit := 100;
+  end if;
+
+  return query
+    select
+      ap.id,
+      ap.amount_minor,
+      ap.currency,
+      ap.status,
+      ap.created_at,
+      ap.processing_at,
+      ap.paid_at,
+      ap.failed_at
+    from public.author_payouts ap
+    where ap.author_id = auth.uid()
+      and (
+        p_cursor_created_at is null
+        or (ap.created_at, ap.id) < (p_cursor_created_at, p_cursor_id)
+      )
+    order by ap.created_at desc, ap.id desc
+    limit v_limit;
+end;
+$$;
+
+revoke all on function public.list_author_payout_history(integer, timestamptz, uuid) from public, anon, authenticated;
+grant execute on function public.list_author_payout_history(integer, timestamptz, uuid) to authenticated;

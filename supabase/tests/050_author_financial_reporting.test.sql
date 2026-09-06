@@ -191,8 +191,17 @@ values
    'e0500000-0000-0000-0000-000000000003', 'a0500000-0000-0000-0000-000000000003', 'sale', 640, 'USD', 8000, 800, 160,
    now() - interval '40 days', now() - interval '70 days');
 
-insert into public.author_payouts (id, author_id, amount_minor, currency, status) values
-  ('90500000-0000-0000-0000-000000000001', 'c0500000-0000-0000-0000-000000000003', 640, 'USD', 'paid');
+-- LEDGER-1E-C.1: provider/provider_reference/paid_at are populated here
+-- (synthetic test values, no real provider involved) so this fixture
+-- stays valid under migration 051's later-added
+-- author_payouts_paid_requires_provider_and_reference CHECK -- a rule
+-- that did not exist when this file was originally written. This is a
+-- fixture-validity fix only: amount_minor/currency/status and every
+-- downstream ledger entry/assertion below are unchanged from LEDGER-1D's
+-- original POST-PAYOUT REFUND CASE.
+insert into public.author_payouts (id, author_id, amount_minor, currency, status, paid_at, provider, provider_reference) values
+  ('90500000-0000-0000-0000-000000000001', 'c0500000-0000-0000-0000-000000000003', 640, 'USD', 'paid',
+   now() - interval '30 days', 'test', 'ref-p050-p3-001');
 
 insert into public.author_ledger_entries
   (id, author_id, payout_id, entry_type, amount_minor, currency, available_at, created_at)

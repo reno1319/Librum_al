@@ -216,17 +216,41 @@ values
    'adjustment', -150, 'USD', 'manual_note', 'p048-goodwill-debit', now());
 
 -- ============================================================
--- Part 6: author_ledger_entries RLS -- author-own read, cross-author
--- denial, anon denial, and staff finance read.
+-- Part 6: author_ledger_entries RLS -- raw direct-table access, cross-
+-- author denial, anon denial, and staff finance read.
+--
+-- LEDGER-1E-C.1: the "Author A/B sees their own row via raw SELECT"
+-- expectation this part originally asserted was CORRECT for migration
+-- 048's own schema at the time this file was written -- migration 048
+-- shipped exactly that author-own SELECT policy. Migration 050 (Part 1)
+-- later and DELIBERATELY dropped it: LEDGER-1D's own explicit design
+-- moved authors off raw-table access entirely, onto
+-- get_author_financial_summary()/list_author_financial_activity() only
+-- (both SECURITY DEFINER, exposing no internal correlation identifiers)
+-- -- see migration 050's own top-of-file comment and its Part 9 test
+-- (this exact file's later-committed sibling), which already asserts
+-- the CURRENT correct behavior: an ordinary author now sees ZERO rows
+-- from a raw author_ledger_entries SELECT, not their own row. This is
+-- not a regression in migration 048's own history -- 048's policy was
+-- right THEN -- it is this test file's own expectation going stale the
+-- moment a LATER migration intentionally superseded it, exactly
+-- parallel to Part 9's fixture staleness this same pass also repairs.
+-- The table-level grant is untouched (kept only so the still-live staff
+-- policy below has something to narrow), so this is RLS filtering to an
+-- empty result, never a privilege exception -- cross-author denial and
+-- staff finance read (both still fully correct and unaffected by 050)
+-- are left completely unchanged below.
 -- ============================================================
 do $$
 begin
-  -- Author A sees their own row.
+  -- Author A: raw direct-table access is now empty (Part 1's comment
+  -- above) -- author-facing reads go exclusively through migration
+  -- 050's two safe RPCs, not this table.
   perform set_config('request.jwt.claim.sub', 'a0480000-0000-0000-0000-000000000001', true);
   set local role authenticated;
   perform pg_temp.assert(
-    (select count(*) from public.author_ledger_entries) = 1,
-    'part6: Author A must see exactly their own one ledger row'
+    (select count(*) from public.author_ledger_entries) = 0,
+    'part6: an ordinary author must see zero rows querying the raw table directly (author-own policy was superseded by migration 050)'
   );
   perform pg_temp.assert(
     (select count(*) from public.author_ledger_entries where author_id = 'a0480000-0000-0000-0000-000000000002') = 0,
@@ -234,12 +258,12 @@ begin
   );
   reset role;
 
-  -- Author B sees only their own.
+  -- Author B: same corrected expectation.
   perform set_config('request.jwt.claim.sub', 'a0480000-0000-0000-0000-000000000002', true);
   set local role authenticated;
   perform pg_temp.assert(
-    (select count(*) from public.author_ledger_entries) = 1,
-    'part6: Author B must see exactly their own one ledger row'
+    (select count(*) from public.author_ledger_entries) = 0,
+    'part6: an ordinary author must see zero rows querying the raw table directly (author-own policy was superseded by migration 050)'
   );
   reset role;
 
@@ -478,8 +502,17 @@ begin
   end;
 
   -- one payout entry per payout_id.
-  insert into public.author_payouts (id, author_id, amount_minor, currency, status) values
-    ('90480000-0000-0000-0000-000000000001', 'a0480000-0000-0000-0000-000000000001', 799, 'USD', 'paid');
+  --
+  -- LEDGER-1E-C.1: provider/provider_reference/paid_at are populated
+  -- here (synthetic test values) so this fixture stays valid under
+  -- migration 051's later-added
+  -- author_payouts_paid_requires_provider_and_reference CHECK -- a rule
+  -- that did not exist when this file was originally written. Fixture-
+  -- validity fix only: amount_minor/currency/status and the unique-
+  -- payout-debit assertion immediately below are unchanged.
+  insert into public.author_payouts (id, author_id, amount_minor, currency, status, paid_at, provider, provider_reference) values
+    ('90480000-0000-0000-0000-000000000001', 'a0480000-0000-0000-0000-000000000001', 799, 'USD', 'paid',
+     now(), 'test', 'ref-p048-p10-001');
   v_payout_id := '90480000-0000-0000-0000-000000000001';
 
   insert into public.author_ledger_entries (author_id, payout_id, entry_type, amount_minor, currency, available_at) values
@@ -492,14 +525,30 @@ begin
   exception when unique_violation then null;
   end;
 
-  -- external reference idempotency: two refund entries with the same
+  -- External reference idempotency: two entries with the same
   -- (author_id, entry_type, reference_type, reference_id) must collide.
+  --
+  -- LEDGER-1E-C.1: this probe uses entry_type='adjustment', not
+  -- 'refund' -- the general index this exercises
+  -- (author_ledger_entries_reference_idempotency_idx) is scoped to
+  -- (author_id, entry_type, reference_type, reference_id) for ANY
+  -- entry type, per this migration's own comment on that index; it was
+  -- never refund-specific. Using 'refund' here was originally harmless
+  -- (this fixture predates migration 049's payment_refund_id
+  -- requirement), but a 'refund' entry now needs a real
+  -- payments/payment_refunds fixture chain just to satisfy that
+  -- unrelated CHECK -- 049/050's own suites already exhaustively test
+  -- refund-specific ledger mechanics, so 'adjustment' is the minimal
+  -- fixture that proves the exact same general-purpose collision
+  -- without unrelated complexity. Fixture-validity fix only: the
+  -- idempotency mechanism under test, its scope, and its expected
+  -- unique_violation outcome are all unchanged.
   insert into public.author_ledger_entries (author_id, entry_type, amount_minor, currency, reference_type, reference_id, available_at) values
-    ('a0480000-0000-0000-0000-000000000001', 'refund', -999, 'USD', 'stripe_refund', 're_p048_one', now());
+    ('a0480000-0000-0000-0000-000000000001', 'adjustment', -999, 'USD', 'stripe_refund', 're_p048_one', now());
 
   begin
     insert into public.author_ledger_entries (author_id, entry_type, amount_minor, currency, reference_type, reference_id, available_at) values
-      ('a0480000-0000-0000-0000-000000000001', 'refund', -999, 'USD', 'stripe_refund', 're_p048_one', now());
+      ('a0480000-0000-0000-0000-000000000001', 'adjustment', -999, 'USD', 'stripe_refund', 're_p048_one', now());
     perform pg_temp.assert(false, 'part10: a duplicate (author_id, entry_type, reference_type, reference_id) must be rejected');
   exception when unique_violation then null;
   end;
@@ -522,20 +571,41 @@ begin
 end $$;
 
 -- ============================================================
--- Part 12: author_payouts -- author-own read, cross-author denial,
--- direct author mutation denied, positive-amount CHECK, nullable/open
--- provider text.
+-- Part 12: author_payouts -- current-schema raw-access boundary,
+-- cross-author denial, direct author mutation denied, positive-amount
+-- CHECK, nullable/open provider text.
+--
+-- LEDGER-1E-C.2: this suite is a CURRENT-SCHEMA regression test, not a
+-- historical replay of migration 048's own point-in-time behavior --
+-- migration 052 intentionally removed the author-own raw author_payouts
+-- SELECT policy this table shipped with in migration 048, exactly the
+-- same tightening LEDGER-1D already applied to author_ledger_entries in
+-- migration 050 (which Part 6 above already reflects). Keeping this
+-- part's expectation frozen at 048's original policy while Part 6
+-- already tracks 050's later policy would leave mixed, inconsistent
+-- test semantics inside this one file -- this part now asserts the
+-- SAME current intended behavior: an ordinary authenticated caller
+-- (author OR reader) sees ZERO rows from a raw author_payouts SELECT,
+-- never their own row, regardless of ownership. Authors' only safe path
+-- is now get_author_payout_overview()/list_author_payout_history()
+-- (migration 052's own two SECURITY DEFINER RPCs, exhaustively tested
+-- by that migration's own suite). finance.view staff raw read remains
+-- fully available, completely unaffected -- see the staff assertion
+-- added at the end of this block.
 -- ============================================================
 do $$
 begin
+  -- Author A: raw direct-table access is now empty -- current intended
+  -- behavior per migration 052, not "sees their own row."
   perform set_config('request.jwt.claim.sub', 'a0480000-0000-0000-0000-000000000001', true);
   set local role authenticated;
   perform pg_temp.assert(
-    (select count(*) from public.author_payouts) = 1,
-    'part12: Author A must see exactly their own one payout row'
+    (select count(*) from public.author_payouts) = 0,
+    'part12: an ordinary author must see zero rows querying the raw author_payouts table directly (author-own policy was superseded by migration 052)'
   );
   reset role;
 
+  -- Author B: cross-author denial -- still correctly sees nothing.
   perform set_config('request.jwt.claim.sub', 'a0480000-0000-0000-0000-000000000002', true);
   set local role authenticated;
   perform pg_temp.assert(
@@ -550,6 +620,28 @@ begin
   end;
   reset role;
 
+  -- Reader: no financial data of any kind -- same zero-rows behavior
+  -- as any other ordinary authenticated caller, not just "not an
+  -- author."
+  perform set_config('request.jwt.claim.sub', 'a0480000-0000-0000-0000-000000000004', true);
+  set local role authenticated;
+  perform pg_temp.assert(
+    (select count(*) from public.author_payouts) = 0,
+    'part12: a reader must see zero rows querying the raw author_payouts table directly'
+  );
+  reset role;
+
+  -- anon: no privilege at all -- no grant exists for anon on this
+  -- table (same posture as author_ledger_entries, Part 6 above).
+  perform set_config('request.jwt.claim.sub', '', true);
+  set local role anon;
+  begin
+    perform count(*) from public.author_payouts;
+    perform pg_temp.assert(false, 'part12: anon must not have any privilege to read author_payouts');
+  exception when insufficient_privilege then null;
+  end;
+  reset role;
+
   begin
     insert into public.author_payouts (author_id, amount_minor, currency) values
       ('a0480000-0000-0000-0000-000000000001', 0, 'USD');
@@ -559,14 +651,40 @@ begin
 
   -- nullable/open provider text: no provider at all, and an arbitrary
   -- provider name, both succeed.
-  insert into public.author_payouts (author_id, amount_minor, currency) values
-    ('a0480000-0000-0000-0000-000000000001', 250, 'USD');
-  insert into public.author_payouts (author_id, amount_minor, currency, provider) values
-    ('a0480000-0000-0000-0000-000000000001', 250, 'USD', 'paysera_bank_transfer');
+  --
+  -- LEDGER-1E-C.1: both rows are given an explicit terminal
+  -- status='cancelled' -- orthogonal to what this probe actually tests
+  -- (the provider column's own nullability/open-text acceptance), but
+  -- required so two more same-author/same-currency rows don't collide
+  -- with migration 051's one-active-reservation-per-author-currency
+  -- unique index (status defaulted to 'pending' at the time this
+  -- fixture was originally written, before that invariant existed).
+  -- 'paid' is not usable here instead: migration 051's own paid-state
+  -- CHECK requires a non-blank provider, which would directly
+  -- contradict the very row this test needs to have a NULL provider.
+  -- Fixture-validity fix only: the provider-nullability assertion below
+  -- and its expected count are unchanged.
+  insert into public.author_payouts (author_id, amount_minor, currency, status) values
+    ('a0480000-0000-0000-0000-000000000001', 250, 'USD', 'cancelled');
+  insert into public.author_payouts (author_id, amount_minor, currency, provider, status) values
+    ('a0480000-0000-0000-0000-000000000001', 250, 'USD', 'paysera_bank_transfer', 'cancelled');
   perform pg_temp.assert(
     (select count(*) from public.author_payouts where author_id = 'a0480000-0000-0000-0000-000000000001') = 3,
     'part12: a null provider and an arbitrary open-text provider must both be accepted'
   );
+
+  -- finance.view staff: raw read remains fully available -- current
+  -- intended policy, completely unaffected by migration 052's author-
+  -- own policy removal. No other author's payouts exist in this file
+  -- yet, so staff's own unfiltered count matches Author A's own total
+  -- exactly (1 from Part 10 + 2 from this part's own fixtures above).
+  perform set_config('request.jwt.claim.sub', 'a0480000-0000-0000-0000-000000000003', true);
+  set local role authenticated;
+  perform pg_temp.assert(
+    (select count(*) from public.author_payouts) = 3,
+    format('part12: staff with finance.view must see all payout rows across authors, got %s', (select count(*) from public.author_payouts))
+  );
+  reset role;
 end $$;
 
 -- ============================================================

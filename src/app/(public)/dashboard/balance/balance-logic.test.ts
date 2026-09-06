@@ -5,8 +5,15 @@ import {
   hasAnyLedgerActivity,
   resolveActivityPage,
   ACTIVITY_DISPLAY_PAGE_SIZE,
+  payoutStatusLabel,
+  resolvePayoutHistoryPage,
+  PAYOUT_HISTORY_DISPLAY_PAGE_SIZE,
 } from "./balance-logic";
-import type { AuthorFinancialSummaryRow, AuthorFinancialActivityRow } from "@/lib/types";
+import type {
+  AuthorFinancialSummaryRow,
+  AuthorFinancialActivityRow,
+  AuthorPayoutHistoryRow,
+} from "@/lib/types";
 
 function makeSummaryRow(overrides: Partial<AuthorFinancialSummaryRow> = {}): AuthorFinancialSummaryRow {
   return {
@@ -36,6 +43,20 @@ function makeActivityRow(overrides: Partial<AuthorFinancialActivityRow> = {}): A
     created_at: "2026-01-01T00:00:00Z",
     book_id: null,
     book_title: null,
+    ...overrides,
+  };
+}
+
+function makePayoutHistoryRow(overrides: Partial<AuthorPayoutHistoryRow> = {}): AuthorPayoutHistoryRow {
+  return {
+    id: "00000000-0000-0000-0000-000000000000",
+    amount_minor: 100,
+    currency: "USD",
+    status: "pending",
+    created_at: "2026-01-01T00:00:00Z",
+    processing_at: null,
+    paid_at: null,
+    failed_at: null,
     ...overrides,
   };
 }
@@ -122,5 +143,52 @@ describe("resolveActivityPage", () => {
 
   it("uses ACTIVITY_DISPLAY_PAGE_SIZE (25) as the default page size", () => {
     expect(ACTIVITY_DISPLAY_PAGE_SIZE).toBe(25);
+  });
+});
+
+describe("payoutStatusLabel", () => {
+  it("labels every known payout status with safe, factual, non-promissory copy", () => {
+    expect(payoutStatusLabel("pending")).toBe("Pending");
+    expect(payoutStatusLabel("processing")).toBe("Processing");
+    expect(payoutStatusLabel("paid")).toBe("Paid");
+    expect(payoutStatusLabel("failed")).toBe("Failed");
+    expect(payoutStatusLabel("cancelled")).toBe("Cancelled");
+  });
+
+  it("never labels reconciling as failed or paid -- it means Librum is still confirming the outcome", () => {
+    const label = payoutStatusLabel("reconciling");
+    expect(label.toLowerCase()).not.toContain("fail");
+    expect(label.toLowerCase()).not.toBe("paid");
+    expect(label).toBe("Under review");
+  });
+});
+
+describe("resolvePayoutHistoryPage", () => {
+  it("shows every row and no next cursor when fewer than displayPageSize+1 were fetched", () => {
+    const rows = [makePayoutHistoryRow({ id: "1" }), makePayoutHistoryRow({ id: "2" })];
+    const result = resolvePayoutHistoryPage(rows, 10);
+    expect(result.rows).toHaveLength(2);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("shows exactly displayPageSize rows and no next cursor when exactly displayPageSize were fetched", () => {
+    const rows = Array.from({ length: 10 }, (_, i) => makePayoutHistoryRow({ id: String(i) }));
+    const result = resolvePayoutHistoryPage(rows, 10);
+    expect(result.rows).toHaveLength(10);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("drops the lookahead row and derives the cursor from the last DISPLAYED row", () => {
+    const rows = Array.from({ length: 11 }, (_, i) =>
+      makePayoutHistoryRow({ id: String(i), created_at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z` }),
+    );
+    const result = resolvePayoutHistoryPage(rows, 10);
+    expect(result.rows).toHaveLength(10);
+    expect(result.rows[9].id).toBe("9");
+    expect(result.nextCursor).toEqual({ createdAt: "2026-01-10T00:00:00Z", id: "9" });
+  });
+
+  it("uses PAYOUT_HISTORY_DISPLAY_PAGE_SIZE (10) as the default page size", () => {
+    expect(PAYOUT_HISTORY_DISPLAY_PAGE_SIZE).toBe(10);
   });
 });
