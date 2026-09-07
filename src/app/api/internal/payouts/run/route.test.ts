@@ -536,8 +536,14 @@ describe("source-level guards", () => {
     expect(routeSource).not.toMatch(/body\.secret/);
   });
 
-  it("does not modify vercel.json (no cron path string literal for this route)", () => {
+  // LEDGER-1E-D-G: this route's cron entry was deliberately registered
+  // in vercel.json once the monthly payout schedule was approved --
+  // full structural validation (exact schedule, no duplicates, existing
+  // reconciliation cron preserved) lives in
+  // src/lib/vercel-cron-config.test.ts. This guard is narrower: it only
+  // confirms cron registration didn't silently regress back to absent.
+  it("has a cron entry registered in vercel.json (see vercel-cron-config.test.ts for full validation)", () => {
     const vercelJson = readFileSync(path.join(process.cwd(), "vercel.json"), "utf8");
-    expect(vercelJson).not.toContain("/api/internal/payouts/run");
+    expect(vercelJson).toContain("/api/internal/payouts/run");
   });
 });

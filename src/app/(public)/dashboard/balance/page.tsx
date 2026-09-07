@@ -18,6 +18,8 @@ import {
   PAYOUT_HISTORY_DISPLAY_PAGE_SIZE,
 } from "./balance-logic";
 import { AUTHOR_EARNINGS_SETTLEMENT_DAYS } from "@/lib/settlement-policy";
+import { isSchedulerEnabled } from "@/lib/payout-scheduler";
+import { computeNextPayoutCycleDate, formatPayoutCycleDate } from "@/lib/payout-cycle";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
@@ -48,6 +50,14 @@ export default async function BalancePage() {
   if (!user) {
     redirect("/login?next=/dashboard/balance");
   }
+
+  // LEDGER-1E-D-G: gates the "Next payout cycle" notice below on the
+  // same fail-closed switch the scheduler route itself reads (never a
+  // second, possibly-drifting definition of "enabled") -- see
+  // isSchedulerEnabled() in src/lib/payout-scheduler.ts. Still unset in
+  // production as of this change, so this remains the disabled branch
+  // today; nothing here arms reservation execution.
+  const schedulerEnabled = isSchedulerEnabled(process.env.PAYOUT_SCHEDULER_ENABLED);
 
   const [summaryResult, activityResult, overviewResult, historyResult] = await Promise.all([
     getAuthorFinancialSummary(),
@@ -96,9 +106,29 @@ export default async function BalancePage() {
       <div className="mt-2">
         <PageHeader
           title="Financial Balance"
-          description={`Your ledger balance across every sale, refund, adjustment, and payout. New sales settle ${AUTHOR_EARNINGS_SETTLEMENT_DAYS} days after purchase, once Librum's refund window has closed, and become available for payout at that point — an exact payout date isn't scheduled yet.`}
+          description={`Your ledger balance across every sale, refund, adjustment, and payout. New sales settle ${AUTHOR_EARNINGS_SETTLEMENT_DAYS} days after purchase, once Librum's refund window has closed, and become available for payout at that point${schedulerEnabled ? "." : " — an exact payout date isn't scheduled yet."}`}
         />
       </div>
+
+      {/* LEDGER-1E-D-G: forward-looking payout-cycle policy notice --
+          shown regardless of isEmpty below, since it's schedule
+          information, not historical ledger data. Never shows a "Next
+          payout cycle" date while the scheduler is disabled (Section
+          14's own explicit rule): a real date here would promise
+          scheduling that isn't actually armed yet. */}
+      <Alert
+        variant="info"
+        className="mt-4"
+        title={
+          schedulerEnabled
+            ? `Next payout cycle: ${formatPayoutCycleDate(computeNextPayoutCycleDate())}`
+            : undefined
+        }
+      >
+        {schedulerEnabled
+          ? "Once your available balance meets your payout threshold, it will be reserved for payout during this cycle."
+          : "Monthly payout scheduling is not yet active."}
+      </Alert>
 
       {isEmpty ? (
         <EmptyState

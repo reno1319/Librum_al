@@ -3,6 +3,10 @@
     {
       "path": "/api/internal/reconcile-transfer-reversals",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/internal/payouts/run",
+      "schedule": "0 6 5 * *"
     }
   ]
 }

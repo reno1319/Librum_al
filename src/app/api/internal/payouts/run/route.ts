@@ -17,19 +17,23 @@ import {
 // closed) -- there is deliberately only ONE internal-job authentication
 // pattern in this repo, not a second one invented here.
 //
-// THIS ROUTE IS NOT YET REGISTERED WITH VERCEL CRON (Section 3/35):
-// vercel.json is untouched by this task. The nominal monthly payout day
-// has not yet been approved as business policy -- cron registration is
-// a deliberately separate future task, after this route has been
-// reviewed, deployed disabled, and dry-run-verified in production.
+// CRON REGISTRATION (Section 3/35, updated by LEDGER-1E-D-G): this
+// route's monthly cron entry now IS registered in vercel.json
+// ("0 6 5 * *" -- see src/lib/payout-cycle.ts for the approved
+// business policy this schedule encodes, and
+// src/lib/vercel-cron-config.test.ts for the structural regression
+// guard). Registering the cron only means Vercel will issue the GET
+// request below on schedule -- it does NOT arm reservation execution
+// on its own; that remains a separate switch (immediately below).
 //
-// PAYOUT_SCHEDULER_ENABLED IS NOT SET ANYWHERE IN THIS TASK (Section
-// 8/36): the application logic below reads it, but no Vercel env var,
-// local secret, or committed config sets a value. A missing value
-// means disabled -- see isSchedulerEnabled()'s own fail-closed rule.
-// Immediately after this route deploys, EVERY reserve-mode request
-// (including the future cron's own GET) is a safe, deterministic,
-// zero-RPC no-op.
+// PAYOUT_SCHEDULER_ENABLED IS STILL NOT SET ANYWHERE (Section 8/36):
+// the application logic below reads it, but no Vercel env var, local
+// secret, or committed config sets a value. A missing value means
+// disabled -- see isSchedulerEnabled()'s own fail-closed rule. So even
+// though the cron now fires monthly, EVERY reserve-mode request it
+// triggers (the GET handler below) remains a safe, deterministic,
+// zero-RPC no-op until PAYOUT_SCHEDULER_ENABLED is explicitly set to
+// "true" in a separate, future task.
 //
 // This route calls ONLY the four migration-053 scheduler RPCs
 // (dry_run_scheduled_payouts, start_scheduled_payout_run,
