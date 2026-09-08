@@ -134,6 +134,16 @@ export async function issueStripeRefund(refundRequestId: string) {
         `/admin/refunds/${refundRequestId}?error=${encodeURIComponent(outcome.message)}`,
       );
       break;
+    case "ledger_v1_not_supported":
+      // STRIPE-CUTOVER-2A Section 24: development-safe, honest message --
+      // never a generic Stripe-failure wording, since Stripe was never
+      // even called. Stage 3 owns real ledger_v1 refund routing.
+      redirect(
+        `/admin/refunds/${refundRequestId}?error=${encodeURIComponent(
+          "This is a librum_ledger_v1 test transaction -- ledger_v1 refunds are not enabled yet.",
+        )}`,
+      );
+      break;
     case "issued":
     case "blocked":
       // ADMIN-1C Part B: issueStripeRefund()'s own user-visible behavior

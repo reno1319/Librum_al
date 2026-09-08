@@ -18,6 +18,10 @@ const {
   fulfillBundleSnapshot,
   fulfillLegacyBundle,
   fulfillSingleBookPurchase,
+  fulfillLedgerBookPayment,
+  fulfillLedgerBundlePayment,
+  fulfillBookCheckoutByRegime,
+  fulfillBundleCheckoutByRegime,
   processChargeRefund,
   processRefundLifecycleEvent,
   processChargeRefundedEvent,
@@ -1382,6 +1386,846 @@ describe("fulfillSingleBookPurchase: finalize_book_checkout_intent wrapper", () 
 
     expect(result).not.toBeNull();
     expect(failWebhook).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------
+// STRIPE-CUTOVER-2A Sections 34-37: the librum_ledger_v1 TEST-mode
+// webhook finalizers, and the regime dispatchers that route to them.
+// ---------------------------------------------------------------------
+const LG_EVENT_ID = "pevt-lg-1";
+const LG_INTENT_ID = "intent-lg-1";
+const LG_SNAPSHOT_ID = "snapshot-lg-1";
+const LG_SESSION_ID = "cs_test_lg_new";
+const LG_PAYMENT_INTENT_ID = "pi_test_lg_new";
+const LG_PAID_AT_UNIX = 1_700_000_050;
+const LG_PAID_AT_ISO = new Date(LG_PAID_AT_UNIX * 1000).toISOString();
+
+function makeLedgerEvent(overrides: Partial<Stripe.Event> = {}): Stripe.Event {
+  return { id: "evt_lg_1", type: "checkout.session.completed", livemode: false, ...overrides } as Stripe.Event;
+}
+
+function makeLedgerSession(overrides: Partial<Stripe.Checkout.Session> = {}): Stripe.Checkout.Session {
+  return { id: LG_SESSION_ID, currency: "all", metadata: {}, ...overrides } as unknown as Stripe.Checkout.Session;
+}
+
+// Minimal Pick<Stripe, "paymentIntents"> fake -- exercises the real
+// retrieveStripeLedgerPaymentFacts adapter (no mocking of that module),
+// so these tests prove the actual facts (paid_at, amount, currency) that
+// reach the finalizer RPC, not hand-substituted ones. Defaults to a
+// fully genuine, provider-confirmed SUCCESSFUL payment (PaymentIntent.
+// status='succeeded', an attached charge that is itself succeeded/paid,
+// amount_captured=120000, currency='all', charge created at
+// LG_PAID_AT_UNIX) -- every override narrows from that default, so a
+// test only needs to specify what it's actually varying.
+type FakePaymentIntentOverrides = {
+  status?: string;
+  amountReceived?: number | null;
+  currency?: string | null;
+  createdUnixSeconds?: number | null;
+  // undefined = default successful charge; null = no charge attached at
+  // all (falls back to PaymentIntent-level facts); an object overrides
+  // individual charge fields on top of the successful default.
+  charge?:
+    | null
+    | {
+        status?: string;
+        paid?: boolean;
+        amountCaptured?: number | null;
+        currency?: string | null;
+        createdUnixSeconds?: number | null;
+      };
+};
+
+function makeFakePaymentIntentClient(overrides: FakePaymentIntentOverrides = {}) {
+  const chargeOverride = overrides.charge;
+  const latestCharge =
+    chargeOverride === null
+      ? null
+      : {
+          id: "ch_lg_1",
+          status: chargeOverride?.status ?? "succeeded",
+          paid: chargeOverride?.paid ?? true,
+          amount_captured: chargeOverride?.amountCaptured ?? 120000,
+          currency: chargeOverride?.currency ?? "all",
+          created: chargeOverride?.createdUnixSeconds ?? LG_PAID_AT_UNIX,
+        };
+
+  const retrieve = vi.fn().mockResolvedValue({
+    id: LG_PAYMENT_INTENT_ID,
+    status: overrides.status ?? "succeeded",
+    created: overrides.createdUnixSeconds === undefined ? LG_PAID_AT_UNIX - 5 : overrides.createdUnixSeconds,
+    amount_received: overrides.amountReceived === undefined ? 120000 : overrides.amountReceived,
+    currency: overrides.currency === undefined ? "all" : overrides.currency,
+    latest_charge: latestCharge,
+  });
+  return { paymentIntents: { retrieve } };
+}
+
+// rpc() dispatches by RPC name -- record_payment_event and
+// finalize_ledger_book_payment/finalize_ledger_bundle_payment (never
+// both a ledger RPC and finalize_book_checkout_intent/
+// finalize_bundle_checkout_snapshot for the SAME call, per the
+// double-pay-prevention invariant these tests exist to prove).
+function makeLedgerFinalizeSupabase(opts: {
+  recordEventResult?: { data: unknown; error: unknown };
+  finalizeResult?: { data: unknown; error: unknown };
+}) {
+  const rpc = vi.fn().mockImplementation((name: string) => {
+    if (name === "record_payment_event") {
+      return Promise.resolve(opts.recordEventResult ?? { data: [{ id: "payevt-1" }], error: null });
+    }
+    if (name === "finalize_ledger_book_payment" || name === "finalize_ledger_bundle_payment") {
+      return Promise.resolve(opts.finalizeResult ?? { data: [], error: null });
+    }
+    throw new Error(`makeLedgerFinalizeSupabase: unexpected rpc "${name}"`);
+  });
+  return { rpc };
+}
+
+describe("fulfillLedgerBookPayment (STRIPE-CUTOVER-2A)", () => {
+  it("a LIVE-mode event fails the webhook and makes NO rpc calls at all -- hard test-mode safety blocker", async () => {
+    const supabase = makeLedgerFinalizeSupabase({});
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent({ livemode: true }),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("no payment intent id: fails the webhook, no rpc calls", async () => {
+    const supabase = makeLedgerFinalizeSupabase({});
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      null,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("payment facts retrieval throws: fails the webhook rather than substituting Date.now() or any local value", async () => {
+    const supabase = makeLedgerFinalizeSupabase({});
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const stripeClient = { paymentIntents: { retrieve: vi.fn().mockRejectedValue(new Error("network")) } };
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      stripeClient as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("payment facts retrieval returns no usable paid_at timestamp: fails the webhook", async () => {
+    const supabase = makeLedgerFinalizeSupabase({});
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient({ charge: null, createdUnixSeconds: null }) as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("passes the STRIPE-CONFIRMED paid_at (from the charge's own created timestamp) to finalize_ledger_book_payment, never Date.now()", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "eligible_fulfilled", out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: "author-1" }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent({ id: LG_EVENT_ID }),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "finalize_ledger_book_payment",
+      expect.objectContaining({ p_paid_at: LG_PAID_AT_ISO }),
+    );
+  });
+
+  it("calls record_payment_event then finalize_ledger_book_payment with exactly the expected arguments -- never finalize_book_checkout_intent", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "eligible_fulfilled", out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: "author-1" }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent({ id: LG_EVENT_ID }),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(supabase.rpc).toHaveBeenCalledWith("record_payment_event", {
+      p_provider: "stripe",
+      p_provider_event_id: LG_EVENT_ID,
+      p_event_type: "checkout.session.completed",
+      p_provider_payment_id: LG_PAYMENT_INTENT_ID,
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith("finalize_ledger_book_payment", {
+      p_payment_event_id: "payevt-1",
+      p_intent_id: LG_INTENT_ID,
+      p_provider: "stripe",
+      p_provider_payment_id: LG_PAYMENT_INTENT_ID,
+      p_actual_amount_minor: 120000,
+      p_actual_currency: "all",
+      p_paid_at: LG_PAID_AT_ISO,
+    });
+    expect(supabase.rpc).not.toHaveBeenCalledWith("finalize_book_checkout_intent", expect.anything());
+  });
+
+  // STRIPE-CUTOVER-2A.1 Section 13 tests A-F: genuine payment-success
+  // proof and provider-sourced actual facts, not merely
+  // "checkout.session.completed fired."
+  it("[A] PaymentIntent.status is not 'succeeded' (e.g. still 'processing'): no event recorded, no finalizer called", async () => {
+    const supabase = makeLedgerFinalizeSupabase({});
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient({ status: "processing" }) as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("[A] PaymentIntent succeeded but the attached charge is not itself successful/paid: no event recorded, no finalizer called", async () => {
+    const supabase = makeLedgerFinalizeSupabase({});
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient({ charge: { status: "pending", paid: false } }) as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("[B] a genuinely successful test PaymentIntent + Charge: ledger finalization proceeds normally", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "eligible_fulfilled", out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: "author-1" }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(supabase.rpc).toHaveBeenCalledWith("finalize_ledger_book_payment", expect.anything());
+  });
+
+  it("[D/F] actual amount reaching the DB wrapper is the CHARGE's amount_captured, never the webhook's own amountCents parameter (no expected-amount substitution)", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "eligible_fulfilled", out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: "author-1" }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    // amountCents (the Checkout Session's own expected total) is
+    // DELIBERATELY different from the fake charge's amount_captured
+    // (120000, the default) -- if the code ever substituted the
+    // expected/session amount for the actual one, this assertion would
+    // catch it.
+    await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      999999, // a deliberately WRONG amountCents, never used as "actual"
+      failWebhook,
+    );
+
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "finalize_ledger_book_payment",
+      expect.objectContaining({ p_actual_amount_minor: 120000 }),
+    );
+    expect(supabase.rpc).not.toHaveBeenCalledWith(
+      "finalize_ledger_book_payment",
+      expect.objectContaining({ p_actual_amount_minor: 999999 }),
+    );
+  });
+
+  it("[E] actual currency reaching the DB wrapper is the CHARGE's own currency, never the Checkout Session's currency field", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "eligible_fulfilled", out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: "author-1" }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    // The Checkout Session claims currency "all" (makeLedgerSession's
+    // own default), but the fake charge itself actually settled in a
+    // deliberately DIFFERENT currency -- proves the adapter's own
+    // charge-sourced value reaches the RPC, not session.currency, and
+    // that a genuine mismatch is passed through (not silently coerced to
+    // "all") for the DB wrapper's own hard match to reject.
+    await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient({ charge: { currency: "usd" } }) as never,
+      makeLedgerEvent(),
+      makeLedgerSession({ currency: "all" }),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "finalize_ledger_book_payment",
+      expect.objectContaining({ p_actual_currency: "usd" }),
+    );
+  });
+
+  it("record_payment_event error: fails the webhook, never calls the finalizer", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      recordEventResult: { data: null, error: { message: "connection reset" } },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalledWith("finalize_ledger_book_payment", expect.anything());
+  });
+
+  it("finalize_ledger_book_payment hard mismatch error: treated as reconciliation/error, fails the webhook -- never falls back to legacy", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: null,
+        error: { message: "finalize_ledger_book_payment: amount/currency mismatch for intent ..." },
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      999,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalledWith("finalize_book_checkout_intent", expect.anything());
+  });
+
+  it("eligible_fulfilled: succeeds with no error logged", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "eligible_fulfilled", out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: "author-1" }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("already_finalized (duplicate delivery): idempotent no-op, no error logged -- proves retry safety", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "already_finalized", out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: "author-1" }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillLedgerBookPayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_INTENT_ID,
+      LG_PAYMENT_INTENT_ID,
+      120000,
+      failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it.each(["active_other_session", "blocked_book_or_reader_deleted", "blocked_disputed_lost"])(
+    "%s: logs for manual reconciliation, still 200s, no failWebhook",
+    async (outcome) => {
+      const supabase = makeLedgerFinalizeSupabase({
+        finalizeResult: { data: [{ outcome, out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: null }], error: null },
+      });
+      const failWebhook = vi.fn(fakeFailWebhook);
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const result = await fulfillLedgerBookPayment(
+        supabase as never,
+        makeFakePaymentIntentClient() as never,
+        makeLedgerEvent(),
+        makeLedgerSession(),
+        LG_INTENT_ID,
+        LG_PAYMENT_INTENT_ID,
+        120000,
+        failWebhook,
+      );
+
+      expect(result).toBeNull();
+      expect(failWebhook).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("needs manual reconciliation"),
+        expect.objectContaining({ outcome }),
+      );
+      errorSpy.mockRestore();
+    },
+  );
+
+  it("simulated Stripe redelivery: two independent calls both succeed and converge (no local dedup needed, DB owns idempotency)", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "eligible_fulfilled", out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: "author-1" }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const first = await fulfillLedgerBookPayment(
+      supabase as never, makeFakePaymentIntentClient() as never, makeLedgerEvent(), makeLedgerSession(),
+      LG_INTENT_ID, LG_PAYMENT_INTENT_ID, 120000, failWebhook,
+    );
+    const second = await fulfillLedgerBookPayment(
+      supabase as never, makeFakePaymentIntentClient() as never, makeLedgerEvent(), makeLedgerSession(),
+      LG_INTENT_ID, LG_PAYMENT_INTENT_ID, 120000, failWebhook,
+    );
+
+    expect(first).toBeNull();
+    expect(second).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    const finalizeCalls = supabase.rpc.mock.calls.filter((c) => c[0] === "finalize_ledger_book_payment");
+    expect(finalizeCalls).toHaveLength(2);
+  });
+});
+
+describe("fulfillLedgerBundlePayment (STRIPE-CUTOVER-2A)", () => {
+  it("a LIVE-mode event fails the webhook and makes NO rpc calls at all", async () => {
+    const supabase = makeLedgerFinalizeSupabase({});
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBundlePayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent({ livemode: true }),
+      makeLedgerSession(),
+      LG_SNAPSHOT_ID,
+      LG_PAYMENT_INTENT_ID,
+      250000,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("[A] PaymentIntent.status is not 'succeeded': no event recorded, no bundle finalizer called", async () => {
+    const supabase = makeLedgerFinalizeSupabase({});
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBundlePayment(
+      supabase as never,
+      makeFakePaymentIntentClient({ status: "requires_payment_method" }) as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_SNAPSHOT_ID,
+      LG_PAYMENT_INTENT_ID,
+      250000,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("calls record_payment_event then finalize_ledger_bundle_payment with exactly the expected arguments -- never fulfillBundleSnapshot's own RPCs", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "eligible_fulfilled", out_reader_id: "reader-1", out_author_id: "author-1", out_book_ids: ["book-1", "book-2"] }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    await fulfillLedgerBundlePayment(
+      supabase as never,
+      makeFakePaymentIntentClient({ charge: { amountCaptured: 250000 } }) as never,
+      makeLedgerEvent({ id: LG_EVENT_ID }),
+      makeLedgerSession(),
+      LG_SNAPSHOT_ID,
+      LG_PAYMENT_INTENT_ID,
+      250000,
+      failWebhook,
+    );
+
+    expect(supabase.rpc).toHaveBeenCalledWith("record_payment_event", {
+      p_provider: "stripe",
+      p_provider_event_id: LG_EVENT_ID,
+      p_event_type: "checkout.session.completed",
+      p_provider_payment_id: LG_PAYMENT_INTENT_ID,
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith("finalize_ledger_bundle_payment", {
+      p_payment_event_id: "payevt-1",
+      p_snapshot_id: LG_SNAPSHOT_ID,
+      p_provider: "stripe",
+      p_provider_payment_id: LG_PAYMENT_INTENT_ID,
+      p_actual_amount_minor: 250000,
+      p_actual_currency: "all",
+      p_paid_at: LG_PAID_AT_ISO,
+    });
+  });
+
+  it("finalize error: fails the webhook", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: { data: null, error: { message: "amount/currency mismatch" } },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillLedgerBundlePayment(
+      supabase as never,
+      makeFakePaymentIntentClient() as never,
+      makeLedgerEvent(),
+      makeLedgerSession(),
+      LG_SNAPSHOT_ID,
+      LG_PAYMENT_INTENT_ID,
+      999,
+      failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+  });
+
+  it("eligible_fulfilled: succeeds, no error logged", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "eligible_fulfilled", out_reader_id: "reader-1", out_author_id: "author-1", out_book_ids: ["book-1"] }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillLedgerBundlePayment(
+      supabase as never, makeFakePaymentIntentClient() as never, makeLedgerEvent(), makeLedgerSession(),
+      LG_SNAPSHOT_ID, LG_PAYMENT_INTENT_ID, 250000, failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("blocked_disputed_lost: logs for reconciliation, still 200s, no failWebhook", async () => {
+    const supabase = makeLedgerFinalizeSupabase({
+      finalizeResult: {
+        data: [{ outcome: "blocked_disputed_lost", out_reader_id: "reader-1", out_author_id: "author-1", out_book_ids: [] }],
+        error: null,
+      },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await fulfillLedgerBundlePayment(
+      supabase as never, makeFakePaymentIntentClient() as never, makeLedgerEvent(), makeLedgerSession(),
+      LG_SNAPSHOT_ID, LG_PAYMENT_INTENT_ID, 250000, failWebhook,
+    );
+
+    expect(result).toBeNull();
+    expect(failWebhook).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("needs manual reconciliation"),
+      expect.objectContaining({ snapshotId: LG_SNAPSHOT_ID }),
+    );
+    errorSpy.mockRestore();
+  });
+});
+
+// Fake with BOTH .from(...).select(...).eq(...).maybeSingle() (the
+// regime lookup) and .rpc() (whichever finalizer regime picks) -- proves
+// Section 12's "frozen checkout regime decides" dispatch, and Section 36's
+// double-pay-prevention invariant end-to-end: never both a legacy AND a
+// ledger RPC for the same checkout.
+function makeRegimeDispatchSupabase(opts: {
+  table: "book_checkout_intents" | "bundle_checkout_snapshots";
+  regime?: string | null;
+  regimeError?: unknown;
+  legacyRpcResult?: { data: unknown; error: unknown };
+  recordEventResult?: { data: unknown; error: unknown };
+  finalizeResult?: { data: unknown; error: unknown };
+}) {
+  const legacyRpcName =
+    opts.table === "book_checkout_intents" ? "finalize_book_checkout_intent" : undefined;
+
+  const rpc = vi.fn().mockImplementation((name: string) => {
+    if (name === "record_payment_event") {
+      return Promise.resolve(opts.recordEventResult ?? { data: [{ id: "payevt-1" }], error: null });
+    }
+    if (name === "finalize_ledger_book_payment" || name === "finalize_ledger_bundle_payment") {
+      return Promise.resolve(
+        opts.finalizeResult ?? {
+          data: [{ outcome: "eligible_fulfilled", out_book_id: "book-1", out_reader_id: "reader-1", out_author_id: "author-1", out_book_ids: ["book-1"] }],
+          error: null,
+        },
+      );
+    }
+    if (name === legacyRpcName) {
+      return Promise.resolve(
+        opts.legacyRpcResult ?? {
+          data: [{ outcome: "eligible_fulfilled", out_book_id: "book-1", out_reader_id: "reader-1" }],
+          error: null,
+        },
+      );
+    }
+    throw new Error(`makeRegimeDispatchSupabase: unexpected rpc "${name}"`);
+  });
+
+  const from = vi.fn().mockImplementation((table: string) => {
+    if (table !== opts.table) {
+      throw new Error(`makeRegimeDispatchSupabase: unexpected table "${table}"`);
+    }
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: () =>
+            Promise.resolve(
+              opts.regimeError
+                ? { data: null, error: opts.regimeError }
+                : { data: opts.regime === null ? null : { regime: opts.regime ?? "legacy_stripe_connect_v1" }, error: null },
+            ),
+        }),
+      }),
+    };
+  });
+
+  return { rpc, from };
+}
+
+describe("fulfillBookCheckoutByRegime: dispatch by the checkout intent's OWN frozen regime (STRIPE-CUTOVER-2A Section 12)", () => {
+  it("regime read error: fails the webhook, calls neither finalizer", async () => {
+    const supabase = makeRegimeDispatchSupabase({
+      table: "book_checkout_intents",
+      regimeError: { message: "connection reset" },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillBookCheckoutByRegime(
+      supabase as never, makeFakePaymentIntentClient() as never, makeLedgerEvent(), makeLedgerSession(),
+      LG_INTENT_ID, LG_PAYMENT_INTENT_ID, 120000, failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("regime row not found: fails the webhook", async () => {
+    const supabase = makeRegimeDispatchSupabase({ table: "book_checkout_intents", regime: null });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillBookCheckoutByRegime(
+      supabase as never, makeFakePaymentIntentClient() as never, makeLedgerEvent(), makeLedgerSession(),
+      LG_INTENT_ID, LG_PAYMENT_INTENT_ID, 120000, failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+  });
+
+  it("regime=legacy_stripe_connect_v1: calls ONLY finalize_book_checkout_intent -- never record_payment_event or the ledger finalizer (double-pay guard)", async () => {
+    const supabase = makeRegimeDispatchSupabase({
+      table: "book_checkout_intents",
+      regime: "legacy_stripe_connect_v1",
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    await fulfillBookCheckoutByRegime(
+      supabase as never, makeFakePaymentIntentClient() as never,
+      { id: "evt_legacy" } as Stripe.Event,
+      { id: SB_SESSION_ID, metadata: {} } as unknown as Stripe.Checkout.Session,
+      LG_INTENT_ID, LG_PAYMENT_INTENT_ID, 120000, failWebhook,
+    );
+
+    expect(supabase.rpc).toHaveBeenCalledWith("finalize_book_checkout_intent", expect.anything());
+    expect(supabase.rpc).not.toHaveBeenCalledWith("record_payment_event", expect.anything());
+    expect(supabase.rpc).not.toHaveBeenCalledWith("finalize_ledger_book_payment", expect.anything());
+  });
+
+  it("regime=librum_ledger_v1: calls ONLY record_payment_event + finalize_ledger_book_payment -- never finalize_book_checkout_intent (double-pay guard)", async () => {
+    const supabase = makeRegimeDispatchSupabase({
+      table: "book_checkout_intents",
+      regime: "librum_ledger_v1",
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    await fulfillBookCheckoutByRegime(
+      supabase as never, makeFakePaymentIntentClient() as never, makeLedgerEvent(), makeLedgerSession(),
+      LG_INTENT_ID, LG_PAYMENT_INTENT_ID, 120000, failWebhook,
+    );
+
+    expect(supabase.rpc).toHaveBeenCalledWith("record_payment_event", expect.anything());
+    expect(supabase.rpc).toHaveBeenCalledWith("finalize_ledger_book_payment", expect.anything());
+    expect(supabase.rpc).not.toHaveBeenCalledWith("finalize_book_checkout_intent", expect.anything());
+  });
+});
+
+describe("fulfillBundleCheckoutByRegime: dispatch by the checkout snapshot's OWN frozen regime (STRIPE-CUTOVER-2A Section 12)", () => {
+  it("regime read error: fails the webhook, calls neither finalizer", async () => {
+    const supabase = makeRegimeDispatchSupabase({
+      table: "bundle_checkout_snapshots",
+      regimeError: { message: "connection reset" },
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    const result = await fulfillBundleCheckoutByRegime(
+      supabase as never, makeFakePaymentIntentClient() as never, makeLedgerEvent(), makeLedgerSession(),
+      LG_SNAPSHOT_ID, LG_PAYMENT_INTENT_ID, 250000, failWebhook,
+    );
+
+    expect(result).not.toBeNull();
+    expect(failWebhook).toHaveBeenCalledOnce();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("regime=librum_ledger_v1: calls ONLY record_payment_event + finalize_ledger_bundle_payment -- never the legacy TS classification/allocation path's own RPCs", async () => {
+    const supabase = makeRegimeDispatchSupabase({
+      table: "bundle_checkout_snapshots",
+      regime: "librum_ledger_v1",
+    });
+    const failWebhook = vi.fn(fakeFailWebhook);
+
+    await fulfillBundleCheckoutByRegime(
+      supabase as never, makeFakePaymentIntentClient() as never, makeLedgerEvent(), makeLedgerSession(),
+      LG_SNAPSHOT_ID, LG_PAYMENT_INTENT_ID, 250000, failWebhook,
+    );
+
+    expect(supabase.rpc).toHaveBeenCalledWith("record_payment_event", expect.anything());
+    expect(supabase.rpc).toHaveBeenCalledWith("finalize_ledger_bundle_payment", expect.anything());
   });
 });
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 // LAUNCH-1 P1-11: minimal, focused coverage of ONLY the new recovery
@@ -248,5 +248,156 @@ describe("buyBook: connected-account validation gate (LIBRUM 2.0 CONNECT-HARDEN-
     expect(redirectedUrl).not.toContain("acct_");
     expect(redirectedUrl).not.toContain("test mode");
     expect(redirectedUrl).not.toContain("live mode key");
+  });
+});
+
+// STRIPE-CUTOVER-2A Section 32: buyBook's librum_ledger_v1 branch --
+// covers frozen regime/currency/royalty, the absence of any Connect
+// dependency, and the checkout-creation-time test-mode safety gate.
+// Deliberately does NOT re-test the legacy branch's own pre-existing
+// Connect gate or checkout-intent logic (covered above).
+describe("buyBook: librum_ledger_v1 regime (STRIPE-CUTOVER-2A)", () => {
+  const BOOK_ID = "book-1";
+  const READER_ID = "reader-1";
+  const AUTHOR_ID = "author-1";
+  const ORIGINAL_REGIME = process.env.NEW_CHECKOUT_REGIME;
+  const ORIGINAL_KEY = process.env.STRIPE_SECRET_KEY;
+
+  function makeLedgerBookRow() {
+    return {
+      id: BOOK_ID,
+      title: "Test Book",
+      price_cents: 120000,
+      status: "published",
+      author_id: AUTHOR_ID,
+      // No stripe_account_id at all -- proves the ledger_v1 branch never
+      // requires one.
+      profiles: null,
+    };
+  }
+
+  let mockBookSingle = vi.fn();
+  let mockRpc = vi.fn();
+  let mockAdminUpdateEq = vi.fn();
+
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockAccountsRetrieve.mockReset();
+    mockCheckoutSessionsCreate.mockReset();
+    mockCreateAdminClient.mockReset();
+    mockCookieStore.get.mockImplementation(() => undefined);
+    process.env.NEW_CHECKOUT_REGIME = "librum_ledger_v1";
+    process.env.STRIPE_SECRET_KEY = "sk_test_abc123";
+
+    mockBookSingle = vi.fn().mockResolvedValue({ data: makeLedgerBookRow(), error: null });
+    mockRpc = vi.fn().mockImplementation((name: string) => {
+      if (name === "user_owns_book") return Promise.resolve({ data: false, error: null });
+      if (name === "create_book_checkout_intent") {
+        return Promise.resolve({
+          data: [
+            {
+              intent_id: "intent-ledger-1",
+              price_cents_at_checkout: 120000,
+              discount_code_id: null,
+              expires_at: "2026-08-24T09:00:00.000Z",
+            },
+          ],
+          error: null,
+        });
+      }
+      throw new Error(`unexpected rpc "${name}"`);
+    });
+    mockAdminUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    mockCreateAdminClient.mockReturnValue({
+      from: (table: string) => {
+        if (table !== "book_checkout_intents") {
+          throw new Error(`ledger buyBook test: unexpected admin table "${table}"`);
+        }
+        return { update: () => ({ eq: mockAdminUpdateEq }) };
+      },
+    });
+    mockCreateClient.mockReset().mockResolvedValue({
+      auth: { getUser: () => Promise.resolve({ data: { user: { id: READER_ID } } }) },
+      from: (table: string) => {
+        if (table !== "books") {
+          throw new Error(`ledger buyBook test: unexpected table "${table}"`);
+        }
+        return { select: () => ({ eq: () => ({ single: () => mockBookSingle() }) }) };
+      },
+      rpc: (...args: unknown[]) => mockRpc(...(args as [string, unknown])),
+    });
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_REGIME === undefined) delete process.env.NEW_CHECKOUT_REGIME;
+    else process.env.NEW_CHECKOUT_REGIME = ORIGINAL_REGIME;
+    if (ORIGINAL_KEY === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = ORIGINAL_KEY;
+  });
+
+  it("never calls the Connect account gate for a ledger_v1 checkout", async () => {
+    mockCheckoutSessionsCreate.mockResolvedValue({
+      id: "cs_ledger_1",
+      url: "https://checkout.stripe.com/cs_ledger_1",
+    });
+
+    await expect(buyBook(BOOK_ID, new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockAccountsRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("freezes regime=librum_ledger_v1, currency=ALL, and the current royalty rate on create_book_checkout_intent", async () => {
+    mockCheckoutSessionsCreate.mockResolvedValue({
+      id: "cs_ledger_1",
+      url: "https://checkout.stripe.com/cs_ledger_1",
+    });
+
+    await expect(buyBook(BOOK_ID, new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRpc).toHaveBeenCalledWith("create_book_checkout_intent", {
+      book_id: BOOK_ID,
+      p_discount_code: null,
+      p_regime: "librum_ledger_v1",
+      p_currency: "ALL",
+      p_royalty_rate_bps: 8000,
+    });
+  });
+
+  it("creates a Stripe session with currency 'all', unit_amount in minor units, and no Connect fields", async () => {
+    mockCheckoutSessionsCreate.mockResolvedValue({
+      id: "cs_ledger_1",
+      url: "https://checkout.stripe.com/cs_ledger_1",
+    });
+
+    await expect(buyBook(BOOK_ID, new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockCheckoutSessionsCreate).toHaveBeenCalledTimes(1);
+    const [params] = mockCheckoutSessionsCreate.mock.calls[0] as [
+      { line_items: { price_data: { currency: string; unit_amount: number } }[]; payment_intent_data?: unknown },
+    ];
+    expect(params.line_items[0].price_data.currency).toBe("all");
+    expect(params.line_items[0].price_data.unit_amount).toBe(120000);
+    expect(params.payment_intent_data).toBeUndefined();
+  });
+
+  it("fails closed and never reaches the checkout-intent RPC when STRIPE_SECRET_KEY is not a test key", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_live_abc123";
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(buyBook(BOOK_ID, new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining(`/books/${BOOK_ID}?error=`));
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when STRIPE_SECRET_KEY is unset entirely", async () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(buyBook(BOOK_ID, new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
 });

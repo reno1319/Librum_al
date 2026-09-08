@@ -55,3 +55,29 @@ describe("issueStripeRefund: recovery-session defense-in-depth", () => {
     expect(mockRefundsCreate).not.toHaveBeenCalled();
   });
 });
+
+// STRIPE-CUTOVER-2A Section 24: proves issueStripeRefund's own outcome
+// switch handles the new "ledger_v1_not_supported" case with a
+// development-safe, honest redirect message -- never the generic
+// Stripe-failure wording (Stripe was never called for this outcome).
+describe("issueStripeRefund: ledger_v1_not_supported outcome", () => {
+  const REFUND_REQUEST_ID = "refund-request-1";
+
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockExecuteApprovedRefund.mockReset();
+    mockCookieStore.get.mockImplementation(() => undefined);
+    mockCreateClient.mockResolvedValue({});
+  });
+
+  it("redirects with a ledger_v1-specific message, distinct from the generic Stripe error wording", async () => {
+    mockExecuteApprovedRefund.mockResolvedValue({ kind: "ledger_v1_not_supported" });
+
+    await expect(issueStripeRefund(REFUND_REQUEST_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const redirectedUrl = mockRedirect.mock.calls[0][0] as string;
+    expect(redirectedUrl).toContain(`/admin/refunds/${REFUND_REQUEST_ID}?error=`);
+    expect(decodeURIComponent(redirectedUrl)).toContain("ledger_v1");
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+});

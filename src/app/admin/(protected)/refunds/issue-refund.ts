@@ -299,9 +299,17 @@ export const REFUND_ATTEMPT_INIT_ERROR_MESSAGE =
 // rather than a silently swallowed failure. See the begin/complete/fail
 // RPC call sites in executeApprovedRefund below for the full ordering
 // this protects.
+// STRIPE-CUTOVER-2A Section 24: "ledger_v1_not_supported" -- a refund
+// request whose underlying transaction is a librum_ledger_v1 purchase.
+// Stage 3 owns real regime-aware refund routing; this task only adds the
+// fail-closed guard that PREVENTS the pre-existing Connect-charge refund
+// path below (reverse_transfer/refund_application_fee) from ever running
+// against a ledger_v1 transaction, which was never a Connect destination
+// charge in the first place.
 export type IssueRefundOutcome =
   | { kind: "not_found" }
   | { kind: "not_approved" }
+  | { kind: "ledger_v1_not_supported" }
   | { kind: "stripe_error"; message: string }
   | { kind: "issued"; refund: { id: string; status: string }; auditRecorded: boolean }
   | { kind: "blocked" };
@@ -387,6 +395,57 @@ export async function executeApprovedRefund(
 
   if (request.status !== "approved") {
     return { kind: "not_approved" };
+  }
+
+  // STRIPE-CUTOVER-2A.1 Section 9 CORRECTION: fail-closed BEFORE any
+  // Stripe call -- a librum_ledger_v1 payment was never a Connect
+  // destination charge (Section 7), so the reverse_transfer/
+  // refund_application_fee call below (LAUNCH-1 P1-1/P1-9, written for
+  // the Connect-only legacy world) would apply the WRONG refund
+  // semantics if it ever reached one.
+  //
+  // Queries the IMMUTABLE `payments` table, keyed by
+  // (provider, provider_payment_id) -- migration 056's own locked
+  // authority for a transaction's regime -- never `purchases.regime`.
+  // purchases is a REUSABLE current-entitlement row (STRIPE-CUTOVER-1B.4):
+  // the same purchases row can be refunded under a legacy PAY1 and later
+  // repurchased under a ledger_v1 PAY2 (or vice versa), at which point
+  // purchases.regime reflects only the CURRENT/latest payment, not the
+  // specific historical payment this refund request is actually about.
+  // Checking purchases.regime here would misclassify an old legacy PAY1
+  // refund as ledger_v1 (or the reverse) purely because the row was
+  // later reused -- exactly the class of bug STRIPE-CUTOVER-1B.4/1B.5
+  // moved historical financial truth into payments/author_ledger_entries
+  // to prevent. A legacy Stripe Connect transaction has no payments row
+  // at all (that table is written exclusively by record_successful_sale,
+  // reachable only via the ledger_v1 finalizers) -- zero rows here means
+  // "not ledger_v1," and the legacy refund path below proceeds exactly
+  // as it always has. A read failure also fails closed: there is no safe
+  // basis to proceed without knowing which regime this SPECIFIC payment
+  // actually is.
+  const { data: ledgerPaymentRows, error: regimeCheckError } = await supabase
+    .from("payments")
+    .select("id")
+    .eq("provider", "stripe")
+    .eq("provider_payment_id", request.stripe_payment_intent_id)
+    .eq("regime", "librum_ledger_v1")
+    .limit(1);
+
+  if (regimeCheckError) {
+    console.error("Admin refund issuance: failed to determine the payment's regime -- refusing to guess", {
+      refundRequestId: request.id,
+      paymentIntentId: request.stripe_payment_intent_id,
+      error: regimeCheckError.message,
+    });
+    return { kind: "stripe_error", message: STRIPE_REFUND_ERROR_MESSAGE };
+  }
+
+  if ((ledgerPaymentRows?.length ?? 0) > 0) {
+    console.error(
+      "Admin refund issuance: refund request resolves to a librum_ledger_v1 TEST transaction -- ledger_v1 refunds are not implemented yet (Stage 3), refusing to apply Connect reverse_transfer/refund_application_fee semantics",
+      { refundRequestId: request.id, paymentIntentId: request.stripe_payment_intent_id },
+    );
+    return { kind: "ledger_v1_not_supported" };
   }
 
   let plan: RefundAttemptPlan;

@@ -40,16 +40,52 @@ function defaultRpcImpl(name: string): Promise<RpcResult> {
   return Promise.resolve({ data: null, error: null });
 }
 
-function makeFakeSupabase(row: Row, rpcImpl: RpcImpl = defaultRpcImpl) {
+// STRIPE-CUTOVER-2A.1 Section 9 CORRECTION: executeApprovedRefund now
+// makes a SECOND real Supabase read against the IMMUTABLE `payments`
+// table (keyed by provider + provider_payment_id, migration 056's own
+// locked regime authority) -- NOT `purchases.regime` (a reusable
+// current-entitlement column that can misclassify an old payment after
+// the same purchases row is later reused by a different-regime
+// repurchase) -- to fail closed on a librum_ledger_v1 PAYMENT, before
+// ever reaching Stripe. `ledgerPaymentRows` seeds what that read sees --
+// defaults to an empty array (no ledger_v1 payment found for this
+// provider_payment_id), which is the "not ledger_v1, proceed exactly as
+// before" case every PRE-EXISTING test below relies on implicitly.
+// `ledgerPaymentError`, when set, makes that read itself fail
+// (simulating a DB read failure at the guard stage). The real query
+// chains THREE .eq() calls (provider, provider_payment_id, regime)
+// before .limit(1) -- this fake's chain shape mirrors that exactly.
+function makeFakeSupabase(
+  row: Row,
+  rpcImpl: RpcImpl = defaultRpcImpl,
+  ledgerPaymentRows: Row[] = [],
+  ledgerPaymentError: { message: string } | null = null,
+) {
   const rpc = vi.fn((name: string, params: Record<string, unknown>) => rpcImpl(name, params));
   return {
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          maybeSingle: () => Promise.resolve({ data: row, error: null }),
+    from: (table: string) => {
+      if (table === "payments") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  limit: () =>
+                    Promise.resolve({ data: ledgerPaymentError ? null : ledgerPaymentRows, error: ledgerPaymentError }),
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: () => Promise.resolve({ data: row, error: null }),
+          }),
         }),
-      }),
-    }),
+      };
+    },
     rpc,
   };
 }
@@ -401,6 +437,122 @@ describe("executeApprovedRefund", () => {
     expect(stripe.refunds.create).not.toHaveBeenCalled();
     expect(stripe.refunds.list).not.toHaveBeenCalled();
     expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  // STRIPE-CUTOVER-2A.1 Section 9/10/11: the ledger_v1 fail-closed
+  // guard -- must run BEFORE any Stripe call (including the pre-flight
+  // refunds.list()), since a librum_ledger_v1 PAYMENT was never a
+  // Connect destination charge and applying reverse_transfer/
+  // refund_application_fee to it would be the wrong semantics entirely.
+  // Uses the IMMUTABLE `payments` table (provider + provider_payment_id
+  // + regime), never the reusable `purchases.regime` column -- see
+  // makeFakeSupabase's own comment above for the full correction
+  // rationale and the exact chain shape this exercises.
+  describe("ledger_v1 fail-closed guard (immutable payments-table regime authority)", () => {
+    it("an approved request resolving to a librum_ledger_v1 payment: returns ledger_v1_not_supported, never calls Stripe", async () => {
+      const supabase = makeFakeSupabase(
+        { id: REQUEST_ID, status: "approved", stripe_payment_intent_id: PAYMENT_INTENT_ID },
+        defaultRpcImpl,
+        [{ id: "payment-ledger-1" }],
+      );
+      const stripe = makeFakeStripe();
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const outcome = await executeApprovedRefund(supabase as never, stripe as never, REQUEST_ID);
+
+      expect(outcome).toEqual({ kind: "ledger_v1_not_supported" });
+      expect(stripe.refunds.list).not.toHaveBeenCalled();
+      expect(stripe.refunds.create).not.toHaveBeenCalled();
+      expect(supabase.rpc).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
+    it("an approved request resolving to a legacy_stripe_connect_v1 transaction (no payments row at all): proceeds exactly as before", async () => {
+      const supabase = makeFakeSupabase(
+        { id: REQUEST_ID, status: "approved", stripe_payment_intent_id: PAYMENT_INTENT_ID },
+        defaultRpcImpl,
+        [], // no payments row for this provider_payment_id -- legacy transactions never have one
+      );
+      const stripe = makeFakeStripe();
+
+      const outcome = await executeApprovedRefund(supabase as never, stripe as never, REQUEST_ID);
+
+      expect(outcome.kind).toBe("issued");
+      expect(stripe.refunds.create).toHaveBeenCalledWith(
+        expect.objectContaining({ reverse_transfer: true, refund_application_fee: true }),
+        expect.anything(),
+      );
+    });
+
+    it("a failure reading the payments table for the regime check: fails closed with stripe_error, never calls Stripe, never falls back to purchases.regime", async () => {
+      const supabase = makeFakeSupabase(
+        { id: REQUEST_ID, status: "approved", stripe_payment_intent_id: PAYMENT_INTENT_ID },
+        defaultRpcImpl,
+        [],
+        { message: "connection reset" },
+      );
+      const stripe = makeFakeStripe();
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const outcome = await executeApprovedRefund(supabase as never, stripe as never, REQUEST_ID);
+
+      expect(outcome).toEqual({ kind: "stripe_error", message: STRIPE_REFUND_ERROR_MESSAGE });
+      expect(stripe.refunds.create).not.toHaveBeenCalled();
+      expect(supabase.rpc).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
+    // STRIPE-CUTOVER-2A.1 Section 11: the repurchase pressure test.
+    // purchases is a REUSABLE current-entitlement row -- the same row
+    // can be refunded under a legacy PAY1 and later repurchased under a
+    // ledger_v1 PAY2. A refund request for PAY1 (an OLD payment intent,
+    // no longer the purchases row's current one) must still classify as
+    // legacy: the guard never reads purchases.regime (which would now
+    // say librum_ledger_v1, the CURRENT entitlement's payment) -- it
+    // looks up PAY1's own provider_payment_id in `payments` directly,
+    // which correctly finds nothing (PAY1 was never a ledger_v1 payment)
+    // regardless of what the shared purchases row's regime says today.
+    it("old legacy PAY1 refund request is classified by PAY1's OWN payments-table lookup, never by the purchases row's later-reused (now librum_ledger_v1) regime", async () => {
+      const PAY1_INTENT_ID = "pi_legacy_pay1";
+      const supabase = makeFakeSupabase(
+        { id: "refund-request-pay1", status: "approved", stripe_payment_intent_id: PAY1_INTENT_ID },
+        defaultRpcImpl,
+        // The payments-table lookup is scoped to PAY1's own
+        // provider_payment_id -- this fake ignores the queried id and
+        // always returns what's configured, but the real query's WHERE
+        // clause (provider_payment_id = PAY1_INTENT_ID) is exactly what
+        // makes this correct in production: PAY1 never has a matching
+        // librum_ledger_v1 payments row, even though the purchases row
+        // it originally funded was later reused by a ledger_v1 PAY2.
+        [],
+      );
+      const stripe = makeFakeStripe();
+
+      const outcome = await executeApprovedRefund(supabase as never, stripe as never, "refund-request-pay1");
+
+      expect(outcome.kind).toBe("issued");
+      expect(stripe.refunds.create).toHaveBeenCalledWith(
+        expect.objectContaining({ reverse_transfer: true, refund_application_fee: true }),
+        expect.anything(),
+      );
+    });
+
+    it("new ledger_v1 PAY2 refund request (the current entitlement's payment) is blocked as ledger_v1-not-supported", async () => {
+      const PAY2_INTENT_ID = "pi_ledger_pay2";
+      const supabase = makeFakeSupabase(
+        { id: "refund-request-pay2", status: "approved", stripe_payment_intent_id: PAY2_INTENT_ID },
+        defaultRpcImpl,
+        [{ id: "payment-ledger-pay2" }],
+      );
+      const stripe = makeFakeStripe();
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const outcome = await executeApprovedRefund(supabase as never, stripe as never, "refund-request-pay2");
+
+      expect(outcome).toEqual({ kind: "ledger_v1_not_supported" });
+      expect(stripe.refunds.create).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
   });
 
   it("rejects every non-approved status the same way, never calling Stripe", async () => {

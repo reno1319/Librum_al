@@ -8,6 +8,11 @@ import {
   sendBundlePurchaseEmails,
   sendSnapshotBundlePurchaseEmails,
 } from "@/lib/email";
+import { isStripeEventTestMode } from "@/lib/checkout-regime";
+import {
+  retrieveStripeLedgerPaymentFacts,
+  type StripePaymentIntentRetrieveClient,
+} from "@/lib/stripe-ledger-facts";
 
 // Stripe's own type for both Checkout.Session.payment_intent and
 // Charge.payment_intent is `string | Stripe.PaymentIntent | null` --
@@ -762,6 +767,216 @@ export async function fulfillBundleSnapshot(
   return null;
 }
 
+// STRIPE-CUTOVER-2A Section 12: bundle equivalent of
+// fulfillBookCheckoutByRegime above -- reads bundle_checkout_snapshots'
+// OWN frozen regime before choosing a finalizer.
+export async function fulfillBundleCheckoutByRegime(
+  supabase: ReturnType<typeof createAdminClient>,
+  stripeClient: StripePaymentIntentRetrieveClient,
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+  snapshotId: string,
+  paymentIntentId: string | null,
+  amountCents: number,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  const { data: snapshotRow, error: regimeError } = await supabase
+    .from("bundle_checkout_snapshots")
+    .select("regime")
+    .eq("id", snapshotId)
+    .maybeSingle<{ regime: string }>();
+
+  if (regimeError || !snapshotRow) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason: "could not resolve checkout snapshot regime",
+      error: regimeError,
+    });
+  }
+
+  if (snapshotRow.regime === "librum_ledger_v1") {
+    return fulfillLedgerBundlePayment(
+      supabase,
+      stripeClient,
+      event,
+      session,
+      snapshotId,
+      paymentIntentId,
+      amountCents,
+      failWebhook,
+    );
+  }
+
+  return fulfillBundleSnapshot(supabase, event, session, snapshotId, paymentIntentId, amountCents, failWebhook);
+}
+
+// STRIPE-CUTOVER-2A Section 16: the librum_ledger_v1 TEST-mode bundle
+// finalizer. Deliberately does NOT run fulfillBundleSnapshot's
+// classification/allocation/purchases-upsert TypeScript logic at all --
+// migration 056's finalize_ledger_bundle_payment owns every entitlement,
+// the payment, all sale ledger entries, and event disposition, together,
+// in one DB transaction, using the snapshot's own frozen items/prices.
+export async function fulfillLedgerBundlePayment(
+  supabase: ReturnType<typeof createAdminClient>,
+  stripeClient: StripePaymentIntentRetrieveClient,
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+  snapshotId: string,
+  paymentIntentId: string | null,
+  amountCents: number,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  // Section 4/25 -- identical reasoning to fulfillLedgerBookPayment's own
+  // livemode guard above.
+  if (!isStripeEventTestMode(event)) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason:
+        "CRITICAL: a LIVE-mode event reached the librum_ledger_v1 bundle finalizer -- ledger_v1 has no dispute accounting and must never process real commerce",
+    });
+  }
+
+  if (!paymentIntentId) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      snapshotId,
+      reason: "librum_ledger_v1 bundle checkout completed with no usable Stripe payment intent id",
+    });
+  }
+
+  // STRIPE-CUTOVER-2A.1 Sections 2-7: identical reasoning/behavior to
+  // fulfillLedgerBookPayment's own success-proof gate above -- see that
+  // function's comment for the full rationale. No event is recorded, no
+  // finalizer is called, if genuine payment success cannot be proven.
+  let facts: Awaited<ReturnType<typeof retrieveStripeLedgerPaymentFacts>>;
+  try {
+    facts = await retrieveStripeLedgerPaymentFacts(stripeClient, paymentIntentId);
+  } catch (error) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason: "failed to retrieve Stripe payment facts",
+      error,
+    });
+  }
+
+  if (!facts.ok) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason: `payment success not proven: ${facts.reason}`,
+    });
+  }
+
+  const { data: eventRows, error: eventError } = await supabase.rpc("record_payment_event", {
+    p_provider: "stripe",
+    p_provider_event_id: event.id,
+    p_event_type: event.type,
+    p_provider_payment_id: paymentIntentId,
+  });
+
+  if (eventError) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason: "record_payment_event failed",
+      error: eventError,
+    });
+  }
+
+  const eventRow = (eventRows as { id: string }[] | null)?.[0];
+  if (!eventRow?.id) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason: "record_payment_event returned no row",
+    });
+  }
+
+  const { data: finalizeRows, error: finalizeError } = await supabase.rpc(
+    "finalize_ledger_bundle_payment",
+    {
+      p_payment_event_id: eventRow.id,
+      p_snapshot_id: snapshotId,
+      p_provider: "stripe",
+      p_provider_payment_id: paymentIntentId,
+      p_actual_amount_minor: facts.actualAmountMinor,
+      p_actual_currency: facts.actualCurrency,
+      p_paid_at: facts.paidAt.toISOString(),
+    },
+  );
+
+  if (finalizeError) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason: "finalize_ledger_bundle_payment failed",
+      error: finalizeError,
+    });
+  }
+
+  const result = (
+    finalizeRows as
+      | {
+          outcome: string;
+          out_reader_id: string | null;
+          out_author_id: string | null;
+          out_book_ids: string[] | null;
+        }[]
+      | null
+  )?.[0];
+
+  if (!result) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      snapshotId,
+      reason: "finalize_ledger_bundle_payment returned no row",
+    });
+  }
+
+  if (result.outcome === "eligible_fulfilled") {
+    // TEST-mode development scope: no purchase email is sent -- see the
+    // identical note in fulfillLedgerBookPayment above.
+    return null;
+  }
+
+  if (result.outcome === "blocked_disputed_lost") {
+    console.error(
+      "Stripe webhook: librum_ledger_v1 bundle checkout paid but blocked by an already-lost dispute -- needs manual reconciliation",
+      { eventId: event.id, checkoutSessionId: session.id, paymentIntentId, snapshotId },
+    );
+    return null;
+  }
+
+  return failWebhook({
+    eventId: event.id,
+    checkoutSessionId: session.id,
+    paymentIntentId,
+    snapshotId,
+    reason: "finalize_ledger_bundle_payment returned an unrecognized outcome",
+    outcome: result.outcome,
+  });
+}
+
 // Fulfills a LEGACY-shape bundle checkout (metadata.bundle_id +
 // metadata.reader_id, no snapshot_id) -- the pre-migration-025 checkout
 // shape, kept only for as long as any Checkout Session created before
@@ -1176,6 +1391,267 @@ export async function fulfillSingleBookPurchase(
   // 'already_finalized' -- a duplicate delivery of an event already
   // settled by an earlier call. Complete no-op.
   return null;
+}
+
+// STRIPE-CUTOVER-2A Section 12: reads the checkout intent's OWN FROZEN
+// regime (migration 056) BEFORE deciding which finalizer to run --
+// never guessed from env, webhook arrival time, presence/absence of
+// Connect fields, or purchases.payment_id. A row-read failure fails the
+// webhook (retryable) rather than falling through to either finalizer on
+// an unproven regime -- guessing wrong here has real financial
+// consequences.
+export async function fulfillBookCheckoutByRegime(
+  supabase: ReturnType<typeof createAdminClient>,
+  stripeClient: StripePaymentIntentRetrieveClient,
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+  intentId: string,
+  paymentIntentId: string | null,
+  amountCents: number,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  const { data: intentRow, error: regimeError } = await supabase
+    .from("book_checkout_intents")
+    .select("regime")
+    .eq("id", intentId)
+    .maybeSingle<{ regime: string }>();
+
+  if (regimeError || !intentRow) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      reason: "could not resolve checkout intent regime",
+      error: regimeError,
+    });
+  }
+
+  if (intentRow.regime === "librum_ledger_v1") {
+    return fulfillLedgerBookPayment(
+      supabase,
+      stripeClient,
+      event,
+      session,
+      intentId,
+      paymentIntentId,
+      amountCents,
+      failWebhook,
+    );
+  }
+
+  return fulfillSingleBookPurchase(supabase, event, session, intentId, paymentIntentId, amountCents, failWebhook);
+}
+
+// STRIPE-CUTOVER-2A Sections 13-15: the librum_ledger_v1 TEST-mode
+// single-book finalizer. Deliberately does NOT call
+// finalize_book_checkout_intent (the legacy RPC) at all -- migration
+// 056's finalize_ledger_book_payment owns entitlement, payment, ledger,
+// and event disposition together, in one DB transaction. This function's
+// only job is: prove test-mode safety, extract provider-owned facts
+// (never Librum-expected values), ingest the payment event, then call
+// the atomic wrapper.
+export async function fulfillLedgerBookPayment(
+  supabase: ReturnType<typeof createAdminClient>,
+  stripeClient: StripePaymentIntentRetrieveClient,
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+  intentId: string,
+  paymentIntentId: string | null,
+  amountCents: number,
+  failWebhook: (context: Record<string, unknown>) => NextResponse,
+): Promise<NextResponse | null> {
+  // Section 4/25: the second, independent test-mode proof, reachable
+  // only here -- event.livemode is part of the SIGNED payload Stripe
+  // already verified (POST()'s own signature check runs before this is
+  // ever reached). A LIVE event reaching this branch would mean real
+  // money almost entered a path with no dispute-accounting
+  // implementation (Section 25's hard blocker) -- this must never be
+  // silently processed, so it fails the webhook loudly (500, repeatedly
+  // retried, impossible to miss in logs) rather than either finalizing
+  // it or silently swallowing it as a 200.
+  if (!isStripeEventTestMode(event)) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      reason:
+        "CRITICAL: a LIVE-mode event reached the librum_ledger_v1 finalizer -- ledger_v1 has no dispute accounting and must never process real commerce",
+    });
+  }
+
+  if (!paymentIntentId) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      intentId,
+      reason: "librum_ledger_v1 checkout completed with no usable Stripe payment intent id",
+    });
+  }
+
+  // STRIPE-CUTOVER-2A.1 Sections 2-7: genuine, provider-confirmed proof
+  // of payment success -- checkout.session.completed firing is NOT
+  // sufficient proof on its own (it fires even for delayed/asynchronous
+  // payment methods while payment_status is still 'unpaid'). This call
+  // verifies PaymentIntent.status === 'succeeded' and (when a charge is
+  // attached) that the charge is itself successful and paid, BEFORE this
+  // function does anything else -- no event is recorded, no finalizer is
+  // called, no fallback to legacy, if success cannot be proven. A
+  // retrieval failure (network error) and a verified-but-not-successful
+  // payment are both treated the same way here: fail the webhook so
+  // Stripe retries once the true, final outcome is known.
+  let facts: Awaited<ReturnType<typeof retrieveStripeLedgerPaymentFacts>>;
+  try {
+    facts = await retrieveStripeLedgerPaymentFacts(stripeClient, paymentIntentId);
+  } catch (error) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      reason: "failed to retrieve Stripe payment facts",
+      error,
+    });
+  }
+
+  if (!facts.ok) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      reason: `payment success not proven: ${facts.reason}`,
+    });
+  }
+
+  // Section 14, Transaction 1: durable event ingestion, independent of
+  // whatever finalization does next -- a received event that fails
+  // finalization below remains retryable exactly because this row
+  // already exists. Only reached once payment success is genuinely
+  // proven above.
+  const { data: eventRows, error: eventError } = await supabase.rpc("record_payment_event", {
+    p_provider: "stripe",
+    p_provider_event_id: event.id,
+    p_event_type: event.type,
+    p_provider_payment_id: paymentIntentId,
+  });
+
+  if (eventError) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      reason: "record_payment_event failed",
+      error: eventError,
+    });
+  }
+
+  const eventRow = (eventRows as { id: string }[] | null)?.[0];
+  if (!eventRow?.id) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      reason: "record_payment_event returned no row",
+    });
+  }
+
+  // Section 15: the atomic ledger wrapper. Deliberately does NOT pass
+  // author_id, expected amount, expected currency, royalty rate,
+  // available_at, or regime -- the DB wrapper derives every one of those
+  // from the trusted, already-frozen book_checkout_intents row.
+  // p_actual_amount_minor/p_actual_currency/p_paid_at are the provider-
+  // CONFIRMED facts from the successful Charge/PaymentIntent above --
+  // never amountCents/session.currency (which merely describe what the
+  // Checkout Session asked for, not what was actually captured).
+  const { data: finalizeRows, error: finalizeError } = await supabase.rpc(
+    "finalize_ledger_book_payment",
+    {
+      p_payment_event_id: eventRow.id,
+      p_intent_id: intentId,
+      p_provider: "stripe",
+      p_provider_payment_id: paymentIntentId,
+      p_actual_amount_minor: facts.actualAmountMinor,
+      p_actual_currency: facts.actualCurrency,
+      p_paid_at: facts.paidAt.toISOString(),
+    },
+  );
+
+  if (finalizeError) {
+    // Section 15: a hard amount/currency mismatch (or any other DB-level
+    // rejection) is treated as a reconciliation/error condition -- never
+    // a silent fallback to the legacy path, which was already ruled out
+    // by the regime read in fulfillBookCheckoutByRegime above.
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      reason: "finalize_ledger_book_payment failed",
+      error: finalizeError,
+    });
+  }
+
+  const result = (
+    finalizeRows as
+      | {
+          outcome: string;
+          out_book_id: string | null;
+          out_reader_id: string | null;
+          out_author_id: string | null;
+        }[]
+      | null
+  )?.[0];
+
+  if (!result) {
+    return failWebhook({
+      eventId: event.id,
+      checkoutSessionId: session.id,
+      paymentIntentId,
+      intentId,
+      reason: "finalize_ledger_book_payment returned no row",
+    });
+  }
+
+  if (result.outcome === "eligible_fulfilled" || result.outcome === "already_finalized") {
+    // TEST-mode development scope: no purchase email is sent for a
+    // ledger_v1 test transaction (Section 39's own scope note) --
+    // sendPurchaseEmails' template is USD-formatted and would misrepresent
+    // an ALL amount; regime-aware email templates are deferred to a later
+    // stage. Idempotent no-op on 'already_finalized', matching the
+    // legacy path's own posture (no duplicate email on a retried event).
+    return null;
+  }
+
+  if (
+    result.outcome === "active_other_session" ||
+    result.outcome === "blocked_book_or_reader_deleted" ||
+    result.outcome === "blocked_disputed_lost"
+  ) {
+    console.error(
+      "Stripe webhook: librum_ledger_v1 checkout paid but not fulfilled -- needs manual reconciliation",
+      {
+        eventId: event.id,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        intentId,
+        outcome: result.outcome,
+      },
+    );
+    return null;
+  }
+
+  return failWebhook({
+    eventId: event.id,
+    checkoutSessionId: session.id,
+    paymentIntentId,
+    intentId,
+    reason: "finalize_ledger_book_payment returned an unrecognized outcome",
+    outcome: result.outcome,
+  });
 }
 
 // Fulfills a Stripe-confirmed FULL refund (charge.refunded) against
@@ -2550,9 +3026,14 @@ export async function POST(request: Request) {
     // could still be open -- see the Phase 9B-2 rollout plan for when
     // that legacy branch can eventually be removed.
     if (snapshotId) {
+      // STRIPE-CUTOVER-2A Section 12: fulfillBundleCheckoutByRegime reads
+      // the snapshot's own frozen regime and routes to fulfillBundleSnapshot
+      // (legacy, unchanged) or fulfillLedgerBundlePayment (Section 16) --
+      // POST() itself never decides this.
       const supabase = createAdminClient();
-      const failureResponse = await fulfillBundleSnapshot(
+      const failureResponse = await fulfillBundleCheckoutByRegime(
         supabase,
+        stripe,
         event,
         session,
         snapshotId,
@@ -2564,6 +3045,8 @@ export async function POST(request: Request) {
         return failureResponse;
       }
     } else if (bundleId && readerId) {
+      // Pre-migration-025 legacy shape -- predates the regime concept
+      // entirely, exclusively legacy_stripe_connect_v1, unchanged.
       const supabase = createAdminClient();
       const failureResponse = await fulfillLegacyBundle(
         supabase,
@@ -2579,9 +3062,14 @@ export async function POST(request: Request) {
         return failureResponse;
       }
     } else if (intentId) {
+      // STRIPE-CUTOVER-2A Section 12: fulfillBookCheckoutByRegime reads
+      // the intent's own frozen regime and routes to
+      // fulfillSingleBookPurchase (legacy, unchanged) or
+      // fulfillLedgerBookPayment (Sections 13-15).
       const supabase = createAdminClient();
-      const failureResponse = await fulfillSingleBookPurchase(
+      const failureResponse = await fulfillBookCheckoutByRegime(
         supabase,
+        stripe,
         event,
         session,
         intentId,

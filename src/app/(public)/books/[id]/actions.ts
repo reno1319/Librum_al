@@ -7,15 +7,20 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
-import { platformFeeCents } from "@/lib/pricing";
+import { AUTHOR_ROYALTY_RATE_BPS } from "@/lib/pricing";
 import { REPORT_REASONS } from "@/lib/report-reasons";
-import { toStripeExpiresAtSeconds } from "./checkout-logic";
+import {
+  toStripeExpiresAtSeconds,
+  buildLegacyBookCheckoutSessionParams,
+  buildLedgerBookCheckoutSessionParams,
+} from "./checkout-logic";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import {
   checkConnectedAccountReadyForCheckout,
   BOOK_CHECKOUT_UNAVAILABLE_MESSAGE,
 } from "@/lib/connect-account";
+import { resolveCheckoutRegime, isStripeSecretKeyTestMode } from "@/lib/checkout-regime";
 import type { DiscountCode } from "@/lib/types";
 
 type BookForCheckout = {
@@ -74,31 +79,65 @@ export async function buyBook(bookId: string, formData: FormData) {
     redirect(`/books/${bookId}?error=This+book+is+free+-+use+the+free+download+option+instead`);
   }
 
-  const authorAccount = book.profiles?.stripe_account_id;
-  if (!authorAccount) {
-    redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
-  }
+  // STRIPE-CUTOVER-2A Section 3: the ONLY point that decides this
+  // checkout's regime -- server-only, never overridable by request
+  // input. Once create_book_checkout_intent below actually mints a
+  // fresh row, ITS OWN frozen regime column (migration 056) is
+  // authoritative forever, independent of whatever this env var says on
+  // any later request.
+  const regime = resolveCheckoutRegime(process.env.NEW_CHECKOUT_REGIME);
 
-  // LIBRUM 2.0 CONNECT-HARDEN-1: never trust profiles.stripe_payouts_enabled
-  // alone -- it's a webhook-synchronized cache (see
-  // processAccountUpdatedEvent in the Stripe webhook route), not a live
-  // guarantee. A stored account id that's stale, wrong-platform, or
-  // wrong-mode must be caught HERE, before any checkout intent is minted
-  // or Stripe is ever asked to use it as a transfer destination -- this
-  // is the direct fix for the production incident where Stripe rejected
-  // checkout with "No such destination" for exactly this reason. The
-  // real Stripe/DB reason is logged server-side only; the reader only
-  // ever sees the same generic, pre-existing unavailability message.
-  const accountCheck = await checkConnectedAccountReadyForCheckout(stripe, authorAccount);
-  if (!accountCheck.ok) {
-    console.error("buyBook: author's connected Stripe account is not ready for checkout", {
-      bookId,
-      authorId: book.author_id,
-      readerId: user.id,
-      reason: accountCheck.reason,
-      detail: accountCheck.detail,
-    });
-    redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+  // legacy_stripe_connect_v1 has a Stripe Connect account dependency;
+  // librum_ledger_v1 (TEST-mode only, Section 6/7) deliberately does
+  // not -- it never sends transfer_data.destination/application_fee_amount,
+  // so requiring the author to have a working Connect account here would
+  // needlessly block exactly the authors ledger_v1 exists to eventually
+  // serve. authorAccount therefore only needs to be resolved, and only
+  // needs to be READY, on the legacy path.
+  let authorAccount: string | null = null;
+
+  if (regime === "legacy_stripe_connect_v1") {
+    authorAccount = book.profiles?.stripe_account_id ?? null;
+    if (!authorAccount) {
+      redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+    }
+
+    // LIBRUM 2.0 CONNECT-HARDEN-1: never trust profiles.stripe_payouts_enabled
+    // alone -- it's a webhook-synchronized cache (see
+    // processAccountUpdatedEvent in the Stripe webhook route), not a live
+    // guarantee. A stored account id that's stale, wrong-platform, or
+    // wrong-mode must be caught HERE, before any checkout intent is minted
+    // or Stripe is ever asked to use it as a transfer destination -- this
+    // is the direct fix for the production incident where Stripe rejected
+    // checkout with "No such destination" for exactly this reason. The
+    // real Stripe/DB reason is logged server-side only; the reader only
+    // ever sees the same generic, pre-existing unavailability message.
+    const accountCheck = await checkConnectedAccountReadyForCheckout(stripe, authorAccount);
+    if (!accountCheck.ok) {
+      console.error("buyBook: author's connected Stripe account is not ready for checkout", {
+        bookId,
+        authorId: book.author_id,
+        readerId: user.id,
+        reason: accountCheck.reason,
+        detail: accountCheck.detail,
+      });
+      redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+    }
+  } else {
+    // STRIPE-CUTOVER-2A Section 4: TEST-mode safety -- ledger_v1 must
+    // never silently create real commerce. The smallest robust,
+    // non-client-trusting proof available at THIS stage is the
+    // platform's own configured Stripe secret key. Fails closed (the
+    // same generic, no-internal-detail message every other checkout
+    // failure in this function already uses) rather than proceeding on
+    // an unverifiable assumption.
+    if (!isStripeSecretKeyTestMode(process.env.STRIPE_SECRET_KEY)) {
+      console.error(
+        "buyBook: refusing to create a librum_ledger_v1 checkout -- Stripe is not configured in test mode",
+        { bookId, readerId: user.id },
+      );
+      redirect(`/books/${bookId}?error=Could+not+start+checkout`);
+    }
   }
 
   // Cheap, non-authoritative early check for a friendlier redirect --
@@ -150,14 +189,32 @@ export async function buyBook(bookId: string, formData: FormData) {
   // The sole source of truth for what Stripe actually charges from this
   // point forward -- price, the resolved discount, and this attempt's
   // own durable identity are all frozen atomically by this one call
-  // (migration 032's create_book_checkout_intent). Never trusts
-  // book.price_cents or the discount lookup above for the actual charge
-  // -- both are re-derived server-side inside the RPC, which is directly
-  // callable by any authenticated client and so can never trust a
-  // caller-supplied price.
+  // (migration 032's create_book_checkout_intent, evolved by migration
+  // 056). Never trusts book.price_cents or the discount lookup above for
+  // the actual charge -- both are re-derived server-side inside the RPC,
+  // which is directly callable by any authenticated client and so can
+  // never trust a caller-supplied price.
+  //
+  // STRIPE-CUTOVER-2A Section 5: for regime=librum_ledger_v1, currency
+  // and royalty_rate_bps are frozen HERE, on this exact call -- ALL
+  // (Section 8, no FX) and AUTHOR_ROYALTY_RATE_BPS (Section 22, the
+  // current platform rate snapshotted ONCE, never recomputed later at
+  // webhook/finalization time). For the legacy default these three
+  // trailing params are omitted entirely -- create_book_checkout_intent
+  // takes their DB-side defaults (legacy_stripe_connect_v1/USD/null),
+  // identical to this call's pre-2A shape, so legacy checkout economics
+  // are unchanged.
   const { data: intentRows, error: intentError } = await supabase.rpc(
     "create_book_checkout_intent",
-    { book_id: bookId, p_discount_code: rawCode || null },
+    regime === "librum_ledger_v1"
+      ? {
+          book_id: bookId,
+          p_discount_code: rawCode || null,
+          p_regime: "librum_ledger_v1",
+          p_currency: "ALL",
+          p_royalty_rate_bps: AUTHOR_ROYALTY_RATE_BPS,
+        }
+      : { book_id: bookId, p_discount_code: rawCode || null },
   );
 
   const intent = (intentRows as CheckoutIntentResult[] | null)?.[0];
@@ -195,38 +252,47 @@ export async function buyBook(bookId: string, formData: FormData) {
 
   const origin = resolveSiteOrigin();
 
+  // Aligned with the intent's own expires_at (Math.floor, never
+  // Math.round -- see toStripeExpiresAtSeconds) so Stripe can never hold
+  // this session payable past the moment the database has already
+  // stopped reusing this intent for a fresh attempt. Shared by both
+  // regimes -- this expiry mechanism has nothing to do with payment
+  // economics.
+  const expiresAtSeconds = toStripeExpiresAtSeconds(intent.expires_at);
+
+  // STRIPE-CUTOVER-2A Section 6/7: the legacy branch's params are
+  // byte-identical to the pre-2A inline object (now built by
+  // buildLegacyBookCheckoutSessionParams) -- Connect destination
+  // transfer and application fee, USD. The ledger branch
+  // (buildLedgerBookCheckoutSessionParams) has neither -- no
+  // transfer_data.destination, no application_fee_amount, currency
+  // "all", amount used directly as internal minor units. `authorAccount`
+  // is guaranteed non-null here whenever regime is legacy (redirected
+  // above otherwise); the ledger branch never reads it at all.
+  const sessionParams =
+    regime === "librum_ledger_v1"
+      ? buildLedgerBookCheckoutSessionParams({
+          bookId,
+          bookTitle: book.title,
+          priceMinorUnitsAtCheckout: intent.price_cents_at_checkout,
+          expiresAtSeconds,
+          origin,
+          intentId: intent.intent_id,
+        })
+      : buildLegacyBookCheckoutSessionParams({
+          bookId,
+          bookTitle: book.title,
+          priceCentsAtCheckout: intent.price_cents_at_checkout,
+          authorStripeAccountId: authorAccount as string,
+          expiresAtSeconds,
+          origin,
+          intentId: intent.intent_id,
+        });
+
   let session: Stripe.Checkout.Session;
   try {
     session = await stripe.checkout.sessions.create(
-      {
-        mode: "payment",
-        line_items: [
-          {
-            price_data: {
-              currency: "usd",
-              product_data: { name: book.title },
-              unit_amount: intent.price_cents_at_checkout,
-            },
-            quantity: 1,
-          },
-        ],
-        payment_intent_data: {
-          application_fee_amount: platformFeeCents(intent.price_cents_at_checkout),
-          transfer_data: {
-            destination: authorAccount,
-          },
-        },
-        // Aligned with the intent's own expires_at (Math.floor, never
-        // Math.round -- see toStripeExpiresAtSeconds) so Stripe can never
-        // hold this session payable past the moment the database has
-        // already stopped reusing this intent for a fresh attempt.
-        expires_at: toStripeExpiresAtSeconds(intent.expires_at),
-        success_url: `${origin}/books/${bookId}?purchase=success`,
-        cancel_url: `${origin}/books/${bookId}?purchase=cancelled`,
-        metadata: {
-          intent_id: intent.intent_id,
-        },
-      },
+      sessionParams,
       {
         // Deterministic, not random: retrying this exact intent's
         // checkout-creation request (e.g. after an ambiguous network

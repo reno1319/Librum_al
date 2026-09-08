@@ -4,13 +4,18 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
-import { platformFeeCents } from "@/lib/pricing";
+import { AUTHOR_ROYALTY_RATE_BPS } from "@/lib/pricing";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import {
   checkConnectedAccountReadyForCheckout,
   BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE,
 } from "@/lib/connect-account";
+import { resolveCheckoutRegime, isStripeSecretKeyTestMode } from "@/lib/checkout-regime";
+import {
+  buildLegacyBundleCheckoutSessionParams,
+  buildLedgerBundleCheckoutSessionParams,
+} from "./checkout-logic";
 import {
   classifyLinkBackResult,
   shouldExposeStripeCheckoutSession,
@@ -67,26 +72,50 @@ export async function buyBundle(bundleId: string) {
     redirect(`/bundles/${bundleId}`);
   }
 
-  const authorAccount = bundle.profiles?.stripe_account_id;
-  if (!authorAccount) {
-    redirect(`/bundles/${bundleId}?error=${encodeURIComponent(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
-  }
+  // STRIPE-CUTOVER-2A Section 3: the ONLY point that decides this
+  // checkout's regime -- server-only, never overridable by request
+  // input. Once create_bundle_checkout_snapshot below actually mints a
+  // fresh row, ITS OWN frozen regime column (migration 056) is
+  // authoritative forever.
+  const regime = resolveCheckoutRegime(process.env.NEW_CHECKOUT_REGIME);
 
-  // LIBRUM 2.0 CONNECT-HARDEN-1: same live re-verification buyBook now
-  // performs -- never trust profiles.stripe_payouts_enabled alone (a
-  // webhook-synchronized cache, not a live guarantee). Runs before any
-  // checkout snapshot is minted or Stripe is asked to use this account as
-  // a transfer destination. Real reason logged server-side only.
-  const accountCheck = await checkConnectedAccountReadyForCheckout(stripe, authorAccount);
-  if (!accountCheck.ok) {
-    console.error("buyBundle: author's connected Stripe account is not ready for checkout", {
-      bundleId,
-      authorId: bundle.author_id,
-      readerId: user.id,
-      reason: accountCheck.reason,
-      detail: accountCheck.detail,
-    });
-    redirect(`/bundles/${bundleId}?error=${encodeURIComponent(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+  // legacy_stripe_connect_v1 has a Stripe Connect account dependency;
+  // librum_ledger_v1 (TEST-mode only) deliberately does not -- see the
+  // identical reasoning in buyBook (src/app/(public)/books/[id]/actions.ts).
+  let authorAccount: string | null = null;
+
+  if (regime === "legacy_stripe_connect_v1") {
+    authorAccount = bundle.profiles?.stripe_account_id ?? null;
+    if (!authorAccount) {
+      redirect(`/bundles/${bundleId}?error=${encodeURIComponent(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+    }
+
+    // LIBRUM 2.0 CONNECT-HARDEN-1: same live re-verification buyBook now
+    // performs -- never trust profiles.stripe_payouts_enabled alone (a
+    // webhook-synchronized cache, not a live guarantee). Runs before any
+    // checkout snapshot is minted or Stripe is asked to use this account as
+    // a transfer destination. Real reason logged server-side only.
+    const accountCheck = await checkConnectedAccountReadyForCheckout(stripe, authorAccount);
+    if (!accountCheck.ok) {
+      console.error("buyBundle: author's connected Stripe account is not ready for checkout", {
+        bundleId,
+        authorId: bundle.author_id,
+        readerId: user.id,
+        reason: accountCheck.reason,
+        detail: accountCheck.detail,
+      });
+      redirect(`/bundles/${bundleId}?error=${encodeURIComponent(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+    }
+  } else {
+    // STRIPE-CUTOVER-2A Section 4: TEST-mode safety, identical posture to
+    // buyBook's own checkout-creation-time gate.
+    if (!isStripeSecretKeyTestMode(process.env.STRIPE_SECRET_KEY)) {
+      console.error(
+        "buyBundle: refusing to create a librum_ledger_v1 checkout -- Stripe is not configured in test mode",
+        { bundleId, readerId: user.id },
+      );
+      redirect(`/bundles/${bundleId}?error=Could+not+start+checkout`);
+    }
   }
 
   // Advisory only -- an early, friendlier "you already own this" exit.
@@ -126,9 +155,22 @@ export async function buyBundle(bundleId: string) {
   // re-read bundles/bundle_books for pricing purposes -- doing so would
   // reopen the exact mutable-price race this whole design exists to
   // close.
+  // STRIPE-CUTOVER-2A Section 10: for regime=librum_ledger_v1, currency
+  // and royalty_rate_bps are frozen HERE, on this exact call -- ALL and
+  // the current platform royalty rate, snapshotted once. The legacy
+  // default omits these trailing params entirely, taking the RPC's
+  // unchanged DB-side defaults, so legacy snapshot economics are
+  // unchanged.
   const { data: snapshotRows, error: snapshotError } = await supabase.rpc(
     "create_bundle_checkout_snapshot",
-    { bundle_id: bundleId },
+    regime === "librum_ledger_v1"
+      ? {
+          bundle_id: bundleId,
+          p_regime: "librum_ledger_v1",
+          p_currency: "ALL",
+          p_royalty_rate_bps: AUTHOR_ROYALTY_RATE_BPS,
+        }
+      : { bundle_id: bundleId },
   );
 
   const snapshot = (snapshotRows as SnapshotResult[] | null)?.[0];
@@ -170,37 +212,34 @@ export async function buyBundle(bundleId: string) {
 
   const origin = resolveSiteOrigin();
 
+  // STRIPE-CUTOVER-2A Section 7/10: the legacy branch's params are
+  // byte-identical to the pre-2A inline object. The ledger branch has no
+  // payment_intent_data at all. `authorAccount` is guaranteed non-null
+  // here whenever regime is legacy; the ledger branch never reads it.
+  const sessionParams =
+    regime === "librum_ledger_v1"
+      ? buildLedgerBundleCheckoutSessionParams({
+          bundleId,
+          bundleTitle: snapshot.bundle_title,
+          bundlePriceMinorUnitsAtCheckout: snapshot.bundle_price_cents_at_checkout,
+          expiresAtSeconds: stripeExpiresAtSeconds,
+          origin,
+          snapshotId: snapshot.snapshot_id,
+        })
+      : buildLegacyBundleCheckoutSessionParams({
+          bundleId,
+          bundleTitle: snapshot.bundle_title,
+          bundlePriceCentsAtCheckout: snapshot.bundle_price_cents_at_checkout,
+          authorStripeAccountId: authorAccount as string,
+          expiresAtSeconds: stripeExpiresAtSeconds,
+          origin,
+          snapshotId: snapshot.snapshot_id,
+        });
+
   let session: Awaited<ReturnType<typeof stripe.checkout.sessions.create>>;
   try {
     session = await stripe.checkout.sessions.create(
-      {
-        mode: "payment",
-        line_items: [
-          {
-            price_data: {
-              currency: "usd",
-              product_data: { name: snapshot.bundle_title },
-              unit_amount: snapshot.bundle_price_cents_at_checkout,
-            },
-            quantity: 1,
-          },
-        ],
-        payment_intent_data: {
-          application_fee_amount: platformFeeCents(
-            snapshot.bundle_price_cents_at_checkout,
-          ),
-          transfer_data: {
-            destination: authorAccount,
-          },
-        },
-        expires_at: stripeExpiresAtSeconds,
-        success_url: `${origin}/bundles/${bundleId}?purchase=success`,
-        cancel_url: `${origin}/bundles/${bundleId}?purchase=cancelled`,
-        metadata: {
-          snapshot_id: snapshot.snapshot_id,
-          bundle_id: bundleId,
-        },
-      },
+      sessionParams,
       {
         // Deterministic, not random: retrying this exact snapshot's
         // checkout-creation request (e.g. after an ambiguous network

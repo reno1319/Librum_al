@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 // LAUNCH-1 P1-11: minimal, focused coverage of ONLY the new recovery
@@ -237,5 +237,150 @@ describe("buyBundle: connected-account validation gate (LIBRUM 2.0 CONNECT-HARDE
     expect(redirectedUrl).not.toContain("acct_");
     expect(redirectedUrl).not.toContain("test mode");
     expect(redirectedUrl).not.toContain("live mode key");
+  });
+});
+
+// STRIPE-CUTOVER-2A Section 33: buyBundle's librum_ledger_v1 branch --
+// mirrors buyBook's own ledger_v1 coverage.
+describe("buyBundle: librum_ledger_v1 regime (STRIPE-CUTOVER-2A)", () => {
+  const BUNDLE_ID = "bundle-1";
+  const READER_ID = "reader-1";
+  const AUTHOR_ID = "author-1";
+  const ORIGINAL_REGIME = process.env.NEW_CHECKOUT_REGIME;
+  const ORIGINAL_KEY = process.env.STRIPE_SECRET_KEY;
+
+  function makeLedgerBundleRow() {
+    return {
+      id: BUNDLE_ID,
+      status: "published",
+      author_id: AUTHOR_ID,
+      // No stripe_account_id at all -- proves the ledger_v1 branch never
+      // requires one.
+      profiles: null,
+    };
+  }
+
+  let mockBundleSingle = vi.fn();
+  let mockBundleBooksSelect = vi.fn();
+  let mockRpc = vi.fn();
+  let mockSnapshotUpdateSelect = vi.fn();
+
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockAccountsRetrieve.mockReset();
+    mockCheckoutSessionsCreate.mockReset();
+    mockCreateAdminClient.mockReset();
+    mockCookieStore.get.mockImplementation(() => undefined);
+    process.env.NEW_CHECKOUT_REGIME = "librum_ledger_v1";
+    process.env.STRIPE_SECRET_KEY = "sk_test_abc123";
+
+    mockBundleSingle = vi.fn().mockResolvedValue({ data: makeLedgerBundleRow(), error: null });
+    mockBundleBooksSelect = vi.fn().mockResolvedValue({
+      data: [{ book_id: "book-a" }, { book_id: "book-b" }],
+      error: null,
+    });
+    mockRpc = vi.fn().mockImplementation((name: string) => {
+      if (name === "user_owns_book") return Promise.resolve({ data: false, error: null });
+      if (name === "create_bundle_checkout_snapshot") {
+        return Promise.resolve({
+          data: [
+            {
+              snapshot_id: "snapshot-ledger-1",
+              bundle_title: "Test Bundle",
+              bundle_price_cents_at_checkout: 250000,
+              protection_expires_at: "2026-08-24T09:00:00.000Z",
+            },
+          ],
+          error: null,
+        });
+      }
+      throw new Error(`unexpected rpc "${name}"`);
+    });
+    mockSnapshotUpdateSelect = vi.fn().mockResolvedValue({ data: [{ id: "snapshot-ledger-1" }], error: null });
+    mockCreateAdminClient.mockReturnValue({
+      from: (table: string) => {
+        if (table !== "bundle_checkout_snapshots") {
+          throw new Error(`ledger buyBundle test: unexpected admin table "${table}"`);
+        }
+        return {
+          update: () => ({ eq: () => ({ is: () => ({ select: mockSnapshotUpdateSelect }) }) }),
+        };
+      },
+    });
+    mockCreateClient.mockReset().mockResolvedValue({
+      auth: { getUser: () => Promise.resolve({ data: { user: { id: READER_ID } } }) },
+      from: (table: string) => {
+        if (table === "bundles") {
+          return { select: () => ({ eq: () => ({ single: () => mockBundleSingle() }) }) };
+        }
+        if (table === "bundle_books") {
+          return { select: () => ({ eq: () => mockBundleBooksSelect() }) };
+        }
+        throw new Error(`ledger buyBundle test: unexpected table "${table}"`);
+      },
+      rpc: (...args: unknown[]) => mockRpc(...(args as [string, unknown])),
+    });
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_REGIME === undefined) delete process.env.NEW_CHECKOUT_REGIME;
+    else process.env.NEW_CHECKOUT_REGIME = ORIGINAL_REGIME;
+    if (ORIGINAL_KEY === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = ORIGINAL_KEY;
+  });
+
+  it("never calls the Connect account gate for a ledger_v1 bundle checkout", async () => {
+    mockCheckoutSessionsCreate.mockResolvedValue({
+      id: "cs_ledger_1",
+      url: "https://checkout.stripe.com/cs_ledger_1",
+    });
+
+    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockAccountsRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("freezes regime=librum_ledger_v1, currency=ALL, and the current royalty rate on create_bundle_checkout_snapshot", async () => {
+    mockCheckoutSessionsCreate.mockResolvedValue({
+      id: "cs_ledger_1",
+      url: "https://checkout.stripe.com/cs_ledger_1",
+    });
+
+    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRpc).toHaveBeenCalledWith("create_bundle_checkout_snapshot", {
+      bundle_id: BUNDLE_ID,
+      p_regime: "librum_ledger_v1",
+      p_currency: "ALL",
+      p_royalty_rate_bps: 8000,
+    });
+  });
+
+  it("creates a Stripe session with currency 'all', unit_amount in minor units, and no Connect fields", async () => {
+    mockCheckoutSessionsCreate.mockResolvedValue({
+      id: "cs_ledger_1",
+      url: "https://checkout.stripe.com/cs_ledger_1",
+    });
+
+    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockCheckoutSessionsCreate).toHaveBeenCalledTimes(1);
+    const [params] = mockCheckoutSessionsCreate.mock.calls[0] as [
+      { line_items: { price_data: { currency: string; unit_amount: number } }[]; payment_intent_data?: unknown },
+    ];
+    expect(params.line_items[0].price_data.currency).toBe("all");
+    expect(params.line_items[0].price_data.unit_amount).toBe(250000);
+    expect(params.payment_intent_data).toBeUndefined();
+  });
+
+  it("fails closed and never reaches the checkout-snapshot RPC when STRIPE_SECRET_KEY is not a test key", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_live_abc123";
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining(`/bundles/${BUNDLE_ID}?error=`));
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
 });
