@@ -298,14 +298,18 @@ end $$;
 -- Part 5 (Section 8): MULTI-CURRENCY -- EUR and USD must never be
 -- summed into one balance; two separate rows.
 -- ============================================================
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('a0500000-0000-0000-0000-000000000005', 'test', 'pay_p050_p5_usd', 500, 'USD', 'succeeded'),
+  ('a0500000-0000-0000-0000-000000000006', 'test', 'pay_p050_p5_eur', 500, 'EUR', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('f0500000-0000-0000-0000-000000000040', 'c0500000-0000-0000-0000-000000000005',
-   'e0500000-0000-0000-0000-000000000007', 'sale', 400, 'USD', 8000, 500, 100,
+   'e0500000-0000-0000-0000-000000000007', 'a0500000-0000-0000-0000-000000000005', 'sale', 400, 'USD', 8000, 500, 100,
    now() - interval '10 days', now() - interval '10 days'),
   ('f0500000-0000-0000-0000-000000000041', 'c0500000-0000-0000-0000-000000000005',
-   'e0500000-0000-0000-0000-000000000008', 'sale', 400, 'EUR', 8000, 500, 100,
+   'e0500000-0000-0000-0000-000000000008', 'a0500000-0000-0000-0000-000000000006', 'sale', 400, 'EUR', 8000, 500, 100,
    now() - interval '10 days', now() - interval '10 days');
 
 do $$
@@ -412,11 +416,14 @@ end $$;
 -- Part 7 (Sections 9/12/13): ACTIVITY -- bounded pagination, own-only,
 -- keyset (created_at, id) ordering, no internal identifiers.
 -- ============================================================
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('a0500000-0000-0000-0000-000000000007', 'test', 'pay_p050_p7', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('f0500000-0000-0000-0000-000000000060', 'c0500000-0000-0000-0000-000000000007',
-   'e0500000-0000-0000-0000-00000000000a', 'sale', 80, 'USD', 8000, 100, 20,
+   'e0500000-0000-0000-0000-00000000000a', 'a0500000-0000-0000-0000-000000000007', 'sale', 80, 'USD', 8000, 100, 20,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_ledger_entries
   (id, author_id, entry_type, amount_minor, currency, available_at, created_at)

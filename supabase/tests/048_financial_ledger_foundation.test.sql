@@ -203,11 +203,14 @@ end $$;
 -- purchase at all) -- used later to prove both the negative-balance and
 -- the account-deletion-without-a-purchase invariants.
 -- ============================================================
+-- STRIPE-CUTOVER-1C (migration 056): a 'sale' row now requires a
+-- payment_id (author_ledger_entries_sale_requires_payment_id CHECK) --
+-- reuses the Part 3 fixture payment (d0480000-...-01, 999 USD).
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at)
 values
   ('f0480000-0000-0000-0000-000000000001', 'a0480000-0000-0000-0000-000000000001',
-   'c0480000-0000-0000-0000-000000000001', 'sale', 799, 'USD', 8000, 999, 200, now());
+   'c0480000-0000-0000-0000-000000000001', 'd0480000-0000-0000-0000-000000000001', 'sale', 799, 'USD', 8000, 999, 200, now());
 
 insert into public.author_ledger_entries
   (id, author_id, entry_type, amount_minor, currency, reference_type, reference_id, available_at)
@@ -473,9 +476,9 @@ begin
   insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id, amount_cents) values
     ('c0480000-0000-0000-0000-000000000002', 'b0480000-0000-0000-0000-000000000002', 'a0480000-0000-0000-0000-000000000004', 'cs_p048_two', 'pi_p048_two', 500);
   insert into public.author_ledger_entries
-    (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at)
+    (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at)
     values ('f0480000-0000-0000-0000-000000000003', 'a0480000-0000-0000-0000-000000000001',
-            'c0480000-0000-0000-0000-000000000002', 'sale', 400, 'USD', 8000, 500, 100, now());
+            'c0480000-0000-0000-0000-000000000002', 'd0480000-0000-0000-0000-000000000001', 'sale', 400, 'USD', 8000, 500, 100, now());
 
   perform pg_temp.assert(
     (select count(*) from public.author_ledger_entries where id = 'f0480000-0000-0000-0000-000000000003') = 1,
@@ -484,22 +487,45 @@ begin
 end $$;
 
 -- ============================================================
--- Part 10: idempotency -- one sale per purchase, one payout entry per
--- payout, and general external-reference idempotency.
+-- Part 10: idempotency -- one sale per (payment, purchase) pair
+-- (STRIPE-CUTOVER-1B.5/1C: the uniqueness scope was widened from bare
+-- purchase_id to (payment_id, purchase_id) so a reused purchases row
+-- can legitimately gain a second, independent sale credit under a
+-- genuinely different payment -- see
+-- 056_ledger_v1_transactional_payment_foundation.test.sql for that
+-- specific repeat-purchase proof. This part now proves the narrower,
+-- still-true invariant: the SAME payment can never credit the SAME
+-- purchase twice), one payout entry per payout, and general external-
+-- reference idempotency.
 -- ============================================================
 do $$
 declare
   v_payout_id uuid;
 begin
-  -- one sale per purchase: a second sale against the SAME purchase
-  -- already credited in Part 5 must be rejected.
+  -- one sale per (payment, purchase): a second sale against the SAME
+  -- purchase under the SAME payment already credited in Part 5 must be
+  -- rejected.
   begin
     insert into public.author_ledger_entries
-      (author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at)
-      values ('a0480000-0000-0000-0000-000000000001', 'c0480000-0000-0000-0000-000000000001', 'sale', 799, 'USD', 8000, 999, 200, now());
-    perform pg_temp.assert(false, 'part10: a second sale entry for an already-credited purchase must be rejected');
+      (author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at)
+      values ('a0480000-0000-0000-0000-000000000001', 'c0480000-0000-0000-0000-000000000001', 'd0480000-0000-0000-0000-000000000001', 'sale', 799, 'USD', 8000, 999, 200, now());
+    perform pg_temp.assert(false, 'part10: a second sale entry for the same (payment, purchase) pair must be rejected');
   exception when unique_violation then null;
   end;
+
+  -- but a DIFFERENT payment claiming the SAME purchase (the repeat-
+  -- purchase-after-reuse scenario) is now legitimately accepted --
+  -- proven here as the direct converse of the case just above, using a
+  -- second payments fixture row.
+  insert into public.payments (id, provider, provider_payment_id, buyer_id, amount_minor, currency, status) values
+    ('d0480000-0000-0000-0000-000000000002', 'stripe', 'pi_p048_repeat', 'a0480000-0000-0000-0000-000000000004', 999, 'USD', 'succeeded');
+  insert into public.author_ledger_entries
+    (author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at)
+    values ('a0480000-0000-0000-0000-000000000001', 'c0480000-0000-0000-0000-000000000001', 'd0480000-0000-0000-0000-000000000002', 'sale', 799, 'USD', 8000, 999, 200, now());
+  perform pg_temp.assert(
+    (select count(*) from public.author_ledger_entries where purchase_id = 'c0480000-0000-0000-0000-000000000001' and entry_type = 'sale') = 2,
+    'part10: a genuinely different payment must be able to credit the same purchase a second, independent time'
+  );
 
   -- one payout entry per payout_id.
   --
@@ -763,10 +789,12 @@ begin
     (select count(*) from public.profiles where id = 'a0480000-0000-0000-0000-000000000001') = 1,
     'part14a: Author A''s profile must still exist after the blocked delete attempt'
   );
-  -- 4 rows: two sales (Part 5, Part 9), one payout debit (Part 10), one
-  -- refund (Part 10's external-reference idempotency fixture).
+  -- 5 rows: two sales (Part 5, Part 9), one repeat-purchase second sale
+  -- under a different payment (Part 10's STRIPE-CUTOVER-1B.5 proof), one
+  -- payout debit (Part 10), one refund (Part 10's external-reference
+  -- idempotency fixture).
   perform pg_temp.assert(
-    (select count(*) from public.author_ledger_entries where author_id = 'a0480000-0000-0000-0000-000000000001') = 4,
+    (select count(*) from public.author_ledger_entries where author_id = 'a0480000-0000-0000-0000-000000000001') = 5,
     'part14a: Author A''s ledger rows must be fully intact after the blocked delete attempt'
   );
   perform pg_temp.assert(

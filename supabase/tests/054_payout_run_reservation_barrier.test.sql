@@ -61,13 +61,17 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('05400100-0000-0000-0000-000000000003', '05400100-0000-0000-0000-000000000002', '05400100-0000-0000-0000-000000000001', 'cs_p054_a1', 100),
   ('05400200-0000-0000-0000-000000000003', '05400200-0000-0000-0000-000000000002', '05400200-0000-0000-0000-000000000001', 'cs_p054_a2', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('3b38366c-bd37-799b-1c64-4fa60201699e', 'test', 'pay_auto_3b38366c', 100, 'USD', 'succeeded'),
+  ('6185472c-b96b-2792-1c91-98365c36bd85', 'test', 'pay_auto_6185472c', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('05400100-0000-0000-0000-000000000004', '05400100-0000-0000-0000-000000000001',
-   '05400100-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days'),
+   '05400100-0000-0000-0000-000000000003', '3b38366c-bd37-799b-1c64-4fa60201699e', 'sale', 100, 'USD', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days'),
   ('05400200-0000-0000-0000-000000000004', '05400200-0000-0000-0000-000000000001',
-   '05400200-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days');
+   '05400200-0000-0000-0000-000000000003', '6185472c-b96b-2792-1c91-98365c36bd85', 'sale', 100, 'USD', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05400100-0000-0000-0000-000000000001', 50, 'USD'),
   ('05400200-0000-0000-0000-000000000001', 50, 'USD');
@@ -223,11 +227,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('05400100-0000-0000-0000-000000000005', '05400100-0000-0000-0000-000000000001', 'P054 EUR Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('05400100-0000-0000-0000-000000000006', '05400100-0000-0000-0000-000000000005', '05400100-0000-0000-0000-000000000001', 'cs_p054_eur', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('37837595-a95e-7925-c631-4d08fa4ea005', 'test', 'pay_auto_37837595', 100, 'EUR', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('05400100-0000-0000-0000-000000000007', '05400100-0000-0000-0000-000000000001',
-   '05400100-0000-0000-0000-000000000006', 'sale', 100, 'EUR', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days');
+   '05400100-0000-0000-0000-000000000006', '37837595-a95e-7925-c631-4d08fa4ea005', 'sale', 100, 'EUR', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05400100-0000-0000-0000-000000000001', 50, 'EUR');
 -- Migration 055 fail-closed gate: author_payout_eligibility() now
@@ -265,11 +272,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('05400200-0000-0000-0000-000000000005', '05400200-0000-0000-0000-000000000001', 'P054 EUR Book 2', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('05400200-0000-0000-0000-000000000006', '05400200-0000-0000-0000-000000000005', '05400200-0000-0000-0000-000000000001', 'cs_p054_eur2', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('d7caff24-eae8-3c1d-9a3c-88ede404bfcd', 'test', 'pay_auto_d7caff24', 100, 'EUR', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('05400200-0000-0000-0000-000000000007', '05400200-0000-0000-0000-000000000001',
-   '05400200-0000-0000-0000-000000000006', 'sale', 100, 'EUR', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days');
+   '05400200-0000-0000-0000-000000000006', 'd7caff24-eae8-3c1d-9a3c-88ede404bfcd', 'sale', 100, 'EUR', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05400200-0000-0000-0000-000000000001', 50, 'EUR');
 -- Migration 055 fail-closed gate: author_payout_eligibility() now

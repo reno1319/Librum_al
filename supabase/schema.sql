@@ -776,10 +776,49 @@ create table public.bundle_checkout_snapshots (
   protection_expires_at timestamptz not null,
   fulfilled_at timestamptz,
   refunded_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- STRIPE-CUTOVER-1C (migration 056): same immutable checkout-facts
+  -- contract as book_checkout_intents above -- frozen at ORIGINAL
+  -- insert by create_bundle_checkout_snapshot(), never patched
+  -- afterward, enforced by the selective trigger below.
+  regime text not null default 'legacy_stripe_connect_v1'
+    check (regime in ('legacy_stripe_connect_v1', 'librum_ledger_v1')),
+  currency text not null default 'USD'
+    check (currency ~ '^[A-Z]{3}$'),
+  royalty_rate_bps integer
+    check (royalty_rate_bps is null or (royalty_rate_bps >= 0 and royalty_rate_bps <= 10000)),
+  check (regime <> 'librum_ledger_v1' or currency = 'ALL'),
+  check (regime <> 'librum_ledger_v1' or royalty_rate_bps is not null)
 );
 
 alter table public.bundle_checkout_snapshots enable row level security;
+
+-- STRIPE-CUTOVER-1C (migration 056): selective immutability trigger,
+-- same pattern as book_checkout_intents' own above -- protects only
+-- regime/currency/royalty_rate_bps; fulfilled_at/total_amount_cents/
+-- refunded_at remain freely updatable.
+create or replace function public.enforce_bundle_checkout_snapshots_financial_facts_immutability()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.regime is distinct from old.regime
+    or new.currency is distinct from old.currency
+    or new.royalty_rate_bps is distinct from old.royalty_rate_bps
+  then
+    raise exception
+      'bundle_checkout_snapshots: regime/currency/royalty_rate_bps are immutable once set (snapshot %)',
+      old.id;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger bundle_checkout_snapshots_enforce_financial_facts_immutability
+  before update on public.bundle_checkout_snapshots
+  for each row
+  execute function public.enforce_bundle_checkout_snapshots_financial_facts_immutability();
 
 -- Explicit least-privilege table grant (LAUNCH-1 P1-6), same rationale
 -- as purchases above: both SELECT policies below require auth.uid(),
@@ -918,8 +957,18 @@ create index bundle_checkout_reader_holds_reader_id_idx on public.bundle_checkou
 -- (unfulfilled, unexpired) snapshot for that pair instead of creating a
 -- second one -- see the Phase 9B-2 Stage 2C audit. A reused snapshot's
 -- frozen values are returned verbatim; nothing about it is refreshed.
+-- STRIPE-CUTOVER-1C (migration 056): three new trailing, defaulted
+-- parameters (p_regime/p_currency/p_royalty_rate_bps) so ledger_v1
+-- checkout facts are written on this ORIGINAL insert, never patched
+-- afterward. The existing 1-argument call site (buyBundle) continues to
+-- work completely unchanged, taking the defaults --
+-- regime='legacy_stripe_connect_v1', currency='USD',
+-- royalty_rate_bps=NULL, exactly as before this migration.
 create or replace function public.create_bundle_checkout_snapshot(
-  bundle_id uuid
+  bundle_id uuid,
+  p_regime text default 'legacy_stripe_connect_v1',
+  p_currency text default 'USD',
+  p_royalty_rate_bps integer default null
 )
 returns table (
   snapshot_id uuid,
@@ -1084,7 +1133,10 @@ begin
     reader_id,
     bundle_price_cents_at_checkout,
     items,
-    protection_expires_at
+    protection_expires_at,
+    regime,
+    currency,
+    royalty_rate_bps
   )
   values (
     v_bundle.id,
@@ -1093,7 +1145,10 @@ begin
     v_reader_id,
     v_bundle.price_cents,
     v_items,
-    v_protection_expires_at
+    v_protection_expires_at,
+    p_regime,
+    p_currency,
+    p_royalty_rate_bps
   )
   returning id into v_snapshot_id;
 
@@ -1116,10 +1171,10 @@ $$;
 -- it already did in this call (the header insert, any reservations, the
 -- reader hold) as a single atomic unit -- there is no partial-snapshot
 -- state possible from a failed call.
-revoke all on function public.create_bundle_checkout_snapshot(uuid) from public;
-revoke all on function public.create_bundle_checkout_snapshot(uuid) from anon;
-revoke all on function public.create_bundle_checkout_snapshot(uuid) from authenticated;
-grant execute on function public.create_bundle_checkout_snapshot(uuid) to authenticated;
+revoke all on function public.create_bundle_checkout_snapshot(uuid, text, text, integer) from public;
+revoke all on function public.create_bundle_checkout_snapshot(uuid, text, text, integer) from anon;
+revoke all on function public.create_bundle_checkout_snapshot(uuid, text, text, integer) from authenticated;
+grant execute on function public.create_bundle_checkout_snapshot(uuid, text, text, integer) to authenticated;
 
 -- ============================================================
 -- clear_expired_book_reservations / clear_expired_reader_holds: the
@@ -1387,13 +1442,31 @@ create table public.purchases (
   -- fans out into one purchase row per book in the bundle, so several
   -- rows can share the same session id. (book_id, reader_id) below is
   -- still the real uniqueness guarantee.
-  stripe_checkout_session_id text not null,
+  --
+  -- STRIPE-CUTOVER-1C (migration 056): relaxed from `not null` -- a
+  -- provider-neutral librum_ledger_v1 purchase, created by the shared
+  -- entitlement core, has no Stripe checkout session concept at all.
+  -- Zero effect on the legacy path: every legacy call site still
+  -- always supplies a real, non-null session id.
+  stripe_checkout_session_id text,
   stripe_payment_intent_id text,
   amount_cents integer not null,
   discount_code_id uuid references public.discount_codes(id) on delete set null,
   bundle_id uuid references public.bundles(id) on delete set null,
   refunded_at timestamptz,
   created_at timestamptz not null default now(),
+  -- STRIPE-CUTOVER-1C (migration 056): current-entitlement/informational
+  -- only -- NOT immutable historical payment authority (see
+  -- payments.regime, and author_ledger_entries/payment_refunds' own
+  -- composite (payment_id, purchase_id) keying, for that). Reflects the
+  -- most recent transaction that established or re-established this
+  -- entitlement row; refund/dispute routing must never rely on it to
+  -- identify a specific old financial transaction. Deliberately carries
+  -- no immutability trigger -- legitimately changes value on a genuine
+  -- refunded/disputed-lost repurchase, exactly like stripe_checkout_
+  -- session_id/stripe_payment_intent_id/amount_cents already do.
+  regime text not null default 'legacy_stripe_connect_v1'
+    check (regime in ('legacy_stripe_connect_v1', 'librum_ledger_v1')),
   unique (book_id, reader_id)
 );
 
@@ -2558,11 +2631,25 @@ create table public.book_checkout_intents (
   fulfilled_at timestamptz,
   reconciliation_reason text,
   created_at timestamptz not null default now(),
+  -- STRIPE-CUTOVER-1C (migration 056): immutable checkout financial
+  -- facts, frozen at ORIGINAL insert by create_book_checkout_intent()
+  -- and never patched afterward -- enforced by the selective trigger
+  -- below. Existing/compatibility-phase legacy rows default to
+  -- legacy_stripe_connect_v1/USD/NULL; ledger_v1 rows must supply
+  -- currency='ALL' (no FX) and a real royalty_rate_bps.
+  regime text not null default 'legacy_stripe_connect_v1'
+    check (regime in ('legacy_stripe_connect_v1', 'librum_ledger_v1')),
+  currency text not null default 'USD'
+    check (currency ~ '^[A-Z]{3}$'),
+  royalty_rate_bps integer
+    check (royalty_rate_bps is null or (royalty_rate_bps >= 0 and royalty_rate_bps <= 10000)),
 
   check (expires_at > created_at),
   check (fulfilled_at is null or completed_at is not null),
   check ((reconciliation_reason is not null) = (completed_at is not null and fulfilled_at is null)),
-  check (reconciliation_reason is null or reconciliation_reason in ('active_other_session', 'book_or_reader_deleted', 'disputed_lost'))
+  check (reconciliation_reason is null or reconciliation_reason in ('active_other_session', 'book_or_reader_deleted', 'disputed_lost')),
+  check (regime <> 'librum_ledger_v1' or currency = 'ALL'),
+  check (regime <> 'librum_ledger_v1' or royalty_rate_bps is not null)
 );
 
 alter table public.book_checkout_intents enable row level security;
@@ -2577,9 +2664,43 @@ create index book_checkout_intents_needs_reconciliation_idx
   on public.book_checkout_intents (completed_at)
   where fulfilled_at is null and completed_at is not null;
 
+-- STRIPE-CUTOVER-1C (migration 056): selective immutability trigger,
+-- modeled on migration 051's enforce_author_payouts_immutability() --
+-- protects only regime/currency/royalty_rate_bps; completed_at/
+-- fulfilled_at/reconciliation_reason remain freely updatable.
+create or replace function public.enforce_book_checkout_intents_financial_facts_immutability()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.regime is distinct from old.regime
+    or new.currency is distinct from old.currency
+    or new.royalty_rate_bps is distinct from old.royalty_rate_bps
+  then
+    raise exception
+      'book_checkout_intents: regime/currency/royalty_rate_bps are immutable once set (intent %)',
+      old.id;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger book_checkout_intents_enforce_financial_facts_immutability
+  before update on public.book_checkout_intents
+  for each row
+  execute function public.enforce_book_checkout_intents_financial_facts_immutability();
+
+-- STRIPE-CUTOVER-1C (migration 056): three new trailing, defaulted
+-- parameters, same reasoning and pattern as create_bundle_checkout_
+-- snapshot() above -- the existing 2-argument call site (buyBook)
+-- continues to work completely unchanged, taking the defaults.
 create or replace function public.create_book_checkout_intent(
   book_id uuid,
-  p_discount_code text default null
+  p_discount_code text default null,
+  p_regime text default 'legacy_stripe_connect_v1',
+  p_currency text default 'USD',
+  p_royalty_rate_bps integer default null
 )
 returns table (
   intent_id uuid,
@@ -2682,9 +2803,11 @@ begin
   v_expires_at := now() + interval '23 hours';
 
   insert into public.book_checkout_intents (
-    book_id, reader_id, book_title, price_cents_at_checkout, discount_code_id, expires_at
+    book_id, reader_id, book_title, price_cents_at_checkout, discount_code_id, expires_at,
+    regime, currency, royalty_rate_bps
   ) values (
-    create_book_checkout_intent.book_id, v_reader_id, v_book.title, v_price_cents, v_discount_code_id, v_expires_at
+    create_book_checkout_intent.book_id, v_reader_id, v_book.title, v_price_cents, v_discount_code_id, v_expires_at,
+    p_regime, p_currency, p_royalty_rate_bps
   )
   returning id into v_intent_id;
 
@@ -2693,12 +2816,29 @@ begin
 end;
 $$;
 
-revoke all on function public.create_book_checkout_intent(uuid, text) from public;
-revoke all on function public.create_book_checkout_intent(uuid, text) from anon;
-revoke all on function public.create_book_checkout_intent(uuid, text) from authenticated;
-grant execute on function public.create_book_checkout_intent(uuid, text) to authenticated;
+revoke all on function public.create_book_checkout_intent(uuid, text, text, text, integer) from public;
+revoke all on function public.create_book_checkout_intent(uuid, text, text, text, integer) from anon;
+revoke all on function public.create_book_checkout_intent(uuid, text, text, text, integer) from authenticated;
+grant execute on function public.create_book_checkout_intent(uuid, text, text, text, integer) to authenticated;
 
-create or replace function public.finalize_book_checkout_intent(
+-- STRIPE-CUTOVER-1C (migration 056): the entitlement-creation logic
+-- below (lock intent, classify already-finalized/disputed/deleted/
+-- active-other-session, upsert purchases) is identical for both regimes
+-- -- only the SECURITY BOUNDARY differs. Extracted into a shared,
+-- INTERNAL core (revoked from every application role, including
+-- service_role -- only callable by finalize_book_checkout_intent()
+-- below and finalize_ledger_book_payment() further down this file, both
+-- owned by the same role, which always retains implicit EXECUTE on its
+-- own functions regardless of that revoke). Two corrections versus the
+-- pre-056 body: (1) `regime` is now selected off the locked intent row
+-- and written into the purchases insert/upsert; (2) the
+-- "active_other_session" check's `stripe_checkout_session_id is not
+-- null` clause is replaced with an explicit `v_existing.id is not
+-- null` -- that column is now nullable for provider-neutral
+-- librum_ledger_v1 purchases (see purchases.stripe_checkout_session_id
+-- above), so the old clause would have silently misclassified an
+-- active ledger_v1 purchase as "no active row exists."
+create or replace function public.finalize_book_checkout_intent_entitlement_core(
   p_intent_id uuid,
   p_stripe_checkout_session_id text,
   p_stripe_payment_intent_id text,
@@ -2719,7 +2859,7 @@ declare
   v_intent record;
   v_existing record;
 begin
-  select id, book_id, reader_id, discount_code_id, price_cents_at_checkout,
+  select id, book_id, reader_id, discount_code_id, price_cents_at_checkout, regime,
          fulfilled_at, completed_at, reconciliation_reason
   into v_intent
   from public.book_checkout_intents
@@ -2778,7 +2918,12 @@ begin
     pg_catalog.hashtext(v_intent.book_id::text)
   );
 
-  select p.stripe_checkout_session_id, p.stripe_payment_intent_id, p.refunded_at
+  -- p.id is selected specifically to detect "does an existing purchases
+  -- row exist at all" -- id is the primary key, always non-null for a
+  -- real row, unlike stripe_checkout_session_id (now nullable) or
+  -- stripe_payment_intent_id (always nullable). When no row matches,
+  -- v_existing.id is null and every other field is null too.
+  select p.id, p.stripe_payment_intent_id, p.refunded_at
   into v_existing
   from public.purchases p
   where p.book_id = v_intent.book_id
@@ -2792,7 +2937,7 @@ begin
   -- existing row whose own payment intent is disputed-lost now falls
   -- through to the eligible/upsert path below, exactly like a refunded
   -- row already does.
-  if v_existing.stripe_checkout_session_id is not null
+  if v_existing.id is not null
      and v_existing.refunded_at is null
      and not public.payment_intent_has_lost_dispute(v_existing.stripe_payment_intent_id)
   then
@@ -2807,17 +2952,18 @@ begin
 
   insert into public.purchases (
     book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id,
-    amount_cents, discount_code_id, refunded_at
+    amount_cents, discount_code_id, refunded_at, regime
   ) values (
     v_intent.book_id, v_intent.reader_id, p_stripe_checkout_session_id, p_stripe_payment_intent_id,
-    v_intent.price_cents_at_checkout, v_intent.discount_code_id, null
+    v_intent.price_cents_at_checkout, v_intent.discount_code_id, null, v_intent.regime
   )
   on conflict (book_id, reader_id) do update set
     stripe_checkout_session_id = excluded.stripe_checkout_session_id,
     stripe_payment_intent_id = excluded.stripe_payment_intent_id,
     amount_cents = excluded.amount_cents,
     discount_code_id = excluded.discount_code_id,
-    refunded_at = null;
+    refunded_at = null,
+    regime = excluded.regime;
 
   update public.book_checkout_intents
   set stripe_payment_intent_id = p_stripe_payment_intent_id,
@@ -2826,6 +2972,55 @@ begin
   where id = p_intent_id;
 
   return query select 'eligible_fulfilled'::text, v_intent.book_id, v_intent.reader_id;
+end;
+$$;
+
+revoke all on function public.finalize_book_checkout_intent_entitlement_core(uuid, text, text, integer)
+  from public, anon, authenticated, service_role;
+
+-- finalize_book_checkout_intent() remains the legacy-compatible public/
+-- service_role RPC -- signature and RETURNS TABLE shape unchanged, so
+-- the live Stripe webhook keeps calling this exact RPC unaware anything
+-- changed. Explicitly requires regime = legacy_stripe_connect_v1 before
+-- delegating to the shared core -- a librum_ledger_v1 intent can only
+-- be finalized through finalize_ledger_book_payment() further down this
+-- file, which additionally enforces payment-event binding and the hard
+-- actual-vs-expected amount/currency match.
+create or replace function public.finalize_book_checkout_intent(
+  p_intent_id uuid,
+  p_stripe_checkout_session_id text,
+  p_stripe_payment_intent_id text,
+  p_amount_cents integer
+)
+returns table (
+  outcome text,
+  out_book_id uuid,
+  out_reader_id uuid
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_regime text;
+begin
+  select regime into v_regime from public.book_checkout_intents where id = p_intent_id;
+
+  if v_regime is null then
+    raise exception 'checkout intent not found';
+  end if;
+
+  if v_regime <> 'legacy_stripe_connect_v1' then
+    raise exception
+      'finalize_book_checkout_intent: intent % is not a legacy_stripe_connect_v1 checkout (regime %) -- ledger_v1 checkouts must be finalized via finalize_ledger_book_payment',
+      p_intent_id, v_regime;
+  end if;
+
+  return query
+  select *
+  from public.finalize_book_checkout_intent_entitlement_core(
+    p_intent_id, p_stripe_checkout_session_id, p_stripe_payment_intent_id, p_amount_cents
+  );
 end;
 $$;
 
@@ -5802,6 +5997,16 @@ create table public.payments (
   paid_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  -- STRIPE-CUTOVER-1C (migration 056): immutable ledger-side transaction
+  -- regime authority. payments rows are written exclusively by
+  -- record_successful_sale(), which hardcodes the literal
+  -- 'librum_ledger_v1' -- this table has no legacy_stripe_connect_v1
+  -- rows and never will, since the legacy checkout path is entirely
+  -- unwired from it. Kept NOT NULL with a default for schema self-
+  -- documentation and forward compatibility with a hypothetical future
+  -- third regime.
+  regime text not null default 'librum_ledger_v1'
+    check (regime in ('legacy_stripe_connect_v1', 'librum_ledger_v1')),
   unique (provider, provider_payment_id)
 );
 
@@ -5827,6 +6032,10 @@ create table public.payment_events (
   processed_at timestamptz,
   last_error_code text,
   created_at timestamptz not null default now(),
+  -- STRIPE-CUTOVER-1C (migration 056): required event/payment binding
+  -- for ledger_v1 ingestion -- legacy historical rows may remain NULL
+  -- forever (no backfill, no default, no NOT NULL).
+  provider_payment_id text,
   unique (provider, provider_event_id)
 );
 
@@ -6030,7 +6239,13 @@ create table public.author_ledger_entries (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references public.profiles(id) on delete restrict,
   purchase_id uuid references public.purchases(id) on delete set null,
-  payment_id uuid references public.payments(id) on delete set null,
+  -- STRIPE-CUTOVER-1C (migration 056): ON DELETE RESTRICT, not SET
+  -- NULL -- a sale row's payment_id must never become NULL (the CHECK
+  -- below forbids it), so a payments row that any sale entry still
+  -- references can never legitimately be deleted at all. Realigned to
+  -- match purchases.payment_id/payment_refunds.payment_id, both already
+  -- RESTRICT for the same payments row.
+  payment_id uuid references public.payments(id) on delete restrict,
   payout_id uuid references public.author_payouts(id) on delete set null,
 
   entry_type text not null check (entry_type in ('sale', 'refund', 'adjustment', 'payout')),
@@ -6068,11 +6283,25 @@ create table public.author_ledger_entries (
   check (
     entry_type <> 'sale'
     or gross_amount_minor = amount_minor + librum_amount_minor
-  )
+  ),
+
+  -- STRIPE-CUTOVER-1C (migration 056): sale rows are now the canonical
+  -- immutable payment-item association (composite unique index below) --
+  -- a NULL payment_id would be invisible to that index (Postgres treats
+  -- NULL as distinct from every other value in a unique index) and
+  -- unrecoverable by the immutable-payment-set reconstruction query
+  -- inside record_successful_sale()'s own retry branch.
+  check (entry_type <> 'sale' or payment_id is not null)
 );
 
-create unique index author_ledger_entries_one_sale_per_purchase_idx
-  on public.author_ledger_entries (purchase_id)
+-- STRIPE-CUTOVER-1C (migration 056): widened from bare purchase_id to
+-- (payment_id, purchase_id) -- purchases is a reusable current-
+-- entitlement row (STRIPE-CUTOVER-1B.4), so the same purchase must be
+-- able to receive a second, independent sale credit under a genuinely
+-- different, later payment. Still enforces exactly-once per
+-- (payment,item) pair.
+create unique index author_ledger_entries_one_sale_per_payment_purchase_idx
+  on public.author_ledger_entries (payment_id, purchase_id)
   where entry_type = 'sale';
 
 create unique index author_ledger_entries_one_entry_per_payout_idx
@@ -6148,7 +6377,13 @@ create table public.payment_refunds (
   created_at timestamptz not null default now(),
   refunded_at timestamptz,
   unique (provider, provider_refund_id),
-  unique (purchase_id)
+  -- STRIPE-CUTOVER-1C (migration 056): widened from bare purchase_id to
+  -- (payment_id, purchase_id) -- same reasoning as author_ledger_
+  -- entries' own sale-uniqueness widening above: one transaction item
+  -- may receive one full V1 refund, but the same reusable entitlement,
+  -- bought again later under a genuinely different payment, may have
+  -- its own independent refund.
+  unique (payment_id, purchase_id)
 );
 
 create index payment_refunds_payment_id_idx on public.payment_refunds (payment_id);
@@ -6173,10 +6408,15 @@ create unique index author_ledger_entries_one_refund_per_payment_refund_idx
   on public.author_ledger_entries (payment_refund_id)
   where entry_type = 'refund';
 
+-- STRIPE-CUTOVER-1C (migration 056): new trailing p_provider_payment_id
+-- parameter and provider_payment_id output column -- required event/
+-- payment binding for ledger_v1 (a caller-argument mismatch here raises
+-- before either ledger wrapper does any business mutation).
 create or replace function public.record_payment_event(
   p_provider text,
   p_provider_event_id text,
-  p_event_type text
+  p_event_type text,
+  p_provider_payment_id text default null
 )
 returns table (
   id uuid,
@@ -6188,6 +6428,7 @@ returns table (
   processed_at timestamptz,
   last_error_code text,
   created_at timestamptz,
+  provider_payment_id text,
   already_existed boolean
 )
 language plpgsql
@@ -6198,13 +6439,14 @@ declare
   v_new record;
   v_existing record;
 begin
-  insert into public.payment_events (provider, provider_event_id, event_type)
-    values (p_provider, p_provider_event_id, p_event_type)
+  insert into public.payment_events (provider, provider_event_id, event_type, provider_payment_id)
+    values (p_provider, p_provider_event_id, p_event_type, p_provider_payment_id)
     on conflict on constraint payment_events_provider_provider_event_id_key do nothing
     returning
       payment_events.id, payment_events.provider, payment_events.provider_event_id,
       payment_events.event_type, payment_events.status, payment_events.received_at,
-      payment_events.processed_at, payment_events.last_error_code, payment_events.created_at
+      payment_events.processed_at, payment_events.last_error_code, payment_events.created_at,
+      payment_events.provider_payment_id
     into v_new;
 
   if v_new.id is not null then
@@ -6217,13 +6459,15 @@ begin
     processed_at := v_new.processed_at;
     last_error_code := v_new.last_error_code;
     created_at := v_new.created_at;
+    provider_payment_id := v_new.provider_payment_id;
     already_existed := false;
     return next;
     return;
   end if;
 
   select pe.id, pe.provider, pe.provider_event_id, pe.event_type, pe.status,
-         pe.received_at, pe.processed_at, pe.last_error_code, pe.created_at
+         pe.received_at, pe.processed_at, pe.last_error_code, pe.created_at,
+         pe.provider_payment_id
     into v_existing
     from public.payment_events pe
     where pe.provider = p_provider and pe.provider_event_id = p_provider_event_id;
@@ -6232,6 +6476,25 @@ begin
     raise exception
       'payment event %/% already recorded with a different event_type (existing=%, requested=%)',
       p_provider, p_provider_event_id, v_existing.event_type, p_event_type;
+  end if;
+
+  -- provider_payment_id consistency: a mismatch between two non-null
+  -- values is a genuine integrity problem and must raise. An existing
+  -- NULL row may be backfilled by a later call that does supply one;
+  -- never the reverse.
+  if v_existing.provider_payment_id is not null
+     and p_provider_payment_id is not null
+     and v_existing.provider_payment_id <> p_provider_payment_id
+  then
+    raise exception
+      'payment event %/% already recorded with a different provider_payment_id (existing=%, requested=%)',
+      p_provider, p_provider_event_id, v_existing.provider_payment_id, p_provider_payment_id;
+  end if;
+
+  if v_existing.provider_payment_id is null and p_provider_payment_id is not null then
+    update public.payment_events set provider_payment_id = p_provider_payment_id
+      where payment_events.id = v_existing.id;
+    v_existing.provider_payment_id := p_provider_payment_id;
   end if;
 
   id := v_existing.id;
@@ -6243,13 +6506,14 @@ begin
   processed_at := v_existing.processed_at;
   last_error_code := v_existing.last_error_code;
   created_at := v_existing.created_at;
+  provider_payment_id := v_existing.provider_payment_id;
   already_existed := true;
   return next;
 end;
 $$;
 
-revoke all on function public.record_payment_event(text, text, text) from public, anon, authenticated;
-grant execute on function public.record_payment_event(text, text, text) to service_role;
+revoke all on function public.record_payment_event(text, text, text, text) from public, anon, authenticated;
+grant execute on function public.record_payment_event(text, text, text, text) to service_role;
 
 create or replace function public.mark_payment_event_processed(p_event_id uuid)
 returns void
@@ -6268,8 +6532,13 @@ begin
 end;
 $$;
 
-revoke all on function public.mark_payment_event_processed(uuid) from public, anon, authenticated;
-grant execute on function public.mark_payment_event_processed(uuid) to service_role;
+-- STRIPE-CUTOVER-1C (migration 056): internal-only after this
+-- migration -- ledger-v1 event disposition must only ever happen via
+-- the atomic wrapper that also recorded the corresponding business
+-- effect (finalize_ledger_book_payment()/finalize_ledger_bundle_
+-- payment(), both further down this file), never via a bare,
+-- independent service_role call.
+revoke all on function public.mark_payment_event_processed(uuid) from public, anon, authenticated, service_role;
 
 create or replace function public.mark_payment_event_failed(p_event_id uuid, p_error_code text)
 returns void
@@ -6288,16 +6557,26 @@ begin
 end;
 $$;
 
-revoke all on function public.mark_payment_event_failed(uuid, text) from public, anon, authenticated;
-grant execute on function public.mark_payment_event_failed(uuid, text) to service_role;
+-- STRIPE-CUTOVER-1C (migration 056): internal-only, same reasoning as
+-- mark_payment_event_processed() above.
+revoke all on function public.mark_payment_event_failed(uuid, text) from public, anon, authenticated, service_role;
 
+-- STRIPE-CUTOVER-1C (migration 056): final signature and two-branch
+-- body. p_available_at (6th param) renamed to p_paid_at -- available_at
+-- is now derived internally as paid_at + 30 days, never accepted from a
+-- caller. INTERNAL after this migration -- EXECUTE is revoked from
+-- service_role too (see the revoke below), reachable only via
+-- finalize_ledger_book_payment()/finalize_ledger_bundle_payment()
+-- further down this file (both owned by the same role, which always
+-- retains implicit EXECUTE on its own functions regardless of that
+-- revoke).
 create or replace function public.record_successful_sale(
   p_provider text,
   p_provider_payment_id text,
   p_currency text,
   p_purchase_ids uuid[],
   p_royalty_rate_bps integer,
-  p_available_at timestamptz,
+  p_paid_at timestamptz,
   p_buyer_id uuid default null
 )
 returns table (
@@ -6313,8 +6592,7 @@ declare
   v_purchase_ids uuid[];
   v_canonical_ids uuid[];
   v_payment_id uuid;
-  v_existing_amount bigint;
-  v_existing_currency text;
+  v_payment record;
   v_total_gross bigint;
   v_distinct_reader_count integer;
   v_derived_reader_id uuid;
@@ -6325,7 +6603,7 @@ declare
   v_author_amount bigint;
   v_existing_entry record;
   v_entry_id uuid;
-  v_created boolean;
+  v_available_at timestamptz;
 begin
   if p_provider is null or length(trim(p_provider)) = 0 then
     raise exception 'p_provider is required';
@@ -6339,8 +6617,8 @@ begin
   if p_royalty_rate_bps is null or p_royalty_rate_bps < 0 or p_royalty_rate_bps > 10000 then
     raise exception 'p_royalty_rate_bps must be between 0 and 10000';
   end if;
-  if p_available_at is null then
-    raise exception 'p_available_at is required';
+  if p_paid_at is null then
+    raise exception 'p_paid_at is required';
   end if;
 
   select array_agg(distinct x order by x) into v_purchase_ids from unnest(p_purchase_ids) x;
@@ -6372,6 +6650,14 @@ begin
       p_buyer_id, v_derived_reader_id;
   end if;
 
+  -- v_total_gross is only ever computed from purchases.amount_cents HERE
+  -- -- the candidate INSERT amount for a brand new payment -- never
+  -- read or trusted again once a payment already exists (the retry
+  -- branch below never touches purchases.amount_cents at all). Safe
+  -- here because, if this insert wins, these purchases were just
+  -- finalized/upserted in the SAME outer transaction from frozen
+  -- checkout/snapshot data by the calling wrapper, moments before this
+  -- call.
   select coalesce(sum(pu.amount_cents), 0) into v_total_gross
     from public.purchases pu
     where pu.id = any(v_purchase_ids);
@@ -6380,97 +6666,136 @@ begin
     raise exception 'total gross amount for the supplied purchases must be positive';
   end if;
 
-  insert into public.payments (provider, provider_payment_id, buyer_id, amount_minor, currency, status, paid_at)
-    values (p_provider, p_provider_payment_id, v_derived_reader_id, v_total_gross, p_currency, 'succeeded', now())
+  v_available_at := p_paid_at + interval '30 days';
+
+  -- regime is a hardcoded trusted literal, never a caller-supplied
+  -- parameter: calling this function at all is definitionally a
+  -- ledger_v1 event, since it is callable only by the ledger wrapper
+  -- RPCs after the revoke below.
+  insert into public.payments
+    (provider, provider_payment_id, buyer_id, amount_minor, currency, status, paid_at, regime)
+    values
+    (p_provider, p_provider_payment_id, v_derived_reader_id, v_total_gross, p_currency, 'succeeded', p_paid_at, 'librum_ledger_v1')
     on conflict (provider, provider_payment_id) do nothing
-    returning payments.id, payments.amount_minor, payments.currency
-    into v_payment_id, v_existing_amount, v_existing_currency;
+    returning payments.id
+    into v_payment_id;
 
-  if v_payment_id is null then
-    select p.id, p.amount_minor, p.currency
-      into v_payment_id, v_existing_amount, v_existing_currency
-      from public.payments p
-      where p.provider = p_provider and p.provider_payment_id = p_provider_payment_id;
+  if v_payment_id is not null then
+    -- FRESH PAYMENT BRANCH. Derives economics from current
+    -- purchases.amount_cents -- the only branch where that is ever
+    -- safe to do.
+    foreach v_pid in array v_purchase_ids loop
+      select pu.id as purchase_id, pu.amount_cents, b.author_id
+        into v_purchase
+        from public.purchases pu
+        join public.books b on b.id = pu.book_id
+        where pu.id = v_pid;
 
-    select array_agg(pu.id order by pu.id) into v_canonical_ids
-      from public.purchases pu
-      where pu.payment_id = v_payment_id;
+      v_gross := v_purchase.amount_cents;
+      v_librum := round(v_gross * (10000 - p_royalty_rate_bps) / 10000.0)::bigint;
+      v_author_amount := v_gross - v_librum;
 
-    if v_canonical_ids is distinct from v_purchase_ids then
-      raise exception
-        'payment %/% is already linked to a different set of purchases and cannot be reassigned',
-        p_provider, p_provider_payment_id;
-    end if;
-
-    if v_existing_amount <> v_total_gross or v_existing_currency <> p_currency then
-      raise exception
-        'payment %/% already recorded with different economics (retry mismatch): existing amount_minor=% currency=%, requested amount_minor=% currency=%',
-        p_provider, p_provider_payment_id, v_existing_amount, v_existing_currency, v_total_gross, p_currency;
-    end if;
-  end if;
-
-  foreach v_pid in array v_purchase_ids loop
-    select pu.id as purchase_id, pu.amount_cents, pu.payment_id, b.author_id
-      into v_purchase
-      from public.purchases pu
-      join public.books b on b.id = pu.book_id
-      where pu.id = v_pid;
-
-    if v_purchase.payment_id is not null and v_purchase.payment_id <> v_payment_id then
-      raise exception 'purchase % is already linked to a different payment (%), not %',
-        v_pid, v_purchase.payment_id, v_payment_id;
-    end if;
-
-    if v_purchase.payment_id is null then
-      update public.purchases set payment_id = v_payment_id where id = v_pid;
-    end if;
-
-    v_gross := v_purchase.amount_cents;
-    v_librum := round(v_gross * (10000 - p_royalty_rate_bps) / 10000.0)::bigint;
-    v_author_amount := v_gross - v_librum;
-
-    select ale.id, ale.amount_minor, ale.gross_amount_minor, ale.librum_amount_minor,
-           ale.royalty_rate_bps, ale.currency
-      into v_existing_entry
-      from public.author_ledger_entries ale
-      where ale.purchase_id = v_pid and ale.entry_type = 'sale';
-
-    if v_existing_entry.id is not null then
-      if v_existing_entry.amount_minor <> v_author_amount
-         or v_existing_entry.gross_amount_minor <> v_gross
-         or v_existing_entry.librum_amount_minor <> v_librum
-         or v_existing_entry.royalty_rate_bps <> p_royalty_rate_bps
-         or v_existing_entry.currency <> p_currency then
-        raise exception
-          'purchase % already has a sale ledger entry with different economics (retry mismatch)', v_pid;
-      end if;
-      v_entry_id := v_existing_entry.id;
-      v_created := false;
-    else
       insert into public.author_ledger_entries
         (author_id, purchase_id, payment_id, entry_type, amount_minor, currency,
          royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at)
       values
         (v_purchase.author_id, v_pid, v_payment_id, 'sale', v_author_amount, p_currency,
-         p_royalty_rate_bps, v_gross, v_librum, p_available_at)
+         p_royalty_rate_bps, v_gross, v_librum, v_available_at)
       returning id into v_entry_id;
-      v_created := true;
+
+      -- "Most recent payment for this current entitlement" pointer --
+      -- unconditional, since this branch only runs once, at true
+      -- creation time.
+      update public.purchases set payment_id = v_payment_id where id = v_pid;
+
+      purchase_id := v_pid;
+      ledger_entry_id := v_entry_id;
+      created := true;
+      return next;
+    end loop;
+    return;
+  end if;
+
+  -- EXISTING PAYMENT RETRY BRANCH. Never reads purchases.amount_cents
+  -- for economics, never updates purchases.payment_id, never updates
+  -- payments. Every fact compared below comes from the immutable
+  -- payments row itself or from the immutable author_ledger_entries
+  -- sale rows already recorded against it -- reconstructed here, never
+  -- from the mutable current-entitlement state.
+  select p.id, p.currency, p.paid_at, p.regime into v_payment
+    from public.payments p
+    where p.provider = p_provider and p.provider_payment_id = p_provider_payment_id;
+
+  v_payment_id := v_payment.id;
+
+  if v_payment.regime <> 'librum_ledger_v1' then
+    raise exception
+      'payment %/% is not a librum_ledger_v1 payment (regime %) -- cannot be retried via record_successful_sale',
+      p_provider, p_provider_payment_id, v_payment.regime;
+  end if;
+
+  if v_payment.currency <> p_currency then
+    raise exception
+      'payment %/% already recorded with a different currency (existing=%, requested=%)',
+      p_provider, p_provider_payment_id, v_payment.currency, p_currency;
+  end if;
+
+  if v_payment.paid_at <> p_paid_at then
+    raise exception
+      'payment %/% already recorded with a different paid_at (existing=%, requested=%)',
+      p_provider, p_provider_payment_id, v_payment.paid_at, p_paid_at;
+  end if;
+
+  select array_agg(ale.purchase_id order by ale.purchase_id) into v_canonical_ids
+    from public.author_ledger_entries ale
+    where ale.payment_id = v_payment_id and ale.entry_type = 'sale';
+
+  if v_canonical_ids is distinct from v_purchase_ids then
+    raise exception
+      'payment %/% is already linked to a different set of purchases and cannot be reassigned',
+      p_provider, p_provider_payment_id;
+  end if;
+
+  foreach v_pid in array v_purchase_ids loop
+    select ale.id, ale.royalty_rate_bps
+      into v_existing_entry
+      from public.author_ledger_entries ale
+      where ale.payment_id = v_payment_id and ale.purchase_id = v_pid and ale.entry_type = 'sale';
+
+    if v_existing_entry.id is null then
+      raise exception
+        'payment %/% is missing a sale entry for purchase % -- partial/corrupt prior recording, cannot safely retry',
+        p_provider, p_provider_payment_id, v_pid;
+    end if;
+
+    if v_existing_entry.royalty_rate_bps <> p_royalty_rate_bps then
+      raise exception
+        'purchase % sale entry royalty_rate_bps does not match retry request (existing=%, requested=%)',
+        v_pid, v_existing_entry.royalty_rate_bps, p_royalty_rate_bps;
     end if;
 
     purchase_id := v_pid;
-    ledger_entry_id := v_entry_id;
-    created := v_created;
+    ledger_entry_id := v_existing_entry.id;
+    created := false;
     return next;
   end loop;
 end;
 $$;
 
 revoke all on function public.record_successful_sale(text, text, text, uuid[], integer, timestamptz, uuid)
-  from public, anon, authenticated;
-grant execute on function public.record_successful_sale(text, text, text, uuid[], integer, timestamptz, uuid)
-  to service_role;
+  from public, anon, authenticated, service_role;
 
+-- STRIPE-CUTOVER-1C (migration 056): corrected signature -- resolves
+-- the payment being refunded via the immutable (provider,
+-- provider_payment_id) key, NEVER via purchases.payment_id (which only
+-- ever reflects the current entitlement's MOST RECENT payment and would
+-- resolve to the wrong, later payment once the same purchases row has
+-- been reused by a subsequent transaction). Resolves the original sale
+-- via the composite (payment_id, purchase_id) key, mirroring
+-- record_successful_sale()'s own correction above.
 create or replace function public.record_refund(
+  p_provider text,
+  p_provider_payment_id text,
   p_purchase_id uuid,
   p_provider_refund_id text
 )
@@ -6493,6 +6818,12 @@ declare
   v_refunded_sum bigint;
   v_new_status text;
 begin
+  if p_provider is null or length(trim(p_provider)) = 0 then
+    raise exception 'p_provider is required';
+  end if;
+  if p_provider_payment_id is null or length(trim(p_provider_payment_id)) = 0 then
+    raise exception 'p_provider_payment_id is required';
+  end if;
   if p_purchase_id is null then
     raise exception 'p_purchase_id is required';
   end if;
@@ -6500,32 +6831,34 @@ begin
     raise exception 'p_provider_refund_id is required';
   end if;
 
-  select pu.id, pu.payment_id into v_purchase
+  select pu.id into v_purchase
     from public.purchases pu
     where pu.id = p_purchase_id;
 
   if v_purchase.id is null then
     raise exception 'purchase % does not exist', p_purchase_id;
   end if;
-  if v_purchase.payment_id is null then
-    raise exception 'purchase % has no canonical payment; cannot record a refund', p_purchase_id;
-  end if;
 
   select p.id, p.provider, p.amount_minor, p.currency into v_payment
     from public.payments p
-    where p.id = v_purchase.payment_id;
+    where p.provider = p_provider and p.provider_payment_id = p_provider_payment_id;
+
+  if v_payment.id is null then
+    raise exception 'payment %/% does not exist; cannot record a refund', p_provider, p_provider_payment_id;
+  end if;
 
   select ale.id, ale.author_id, ale.amount_minor, ale.gross_amount_minor into v_sale
     from public.author_ledger_entries ale
-    where ale.purchase_id = p_purchase_id and ale.entry_type = 'sale';
+    where ale.payment_id = v_payment.id and ale.purchase_id = p_purchase_id and ale.entry_type = 'sale';
 
   if v_sale.id is null then
-    raise exception 'no sale ledger entry found for purchase %; cannot record a refund', p_purchase_id;
+    raise exception 'no sale ledger entry found for payment %/% purchase %; cannot record a refund',
+      p_provider, p_provider_payment_id, p_purchase_id;
   end if;
 
   select pr.id, pr.provider, pr.provider_refund_id into v_existing_refund
     from public.payment_refunds pr
-    where pr.purchase_id = p_purchase_id;
+    where pr.payment_id = v_payment.id and pr.purchase_id = p_purchase_id;
 
   if v_existing_refund.id is not null then
     if v_existing_refund.provider = v_payment.provider
@@ -6540,8 +6873,8 @@ begin
       return;
     else
       raise exception
-        'purchase % has already been refunded under a different provider refund id (%/%); full-refund-only V1 does not support a second refund',
-        p_purchase_id, v_existing_refund.provider, v_existing_refund.provider_refund_id;
+        'payment %/% purchase % has already been refunded under a different provider refund id (%/%); full-refund-only V1 does not support a second refund',
+        p_provider, p_provider_payment_id, p_purchase_id, v_existing_refund.provider, v_existing_refund.provider_refund_id;
     end if;
   end if;
 
@@ -6549,15 +6882,22 @@ begin
     insert into public.payment_refunds
       (payment_id, purchase_id, provider, provider_refund_id, amount_minor, currency, refunded_at)
     values
-      (v_purchase.payment_id, p_purchase_id, v_payment.provider, p_provider_refund_id,
+      (v_payment.id, p_purchase_id, v_payment.provider, p_provider_refund_id,
        v_sale.gross_amount_minor, v_payment.currency, now())
     returning id into v_refund_id;
   exception when unique_violation then
-    select pr.id, pr.purchase_id into v_existing_refund
+    -- The only remaining unique constraint that can fire here is
+    -- (provider, provider_refund_id) -- the (payment_id, purchase_id)
+    -- scoped check above already ruled out a pre-existing row for THIS
+    -- payment/purchase pair.
+    select pr.id, pr.payment_id, pr.purchase_id into v_existing_refund
       from public.payment_refunds pr
       where pr.provider = v_payment.provider and pr.provider_refund_id = p_provider_refund_id;
 
-    if v_existing_refund.id is not null and v_existing_refund.purchase_id = p_purchase_id then
+    if v_existing_refund.id is not null
+       and v_existing_refund.payment_id = v_payment.id
+       and v_existing_refund.purchase_id = p_purchase_id
+    then
       select ale.id into v_ledger_id
         from public.author_ledger_entries ale
         where ale.payment_refund_id = v_existing_refund.id and ale.entry_type = 'refund';
@@ -6569,25 +6909,25 @@ begin
     end if;
 
     raise exception
-      'provider refund id %/% is already recorded against a different purchase',
+      'provider refund id %/% is already recorded against a different payment/purchase',
       v_payment.provider, p_provider_refund_id;
   end;
 
   insert into public.author_ledger_entries
     (author_id, purchase_id, payment_id, payment_refund_id, entry_type, amount_minor, currency, available_at)
   values
-    (v_sale.author_id, p_purchase_id, v_purchase.payment_id, v_refund_id, 'refund',
+    (v_sale.author_id, p_purchase_id, v_payment.id, v_refund_id, 'refund',
      -v_sale.amount_minor, v_payment.currency, now())
   returning id into v_ledger_id;
 
   select coalesce(sum(pr.amount_minor), 0) into v_refunded_sum
     from public.payment_refunds pr
-    where pr.payment_id = v_purchase.payment_id;
+    where pr.payment_id = v_payment.id;
 
   if v_refunded_sum > v_payment.amount_minor then
     raise exception
       'payment % refunded sum % exceeds payment total % -- data integrity violation',
-      v_purchase.payment_id, v_refunded_sum, v_payment.amount_minor;
+      v_payment.id, v_refunded_sum, v_payment.amount_minor;
   elsif v_refunded_sum = v_payment.amount_minor then
     v_new_status := 'refunded';
   elsif v_refunded_sum > 0 then
@@ -6596,7 +6936,7 @@ begin
     v_new_status := 'succeeded';
   end if;
 
-  update public.payments set status = v_new_status, updated_at = now() where id = v_purchase.payment_id;
+  update public.payments set status = v_new_status, updated_at = now() where id = v_payment.id;
 
   payment_refund_id := v_refund_id;
   ledger_entry_id := v_ledger_id;
@@ -6605,8 +6945,372 @@ begin
 end;
 $$;
 
-revoke all on function public.record_refund(uuid, text) from public, anon, authenticated;
-grant execute on function public.record_refund(uuid, text) to service_role;
+revoke all on function public.record_refund(text, text, uuid, text) from public, anon, authenticated;
+grant execute on function public.record_refund(text, text, uuid, text) to service_role;
+
+-- ============================================================
+-- STRIPE-CUTOVER-1C (migration 056): the two ledger_v1 atomic wrapper
+-- RPCs. Every step below runs inside the wrapper's own transaction --
+-- any exception rolls back everything: the payment_event row lock, any
+-- entitlement write the shared core made, and any payment/ledger write
+-- record_successful_sale made. All commit or all rollback. Neither
+-- accepts author_id, expected amount, expected currency, royalty rate,
+-- available_at, or regime -- every one of those is derived from the
+-- trusted, already-frozen checkout row or computed internally.
+-- ============================================================
+
+create or replace function public.finalize_ledger_book_payment(
+  p_payment_event_id uuid,
+  p_intent_id uuid,
+  p_provider text,
+  p_provider_payment_id text,
+  p_actual_amount_minor bigint,
+  p_actual_currency text,
+  p_paid_at timestamptz
+)
+returns table (
+  outcome text,
+  out_book_id uuid,
+  out_reader_id uuid,
+  out_author_id uuid
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_event record;
+  v_intent record;
+  v_normalized_currency text;
+  v_core record;
+  v_purchase_id uuid;
+  v_author_id uuid;
+begin
+  if p_payment_event_id is null then raise exception 'p_payment_event_id is required'; end if;
+  if p_intent_id is null then raise exception 'p_intent_id is required'; end if;
+  if p_provider is null or length(trim(p_provider)) = 0 then raise exception 'p_provider is required'; end if;
+  if p_provider_payment_id is null or length(trim(p_provider_payment_id)) = 0 then
+    raise exception 'p_provider_payment_id is required';
+  end if;
+  if p_paid_at is null then raise exception 'p_paid_at is required'; end if;
+
+  select id, provider, provider_payment_id into v_event
+    from public.payment_events
+    where id = p_payment_event_id
+    for update;
+
+  if v_event.id is null then
+    raise exception 'finalize_ledger_book_payment: payment_event % not found', p_payment_event_id;
+  end if;
+
+  if v_event.provider is distinct from p_provider
+     or v_event.provider_payment_id is distinct from p_provider_payment_id
+  then
+    raise exception
+      'finalize_ledger_book_payment: payment_event %/% does not match supplied provider/provider_payment_id (event provider=%, provider_payment_id=%)',
+      p_provider, p_provider_payment_id, v_event.provider, v_event.provider_payment_id;
+  end if;
+
+  select id, book_id, reader_id, price_cents_at_checkout, currency, royalty_rate_bps, regime
+    into v_intent
+    from public.book_checkout_intents
+    where id = p_intent_id
+    for update;
+
+  if v_intent.id is null then
+    raise exception 'finalize_ledger_book_payment: checkout intent % not found', p_intent_id;
+  end if;
+
+  if v_intent.regime <> 'librum_ledger_v1' then
+    raise exception
+      'finalize_ledger_book_payment: intent % is not a librum_ledger_v1 checkout (regime %) -- use finalize_book_checkout_intent for legacy_stripe_connect_v1',
+      p_intent_id, v_intent.regime;
+  end if;
+
+  v_normalized_currency := upper(btrim(coalesce(p_actual_currency, '')));
+
+  if p_actual_amount_minor is null or p_actual_amount_minor <= 0 then
+    raise exception 'finalize_ledger_book_payment: p_actual_amount_minor must be positive';
+  end if;
+
+  if p_actual_amount_minor <> v_intent.price_cents_at_checkout
+     or v_normalized_currency <> v_intent.currency
+  then
+    raise exception
+      'finalize_ledger_book_payment: amount/currency mismatch for intent % (expected % %, got % %)',
+      p_intent_id, v_intent.price_cents_at_checkout, v_intent.currency, p_actual_amount_minor, v_normalized_currency;
+  end if;
+
+  select core.outcome, core.out_book_id, core.out_reader_id
+    into v_core
+    from public.finalize_book_checkout_intent_entitlement_core(
+      p_intent_id, null, p_provider_payment_id, p_actual_amount_minor::integer
+    ) as core;
+
+  if v_core.outcome in ('active_other_session', 'blocked_book_or_reader_deleted', 'blocked_disputed_lost') then
+    perform public.mark_payment_event_failed(p_payment_event_id, v_core.outcome);
+    outcome := v_core.outcome;
+    out_book_id := v_core.out_book_id;
+    out_reader_id := v_core.out_reader_id;
+    out_author_id := null;
+    return next;
+    return;
+  end if;
+
+  select id into v_purchase_id
+    from public.purchases
+    where book_id = v_core.out_book_id and reader_id = v_core.out_reader_id;
+
+  select author_id into v_author_id from public.books where id = v_core.out_book_id;
+
+  perform public.record_successful_sale(
+    p_provider, p_provider_payment_id, v_normalized_currency,
+    array[v_purchase_id], v_intent.royalty_rate_bps, p_paid_at, v_core.out_reader_id
+  );
+
+  perform public.mark_payment_event_processed(p_payment_event_id);
+
+  outcome := v_core.outcome;
+  out_book_id := v_core.out_book_id;
+  out_reader_id := v_core.out_reader_id;
+  out_author_id := v_author_id;
+  return next;
+end;
+$$;
+
+revoke all on function public.finalize_ledger_book_payment(uuid, uuid, text, text, bigint, text, timestamptz)
+  from public, anon, authenticated;
+grant execute on function public.finalize_ledger_book_payment(uuid, uuid, text, text, bigint, text, timestamptz)
+  to service_role;
+
+create or replace function public.finalize_ledger_bundle_payment(
+  p_payment_event_id uuid,
+  p_snapshot_id uuid,
+  p_provider text,
+  p_provider_payment_id text,
+  p_actual_amount_minor bigint,
+  p_actual_currency text,
+  p_paid_at timestamptz
+)
+returns table (
+  outcome text,
+  out_reader_id uuid,
+  out_author_id uuid,
+  out_book_ids uuid[]
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_event record;
+  v_snapshot record;
+  v_normalized_currency text;
+  v_existing_payment_id uuid;
+  v_funded_total_frozen bigint;
+  v_row record;
+  v_purchase_ids uuid[] := array[]::uuid[];
+  v_out_book_ids uuid[] := array[]::uuid[];
+  v_pid uuid;
+begin
+  if p_payment_event_id is null then raise exception 'p_payment_event_id is required'; end if;
+  if p_snapshot_id is null then raise exception 'p_snapshot_id is required'; end if;
+  if p_provider is null or length(trim(p_provider)) = 0 then raise exception 'p_provider is required'; end if;
+  if p_provider_payment_id is null or length(trim(p_provider_payment_id)) = 0 then
+    raise exception 'p_provider_payment_id is required';
+  end if;
+  if p_paid_at is null then raise exception 'p_paid_at is required'; end if;
+
+  select id, provider, provider_payment_id into v_event
+    from public.payment_events
+    where id = p_payment_event_id
+    for update;
+
+  if v_event.id is null then
+    raise exception 'finalize_ledger_bundle_payment: payment_event % not found', p_payment_event_id;
+  end if;
+
+  if v_event.provider is distinct from p_provider
+     or v_event.provider_payment_id is distinct from p_provider_payment_id
+  then
+    raise exception
+      'finalize_ledger_bundle_payment: payment_event %/% does not match supplied provider/provider_payment_id (event provider=%, provider_payment_id=%)',
+      p_provider, p_provider_payment_id, v_event.provider, v_event.provider_payment_id;
+  end if;
+
+  select id, reader_id, author_id, bundle_id, bundle_title, bundle_price_cents_at_checkout,
+         items, regime, currency, royalty_rate_bps
+    into v_snapshot
+    from public.bundle_checkout_snapshots
+    where id = p_snapshot_id
+    for update;
+
+  if v_snapshot.id is null then
+    raise exception 'finalize_ledger_bundle_payment: bundle checkout snapshot % not found', p_snapshot_id;
+  end if;
+
+  if v_snapshot.regime <> 'librum_ledger_v1' then
+    raise exception
+      'finalize_ledger_bundle_payment: snapshot % is not a librum_ledger_v1 checkout (regime %) -- legacy bundle fulfillment handles legacy_stripe_connect_v1',
+      p_snapshot_id, v_snapshot.regime;
+  end if;
+
+  if v_snapshot.reader_id is null then
+    raise exception
+      'finalize_ledger_bundle_payment: snapshot % reader_id is null (reader deleted) -- unrecoverable',
+      p_snapshot_id;
+  end if;
+
+  v_normalized_currency := upper(btrim(coalesce(p_actual_currency, '')));
+
+  if p_actual_amount_minor is null or p_actual_amount_minor <= 0 then
+    raise exception 'finalize_ledger_bundle_payment: p_actual_amount_minor must be positive';
+  end if;
+
+  if p_actual_amount_minor <> v_snapshot.bundle_price_cents_at_checkout
+     or v_normalized_currency <> v_snapshot.currency
+  then
+    raise exception
+      'finalize_ledger_bundle_payment: amount/currency mismatch for snapshot % (expected % %, got % %)',
+      p_snapshot_id, v_snapshot.bundle_price_cents_at_checkout, v_snapshot.currency,
+      p_actual_amount_minor, v_normalized_currency;
+  end if;
+
+  if public.payment_intent_has_lost_dispute(p_provider_payment_id) then
+    perform public.mark_payment_event_failed(p_payment_event_id, 'blocked_disputed_lost');
+    outcome := 'blocked_disputed_lost';
+    out_reader_id := v_snapshot.reader_id;
+    out_author_id := v_snapshot.author_id;
+    out_book_ids := array[]::uuid[];
+    return next;
+    return;
+  end if;
+
+  select id into v_existing_payment_id
+    from public.payments
+    where provider = p_provider and provider_payment_id = p_provider_payment_id;
+
+  select coalesce(sum(d.frozen_price), 0)
+    into v_funded_total_frozen
+    from jsonb_array_elements(v_snapshot.items) as item,
+      lateral (select (item->>'book_id')::uuid as book_id, (item->>'price_cents_at_checkout')::integer as frozen_price) d
+    left join public.purchases pu on pu.book_id = d.book_id and pu.reader_id = v_snapshot.reader_id
+    where not (
+      pu.id is not null
+      and (v_existing_payment_id is null or pu.payment_id is distinct from v_existing_payment_id)
+      and pu.refunded_at is null
+      and not public.payment_intent_has_lost_dispute(pu.stripe_payment_intent_id)
+    );
+
+  if v_funded_total_frozen = 0 then
+    raise exception
+      'finalize_ledger_bundle_payment: snapshot % has no fundable items but a positive amount must still be allocated (every item already actively owned via a different payment)',
+      p_snapshot_id;
+  end if;
+
+  for v_row in
+    with item_data as (
+      select
+        (item->>'book_id')::uuid as book_id,
+        (item->>'price_cents_at_checkout')::integer as frozen_price,
+        (item->>'position')::integer as position
+      from jsonb_array_elements(v_snapshot.items) as item
+    ),
+    classified as (
+      select
+        d.book_id, d.frozen_price, d.position,
+        pu.id as existing_purchase_id,
+        case
+          when pu.id is not null
+            and (v_existing_payment_id is null or pu.payment_id is distinct from v_existing_payment_id)
+            and pu.refunded_at is null
+            and not public.payment_intent_has_lost_dispute(pu.stripe_payment_intent_id)
+          then 'active_other_payment'
+          else 'eligible'
+        end as classification
+      from item_data d
+      left join public.purchases pu on pu.book_id = d.book_id and pu.reader_id = v_snapshot.reader_id
+    ),
+    funded as (
+      select * from classified where classification = 'eligible'
+    ),
+    allocated as (
+      select
+        book_id, frozen_price, position, existing_purchase_id,
+        floor(p_actual_amount_minor * frozen_price::numeric / v_funded_total_frozen)::bigint as floor_share
+      from funded
+    ),
+    final_shares as (
+      select
+        book_id, existing_purchase_id, floor_share,
+        floor_share + case
+          when row_number() over (order by position) <= (p_actual_amount_minor - sum(floor_share) over ())
+          then 1 else 0
+        end as final_share
+      from allocated
+    )
+    select book_id, existing_purchase_id, final_share from final_shares
+  loop
+    insert into public.purchases (
+      book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id,
+      amount_cents, discount_code_id, bundle_id, refunded_at, regime
+    ) values (
+      v_row.book_id, v_snapshot.reader_id, null, p_provider_payment_id,
+      v_row.final_share, null, v_snapshot.bundle_id, null, v_snapshot.regime
+    )
+    on conflict (book_id, reader_id) do update set
+      stripe_payment_intent_id = excluded.stripe_payment_intent_id,
+      amount_cents = excluded.amount_cents,
+      bundle_id = excluded.bundle_id,
+      refunded_at = null,
+      regime = excluded.regime
+    returning id into v_pid;
+
+    v_purchase_ids := array_append(v_purchase_ids, v_pid);
+    v_out_book_ids := array_append(v_out_book_ids, v_row.book_id);
+  end loop;
+
+  for v_row in
+    select pu.id as pid, pu.book_id as bid
+    from public.purchases pu
+    where pu.reader_id = v_snapshot.reader_id
+      and pu.book_id in (
+        select (item->>'book_id')::uuid from jsonb_array_elements(v_snapshot.items) as item
+      )
+      and v_existing_payment_id is not null
+      and pu.payment_id = v_existing_payment_id
+      and not (pu.id = any(v_purchase_ids))
+  loop
+    v_purchase_ids := array_append(v_purchase_ids, v_row.pid);
+    v_out_book_ids := array_append(v_out_book_ids, v_row.bid);
+  end loop;
+
+  perform public.record_successful_sale(
+    p_provider, p_provider_payment_id, v_normalized_currency,
+    v_purchase_ids, v_snapshot.royalty_rate_bps, p_paid_at, v_snapshot.reader_id
+  );
+
+  update public.bundle_checkout_snapshots
+    set fulfilled_at = now(), total_amount_cents = p_actual_amount_minor
+    where id = p_snapshot_id and fulfilled_at is null;
+
+  delete from public.bundle_checkout_reservations where snapshot_id = p_snapshot_id;
+  delete from public.bundle_checkout_reader_holds where snapshot_id = p_snapshot_id;
+
+  perform public.mark_payment_event_processed(p_payment_event_id);
+
+  outcome := 'eligible_fulfilled';
+  out_reader_id := v_snapshot.reader_id;
+  out_author_id := v_snapshot.author_id;
+  out_book_ids := v_out_book_ids;
+  return next;
+end;
+$$;
+
+revoke all on function public.finalize_ledger_bundle_payment(uuid, uuid, text, text, bigint, text, timestamptz)
+  from public, anon, authenticated;
+grant execute on function public.finalize_ledger_bundle_payment(uuid, uuid, text, text, bigint, text, timestamptz)
+  to service_role;
 
 -- ============================================================
 -- LIBRUM 2.0 LEDGER-1D (migration 050): author-facing financial

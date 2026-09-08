@@ -841,8 +841,16 @@ begin
   perform pg_temp.assert(not has_function_privilege('authenticated', 'public.finalize_book_checkout_intent(uuid,text,text,integer)', 'EXECUTE'), 'part9: authenticated must not have EXECUTE on finalize_book_checkout_intent');
   perform pg_temp.assert(has_function_privilege('service_role', 'public.finalize_book_checkout_intent(uuid,text,text,integer)', 'EXECUTE'), 'part9: service_role must have EXECUTE on finalize_book_checkout_intent');
 
-  perform pg_temp.assert(not has_function_privilege('anon', 'public.create_book_checkout_intent(uuid,text)', 'EXECUTE'), 'part9: anon must not have EXECUTE on create_book_checkout_intent');
-  perform pg_temp.assert(has_function_privilege('authenticated', 'public.create_book_checkout_intent(uuid,text)', 'EXECUTE'), 'part9: authenticated must have EXECUTE on create_book_checkout_intent');
+  -- STRIPE-CUTOVER-1C (migration 056): create_book_checkout_intent's
+  -- signature gained three trailing, defaulted ledger_v1 parameters
+  -- (regime/currency/royalty_rate_bps) -- the 2-argument signature this
+  -- assertion originally checked no longer exists as a distinct
+  -- function at all (drop+recreate, since CREATE OR REPLACE cannot
+  -- widen a parameter list -- see that migration's own Part 10
+  -- comment). The grant behavior itself (anon denied, authenticated
+  -- allowed) is unchanged.
+  perform pg_temp.assert(not has_function_privilege('anon', 'public.create_book_checkout_intent(uuid,text,text,text,integer)', 'EXECUTE'), 'part9: anon must not have EXECUTE on create_book_checkout_intent');
+  perform pg_temp.assert(has_function_privilege('authenticated', 'public.create_book_checkout_intent(uuid,text,text,text,integer)', 'EXECUTE'), 'part9: authenticated must have EXECUTE on create_book_checkout_intent');
 end $$;
 
 select 'ALL PASSED: 032_book_checkout_intents.test.sql' as result;

@@ -87,11 +87,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0520100-0000-0000-0000-000000000002', 'e0520100-0000-0000-0000-000000000001', 'S1 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0520100-0000-0000-0000-000000000003', 'e0520100-0000-0000-0000-000000000002', 'e0520100-0000-0000-0000-000000000001', 'cs_p052_s01', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('122f4fdc-b568-a86f-61bf-4847b9923302', 'test', 'pay_auto_122f4fdc', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0520100-0000-0000-0000-000000000004', 'e0520100-0000-0000-0000-000000000001',
-   'e0520100-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0,
+   'e0520100-0000-0000-0000-000000000003', '122f4fdc-b568-a86f-61bf-4847b9923302', 'sale', 100, 'USD', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payouts (id, author_id, amount_minor, currency, status, created_at) values
   ('e0520100-0000-0000-0000-000000000005', 'e0520100-0000-0000-0000-000000000001', 100, 'USD', 'pending', now() - interval '1 day');
@@ -101,11 +104,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0520200-0000-0000-0000-000000000002', 'e0520200-0000-0000-0000-000000000001', 'S2 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0520200-0000-0000-0000-000000000003', 'e0520200-0000-0000-0000-000000000002', 'e0520200-0000-0000-0000-000000000001', 'cs_p052_s02', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('eaf37699-0943-8416-b9a4-f52b4387c380', 'test', 'pay_auto_eaf37699', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0520200-0000-0000-0000-000000000004', 'e0520200-0000-0000-0000-000000000001',
-   'e0520200-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0,
+   'e0520200-0000-0000-0000-000000000003', 'eaf37699-0943-8416-b9a4-f52b4387c380', 'sale', 100, 'USD', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payouts (id, author_id, amount_minor, currency, status, created_at, processing_at) values
   ('e0520200-0000-0000-0000-000000000005', 'e0520200-0000-0000-0000-000000000001', 100, 'USD', 'processing', now() - interval '1 day', now() - interval '12 hours');
@@ -115,11 +121,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0520300-0000-0000-0000-000000000002', 'e0520300-0000-0000-0000-000000000001', 'S3 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0520300-0000-0000-0000-000000000003', 'e0520300-0000-0000-0000-000000000002', 'e0520300-0000-0000-0000-000000000001', 'cs_p052_s03', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('42e1ef09-1f9b-bc01-7c0b-6d9fe8434d37', 'test', 'pay_auto_42e1ef09', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0520300-0000-0000-0000-000000000004', 'e0520300-0000-0000-0000-000000000001',
-   'e0520300-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0,
+   'e0520300-0000-0000-0000-000000000003', '42e1ef09-1f9b-bc01-7c0b-6d9fe8434d37', 'sale', 100, 'USD', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payouts (id, author_id, amount_minor, currency, status, created_at, processing_at) values
   ('e0520300-0000-0000-0000-000000000005', 'e0520300-0000-0000-0000-000000000001', 100, 'USD', 'reconciling', now() - interval '1 day', now() - interval '12 hours');
@@ -131,11 +140,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0520400-0000-0000-0000-000000000002', 'e0520400-0000-0000-0000-000000000001', 'S4 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0520400-0000-0000-0000-000000000003', 'e0520400-0000-0000-0000-000000000002', 'e0520400-0000-0000-0000-000000000001', 'cs_p052_s04', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('86a03d57-dcf3-4ff1-b2e2-d8529547e312', 'test', 'pay_auto_86a03d57', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0520400-0000-0000-0000-000000000004', 'e0520400-0000-0000-0000-000000000001',
-   'e0520400-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0,
+   'e0520400-0000-0000-0000-000000000003', '86a03d57-dcf3-4ff1-b2e2-d8529547e312', 'sale', 100, 'USD', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payouts (id, author_id, amount_minor, currency, status, created_at, processing_at, failed_at, failure_code) values
   ('e0520400-0000-0000-0000-000000000005', 'e0520400-0000-0000-0000-000000000001', 100, 'USD', 'failed',
@@ -146,11 +158,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0520500-0000-0000-0000-000000000002', 'e0520500-0000-0000-0000-000000000001', 'S5 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0520500-0000-0000-0000-000000000003', 'e0520500-0000-0000-0000-000000000002', 'e0520500-0000-0000-0000-000000000001', 'cs_p052_s05', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('32dc3dec-7d24-edf7-3da2-307119b16e50', 'test', 'pay_auto_32dc3dec', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0520500-0000-0000-0000-000000000004', 'e0520500-0000-0000-0000-000000000001',
-   'e0520500-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0,
+   'e0520500-0000-0000-0000-000000000003', '32dc3dec-7d24-edf7-3da2-307119b16e50', 'sale', 100, 'USD', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payouts (id, author_id, amount_minor, currency, status, created_at) values
   ('e0520500-0000-0000-0000-000000000005', 'e0520500-0000-0000-0000-000000000001', 100, 'USD', 'cancelled', now() - interval '2 days');
@@ -166,11 +181,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0520600-0000-0000-0000-000000000002', 'e0520600-0000-0000-0000-000000000001', 'S6 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0520600-0000-0000-0000-000000000003', 'e0520600-0000-0000-0000-000000000002', 'e0520600-0000-0000-0000-000000000001', 'cs_p052_s06', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('ecdfe717-b6c8-f0dc-7298-e5511128ea6d', 'test', 'pay_auto_ecdfe717', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0520600-0000-0000-0000-000000000004', 'e0520600-0000-0000-0000-000000000001',
-   'e0520600-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0,
+   'e0520600-0000-0000-0000-000000000003', 'ecdfe717-b6c8-f0dc-7298-e5511128ea6d', 'sale', 100, 'USD', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payouts (id, author_id, amount_minor, currency, status, created_at, processing_at) values
   ('e0520600-0000-0000-0000-000000000005', 'e0520600-0000-0000-0000-000000000001', 100, 'USD', 'processing', now() - interval '2 days', now() - interval '1 day');
@@ -188,11 +206,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0520700-0000-0000-0000-000000000002', 'e0520700-0000-0000-0000-000000000001', 'S7 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0520700-0000-0000-0000-000000000003', 'e0520700-0000-0000-0000-000000000002', 'e0520700-0000-0000-0000-000000000001', 'cs_p052_s07', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('439a9761-12cf-0e57-df4d-570c040d2ec5', 'test', 'pay_auto_439a9761', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0520700-0000-0000-0000-000000000004', 'e0520700-0000-0000-0000-000000000001',
-   'e0520700-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0,
+   'e0520700-0000-0000-0000-000000000003', '439a9761-12cf-0e57-df4d-570c040d2ec5', 'sale', 100, 'USD', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payouts (id, author_id, amount_minor, currency, status, created_at, processing_at) values
   ('e0520700-0000-0000-0000-000000000005', 'e0520700-0000-0000-0000-000000000001', 100, 'USD', 'processing', now() - interval '2 days', now() - interval '1 day');
@@ -209,14 +230,18 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0520800-0000-0000-0000-000000000003', 'e0520800-0000-0000-0000-000000000002', 'e0520800-0000-0000-0000-000000000001', 'cs_p052_s08_eur', 100),
   ('e0520800-0000-0000-0000-000000000007', 'e0520800-0000-0000-0000-000000000006', 'e0520800-0000-0000-0000-000000000001', 'cs_p052_s08_usd', 200);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('f34804ba-1904-59f4-9475-5b4b1854f08c', 'test', 'pay_auto_f34804ba', 100, 'EUR', 'succeeded'),
+  ('a2f4be06-a988-be5a-3d5e-71bb541748bc', 'test', 'pay_auto_a2f4be06', 200, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0520800-0000-0000-0000-000000000004', 'e0520800-0000-0000-0000-000000000001',
-   'e0520800-0000-0000-0000-000000000003', 'sale', 100, 'EUR', 8000, 100, 0,
+   'e0520800-0000-0000-0000-000000000003', 'f34804ba-1904-59f4-9475-5b4b1854f08c', 'sale', 100, 'EUR', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days'),
   ('e0520800-0000-0000-0000-000000000008', 'e0520800-0000-0000-0000-000000000001',
-   'e0520800-0000-0000-0000-000000000007', 'sale', 200, 'USD', 8000, 200, 0,
+   'e0520800-0000-0000-0000-000000000007', 'a2f4be06-a988-be5a-3d5e-71bb541748bc', 'sale', 200, 'USD', 8000, 200, 0,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payouts (id, author_id, amount_minor, currency, status, created_at) values
   ('e0520800-0000-0000-0000-000000000005', 'e0520800-0000-0000-0000-000000000001', 50, 'EUR', 'pending', now() - interval '1 day');
@@ -230,11 +255,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0521000-0000-0000-0000-000000000002', 'e0521000-0000-0000-0000-000000000001', 'S10 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0521000-0000-0000-0000-000000000003', 'e0521000-0000-0000-0000-000000000002', 'e0521000-0000-0000-0000-000000000001', 'cs_p052_s10', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('3d07c711-9835-f8e3-0c1c-55ffac5823e4', 'test', 'pay_auto_3d07c711', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0521000-0000-0000-0000-000000000004', 'e0521000-0000-0000-0000-000000000001',
-   'e0521000-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0,
+   'e0521000-0000-0000-0000-000000000003', '3d07c711-9835-f8e3-0c1c-55ffac5823e4', 'sale', 100, 'USD', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('e0521000-0000-0000-0000-000000000001', 50, 'USD');
@@ -244,11 +272,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0521100-0000-0000-0000-000000000002', 'e0521100-0000-0000-0000-000000000001', 'S11 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0521100-0000-0000-0000-000000000003', 'e0521100-0000-0000-0000-000000000002', 'e0521100-0000-0000-0000-000000000001', 'cs_p052_s11', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('0d8648cf-f221-37fc-63da-84648160c8fd', 'test', 'pay_auto_0d8648cf', 100, 'USD', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0521100-0000-0000-0000-000000000004', 'e0521100-0000-0000-0000-000000000001',
-   'e0521100-0000-0000-0000-000000000003', 'sale', 100, 'USD', 8000, 100, 0,
+   'e0521100-0000-0000-0000-000000000003', '0d8648cf-f221-37fc-63da-84648160c8fd', 'sale', 100, 'USD', 8000, 100, 0,
    now() - interval '10 days', now() - interval '10 days');
 
 -- S12: a PAID historical payout that nets the currency's ledger balance
@@ -257,11 +288,14 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
   ('e0521200-0000-0000-0000-000000000002', 'e0521200-0000-0000-0000-000000000001', 'S12 Book', '', '', '', 100, 'published');
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, amount_cents) values
   ('e0521200-0000-0000-0000-000000000003', 'e0521200-0000-0000-0000-000000000002', 'e0521200-0000-0000-0000-000000000001', 'cs_p052_s12', 100);
+insert into public.payments (id, provider, provider_payment_id, amount_minor, currency, status) values
+  ('155166a7-0ba7-1ad4-de82-125ec2db015e', 'test', 'pay_auto_155166a7', 100, 'EUR', 'succeeded');
+
 insert into public.author_ledger_entries
-  (id, author_id, purchase_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
+  (id, author_id, purchase_id, payment_id, entry_type, amount_minor, currency, royalty_rate_bps, gross_amount_minor, librum_amount_minor, available_at, created_at)
 values
   ('e0521200-0000-0000-0000-000000000004', 'e0521200-0000-0000-0000-000000000001',
-   'e0521200-0000-0000-0000-000000000003', 'sale', 100, 'EUR', 8000, 100, 0,
+   'e0521200-0000-0000-0000-000000000003', '155166a7-0ba7-1ad4-de82-125ec2db015e', 'sale', 100, 'EUR', 8000, 100, 0,
    now() - interval '30 days', now() - interval '30 days');
 insert into public.author_payouts (id, author_id, amount_minor, currency, status, created_at, processing_at, paid_at, provider, provider_reference) values
   ('e0521200-0000-0000-0000-000000000005', 'e0521200-0000-0000-0000-000000000001', 100, 'EUR', 'paid',
