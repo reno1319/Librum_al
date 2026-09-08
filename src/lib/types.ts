@@ -465,15 +465,20 @@ export type AuthorFinancialActivityRow = {
 };
 
 // LEDGER-1E-C: mirrors get_author_payout_overview()'s exact return shape
-// (migration 052) -- a reservation-aware payoutability snapshot layered
-// on top of author_ledger_balance(), never a redefinition of it.
+// (migration 052, widened by migration 055/BANK-PAYOUT-1C Part 8) -- a
+// reservation-aware payoutability snapshot layered on top of
+// author_ledger_balance(), never a redefinition of it.
 // available_for_payout_minor is deliberately NOT clamped to zero (a
 // processing/reconciling reservation can outlive the ledger debit that
 // funded it, e.g. a refund posted after the reservation was made) -- it
 // must render as a real negative number, never floored. threshold_minor
 // is null exactly when threshold_configured is false; never a fabricated
-// default. No provider/reference/internal identifier appears anywhere in
-// this shape.
+// default. No provider/reference/internal identifier, and no bank
+// destination data (beneficiary/IBAN), appears anywhere in this shape --
+// minimum_policy_configured/effective_threshold_minor/
+// destination_configured are honestly null/false whenever no active
+// platform minimum policy exists for that currency, exactly mirroring
+// author_payout_eligibility()'s own fail-closed semantics.
 export type AuthorPayoutOverviewRow = {
   currency: string;
   ledger_available_minor: number;
@@ -482,6 +487,9 @@ export type AuthorPayoutOverviewRow = {
   threshold_configured: boolean;
   threshold_minor: number | null;
   threshold_reached: boolean;
+  minimum_policy_configured: boolean;
+  effective_threshold_minor: number | null;
+  destination_configured: boolean;
 };
 
 // LEDGER-1E-C: mirrors list_author_payout_history()'s exact return shape

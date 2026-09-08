@@ -6,6 +6,8 @@ import {
   listAuthorFinancialActivity,
   getAuthorPayoutOverview,
   listAuthorPayoutHistory,
+  getAuthorPayoutDestination,
+  saveAuthorPayoutDestination,
 } from "./actions";
 import {
   formatMinorAmount,
@@ -16,6 +18,9 @@ import {
   payoutStatusLabel,
   resolvePayoutHistoryPage,
   PAYOUT_HISTORY_DISPLAY_PAGE_SIZE,
+  maskIban,
+  PAYOUT_DESTINATION_CURRENCY,
+  isBankPayoutSetupEnabled,
 } from "./balance-logic";
 import { AUTHOR_EARNINGS_SETTLEMENT_DAYS } from "@/lib/settlement-policy";
 import { isSchedulerEnabled } from "@/lib/payout-scheduler";
@@ -23,6 +28,8 @@ import { computeNextPayoutCycleDate, formatPayoutCycleDate } from "@/lib/payout-
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
+import { buttonClasses } from "@/components/ui/button";
+import { formControlClasses } from "@/lib/form-styles";
 import type { AuthorPayoutOverviewRow } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -41,7 +48,12 @@ export const metadata: Metadata = {
 // migration's own top-of-file comment). Combining the two into one
 // number would produce two competing definitions of "revenue" under one
 // label, which is exactly what LEDGER-1D was asked to avoid.
-export default async function BalancePage() {
+export default async function BalancePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ editBank?: string; error?: string; success?: string }>;
+}) {
+  const { editBank, error: queryError, success: querySuccess } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -59,11 +71,28 @@ export default async function BalancePage() {
   // today; nothing here arms reservation execution.
   const schedulerEnabled = isSchedulerEnabled(process.env.PAYOUT_SCHEDULER_ENABLED);
 
-  const [summaryResult, activityResult, overviewResult, historyResult] = await Promise.all([
+  // BANK-PAYOUT-1E.1: a SEPARATE rollout switch from schedulerEnabled
+  // above -- this one gates only whether the bank-destination setup UI
+  // (and its underlying read) is shown at all, independent of whether
+  // reservation execution is armed. Stripe Connect remains the live
+  // author-payout mechanism today; this stays off until a future,
+  // explicit cutover task turns it on (see balance-logic.ts's own
+  // comment on isBankPayoutSetupEnabled for the full reasoning).
+  const bankPayoutSetupEnabled = isBankPayoutSetupEnabled(process.env.BANK_PAYOUT_SETUP_ENABLED);
+
+  const [summaryResult, activityResult, overviewResult, historyResult, destinationResult] = await Promise.all([
     getAuthorFinancialSummary(),
     listAuthorFinancialActivity({ limit: ACTIVITY_DISPLAY_PAGE_SIZE + 1 }),
     getAuthorPayoutOverview(),
     listAuthorPayoutHistory({ limit: PAYOUT_HISTORY_DISPLAY_PAGE_SIZE + 1 }),
+    // Section 8/9: never query the author's full stored bank
+    // destination while the setup UI is disabled -- there is nothing
+    // to show it for, so this is a real data-minimization gate, not
+    // merely a hidden-in-the-UI one. getAuthorPayoutDestination() is
+    // literally never called in this state.
+    bankPayoutSetupEnabled
+      ? getAuthorPayoutDestination()
+      : Promise.resolve({ ok: true, data: null } as Awaited<ReturnType<typeof getAuthorPayoutDestination>>),
   ]);
 
   if (!summaryResult.ok) {
@@ -77,6 +106,9 @@ export default async function BalancePage() {
   }
   if (!historyResult.ok) {
     throw new Error(historyResult.error);
+  }
+  if (!destinationResult.ok) {
+    throw new Error(destinationResult.error);
   }
 
   const summary = summaryResult.data;
@@ -97,6 +129,21 @@ export default async function BalancePage() {
     overviewResult.data.map((row) => [row.currency, row]),
   );
 
+  // BANK-PAYOUT-1E Section 12: the platform minimum policy is GLOBAL,
+  // not per-author, so its configured-state is read from whichever ALL
+  // overview row exists. get_author_payout_overview() only ever returns
+  // a row for a currency the author already has ledger activity,
+  // settings, or past payouts in (its own "currencies" CTE) -- a
+  // first-time author with none of those gets no ALL row at all. The
+  // honest default when that row is absent is "not configured", never
+  // a fabricated true -- exactly matching what a real query against
+  // payout_minimum_policy would say for this author's own effective
+  // state today.
+  const destination = destinationResult.data;
+  const overviewForDestinationCurrency = overviewByCurrency.get(PAYOUT_DESTINATION_CURRENCY);
+  const minimumPolicyConfigured = overviewForDestinationCurrency?.minimum_policy_configured ?? false;
+  const isEditingBank = editBank === "1";
+
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
@@ -109,6 +156,17 @@ export default async function BalancePage() {
           description={`Your ledger balance across every sale, refund, adjustment, and payout. New sales settle ${AUTHOR_EARNINGS_SETTLEMENT_DAYS} days after purchase, once Librum's refund window has closed, and become available for payout at that point${schedulerEnabled ? "." : " — an exact payout date isn't scheduled yet."}`}
         />
       </div>
+
+      {queryError && (
+        <Alert variant="error" className="mt-4">
+          {queryError}
+        </Alert>
+      )}
+      {querySuccess && (
+        <Alert variant="success" className="mt-4">
+          {querySuccess}
+        </Alert>
+      )}
 
       {/* LEDGER-1E-D-G: forward-looking payout-cycle policy notice --
           shown regardless of isEmpty below, since it's schedule
@@ -272,6 +330,129 @@ export default async function BalancePage() {
             </ul>
           )}
         </>
+      )}
+
+      {/* BANK-PAYOUT-1E.1: the ENTIRE bank-destination setup section is
+          gated on bankPayoutSetupEnabled and OMITTED ENTIRELY while
+          disabled (option A of Section 5) -- not merely hidden behind a
+          disabled form. Stripe Connect remains the only live author-
+          payout mechanism today, and showing this section (even as an
+          informational notice) risks telling authors they need to set
+          up two competing payout systems. The underlying read is
+          already skipped above when disabled, so this omission is a
+          real data-minimization boundary, not cosmetic. */}
+      {bankPayoutSetupEnabled && (
+      /* BANK-PAYOUT-1E: bank destination + threshold-readiness setup --
+          deliberately rendered UNCONDITIONALLY (once enabled), outside
+          the isEmpty branch above, since an author with zero sales so
+          far still needs to be able to add a bank account before
+          payouts are ever activated (Section 19's own empty-state
+          requirement). Bank data flows exclusively through the live
+          migration-055 set_author_payout_destination() RPC (via the
+          Server Action in ./actions.ts) -- no direct write to
+          author_payout_destinations anywhere here, and no author_id is
+          ever read from or sent by this page. This is a SEPARATE
+          concern from the existing Stripe Connect onboarding at
+          /dashboard/payouts (left untouched by this task -- that page
+          still gates real paid-book publishing today) -- this section
+          only prepares the NOT-YET-ACTIVE bank-transfer payout path
+          this migration foundation exists for. */
+      <section className="mt-10 border-t border-border pt-8">
+        <h2 className="font-serif text-xl font-semibold">Payout setup</h2>
+
+        <div className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <h3 className="font-serif text-base font-semibold">Bank account</h3>
+
+          {destination && !isEditingBank ? (
+            <>
+              <p className="mt-2 text-sm font-medium text-emerald-700">&#10003; Added</p>
+              <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+                <div>
+                  <dt className="text-muted">Account holder</dt>
+                  <dd className="font-medium">{destination.beneficiary_name}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted">IBAN</dt>
+                  <dd className="font-medium">{maskIban(destination.iban)}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted">Currency</dt>
+                  <dd className="font-medium">{destination.currency}</dd>
+                </div>
+              </dl>
+              <Link
+                href="/dashboard/balance?editBank=1"
+                className={buttonClasses("outline", "sm", "mt-4")}
+              >
+                Change bank account
+              </Link>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 text-sm text-muted">
+                {destination
+                  ? "Changing your bank account affects future payouts only. Any payout already being processed keeps the bank details frozen for that payout."
+                  : "Add a bank account to become eligible for payouts once payouts are activated."}
+              </p>
+
+              <form action={saveAuthorPayoutDestination} className="mt-4 flex flex-col gap-4">
+                <label className="flex flex-col gap-1 text-sm">
+                  Account holder name
+                  <input
+                    name="beneficiaryName"
+                    type="text"
+                    required
+                    autoComplete="off"
+                    placeholder="Full name on the bank account"
+                    className={formControlClasses}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm">
+                  IBAN
+                  <input
+                    name="iban"
+                    type="text"
+                    required
+                    autoComplete="off"
+                    placeholder="AL47 2121 1009 0000 0002 3569 8741"
+                    className={formControlClasses}
+                  />
+                  <span className="text-xs text-muted">
+                    We check that this is a validly formatted IBAN — this confirms the format
+                    only, not that the account belongs to you.
+                  </span>
+                </label>
+
+                <div className="flex flex-col gap-1 text-sm">
+                  <span>Currency</span>
+                  <span className="text-muted">{PAYOUT_DESTINATION_CURRENCY} (Albanian Lek)</span>
+                </div>
+
+                <div className="mt-1 flex flex-wrap gap-3">
+                  <button type="submit" className={buttonClasses("primary", "md")}>
+                    Save bank account
+                  </button>
+                  {destination && (
+                    <Link href="/dashboard/balance" className={buttonClasses("outline", "md")}>
+                      Cancel
+                    </Link>
+                  )}
+                </div>
+              </form>
+            </>
+          )}
+        </div>
+
+        <div className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <h3 className="font-serif text-base font-semibold">Payout threshold</h3>
+          <p className="mt-2 text-sm text-muted">
+            {minimumPolicyConfigured
+              ? "Payout threshold is ready to be set."
+              : "Payout threshold will become available when Librum activates its minimum payout policy."}
+          </p>
+        </div>
+      </section>
       )}
 
       <Alert variant="info" className="mt-10">

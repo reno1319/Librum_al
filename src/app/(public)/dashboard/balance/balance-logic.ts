@@ -133,3 +133,58 @@ export function resolvePayoutHistoryPage(
     nextCursor: { createdAt: lastDisplayedRow.created_at, id: lastDisplayedRow.id },
   };
 }
+
+// BANK-PAYOUT-1E: the single fixed V1 payout-destination currency --
+// no EUR selector yet (Section 4/7 of the task). Shared between the
+// page and the Server Action so there is exactly one place this is
+// ever hardcoded.
+export const PAYOUT_DESTINATION_CURRENCY = "ALL";
+
+// ---------------------------------------------------------------------
+// BANK-PAYOUT-1E.1 -- fail-closed rollout switch for the bank-destination
+// setup UI itself, deliberately separate from PAYOUT_SCHEDULER_ENABLED
+// (src/lib/payout-scheduler.ts): that switch arms real reservation
+// execution against the ledger and has nothing to do with whether the
+// bank-destination FORM is shown at all. Kept in this page-scoped
+// module rather than payout-scheduler.ts precisely so this rollout
+// gate is never mixed into scheduler orchestration logic (Section 3 of
+// the task).
+//
+// Exact rule, identical in shape to isSchedulerEnabled(): the RAW
+// environment value, trimmed, must be byte-identical to the lowercase
+// literal "true". Every other value -- missing, empty, "false", "1",
+// "yes", differently-cased ("True"/"TRUE"), or anything malformed -- is
+// disabled. Stripe Connect remains the only LIVE author-payout
+// mechanism today (profiles.stripe_payouts_enabled still gates paid-
+// book publishing); this switch stays unset in every environment as of
+// this change, so the bank-setup UI/write path is OFF by default,
+// deliberately, until a future, separate cutover task turns it on.
+// ---------------------------------------------------------------------
+export function isBankPayoutSetupEnabled(raw: string | undefined): boolean {
+  return raw?.trim() === "true";
+}
+
+// BANK-PAYOUT-1E Section 5: the full IBAN is never shown once a
+// destination is saved -- only enough of it for the author to
+// recognize their own account. Keeps the country prefix and the last
+// 4 characters, masks everything between with bullets, and groups the
+// result into 4-character chunks purely for readability (the exact
+// grouping is deliberately NOT contractual -- a real IBAN's length
+// varies by country, per the task's own instruction not to rely on a
+// single fixed grouping). Falls back to returning the input unmasked
+// only for a string too short to usefully mask at all -- not a shape
+// migration 055's own IBAN validation would ever actually accept, but
+// this function must never throw regardless of what it's given.
+export function maskIban(iban: string): string {
+  const normalized = iban.replace(/\s+/g, "").toUpperCase();
+  if (normalized.length <= 6) {
+    return normalized;
+  }
+
+  const countryPrefix = normalized.slice(0, 2);
+  const visibleTail = normalized.slice(-4);
+  const maskedLength = normalized.length - countryPrefix.length - visibleTail.length;
+  const combined = countryPrefix + "•".repeat(maskedLength) + visibleTail;
+
+  return combined.match(/.{1,4}/g)?.join(" ") ?? combined;
+}

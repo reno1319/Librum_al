@@ -8,6 +8,9 @@ import {
   payoutStatusLabel,
   resolvePayoutHistoryPage,
   PAYOUT_HISTORY_DISPLAY_PAGE_SIZE,
+  maskIban,
+  PAYOUT_DESTINATION_CURRENCY,
+  isBankPayoutSetupEnabled,
 } from "./balance-logic";
 import type {
   AuthorFinancialSummaryRow,
@@ -190,5 +193,105 @@ describe("resolvePayoutHistoryPage", () => {
 
   it("uses PAYOUT_HISTORY_DISPLAY_PAGE_SIZE (10) as the default page size", () => {
     expect(PAYOUT_HISTORY_DISPLAY_PAGE_SIZE).toBe(10);
+  });
+});
+
+// ---------------------------------------------------------------------
+// PAYOUT_DESTINATION_CURRENCY -- BANK-PAYOUT-1E Section 4/7: the fixed
+// V1 currency, never caller-selected.
+// ---------------------------------------------------------------------
+describe("PAYOUT_DESTINATION_CURRENCY", () => {
+  it("is fixed to ALL", () => {
+    expect(PAYOUT_DESTINATION_CURRENCY).toBe("ALL");
+  });
+});
+
+// ---------------------------------------------------------------------
+// maskIban -- BANK-PAYOUT-1E Section 5: never the full IBAN once saved,
+// but still enough of it to recognize the account.
+// ---------------------------------------------------------------------
+describe("maskIban", () => {
+  it("masks a real Albanian IBAN, keeping the country prefix and last 4 characters visible", () => {
+    const masked = maskIban("AL47212110090000000235698741");
+    expect(masked).not.toContain("212110090000000235698");
+    expect(masked.startsWith("AL")).toBe(true);
+    expect(masked.endsWith("8741")).toBe(true);
+  });
+
+  it("normalizes spaces and lowercase before masking (matches the RPC's own normalization)", () => {
+    const spaced = maskIban("al47 2121 1009 0000 0002 3569 8741");
+    const unspaced = maskIban("AL47212110090000000235698741");
+    expect(spaced.replace(/\s+/g, "")).toBe(unspaced.replace(/\s+/g, ""));
+  });
+
+  it("never returns the full unmasked middle section of a real-length IBAN", () => {
+    const masked = maskIban("GB29NWBK60161331926819");
+    expect(masked).toContain("•");
+    expect(masked).not.toContain("NWBK60161331926819".slice(0, 10));
+  });
+
+  it("contains no digits from the masked middle section, only the visible prefix/suffix", () => {
+    const iban = "AL47212110090000000235698741";
+    const masked = maskIban(iban);
+    const middle = iban.slice(2, -4); // everything except country prefix + last 4
+    expect(masked).not.toContain(middle);
+  });
+
+  it("never throws on a very short or malformed string", () => {
+    expect(() => maskIban("")).not.toThrow();
+    expect(() => maskIban("AL")).not.toThrow();
+    expect(() => maskIban("not-an-iban")).not.toThrow();
+  });
+
+  it("returns a short string as-is (too short to usefully mask)", () => {
+    expect(maskIban("AL47")).toBe("AL47");
+  });
+});
+
+// ---------------------------------------------------------------------
+// isBankPayoutSetupEnabled -- BANK-PAYOUT-1E.1 Section 10: exact
+// trimmed lowercase "true", fail closed on everything else. Same
+// contract/test matrix as isSchedulerEnabled() (src/lib/payout-
+// scheduler.ts), deliberately duplicated rather than shared, since the
+// two switches gate genuinely different concerns (UI rollout vs.
+// reservation execution) and must never be collapsed into one.
+// ---------------------------------------------------------------------
+describe("isBankPayoutSetupEnabled", () => {
+  it("is disabled when the value is missing (undefined)", () => {
+    expect(isBankPayoutSetupEnabled(undefined)).toBe(false);
+  });
+
+  it("is disabled for an empty string", () => {
+    expect(isBankPayoutSetupEnabled("")).toBe(false);
+  });
+
+  it("is disabled for 'false'", () => {
+    expect(isBankPayoutSetupEnabled("false")).toBe(false);
+  });
+
+  it("is disabled for '1'", () => {
+    expect(isBankPayoutSetupEnabled("1")).toBe(false);
+  });
+
+  it("is disabled for 'yes'", () => {
+    expect(isBankPayoutSetupEnabled("yes")).toBe(false);
+  });
+
+  it("is disabled for differently-cased 'True'/'TRUE' -- no case folding", () => {
+    expect(isBankPayoutSetupEnabled("True")).toBe(false);
+    expect(isBankPayoutSetupEnabled("TRUE")).toBe(false);
+  });
+
+  it("is enabled for exactly 'true'", () => {
+    expect(isBankPayoutSetupEnabled("true")).toBe(true);
+  });
+
+  it("is enabled for 'true' with surrounding whitespace (trimmed)", () => {
+    expect(isBankPayoutSetupEnabled("  true  ")).toBe(true);
+    expect(isBankPayoutSetupEnabled("\ttrue\n")).toBe(true);
+  });
+
+  it("is disabled for 'true' with internal whitespace", () => {
+    expect(isBankPayoutSetupEnabled("tr ue")).toBe(false);
   });
 });
