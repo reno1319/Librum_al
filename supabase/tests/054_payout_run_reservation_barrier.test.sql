@@ -33,6 +33,17 @@ begin
 end;
 $$;
 
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- requires an active payout_minimum_policy row before it will ever
+-- report a numeric threshold/payoutable comparison (no_minimum_policy
+-- sits between no_settings and no_available_balance in the priority
+-- chain). Seed a permissive policy (1 minor unit) for every currency
+-- this suite's fixtures use, so none of THIS file's own
+-- threshold/balance assertions (which predate 055) are affected.
+insert into public.payout_minimum_policy (currency, minimum_threshold_minor, is_active) values
+  ('EUR', 1, true),
+  ('USD', 1, true);
+
 -- ============================================================
 -- Shared fixture: one eligible author/currency (settings + available
 -- ledger balance well above threshold), reused by every scenario
@@ -60,6 +71,17 @@ values
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05400100-0000-0000-0000-000000000001', 50, 'USD'),
   ('05400200-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05400100-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED'),
+  ('05400200-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 -- ============================================================
 -- A: sequential closed-run invariant (Section 16) -- running -> complete
@@ -208,6 +230,16 @@ values
    '05400100-0000-0000-0000-000000000006', 'sale', 100, 'EUR', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05400100-0000-0000-0000-000000000001', 50, 'EUR');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05400100-0000-0000-0000-000000000001', 'EUR', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare
@@ -240,6 +272,16 @@ values
    '05400200-0000-0000-0000-000000000006', 'sale', 100, 'EUR', 8000, 100, 0, now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05400200-0000-0000-0000-000000000001', 50, 'EUR');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05400200-0000-0000-0000-000000000001', 'EUR', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare

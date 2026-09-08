@@ -43,6 +43,17 @@ begin
 end;
 $$;
 
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- requires an active payout_minimum_policy row before it will ever
+-- report a numeric threshold/payoutable comparison (no_minimum_policy
+-- sits between no_settings and no_available_balance in the priority
+-- chain). Seed a permissive policy (1 minor unit) for every currency
+-- this suite's fixtures use, so none of THIS file's own
+-- threshold/balance assertions (which predate 055) are affected.
+insert into public.payout_minimum_policy (currency, minimum_threshold_minor, is_active) values
+  ('EUR', 1, true),
+  ('USD', 1, true);
+
 -- ============================================================
 -- Fixtures -- Scenarios 1-17. Every author/book/purchase/ledger/payout
 -- id below is prefixed 'e052<NN>00-...' where NN is the two-digit

@@ -173,13 +173,24 @@ function ineligibleRow(
 }
 
 describe("summarizeDryRunRows", () => {
-  it("empty input yields all-zero summary", () => {
+  // A: empty summary contains all six zero counters (BANK-PAYOUT-1C.1
+  // Section 6A) -- migration 055 added no_minimum_policy/no_destination
+  // alongside the original four.
+  it("empty input yields all-zero summary, all six reason counters present", () => {
     expect(summarizeDryRunRows([])).toEqual({
       candidateCount: 0,
       eligibleCount: 0,
       ineligibleCount: 0,
       totalsByCurrency: {},
-      reasonCounts: { no_settings: 0, no_available_balance: 0, active_reservation: 0, below_threshold: 0 },
+      reasonCounts: {
+        no_settings: 0,
+        no_minimum_policy: 0,
+        no_available_balance: 0,
+        active_reservation: 0,
+        below_threshold: 0,
+        no_destination: 0,
+      },
+      unknownReasonCount: 0,
     });
   });
 
@@ -215,9 +226,11 @@ describe("summarizeDryRunRows", () => {
     const summary = summarizeDryRunRows(rows);
     expect(summary.reasonCounts).toEqual({
       no_settings: 0,
+      no_minimum_policy: 0,
       no_available_balance: 1,
       active_reservation: 1,
       below_threshold: 2,
+      no_destination: 0,
     });
     expect(summary.ineligibleCount).toBe(4);
   });
@@ -225,6 +238,85 @@ describe("summarizeDryRunRows", () => {
   it("treats a null payoutable_minor on an eligible row as 0 (defensive; should not occur in practice)", () => {
     const rows = [eligibleRow({ currency: "USD", payoutable_minor: null })];
     expect(summarizeDryRunRows(rows).totalsByCurrency).toEqual({ USD: 0 });
+  });
+
+  // B: no_minimum_policy increments correctly (BANK-PAYOUT-1C.1 Section
+  // 6B) -- migration 055's new fail-closed gate: no active
+  // payout_minimum_policy row for the currency.
+  it("counts no_minimum_policy rows correctly, with no NaN/undefined corruption", () => {
+    const rows = [ineligibleRow("no_minimum_policy"), ineligibleRow("no_minimum_policy")];
+    const summary = summarizeDryRunRows(rows);
+    expect(summary.reasonCounts.no_minimum_policy).toBe(2);
+    expect(summary.ineligibleCount).toBe(2);
+    expect(Number.isNaN(summary.reasonCounts.no_minimum_policy)).toBe(false);
+  });
+
+  // C: no_destination increments correctly (BANK-PAYOUT-1C.1 Section
+  // 6C) -- migration 055's new gate: settings+policy+balance all
+  // satisfied, but no saved payout destination.
+  it("counts no_destination rows correctly, with no NaN/undefined corruption", () => {
+    const rows = [ineligibleRow("no_destination")];
+    const summary = summarizeDryRunRows(rows);
+    expect(summary.reasonCounts.no_destination).toBe(1);
+    expect(Number.isNaN(summary.reasonCounts.no_destination)).toBe(false);
+  });
+
+  // D: mixed old/new reasons count correctly (BANK-PAYOUT-1C.1 Section
+  // 6D) -- every one of the six reasons in a single batch, each
+  // counted independently and exactly once.
+  it("counts a mix of pre-055 and migration-055 reasons independently and correctly", () => {
+    const rows = [
+      ineligibleRow("no_settings"),
+      ineligibleRow("no_minimum_policy"),
+      ineligibleRow("no_available_balance"),
+      ineligibleRow("active_reservation"),
+      ineligibleRow("below_threshold"),
+      ineligibleRow("no_destination"),
+      eligibleRow({ currency: "USD", payoutable_minor: 20 }),
+    ];
+    const summary = summarizeDryRunRows(rows);
+    expect(summary.reasonCounts).toEqual({
+      no_settings: 1,
+      no_minimum_policy: 1,
+      no_available_balance: 1,
+      active_reservation: 1,
+      below_threshold: 1,
+      no_destination: 1,
+    });
+    expect(summary.eligibleCount).toBe(1);
+    expect(summary.ineligibleCount).toBe(6);
+    expect(summary.unknownReasonCount).toBe(0);
+  });
+
+  // F: an unexpected runtime reason (e.g. a future migration's DB
+  // string this module hasn't been updated for yet) cannot produce
+  // NaN/null numeric corruption anywhere in the summary
+  // (BANK-PAYOUT-1C.1 Section 6F/5) -- it is bucketed into
+  // unknownReasonCount instead, and every one of the six typed
+  // counters stays a clean, defined number.
+  it("an unrecognized future ineligible_reason is bucketed safely, never corrupts the typed counters", () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const futureRow = ineligibleRow("no_settings", {
+      ineligible_reason: "some_future_reason_not_yet_known" as unknown as DryRunEligibilityRow["ineligible_reason"],
+    });
+    const summary = summarizeDryRunRows([futureRow]);
+
+    expect(summary.unknownReasonCount).toBe(1);
+    expect(summary.ineligibleCount).toBe(1);
+    for (const count of Object.values(summary.reasonCounts)) {
+      expect(typeof count).toBe("number");
+      expect(Number.isNaN(count)).toBe(false);
+    }
+    expect(summary.reasonCounts).toEqual({
+      no_settings: 0,
+      no_minimum_policy: 0,
+      no_available_balance: 0,
+      active_reservation: 0,
+      below_threshold: 0,
+      no_destination: 0,
+    });
+    expect(consoleErrorSpy).toHaveBeenCalledOnce();
+    consoleErrorSpy.mockRestore();
   });
 });
 
@@ -257,7 +349,15 @@ describe("runDryRunPass", () => {
         eligibleCount: 1,
         ineligibleCount: 0,
         totalsByCurrency: { USD: 75 },
-        reasonCounts: { no_settings: 0, no_available_balance: 0, active_reservation: 0, below_threshold: 0 },
+        reasonCounts: {
+          no_settings: 0,
+          no_minimum_policy: 0,
+          no_available_balance: 0,
+          active_reservation: 0,
+          below_threshold: 0,
+          no_destination: 0,
+        },
+        unknownReasonCount: 0,
       },
     });
   });
@@ -266,6 +366,30 @@ describe("runDryRunPass", () => {
     const supabase = makeFakeAdminClient(async () => ({ data: null, error: { message: "db unavailable" } }));
     const result = await runDryRunPass(supabase as never);
     expect(result).toEqual({ ok: false, message: "db unavailable" });
+  });
+
+  // E: runDryRunPass returns a correct, safe summary for BOTH
+  // migration-055 reasons end-to-end (BANK-PAYOUT-1C.1 Section 6E) --
+  // not just the pure summarizeDryRunRows() unit above.
+  it("returns a correct summary for a mix including no_minimum_policy and no_destination rows", async () => {
+    const rows = [
+      eligibleRow({ author_id: "a1", currency: "USD", payoutable_minor: 60 }),
+      ineligibleRow("no_minimum_policy", { author_id: "a2" }),
+      ineligibleRow("no_destination", { author_id: "a3" }),
+    ];
+    const supabase = makeFakeAdminClient(async () => ({ data: rows, error: null }));
+    const result = await runDryRunPass(supabase as never);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary.candidateCount).toBe(3);
+      expect(result.summary.eligibleCount).toBe(1);
+      expect(result.summary.ineligibleCount).toBe(2);
+      expect(result.summary.totalsByCurrency).toEqual({ USD: 60 });
+      expect(result.summary.reasonCounts.no_minimum_policy).toBe(1);
+      expect(result.summary.reasonCounts.no_destination).toBe(1);
+      expect(result.summary.unknownReasonCount).toBe(0);
+    }
   });
 });
 

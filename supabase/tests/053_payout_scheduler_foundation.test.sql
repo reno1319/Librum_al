@@ -46,6 +46,19 @@ begin
 end;
 $$;
 
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- requires an active payout_minimum_policy row before it will ever
+-- report a numeric threshold/payoutable comparison (no_minimum_policy
+-- sits between no_settings and no_available_balance in the priority
+-- chain -- S1's own "no_settings" scenario below is unaffected, since
+-- that check fires before no_minimum_policy regardless of policy
+-- presence). Seed a permissive policy (1 minor unit) for every
+-- currency this suite's fixtures use, so none of THIS file's own
+-- threshold/balance assertions (which predate 055) are affected.
+insert into public.payout_minimum_policy (currency, minimum_threshold_minor, is_active) values
+  ('EUR', 1, true),
+  ('USD', 1, true);
+
 -- ============================================================
 -- Part 1: author_payout_eligibility() -- one dedicated author per
 -- scenario, kept currency-isolated so each result can be hand-verified
@@ -93,6 +106,16 @@ end $$;
 -- at all (no author_ledger_entries row exists).
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05300200-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05300200-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare
@@ -118,6 +141,16 @@ values
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05300300-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05300300-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare
@@ -143,6 +176,16 @@ values
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05300400-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05300400-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare
@@ -168,6 +211,16 @@ values
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05300500-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05300500-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare
@@ -203,6 +256,18 @@ insert into public.author_payout_settings (author_id, threshold_minor, currency)
   ('05300600-0000-0000-0000-000000000001', 50, 'USD'),
   ('05300700-0000-0000-0000-000000000001', 50, 'USD'),
   ('05300800-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05300600-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED'),
+  ('05300700-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED'),
+  ('05300800-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 insert into public.author_payouts (author_id, amount_minor, currency, status) values
   ('05300600-0000-0000-0000-000000000001', 50, 'USD', 'pending');
 insert into public.author_payouts (author_id, amount_minor, currency, status, processing_at) values
@@ -253,6 +318,16 @@ values
    '05300900-0000-0000-0000-000000000003', 'sale', 200, 'USD', 8000, 200, 0, now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05300900-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05300900-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 insert into public.author_payouts (author_id, amount_minor, currency, status, paid_at, provider, provider_reference) values
   ('05300900-0000-0000-0000-000000000001', 30, 'USD', 'paid', now() - interval '5 days', 'test', 'ref-s09-paid');
 insert into public.author_payouts (author_id, amount_minor, currency, status, failed_at, failure_code) values
@@ -313,6 +388,16 @@ values
    'refund', -640, 'USD', now(), now());
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05301000-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05301000-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare
@@ -343,6 +428,17 @@ values
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05301100-0000-0000-0000-000000000001', 50, 'EUR'),
   ('05301100-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05301100-0000-0000-0000-000000000001', 'EUR', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED'),
+  ('05301100-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare
@@ -373,6 +469,16 @@ values
    now() + interval '20 days', now() - interval '1 day');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05301200-0000-0000-0000-000000000001', 50, 'USD');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05301200-0000-0000-0000-000000000001', 'USD', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare
@@ -482,6 +588,16 @@ values
    now() - interval '10 days', now() - interval '10 days');
 insert into public.author_payout_settings (author_id, threshold_minor, currency) values
   ('05301300-0000-0000-0000-000000000001', 50, 'EUR');
+-- Migration 055 fail-closed gate: author_payout_eligibility() now
+-- also requires a saved payout destination (no_destination sits
+-- between below_threshold and eligible). Give every author/currency
+-- pair from the settings insert immediately above a matching
+-- destination fixture so none of THIS file's own
+-- eligibility/reservation-success assertions (which predate 055) are
+-- affected; a destination configured but not reached in the
+-- priority chain is harmless to any ineligibility-reason assertion.
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('05301300-0000-0000-0000-000000000001', 'EUR', 'Fixture Beneficiary', 'FIXTURE-IBAN-NOT-VALIDATED');
 
 do $$
 declare

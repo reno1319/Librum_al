@@ -92,7 +92,11 @@ export function parseStrictTargetMonth(input: unknown): string | null {
 // ---------------------------------------------------------------------
 // dry_run_scheduled_payouts() row shape -- mirrors
 // author_payout_eligibility()'s own RETURNS TABLE exactly (migration
-// 053 Part 1/3). Local to this module, never broadened into the
+// 053 Part 1/3, extended by migration 055 Part 7 with two new
+// ineligible_reason values: no_minimum_policy and no_destination,
+// inserted into the DB's own locked priority chain between
+// no_settings/no_available_balance and below_threshold/eligible
+// respectively). Local to this module, never broadened into the
 // shared/public financial types client bundles import.
 // ---------------------------------------------------------------------
 export type DryRunEligibilityRow = {
@@ -105,8 +109,37 @@ export type DryRunEligibilityRow = {
   threshold_minor: number | null;
   active_reservation: boolean;
   eligible: boolean;
-  ineligible_reason: "no_settings" | "no_available_balance" | "active_reservation" | "below_threshold" | null;
+  ineligible_reason:
+    | "no_settings"
+    | "no_minimum_policy"
+    | "no_available_balance"
+    | "active_reservation"
+    | "below_threshold"
+    | "no_destination"
+    | null;
 };
+
+// The exact six ineligible_reason values migration 055's
+// author_payout_eligibility() can produce (BANK-PAYOUT-1C.1). Kept as
+// its own named type so reasonCounts can never silently drift out of
+// sync with DryRunEligibilityRow['ineligible_reason'] again.
+export type DryRunReasonCounts = {
+  no_settings: number;
+  no_minimum_policy: number;
+  no_available_balance: number;
+  active_reservation: number;
+  below_threshold: number;
+  no_destination: number;
+};
+
+const KNOWN_INELIGIBLE_REASONS: ReadonlySet<string> = new Set<keyof DryRunReasonCounts>([
+  "no_settings",
+  "no_minimum_policy",
+  "no_available_balance",
+  "active_reservation",
+  "below_threshold",
+  "no_destination",
+]);
 
 export type DryRunSummary = {
   candidateCount: number;
@@ -118,12 +151,16 @@ export type DryRunSummary = {
   // deliberately excluded (it can be null, negative, or simply not a
   // real payoutable amount).
   totalsByCurrency: Record<string, number>;
-  reasonCounts: {
-    no_settings: number;
-    no_available_balance: number;
-    active_reservation: number;
-    below_threshold: number;
-  };
+  reasonCounts: DryRunReasonCounts;
+  // A defensive, always-present counter for a row whose
+  // ineligible_reason is a non-null string outside the six known DB
+  // reasons above -- e.g. a future migration adds a seventh reason
+  // before this module is updated for it. Kept as its own separately-
+  // typed field rather than folded into reasonCounts (BANK-PAYOUT-1C.1
+  // Section 5), so an unrecognized reason can never produce a NaN or
+  // undefined entry in the typed six-reason contract or in the JSON
+  // this summary is serialized into.
+  unknownReasonCount: number;
 };
 
 // Pure aggregation -- no I/O, no eligibility logic of its own (every
@@ -134,13 +171,16 @@ export type DryRunSummary = {
 // 0 is a real, honestly-computed count, not a fabricated one.
 export function summarizeDryRunRows(rows: DryRunEligibilityRow[]): DryRunSummary {
   const totalsByCurrency: Record<string, number> = {};
-  const reasonCounts = {
+  const reasonCounts: DryRunReasonCounts = {
     no_settings: 0,
+    no_minimum_policy: 0,
     no_available_balance: 0,
     active_reservation: 0,
     below_threshold: 0,
+    no_destination: 0,
   };
   let eligibleCount = 0;
+  let unknownReasonCount = 0;
 
   for (const row of rows) {
     if (row.eligible) {
@@ -148,7 +188,19 @@ export function summarizeDryRunRows(rows: DryRunEligibilityRow[]): DryRunSummary
       const amount = row.payoutable_minor ?? 0;
       totalsByCurrency[row.currency] = (totalsByCurrency[row.currency] ?? 0) + amount;
     } else if (row.ineligible_reason) {
-      reasonCounts[row.ineligible_reason] += 1;
+      // A genuine runtime membership check against reasonCounts' own
+      // keys (Section 5) -- NOT trusting the compile-time
+      // ineligible_reason union alone, since the actual value comes
+      // from an untrusted `as DryRunEligibilityRow[]` cast over live
+      // RPC data, which the TypeScript type cannot enforce at runtime.
+      if (KNOWN_INELIGIBLE_REASONS.has(row.ineligible_reason)) {
+        reasonCounts[row.ineligible_reason as keyof DryRunReasonCounts] += 1;
+      } else {
+        unknownReasonCount += 1;
+        console.error("[payout-scheduler] dry-run row has an unrecognized ineligible_reason", {
+          ineligibleReason: row.ineligible_reason,
+        });
+      }
     }
   }
 
@@ -158,6 +210,7 @@ export function summarizeDryRunRows(rows: DryRunEligibilityRow[]): DryRunSummary
     ineligibleCount: rows.length - eligibleCount,
     totalsByCurrency,
     reasonCounts,
+    unknownReasonCount,
   };
 }
 
