@@ -1,224 +1,173 @@
 # Librum
 
 A self-publishing platform for digital ebooks — authors upload and sell,
-readers browse and buy.
+readers browse and buy. Built with Next.js, TypeScript, Tailwind CSS, and
+Supabase (database, auth, file storage), deployed on Vercel.
 
-Built with Claude, Next.js, TypeScript, Tailwind CSS, Supabase (database, auth,
-file storage), and Stripe (checkout + author payouts).
+**Production deployment (pre-launch):** https://librumal.vercel.app — a
+hosted build, not a completed controlled launch (see `ROADMAP.md` Phase 20).
 
-> See [`ROADMAP.md`](./ROADMAP.md) for everything left to build.
+> See [`ROADMAP.md`](./ROADMAP.md) for full status, sequencing, and what's
+> still open — this file only covers what exists and how to run it.
 
-## What's built so far
+## What's built
 
-- Sign up as an **author** or a **reader**; log in / log out. The
-  header nav is deliberately minimal — Home, Bookstore, About,
-  Pricing — plus an account icon (top right) that doubles as log in
-  when logged out and Account when logged in. Logged in, **Library**
-  in the header shows an author's own dashboard (books, sales) or a
-  reader's purchase history, depending on which the account is
-- Authors upload a book through a 4-step wizard (manuscript & cover,
-  details, price, review) as a draft, then publish it from their
-  dashboard. An optional ISBN field is available for authors who already
-  own one — Librum doesn't issue or register ISBNs
-- The homepage (`/`) is exclusively the author pitch, for everyone —
-  logged out, reader, or author: a full-bleed bright indigo-blue hero
-  ("Write. Publish. Profit.", a single "Publish your book" CTA) with a
-  horizontally-scrolling strip of real published covers, then how
-  self-publishing works in four steps, a
-  "Why Librum?" benefit strip, a trust strip, and a "Start publishing"
-  call to action, ending with an "Everything you need to sell your
-  book" showcase of the dashboard tools. The reader storefront lives
-  on its own page, **Bookstore** (`/bookstore`, linked from the
-  header) — a hero section spotlighting the newest published book,
-  horizontally-scrolling "Bestsellers" (by units sold) and "New
-  releases" shelves, and search/genre/sort/price filters that switch
-  it to a flat results grid. Each published book also has a detail
-  page, which itself ends with "More by this author" and "You might
-  also like" (same genre) shelves
-- Drafts show a non-blocking checklist of what's worth adding before
-  publishing (description, keywords, a preview excerpt, a price above
-  $0) — on the dashboard book list and on the edit page. It's a nudge,
-  not a gate: nothing stops you from publishing with any of these left
-  incomplete
-- The homepage uses real cover art as imagery rather than stock photos —
-  a horizontally-scrolling strip of actual published covers below the
-  Home hero, and a soft "stacked shelf" of other recent covers behind
-  the Bookstore's featured book. Small inline icons (no icon library,
-  hand-drawn SVGs in `src/components/icons.tsx`) mark the how-it-works
-  steps, trust strip, tools showcase, and reader value props. The
-  footer is a proper multi-column layout (Platform / Legal) with
-  Instagram/Facebook icon links, instead of a single row of links
-- Authors can credit contributors on a book — illustrator, translator,
-  narrator, co-author, editor, foreword, or cover designer — from the
-  edit page. Just a name and a role, no Librum account required; shown
-  on the book page as e.g. "Illustrated by Jane Doe." Purely a credit,
-  no payout or account access is tied to it — all money still goes to
-  the primary author
-- A **Pricing** page (linked from the header, footer, and homepage)
-  explains the flat platform fee with a live earnings calculator — type
-  in a price and see the platform fee and your take-home split instantly
-- Readers can **follow an author** from their profile page and get an
-  email the next time that author publishes a new book — only on a
-  genuine first publish, not on every unpublish/republish toggle.
-  **/following** lists everyone you follow, with an unfollow button —
-  not currently linked from the header nav (kept minimal for now),
-  still reachable directly. Follower identities are never exposed
-  publicly — only a follower count shows on the author's page
-- **Dashboard > Sales** also shows book page views — a basic count (not
-  deduplicated unique visitors, and never counting the author's own
-  visits), both as a total and per book, alongside units sold and
-  revenue
-- Authors combine 2+ of their own published books into a **Bundle**
-  (**Dashboard > Bundles**) at a discounted price, shown on their author
-  profile page and its own bundle page. One Stripe Checkout for the
-  bundle grants ownership of every book in it — the webhook fans a
-  single payment out into one `purchases` row per book (split
-  proportionally by each book's own price for revenue reporting), so
-  everything else — the book page, downloads, reviews, the sales
-  dashboard — treats a bundle-derived purchase exactly like a regular
-  one, no separate code path needed
-- Readers buy a book via **Stripe Checkout**; ownership is recorded once
-  payment completes
-- Owners (the buyer, or the author) can download the EPUB from the book
-  page or from **My Library** — the file lives in private storage, and
-  every download request re-checks ownership before streaming it, so
-  there's no permanent, guessable URL to the file
-- Authors connect a payout account (**Stripe Connect**) from
-  **Dashboard > Payouts** before they're allowed to publish. Stripe
-  handles identity verification and tax forms. Every sale is split
-  automatically — the author's cut goes straight to their bank account,
-  Librum keeps a platform fee (20% by default, see `src/lib/pricing.ts`)
-- Authors pick a genre when uploading a book; the Bookstore page has a
-  search box (matches title/description/keywords), a genre filter, a
-  sort dropdown (newest, bestselling, price), and a min/max price filter —
-  all combinable
-- Authors can add optional comma-separated keywords when uploading or
-  editing a book — searchable like title/description, and shown as tags
-  on the book page, for terms readers might search that a single genre
-  doesn't capture
-- Authors create discount codes per book from **Dashboard > Discounts**
-  (percentage or fixed amount off, with an optional expiry date);
-  readers enter one at checkout, and it's applied before Stripe splits
-  the sale, so the platform fee and author payout are both based on the
-  discounted price
-- Authors group their books into a **series** with a reading order, from
-  **Dashboard > Series** (create the series) and each book's edit page
-  (assign it and set its position). A book's page shows the full series
-  in order, linking to the other published entries
-- Authors have a public profile page (photo, bio, their published books),
-  editable from **Dashboard > Profile**; book pages and cards link to it
-- Authors can edit a book after publishing (title, description, genre,
-  price, cover, manuscript) — replacing the cover or manuscript is
-  optional, leave those fields blank to keep the current file
-- **Dashboard > Sales** shows net revenue, units sold, a 14-day revenue
-  chart, and a per-book breakdown
-- Readers who bought a book can leave a star rating and review; the book
-  page shows the average rating and every review. Resubmitting updates
-  your existing review rather than creating a second one
-- **My Library** doubles as order history: purchase date, price paid,
-  and a running total spent, alongside each book's download link
-- Downloads are watermarked: each EPUB is stamped with the downloader's
-  email in its own metadata before being sent, so a leaked copy can be
-  traced back to whoever downloaded it. Not DRM — the file still opens
-  normally everywhere, nothing is encrypted or locked down
-- Purchases trigger two emails (optional — the app works fine without
-  this configured): a receipt to the reader, and a sale notification to
-  the author
-- Forgot-password flow (**/forgot-password**) via Supabase's own reset
-  email. Any logged-in user (reader or author) can delete their account
-  from **Account** in the nav — this removes their storage files first
-  (avatar, and covers/manuscripts for an author's books), then the
-  account itself, which cascades through the database
-- Readers can save a book to their **/wishlist** instead of buying it
-  right away, from the book page — not currently linked from the
-  header nav (kept minimal for now), still reachable directly
-- Logged-in readers can report a book from a small link on its page.
-  Reports are stored in `book_reports` — there's no in-app moderation
-  UI yet, so review them directly in Supabase's Table Editor
-- Authors can add an optional preview excerpt when uploading or editing
-  a book; readers can expand "Look inside" on the book page to read it
-  before buying
-- Refunding a purchase in Stripe (Dashboard > Payments > find the charge
-  > Refund) automatically revokes the reader's access via the webhook —
-  the download link and review form disappear, and re-buying the same
-  book afterward works normally. Issuing the refund itself is still
-  manual; only the "what happens after" part is automated
+The core platform is substantially built, not an early MVP:
 
-## One-time setup
+- **Public storefront** — search, genre/sort/price filters, book detail
+  pages, author public profiles, series, bundles, a blog.
+- **Author tools** — a step-by-step Publishing Studio (EPUB upload, DOCX
+  upload with DOCX→EPUB conversion, EPUB validation, cover uploads, sample
+  excerpts, metadata, contributors, series, discount codes, bundles),
+  draft/edit/publish/unpublish, a sales dashboard, and a payout balance
+  page.
+- **Reader tools** — accounts, wishlist, following authors, reviews,
+  a library of owned books with watermarked downloads, order history,
+  refund requests.
+- **Admin/back-office** — staff accounts with role-based access, a report
+  moderation queue, a refund queue, finance/reconciliation views, an audit
+  log, and a blog CMS.
+- **A provider-neutral financial ledger** — `payment_events`, immutable
+  `payments`, `author_ledger_entries`, sale/refund accounting primitives,
+  transactional book/bundle payment finalizers, and author financial
+  reporting, independent of any specific payment provider.
+- **An author payout foundation** — bank-destination storage, payout
+  eligibility/reservation/batch/reversal logic, and a monthly scheduler —
+  built (BUILT/DORMANT), and kept disabled by approved project policy
+  until its own roadmap gates are reached (see "Payments" below). Actual
+  Vercel Production flag values have not been directly inspected.
+
+For what's still open, see [`ROADMAP.md`](./ROADMAP.md).
+
+## Architecture
+
+- **Next.js** (App Router, Turbopack) — pages and Server Actions under
+  `src/app/`, split into a public route group and an `admin` route group.
+- **Supabase** — Postgres database, auth, and file storage (covers,
+  manuscripts). Row-level security enforces access control; schema lives in
+  `supabase/schema.sql` with incremental changes under
+  `supabase/migrations/`.
+- **Vercel** — hosting and CI/CD. Pushing this branch deploys straight to
+  Vercel's Production environment.
+- **Stripe** — the legacy, currently-implemented payment/payout
+  integration (see "Payments" below for what's implemented, dormant, and
+  unverified).
+- Cron-driven internal routes (`src/app/api/internal/`), registered in
+  `vercel.json`: a daily reconciliation run, and a monthly payout run.
+  Vercel invokes the payout endpoint on schedule, but the endpoint itself
+  must stay a no-op unless `PAYOUT_SCHEDULER_ENABLED` is explicitly set —
+  the cron existing does not by itself mean payout execution is active.
+
+## Payments: implemented, dormant, and legacy paths
+
+Librum has three payment-related code paths, and none of them should be
+read as "real-money-ready" without qualification:
+
+- **Legacy Stripe Checkout/Connect — implemented and deployed:** this is
+  the currently implemented paid-commerce path. Stripe Checkout handles
+  buyer purchases (single book and bundle); Stripe Connect Express is the
+  author payout rail, splitting each sale between the author and Librum's
+  platform fee (`src/lib/pricing.ts`) via Stripe's own transfer mechanism.
+  Paid-book publishing is gated on each author having Stripe Connect
+  payouts enabled. This code is deployed and is the application's default
+  legacy path unless configuration selects another regime (see the
+  ledger_v1 bridge below). **Stripe credential mode (test vs. live) and
+  real-money readiness remain unverified from this repository** — don't
+  assume confirmed real transactions, real author payouts, or launch
+  readiness on that basis. Stripe Connect is also transitional: it is
+  **not** Librum's intended final payment architecture (see `ROADMAP.md`'s
+  Phases 6–14) — don't build new features assuming it's permanent.
+- **Built, but dormant (inactive in production):** a ledger_v1 checkout
+  bridge (`src/lib/checkout-regime.ts`) that can route a Stripe-funded
+  checkout through the provider-neutral ledger instead of the legacy path;
+  the author bank-destination payout system; and the monthly payout
+  scheduler. Each sits behind its own fail-closed environment flag
+  (`NEW_CHECKOUT_REGIME`, `BANK_PAYOUT_SETUP_ENABLED`,
+  `PAYOUT_SCHEDULER_ENABLED`) that defaults to off/legacy when unset in
+  code — whether any of them is actually set in Vercel Production has not
+  been directly inspected either. Enabling any of this is a deliberate,
+  gated decision described in `ROADMAP.md`.
+
+## Authentication
+
+Signup and password-recovery confirmation links work via Supabase Auth's
+PKCE `?code=` flow, and the app also supports the direct
+`?token_hash=...&type=signup|recovery` verification path — but that second
+path is currently **dormant**: Supabase Auth is still on its default email
+templates with no custom SMTP configured, so nothing emits a link in that
+shape yet. Cross-browser/cross-device email confirmation (the scenario that
+path exists for) is not active until custom SMTP and coordinated templates
+are configured and tested. See `ROADMAP.md`'s "Current authentication/email
+state" for details.
+
+## Local development
+
+> **Before you start:** the hard guard that would refuse to let local
+> development or tests run against the *production* Supabase project does
+> not exist yet (`ROADMAP.md` Phase 1). Until it does, verify manually,
+> every time, that the Supabase project you're pointing at is an isolated
+> project of your own — **never the production Supabase ref.**
 
 ### 1. Create a Supabase project
 
-1. Go to [supabase.com](https://supabase.com), sign up, and click **New
-   project**. Pick any name/region and a database password (save it
-   somewhere safe).
-2. Once the project is ready, go to **Project Settings > API**. You'll
-   need three values from this page: the **Project URL**, the **anon
-   public** key, and the **service_role** key (keep this last one secret —
-   it bypasses all security rules).
+Go to [supabase.com](https://supabase.com) and create a project. From
+**Project Settings > API** you'll need the **Project URL**, the **anon
+public** key, and the **service_role** key (server-only — never expose this
+to the browser).
 
 ### 2. Run the database schema
 
-1. In the Supabase dashboard, open **SQL Editor > New query**.
-2. Copy the entire contents of [`supabase/schema.sql`](./supabase/schema.sql)
-   from this repo, paste it in, and click **Run**.
-3. This creates the `profiles`, `books`, and `purchases` tables, the
-   security rules that keep users' data private, and two storage buckets
-   (`covers` and `manuscripts`).
-
-   > Already ran an older version of `schema.sql`? Only run the
-   > migration files under [`supabase/migrations/`](./supabase/migrations)
-   > that came after the version you last ran, in order — each one's
-   > comment says what it adds and whether you need it.
+In the Supabase SQL Editor, run the entire contents of
+[`supabase/schema.sql`](./supabase/schema.sql). If you're updating an
+existing project instead, only run the migration files under
+[`supabase/migrations/`](./supabase/migrations) newer than what you last
+applied, in order.
 
 ### 3. Create a Stripe account (test mode)
 
-1. Go to [stripe.com](https://stripe.com) and sign up — no business
-   details needed to use test mode.
-2. Go to **Developers > API keys** and copy the **Secret key** (starts
-   with `sk_test_...`).
-3. Install the [Stripe CLI](https://docs.stripe.com/stripe-cli) and run:
-   ```bash
-   stripe login
-   stripe listen --forward-to localhost:3000/api/webhooks/stripe
-   ```
-   This prints a **webhook signing secret** (starts with `whsec_...`) —
-   keep this terminal running whenever you're testing purchases locally,
-   it's what delivers the "payment completed" event to your app.
-4. Go to **Connect** in the Stripe dashboard sidebar and click through
-   the "get started" prompt if you see one. This activates Connect on
-   your test account — required before authors can onboard for payouts.
-   No real business details are needed in test mode.
+Sign up at [stripe.com](https://stripe.com); no business details are needed
+for test mode. From **Developers > API keys**, copy the **Secret key**
+(`sk_test_...`). Install the [Stripe CLI](https://docs.stripe.com/stripe-cli)
+and run:
+
+```bash
+stripe login
+stripe listen --forward-to localhost:3000/api/webhooks/stripe
+```
+
+This prints a webhook signing secret (`whsec_...`) — keep this running while
+testing purchases locally. Also open **Connect** in the Stripe dashboard
+sidebar once to activate it on your test account (required before authors
+can onboard for payouts).
 
 ### 4. (Optional) Create a Resend account for emails
 
-Skip this if you don't care about purchase receipt / sale notification
-emails right now — everything else works fine without it.
-
-1. Go to [resend.com](https://resend.com), sign up, and go to **API
-   Keys** to create one.
-2. Without verifying your own domain, Resend can only deliver to the
-   email address you signed up with — fine for trying this out, but
-   means test purchases as a *different* reader account won't actually
-   receive a receipt unless that reader's email matches your Resend
-   account's email too. Verifying a domain removes this limit.
+Skip this if you don't need purchase-receipt / sale-notification emails
+locally. Sign up at [resend.com](https://resend.com) and create an API key
+under **API Keys**.
 
 ### 5. Configure environment variables
 
-1. Copy the example env file:
-   ```bash
-   cp .env.local.example .env.local
-   ```
-2. Fill in every value in `.env.local` from steps 1–3 above:
-   ```
-   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-   STRIPE_SECRET_KEY=sk_test_...
-   STRIPE_WEBHOOK_SECRET=whsec_...
-   NEXT_PUBLIC_SITE_URL=http://localhost:3000
-   RESEND_API_KEY=re_...
-   ```
-   (leave `RESEND_API_KEY` blank if you skipped step 4)
+```bash
+cp .env.local.example .env.local
+```
+
+Then fill in `.env.local`. The variable names, verified against
+`.env.local.example`, are:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_CONNECT_WEBHOOK_SECRET=      # optional — see .env.local.example
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+RESEND_API_KEY=                     # optional — emails are skipped if unset
+EMAIL_FROM=                         # optional, defaults to a shared Resend test address
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY= # optional, used from a later phase onward
+CRON_SECRET=                        # shared secret for the internal cron routes
+```
 
 ### 6. Install dependencies and run
 
@@ -227,45 +176,62 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Sign up as an
-author, then go to **Dashboard > Payouts** and click **Connect with
-Stripe** — Stripe's test-mode onboarding accepts fake data (e.g. phone
-verification code `000000`, routing number `110000000`, account number
-`000123456789`). Once that's done, publish a book, then sign up as a
-reader (or log out) to buy it. On Stripe's checkout page, use test card
-`4242 4242 4242 4242`, any future expiry date, and any CVC/ZIP.
+Open [http://localhost:3000](http://localhost:3000). Other scripts:
 
-> By default, Supabase requires email confirmation before you can log in.
-> For local testing, you can turn this off under **Authentication >
-> Providers > Email > Confirm email** in the Supabase dashboard, or check
-> the inbox of the address you signed up with.
+```bash
+npm run build   # production build
+npm run start   # run a production build locally
+npm run lint     # ESLint
+npm run test     # vitest run
+```
+
+Sign up as an author, go to **Dashboard > Payouts**, and connect a Stripe
+test account (test-mode onboarding accepts fake data — e.g. phone code
+`000000`, routing number `110000000`, account number `000123456789`).
+Publish a book, then buy it as a reader (or logged out) using Stripe's test
+card `4242 4242 4242 4242` with any future expiry and any CVC/ZIP.
+
+> Supabase requires email confirmation before login by default. For local
+> testing, either disable **Authentication > Providers > Email > Confirm
+> email** in the Supabase dashboard, or check the inbox you signed up with.
 
 ## Project structure
 
 ```
 src/
   app/
-    page.tsx                  storefront homepage
-    books/[id]/                 book detail page + buy action
-    library/                     a reader's purchased books
-    login/, signup/              auth pages
-    forgot-password/, reset-password/  password recovery flow
-    account/                     delete account (any logged-in user)
-    auth/actions.ts               server actions for signup/login/logout/reset
-    dashboard/                     author-only area (protected)
-      books/                        add/publish/unpublish/delete a book
-      payouts/                      Stripe Connect onboarding
-    api/webhooks/stripe/            records a purchase once payment completes
-    api/books/[id]/download/        issues a short-lived signed download URL
-  components/
-    site-header.tsx               nav bar, aware of logged-in state
+    (public)/                    public site + author/reader dashboards
+      page.tsx                     author-pitch homepage
+      bookstore/                   reader storefront
+      books/[id]/, bundles/[id]/, series/[id]/, authors/[id]/
+      blog/                        public blog
+      dashboard/                   author-only area (protected)
+        books/, bundles/, discounts/, series/, sales/, balance/, payouts/, profile/
+      account/, library/, wishlist/, following/
+      auth/, login/, signup/, forgot-password/, reset-password/
+    admin/(protected)/            staff-only back office
+      staff/, reports/, refunds/, finance/, audit/, blog/
+    api/
+      webhooks/stripe/              records purchases, drives refund/dispute handling
+      books/[id]/download/, books/[id]/sample/
+      internal/payouts/run/, internal/reconcile-transfer-reversals/
+  components/                     shared UI (site header, icons, etc.)
   lib/
-    supabase/                      browser/server/middleware/admin clients
-    stripe.ts                      Stripe SDK client
-    email.ts                       purchase receipt / sale notification emails
-    pricing.ts                     platform fee constant/helper
-    types.ts                       shared TypeScript types
+    supabase/                       browser/server/middleware/admin clients
+    stripe.ts, connect-account.ts    Stripe SDK client + Connect helpers
+    checkout-regime.ts               dormant ledger_v1 checkout-regime selector
+    payout-scheduler.ts              dormant payout scheduler logic
+    docx-converter.ts                DOCX -> EPUB conversion
+    email.ts, pricing.ts, safe-redirect.ts, recovery-session.ts, types.ts
 supabase/
   schema.sql                       full database schema
-  migrations/                       incremental changes for existing projects
+  migrations/                       incremental changes, in order
 ```
+
+## Notes
+
+This README intentionally doesn't restate the full roadmap — see
+[`ROADMAP.md`](./ROADMAP.md) for phase-by-phase status, completion
+criteria, and what's explicitly deferred or blocked. No secrets, real
+credentials, or private user data are included in this repository's
+documentation.
