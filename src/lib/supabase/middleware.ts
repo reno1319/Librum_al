@@ -6,6 +6,7 @@ import {
   setRecoverySession,
 } from "@/lib/recovery-session";
 import { INTERNAL_PATHNAME_HEADER } from "@/lib/internal-headers";
+import { assertSupabaseEnvSafeForExecution } from "@/lib/supabase/env-guard";
 
 // LIBRUM 2.0 AUTH-2: the only reliable way for a Server Component/Layout
 // to learn the current request's pathname in this Next.js version --
@@ -26,6 +27,14 @@ import { INTERNAL_PATHNAME_HEADER } from "@/lib/internal-headers";
 // never attacker input. No query string is included (see the AUTH-2
 // audit's query-string decision) and no secrets are ever placed on it.
 export async function updateSession(request: NextRequest) {
+  // AUTH-STAGE-1A: see env-guard.ts. Proxy defaults to the Node.js
+  // runtime in this Next.js version (not Edge -- confirmed against
+  // node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/
+  // proxy.md's own "Runtime" section), so process.env.VERCEL_ENV is
+  // genuinely available here on effectively every request, unlike in
+  // client.ts's browser-bundled code.
+  assertSupabaseEnvSafeForExecution();
+
   const requestHeaders = new Headers(request.headers);
   requestHeaders.delete(INTERNAL_PATHNAME_HEADER);
   requestHeaders.set(INTERNAL_PATHNAME_HEADER, request.nextUrl.pathname);

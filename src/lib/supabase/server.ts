@@ -1,7 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { assertSupabaseEnvSafeForExecution } from "@/lib/supabase/env-guard";
 
 export async function createClient() {
+  // AUTH-STAGE-1A: see env-guard.ts -- throws before any client is
+  // constructed if this execution's Supabase project ref doesn't match
+  // what's allowed for this environment (production ref only in Vercel
+  // Production, never anywhere else).
+  assertSupabaseEnvSafeForExecution();
+
   const cookieStore = await cookies();
 
   return createServerClient(
