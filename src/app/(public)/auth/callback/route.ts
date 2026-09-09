@@ -43,11 +43,57 @@ export function isRecoveryExchange(exchangeResult: unknown): boolean {
   return redirectType === "recovery";
 }
 
+// AUTH-1E: the only two purposes this route's token_hash path accepts.
+// Deliberately narrower than the SDK's own EmailOtpType (which also
+// covers "invite"/"magiclink"/"email"/"email_change"/an open string
+// fallback) -- `type` doubles here as the signal that decides whether
+// to set the recovery-session restriction below, so it must be a
+// closed, Librum-controlled set rather than whatever a query string
+// happens to carry. If Librum's configured email templates ever use a
+// different type (e.g. "email"), this route must be updated alongside
+// them, not silently widened to accept it.
+type TokenHashType = "signup" | "recovery";
+
+function parseTokenHashType(value: string | null): TokenHashType | null {
+  return value === "signup" || value === "recovery" ? value : null;
+}
+
+// AUTH-1E: which failure copy to show. `type === "recovery"` covers a
+// rejected/unsupported type on the token_hash path; `next ===
+// "/reset-password"` is requestPasswordReset()'s own fixed redirectTo
+// value (see auth/actions.ts) and is the only recovery signal available
+// after a failed code exchange, which has no other data to inspect.
+export function isRecoveryAttempt(type: string | null, next: string): boolean {
+  return type === "recovery" || next === "/reset-password";
+}
+
+const CONFIRMATION_LINK_INVALID_MESSAGE =
+  "This confirmation link is invalid or has expired. Please request a new one.";
+const RECOVERY_LINK_INVALID_MESSAGE =
+  "This password reset link is invalid or has expired. Please request a new one.";
+
+// AUTH-1E: one safe, non-leaking failure destination -- never the raw
+// Supabase/GoTrue error, only a choice between signup and recovery copy.
+function buildFailureRedirect(origin: string, type: string | null, next: string): string {
+  const message = isRecoveryAttempt(type, next)
+    ? RECOVERY_LINK_INVALID_MESSAGE
+    : CONFIRMATION_LINK_INVALID_MESSAGE;
+  return `${origin}/login?error=${encodeURIComponent(message)}`;
+}
+
 // Handles the link Supabase emails out for signup/password-reset
-// confirmation: it exchanges the one-time code for a real session.
+// confirmation. Supports two query-param shapes:
+//   - `?code=...` -- PKCE authorization code, exchanged via
+//     exchangeCodeForSession().
+//   - `?token_hash=...&type=signup|recovery` -- verified directly via
+//     verifyOtp(), for links that arrive without a stored PKCE
+//     verifier (e.g. opened in a different browser/device than the one
+//     that started the request).
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
+  const tokenHash = searchParams.get("token_hash");
+  const type = searchParams.get("type");
   // LAUNCH-1 P1: routed through the same centralized safe-redirect policy
   // login() uses (src/lib/safe-redirect.ts) rather than trusting the raw
   // query param. Building the final Location by concatenating `origin`
@@ -86,7 +132,29 @@ export async function GET(request: Request) {
       }
       return response;
     }
+    return NextResponse.redirect(buildFailureRedirect(origin, type, next));
   }
 
-  return NextResponse.redirect(`${origin}/login?error=Could+not+confirm+your+email`);
+  // AUTH-1E: token_hash path -- only for an exact, supported `type`.
+  // An unsupported or missing type is rejected here, before verifyOtp()
+  // is called and before a Supabase client is even created.
+  if (tokenHash) {
+    const verifiedType = parseTokenHashType(type);
+    if (verifiedType) {
+      const supabase = await createClient();
+      const { error } = await supabase.auth.verifyOtp({ type: verifiedType, token_hash: tokenHash });
+      if (!error) {
+        const response = NextResponse.redirect(`${origin}${next}`);
+        if (verifiedType === "recovery") {
+          setRecoverySession(response.cookies);
+        } else {
+          clearRecoverySession(response.cookies);
+        }
+        return response;
+      }
+      return NextResponse.redirect(buildFailureRedirect(origin, type, next));
+    }
+  }
+
+  return NextResponse.redirect(buildFailureRedirect(origin, type, next));
 }

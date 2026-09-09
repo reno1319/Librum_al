@@ -53,11 +53,21 @@ export async function signup(formData: FormData) {
   }
 
   const supabase = await createClient();
+  // AUTH-1E: explicit emailRedirectTo, mirroring requestPasswordReset()'s
+  // own explicit redirectTo below -- previously absent here, so a
+  // project-level Auth template that honors {{ .RedirectTo }} had no
+  // application-supplied value to fall back to for signup confirmation
+  // specifically (unlike recovery, which has always set this). Points at
+  // the same /auth/callback route recovery already uses; no `next` is
+  // appended since that route's own default (redirect to "/") is already
+  // the correct post-confirmation destination for signup.
+  const origin = resolveSiteOrigin();
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: { display_name: displayName, role },
+      emailRedirectTo: `${origin}/auth/callback`,
     },
   });
 

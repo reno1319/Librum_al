@@ -4,15 +4,21 @@ import { createRequire } from "module";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 const mockExchangeCodeForSession = vi.fn();
+const mockVerifyOtp = vi.fn();
+const mockCreateClient = vi.fn(() =>
+  Promise.resolve({
+    auth: {
+      exchangeCodeForSession: mockExchangeCodeForSession,
+      verifyOtp: mockVerifyOtp,
+    },
+  }),
+);
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: () =>
-    Promise.resolve({
-      auth: { exchangeCodeForSession: mockExchangeCodeForSession },
-    }),
+  createClient: mockCreateClient,
 }));
 
-const { GET, isRecoveryExchange } = await import("./route");
+const { GET, isRecoveryExchange, isRecoveryAttempt } = await import("./route");
 
 describe("isRecoveryExchange", () => {
   it("redirectType === 'recovery' -> true", () => {
@@ -85,9 +91,29 @@ describe("isRecoveryExchange: pinned against the installed @supabase/auth-js SDK
   });
 });
 
+describe("isRecoveryAttempt (AUTH-1E)", () => {
+  it("type === 'recovery' -> true, regardless of next", () => {
+    expect(isRecoveryAttempt("recovery", "/")).toBe(true);
+    expect(isRecoveryAttempt("recovery", "/reset-password")).toBe(true);
+  });
+
+  it("next === '/reset-password' -> true, even with no/other type (failed code-exchange fallback signal)", () => {
+    expect(isRecoveryAttempt(null, "/reset-password")).toBe(true);
+    expect(isRecoveryAttempt("signup", "/reset-password")).toBe(true);
+  });
+
+  it("neither signal present -> false", () => {
+    expect(isRecoveryAttempt(null, "/")).toBe(false);
+    expect(isRecoveryAttempt("signup", "/")).toBe(false);
+    expect(isRecoveryAttempt("email", "/library")).toBe(false);
+  });
+});
+
 describe("GET /auth/callback", () => {
   beforeEach(() => {
+    mockCreateClient.mockClear();
     mockExchangeCodeForSession.mockReset();
+    mockVerifyOtp.mockReset();
   });
 
   it("a successful recovery exchange sets the recovery cookie", async () => {
@@ -141,16 +167,29 @@ describe("GET /auth/callback", () => {
       new Request("https://librumal.vercel.app/auth/callback?code=bad&next=/reset-password"),
     );
 
-    expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    // AUTH-1E: next=/reset-password is the recovery-attempt fallback
+    // signal (see isRecoveryAttempt()) -- the safe error copy must be
+    // the recovery-specific one, never "Could not confirm your email".
+    expect(location.searchParams.get("error")).toBe(
+      "This password reset link is invalid or has expired. Please request a new one.",
+    );
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("no code at all redirects to /login and never touches the recovery cookie", async () => {
+  it("no code and no token_hash at all redirects to /login with the generic confirmation-link message, never touches the recovery cookie, and never creates a Supabase client", async () => {
     const response = await GET(new Request("https://librumal.vercel.app/auth/callback"));
 
-    expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("error")).toBe(
+      "This confirmation link is invalid or has expired. Please request a new one.",
+    );
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(mockExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mockVerifyOtp).not.toHaveBeenCalled();
+    expect(mockCreateClient).not.toHaveBeenCalled();
   });
 
   // LAUNCH-1 P1: `next` is now routed through the same centralized
@@ -291,5 +330,234 @@ describe("GET /auth/callback", () => {
       expect(location.pathname).toBe("/login");
       expect(response.headers.get("set-cookie")).toBeNull();
     });
+  });
+});
+
+// AUTH-1E: the token_hash/verifyOtp() path -- for links that arrive
+// with no stored PKCE verifier (see route.ts's top-of-file comment).
+describe("GET /auth/callback: token_hash/verifyOtp() path (AUTH-1E)", () => {
+  beforeEach(() => {
+    mockCreateClient.mockClear();
+    mockExchangeCodeForSession.mockReset();
+    mockVerifyOtp.mockReset();
+  });
+
+  it("a valid signup confirmation link (type=signup) verifies, establishes a session, and does NOT set the recovery marker", async () => {
+    mockVerifyOtp.mockResolvedValue({
+      data: { session: {}, user: {} },
+      error: null,
+    });
+
+    const response = await GET(
+      new Request(
+        "https://librumal.vercel.app/auth/callback?token_hash=th_abc&type=signup&next=/",
+      ),
+    );
+
+    expect(mockVerifyOtp).toHaveBeenCalledWith({ type: "signup", token_hash: "th_abc" });
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/");
+    const setCookieHeader = response.headers.get("set-cookie") ?? "";
+    expect(setCookieHeader).toContain(RECOVERY_COOKIE_NAME);
+    expect(setCookieHeader).not.toContain(`${RECOVERY_COOKIE_NAME}=1`);
+  });
+
+  it("a valid recovery link (type=recovery) verifies, establishes a session, SETS the recovery marker, and redirects to /reset-password", async () => {
+    mockVerifyOtp.mockResolvedValue({
+      data: { session: {}, user: {} },
+      error: null,
+    });
+
+    const response = await GET(
+      new Request(
+        "https://librumal.vercel.app/auth/callback?token_hash=th_recovery&type=recovery&next=/reset-password",
+      ),
+    );
+
+    expect(mockVerifyOtp).toHaveBeenCalledWith({ type: "recovery", token_hash: "th_recovery" });
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/reset-password");
+    const setCookieHeader = response.headers.get("set-cookie") ?? "";
+    expect(setCookieHeader).toContain(`${RECOVERY_COOKIE_NAME}=1`);
+    expect(setCookieHeader.toLowerCase()).toContain("httponly");
+  });
+
+  it("an invalid/expired signup confirmation token_hash gets the confirmation-specific safe error, never the recovery one", async () => {
+    mockVerifyOtp.mockResolvedValue({
+      data: { session: null, user: null },
+      error: { message: "Token has expired or is invalid" },
+    });
+
+    const response = await GET(
+      new Request(
+        "https://librumal.vercel.app/auth/callback?token_hash=th_bad&type=signup&next=/",
+      ),
+    );
+
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("error")).toBe(
+      "This confirmation link is invalid or has expired. Please request a new one.",
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("an invalid/expired recovery token_hash gets the recovery-specific safe error, never 'Could not confirm your email'", async () => {
+    mockVerifyOtp.mockResolvedValue({
+      data: { session: null, user: null },
+      error: { message: "Token has expired or is invalid" },
+    });
+
+    const response = await GET(
+      new Request(
+        "https://librumal.vercel.app/auth/callback?token_hash=th_bad&type=recovery&next=/reset-password",
+      ),
+    );
+
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("error")).toBe(
+      "This password reset link is invalid or has expired. Please request a new one.",
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("never exposes the raw Supabase/GoTrue error message for a failed verification", async () => {
+    mockVerifyOtp.mockResolvedValue({
+      data: { session: null, user: null },
+      error: { message: "otp_expired: raw provider detail that must never reach the browser" },
+    });
+
+    const response = await GET(
+      new Request(
+        "https://librumal.vercel.app/auth/callback?token_hash=th_bad&type=recovery&next=/reset-password",
+      ),
+    );
+
+    const location = new URL(response.headers.get("location")!);
+    expect(location.searchParams.get("error")).not.toContain("otp_expired");
+    expect(location.searchParams.get("error")).not.toContain("raw provider detail");
+  });
+
+  it("does not attempt verifyOtp() when only token_hash is present without type (malformed link), and never creates a Supabase client", async () => {
+    const response = await GET(
+      new Request("https://librumal.vercel.app/auth/callback?token_hash=th_only"),
+    );
+
+    expect(mockVerifyOtp).not.toHaveBeenCalled();
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("error")).toBe(
+      "This confirmation link is invalid or has expired. Please request a new one.",
+    );
+  });
+
+  // AUTH-1E revision: `type` is a closed, Librum-controlled set
+  // ("signup"/"recovery" only) -- the SDK's own EmailOtpType also
+  // includes "invite"/"magiclink"/"email"/"email_change"/an open
+  // string fallback, none of which this route accepts, since `type`
+  // also decides whether to set the recovery-session restriction.
+  describe("unsupported token_hash types are rejected before verifyOtp() is ever called", () => {
+    it.each(["magiclink", "email", "email_change", "invite", "some_future_type"])(
+      "type=%s: does not call verifyOtp(), does not create a Supabase client, and does not touch the recovery marker",
+      async (unsupportedType) => {
+        const response = await GET(
+          new Request(
+            `https://librumal.vercel.app/auth/callback?token_hash=th_x&type=${unsupportedType}&next=/`,
+          ),
+        );
+
+        expect(mockVerifyOtp).not.toHaveBeenCalled();
+        expect(mockCreateClient).not.toHaveBeenCalled();
+        expect(response.headers.get("set-cookie")).toBeNull();
+        const location = new URL(response.headers.get("location")!);
+        expect(location.pathname).toBe("/login");
+      },
+    );
+
+    it("an unsupported type combined with next=/reset-password still gets the recovery-specific copy (isRecoveryAttempt's own next-based fallback), even though verifyOtp() is never called", async () => {
+      const response = await GET(
+        new Request(
+          "https://librumal.vercel.app/auth/callback?token_hash=th_x&type=email&next=/reset-password",
+        ),
+      );
+
+      expect(mockVerifyOtp).not.toHaveBeenCalled();
+      const location = new URL(response.headers.get("location")!);
+      expect(location.searchParams.get("error")).toBe(
+        "This password reset link is invalid or has expired. Please request a new one.",
+      );
+    });
+  });
+
+  it("a `code` param takes precedence over token_hash/type when both are somehow present -- the existing PKCE path is not shadowed", async () => {
+    mockExchangeCodeForSession.mockResolvedValue({
+      data: { session: {}, user: {}, redirectType: null },
+      error: null,
+    });
+
+    await GET(
+      new Request(
+        "https://librumal.vercel.app/auth/callback?code=abc&token_hash=th_abc&type=signup&next=/",
+      ),
+    );
+
+    expect(mockExchangeCodeForSession).toHaveBeenCalledWith("abc");
+    expect(mockVerifyOtp).not.toHaveBeenCalled();
+  });
+
+  describe("open-redirect protection also applies to the token_hash path", () => {
+    it("an unsafe next on a successful token_hash verification cannot produce a cross-origin Location", async () => {
+      mockVerifyOtp.mockResolvedValue({
+        data: { session: {}, user: {} },
+        error: null,
+      });
+
+      const response = await GET(
+        new Request(
+          "https://librumal.vercel.app/auth/callback?token_hash=th_abc&type=signup&next=" +
+            encodeURIComponent("https://evil.com/phish"),
+        ),
+      );
+
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("https://librumal.vercel.app");
+      expect(location.hostname).not.toBe("evil.com");
+      expect(location.pathname).toBe("/");
+    });
+
+    it("an unsafe next on a successful recovery token_hash verification still sets the marker safely, off-origin next ignored", async () => {
+      mockVerifyOtp.mockResolvedValue({
+        data: { session: {}, user: {} },
+        error: null,
+      });
+
+      const response = await GET(
+        new Request(
+          "https://librumal.vercel.app/auth/callback?token_hash=th_recovery&type=recovery&next=" +
+            encodeURIComponent("//evil.com/phish"),
+        ),
+      );
+
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("https://librumal.vercel.app");
+      const setCookieHeader = response.headers.get("set-cookie") ?? "";
+      expect(setCookieHeader).toContain(`${RECOVERY_COOKIE_NAME}=1`);
+    });
+  });
+});
+
+// AUTH-1E: source-contract check -- this route handles a raw one-time
+// token_hash and PKCE code on every request; neither may ever reach a
+// log line (Vercel runtime logs are not a secure secret store). Reading
+// the actual source rather than only asserting on mock call args means
+// a future edit that adds a stray `console.log(tokenHash)`-style
+// diagnostic fails this test immediately, not just in code review.
+describe("route.ts: no secret/token logging (AUTH-1E)", () => {
+  it("the route source contains no console.* calls at all", () => {
+    const source = readFileSync(
+      new URL("./route.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toMatch(/console\.\w+\(/);
   });
 });

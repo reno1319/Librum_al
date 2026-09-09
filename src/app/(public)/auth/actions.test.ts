@@ -337,6 +337,39 @@ describe("login: never marked as a recovery session", () => {
 // signUp() only sometimes establishes a session immediately (only when
 // the project doesn't require email confirmation); these tests cover
 // both branches explicitly.
+// AUTH-1E: signup() previously called signUp() with no emailRedirectTo
+// at all -- an asymmetry with requestPasswordReset()'s own explicit
+// redirectTo, and part of the root-cause investigation into why signup
+// confirmation links have appeared broken since the project's own
+// inception. Now explicitly targets /auth/callback, the same route
+// recovery already uses.
+describe("signup: emailRedirectTo (AUTH-1E)", () => {
+  beforeEach(resetMocks);
+
+  it("passes emailRedirectTo pointing at /auth/callback", async () => {
+    await expectRedirectTo(
+      signup(
+        formData({
+          email: "newauthor@example.com",
+          password: "hunter2",
+          displayName: "New Author",
+          role: "reader",
+          accept_terms: "on",
+        }),
+      ),
+      "/",
+    );
+
+    expect(mockSupabaseAuth.signUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          emailRedirectTo: expect.stringContaining("/auth/callback"),
+        }),
+      }),
+    );
+  });
+});
+
 describe("signup: stale recovery marker", () => {
   beforeEach(resetMocks);
 
