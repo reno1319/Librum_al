@@ -90,8 +90,10 @@ export function checkOwnershipMarker(
 
 export class FixtureOwnershipMarkerError extends Error {}
 export class FixtureProfileMissingError extends Error {
-  constructor(public readonly authUserId: string, message: string) {
+  readonly authUserId: string;
+  constructor(authUserId: string, message: string) {
     super(message);
+    this.authUserId = authUserId;
   }
 }
 export class FixtureProfileIntegrityError extends Error {}

@@ -17,11 +17,20 @@ As of this commit, the real `@supabase/supabase-js` client wiring
 entry points will actually construct a real admin client and attempt a
 real run if invoked with `npm run staging:fixtures:*`. **This wiring has
 not been executed or tested against any real project in this
-repository's history** — it was written and verified only by type-
-checking and code review, never run, because no staging credentials
-were available or used during its implementation. Treat it as unproven
-until a human runs it deliberately, with real staging credentials,
-outside of an automated pass. The orchestration logic itself (`runSeed`,
+repository's history** — no staging credentials were available or used
+during its implementation, and it has never been run to completion
+against real staging data. What HAS now been verified with a real,
+unmodified Node process (not just type-checking/code review, and not
+just vitest's compiled-TypeScript environment — see the "Runtime"
+section below for why that distinction matters): the entire runtime
+import graph parses and loads cleanly end-to-end under Node's own
+native `--experimental-strip-types`, with no CLI entry point ever
+firing, no client ever constructed, and no credential ever read. That
+is a necessary precondition for `npm run staging:fixtures:*` to even
+start, not a substitute for actually running it. Treat the actual
+seed/reset/teardown behavior as unproven until a human runs it
+deliberately, with real staging credentials, outside of an automated
+pass. The orchestration logic itself (`runSeed`,
 `runPreflight`, `runReset`, and every safety check they call) is, by
 contrast, fully implemented and unit-tested against injected fakes with
 zero network access — see `*.test.ts` next to each module — and that
@@ -108,10 +117,44 @@ substitute for it.
 ## Runtime
 
 Plain `node --experimental-strip-types` against `.mts` files — no `tsx`,
-no `ts-node`, no new dependency. See the PHASE-1C design report's
-runtime-execution section for the probe that confirmed this works,
-including the one relative import of the app's own
-`src/lib/supabase/env-guard.ts`. Requires Node ≥ 22.6.
+no `ts-node`, no new dependency. Requires Node ≥ 22.6 — verified
+directly against Node v22.6.0 (the documented minimum), v22.22.2, and
+v26.7.0; the minimum stands as originally documented and did not
+need revising.
+
+**Correction:** an earlier version of this section claimed a "probe"
+had confirmed this runtime path worked. That claim was false in a way
+that mattered: the first actual local invocation
+(`npm run staging:fixtures:seed`) failed immediately with
+`SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: TypeScript parameter
+property is not supported in strip-only mode`, in `auth-ownership.mts`'s
+`FixtureProfileMissingError` constructor (a second instance existed in
+`reset.mts`'s `PreflightHardStopError`). Node's `--experimental-strip-types`
+only ever supports *erasable* TypeScript syntax — a parameter property
+(`constructor(public readonly x: string, ...)`) both declares a field
+and assigns it, so it requires real code generation and is rejected
+outright. Whatever "probe" produced the original claim never actually
+ran this exact command against this exact code with a real,
+unmodified Node process — vitest's own test suite always passed, but
+vitest transforms `.mts`/`.ts` files with vite/esbuild first, which
+fully compiles parameter properties and therefore could never have
+caught this.
+
+Both classes have been rewritten as an ordinary field declaration plus
+constructor assignment (identical public, readonly, externally-visible
+shape — `err.authUserId` / `err.table` behave exactly as before). The
+whole runtime import graph (every `.mts` file in this directory, plus
+the one external dependency, `../../src/lib/supabase/env-guard.ts`) was
+re-audited for every other non-erasable construct — enums, namespaces,
+`import ... = require(...)`, decorators, and any other parameter
+property — and none were found. This is now enforced permanently, not
+just re-checked once: `runtime-smoke.test.ts` spawns a real,
+unmodified Node process (whatever Node is running the suite) with
+`--experimental-strip-types` and imports `seed.mts`, `reset.mts`, and
+`live-deps.mts` (which together pull in every other file in this
+directory), so any future reintroduction of non-erasable syntax fails
+`npm run test` immediately — it does not depend on a human remembering
+to probe this path by hand again.
 
 ## Why no `@/`-aliased imports here
 

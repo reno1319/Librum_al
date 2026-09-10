@@ -69,8 +69,10 @@ export type ResetMode = "reset-to-baseline" | "teardown";
 export type FixtureContext = { authorId: string; readerId: string };
 
 export class PreflightHardStopError extends Error {
-  constructor(public readonly table: string, message: string) {
+  readonly table: string;
+  constructor(table: string, message: string) {
     super(message);
+    this.table = table;
   }
 }
 export class ConfirmationMismatchError extends Error {}
