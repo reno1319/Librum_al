@@ -7,7 +7,7 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     env: {
       // route.ts imports the shared `stripe` client (src/lib/stripe.ts) at
       // module scope, which throws immediately if the SDK gets no API key

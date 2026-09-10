@@ -6,6 +6,15 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // PHASE-1C: scripts/staging-fixtures/*.mts import each other (and
+    // one app module, src/lib/supabase/env-guard.ts) via explicit
+    // relative .mts/.ts extensions -- required for those files to run
+    // directly under plain `node --experimental-strip-types` with no
+    // bundler (see scripts/staging-fixtures/README.md). Permissive
+    // only: requires noEmit (already set above) and does not change
+    // how any EXISTING extensionless import elsewhere in this repo is
+    // type-checked.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

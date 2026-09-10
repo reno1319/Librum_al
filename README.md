@@ -102,10 +102,15 @@ state" for details.
 
 ## Local development
 
-> **Before you start:** the hard guard that would refuse to let local
-> development or tests run against the *production* Supabase project does
-> not exist yet (`ROADMAP.md` Phase 1). Until it does, verify manually,
-> every time, that the Supabase project you're pointing at is an isolated
+> **Before you start:** a repository-level guard
+> (`src/lib/supabase/env-guard.ts`, PHASE-1A) fails closed against the
+> *application itself* (local dev, local builds, tests, and any non-
+> Production Vercel deployment) ever connecting to the production
+> Supabase project. It does **not** cover ad hoc CLI/admin scripts
+> outside the app's own client constructors — those need their own,
+> independent target check (see `scripts/staging-fixtures/guard.mts` for
+> the one PHASE-1C's staging fixture scripts use). Still verify manually
+> that any script or tool you point at Supabase resolves to an isolated
 > project of your own — **never the production Supabase ref.**
 
 ### 1. Create a Supabase project

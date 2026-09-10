@@ -9802,3 +9802,44 @@ grant execute on function public.list_payout_batch_export(uuid) to authenticated
 -- invented here. PAYOUT_SCHEDULER_ENABLED is not referenced by this
 -- migration at all.
 -- ============================================================
+
+-- ============================================================
+-- PHASE-1C round-4 review, finding 4 (migration 057): a single,
+-- narrowly scoped, SECURITY DEFINER, count-only RPC for the staging
+-- fixture scripts (scripts/staging-fixtures/) -- author_payout_
+-- destinations, payout_destination_snapshots, and payout_reversal are
+-- `revoke all ... from anon, authenticated, service_role`, so the
+-- fixture scripts' service-role client cannot count fixture-linked rows
+-- in them via a direct REST query. Scoped to ONE caller-supplied author
+-- id, discloses nothing but a row count per table, EXECUTE-granted
+-- ONLY to service_role. Does not weaken any of the 3 tables' own
+-- grants. See migration 057 for the full design rationale.
+-- ============================================================
+create or replace function public.staging_fixture_protected_table_counts(p_author_id uuid)
+returns table (table_name text, row_count bigint)
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select 'author_payout_destinations'::text, count(*)
+    from public.author_payout_destinations
+    where author_id = p_author_id
+  union all
+  select 'payout_destination_snapshots'::text, count(*)
+    from public.payout_destination_snapshots pds
+    where pds.payout_id in (
+      select id from public.author_payouts where author_id = p_author_id
+    )
+  union all
+  select 'payout_reversal'::text, count(*)
+    from public.payout_reversal pr
+    where pr.payout_id in (
+      select id from public.author_payouts where author_id = p_author_id
+    );
+$$;
+
+revoke all on function public.staging_fixture_protected_table_counts(uuid) from public;
+revoke all on function public.staging_fixture_protected_table_counts(uuid) from anon;
+revoke all on function public.staging_fixture_protected_table_counts(uuid) from authenticated;
+grant execute on function public.staging_fixture_protected_table_counts(uuid) to service_role;

@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "staging:fixtures:seed": "node --experimental-strip-types --env-file=.env.staging.local scripts/staging-fixtures/seed.mts",
+    "staging:fixtures:reset": "node --experimental-strip-types --env-file=.env.staging.local scripts/staging-fixtures/reset.mts reset-to-baseline",
+    "staging:fixtures:teardown": "node --experimental-strip-types --env-file=.env.staging.local scripts/staging-fixtures/reset.mts teardown"
   },
   "dependencies": {
     "@stripe/stripe-js": "^9.13.0",

@@ -252,6 +252,15 @@ nonblocking `purchases_reader_id_idx` follow-up.
 3. Keep credentials/environments fully separate.
 4. Create synthetic staging users/data (author, reader, books/drafts,
    series, bundle, supporting test data).
+   - PHASE-1C (local implementation only, not yet run against staging):
+     `scripts/staging-fixtures/` implements this — an independent
+     staging-only guard, a versioned Auth ownership marker, a fixed
+     idempotent fixture dataset, and a full preflight/reset/teardown
+     disposition matrix, all covered by unit tests against injected
+     fakes (no live credentials used). **Not yet exercised against the
+     real staging project** — do not treat this item as done until a
+     live `seed`/`reset-to-baseline` run against
+     `erhzpapqwyfjotliqdjo` has actually been demonstrated.
 5. Establish a repeatable local → staging QA workflow.
 
 **Completion criteria:** the guard exists in code (not just convention),
