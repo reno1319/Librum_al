@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   reverseAuthorTransferForLostDispute,
@@ -58,7 +58,7 @@ async function handleReconciliationRequest(request: Request): Promise<Response> 
   }
 
   const supabase = createAdminClient();
-  const summary = await runTransferReversalReconciliation(supabase, stripe);
+  const summary = await runTransferReversalReconciliation(supabase, getStripe());
 
   return NextResponse.json({ received: true, ...summary });
 }

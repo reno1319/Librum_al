@@ -26,10 +26,10 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdmi
 const mockCheckoutSessionsCreate = vi.fn();
 const mockAccountsRetrieve = vi.fn();
 vi.mock("@/lib/stripe", () => ({
-  stripe: {
+  getStripe: () => ({
     checkout: { sessions: { create: mockCheckoutSessionsCreate } },
     accounts: { retrieve: (...args: unknown[]) => mockAccountsRetrieve(...args) },
-  },
+  }),
 }));
 
 const { buyBundle } = await import("./actions");

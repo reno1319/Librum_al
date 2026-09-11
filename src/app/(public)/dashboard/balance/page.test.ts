@@ -221,8 +221,8 @@ describe("Dashboard Balance: /dashboard/payouts (Stripe Connect) remains untouch
   );
 
   it("still imports and calls the real Stripe SDK -- no redirect/neutralization was introduced", () => {
-    expect(payoutsSource).toContain('import { stripe } from "@/lib/stripe"');
-    expect(payoutsSource).toContain("stripe.accounts.retrieve(");
+    expect(payoutsSource).toContain('import { getStripe } from "@/lib/stripe"');
+    expect(payoutsSource).toContain("getStripe().accounts.retrieve(");
   });
 
   it("still reads/writes stripe_account_id and stripe_payouts_enabled, the live publishing gate", () => {

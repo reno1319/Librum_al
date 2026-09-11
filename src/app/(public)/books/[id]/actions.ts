@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { AUTHOR_ROYALTY_RATE_BPS } from "@/lib/pricing";
 import { REPORT_REASONS } from "@/lib/report-reasons";
 import {
@@ -112,7 +112,7 @@ export async function buyBook(bookId: string, formData: FormData) {
     // checkout with "No such destination" for exactly this reason. The
     // real Stripe/DB reason is logged server-side only; the reader only
     // ever sees the same generic, pre-existing unavailability message.
-    const accountCheck = await checkConnectedAccountReadyForCheckout(stripe, authorAccount);
+    const accountCheck = await checkConnectedAccountReadyForCheckout(getStripe(), authorAccount);
     if (!accountCheck.ok) {
       console.error("buyBook: author's connected Stripe account is not ready for checkout", {
         bookId,
@@ -291,7 +291,7 @@ export async function buyBook(bookId: string, formData: FormData) {
 
   let session: Stripe.Checkout.Session;
   try {
-    session = await stripe.checkout.sessions.create(
+    session = await getStripe().checkout.sessions.create(
       sessionParams,
       {
         // Deterministic, not random: retrying this exact intent's

@@ -33,7 +33,7 @@ vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(mockCookieStore)
 const mockCreateClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 const mockRefundsCreate = vi.fn();
-vi.mock("@/lib/stripe", () => ({ stripe: { refunds: { create: mockRefundsCreate } } }));
+vi.mock("@/lib/stripe", () => ({ getStripe: () => ({ refunds: { create: mockRefundsCreate } }) }));
 const mockExecuteApprovedRefund = vi.fn();
 vi.mock("./issue-refund", () => ({ executeApprovedRefund: () => mockExecuteApprovedRefund() }));
 

@@ -28,7 +28,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient()
 // issueStripeRefund is also exported from this module -- unused here, but
 // importing the module still evaluates its top-level Stripe/recovery-guard
 // imports, so those are mocked too, purely so the import doesn't fail.
-vi.mock("@/lib/stripe", () => ({ stripe: {} }));
+vi.mock("@/lib/stripe", () => ({ getStripe: () => ({}) }));
 vi.mock("@/lib/recovery-guard", () => ({ redirectIfRecoverySessionActive: vi.fn() }));
 
 const { reviewRefundRequest } = await import("./actions");

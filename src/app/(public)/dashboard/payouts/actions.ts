@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { retrieveConnectedAccount } from "@/lib/connect-account";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
@@ -94,6 +94,13 @@ export async function connectStripeAccount() {
   }
 
   let accountId = profile?.stripe_account_id;
+
+  // Every remaining path below this point needs a real Stripe client
+  // (either to mint a new Connect account or to verify/link an
+  // existing one) -- see src/lib/stripe.ts for why this must be called
+  // here, inside the action, rather than imported as a ready-made
+  // module-scope client.
+  const stripe = getStripe();
 
   if (!accountId) {
     let account;
@@ -287,6 +294,6 @@ export async function openStripeExpressDashboard() {
     redirect("/dashboard/payouts");
   }
 
-  const loginLink = await stripe.accounts.createLoginLink(profile.stripe_account_id);
+  const loginLink = await getStripe().accounts.createLoginLink(profile.stripe_account_id);
   redirect(loginLink.url);
 }

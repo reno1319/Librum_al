@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import {
   mapReviewRpcError,
@@ -116,7 +116,7 @@ export async function issueStripeRefund(refundRequestId: string) {
   await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();
-  const outcome = await executeApprovedRefund(supabase, stripe, refundRequestId);
+  const outcome = await executeApprovedRefund(supabase, getStripe(), refundRequestId);
 
   switch (outcome.kind) {
     case "not_found":

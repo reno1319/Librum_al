@@ -71,14 +71,14 @@ const mockAccountsRetrieve = vi.fn();
 const mockAccountLinksCreate = vi.fn();
 const mockCreateLoginLink = vi.fn();
 vi.mock("@/lib/stripe", () => ({
-  stripe: {
+  getStripe: () => ({
     accounts: {
       create: (...args: unknown[]) => mockAccountsCreate(...args),
       retrieve: (...args: unknown[]) => mockAccountsRetrieve(...args),
       createLoginLink: (...args: unknown[]) => mockCreateLoginLink(...args),
     },
     accountLinks: { create: (...args: unknown[]) => mockAccountLinksCreate(...args) },
-  },
+  }),
 }));
 
 const { connectStripeAccount, openStripeExpressDashboard } = await import("./actions");

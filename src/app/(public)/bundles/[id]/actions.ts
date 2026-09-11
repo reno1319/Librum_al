@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { AUTHOR_ROYALTY_RATE_BPS } from "@/lib/pricing";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
@@ -95,7 +95,7 @@ export async function buyBundle(bundleId: string) {
     // webhook-synchronized cache, not a live guarantee). Runs before any
     // checkout snapshot is minted or Stripe is asked to use this account as
     // a transfer destination. Real reason logged server-side only.
-    const accountCheck = await checkConnectedAccountReadyForCheckout(stripe, authorAccount);
+    const accountCheck = await checkConnectedAccountReadyForCheckout(getStripe(), authorAccount);
     if (!accountCheck.ok) {
       console.error("buyBundle: author's connected Stripe account is not ready for checkout", {
         bundleId,
@@ -236,9 +236,9 @@ export async function buyBundle(bundleId: string) {
           snapshotId: snapshot.snapshot_id,
         });
 
-  let session: Awaited<ReturnType<typeof stripe.checkout.sessions.create>>;
+  let session: Awaited<ReturnType<ReturnType<typeof getStripe>["checkout"]["sessions"]["create"]>>;
   try {
-    session = await stripe.checkout.sessions.create(
+    session = await getStripe().checkout.sessions.create(
       sessionParams,
       {
         // Deterministic, not random: retrying this exact snapshot's

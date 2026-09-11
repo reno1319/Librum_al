@@ -28,11 +28,11 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 vi.mock("@/lib/stripe", () => ({
-  stripe: {
+  getStripe: () => ({
     disputes: { retrieve: vi.fn() },
     charges: { retrieve: vi.fn() },
     transfers: { retrieve: vi.fn(), listReversals: vi.fn(), createReversal: vi.fn() },
-  },
+  }),
 }));
 
 const { GET, POST, runTransferReversalReconciliation, STALE_ATTEMPTING_THRESHOLD_MS } =

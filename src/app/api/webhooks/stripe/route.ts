@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isConnectedAccountPayoutReady } from "@/lib/connect-account";
 import {
@@ -2984,6 +2984,12 @@ export async function POST(request: Request) {
   if (!signature) {
     return NextResponse.json({ error: "Missing signature" }, { status: 400 });
   }
+
+  // Every branch below this point needs a real Stripe client to verify
+  // the signature and (once verified) handle the event -- see
+  // src/lib/stripe.ts for why this must be called here, inside the
+  // handler, rather than imported as a ready-made module-scope client.
+  const stripe = getStripe();
 
   const verification = constructStripeEventFromApprovedSecrets(stripe, body, signature);
   if (!verification.ok) {

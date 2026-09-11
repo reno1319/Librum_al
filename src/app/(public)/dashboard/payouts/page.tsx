@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { connectStripeAccount, openStripeExpressDashboard } from "./actions";
 import { PageHeader } from "@/components/ui/page-header";
@@ -40,7 +40,7 @@ export default async function PayoutsPage({
   // Refresh the cached status from Stripe on every visit, since Stripe
   // doesn't push updates to us unless we set up a webhook for it.
   if (profile?.stripe_account_id) {
-    const account = await stripe.accounts.retrieve(profile.stripe_account_id);
+    const account = await getStripe().accounts.retrieve(profile.stripe_account_id);
     payoutsEnabled = !!account.payouts_enabled;
 
     if (payoutsEnabled !== profile.stripe_payouts_enabled) {
