@@ -641,11 +641,34 @@ export async function createBook(formData: FormData) {
   const publishResult = await performPublish(supabase, bookId, user.id);
 
   if (publishResult.ok) {
+    // Same reasoning as publishBook()'s own post-mutation block -- the
+    // status="published" mutation above already committed inside
+    // performPublish(), so nothing below may report that as a failure.
+    // Each step is isolated and logged, never rethrown; redirect() stays
+    // outside every try/catch so its NEXT_REDIRECT signal is never
+    // swallowed. See publishBook() for the full rationale.
     if (publishResult.wasNewlyPublished) {
-      const admin = createAdminClient();
-      await sendNewBookEmails(admin, { bookId, authorId: user.id });
+      try {
+        const admin = createAdminClient();
+        await sendNewBookEmails(admin, { bookId, authorId: user.id });
+      } catch (error) {
+        console.error("createBook: sendNewBookEmails failed after a successful publish", {
+          bookId,
+          authorId: user.id,
+          error,
+        });
+      }
     }
-    revalidatePath("/");
+
+    try {
+      revalidatePath("/");
+    } catch (error) {
+      console.error("createBook: revalidatePath failed after a successful publish", {
+        bookId,
+        error,
+      });
+    }
+
     redirect("/dashboard?success=Your+book+is+now+live");
   }
 
@@ -1037,13 +1060,19 @@ async function performPublish(
     }
   }
 
-  // Only a genuine draft -> published transition should notify
-  // followers — otherwise every unpublish/republish toggle would spam
-  // them again. Read BEFORE the update below (which changes it).
-  const wasNewlyPublished = book.status === "draft";
+  // Only a genuine FIRST publication should notify followers --
+  // otherwise every unpublish/republish toggle would spam them again.
+  // `status` alone can't distinguish "never published before" from "was
+  // unpublished, is now republishing" -- both read status === "draft"
+  // here. published_at can: it is set exactly once, on first publish
+  // (immediately below), and unpublishBook() never clears it (see that
+  // function's own comment), so a non-null published_at read BEFORE this
+  // update is authoritative proof this book has already been published
+  // at least once before.
+  const isFirstPublication = book.published_at == null;
 
   const updatePayload: { status: "published"; published_at?: string } = { status: "published" };
-  if (book.published_at == null) {
+  if (isFirstPublication) {
     updatePayload.published_at = new Date().toISOString();
   }
 
@@ -1057,7 +1086,7 @@ async function performPublish(
     return { ok: false, reason: "update_failed" };
   }
 
-  return { ok: true, wasNewlyPublished };
+  return { ok: true, wasNewlyPublished: isFirstPublication };
 }
 
 export async function publishBook(bookId: string) {
@@ -1090,13 +1119,40 @@ export async function publishBook(bookId: string) {
     redirect("/dashboard");
   }
 
+  // The books.status="published" mutation above has already committed
+  // -- everything from here on is best-effort follow-up (notifying
+  // followers, refreshing cached pages), never something that may turn
+  // an already-successful publish into a reported failure. Each step is
+  // isolated in its own try/catch and logged server-side only, never
+  // rethrown, so a transient failure here can cost at most a missed
+  // notification or a stale cached page, never the user's confidence
+  // that their book is actually live. redirect() below stays OUTSIDE
+  // every try/catch: Next.js implements redirect() by throwing a special
+  // NEXT_REDIRECT signal that a surrounding catch would otherwise
+  // swallow, turning a successful publish into the generic error page.
   if (result.wasNewlyPublished) {
-    const admin = createAdminClient();
-    await sendNewBookEmails(admin, { bookId, authorId: user.id });
+    try {
+      const admin = createAdminClient();
+      await sendNewBookEmails(admin, { bookId, authorId: user.id });
+    } catch (error) {
+      console.error("publishBook: sendNewBookEmails failed after a successful publish", {
+        bookId,
+        authorId: user.id,
+        error,
+      });
+    }
   }
 
-  revalidatePath("/dashboard");
-  revalidatePath("/");
+  try {
+    revalidatePath("/dashboard");
+    revalidatePath("/");
+  } catch (error) {
+    console.error("publishBook: revalidatePath failed after a successful publish", {
+      bookId,
+      error,
+    });
+  }
+
   redirect("/dashboard?success=Your+book+is+now+live");
 }
 

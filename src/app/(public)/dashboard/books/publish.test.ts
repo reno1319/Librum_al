@@ -24,7 +24,12 @@ const mockRedirect = vi.fn((url: string) => {
   throw new RedirectSignal(url);
 });
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+
+// A controllable mock (rather than a bare `vi.fn()`) so individual tests
+// can make a specific call throw, to prove a revalidatePath failure
+// after a successful publish never prevents the success redirect.
+const mockRevalidatePath = vi.fn();
+vi.mock("next/cache", () => ({ revalidatePath: (path: string) => mockRevalidatePath(path) }));
 
 // AUTH-1C: performPublish() (the shared helper both publishBook() and
 // createBook()'s own intent=publish branch call into) now guards
@@ -164,9 +169,10 @@ function resetMocks() {
   mockBookInsert.mockClear();
   mockUploadCover.mockReset().mockResolvedValue({ error: null });
   mockUploadManuscript.mockReset().mockResolvedValue({ error: null });
-  mockCreateAdminClient.mockClear();
+  mockCreateAdminClient.mockReset().mockReturnValue({ __isAdminClient: true });
   mockSendNewBookEmails.mockClear().mockResolvedValue(undefined);
   mockCookieStore.get.mockReset().mockImplementation(() => undefined);
+  mockRevalidatePath.mockReset();
 }
 
 describe("publishBook: draft -> published", () => {
@@ -241,7 +247,7 @@ describe("publishBook: draft -> published", () => {
     expect(mockBookUpdatePayload.mock.calls[0][0]).not.toHaveProperty("published_at");
   });
 
-  it("unpublish -> republish preserves the original published_at and does not re-notify", async () => {
+  it("unpublish -> republish preserves the original published_at and sends no new-book notification", async () => {
     // Simulates a book that was published once (published_at already
     // set), then unpublished (status back to draft, published_at
     // untouched by unpublishBook() -- see actions.ts), then published
@@ -252,16 +258,79 @@ describe("publishBook: draft -> published", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    // wasNewlyPublished is true here (status was "draft" at read time)
-    // -- current documented semantics (Part A/B brief): an unpublish/
-    // republish cycle DOES currently re-trigger the "new book" author
-    // notification, exactly as it did before this refactor (the
-    // pre-extraction code's own gate was `if (book.status === "draft")`,
-    // unconditionally true after any unpublish). This is reported
-    // explicitly, not silently changed.
-    expect(mockSendNewBookEmails).toHaveBeenCalledOnce();
+    // isFirstPublication is now derived from the pre-update published_at
+    // value, not status -- published_at is already non-null here, so
+    // this is correctly recognized as a republish, not a first
+    // publication, and no notification is sent.
+    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
     // published_at itself is still preserved, since it was already set.
     expect(mockBookUpdatePayload.mock.calls[0][0]).not.toHaveProperty("published_at");
+  });
+
+  it("database update failure does not redirect to success", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+    mockBookUpdateResult.mockReturnValue({ error: { message: "db exploded" } });
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
+    expect(mockRedirect).not.toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+  });
+
+  it("notification rejection after a successful write still reaches the success redirect", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+    mockSendNewBookEmails.mockRejectedValueOnce(new Error("email service down"));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    // The mutation itself is unaffected by the later notification failure.
+    expect(mockBookUpdatePayload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "publishBook: sendNewBookEmails failed after a successful publish",
+      expect.objectContaining({ bookId: BOOK_ID }),
+    );
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("createAdminClient failure after a successful write still reaches the success redirect", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+    mockCreateAdminClient.mockImplementationOnce(() => {
+      throw new Error("admin client construction failed");
+    });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "publishBook: sendNewBookEmails failed after a successful publish",
+      expect.objectContaining({ bookId: BOOK_ID }),
+    );
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("revalidatePath failure after a successful write still reaches the success redirect", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+    mockRevalidatePath.mockImplementationOnce(() => {
+      throw new Error("cache invalidation failed");
+    });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "publishBook: revalidatePath failed after a successful publish",
+      expect.objectContaining({ bookId: BOOK_ID }),
+    );
+    consoleErrorSpy.mockRestore();
   });
 
   it("sends the new-book notification only on a genuine draft -> published transition", async () => {
@@ -392,6 +461,65 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
     expect(target).toContain("success=Saved+as+draft");
     expect(target).not.toContain("db exploded");
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+  });
+
+  it("notification rejection after a successful publish-on-create still reaches the success redirect", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+    mockSendNewBookEmails.mockRejectedValueOnce(new Error("email service down"));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const formData = await buildFormData({ intent: "publish", price: "0" });
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockBookUpdatePayload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "createBook: sendNewBookEmails failed after a successful publish",
+      expect.objectContaining({ authorId: USER_ID }),
+    );
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("createAdminClient failure after a successful publish-on-create still reaches the success redirect", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+    mockCreateAdminClient.mockImplementationOnce(() => {
+      throw new Error("admin client construction failed");
+    });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const formData = await buildFormData({ intent: "publish", price: "0" });
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("revalidatePath failure after a successful publish-on-create still reaches the success redirect", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
+    const formData = await buildFormData({ intent: "publish", price: "0" });
+    // The unconditional revalidatePath("/dashboard") earlier in
+    // createBook() (draft-save path, always run, out of scope for this
+    // fix) must still succeed -- only the intent=publish block's own
+    // revalidatePath("/") call is made to fail here.
+    mockRevalidatePath.mockImplementation((path: string) => {
+      if (path === "/") throw new Error("cache invalidation failed");
+    });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    // createBook() generates its own bookId via randomUUID() (a fresh
+    // value each run, unlike publishBook()'s caller-supplied BOOK_ID),
+    // so only the message and the field's presence are asserted here.
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "createBook: revalidatePath failed after a successful publish",
+      expect.objectContaining({ bookId: expect.any(String) }),
+    );
+    consoleErrorSpy.mockRestore();
   });
 
   it("never inserts a book directly as status='published', even for intent=publish", async () => {
