@@ -144,6 +144,96 @@ export async function updateBundle(bundleId: string, formData: FormData) {
   redirect("/dashboard/bundles?success=Bundle+updated");
 }
 
+type PerformBundlePublishResult =
+  | { ok: true }
+  | { ok: false; reason: "not_found" | "read_failed" | "payout_required" | "update_failed" };
+
+// FIX/bundle-payout-publication-gate: the bundle equivalent of
+// performPublish() (books/actions.ts) -- a bundle with a real price must
+// not publish unless the owning author's payout setup is enabled, for
+// exactly the same reason a priced book can't: buyBundle() (bundles/[id]/
+// actions.ts) requires bundle.profiles.stripe_account_id before it will
+// ever construct a Stripe Checkout Session, so a published-but-unsellable
+// bundle is otherwise fully public and looks purchasable while every
+// checkout attempt dead-ends. This was the ONLY gap: publishBundle()
+// previously updated status unconditionally with no payout check at all.
+//
+// Every Supabase read below inspects BOTH `data` and `error` explicitly --
+// `.maybeSingle()` returns `{data: null, error: null}` for an ordinary
+// zero-row result (no such bundle, or not owned by this author) and only
+// ever sets `error` for a genuine query-execution failure, so the two
+// cases are never conflated: a real database error must fail closed via
+// "read_failed", never silently fall through as if it were an ordinary
+// "not found".
+async function performBundlePublish(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  bundleId: string,
+  userId: string,
+): Promise<PerformBundlePublishResult> {
+  const { data: bundle, error: bundleReadError } = await supabase
+    .from("bundles")
+    .select("price_cents")
+    .eq("id", bundleId)
+    .eq("author_id", userId)
+    .maybeSingle();
+
+  if (bundleReadError) {
+    console.error("performBundlePublish: bundle read failed", { bundleId, error: bundleReadError });
+    return { ok: false, reason: "read_failed" };
+  }
+  if (!bundle) {
+    return { ok: false, reason: "not_found" };
+  }
+
+  // Free bundles never touch Stripe (buyBundle's own checkout-creation
+  // path is the only thing that ever requires payout readiness), so
+  // payout setup is only a real requirement for a bundle that will
+  // actually be sold. price_cents is read fresh from the bundle's own
+  // row here -- never trusted from the client.
+  if (bundle.price_cents > 0) {
+    const { data: profile, error: profileReadError } = await supabase
+      .from("profiles")
+      .select("stripe_payouts_enabled")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profileReadError) {
+      console.error("performBundlePublish: profile read failed", { bundleId, userId, error: profileReadError });
+      return { ok: false, reason: "read_failed" };
+    }
+    if (!profile?.stripe_payouts_enabled) {
+      return { ok: false, reason: "payout_required" };
+    }
+  }
+
+  // `.select("id")` on the update is required, not cosmetic: a plain
+  // `.update(...).eq(...)` with no `.select()` returns `data: null` even
+  // when it succeeds, so it cannot distinguish "updated exactly the
+  // owned row" from "matched zero rows" (e.g. a bundle whose author_id
+  // stopped matching between the read above and this write). Checking
+  // the returned row array's length is what actually proves the
+  // mutation affected the row this function verified ownership of --
+  // mirroring the same pattern already used for the link-back update in
+  // buyBundle() (bundles/[id]/actions.ts).
+  const { data: updatedRows, error: updateError } = await supabase
+    .from("bundles")
+    .update({ status: "published" })
+    .eq("id", bundleId)
+    .eq("author_id", userId)
+    .select("id");
+
+  if (updateError) {
+    console.error("performBundlePublish: update failed", { bundleId, error: updateError });
+    return { ok: false, reason: "update_failed" };
+  }
+  if (!updatedRows || updatedRows.length === 0) {
+    console.error("performBundlePublish: update affected zero rows", { bundleId, userId });
+    return { ok: false, reason: "update_failed" };
+  }
+
+  return { ok: true };
+}
+
 export async function publishBundle(bundleId: string) {
   // AUTH-1C: defense-in-depth, mirroring publishBook()/unpublishBook()
   // (src/app/dashboard/books/actions.ts) -- a bundle's publish state is
@@ -159,11 +249,16 @@ export async function publishBundle(bundleId: string) {
     redirect("/login");
   }
 
-  await supabase
-    .from("bundles")
-    .update({ status: "published" })
-    .eq("id", bundleId)
-    .eq("author_id", user.id);
+  const result = await performBundlePublish(supabase, bundleId, user.id);
+
+  if (!result.ok) {
+    if (result.reason === "payout_required") {
+      // Same message publishBook() uses for the identical situation --
+      // see performPublish() (books/actions.ts).
+      redirect("/dashboard/bundles?error=Connect+your+payout+account+before+publishing");
+    }
+    redirect("/dashboard/bundles");
+  }
 
   revalidatePath("/dashboard/bundles");
 }
