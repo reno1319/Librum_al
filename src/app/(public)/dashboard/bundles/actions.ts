@@ -5,6 +5,18 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 
+// PHASE-2C bundle-membership-integrity: an explicit `.returns<T[]>()`
+// shape for performBundlePublish()'s own bundle_books->books membership
+// read, below -- the same established pattern this codebase already
+// uses for a single-book embed elsewhere (see BundleBookRow in
+// bundles/[id]/page.tsx). `books` is null only if the joined book row
+// itself is gone (e.g. cascade-deleted) -- treated as an invalid member
+// by performBundlePublish()'s own filter, never as a query failure.
+type BundleMembershipRow = {
+  book_id: string;
+  books: { author_id: string; status: string } | null;
+};
+
 async function resolveBookSelection(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
@@ -146,7 +158,10 @@ export async function updateBundle(bundleId: string, formData: FormData) {
 
 type PerformBundlePublishResult =
   | { ok: true }
-  | { ok: false; reason: "not_found" | "read_failed" | "payout_required" | "update_failed" };
+  | {
+      ok: false;
+      reason: "not_found" | "read_failed" | "payout_required" | "insufficient_members" | "update_failed";
+    };
 
 // FIX/bundle-payout-publication-gate: the bundle equivalent of
 // performPublish() (books/actions.ts) -- a bundle with a real price must
@@ -206,6 +221,41 @@ async function performBundlePublish(
     }
   }
 
+  // PHASE-2C bundle-membership-integrity: a bundle is only validly
+  // publishable if EVERY membership row resolves to a book still owned
+  // by this exact bundle's author and still published -- not merely "at
+  // least 2 happen to be valid" (a weaker filtered-count check that
+  // would let a bundle publish, and later checkout, as a silently
+  // smaller or different bundle than its author actually selected).
+  // totalMembers and validMembers are counted from two separate reads
+  // (never one derived from the other by filtering), so a bundle with
+  // e.g. 3 members where 1 is invalid is rejected outright, never
+  // silently accepted as "a 2-book bundle." This mirrors, at publish
+  // time, the exact same total-vs-valid comparison
+  // create_bundle_checkout_snapshot() (supabase/schema.sql) now performs
+  // at checkout time -- the database-level backstop for this same
+  // invariant.
+  const { data: memberRows, error: memberReadError } = await supabase
+    .from("bundle_books")
+    .select("book_id, books(author_id, status)")
+    .eq("bundle_id", bundleId)
+    .returns<BundleMembershipRow[]>();
+
+  if (memberReadError) {
+    console.error("performBundlePublish: membership read failed", { bundleId, error: memberReadError });
+    return { ok: false, reason: "read_failed" };
+  }
+
+  const totalMembers = memberRows?.length ?? 0;
+  const validMembers = (memberRows ?? []).filter((row) => {
+    const book = row.books;
+    return !!book && book.author_id === userId && book.status === "published";
+  }).length;
+
+  if (totalMembers !== validMembers || validMembers < 2) {
+    return { ok: false, reason: "insufficient_members" };
+  }
+
   // `.select("id")` on the update is required, not cosmetic: a plain
   // `.update(...).eq(...)` with no `.select()` returns `data: null` even
   // when it succeeds, so it cannot distinguish "updated exactly the
@@ -256,6 +306,9 @@ export async function publishBundle(bundleId: string) {
       // Same message publishBook() uses for the identical situation --
       // see performPublish() (books/actions.ts).
       redirect("/dashboard/bundles?error=Connect+your+payout+account+before+publishing");
+    }
+    if (result.reason === "insufficient_members") {
+      redirect("/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books");
     }
     redirect("/dashboard/bundles");
   }
