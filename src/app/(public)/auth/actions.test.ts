@@ -57,7 +57,9 @@ function resetMocks() {
     getUser: vi.fn(() => Promise.resolve({ data: { user: { id: "user-1" } } })),
     updateUser: vi.fn(() => Promise.resolve({ error: null })),
     signOut: vi.fn(() => Promise.resolve({ error: null })),
-    signInWithPassword: vi.fn(() => Promise.resolve({ error: null })),
+    signInWithPassword: vi.fn(() =>
+      Promise.resolve({ data: { user: { id: "signed-in-user" } }, error: null }),
+    ),
     signUp: vi.fn(() =>
       Promise.resolve({ data: { session: { access_token: "tok" } }, error: null }),
     ),
@@ -146,6 +148,65 @@ describe("logout: clears recovery state", () => {
 
 describe("login: never marked as a recovery session", () => {
   beforeEach(resetMocks);
+
+  it("uses the user returned by signInWithPassword for a reader role lookup without re-reading the new session", async () => {
+    const eq = vi.fn(() => ({
+      single: () => Promise.resolve({ data: { role: "reader" } }),
+    }));
+    mockCreateClient.mockImplementationOnce(() =>
+      Promise.resolve({
+        auth: mockSupabaseAuth,
+        from: () => ({
+          select: () => ({ eq }),
+        }),
+      } as never),
+    );
+
+    await expectRedirectTo(
+      login(formData({ email: "reader@example.com", password: "hunter2" })),
+      "/",
+    );
+
+    expect(eq).toHaveBeenCalledExactlyOnceWith("id", "signed-in-user");
+    expect(mockSupabaseAuth.getUser).not.toHaveBeenCalled();
+  });
+
+  it("uses the user returned by signInWithPassword and preserves the author dashboard redirect", async () => {
+    const eq = vi.fn(() => ({
+      single: () => Promise.resolve({ data: { role: "author" } }),
+    }));
+    mockCreateClient.mockImplementationOnce(() =>
+      Promise.resolve({
+        auth: mockSupabaseAuth,
+        from: () => ({
+          select: () => ({ eq }),
+        }),
+      } as never),
+    );
+
+    await expectRedirectTo(
+      login(formData({ email: "author@example.com", password: "hunter2" })),
+      "/dashboard",
+    );
+
+    expect(eq).toHaveBeenCalledExactlyOnceWith("id", "signed-in-user");
+    expect(mockSupabaseAuth.getUser).not.toHaveBeenCalled();
+  });
+
+  it("fails safely when a nominally successful sign-in returns no user", async () => {
+    mockSupabaseAuth.signInWithPassword.mockResolvedValue({
+      data: { user: null },
+      error: null,
+    });
+
+    await expectRedirectTo(
+      login(formData({ email: "reader@example.com", password: "hunter2" })),
+      "/login?error=Unable%20to%20complete%20login.%20Please%20try%20again.",
+    );
+
+    expect(mockSupabaseAuth.getUser).not.toHaveBeenCalled();
+    expect(mockCookieStore.delete).not.toHaveBeenCalled();
+  });
 
   // LAUNCH-1 P1-11 STALE-MARKER CORRECTION: a successful ordinary login
   // now DOES touch the cookie store -- to clear any stale recovery

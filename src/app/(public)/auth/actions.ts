@@ -107,7 +107,7 @@ export async function login(formData: FormData) {
   const next = String(formData.get("next") ?? "");
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
     // LAUNCH-1 P1-11: invalid credentials must leave any existing
@@ -115,6 +115,22 @@ export async function login(formData: FormData) {
     // not evidence that recovery is actually over, and must never
     // downgrade that restriction.
     redirect(`/login?error=${encodeURIComponent(error.message)}`);
+  }
+
+  // AUTH-1E FOLLOW-UP: signInWithPassword() has already authenticated
+  // this request and returns that authenticated user directly. Do not
+  // immediately call getUser() here: in a Server Action, the new auth
+  // cookies are being written to the outgoing response and are not a
+  // reliable source for a second read during the same request. That
+  // re-read returned null in Staging even though the login itself had
+  // succeeded, and the later `user!.id` crashed the action. Treat the
+  // SDK's defensive nullable type as an explicit failure instead of
+  // asserting it away.
+  const signedInUser = data.user;
+  if (!signedInUser) {
+    redirect(
+      `/login?error=${encodeURIComponent("Unable to complete login. Please try again.")}`,
+    );
   }
 
   // LAUNCH-1 P1-11 STALE-MARKER CORRECTION: signInWithPassword resolving
@@ -144,14 +160,10 @@ export async function login(formData: FormData) {
     redirect(safeNext);
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
-    .eq("id", user!.id)
+    .eq("id", signedInUser.id)
     .single();
 
   redirect(profile?.role === "author" ? "/dashboard" : "/");
