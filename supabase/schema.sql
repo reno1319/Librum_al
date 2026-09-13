@@ -987,6 +987,8 @@ declare
   v_protection_expires_at timestamptz;
   v_snapshot_id uuid;
   v_existing record;
+  v_total_members integer;
+  v_valid_members integer;
 begin
   v_reader_id := auth.uid();
   if v_reader_id is null then
@@ -1054,6 +1056,32 @@ begin
 
   if v_bundle.id is null then
     raise exception 'bundle not found or not published';
+  end if;
+
+  -- FIX/bundle-membership-integrity: every membership row must resolve
+  -- to a book still owned by this exact bundle's author and still
+  -- published -- not merely "at least 2 happen to remain valid" (a
+  -- weaker check that would let a bundle silently sell fewer/different
+  -- books than it was published with). Counted separately from the
+  -- item-list build below (never derived from it) so an invalid bundle
+  -- is rejected before any item list is even constructed, let alone
+  -- frozen into a snapshot.
+  select count(*) into v_total_members
+  from public.bundle_books bb
+  where bb.bundle_id = v_bundle.id;
+
+  select count(*) into v_valid_members
+  from public.bundle_books bb
+  join public.books bo on bo.id = bb.book_id
+  where bb.bundle_id = v_bundle.id
+    and bo.author_id = v_bundle.author_id
+    and bo.status = 'published';
+
+  if v_total_members < 2
+    or v_valid_members < 2
+    or v_total_members <> v_valid_members
+  then
+    raise exception 'bundle does not have enough valid books to check out';
   end if;
 
   -- One statement builds the frozen item list AND determines the book

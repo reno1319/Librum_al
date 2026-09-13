@@ -1156,6 +1156,52 @@ export async function publishBook(bookId: string) {
   redirect("/dashboard?success=Your+book+is+now+live");
 }
 
+// PHASE-2C bundle-membership-integrity: shared by unpublishBook() and
+// deleteBook() below. A book's publish state (and its very existence)
+// is part of the composition of any bundle it's currently a member of
+// -- if that bundle is itself published, an unrelated author action
+// here (unpublishing or deleting the underlying book) must not silently
+// shrink or invalidate what a published, publicly-listed bundle
+// advertises to buyers. This is the mutation-time half of the defense;
+// create_bundle_checkout_snapshot() (supabase/schema.sql) is the
+// matching checkout-time half, guarding the same invariant from the
+// other direction (a bundle whose membership already drifted invalid
+// through some other path, e.g. before this check existed).
+//
+// Both the caller-provided bookId and the exact scope of this query are
+// deliberately ownership-agnostic on their own -- callers below MUST
+// confirm the caller owns bookId before invoking this, so that a
+// published-bundle "yes"/"no" answer (the only thing this returns) is
+// never disclosed for a book the caller doesn't own.
+//
+// Fails CLOSED on a genuine read error: `data` and `error` are always
+// inspected separately (never conflated), and any real query failure
+// returns `{ok: false}` -- treated by both callers as "block the
+// mutation," never silently coerced into "not in any published
+// bundle," which would let the very failure this check exists to catch
+// instead defeat it.
+type PublishedBundleMembershipCheck =
+  | { ok: true; inPublishedBundle: boolean }
+  | { ok: false };
+
+async function bookBelongsToPublishedBundle(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  bookId: string,
+): Promise<PublishedBundleMembershipCheck> {
+  const { data, error } = await supabase
+    .from("bundle_books")
+    .select("bundle_id, bundles!inner(status)")
+    .eq("book_id", bookId)
+    .eq("bundles.status", "published");
+
+  if (error) {
+    console.error("bookBelongsToPublishedBundle: membership read failed", { bookId, error });
+    return { ok: false };
+  }
+
+  return { ok: true, inPublishedBundle: (data?.length ?? 0) > 0 };
+}
+
 export async function unpublishBook(bookId: string) {
   // AUTH-1C: defense-in-depth -- Proxy already blocks /dashboard/*
   // while a recovery session is active, so this is the second layer
@@ -1173,11 +1219,66 @@ export async function unpublishBook(bookId: string) {
     redirect("/login");
   }
 
-  await supabase
+  // Ownership-scoped existence check, added by PHASE-2C so the
+  // published-bundle membership check just below never runs for (and
+  // therefore never discloses anything about) a book this caller
+  // doesn't own -- see bookBelongsToPublishedBundle()'s own comment.
+  // `.maybeSingle()` distinguishes an ordinary "no such book, or not
+  // owned by this author" ({data: null, error: null}) from a genuine
+  // read failure, exactly like every other fail-closed read in this
+  // codebase.
+  const { data: book, error: bookReadError } = await supabase
+    .from("books")
+    .select("id")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle();
+
+  if (bookReadError) {
+    console.error("unpublishBook: book read failed", { bookId, error: bookReadError });
+    redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
+  }
+  if (!book) {
+    redirect("/dashboard");
+  }
+
+  // PHASE-2C: a book that's a member of a currently published bundle
+  // can't be unpublished out from under it -- the bundle would then be
+  // advertising and selling a book that's no longer actually available.
+  // The author must unpublish or edit (remove this book from) the
+  // bundle first. Fails closed on a genuine read error -- see
+  // bookBelongsToPublishedBundle()'s own comment.
+  const membership = await bookBelongsToPublishedBundle(supabase, bookId);
+  if (!membership.ok) {
+    redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
+  }
+  if (membership.inPublishedBundle) {
+    redirect(
+      "/dashboard?error=This+book+is+part+of+a+published+bundle+-+unpublish+or+edit+the+bundle+first",
+    );
+  }
+
+  // `.select("id")` is required, not cosmetic -- a plain
+  // `.update(...).eq(...)` with no `.select()` returns `data: null` even
+  // when it succeeds, so it can't prove the mutation actually affected
+  // the row this function just verified ownership of. Mirrors the same
+  // pattern already used in performBundlePublish() (dashboard/bundles/
+  // actions.ts) and buyBundle()'s own link-back update.
+  const { data: updatedRows, error: updateError } = await supabase
     .from("books")
     .update({ status: "draft" })
     .eq("id", bookId)
-    .eq("author_id", user.id);
+    .eq("author_id", user.id)
+    .select("id");
+
+  if (updateError) {
+    console.error("unpublishBook: update failed", { bookId, error: updateError });
+    redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
+  }
+  if (!updatedRows || updatedRows.length === 0) {
+    console.error("unpublishBook: update affected zero rows", { bookId, userId: user.id });
+    redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/");
@@ -1209,6 +1310,29 @@ export async function deleteBook(bookId: string) {
 
   if (!book) {
     redirect("/dashboard");
+  }
+
+  // PHASE-2C: a book that's a member of a currently published bundle
+  // can't be deleted out from under it, for the same reason it can't be
+  // unpublished (see unpublishBook()'s own comment) -- deleting the
+  // book would additionally cascade-remove its bundle_books row
+  // (bundle_books.book_id references public.books(id) on delete
+  // cascade) with no revalidation of the owning bundle's status at all,
+  // silently narrowing what that published bundle advertises. Checked
+  // BEFORE the purchases check below -- and uses a distinct message
+  // from it -- since these are two independent reasons a book can't be
+  // deleted right now; a book referenced only by draft (or no) bundles
+  // is unaffected and may still be deleted normally, exactly as before
+  // this check existed. Fails closed on a genuine read error -- see
+  // bookBelongsToPublishedBundle()'s own comment.
+  const membership = await bookBelongsToPublishedBundle(supabase, bookId);
+  if (!membership.ok) {
+    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+  }
+  if (membership.inPublishedBundle) {
+    redirect(
+      "/dashboard?error=This+book+is+part+of+a+published+bundle+-+unpublish+or+remove+it+from+the+bundle+first",
+    );
   }
 
   // A book with ANY acquisition history -- paid, free, or refunded --
