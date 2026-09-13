@@ -189,6 +189,10 @@ create view public.public_author_profiles as
   from public.profiles
   where role = 'author';
 
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.public_author_profiles
+  from anon, authenticated;
+
 grant select
   on public.public_author_profiles
   to anon, authenticated;
