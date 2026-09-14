@@ -193,9 +193,40 @@ export async function requestPasswordReset(formData: FormData) {
   const supabase = await createClient();
   const origin = resolveSiteOrigin();
 
-  await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${origin}/auth/callback?next=/reset-password`,
-  });
+  let resetError: { code?: string; status?: number } | null = null;
+
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${origin}/auth/callback?next=/reset-password`,
+    });
+    resetError = error;
+  } catch {
+    // Treat a transport/runtime failure exactly like a returned provider
+    // error. Do not log the submitted email or the raw exception: either
+    // could contain sensitive request information.
+    console.error("requestPasswordReset: password-reset provider request threw");
+    redirect(
+      `/forgot-password?error=${encodeURIComponent(
+        "We couldn't send a reset email right now. Please wait and try again.",
+      )}`,
+    );
+  }
+
+  if (resetError) {
+    // Supabase intentionally returns success for an unknown address, so
+    // this branch does not create an account-existence oracle. It only
+    // handles genuine service/rate-limit failures. Keep diagnostics
+    // useful but non-sensitive: never log the address or raw message.
+    console.error("requestPasswordReset: password-reset provider request failed", {
+      code: resetError.code ?? "unknown",
+      status: resetError.status ?? null,
+    });
+    redirect(
+      `/forgot-password?error=${encodeURIComponent(
+        "We couldn't send a reset email right now. Please wait and try again.",
+      )}`,
+    );
+  }
 
   // Always show the same message whether or not that email has an
   // account — otherwise this form could be used to check who's signed up.

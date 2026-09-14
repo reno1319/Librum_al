@@ -40,11 +40,12 @@ let mockSupabaseAuth: {
   signOut: ReturnType<typeof vi.fn>;
   signInWithPassword: ReturnType<typeof vi.fn>;
   signUp: ReturnType<typeof vi.fn>;
+  resetPasswordForEmail: ReturnType<typeof vi.fn>;
 };
 const mockCreateClient = vi.fn(() => Promise.resolve({ auth: mockSupabaseAuth }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
-const { updatePassword, logout, login, signup } = await import("./actions");
+const { updatePassword, logout, login, signup, requestPasswordReset } = await import("./actions");
 
 function resetMocks() {
   mockRedirect.mockClear();
@@ -63,6 +64,7 @@ function resetMocks() {
     signUp: vi.fn(() =>
       Promise.resolve({ data: { session: { access_token: "tok" } }, error: null }),
     ),
+    resetPasswordForEmail: vi.fn(() => Promise.resolve({ data: {}, error: null })),
   };
 }
 
@@ -76,6 +78,81 @@ async function expectRedirectTo(promise: Promise<unknown>, target: string) {
   await expect(promise).rejects.toBeInstanceOf(RedirectSignal);
   expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining(target));
 }
+
+describe("requestPasswordReset: provider failures and anti-enumeration", () => {
+  beforeEach(resetMocks);
+
+  it("rejects an empty email before calling Supabase", async () => {
+    await expectRedirectTo(requestPasswordReset(formData({ email: "" })), "Enter+your+email");
+    expect(mockSupabaseAuth.resetPasswordForEmail).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generic success response when Supabase returns no error", async () => {
+    await expectRedirectTo(
+      requestPasswordReset(formData({ email: "  reader@example.com  " })),
+      "/forgot-password?success=1",
+    );
+
+    expect(mockSupabaseAuth.resetPasswordForEmail).toHaveBeenCalledWith(
+      "reader@example.com",
+      {
+        redirectTo: expect.stringContaining("/auth/callback?next=/reset-password"),
+      },
+    );
+  });
+
+  it("shows a safe temporary error when Supabase returns a provider error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockSupabaseAuth.resetPasswordForEmail.mockResolvedValue({
+      data: {},
+      error: {
+        code: "over_email_send_rate_limit",
+        status: 429,
+        message: "provider detail that must not be exposed",
+      },
+    });
+
+    try {
+      await expectRedirectTo(
+        requestPasswordReset(formData({ email: "private@example.com" })),
+        "We%20couldn't%20send%20a%20reset%20email%20right%20now",
+      );
+
+      expect(consoleError).toHaveBeenCalledWith(
+        "requestPasswordReset: password-reset provider request failed",
+        { code: "over_email_send_rate_limit", status: 429 },
+      );
+      const logged = JSON.stringify(consoleError.mock.calls);
+      expect(logged).not.toContain("private@example.com");
+      expect(logged).not.toContain("provider detail that must not be exposed");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("shows the same safe temporary error when the provider request throws", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockSupabaseAuth.resetPasswordForEmail.mockRejectedValue(
+      new Error("transport detail that must not be exposed"),
+    );
+
+    try {
+      await expectRedirectTo(
+        requestPasswordReset(formData({ email: "private@example.com" })),
+        "We%20couldn't%20send%20a%20reset%20email%20right%20now",
+      );
+
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith(
+        "requestPasswordReset: password-reset provider request threw",
+      );
+      const logged = JSON.stringify(consoleError.mock.calls);
+      expect(logged).not.toContain("private@example.com");
+      expect(logged).not.toContain("transport detail that must not be exposed");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});
 
 describe("updatePassword: recovery-state lifecycle", () => {
   beforeEach(resetMocks);
