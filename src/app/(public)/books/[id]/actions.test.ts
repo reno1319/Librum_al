@@ -41,7 +41,10 @@ const mockPokClient = vi.fn();
 const mockPokRepository = vi.fn();
 const mockStartPok = vi.fn();
 vi.mock("@/lib/pok", () => ({ getPokConfig: () => mockPokConfig(), createPokClient: () => mockPokClient() }));
-vi.mock("@/lib/pok-checkout", () => ({ startPokCheckout: (...args: unknown[]) => mockStartPok(...args) }));
+vi.mock("@/lib/pok-checkout", () => ({
+  startPokCheckout: (...args: unknown[]) => mockStartPok(...args),
+  POK_CHECKOUT_CANNOT_RESUME: "POK_CHECKOUT_CANNOT_RESUME",
+}));
 vi.mock("@/lib/pok-repository", () => ({ createPokRepository: () => mockPokRepository() }));
 const { buyBook } = await import("./actions");
 
@@ -69,6 +72,13 @@ describe("buyBook: POK provider selection", () => {
   it("POK failure never falls back to Stripe", async () => {
     mockStartPok.mockRejectedValue(new Error("timeout"));
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Could+not+start+checkout" });
+    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+  });
+  it("an unsafe-to-resume checkout gets an honest message, never the generic one", async () => {
+    mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_CANNOT_RESUME"));
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({
+      target: "/books/book?error=We%20can't%20safely%20reopen%20this%20checkout.%20If%20you%20already%20paid%2C%20check%20your%20library%3B%20otherwise%2C%20please%20contact%20support%20to%20complete%20this%20purchase.",
+    });
     expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
   it("invalid sandbox configuration fails before an intent is minted", async () => {

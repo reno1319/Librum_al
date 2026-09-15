@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { startPokCheckout, fulfillPokCheckout, type FrozenPokIntent, type PokMapping, type PokRepository } from "./pok-checkout";
+import { startPokCheckout, fulfillPokCheckout, POK_CHECKOUT_CANNOT_RESUME, type FrozenPokIntent, type PokMapping, type PokRepository } from "./pok-checkout";
 import type { PokOrder } from "./pok";
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -23,8 +23,9 @@ function setup(change: Partial<FrozenPokIntent> = {}) {
     finalize: vi.fn(async () => "eligible_fulfilled"),
   } satisfies PokRepository;
   const order: PokOrder = { id: orderId, merchant: { id: merchantId }, merchantCustomReference: `book:${id}`, currencyCode: "ALL", originalCurrencyCode: "ALL",
-    finalAmount: 4.99, capturedAmount: 4.99, autoCapture: true, isCompleted: false, isRefunded: false, isCanceled: false, transactionId: null, _self: { confirmUrl: url } };
-  const orders = { createOrder: vi.fn(async () => order), retrieveOrder: vi.fn(async () => ({ ...order, isCompleted: true, transactionId: paymentId })) };
+    finalAmount: 4.99, capturedAmount: 4.99, autoCapture: true, isCompleted: false, isRefunded: false, isCanceled: false, transactionId: null, _self: { confirmUrl: url },
+    expiresAt: "2026-09-15T10:30:00Z" };
+  const orders = { createOrder: vi.fn(async () => order), retrieveOrder: vi.fn(async (): Promise<PokOrder> => ({ ...order, isCompleted: true, transactionId: paymentId })) };
   function ready() { mapping = { intent_id: id, merchant_custom_reference: `book:${id}`, provider_order_id: orderId, checkout_url: url, webhook_token: callback.token, creation_claim_id: "claim", state: "ready" }; }
   return { repo, orders, order, ready };
 }
@@ -38,8 +39,10 @@ describe("POK durable creation", () => {
     expect(repo.finalize).not.toHaveBeenCalled();
   });
   it("reuses a ready mapping without another payable order", async () => {
-    const { repo, orders, ready } = setup(); ready();
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue(order); // active, unpaid, unexpired
     expect(await startPokCheckout(input, repo, orders, now)).toBe(url);
+    expect(orders.retrieveOrder).toHaveBeenCalledWith(orderId);
     expect(orders.createOrder).not.toHaveBeenCalled();
   });
   it("never retries after an ambiguous external failure", async () => {
@@ -66,6 +69,61 @@ describe("POK durable creation", () => {
     const { repo, orders } = setup(); orders.createOrder.mockRejectedValue(new Error("timeout")); repo.reconcile.mockRejectedValue(new Error("db"));
     await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow();
     await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(); expect(orders.createOrder).toHaveBeenCalledTimes(1);
+  });
+});
+describe("POK checkout-link reuse safety", () => {
+  it("blocks reuse once the POK order has expired even though the Librum intent is still valid", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    // Librum's own intent (expires_at 10:30) is still valid at `now` (10:00);
+    // the POK order itself (capped at 30 min by startPokCheckout) already expired.
+    orders.retrieveOrder.mockResolvedValue({ ...order, expiresAt: "2026-09-15T09:59:59Z" });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
+    expect(orders.createOrder).not.toHaveBeenCalled();
+    expect(repo.ready).not.toHaveBeenCalled(); expect(repo.reconcile).not.toHaveBeenCalled();
+  });
+  it("blocks reuse of a canceled order", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, isCanceled: true });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+  it("blocks reuse of a refunded order", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, isRefunded: true });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+  it("blocks reuse of an already-paid order rather than offering checkout again", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
+    expect(orders.createOrder).not.toHaveBeenCalled(); expect(repo.finalize).not.toHaveBeenCalled();
+  });
+  it("never resumes when the provider order is unreachable", async () => {
+    const { repo, orders, ready } = setup(); ready();
+    orders.retrieveOrder.mockRejectedValue(new Error("timeout"));
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+  it("never resumes when the retrieved order doesn't match this mapping's own binding", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, merchantCustomReference: "book:someone-else" });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+  it("concurrent retries against an active unpaid checkout never create a duplicate payable order", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue(order);
+    const results = await Promise.all([startPokCheckout(input, repo, orders, now), startPokCheckout(input, repo, orders, now)]);
+    expect(results).toEqual([url, url]);
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+  it("concurrent retries against an expired checkout never create a duplicate payable order", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, expiresAt: "2026-09-15T09:59:59Z" });
+    const results = await Promise.allSettled([startPokCheckout(input, repo, orders, now), startPokCheckout(input, repo, orders, now)]);
+    expect(results.every(r => r.status === "rejected")).toBe(true);
+    expect(orders.createOrder).not.toHaveBeenCalled();
   });
 });
 describe("POK atomic fulfillment", () => {

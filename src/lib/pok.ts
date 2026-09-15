@@ -20,6 +20,15 @@ export const pokOrderSchema = z.object({
   transactionId: uuid.nullable(),
   merchant: z.object({ id: uuid }).optional(),
   _self: z.object({ confirmUrl: z.string() }).optional(),
+  // Required field on the SdkOrder model per POK's published OpenAPI spec
+  // (payments.doc.pokpay.io is unreachable from this network; verified
+  // instead via the generated client at
+  // github.com/pokpay-ltd/php-sdk/blob/main/docs/Model/SdkOrder.md, which
+  // declares `expiresAt: \DateTime`). Kept as a bare string and parsed
+  // defensively at each use site (Date.parse), the same way this codebase
+  // already treats Librum's own `expires_at` timestamps -- never assume a
+  // specific wire format beyond "parseable by Date.parse".
+  expiresAt: z.string(),
 });
 export type PokOrder = z.infer<typeof pokOrderSchema>;
 export type PokConfig = { merchantId: string; keyId: string; keySecret: string };

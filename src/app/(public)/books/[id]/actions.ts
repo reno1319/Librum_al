@@ -22,7 +22,7 @@ import {
 } from "@/lib/connect-account";
 import { resolveCheckoutRegime, resolveLedgerPaymentProvider, isStripeSecretKeyTestMode } from "@/lib/checkout-regime";
 import { createPokClient, getPokConfig, type PokConfig } from "@/lib/pok";
-import { startPokCheckout } from "@/lib/pok-checkout";
+import { startPokCheckout, POK_CHECKOUT_CANNOT_RESUME } from "@/lib/pok-checkout";
 import { createPokRepository } from "@/lib/pok-repository";
 import type { DiscountCode } from "@/lib/types";
 
@@ -268,7 +268,19 @@ export async function buyBook(bookId: string, formData: FormData) {
         intentId: intent.intent_id, readerId: user.id, title: book.title,
         origin, merchantId: pokConfig.merchantId,
       }, createPokRepository(), createPokClient(pokConfig));
-    } catch {
+    } catch (err) {
+      // A stale checkout can never be silently resumed (see pok-checkout's
+      // assertReusableUnpaidOrder) -- tell the reader that plainly instead
+      // of implying a retry will work, since it won't: this same intent's
+      // mapping row is already claimed and reusing it is exactly what just
+      // failed. Every other failure keeps the existing generic message.
+      if (err instanceof Error && err.message === POK_CHECKOUT_CANNOT_RESUME) {
+        redirect(
+          `/books/${bookId}?error=${encodeURIComponent(
+            "We can't safely reopen this checkout. If you already paid, check your library; otherwise, please contact support to complete this purchase.",
+          )}`,
+        );
+      }
       redirect(`/books/${bookId}?error=Could+not+start+checkout`);
     }
     redirect(checkoutUrl);

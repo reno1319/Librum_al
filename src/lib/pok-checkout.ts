@@ -2,6 +2,54 @@ import { randomUUID } from "node:crypto";
 import { pokAmountToMinor, validatePokCheckoutUrl, verifiedPokPayment } from "./pok";
 import type { PokOrder, PokCreateOrder } from "./pok";
 
+// Surfaced to the caller (buyBook) so it can give the reader an honest
+// message instead of the generic "could not start checkout" -- thrown only
+// when resuming an existing checkout would be unsafe (the provider order is
+// expired, canceled/refunded, or already paid). Never thrown for ordinary
+// transient/ambiguous failures, which stay POK_CHECKOUT_REQUIRES_RECONCILIATION.
+export const POK_CHECKOUT_CANNOT_RESUME = "POK_CHECKOUT_CANNOT_RESUME";
+
+// A durable "ready" mapping row is only a cache of what POK told us at
+// CREATION time. POK orders expire well before Librum's own 23h intent
+// retention window (createOrder below caps expiresAfterMinutes at 30), so a
+// returning reader can hit this path long after the cached checkout_url has
+// gone stale at the provider -- or, more dangerously, after it was already
+// paid. Never trust the cached row alone: re-check the order's CURRENT
+// provider-side state before ever handing its checkout_url out again.
+function assertReusableUnpaidOrder(
+  order: PokOrder,
+  binding: { orderId: string; reference: string; merchantId: string; expectedMinor: number; currency: string },
+  now: number,
+): void {
+  let facts: ReturnType<typeof verifiedPokPayment>;
+  try {
+    facts = verifiedPokPayment(order, binding);
+  } catch {
+    // Retrieved an order that doesn't even match this mapping's own
+    // identity -- never safe to trust in any direction.
+    throw new Error("POK_CHECKOUT_REQUIRES_RECONCILIATION");
+  }
+  if (facts) {
+    // Genuinely, verifiably paid already. Handing back a checkout URL now
+    // would invite a second payment attempt on a book that may already be
+    // entitled once the webhook/return callback (the only paths that ever
+    // call finalize) catches up -- this function grants nothing itself.
+    throw new Error(POK_CHECKOUT_CANNOT_RESUME);
+  }
+  // isCanceled/isRefunded are the only terminal-failure signals this
+  // adapter's schema captures; POK's docs do not state that either
+  // guarantees the order can never later be marked paid, so this is a
+  // "never hand this back out" decision, not a claim that the order is
+  // conclusively dead.
+  if (order.isCanceled === true || order.isRefunded) {
+    throw new Error(POK_CHECKOUT_CANNOT_RESUME);
+  }
+  const expiresAt = Date.parse(order.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+    throw new Error(POK_CHECKOUT_CANNOT_RESUME);
+  }
+}
+
 export type PokMapping = {
   intent_id: string; merchant_custom_reference: string; provider_order_id: string | null;
   checkout_url: string | null; webhook_token: string; creation_claim_id: string;
@@ -54,7 +102,20 @@ export async function startPokCheckout(input: {
   if (!await repo.claim(row)) {
     const existing = await repo.mapping(intent.id);
     if (existing?.state === "ready" && existing.checkout_url && existing.provider_order_id) {
-      return validatePokCheckoutUrl(existing.checkout_url, existing.provider_order_id);
+      const cachedUrl = validatePokCheckoutUrl(existing.checkout_url, existing.provider_order_id);
+      let current: PokOrder;
+      try {
+        current = await orders.retrieveOrder(existing.provider_order_id);
+      } catch {
+        // Cannot confirm the cached order is still safe to hand out --
+        // never resume blindly on an unconfirmed provider state.
+        throw new Error("POK_CHECKOUT_REQUIRES_RECONCILIATION");
+      }
+      assertReusableUnpaidOrder(current, {
+        orderId: existing.provider_order_id, reference: existing.merchant_custom_reference,
+        merchantId: input.merchantId, expectedMinor: intent.price_cents_at_checkout, currency: intent.currency,
+      }, now);
+      return cachedUrl;
     }
     throw new Error("POK_CHECKOUT_REQUIRES_RECONCILIATION");
   }

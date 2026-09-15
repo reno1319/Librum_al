@@ -7,7 +7,8 @@ const paymentId = "33333333-3333-4333-8333-333333333333";
 const binding = { orderId, merchantId, reference: "book:intent", expectedMinor: 499, currency: "ALL" };
 const paid: PokOrder = { id: orderId, merchant: { id: merchantId }, merchantCustomReference: binding.reference,
   currencyCode: "ALL", originalCurrencyCode: "ALL", finalAmount: 4.99, capturedAmount: 4.99,
-  autoCapture: true, isCompleted: true, isCanceled: false, isRefunded: false, transactionId: paymentId };
+  autoCapture: true, isCompleted: true, isCanceled: false, isRefunded: false, transactionId: paymentId,
+  expiresAt: "2026-09-15T11:00:00Z" };
 const staging = { POK_ENVIRONMENT: "staging", VERCEL_ENV: "preview", VERCEL_GIT_COMMIT_REF: "staging",
   NEXT_PUBLIC_SUPABASE_URL: "https://erhzpapqwyfjotliqdjo.supabase.co" };
 afterEach(() => vi.unstubAllEnvs());
