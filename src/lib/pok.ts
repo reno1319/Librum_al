@@ -131,8 +131,199 @@ export type PokCreateOrder = {
   expiresAfterMinutes: number;
 };
 
+// LOCAL-ONLY diagnostic addition (not part of any commit): narrowly
+// sanitized detail for a POK_HTTP_400 rejection on create_order, captured
+// right before the existing sentinel is thrown. Never touches the
+// existing PokDiagnosticCode/logPokDiagnostic contract or any of its
+// call sites -- this is a strictly additive second log line.
+//
+// CORRECTION (round 2, after a reported false positive): the first draft
+// recursively scanned every key AND string leaf in the whole body against
+// the allowlist. A fabricated `{"statusCode":400,"errors":[],"request":
+// {"amount":4.99}}` -- our OWN echoed request, carrying no actual
+// rejection at all -- was misclassified as "field_rejected"/"amount",
+// because the scan couldn't distinguish an ECHOED request field from an
+// ACTUAL reported error. Fixed by reading fields ONLY from the explicit,
+// documented `errors` array shape -- never the rest of the body -- so an
+// echoed request/data object can no longer be mistaken for a rejection.
+//
+// The field allowlist is createOrder's own outgoing request fields
+// (PokCreateOrder's keys) PLUS "deeplink", a create-order field POK's own
+// published 400 example names as rejectable even though this adapter
+// never sends it -- a documented field can still be meaningfully
+// "missing" even when we don't send it ourselves. No other field is
+// added: this codebase has no further documented evidence of POK's
+// create-order field set, and inventing more would defeat the point of
+// an allowlist. (pok.test.ts asserts every PokCreateOrder key is present,
+// since `satisfies` can't express "superset of a type's keys".)
+const POK_CREATE_ORDER_FIELDS: ReadonlySet<string> = new Set<string>([
+  "amount", "currencyCode", "autoCapture", "shippingCost", "merchantCustomReference",
+  "description", "webhookUrl", "redirectUrl", "failRedirectUrl", "expiresAfterMinutes",
+  "deeplink",
+]);
+
+// Closed vocabulary for POK's own documented validation-error `type`
+// values -- only the two this codebase has direct published evidence for
+// (POK's create-order 400 example: collection reference already used
+// elsewhere in this file). Never a claim about any OTHER type string;
+// anything else maps to "unknown" and its raw text is never logged.
+export type PokValidationCategory = "missing_required" | "invalid_uri" | "unknown";
+const POK_VALIDATION_TYPE_TO_CATEGORY = new Map<string, PokValidationCategory>([
+  ["any.required", "missing_required"],
+  ["string.uri", "invalid_uri"],
+]);
+
+// Overall shape of what was found in a 400 body:
+//   - "errors_reported": the body had a non-empty `errors` array with at
+//     least one entry carrying a string `key` (see below -- `type` is
+//     not required for an entry to count here).
+//   - "no_errors_reported": the body parsed to an object, but its
+//     `errors` field was missing, not an array, empty, or contained no
+//     entry with a string `key` -- includes the exact false-positive
+//     repro `{"errors":[],"request":{"amount":4.99}}`.
+//   - "unparseable": the body wasn't valid JSON, was too large to read
+//     safely, or reading it failed outright.
+export type PokRejectionOutcome = "errors_reported" | "no_errors_reported" | "unparseable";
+export type PokRejectionEntry = { field: string; category: PokValidationCategory };
+export type PokRejectionClassification = {
+  outcome: PokRejectionOutcome;
+  errors?: PokRejectionEntry[];
+  statusCode?: number;
+  serverStatusCode?: number;
+};
+
+// Small fixed cap on how many error entries are ever retained/logged --
+// independent of how many the body actually claims to contain.
+const MAX_REJECTION_ERROR_ENTRIES = 10;
+
+// Bytes are bounded WHILE reading, before any full buffering or JSON
+// parsing -- a response claiming (or actually sending) a huge body can
+// never be fully pulled into memory here. Deliberately no separate
+// timer: this reuses request()'s own already-attached AbortSignal
+// deadline rather than inventing a second one.
+const MAX_REJECTION_BODY_BYTES = 16 * 1024;
+
+// Reads at most MAX_REJECTION_BODY_BYTES from the response body stream,
+// bailing out (and returning null) the moment that cap would be
+// exceeded, rather than buffering the whole thing first and measuring
+// after. Returns null on any read failure, or when there is no readable
+// body at all -- both are treated identically to "unparseable" by the
+// caller, never surfaced as a distinct error.
+async function readBoundedRejectionText(response: Response): Promise<string | null> {
+  const body = response.body;
+  if (!body) return null;
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > MAX_REJECTION_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } catch {
+    return null;
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released or errored */ }
+  }
+}
+
+function extractFiniteInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) ? value : undefined;
+}
+
+// Extracts field/type pairs ONLY from the explicit, documented `errors`
+// array -- never from any other part of the body (an echoed `request`/
+// `data` object, a top-level message, or any other key), which is
+// exactly what a plain recursive scan got wrong before. Each retained
+// entry's `field` is one of our own allowlisted names or "unknown"; its
+// `category` is one of the two documented validation types or "unknown"
+// -- an unrecognized key/type's raw text is never returned or logged.
+// A string `key` is the one thing an entry needs to be retained at all;
+// `type` is informative, not load-bearing -- absent, non-string, or
+// unrecognized all fall back to "unknown" rather than discarding the
+// entry (and its otherwise-identifiable field) entirely.
+function classifyPokRejectionBody(
+  rawText: string | null, fieldAllowlist: ReadonlySet<string>,
+): PokRejectionClassification {
+  if (rawText === null) return { outcome: "unparseable" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    return { outcome: "unparseable" };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { outcome: "no_errors_reported" };
+  }
+  const body = parsed as Record<string, unknown>;
+  const statusCode = extractFiniteInt(body.statusCode);
+  const serverStatusCode = extractFiniteInt(body.serverStatusCode);
+  const rawErrors = body.errors;
+  if (!Array.isArray(rawErrors) || rawErrors.length === 0) {
+    return { outcome: "no_errors_reported", statusCode, serverStatusCode };
+  }
+
+  const errors: PokRejectionEntry[] = [];
+  for (const entry of rawErrors) {
+    if (errors.length >= MAX_REJECTION_ERROR_ENTRIES) break;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const { key, type } = entry as Record<string, unknown>;
+    // No string key at all -- nothing identifiable to retain for this
+    // entry (never fabricate a slot for it). A missing/non-string/
+    // unrecognized `type`, by contrast, still retains the entry: it just
+    // resolves to category "unknown" below.
+    if (typeof key !== "string") continue;
+    errors.push({
+      field: fieldAllowlist.has(key) ? key : "unknown",
+      category: typeof type === "string" ? POK_VALIDATION_TYPE_TO_CATEGORY.get(type) ?? "unknown" : "unknown",
+    });
+  }
+  if (errors.length === 0) return { outcome: "no_errors_reported", statusCode, serverStatusCode };
+  return { outcome: "errors_reported", errors, statusCode, serverStatusCode };
+}
+
+// Separate, distinctly-named event from "pok_diagnostic" so this
+// narrower, LOCAL-ONLY addition is never confused with (and never
+// changes the shape of) the existing, already-tested diagnostic
+// contract. Wrapped so it can never throw or replace the caller's own
+// POK_HTTP_400 throw. Never logs anything but the stage, the fixed
+// httpStatus 400, the outcome, up to MAX_REJECTION_ERROR_ENTRIES
+// {field, category} pairs (each already reduced to a known-safe name/
+// category or "unknown"), and finite integer statusCode/serverStatusCode
+// -- never the raw body, message, or any provider-supplied text.
+function logPokRejectionDiagnostic(
+  stage: PokDiagnosticStage, result: PokRejectionClassification,
+): void {
+  try {
+    const payload: Record<string, unknown> = { stage, httpStatus: 400, outcome: result.outcome };
+    if (result.statusCode !== undefined) payload.statusCode = result.statusCode;
+    if (result.serverStatusCode !== undefined) payload.serverStatusCode = result.serverStatusCode;
+    if (result.outcome === "errors_reported" && result.errors) payload.errors = result.errors;
+    console.error("pok_rejection_diagnostic", payload);
+  } catch {
+    // Must never throw or otherwise disrupt the caller's own error
+    // propagation/reconciliation.
+  }
+}
+
 export function createPokClient(config: PokConfig, fetcher: typeof fetch = fetch) {
-  async function request(path: string, body?: unknown, token?: string): Promise<unknown> {
+  async function request(
+    path: string, body?: unknown, token?: string,
+    // Both optional and only ever supplied by createOrder below -- every
+    // other call site (login, retrieveOrder) is completely unaffected by
+    // this addition: with no allowlist, the new block below never runs.
+    stage?: PokDiagnosticStage, rejectionFieldAllowlist?: ReadonlySet<string>,
+  ): Promise<unknown> {
     // Deliberately no retry of order creation: a timeout can hide a created order.
     let response: Response;
     try {
@@ -143,7 +334,18 @@ export function createPokClient(config: PokConfig, fetcher: typeof fetch = fetch
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch { throw new Error("POK_REQUEST_FAILED"); }
-    if (!response.ok) throw new Error(`POK_HTTP_${response.status}`);
+    if (!response.ok) {
+      if (response.status === 400 && stage !== undefined && rejectionFieldAllowlist !== undefined) {
+        try {
+          const rawText = await readBoundedRejectionText(response);
+          logPokRejectionDiagnostic(stage, classifyPokRejectionBody(rawText, rejectionFieldAllowlist));
+        } catch {
+          // Reading/classifying the rejection body must never disrupt or
+          // replace the existing POK_HTTP_400 throw immediately below.
+        }
+      }
+      throw new Error(`POK_HTTP_${response.status}`);
+    }
     const envelope = z.object({ statusCode: z.number().int().min(200).max(299), data: z.unknown() })
       .safeParse(await response.json());
     if (!envelope.success) throw new Error("POK_INVALID_RESPONSE");
@@ -163,7 +365,7 @@ export function createPokClient(config: PokConfig, fetcher: typeof fetch = fetch
     async createOrder(body: PokCreateOrder): Promise<PokOrder> {
       const accessToken = await token();
       try {
-        const data = await request(path, body, accessToken);
+        const data = await request(path, body, accessToken, "create_order", POK_CREATE_ORDER_FIELDS);
         return z.object({ sdkOrder: pokOrderSchema }).parse(data).sdkOrder;
       } catch (err) {
         // A malformed/missing documented field (a Zod parse failure here)

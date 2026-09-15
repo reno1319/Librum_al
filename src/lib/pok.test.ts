@@ -114,6 +114,214 @@ describe("POK transport", () => {
   });
 });
 
+// LOCAL-ONLY: covers the not-yet-committed create_order 400-rejection
+// diagnostic addition in pok.ts (POK_CREATE_ORDER_FIELDS,
+// POK_VALIDATION_TYPE_TO_CATEGORY, readBoundedRejectionText,
+// classifyPokRejectionBody, logPokRejectionDiagnostic). Every fetch
+// response here is fabricated; no network call of any kind is made.
+describe("POK create_order 400 rejection diagnostics (local-only)", () => {
+  const config = { merchantId, keyId: "test-key", keySecret: "do-not-log-this" };
+  const json = (data: unknown) => Response.json({ statusCode: 200, data });
+  const createBody = { amount: 1, currencyCode: "ALL", autoCapture: true, shippingCost: 0,
+    merchantCustomReference: "book:test", description: "test", webhookUrl: "https://librum.example/webhook",
+    redirectUrl: "https://librum.example/return", failRedirectUrl: "https://librum.example/canceled",
+    expiresAfterMinutes: 30 } as const;
+  let consoleError: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined); });
+  afterEach(() => consoleError.mockRestore());
+
+  function loggedText(): string {
+    return JSON.stringify(consoleError.mock.calls);
+  }
+
+  // Every field this adapter actually sends must be recognizable -- a
+  // compile-time `satisfies` can't express "allowlist is a superset of
+  // PokCreateOrder's keys", so this is the runtime equivalent.
+  it("field allowlist covers every PokCreateOrder key it sends, plus the documented-but-unsent 'deeplink'", async () => {
+    for (const field of Object.keys(createBody)) {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+        .mockResolvedValueOnce(Response.json({ errors: [{ key: field, type: "any.required" }] }, { status: 400 }));
+      await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+      expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic",
+        { stage: "create_order", httpStatus: 400, outcome: "errors_reported", errors: [{ field, category: "missing_required" }] });
+    }
+  });
+
+  // The exact false positive ChatGPT reproduced: our OWN echoed request
+  // (which happens to contain "amount") sitting alongside an EMPTY
+  // errors array must never be read as a rejection of "amount".
+  it("never misreads an echoed request/data object as a rejected field (the reported false positive)", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json({ statusCode: 400, errors: [], request: { amount: 4.99 } }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic",
+      { stage: "create_order", httpStatus: 400, outcome: "no_errors_reported", statusCode: 400 });
+  });
+
+  // POK's own published create-order 400 example (collection reference
+  // already used elsewhere in this file): four errors, including
+  // "deeplink" -- a field this adapter never sends but which is still
+  // documented and therefore allowlisted. This is a PUBLISHED EXAMPLE,
+  // not evidence of either actual incident's rejection reason.
+  it("parses POK's own published multi-error 400 example without inventing or dropping entries", async () => {
+    const publishedExample = {
+      statusCode: 400, serverStatusCode: 400,
+      errors: [
+        { key: "autoCapture", type: "any.required" },
+        { key: "webhookUrl", type: "string.uri" },
+        { key: "redirectUrl", type: "string.uri" },
+        { key: "deeplink", type: "string.uri" },
+      ],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json(publishedExample, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic", {
+      stage: "create_order", httpStatus: 400, outcome: "errors_reported", statusCode: 400, serverStatusCode: 400,
+      errors: [
+        { field: "autoCapture", category: "missing_required" },
+        { field: "webhookUrl", category: "invalid_uri" },
+        { field: "redirectUrl", category: "invalid_uri" },
+        { field: "deeplink", category: "invalid_uri" },
+      ],
+    });
+  });
+
+  it("reduces an unrecognized field name AND an unrecognized type to 'unknown', never logging either's raw text", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json({ errors: [{ key: "totallyUnknownProviderField", type: "some.newType" }] }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic",
+      { stage: "create_order", httpStatus: 400, outcome: "errors_reported", errors: [{ field: "unknown", category: "unknown" }] });
+    expect(loggedText()).not.toContain("totallyUnknownProviderField");
+    expect(loggedText()).not.toContain("some.newType");
+  });
+
+  it("reports a documented field as missing when POK's errors array names it even though our own request omits it", async () => {
+    // "deeplink" is never part of createBody at all -- still recognized.
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json({ errors: [{ key: "deeplink", type: "any.required" }] }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic",
+      { stage: "create_order", httpStatus: 400, outcome: "errors_reported", errors: [{ field: "deeplink", category: "missing_required" }] });
+  });
+
+  it("classifies a missing/non-array/empty errors field, or an entry with no string key, as no_errors_reported", async () => {
+    // { key: "amount" } (no type at all) is deliberately NOT in this
+    // list -- a string key alone is enough to retain an entry now (see
+    // the dedicated missing/null/numeric-type tests below); only an
+    // entry with NO string key at all falls through to here.
+    for (const body of [{}, { errors: "not-an-array" }, { errors: [] }, { errors: [{}] }, { errors: [{ type: "any.required" }] }]) {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+        .mockResolvedValueOnce(Response.json(body, { status: 400 }));
+      await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+      expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic",
+        expect.objectContaining({ stage: "create_order", httpStatus: 400, outcome: "no_errors_reported" }));
+    }
+  });
+
+  it.each([
+    { label: "absent type", entry: { key: "amount" } },
+    { label: "null type", entry: { key: "amount", type: null } },
+    { label: "numeric type", entry: { key: "amount", type: 123 } },
+  ])("retains an entry with a string key and $label, mapping category to unknown rather than discarding it", async ({ entry }) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json({ errors: [entry] }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic",
+      { stage: "create_order", httpStatus: 400, outcome: "errors_reported", errors: [{ field: "amount", category: "unknown" }] });
+  });
+
+  it("still resolves field to 'unknown' for an unrecognized key even when type is also absent", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json({ errors: [{ key: "totallyUnknownProviderField" }] }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic",
+      { stage: "create_order", httpStatus: 400, outcome: "errors_reported", errors: [{ field: "unknown", category: "unknown" }] });
+  });
+
+  it("never logs a raw message or value accompanying an entry that has a key but no usable type", async () => {
+    const leakySentence = "webhookUrl must be a valid https URL, got ftp://leak.example/token=SECRET123";
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json({ errors: [{ key: "webhookUrl", message: leakySentence }] }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic",
+      { stage: "create_order", httpStatus: 400, outcome: "errors_reported", errors: [{ field: "webhookUrl", category: "unknown" }] });
+    expect(loggedText()).not.toContain("leak.example");
+    expect(loggedText()).not.toContain("SECRET123");
+    expect(loggedText()).not.toContain(leakySentence);
+  });
+
+  it("classifies a non-JSON body as unparseable, without throwing anything other than the existing POK_HTTP_400", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(new Response("not json at all {{{", { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic", { stage: "create_order", httpStatus: 400, outcome: "unparseable" });
+  });
+
+  it("bounds retained error entries to a small fixed limit even when the body claims many more", async () => {
+    const manyErrors = Array.from({ length: 50 }, () => ({ key: "amount", type: "any.required" }));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json({ errors: manyErrors }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    const call = consoleError.mock.calls.find((c: unknown[]) => c[0] === "pok_rejection_diagnostic");
+    const logged = call?.[1] as { errors?: unknown[] } | undefined;
+    expect(logged?.errors?.length).toBeLessThanOrEqual(10);
+    expect(logged?.errors?.length).toBeGreaterThan(0);
+  });
+
+  it("never logs a secret or a callback token embedded anywhere in the rejection body, even while still identifying a rejected field", async () => {
+    const secret = "sk_live_DO_NOT_LOG_1234567890";
+    const callbackToken = "SECRET_CALLBACK_TOKEN_9999";
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json({
+        message: `keySecret=${secret} rejected`,
+        errors: [{ key: "webhookUrl", type: "string.uri", value: `https://reader.example/cb?token=${callbackToken}` }],
+      }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic",
+      { stage: "create_order", httpStatus: 400, outcome: "errors_reported", errors: [{ field: "webhookUrl", category: "invalid_uri" }] });
+    const logged = loggedText();
+    expect(logged).not.toContain(secret);
+    expect(logged).not.toContain(callbackToken);
+    expect(logged).not.toContain("reader.example");
+  });
+
+  it("bounds body bytes while reading -- an oversized body is treated as unparseable, never fully buffered or parsed", async () => {
+    const oversized = JSON.stringify({ errors: [{ key: "amount", type: "any.required" }], padding: "x".repeat(20_000) });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(new Response(oversized, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic", { stage: "create_order", httpStatus: 400, outcome: "unparseable" });
+  });
+
+  it("still throws only POK_HTTP_400 and logs 'unparseable' (never the raw error) if reading the rejection body stream itself fails", async () => {
+    const brokenBody = new ReadableStream({ start(controller) { controller.error(new Error("stream error, must never be logged")); } });
+    const brokenResponse = new Response(brokenBody, { status: 400 });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" })).mockResolvedValueOnce(brokenResponse);
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).toHaveBeenCalledWith("pok_rejection_diagnostic", { stage: "create_order", httpStatus: 400, outcome: "unparseable" });
+    expect(loggedText()).not.toContain("stream error");
+    // The pre-existing diagnostic for this same failure still fires, unchanged.
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "create_order", code: "http_error", httpStatus: 400 });
+  });
+
+  it("never adds a rejection-diagnostic line for login's own 400 -- only createOrder passes the allowlist", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ errors: [{ key: "keySecret", type: "any.required" }] }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).not.toHaveBeenCalledWith("pok_rejection_diagnostic", expect.anything());
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "login", code: "http_error", httpStatus: 400 });
+  });
+
+  it("never adds a rejection-diagnostic line for retrieveOrder's own 400 either", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(Response.json({ errors: [{ key: "amount", type: "any.required" }] }, { status: 400 }));
+    await expect(createPokClient(config, fetcher).retrieveOrder(orderId)).rejects.toThrow("POK_HTTP_400");
+    expect(consoleError).not.toHaveBeenCalledWith("pok_rejection_diagnostic", expect.anything());
+  });
+});
+
 describe("logPokDiagnostic", () => {
   let consoleError: ReturnType<typeof vi.spyOn>;
   beforeEach(() => { consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined); });
