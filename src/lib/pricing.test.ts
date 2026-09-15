@@ -60,6 +60,15 @@ describe("formatAllPrice", () => {
     expect(formatAllPrice(50)).toBe("0.50 ALL");
   });
 
+  // Regression: the book detail page's own ad-hoc
+  // `Intl.NumberFormat("en", {style:"currency",currency:"ALL"})` rounded
+  // this exact fixture price to "ALL 8" under this runtime's default CLDR
+  // fraction-digit data for ALL. This is the formatter the page now calls
+  // instead -- confirms the fixture's exact price renders precisely.
+  it("renders 799 minor units (this staging fixture's price) as 7.99 ALL, not rounded to 8", () => {
+    expect(formatAllPrice(799)).toBe("7.99 ALL");
+  });
+
   it("never divides by anything other than 100 -- no FX, no USD conversion", () => {
     // 1200.00 ALL stored as 120000 minor units, per the locked product
     // decision -- not converted from/to any other currency's amount.

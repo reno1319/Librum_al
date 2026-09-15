@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { pokAmountToMinor, validatePokCheckoutUrl, verifiedPokPayment } from "./pok";
+import { pokAmountToMinor, validatePokCheckoutUrl, verifiedPokPayment, logPokDiagnostic } from "./pok";
 import type { PokOrder, PokCreateOrder } from "./pok";
 
 // Surfaced to the caller (buyBook) so it can give the reader an honest
@@ -188,18 +188,46 @@ export async function startPokCheckout(input: {
       redirectUrl: `${origin.origin}/payments/pok/return?${query}`,
       failRedirectUrl: `${origin.origin}/books/${intent.book_id}?canceled=true`,
     });
-    if (order.merchantCustomReference !== row.merchant_custom_reference || order.currencyCode !== "ALL" ||
-        (order.originalCurrencyCode !== undefined && order.originalCurrencyCode !== "ALL") || order.autoCapture === false ||
-        pokAmountToMinor(order.finalAmount) !== intent.price_cents_at_checkout ||
-        (order.merchant && order.merchant.id !== input.merchantId) || order.isCompleted || order.isRefunded || order.isCanceled === true) {
-      throw new Error("POK_CREATED_ORDER_MISMATCH");
+    // The whole validation -- not just the explicit mismatch throw below --
+    // is inside this try: pokAmountToMinor(order.finalAmount) can itself
+    // throw (POK_INVALID_AMOUNT) while the condition is still being
+    // evaluated, before the mismatch throw is ever reached. Without
+    // wrapping the amount conversion too, that failure would skip
+    // response_validation logging entirely and fall straight through to
+    // the outer catch's generic reconciliation, silently.
+    try {
+      if (order.merchantCustomReference !== row.merchant_custom_reference || order.currencyCode !== "ALL" ||
+          (order.originalCurrencyCode !== undefined && order.originalCurrencyCode !== "ALL") || order.autoCapture === false ||
+          pokAmountToMinor(order.finalAmount) !== intent.price_cents_at_checkout ||
+          (order.merchant && order.merchant.id !== input.merchantId) || order.isCompleted || order.isRefunded || order.isCanceled === true) {
+        throw new Error("POK_CREATED_ORDER_MISMATCH");
+      }
+    } catch (err) {
+      logPokDiagnostic("response_validation", err);
+      throw err;
     }
-    const url = validatePokCheckoutUrl(order._self?.confirmUrl ?? "", order.id);
-    await repo.ready(intent.id, row.creation_claim_id, order.id, url);
+    let url: string;
+    try {
+      url = validatePokCheckoutUrl(order._self?.confirmUrl ?? "", order.id);
+    } catch (err) {
+      logPokDiagnostic("checkout_url", err);
+      throw err;
+    }
+    try {
+      await repo.ready(intent.id, row.creation_claim_id, order.id, url);
+    } catch (err) {
+      logPokDiagnostic("ready_write", err);
+      throw err;
+    }
     return url;
   } catch {
     // Keep the durable claim even if recording the diagnostic fails. Never
     // silently create another payable order after an ambiguous response.
+    // (Stage-specific diagnostics for create_order/retrieve_order/login are
+    // logged inside createPokClient itself, closer to the actual failure;
+    // response_validation/checkout_url/ready_write are logged just above.
+    // This outer catch's own behavior -- reconcile, then the same generic
+    // rethrow -- is unchanged by any of that logging.)
     await repo.reconcile(intent.id, row.creation_claim_id).catch(() => undefined);
     throw new Error("POK_CHECKOUT_REQUIRES_RECONCILIATION");
   }
