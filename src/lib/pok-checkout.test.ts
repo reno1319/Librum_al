@@ -7,6 +7,16 @@ const merchantId = "22222222-2222-4222-8222-222222222222";
 const orderId = "33333333-3333-4333-8333-333333333333";
 const paymentId = "44444444-4444-4444-8444-444444444444";
 const now = Date.parse("2026-09-15T10:00:00Z");
+// File-wide, not just one describe block: assertReusableUnpaidOrder reads
+// Date.now() directly (not an injected/passed value), so ANY test whose
+// call graph can reach the reuse branch is clock-dependent on whatever the
+// real wall clock happens to be unless pinned here. Applying this to every
+// test in the file, not only the ones that obviously exercise that branch,
+// is deliberate -- e.g. the concurrent-double-click creation test below can
+// have its second call land in the reuse branch depending on microtask
+// interleaving, and that must not become a real-time-dependent flake.
+beforeEach(() => vi.useFakeTimers({ now: new Date(now) }));
+afterEach(() => vi.useRealTimers());
 const input = { intentId: id, readerId: "reader", merchantId, title: "Test", origin: "https://librum.example" };
 const callback = { intentId: id, token: "callback", merchantId };
 const url = `https://pay-staging.pokpay.io/sdk-orders/${orderId}`;
@@ -22,14 +32,18 @@ function setup(change: Partial<FrozenPokIntent> = {}) {
     recordEvent: vi.fn(async () => ({ id: "event", received_at: "2026-09-15T10:05:00Z" })),
     finalize: vi.fn(async () => "eligible_fulfilled"),
   } satisfies PokRepository;
-  // Deliberately a CONSISTENT unpaid shape: no capturedAmount, no
-  // transactionId, isCompleted/isRefunded/isCanceled all explicitly
-  // false. A fixture claiming "unpaid" while also reporting captured
-  // funds is exactly the contradiction assertReusableUnpaidOrder exists
-  // to reject -- tests that need a paid order build one explicitly below
-  // instead of relying on this fixture to be internally inconsistent.
+  // Deliberately a CONSISTENT unpaid shape: capturedAmount explicitly `0`
+  // (not absent -- assertReusableUnpaidOrder treats a missing value as
+  // ambiguous and blocks it; see pok-checkout.ts's own comment on why
+  // this exact shape is a documented ASSUMPTION about the sandbox's real
+  // response, not a confirmed contract), no transactionId,
+  // isCompleted/isRefunded/isCanceled all explicitly false. A fixture
+  // claiming "unpaid" while also reporting captured funds is exactly the
+  // contradiction assertReusableUnpaidOrder exists to reject -- tests
+  // that need a paid order build one explicitly below instead of relying
+  // on this fixture to be internally inconsistent.
   const order: PokOrder = { id: orderId, merchant: { id: merchantId }, merchantCustomReference: `book:${id}`, currencyCode: "ALL", originalCurrencyCode: "ALL",
-    finalAmount: 4.99, autoCapture: true, isCompleted: false, isRefunded: false, isCanceled: false, transactionId: null, _self: { confirmUrl: url },
+    finalAmount: 4.99, capturedAmount: 0, autoCapture: true, isCompleted: false, isRefunded: false, isCanceled: false, transactionId: null, _self: { confirmUrl: url },
     expiresAt: "2026-09-15T10:30:00Z" };
   const orders = { createOrder: vi.fn(async () => order), retrieveOrder: vi.fn(async (): Promise<PokOrder> => ({ ...order, isCompleted: true, transactionId: paymentId, capturedAmount: 4.99 })) };
   function ready() { mapping = { intent_id: id, merchant_custom_reference: `book:${id}`, provider_order_id: orderId, checkout_url: url, webhook_token: callback.token, creation_claim_id: "claim", state: "ready" }; }
@@ -78,16 +92,15 @@ describe("POK durable creation", () => {
   });
 });
 describe("POK checkout-link reuse safety", () => {
-  beforeEach(() => vi.useFakeTimers({ now: new Date(now) }));
-  afterEach(() => vi.useRealTimers());
-
   it("reproduces and blocks: completed order with transactionId but no capturedAmount was previously ALLOWED", async () => {
     const { repo, orders, order, ready } = setup(); ready();
     // Exactly the reviewer's first repro: isCompleted=true, transactionId
     // present, capturedAmount MISSING. verifiedPokPayment(...) === null
     // here (proof incomplete), which the old code wrongly read as "safe,
-    // still unpaid". A completed order must block regardless.
-    orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId });
+    // still unpaid". A completed order must block regardless. Forces
+    // capturedAmount to undefined explicitly, independent of the base
+    // fixture's own (now required-to-be-0) default.
+    orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId, capturedAmount: undefined });
     await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
     expect(orders.createOrder).not.toHaveBeenCalled();
   });
@@ -110,8 +123,9 @@ describe("POK checkout-link reuse safety", () => {
     expect(orders.createOrder).not.toHaveBeenCalled();
   });
 
-  it("allows reuse of an active, correctly bound, correctly priced, unexpired checkout", async () => {
+  it("allows reuse of an active, correctly bound, correctly priced, unexpired checkout with an explicit zero captured amount", async () => {
     const { repo, orders, order, ready } = setup(); ready();
+    expect(order.capturedAmount).toBe(0); // the fixture IS the explicit-zero case under test
     orders.retrieveOrder.mockResolvedValue(order);
     expect(await startPokCheckout(input, repo, orders, now)).toBe(url);
     expect(orders.createOrder).not.toHaveBeenCalled();
@@ -180,7 +194,11 @@ describe("POK checkout-link reuse safety", () => {
   });
   it.each([
     { label: "missing isCanceled", change: { isCanceled: undefined } },
-    { label: "captured amount present on an unpaid order", change: { capturedAmount: 4.99 } },
+    // Missing capture evidence blocks as ambiguous -- no documented
+    // provider guarantee establishes that an absent capturedAmount means
+    // "zero" on an order POK still calls open (see pok-checkout.ts).
+    { label: "captured amount missing (undefined) on an unpaid order", change: { capturedAmount: undefined } },
+    { label: "positive captured amount on an unpaid order", change: { capturedAmount: 4.99 } },
     { label: "transaction id present on an unpaid order", change: { transactionId: paymentId } },
     { label: "autoCapture missing", change: { autoCapture: undefined } },
     { label: "autoCapture false", change: { autoCapture: false } },

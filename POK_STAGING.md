@@ -52,6 +52,20 @@ example is unpaid and does not demonstrate them. Missing proof leaves fulfillmen
 pending; never weaken it to trust the redirect, webhook body, or requested amount.
 Only the two documented sandbox checkout hosts are accepted.
 
+**Same open item, for a still-open (never paid) order specifically:** the
+checkout-reuse safety check (`assertReusableUnpaidOrder` in `pok-checkout.ts`)
+requires an EXPLICIT, literal `capturedAmount: 0` before it will hand an
+existing checkout link back out again -- an absent `capturedAmount` blocks,
+exactly like a positive one, because the docs never state what omitting the
+field means on an order POK still calls open. Whether a genuinely
+never-touched sandbox order actually reports `0` or omits the field entirely
+is UNCONFIRMED; this is a documented assumption, not a verified contract. If
+sandbox testing shows real staging orders omit the field while still open,
+this check will need a matching, sandbox-confirmed update -- until then it
+fails closed (a reader whose cached checkout is otherwise perfectly valid may
+never get it handed back, only the safer "start over via support" message),
+which is the intended, conservative direction to fail in.
+
 POK major-unit amounts are converted to/from internal hundredths exactly. ALL is
 the ledger's frozen currency; no USD-to-ALL exchange is performed. Fixture prices
 must be explicitly understood as ALL minor units before testing. The single-book

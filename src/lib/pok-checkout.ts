@@ -26,11 +26,15 @@ export const POK_CHECKOUT_CANNOT_RESUME = "POK_CHECKOUT_CANNOT_RESUME";
 // (payments.doc.pokpay.io, unreachable from this network; independently
 // checked via the generated OpenAPI client at
 // github.com/pokpay-ltd/php-sdk/blob/main/docs/Model/SdkOrder.md) never
-// state what an absent capturedAmount/transactionId means on an order POK
-// still calls open -- so this treats that absence as merely "no evidence
-// either way" (the expected shape of a virgin, untouched order), never as
-// proof of "definitely zero/unpaid". Any field that contradicts that exact
-// expected shape blocks, rather than being explained away.
+// state what an ABSENT capturedAmount/transactionId means on an order POK
+// still calls open -- there is no documented guarantee that omission means
+// "zero"/"none", and this has NOT been confirmed against a real sandbox
+// retrieval (see POK_STAGING.md's own open item on exactly this response
+// shape). So an absent field is never read as proof of anything, missing
+// OR positive/present are both treated as blocking ambiguity, and only an
+// EXPLICIT, literal zero/null counts as unambiguous "still open" evidence
+// -- see the capturedAmount-specific comment below for why that one field
+// gets its own, more careful check.
 function assertReusableUnpaidOrder(
   order: PokOrder,
   binding: { orderId: string; reference: string; merchantId: string; expectedMinor: number; currency: string },
@@ -71,12 +75,28 @@ function assertReusableUnpaidOrder(
   if (order.isRefunded !== false || order.isCanceled !== false) {
     throw new Error(POK_CHECKOUT_CANNOT_RESUME);
   }
-  // A captured amount, a transaction id, or autoCapture reading anything
-  // but this order's own known-good `true` on an order that ISN'T
-  // "completed" is contradictory, not reassuring -- payment-in-progress or
-  // an otherwise ambiguous state. POK's docs never document that
-  // combination as meaning "still safely unpaid", so it blocks.
-  if (order.capturedAmount !== undefined || order.transactionId !== null || order.autoCapture !== true) {
+  // A transaction id, or autoCapture reading anything but this order's own
+  // known-good `true`, on an order that ISN'T "completed" is contradictory,
+  // not reassuring -- payment-in-progress or an otherwise ambiguous state.
+  // POK's docs never document that combination as meaning "still safely
+  // unpaid", so it blocks.
+  if (order.transactionId !== null || order.autoCapture !== true) {
+    throw new Error(POK_CHECKOUT_CANNOT_RESUME);
+  }
+  // capturedAmount specifically: POK's docs never state what an ABSENT
+  // capturedAmount means on an order still called open -- there is no
+  // documented guarantee it means "zero", and this has NOT been confirmed
+  // against a real sandbox retrieval (POK_STAGING.md's own open item is
+  // exactly this response shape). So missing blocks as ambiguous, exactly
+  // like a positive value blocks as evidence of an actual capture -- ONLY
+  // an explicit, literal `0` is unambiguous "nothing captured" evidence,
+  // and even then only alongside every other check in this function
+  // already having passed. This is a documented ASSUMPTION about the
+  // sandbox's response shape, not a confirmed contract; a future sandbox
+  // run may show a genuinely open order omits the field entirely, in
+  // which case this correctly (if conservatively) never resumes it until
+  // that shape is confirmed and this comment is updated to match.
+  if (order.capturedAmount !== 0) {
     throw new Error(POK_CHECKOUT_CANNOT_RESUME);
   }
   // Expiry is evaluated against the clock AFTER the provider round-trip
