@@ -17,7 +17,7 @@ import { BookSampleReader } from "@/components/book-sample-reader";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
 import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
-import { formatPrice } from "@/lib/pricing";
+import { formatPrice, formatAllPrice } from "@/lib/pricing";
 import { resolveCheckoutRegime, resolveLedgerPaymentProvider } from "@/lib/checkout-regime";
 import { resolveBookPurchaseState, resolveShowSample, type BookPurchaseState } from "@/lib/book-purchase";
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
@@ -379,8 +379,16 @@ export default async function BookDetailPage({
   });
   const usePok = resolveCheckoutRegime(process.env.NEW_CHECKOUT_REGIME) === "librum_ledger_v1" &&
     resolveLedgerPaymentProvider(process.env.LEDGER_PAYMENT_PROVIDER) === "pok";
+  // Was `new Intl.NumberFormat("en", {style:"currency",currency:"ALL"})`,
+  // which rounds off the minor units under this runtime's default CLDR
+  // data for ALL (7.99 -> "ALL 8") -- confirmed reproducible. Reuses the
+  // existing, already-tested formatAllPrice helper (pricing.ts) that the
+  // ledger_v1 bundle-checkout price display already relies on, instead of
+  // a second, ad-hoc ALL formatter. The frozen checkout amount itself was
+  // never affected either way -- this is display-only, computed
+  // independently in pok-checkout.ts.
   const formattedPrice = usePok && book.price_cents > 0
-    ? new Intl.NumberFormat("en", { style: "currency", currency: "ALL" }).format(book.price_cents / 100)
+    ? formatAllPrice(book.price_cents)
     : formatPrice(book.price_cents);
 
   // See resolveShowSample's own comment (src/lib/book-purchase.ts) for

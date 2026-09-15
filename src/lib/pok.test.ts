@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { assertPokStaging, createPokClient, getPokConfig, pokAmountToMinor, validatePokCheckoutUrl, verifiedPokPayment, type PokOrder } from "./pok";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { assertPokStaging, createPokClient, getPokConfig, logPokDiagnostic, pokAmountToMinor, validatePokCheckoutUrl, verifiedPokPayment, type PokOrder } from "./pok";
 
 const orderId = "11111111-1111-4111-8111-111111111111";
 const merchantId = "22222222-2222-4222-8222-222222222222";
@@ -65,5 +65,113 @@ describe("POK transport", () => {
   it("rejects a malformed order", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" })).mockResolvedValueOnce(json({ sdkOrder: { ...paid, id: "bad" } }));
     await expect(createPokClient(config, fetcher).retrieveOrder(orderId)).rejects.toThrow();
+  });
+
+  // Shape retrieved from POK's own published order-creation example
+  // (payments.doc.pokpay.io collection 17029398, checked 2026-09-15), with
+  // its two template placeholders ({{sdkOrderId}}, {{confirmUrl}}) replaced
+  // by offline-only stand-in values -- explicitly NOT real provider output,
+  // and no network call of any kind was made to obtain or verify this.
+  // Field-for-field as published: no `merchant`, `autoCapture`, `isCanceled`
+  // or `capturedAmount` at all (all optional in our schema); `products`,
+  // `originalAmount`, `appliedExchangeRate`, `createdAt`, `redirectUrl`,
+  // `failRedirectUrl`, `selectedBranchId`, `description` are present in
+  // the example but declared nowhere in our schema -- Zod's default
+  // (non-strict) object parsing accepts and ignores them.
+  const officialExampleOrder = {
+    id: "44444444-4444-4444-8444-444444444444", // was "{{sdkOrderId}}"
+    amount: 100, currencyCode: "ALL",
+    products: [{ name: "testProduct", quantity: 1, price: 100 }],
+    originalCurrencyCode: "ALL", originalAmount: 110, appliedExchangeRate: 1,
+    shippingCost: 10, finalAmount: 110,
+    createdAt: "2022-12-28T13:40:10.625Z", expiresAt: "2022-12-29T13:40:10.625Z",
+    redirectUrl: null, failRedirectUrl: null,
+    _self: { confirmUrl: "https://pay-staging.pokpay.io/sdk-orders/44444444-4444-4444-8444-444444444444", confirmDeeplink: "" }, // was "{{confirmUrl}}"
+    description: "testSdk", isCompleted: false, isRefunded: false,
+    merchantCustomReference: null, selectedBranchId: null, transactionId: null,
+  };
+  it("parses POK's own published order-creation example shape without any schema change", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(json({ sdkOrder: officialExampleOrder }));
+    const order = await createPokClient(config, fetcher).retrieveOrder(officialExampleOrder.id);
+    expect(order.id).toBe(officialExampleOrder.id);
+    expect(order.merchant).toBeUndefined();
+    expect(order.isCompleted).toBe(false);
+  });
+  it("classifies a documented-but-missing field as invalid_response_shape, not a generic failure", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- rest-sibling destructure to drop one field
+    const { isCompleted, ...missingIsCompleted } = officialExampleOrder;
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ accessToken: "bearer" }))
+      .mockResolvedValueOnce(json({ sdkOrder: missingIsCompleted }));
+    const createBody = { amount: 1, currencyCode: "ALL", autoCapture: true, shippingCost: 0,
+      merchantCustomReference: "book:test", description: "test", webhookUrl: "https://librum.example/webhook",
+      redirectUrl: "https://librum.example/return", failRedirectUrl: "https://librum.example/canceled",
+      expiresAfterMinutes: 30 } as const;
+    await expect(createPokClient(config, fetcher).createOrder(createBody)).rejects.toThrow("POK_INVALID_ORDER_SHAPE");
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "create_order", code: "invalid_response_shape" });
+    consoleError.mockRestore();
+  });
+});
+
+describe("logPokDiagnostic", () => {
+  let consoleError: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined); });
+  afterEach(() => consoleError.mockRestore());
+
+  it.each([
+    { message: "POK_REQUEST_FAILED", expected: { code: "network_failure" } },
+    { message: "POK_INVALID_RESPONSE", expected: { code: "invalid_envelope" } },
+    { message: "POK_INVALID_ORDER_SHAPE", expected: { code: "invalid_response_shape" } },
+    { message: "POK_CREATED_ORDER_MISMATCH", expected: { code: "binding_mismatch" } },
+    { message: "POK_UNTRUSTED_CHECKOUT_URL", expected: { code: "untrusted_checkout_url" } },
+    { message: "POK_LINK_FAILED", expected: { code: "ready_write_failed" } },
+    { message: "POK_INVALID_AMOUNT", expected: { code: "invalid_amount" } },
+  ])("maps $message to an allowlisted code", ({ message, expected }) => {
+    logPokDiagnostic("create_order", new Error(message));
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "create_order", ...expected });
+  });
+
+  // Regression: the sentinel-to-code lookup used to be a plain object
+  // literal, so an exception message that happens to name one of
+  // Object.prototype's OWN inherited properties (constructor, toString,
+  // hasOwnProperty, __proto__) resolved through the prototype chain to
+  // that property's real value -- a function, not `undefined` -- instead
+  // of falling through to "unknown". A Map has no such prototype chain of
+  // string keys to leak through. Same guarantee must hold for the empty
+  // string, which is falsy but still a valid (if unrecognized) message.
+  it.each(["constructor", "toString", "hasOwnProperty", "valueOf", "__proto__", ""])(
+    "never resolves the inherited-property-shaped or empty message %j to anything but the allowlisted 'unknown' code",
+    (message) => {
+      logPokDiagnostic("login", new Error(message));
+      expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "login", code: "unknown" });
+    },
+  );
+
+  it("extracts only the 3-digit HTTP status from POK_HTTP_xxx, nothing else", () => {
+    logPokDiagnostic("retrieve_order", new Error("POK_HTTP_503"));
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "retrieve_order", code: "http_error", httpStatus: 503 });
+  });
+
+  it("falls back to 'unknown' for any unrecognized error, never logging its own text", () => {
+    logPokDiagnostic("login", new Error("some future error this code has never seen before"));
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "login", code: "unknown" });
+  });
+
+  it("never leaks a secret-shaped exception message into the log", () => {
+    logPokDiagnostic("login", new Error("keySecret=sk_live_do_not_log_this_1234567890"));
+    const loggedPayload = JSON.stringify(consoleError.mock.calls);
+    expect(loggedPayload).not.toContain("sk_live_do_not_log_this_1234567890");
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "login", code: "unknown" });
+  });
+
+  it("never throws even if console.error itself throws", () => {
+    consoleError.mockImplementation(() => { throw new Error("logging transport down"); });
+    expect(() => logPokDiagnostic("ready_write", new Error("POK_LINK_FAILED"))).not.toThrow();
+  });
+
+  it("never throws for a non-Error thrown value", () => {
+    expect(() => logPokDiagnostic("checkout_url", "a plain string, not an Error")).not.toThrow();
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "checkout_url", code: "unknown" });
   });
 });

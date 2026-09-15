@@ -2,6 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startPokCheckout, fulfillPokCheckout, POK_CHECKOUT_CANNOT_RESUME, type FrozenPokIntent, type PokMapping, type PokRepository } from "./pok-checkout";
 import type { PokOrder } from "./pok";
 
+// This test file's diagnostics coverage is scoped to the three stages
+// pok-checkout.ts itself adds logging for (response_validation,
+// checkout_url, ready_write) -- login/create_order/retrieve_order/
+// invalid_response_shape are logged inside createPokClient itself and are
+// covered in pok.test.ts against a real (mocked-fetch) client, not the
+// plain PokOrders mocks used throughout this file.
+function spyOnConsoleError() {
+  return vi.spyOn(console, "error").mockImplementation(() => undefined);
+}
+
 const id = "11111111-1111-4111-8111-111111111111";
 const merchantId = "22222222-2222-4222-8222-222222222222";
 const orderId = "33333333-3333-4333-8333-333333333333";
@@ -84,6 +94,64 @@ describe("POK durable creation", () => {
     const { repo, orders, order } = setup(); orders.createOrder.mockResolvedValue({ ...order, ...change });
     await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
     expect(repo.ready).not.toHaveBeenCalled(); expect(repo.reconcile).toHaveBeenCalled();
+  });
+  it("logs an allowlisted response_validation diagnostic for a returned-order binding mismatch, never the raw message", async () => {
+    const consoleError = spyOnConsoleError();
+    const { repo, orders, order } = setup();
+    orders.createOrder.mockResolvedValue({ ...order, currencyCode: "USD" });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "response_validation", code: "binding_mismatch" });
+    consoleError.mockRestore();
+  });
+  it("logs response_validation, reconciles exactly once, and never saves ready state when the returned order's amount fails conversion (e.g. finalAmount: 0)", async () => {
+    const consoleError = spyOnConsoleError();
+    const { repo, orders, order } = setup();
+    // pokAmountToMinor(0) throws POK_INVALID_AMOUNT WHILE the mismatch-check
+    // condition is still being evaluated -- before the condition's own
+    // explicit throw is ever reached. That throw must be caught by the
+    // same response_validation try/catch as the explicit mismatch, not
+    // skip it and fall straight through to the outer catch's generic,
+    // unlogged reconciliation.
+    orders.createOrder.mockResolvedValue({ ...order, finalAmount: 0 });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "response_validation", code: "invalid_amount" });
+    expect(repo.reconcile).toHaveBeenCalledTimes(1);
+    expect(repo.ready).not.toHaveBeenCalled();
+    expect(orders.createOrder).toHaveBeenCalledTimes(1);
+    consoleError.mockRestore();
+  });
+  it("logs an allowlisted checkout_url diagnostic when the confirmUrl is untrusted, never the raw URL", async () => {
+    const consoleError = spyOnConsoleError();
+    const { repo, orders, order } = setup();
+    orders.createOrder.mockResolvedValue({ ...order, _self: { confirmUrl: "https://evil.example" } });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "checkout_url", code: "untrusted_checkout_url" });
+    const loggedPayload = JSON.stringify(consoleError.mock.calls);
+    expect(loggedPayload).not.toContain("evil.example");
+    consoleError.mockRestore();
+  });
+  it("preserves the claim, reconciles, and logs an allowlisted ready_write diagnostic when the durable save fails", async () => {
+    const consoleError = spyOnConsoleError();
+    const { repo, orders } = setup();
+    repo.ready.mockRejectedValue(new Error("POK_LINK_FAILED"));
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(repo.reconcile).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "ready_write", code: "ready_write_failed" });
+    consoleError.mockRestore();
+  });
+  it("never calls the provider again when a mapping is already needs_reconciliation-blocked", async () => {
+    const { repo, orders } = setup();
+    // Simulate an already-blocked mapping from a prior ambiguous attempt --
+    // repo.claim's own mock returns false whenever `mapping` is already
+    // set, exactly matching the real unique-insert semantics.
+    await repo.claim({ intent_id: id, merchant_custom_reference: `book:${id}`, provider_order_id: null,
+      checkout_url: null, webhook_token: "prior", creation_claim_id: "prior-claim", state: "needs_reconciliation" });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(orders.createOrder).not.toHaveBeenCalled();
+    expect(orders.retrieveOrder).not.toHaveBeenCalled();
+    // The already-blocked row's own reconciliation state is left exactly
+    // as it was -- this path never touches it again.
+    expect(repo.reconcile).not.toHaveBeenCalled();
   });
   it("keeps claim after failed diagnostic write", async () => {
     const { repo, orders } = setup(); orders.createOrder.mockRejectedValue(new Error("timeout")); repo.reconcile.mockRejectedValue(new Error("db"));
