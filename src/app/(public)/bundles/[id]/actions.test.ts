@@ -323,10 +323,17 @@ describe("buyBundle: librum_ledger_v1 regime (STRIPE-CUTOVER-2A)", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     if (ORIGINAL_REGIME === undefined) delete process.env.NEW_CHECKOUT_REGIME;
     else process.env.NEW_CHECKOUT_REGIME = ORIGINAL_REGIME;
     if (ORIGINAL_KEY === undefined) delete process.env.STRIPE_SECRET_KEY;
     else process.env.STRIPE_SECRET_KEY = ORIGINAL_KEY;
+  });
+
+  it("POK selection blocks unsupported bundles before snapshot creation or Stripe", async () => {
+    vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
+    await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({ target: `/bundles/${BUNDLE_ID}?error=Bundle+checkout+is+not+available+with+POK+yet` });
+    expect(mockRpc).not.toHaveBeenCalled(); expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled(); expect(mockAccountsRetrieve).not.toHaveBeenCalled();
   });
 
   it("never calls the Connect account gate for a ledger_v1 bundle checkout", async () => {

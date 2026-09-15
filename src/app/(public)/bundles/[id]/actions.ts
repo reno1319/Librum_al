@@ -11,7 +11,7 @@ import {
   checkConnectedAccountReadyForCheckout,
   BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE,
 } from "@/lib/connect-account";
-import { resolveCheckoutRegime, isStripeSecretKeyTestMode } from "@/lib/checkout-regime";
+import { resolveCheckoutRegime, resolveLedgerPaymentProvider, isStripeSecretKeyTestMode } from "@/lib/checkout-regime";
 import {
   buildLegacyBundleCheckoutSessionParams,
   buildLedgerBundleCheckoutSessionParams,
@@ -78,6 +78,10 @@ export async function buyBundle(bundleId: string) {
   // fresh row, ITS OWN frozen regime column (migration 056) is
   // authoritative forever.
   const regime = resolveCheckoutRegime(process.env.NEW_CHECKOUT_REGIME);
+  // POK phase one supports single books only. Never silently fall back to Stripe.
+  if (regime === "librum_ledger_v1" && resolveLedgerPaymentProvider(process.env.LEDGER_PAYMENT_PROVIDER) === "pok") {
+    redirect(`/bundles/${bundleId}?error=Bundle+checkout+is+not+available+with+POK+yet`);
+  }
 
   // legacy_stripe_connect_v1 has a Stripe Connect account dependency;
   // librum_ledger_v1 (TEST-mode only) deliberately does not -- see the
