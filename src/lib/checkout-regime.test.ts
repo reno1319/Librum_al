@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveCheckoutRegime,
+  resolveLedgerPaymentProvider,
   isStripeSecretKeyTestMode,
   isStripeEventTestMode,
 } from "./checkout-regime";
+
+describe("resolveLedgerPaymentProvider", () => {
+  it("POK requires an exact explicit opt-in", () => expect(resolveLedgerPaymentProvider("pok")).toBe("pok"));
+  it.each([undefined, "", "stripe", "POK", " pok", "other"])("preserves the legacy default for %s", raw => {
+    expect(resolveLedgerPaymentProvider(raw)).toBe("stripe");
+  });
+});
 
 // STRIPE-CUTOVER-2A Section 31: the regime selector is the single point
 // that decides whether a NEW checkout freezes as legacy or ledger_v1.

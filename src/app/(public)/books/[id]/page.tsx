@@ -18,6 +18,7 @@ import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
 import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { formatPrice } from "@/lib/pricing";
+import { resolveCheckoutRegime, resolveLedgerPaymentProvider } from "@/lib/checkout-regime";
 import { resolveBookPurchaseState, resolveShowSample, type BookPurchaseState } from "@/lib/book-purchase";
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
 import { resolvePublicAuthorName } from "@/lib/author-name";
@@ -376,7 +377,11 @@ export default async function BookDetailPage({
     owned,
     priceCents: book.price_cents,
   });
-  const formattedPrice = formatPrice(book.price_cents);
+  const usePok = resolveCheckoutRegime(process.env.NEW_CHECKOUT_REGIME) === "librum_ledger_v1" &&
+    resolveLedgerPaymentProvider(process.env.LEDGER_PAYMENT_PROVIDER) === "pok";
+  const formattedPrice = usePok && book.price_cents > 0
+    ? new Intl.NumberFormat("en", { style: "currency", currency: "ALL" }).format(book.price_cents / 100)
+    : formatPrice(book.price_cents);
 
   // See resolveShowSample's own comment (src/lib/book-purchase.ts) for
   // the full rule -- omitted for "owned"/"author" (who already have
@@ -493,7 +498,7 @@ export default async function BookDetailPage({
               {book.price_cents === 0
                 ? "Free — no payment required. You'll get a DRM-free EPUB you can download anytime from your Librum Library."
                 : "DRM-free EPUB. Download it anytime from your Librum Library."}
-              {book.price_cents > 0 && " Secure checkout with Stripe."}
+              {book.price_cents > 0 && (usePok ? " Secure checkout with POK." : " Secure checkout with Stripe.")}
             </p>
           )}
 

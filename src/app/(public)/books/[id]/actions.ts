@@ -20,7 +20,10 @@ import {
   checkConnectedAccountReadyForCheckout,
   BOOK_CHECKOUT_UNAVAILABLE_MESSAGE,
 } from "@/lib/connect-account";
-import { resolveCheckoutRegime, isStripeSecretKeyTestMode } from "@/lib/checkout-regime";
+import { resolveCheckoutRegime, resolveLedgerPaymentProvider, isStripeSecretKeyTestMode } from "@/lib/checkout-regime";
+import { createPokClient, getPokConfig, type PokConfig } from "@/lib/pok";
+import { startPokCheckout, POK_CHECKOUT_CANNOT_RESUME } from "@/lib/pok-checkout";
+import { createPokRepository } from "@/lib/pok-repository";
 import type { DiscountCode } from "@/lib/types";
 
 type BookForCheckout = {
@@ -86,6 +89,13 @@ export async function buyBook(bookId: string, formData: FormData) {
   // authoritative forever, independent of whatever this env var says on
   // any later request.
   const regime = resolveCheckoutRegime(process.env.NEW_CHECKOUT_REGIME);
+  const usePok = regime === "librum_ledger_v1" && resolveLedgerPaymentProvider(process.env.LEDGER_PAYMENT_PROVIDER) === "pok";
+  let pokConfig: PokConfig | undefined;
+  if (usePok) {
+    try { pokConfig = getPokConfig(); } catch {
+      redirect(`/books/${bookId}?error=Could+not+start+checkout`);
+    }
+  }
 
   // legacy_stripe_connect_v1 has a Stripe Connect account dependency;
   // librum_ledger_v1 (TEST-mode only, Section 6/7) deliberately does
@@ -123,7 +133,7 @@ export async function buyBook(bookId: string, formData: FormData) {
       });
       redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
     }
-  } else {
+  } else if (!usePok) {
     // STRIPE-CUTOVER-2A Section 4: TEST-mode safety -- ledger_v1 must
     // never silently create real commerce. The smallest robust,
     // non-client-trusting proof available at THIS stage is the
@@ -251,6 +261,30 @@ export async function buyBook(bookId: string, formData: FormData) {
   }
 
   const origin = resolveSiteOrigin();
+  if (usePok && pokConfig) {
+    let checkoutUrl: string;
+    try {
+      checkoutUrl = await startPokCheckout({
+        intentId: intent.intent_id, readerId: user.id, title: book.title,
+        origin, merchantId: pokConfig.merchantId,
+      }, createPokRepository(), createPokClient(pokConfig));
+    } catch (err) {
+      // A stale checkout can never be silently resumed (see pok-checkout's
+      // assertReusableUnpaidOrder) -- tell the reader that plainly instead
+      // of implying a retry will work, since it won't: this same intent's
+      // mapping row is already claimed and reusing it is exactly what just
+      // failed. Every other failure keeps the existing generic message.
+      if (err instanceof Error && err.message === POK_CHECKOUT_CANNOT_RESUME) {
+        redirect(
+          `/books/${bookId}?error=${encodeURIComponent(
+            "We can't safely reopen this checkout. If you already paid, check your library; otherwise, please contact support to complete this purchase.",
+          )}`,
+        );
+      }
+      redirect(`/books/${bookId}?error=Could+not+start+checkout`);
+    }
+    redirect(checkoutUrl);
+  }
 
   // Aligned with the intent's own expires_at (Math.floor, never
   // Math.round -- see toStripeExpiresAtSeconds) so Stripe can never hold

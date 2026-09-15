@@ -8,6 +8,11 @@
 // governs the moment a fresh row is created.
 export type CheckoutRegime = "legacy_stripe_connect_v1" | "librum_ledger_v1";
 
+// POK remains opt-in, server-side and independent of the legacy default.
+export function resolveLedgerPaymentProvider(value: string | undefined): "pok" | "stripe" {
+  return value === "pok" ? "pok" : "stripe";
+}
+
 const LEGACY_REGIME: CheckoutRegime = "legacy_stripe_connect_v1";
 const LEDGER_V1_REGIME: CheckoutRegime = "librum_ledger_v1";
 

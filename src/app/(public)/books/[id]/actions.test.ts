@@ -36,10 +36,61 @@ vi.mock("@/lib/stripe", () => ({
   }),
 }));
 
+const mockPokConfig = vi.fn();
+const mockPokClient = vi.fn();
+const mockPokRepository = vi.fn();
+const mockStartPok = vi.fn();
+vi.mock("@/lib/pok", () => ({ getPokConfig: () => mockPokConfig(), createPokClient: () => mockPokClient() }));
+vi.mock("@/lib/pok-checkout", () => ({
+  startPokCheckout: (...args: unknown[]) => mockStartPok(...args),
+  POK_CHECKOUT_CANNOT_RESUME: "POK_CHECKOUT_CANNOT_RESUME",
+}));
+vi.mock("@/lib/pok-repository", () => ({ createPokRepository: () => mockPokRepository() }));
 const { buyBook } = await import("./actions");
+
+describe("buyBook: POK provider selection", () => {
+  const rpc = vi.fn();
+  beforeEach(() => {
+    vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1"); vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    mockCookieStore.get.mockImplementation(() => undefined);
+    mockRedirect.mockClear(); mockCheckoutSessionsCreate.mockClear(); mockAccountsRetrieve.mockClear();
+    mockPokConfig.mockReset().mockReturnValue({ merchantId: "merchant", keyId: "key", keySecret: "secret" });
+    mockPokClient.mockReturnValue({}); mockPokRepository.mockReturnValue({});
+    mockStartPok.mockReset().mockResolvedValue("https://pay-staging.pokpay.io/sdk-orders/test");
+    rpc.mockReset().mockImplementation(async (name: string) => name === "user_owns_book"
+      ? { data: false } : { data: [{ intent_id: "intent", price_cents_at_checkout: 499, expires_at: "2026-09-15T10:30:00Z" }] });
+    mockCreateClient.mockResolvedValue({ auth: { getUser: async () => ({ data: { user: { id: "reader" } } }) }, rpc,
+      from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { id: "book", title: "Test", price_cents: 499, author_id: "author", status: "published", profiles: null } }) }) }) }) });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+  it("starts POK with a frozen ALL intent and no Stripe key/account dependency", async () => {
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "https://pay-staging.pokpay.io/sdk-orders/test" });
+    expect(rpc).toHaveBeenCalledWith("create_book_checkout_intent", expect.objectContaining({ p_regime: "librum_ledger_v1", p_currency: "ALL" }));
+    expect(mockStartPok).toHaveBeenCalled(); expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled(); expect(mockAccountsRetrieve).not.toHaveBeenCalled();
+  });
+  it("POK failure never falls back to Stripe", async () => {
+    mockStartPok.mockRejectedValue(new Error("timeout"));
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Could+not+start+checkout" });
+    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+  });
+  it("an unsafe-to-resume checkout gets an honest message, never the generic one", async () => {
+    mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_CANNOT_RESUME"));
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({
+      target: "/books/book?error=We%20can't%20safely%20reopen%20this%20checkout.%20If%20you%20already%20paid%2C%20check%20your%20library%3B%20otherwise%2C%20please%20contact%20support%20to%20complete%20this%20purchase.",
+    });
+    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+  });
+  it("invalid sandbox configuration fails before an intent is minted", async () => {
+    mockPokConfig.mockImplementation(() => { throw new Error("POK_STAGING_ONLY"); });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Could+not+start+checkout" });
+    expect(rpc).not.toHaveBeenCalled(); expect(mockStartPok).not.toHaveBeenCalled(); expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+  });
+});
 
 describe("buyBook: recovery-session defense-in-depth", () => {
   beforeEach(() => {
+    mockCookieStore.get.mockImplementation((name: string) => name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined);
     mockRedirect.mockClear();
     mockCreateClient.mockClear();
     mockCreateAdminClient.mockClear();
