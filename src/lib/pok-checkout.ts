@@ -9,43 +9,82 @@ import type { PokOrder, PokCreateOrder } from "./pok";
 // transient/ambiguous failures, which stay POK_CHECKOUT_REQUIRES_RECONCILIATION.
 export const POK_CHECKOUT_CANNOT_RESUME = "POK_CHECKOUT_CANNOT_RESUME";
 
-// A durable "ready" mapping row is only a cache of what POK told us at
-// CREATION time. POK orders expire well before Librum's own 23h intent
-// retention window (createOrder below caps expiresAfterMinutes at 30), so a
-// returning reader can hit this path long after the cached checkout_url has
-// gone stale at the provider -- or, more dangerously, after it was already
-// paid. Never trust the cached row alone: re-check the order's CURRENT
-// provider-side state before ever handing its checkout_url out again.
+// Checkout-REUSE safety is a DIFFERENT question than fulfillment
+// verification, and deliberately does not call verifiedPokPayment (below,
+// unchanged) at all. verifiedPokPayment only ever needs to answer "has this
+// been definitively PAID?", and safely says "no" (null/pending) whenever
+// proof is incomplete -- that is correct for fulfillment, where "not
+// proven paid" is a fine reason to keep waiting. It is NOT safe evidence
+// that an order is "definitely still open and unpaid" -- an order that is
+// actually isCompleted:true but missing capturedAmount (a malformed or
+// partial response) also makes verifiedPokPayment return null, which a
+// reuse check must never read as "safe to hand back out".
+//
+// So reuse safety instead requires POSITIVE, explicit, self-consistent
+// evidence of an open order, and blocks on anything else -- completed,
+// canceled, refunded, or merely ambiguous alike. POK's docs
+// (payments.doc.pokpay.io, unreachable from this network; independently
+// checked via the generated OpenAPI client at
+// github.com/pokpay-ltd/php-sdk/blob/main/docs/Model/SdkOrder.md) never
+// state what an absent capturedAmount/transactionId means on an order POK
+// still calls open -- so this treats that absence as merely "no evidence
+// either way" (the expected shape of a virgin, untouched order), never as
+// proof of "definitely zero/unpaid". Any field that contradicts that exact
+// expected shape blocks, rather than being explained away.
 function assertReusableUnpaidOrder(
   order: PokOrder,
   binding: { orderId: string; reference: string; merchantId: string; expectedMinor: number; currency: string },
-  now: number,
 ): void {
-  let facts: ReturnType<typeof verifiedPokPayment>;
-  try {
-    facts = verifiedPokPayment(order, binding);
-  } catch {
-    // Retrieved an order that doesn't even match this mapping's own
-    // identity -- never safe to trust in any direction.
+  // Identity: this MUST be the exact order created for this mapping.
+  // Checked independently of verifiedPokPayment's own binding check --
+  // reuse safety can never depend on a helper whose contract is "verify a
+  // PAYMENT", not "confirm this is the right, still-open order".
+  if (order.id !== binding.orderId || order.merchantCustomReference !== binding.reference ||
+      order.merchant?.id !== binding.merchantId) {
     throw new Error("POK_CHECKOUT_REQUIRES_RECONCILIATION");
   }
-  if (facts) {
-    // Genuinely, verifiably paid already. Handing back a checkout URL now
-    // would invite a second payment attempt on a book that may already be
-    // entitled once the webhook/return callback (the only paths that ever
-    // call finalize) catches up -- this function grants nothing itself.
+  // Economics: verified UNCONDITIONALLY, not only once a payment is
+  // confirmed -- an order silently bound to the wrong amount, or a
+  // different/converted currency, is never safe to hand back out, paid or
+  // not. No FX is implemented, so originalCurrencyCode must match exactly
+  // too, not merely currencyCode.
+  let finalMinor: number;
+  try {
+    finalMinor = pokAmountToMinor(order.finalAmount);
+  } catch {
+    throw new Error("POK_CHECKOUT_REQUIRES_RECONCILIATION");
+  }
+  if (finalMinor !== binding.expectedMinor || order.currencyCode !== binding.currency ||
+      order.originalCurrencyCode !== binding.currency) {
+    throw new Error("POK_CHECKOUT_REQUIRES_RECONCILIATION");
+  }
+  // Completion is an unconditional, first-checked block: a completed order
+  // can never slip through just because its capture/transaction proof also
+  // happens to be missing or malformed -- that exact shape was the bug
+  // this replaces.
+  if (order.isCompleted !== false) {
     throw new Error(POK_CHECKOUT_CANNOT_RESUME);
   }
-  // isCanceled/isRefunded are the only terminal-failure signals this
-  // adapter's schema captures; POK's docs do not state that either
-  // guarantees the order can never later be marked paid, so this is a
-  // "never hand this back out" decision, not a claim that the order is
-  // conclusively dead.
-  if (order.isCanceled === true || order.isRefunded) {
+  // isRefunded/isCanceled must be explicitly false, mirroring
+  // verifiedPokPayment's own strictness for the same fields -- a missing
+  // value is "no evidence of cancellation", not "evidence of none".
+  if (order.isRefunded !== false || order.isCanceled !== false) {
     throw new Error(POK_CHECKOUT_CANNOT_RESUME);
   }
+  // A captured amount, a transaction id, or autoCapture reading anything
+  // but this order's own known-good `true` on an order that ISN'T
+  // "completed" is contradictory, not reassuring -- payment-in-progress or
+  // an otherwise ambiguous state. POK's docs never document that
+  // combination as meaning "still safely unpaid", so it blocks.
+  if (order.capturedAmount !== undefined || order.transactionId !== null || order.autoCapture !== true) {
+    throw new Error(POK_CHECKOUT_CANNOT_RESUME);
+  }
+  // Expiry is evaluated against the clock AFTER the provider round-trip
+  // that fetched `order`, not a timestamp captured before it -- a POK
+  // order can cross its own expiry during that network call, and this
+  // must never let a stale pre-call clock read call it still valid.
   const expiresAt = Date.parse(order.expiresAt);
-  if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
     throw new Error(POK_CHECKOUT_CANNOT_RESUME);
   }
 }
@@ -114,7 +153,7 @@ export async function startPokCheckout(input: {
       assertReusableUnpaidOrder(current, {
         orderId: existing.provider_order_id, reference: existing.merchant_custom_reference,
         merchantId: input.merchantId, expectedMinor: intent.price_cents_at_checkout, currency: intent.currency,
-      }, now);
+      });
       return cachedUrl;
     }
     throw new Error("POK_CHECKOUT_REQUIRES_RECONCILIATION");

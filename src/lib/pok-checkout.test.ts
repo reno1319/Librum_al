@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startPokCheckout, fulfillPokCheckout, POK_CHECKOUT_CANNOT_RESUME, type FrozenPokIntent, type PokMapping, type PokRepository } from "./pok-checkout";
 import type { PokOrder } from "./pok";
 
@@ -22,10 +22,16 @@ function setup(change: Partial<FrozenPokIntent> = {}) {
     recordEvent: vi.fn(async () => ({ id: "event", received_at: "2026-09-15T10:05:00Z" })),
     finalize: vi.fn(async () => "eligible_fulfilled"),
   } satisfies PokRepository;
+  // Deliberately a CONSISTENT unpaid shape: no capturedAmount, no
+  // transactionId, isCompleted/isRefunded/isCanceled all explicitly
+  // false. A fixture claiming "unpaid" while also reporting captured
+  // funds is exactly the contradiction assertReusableUnpaidOrder exists
+  // to reject -- tests that need a paid order build one explicitly below
+  // instead of relying on this fixture to be internally inconsistent.
   const order: PokOrder = { id: orderId, merchant: { id: merchantId }, merchantCustomReference: `book:${id}`, currencyCode: "ALL", originalCurrencyCode: "ALL",
-    finalAmount: 4.99, capturedAmount: 4.99, autoCapture: true, isCompleted: false, isRefunded: false, isCanceled: false, transactionId: null, _self: { confirmUrl: url },
+    finalAmount: 4.99, autoCapture: true, isCompleted: false, isRefunded: false, isCanceled: false, transactionId: null, _self: { confirmUrl: url },
     expiresAt: "2026-09-15T10:30:00Z" };
-  const orders = { createOrder: vi.fn(async () => order), retrieveOrder: vi.fn(async (): Promise<PokOrder> => ({ ...order, isCompleted: true, transactionId: paymentId })) };
+  const orders = { createOrder: vi.fn(async () => order), retrieveOrder: vi.fn(async (): Promise<PokOrder> => ({ ...order, isCompleted: true, transactionId: paymentId, capturedAmount: 4.99 })) };
   function ready() { mapping = { intent_id: id, merchant_custom_reference: `book:${id}`, provider_order_id: orderId, checkout_url: url, webhook_token: callback.token, creation_claim_id: "claim", state: "ready" }; }
   return { repo, orders, order, ready };
 }
@@ -38,7 +44,7 @@ describe("POK durable creation", () => {
     expect(orders.createOrder).toHaveBeenCalledWith(expect.objectContaining({ amount: 4.99, currencyCode: "ALL", autoCapture: true, shippingCost: 0 }));
     expect(repo.finalize).not.toHaveBeenCalled();
   });
-  it("reuses a ready mapping without another payable order", async () => {
+  it("reuses a ready mapping without another payable order (see 'POK checkout-link reuse safety' for the full validation matrix)", async () => {
     const { repo, orders, order, ready } = setup(); ready();
     orders.retrieveOrder.mockResolvedValue(order); // active, unpaid, unexpired
     expect(await startPokCheckout(input, repo, orders, now)).toBe(url);
@@ -72,6 +78,58 @@ describe("POK durable creation", () => {
   });
 });
 describe("POK checkout-link reuse safety", () => {
+  beforeEach(() => vi.useFakeTimers({ now: new Date(now) }));
+  afterEach(() => vi.useRealTimers());
+
+  it("reproduces and blocks: completed order with transactionId but no capturedAmount was previously ALLOWED", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    // Exactly the reviewer's first repro: isCompleted=true, transactionId
+    // present, capturedAmount MISSING. verifiedPokPayment(...) === null
+    // here (proof incomplete), which the old code wrongly read as "safe,
+    // still unpaid". A completed order must block regardless.
+    orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+  it("reproduces and blocks: unpaid order silently bound to a different currency was previously ALLOWED", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    // Reviewer's second repro: still unpaid (isCompleted false), but
+    // currencyCode/originalCurrencyCode changed to USD. verifiedPokPayment
+    // never checks currency for an unpaid order, so the old code let this
+    // through untouched.
+    orders.retrieveOrder.mockResolvedValue({ ...order, currencyCode: "USD", originalCurrencyCode: "USD" });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+  it("reproduces and blocks: unpaid order silently repriced was previously ALLOWED", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    // Reviewer's third repro: still unpaid, but finalAmount changed from
+    // 4.99 to 999. Same root cause as the currency case.
+    orders.retrieveOrder.mockResolvedValue({ ...order, finalAmount: 999 });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+
+  it("allows reuse of an active, correctly bound, correctly priced, unexpired checkout", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue(order);
+    expect(await startPokCheckout(input, repo, orders, now)).toBe(url);
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+  it.each([
+    { label: "wrong order id", change: { id: "99999999-9999-4999-8999-999999999999" } },
+    { label: "wrong merchant id", change: { merchant: { id: "99999999-9999-4999-8999-999999999999" } } },
+    { label: "wrong reference", change: { merchantCustomReference: "book:someone-else" } },
+    { label: "repriced (999 instead of 4.99)", change: { finalAmount: 999 } },
+    { label: "current currency changed to USD", change: { currencyCode: "USD" } },
+    { label: "original currency changed to USD (FX)", change: { originalCurrencyCode: "USD" } },
+  ])("blocks reuse for reconciliation on $label", async ({ change }) => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...change });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+
   it("blocks reuse once the POK order has expired even though the Librum intent is still valid", async () => {
     const { repo, orders, order, ready } = setup(); ready();
     // Librum's own intent (expires_at 10:30) is still valid at `now` (10:00);
@@ -81,6 +139,27 @@ describe("POK checkout-link reuse safety", () => {
     expect(orders.createOrder).not.toHaveBeenCalled();
     expect(repo.ready).not.toHaveBeenCalled(); expect(repo.reconcile).not.toHaveBeenCalled();
   });
+  it("blocks reuse on an unparseable expiry", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, expiresAt: "not-a-date" });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+  it("blocks reuse when the order expires WHILE the retrieval request is in flight", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    // The order is still unexpired at the moment startPokCheckout is
+    // invoked (`now` = 10:00:00, expiresAt = 10:00:30) -- but the provider
+    // round-trip itself takes long enough that, by the time it resolves,
+    // the order has already crossed its expiry. Only a fresh post-retrieval
+    // clock read catches this; the stale pre-call `now` would not.
+    orders.retrieveOrder.mockImplementation(async () => {
+      vi.setSystemTime(new Date("2026-09-15T10:01:00Z"));
+      return { ...order, expiresAt: "2026-09-15T10:00:30Z" };
+    });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+
   it("blocks reuse of a canceled order", async () => {
     const { repo, orders, order, ready } = setup(); ready();
     orders.retrieveOrder.mockResolvedValue({ ...order, isCanceled: true });
@@ -95,9 +174,21 @@ describe("POK checkout-link reuse safety", () => {
   });
   it("blocks reuse of an already-paid order rather than offering checkout again", async () => {
     const { repo, orders, order, ready } = setup(); ready();
-    orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId });
+    orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId, capturedAmount: 4.99 });
     await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
     expect(orders.createOrder).not.toHaveBeenCalled(); expect(repo.finalize).not.toHaveBeenCalled();
+  });
+  it.each([
+    { label: "missing isCanceled", change: { isCanceled: undefined } },
+    { label: "captured amount present on an unpaid order", change: { capturedAmount: 4.99 } },
+    { label: "transaction id present on an unpaid order", change: { transactionId: paymentId } },
+    { label: "autoCapture missing", change: { autoCapture: undefined } },
+    { label: "autoCapture false", change: { autoCapture: false } },
+  ])("blocks reuse on missing/contradictory status field: $label", async ({ change }) => {
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...change });
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(POK_CHECKOUT_CANNOT_RESUME);
+    expect(orders.createOrder).not.toHaveBeenCalled();
   });
   it("never resumes when the provider order is unreachable", async () => {
     const { repo, orders, ready } = setup(); ready();
