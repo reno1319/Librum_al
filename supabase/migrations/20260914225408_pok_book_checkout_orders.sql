@@ -51,4 +51,3 @@ create trigger pok_book_checkout_orders_set_updated_at
   for each row execute function public.set_pok_book_checkout_order_updated_at();
 
 revoke all on function public.set_pok_book_checkout_order_updated_at() from public, anon, authenticated;
-
