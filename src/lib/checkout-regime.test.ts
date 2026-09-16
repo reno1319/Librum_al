@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveCheckoutRegime,
   resolveLedgerPaymentProvider,
+  resolveActiveCheckoutProvider,
   isStripeSecretKeyTestMode,
   isStripeEventTestMode,
 } from "./checkout-regime";
@@ -49,6 +50,56 @@ describe("resolveCheckoutRegime", () => {
     expect(resolveCheckoutRegime("LIBRUM_LEDGER_V1")).toBe("legacy_stripe_connect_v1");
     expect(resolveCheckoutRegime("Librum_Ledger_V1")).toBe("legacy_stripe_connect_v1");
     expect(resolveCheckoutRegime("LEGACY_STRIPE_CONNECT_V1")).toBe("legacy_stripe_connect_v1");
+  });
+});
+
+// STRIPE-DISABLE-1: exhaustive input matrix -- every combination must
+// resolve to "disabled" except the one exact pair (librum_ledger_v1,
+// pok). "stripe" must never be a possible output of this function.
+describe("resolveActiveCheckoutProvider", () => {
+  it("the exact enabled pair resolves to pok", () => {
+    expect(
+      resolveActiveCheckoutProvider({
+        newCheckoutRegime: "librum_ledger_v1",
+        ledgerPaymentProvider: "pok",
+      }),
+    ).toBe("pok");
+  });
+
+  const disabledCases: Array<[string, string | undefined, string | undefined]> = [
+    ["both missing", undefined, undefined],
+    ["both empty", "", ""],
+    ["legacy regime + pok provider", "legacy_stripe_connect_v1", "pok"],
+    ["ledger regime + missing provider", "librum_ledger_v1", undefined],
+    ["ledger regime + empty provider", "librum_ledger_v1", ""],
+    ["ledger regime + explicit stripe provider", "librum_ledger_v1", "stripe"],
+    ["ledger regime + wrong-case provider", "librum_ledger_v1", "POK"],
+    ["ledger regime + whitespace provider", "librum_ledger_v1", " pok"],
+    ["ledger regime + unrecognized provider", "librum_ledger_v1", "other"],
+    ["missing regime + pok provider", undefined, "pok"],
+    ["empty regime + pok provider", "", "pok"],
+    ["wrong-case regime + pok provider", "LIBRUM_LEDGER_V1", "pok"],
+    ["whitespace regime + pok provider", " librum_ledger_v1", "pok"],
+    ["unrecognized regime + pok provider", "not_a_real_regime", "pok"],
+    ["legacy regime + stripe provider (pre-cutover default)", "legacy_stripe_connect_v1", "stripe"],
+    ["legacy regime + missing provider (pre-cutover default)", "legacy_stripe_connect_v1", undefined],
+  ];
+
+  it.each(disabledCases)("%s resolves to disabled", (_label, regime, provider) => {
+    expect(
+      resolveActiveCheckoutProvider({ newCheckoutRegime: regime, ledgerPaymentProvider: provider }),
+    ).toBe("disabled");
+  });
+
+  it("never returns \"stripe\" for any input in this matrix", () => {
+    const regimes = [undefined, "", "legacy_stripe_connect_v1", "librum_ledger_v1", "LIBRUM_LEDGER_V1", "garbage"];
+    const providers = [undefined, "", "pok", "stripe", "POK", " pok", "garbage"];
+    for (const regime of regimes) {
+      for (const provider of providers) {
+        const result = resolveActiveCheckoutProvider({ newCheckoutRegime: regime, ledgerPaymentProvider: provider });
+        expect(result).not.toBe("stripe");
+      }
+    }
   });
 });
 

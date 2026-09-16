@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveBookPurchaseState, resolveShowSample, type BookPurchaseState } from "./book-purchase";
+import {
+  resolveBookPurchaseState,
+  resolveShowSample,
+  resolveCheckoutSecurityNote,
+  type BookPurchaseState,
+} from "./book-purchase";
 
 describe("resolveBookPurchaseState", () => {
   // Distinct states, not a single collapsed "anonymous" -- a free book
@@ -107,4 +112,27 @@ describe("resolveShowSample", () => {
       expect(resolveShowSample(state)).toBe(false);
     },
   );
+});
+
+// STRIPE-DISABLE-1 CORRECTION: proves the book purchase area can no
+// longer render "Secure checkout with Stripe." -- accurate before new
+// Stripe checkout creation was disabled, false now that buyBook can
+// never reach Stripe. The POK-specific wording is unaffected.
+describe("resolveCheckoutSecurityNote", () => {
+  it("free book: no note at all, regardless of provider", () => {
+    expect(resolveCheckoutSecurityNote({ priceCents: 0, usePok: true })).toBeNull();
+    expect(resolveCheckoutSecurityNote({ priceCents: 0, usePok: false })).toBeNull();
+  });
+
+  it("paid book, POK enabled: names POK", () => {
+    expect(resolveCheckoutSecurityNote({ priceCents: 999, usePok: true })).toBe(
+      " Secure checkout with POK.",
+    );
+  });
+
+  it("paid book, POK not enabled (checkout disabled): neutral wording, never names Stripe", () => {
+    const note = resolveCheckoutSecurityNote({ priceCents: 999, usePok: false });
+    expect(note).toBe(" Secure checkout.");
+    expect(note).not.toContain("Stripe");
+  });
 });

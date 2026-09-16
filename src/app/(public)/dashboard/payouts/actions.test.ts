@@ -117,255 +117,57 @@ async function expectRedirectTo(promise: Promise<unknown>, target: string | RegE
 
 const GENERIC_FAILURE = "/dashboard/payouts?error=";
 
-describe("connectStripeAccount", () => {
+// STRIPE-DISABLE-1: connectStripeAccount's account-creation,
+// idempotency-key, and persistence-reconciliation logic (LAUNCH-1 P2-1)
+// and its live-reverification gate (LIBRUM 2.0 CONNECT-HARDEN-1) have
+// all been REMOVED -- new Stripe Connect account creation, and finishing
+// onboarding for an existing-but-not-yet-ready account, are both
+// disabled under every configuration (locked product decision). The
+// tests that used to live in this file for that logic asserted the
+// exact account-creation behavior this patch removes, so they are
+// superseded, not weakened -- replaced below by tests proving the
+// action now fails closed unconditionally, before any profile read, any
+// Stripe API call, and any DB mutation.
+describe("connectStripeAccount (disabled -- STRIPE-DISABLE-1)", () => {
   beforeEach(resetMocks);
 
-  it("1. profile read error: never calls accounts.create or accountLinks.create, redirects to a generic failure", async () => {
-    mockProfileSingle.mockResolvedValue({ data: null, error: { message: "connection reset" } });
+  it("no stripe_account_id on file: fails closed with zero Stripe calls and zero DB mutation", async () => {
+    mockProfileSingle.mockResolvedValue({ data: { stripe_account_id: null }, error: null });
 
     await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
 
     expect(mockAccountsCreate).not.toHaveBeenCalled();
+    expect(mockAccountsRetrieve).not.toHaveBeenCalled();
     expect(mockAccountLinksCreate).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
   });
 
-  it("2. existing stripe_account_id: skips accounts.create, accountLinks.create uses the existing id", async () => {
+  it("an existing, not-yet-payouts-ready stripe_account_id: also fails closed, never resumes onboarding", async () => {
     mockProfileSingle.mockResolvedValue({
-      data: { stripe_account_id: "acct_existing" },
+      data: { stripe_account_id: "acct_pending" },
       error: null,
     });
 
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
+    await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
 
     expect(mockAccountsCreate).not.toHaveBeenCalled();
-    expect(mockAccountLinksCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ account: "acct_existing" }),
-    );
-  });
-
-  it("3. new account: accounts.create receives metadata.librum_user_id and a deterministic idempotency key", async () => {
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
-
-    expect(mockAccountsCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ metadata: { librum_user_id: USER_ID } }),
-      expect.objectContaining({ idempotencyKey: expect.stringContaining(USER_ID) }),
-    );
-  });
-
-  it("4. successful creation + verified persistence: Account Link created with the persisted id", async () => {
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
-
-    expect(mockAccountLinksCreate).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ account: "acct_new" }),
-    );
-  });
-
-  it("5. DB update returns an error: no Account Link, fails safely, logs correlation info", async () => {
-    mockAdminUpdateSelect.mockResolvedValue({ data: null, error: { message: "write failed" } });
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
-
+    expect(mockAccountsRetrieve).not.toHaveBeenCalled();
     expect(mockAccountLinksCreate).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("failed to persist"),
-      expect.objectContaining({ userId: USER_ID, newlyCreatedStripeAccountId: "acct_new" }),
-    );
-    errorSpy.mockRestore();
-  });
-
-  it("6. zero-row update: triggers a re-read", async () => {
-    mockAdminUpdateSelect.mockResolvedValue({ data: [], error: null });
-    mockAdminReReadMaybeSingle.mockResolvedValue({
-      data: { stripe_account_id: "acct_new" },
-      error: null,
-    });
-
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
-
-    expect(mockAdminReReadMaybeSingle).toHaveBeenCalledOnce();
-  });
-
-  it("7. zero-row update + re-read returns the same id: converges, Account Link created once", async () => {
-    mockAdminUpdateSelect.mockResolvedValue({ data: [], error: null });
-    mockAdminReReadMaybeSingle.mockResolvedValue({
-      data: { stripe_account_id: "acct_new" },
-      error: null,
-    });
-
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
-
-    expect(mockAccountLinksCreate).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ account: "acct_new" }),
-    );
-  });
-
-  it("8. zero-row update + re-read returns a different existing id: the existing DB id wins, orphan logged", async () => {
-    mockAdminUpdateSelect.mockResolvedValue({ data: [], error: null });
-    mockAdminReReadMaybeSingle.mockResolvedValue({
-      data: { stripe_account_id: "acct_existing_other" },
-      error: null,
-    });
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await expectRedirectTo(
-      connectStripeAccount(),
-      "https://connect.stripe.com/setup/acct_new", // resolved value is unconditional in this fixture
-    );
-
-    expect(mockAccountLinksCreate).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ account: "acct_existing_other" }),
-    );
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("orphan"),
-      expect.objectContaining({
-        userId: USER_ID,
-        newlyCreatedStripeAccountId: "acct_new",
-        canonicalStripeAccountId: "acct_existing_other",
-      }),
-    );
-    errorSpy.mockRestore();
-  });
-
-  it("9. zero-row update + re-read still null: fails safely, no Account Link", async () => {
-    mockAdminUpdateSelect.mockResolvedValue({ data: [], error: null });
-    mockAdminReReadMaybeSingle.mockResolvedValue({
-      data: { stripe_account_id: null },
-      error: null,
-    });
-
-    await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
-
-    expect(mockAccountLinksCreate).not.toHaveBeenCalled();
-  });
-
-  it("10. accounts.create throws: no DB persistence attempt, no Account Link", async () => {
-    mockAccountsCreate.mockRejectedValue(new Error("Stripe is down"));
-
-    await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
-
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
-    expect(mockAdminUpdateSelect).not.toHaveBeenCalled();
-    expect(mockAccountLinksCreate).not.toHaveBeenCalled();
   });
 
-  it("11. accountLinks.create throws after persistence: the persisted account stays canonical, no second account is created in this invocation", async () => {
-    mockAccountLinksCreate.mockRejectedValue(new Error("link creation failed"));
-
+  it("never reads the author's profile at all -- the disabled redirect is unconditional", async () => {
     await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
 
-    expect(mockAccountsCreate).toHaveBeenCalledOnce();
+    expect(mockProfileSingle).not.toHaveBeenCalled();
   });
 
-  it("12. the same user gets the same deterministic idempotency key across retries", async () => {
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
-    const firstKey = mockAccountsCreate.mock.calls[0][1].idempotencyKey;
+  it("an unauthenticated caller is still sent to login first, never the disabled notice", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null } });
 
-    mockAccountsCreate.mockClear();
-    mockAdminUpdateSelect.mockResolvedValue({ data: [], error: null });
-    mockAdminReReadMaybeSingle.mockResolvedValue({
-      data: { stripe_account_id: "acct_new" },
-      error: null,
-    });
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
-    const secondKey = mockAccountsCreate.mock.calls[0][1].idempotencyKey;
-
-    expect(secondKey).toBe(firstKey);
-  });
-
-  it("13. different users get different idempotency keys", async () => {
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
-    const firstKey = mockAccountsCreate.mock.calls[0][1].idempotencyKey;
-
-    mockAccountsCreate.mockClear();
-    mockGetUser.mockResolvedValue({ data: { user: { id: "user-2", email: "c@d.co" } } });
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
-    const secondKey = mockAccountsCreate.mock.calls[0][1].idempotencyKey;
-
-    expect(secondKey).not.toBe(firstKey);
-  });
-
-  it("15. LIBRUM 2.0 CONNECT-HARDEN-1: existing account resolves resource_missing under the current platform -- reconnect-required redirect, id NOT auto-cleared, never reaches accountLinks.create", async () => {
-    mockProfileSingle.mockResolvedValue({
-      data: { stripe_account_id: "acct_stale_other_platform" },
-      error: null,
-    });
-    const stripeError = Object.assign(
-      new Error(
-        "No such destination: 'acct_stale_other_platform'; a similar object exists in test mode, but a live mode key was used to make this request.",
-      ),
-      { code: "resource_missing" },
-    );
-    mockAccountsRetrieve.mockRejectedValue(stripeError);
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await expectRedirectTo(connectStripeAccount(), "reconnected");
+    await expectRedirectTo(connectStripeAccount(), "/login");
 
     expect(mockAccountsCreate).not.toHaveBeenCalled();
-    expect(mockAccountLinksCreate).not.toHaveBeenCalled();
-    // Never writes to the admin client from this branch -- the stored id
-    // is deliberately left exactly as it was; only an explicit operator
-    // reset (the same workflow already used for Renato Kalemi's account)
-    // clears it.
-    expect(mockCreateAdminClient).not.toHaveBeenCalled();
-    // The real Stripe reason IS expected here -- server-side logging is
-    // explicitly where the operational detail belongs (see requirement
-    // 4's "continue logging the real operational error server-side").
-    // What must never leak is the BUYER/author-facing redirect, checked
-    // separately below.
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("NOT auto-cleared"),
-      expect.objectContaining({
-        stripeAccountId: "acct_stale_other_platform",
-        detail: expect.stringContaining("test mode"),
-      }),
-    );
-
-    const redirectedUrl = mockRedirect.mock.calls[0][0] as string;
-    expect(redirectedUrl).not.toContain("acct_");
-    expect(redirectedUrl).not.toContain("test mode");
-    errorSpy.mockRestore();
-  });
-
-  it("16. LIBRUM 2.0 CONNECT-HARDEN-1: existing account lookup fails with a transient Stripe error -- generic retryable failure, never reaches accountLinks.create", async () => {
-    mockProfileSingle.mockResolvedValue({
-      data: { stripe_account_id: "acct_existing" },
-      error: null,
-    });
-    mockAccountsRetrieve.mockRejectedValue(new Error("Stripe is temporarily unavailable"));
-
-    await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
-
-    expect(mockAccountLinksCreate).not.toHaveBeenCalled();
-  });
-
-  it("17. LIBRUM 2.0 CONNECT-HARDEN-1: a freshly-created account is always retrieved and passes -- Account Link still created normally", async () => {
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
-
-    expect(mockAccountsRetrieve).toHaveBeenCalledWith("acct_new");
-    expect(mockAccountLinksCreate).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ account: "acct_new" }),
-    );
-  });
-
-  it("14. no secret values appear in operational log payloads", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const forbidden = ["sk_test_", "sk_live_", "service_role", "access_token", "cookie"];
-
-    mockProfileSingle.mockResolvedValue({ data: null, error: { message: "db error" } });
-    await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
-
-    resetMocks();
-    errorSpy.mockClear();
-    mockAdminUpdateSelect.mockResolvedValue({ data: null, error: { message: "write failed" } });
-    await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
-
-    const serialized = JSON.stringify(errorSpy.mock.calls).toLowerCase();
-    for (const secret of forbidden) {
-      expect(serialized).not.toContain(secret);
-    }
-    errorSpy.mockRestore();
   });
 });
 
@@ -390,10 +192,11 @@ describe("connectStripeAccount: recovery-session defense-in-depth (AUTH-1C)", ()
     expect(mockAccountLinksCreate).not.toHaveBeenCalled();
   });
 
-  it("no active recovery session: proceeds past the guard exactly as before this pass", async () => {
-    await expectRedirectTo(connectStripeAccount(), "https://connect.stripe.com/setup/acct_new");
+  it("no active recovery session: proceeds past the guard, then still fails closed (STRIPE-DISABLE-1)", async () => {
+    await expectRedirectTo(connectStripeAccount(), GENERIC_FAILURE);
 
     expect(mockCreateClient).toHaveBeenCalled();
+    expect(mockAccountsCreate).not.toHaveBeenCalled();
   });
 });
 

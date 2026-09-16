@@ -1,26 +1,16 @@
 "use server";
 
-import Stripe from "stripe";
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getStripe } from "@/lib/stripe";
 import { AUTHOR_ROYALTY_RATE_BPS } from "@/lib/pricing";
 import { REPORT_REASONS } from "@/lib/report-reasons";
-import {
-  toStripeExpiresAtSeconds,
-  buildLegacyBookCheckoutSessionParams,
-  buildLedgerBookCheckoutSessionParams,
-} from "./checkout-logic";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
-import {
-  checkConnectedAccountReadyForCheckout,
-  BOOK_CHECKOUT_UNAVAILABLE_MESSAGE,
-} from "@/lib/connect-account";
-import { resolveCheckoutRegime, resolveLedgerPaymentProvider, isStripeSecretKeyTestMode } from "@/lib/checkout-regime";
+import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/connect-account";
+import { resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
 import { createPokClient, getPokConfig, type PokConfig } from "@/lib/pok";
 import { startPokCheckout, POK_CHECKOUT_CANNOT_RESUME } from "@/lib/pok-checkout";
 import { createPokRepository } from "@/lib/pok-repository";
@@ -32,10 +22,6 @@ type BookForCheckout = {
   price_cents: number;
   status: string;
   author_id: string;
-  profiles: {
-    stripe_account_id: string | null;
-    stripe_payouts_enabled: boolean;
-  } | null;
 };
 
 // The shape create_book_checkout_intent (migration 032) returns.
@@ -64,9 +50,7 @@ export async function buyBook(bookId: string, formData: FormData) {
 
   const { data: book } = await supabase
     .from("books")
-    .select(
-      "id, title, price_cents, status, author_id, profiles(stripe_account_id, stripe_payouts_enabled)",
-    )
+    .select("id, title, price_cents, status, author_id")
     .eq("id", bookId)
     .single<BookForCheckout>();
 
@@ -82,72 +66,33 @@ export async function buyBook(bookId: string, formData: FormData) {
     redirect(`/books/${bookId}?error=This+book+is+free+-+use+the+free+download+option+instead`);
   }
 
-  // STRIPE-CUTOVER-2A Section 3: the ONLY point that decides this
-  // checkout's regime -- server-only, never overridable by request
-  // input. Once create_book_checkout_intent below actually mints a
-  // fresh row, ITS OWN frozen regime column (migration 056) is
-  // authoritative forever, independent of whatever this env var says on
-  // any later request.
-  const regime = resolveCheckoutRegime(process.env.NEW_CHECKOUT_REGIME);
-  const usePok = regime === "librum_ledger_v1" && resolveLedgerPaymentProvider(process.env.LEDGER_PAYMENT_PROVIDER) === "pok";
-  let pokConfig: PokConfig | undefined;
-  if (usePok) {
-    try { pokConfig = getPokConfig(); } catch {
-      redirect(`/books/${bookId}?error=Could+not+start+checkout`);
-    }
+  // STRIPE-DISABLE-1: the ONLY point that decides whether this checkout
+  // may proceed at all, and with which provider -- server-only, never
+  // overridable by request input, and evaluated through the single
+  // shared resolution policy (src/lib/checkout-regime.ts) rather than a
+  // parallel ad hoc comparison. Every configuration other than the exact
+  // pair NEW_CHECKOUT_REGIME=librum_ledger_v1 /
+  // LEDGER_PAYMENT_PROVIDER=pok -- missing, empty, malformed,
+  // wrong-cased, the pre-cutover legacy default included -- fails closed
+  // HERE, before any RPC, POK, or Stripe call, and before any
+  // checkout-intent or other DB state is created. This intentionally
+  // removes the legacy Stripe Connect checkout path entirely: no new
+  // Stripe buyer checkout may be created by this action any more, only
+  // an exact-config POK checkout.
+  const activeProvider = resolveActiveCheckoutProvider({
+    newCheckoutRegime: process.env.NEW_CHECKOUT_REGIME,
+    ledgerPaymentProvider: process.env.LEDGER_PAYMENT_PROVIDER,
+  });
+
+  if (activeProvider !== "pok") {
+    redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
   }
 
-  // legacy_stripe_connect_v1 has a Stripe Connect account dependency;
-  // librum_ledger_v1 (TEST-mode only, Section 6/7) deliberately does
-  // not -- it never sends transfer_data.destination/application_fee_amount,
-  // so requiring the author to have a working Connect account here would
-  // needlessly block exactly the authors ledger_v1 exists to eventually
-  // serve. authorAccount therefore only needs to be resolved, and only
-  // needs to be READY, on the legacy path.
-  let authorAccount: string | null = null;
-
-  if (regime === "legacy_stripe_connect_v1") {
-    authorAccount = book.profiles?.stripe_account_id ?? null;
-    if (!authorAccount) {
-      redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
-    }
-
-    // LIBRUM 2.0 CONNECT-HARDEN-1: never trust profiles.stripe_payouts_enabled
-    // alone -- it's a webhook-synchronized cache (see
-    // processAccountUpdatedEvent in the Stripe webhook route), not a live
-    // guarantee. A stored account id that's stale, wrong-platform, or
-    // wrong-mode must be caught HERE, before any checkout intent is minted
-    // or Stripe is ever asked to use it as a transfer destination -- this
-    // is the direct fix for the production incident where Stripe rejected
-    // checkout with "No such destination" for exactly this reason. The
-    // real Stripe/DB reason is logged server-side only; the reader only
-    // ever sees the same generic, pre-existing unavailability message.
-    const accountCheck = await checkConnectedAccountReadyForCheckout(getStripe(), authorAccount);
-    if (!accountCheck.ok) {
-      console.error("buyBook: author's connected Stripe account is not ready for checkout", {
-        bookId,
-        authorId: book.author_id,
-        readerId: user.id,
-        reason: accountCheck.reason,
-        detail: accountCheck.detail,
-      });
-      redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
-    }
-  } else if (!usePok) {
-    // STRIPE-CUTOVER-2A Section 4: TEST-mode safety -- ledger_v1 must
-    // never silently create real commerce. The smallest robust,
-    // non-client-trusting proof available at THIS stage is the
-    // platform's own configured Stripe secret key. Fails closed (the
-    // same generic, no-internal-detail message every other checkout
-    // failure in this function already uses) rather than proceeding on
-    // an unverifiable assumption.
-    if (!isStripeSecretKeyTestMode(process.env.STRIPE_SECRET_KEY)) {
-      console.error(
-        "buyBook: refusing to create a librum_ledger_v1 checkout -- Stripe is not configured in test mode",
-        { bookId, readerId: user.id },
-      );
-      redirect(`/books/${bookId}?error=Could+not+start+checkout`);
-    }
+  let pokConfig: PokConfig;
+  try {
+    pokConfig = getPokConfig();
+  } catch {
+    redirect(`/books/${bookId}?error=Could+not+start+checkout`);
   }
 
   // Cheap, non-authoritative early check for a friendlier redirect --
@@ -205,26 +150,23 @@ export async function buyBook(bookId: string, formData: FormData) {
   // which is directly callable by any authenticated client and so can
   // never trust a caller-supplied price.
   //
-  // STRIPE-CUTOVER-2A Section 5: for regime=librum_ledger_v1, currency
-  // and royalty_rate_bps are frozen HERE, on this exact call -- ALL
-  // (Section 8, no FX) and AUTHOR_ROYALTY_RATE_BPS (Section 22, the
+  // STRIPE-DISABLE-1: `activeProvider === "pok"` above already proves the
+  // regime is exactly librum_ledger_v1 (see resolveActiveCheckoutProvider) --
+  // the legacy-regime branch that used to omit these trailing params is
+  // unreachable here now, since a legacy-regime checkout can never reach
+  // this line any more. Currency and royalty_rate_bps are frozen HERE, on
+  // this exact call -- ALL (no FX) and AUTHOR_ROYALTY_RATE_BPS (the
   // current platform rate snapshotted ONCE, never recomputed later at
-  // webhook/finalization time). For the legacy default these three
-  // trailing params are omitted entirely -- create_book_checkout_intent
-  // takes their DB-side defaults (legacy_stripe_connect_v1/USD/null),
-  // identical to this call's pre-2A shape, so legacy checkout economics
-  // are unchanged.
+  // webhook/finalization time).
   const { data: intentRows, error: intentError } = await supabase.rpc(
     "create_book_checkout_intent",
-    regime === "librum_ledger_v1"
-      ? {
-          book_id: bookId,
-          p_discount_code: rawCode || null,
-          p_regime: "librum_ledger_v1",
-          p_currency: "ALL",
-          p_royalty_rate_bps: AUTHOR_ROYALTY_RATE_BPS,
-        }
-      : { book_id: bookId, p_discount_code: rawCode || null },
+    {
+      book_id: bookId,
+      p_discount_code: rawCode || null,
+      p_regime: "librum_ledger_v1",
+      p_currency: "ALL",
+      p_royalty_rate_bps: AUTHOR_ROYALTY_RATE_BPS,
+    },
   );
 
   const intent = (intentRows as CheckoutIntentResult[] | null)?.[0];
@@ -261,129 +203,35 @@ export async function buyBook(bookId: string, formData: FormData) {
   }
 
   const origin = resolveSiteOrigin();
-  if (usePok && pokConfig) {
-    let checkoutUrl: string;
-    try {
-      checkoutUrl = await startPokCheckout({
-        intentId: intent.intent_id, readerId: user.id, title: book.title,
-        origin, merchantId: pokConfig.merchantId,
-      }, createPokRepository(), createPokClient(pokConfig));
-    } catch (err) {
-      // A stale checkout can never be silently resumed (see pok-checkout's
-      // assertReusableUnpaidOrder) -- tell the reader that plainly instead
-      // of implying a retry will work, since it won't: this same intent's
-      // mapping row is already claimed and reusing it is exactly what just
-      // failed. Every other failure keeps the existing generic message.
-      if (err instanceof Error && err.message === POK_CHECKOUT_CANNOT_RESUME) {
-        redirect(
-          `/books/${bookId}?error=${encodeURIComponent(
-            "We can't safely reopen this checkout. If you already paid, check your library; otherwise, please contact support to complete this purchase.",
-          )}`,
-        );
-      }
-      redirect(`/books/${bookId}?error=Could+not+start+checkout`);
-    }
-    redirect(checkoutUrl);
-  }
 
-  // Aligned with the intent's own expires_at (Math.floor, never
-  // Math.round -- see toStripeExpiresAtSeconds) so Stripe can never hold
-  // this session payable past the moment the database has already
-  // stopped reusing this intent for a fresh attempt. Shared by both
-  // regimes -- this expiry mechanism has nothing to do with payment
-  // economics.
-  const expiresAtSeconds = toStripeExpiresAtSeconds(intent.expires_at);
-
-  // STRIPE-CUTOVER-2A Section 6/7: the legacy branch's params are
-  // byte-identical to the pre-2A inline object (now built by
-  // buildLegacyBookCheckoutSessionParams) -- Connect destination
-  // transfer and application fee, USD. The ledger branch
-  // (buildLedgerBookCheckoutSessionParams) has neither -- no
-  // transfer_data.destination, no application_fee_amount, currency
-  // "all", amount used directly as internal minor units. `authorAccount`
-  // is guaranteed non-null here whenever regime is legacy (redirected
-  // above otherwise); the ledger branch never reads it at all.
-  const sessionParams =
-    regime === "librum_ledger_v1"
-      ? buildLedgerBookCheckoutSessionParams({
-          bookId,
-          bookTitle: book.title,
-          priceMinorUnitsAtCheckout: intent.price_cents_at_checkout,
-          expiresAtSeconds,
-          origin,
-          intentId: intent.intent_id,
-        })
-      : buildLegacyBookCheckoutSessionParams({
-          bookId,
-          bookTitle: book.title,
-          priceCentsAtCheckout: intent.price_cents_at_checkout,
-          authorStripeAccountId: authorAccount as string,
-          expiresAtSeconds,
-          origin,
-          intentId: intent.intent_id,
-        });
-
-  let session: Stripe.Checkout.Session;
+  // STRIPE-DISABLE-1: POK is the only enabled paid-book route now -- the
+  // Stripe Checkout Session creation call site that used to follow here
+  // for every other configuration has been removed entirely, not merely
+  // made unreachable, per the locked product decision. `activeProvider
+  // === "pok"` (checked above, before any RPC call) is this function's
+  // only path past this point.
+  let checkoutUrl: string;
   try {
-    session = await getStripe().checkout.sessions.create(
-      sessionParams,
-      {
-        // Deterministic, not random: retrying this exact intent's
-        // checkout-creation request (e.g. after an ambiguous network
-        // failure) must never be able to create a second, independent
-        // Stripe Checkout Session for the same frozen intent. Mirrors
-        // buyBundle's identical `bundle-checkout:${snapshot_id}` pattern.
-        idempotencyKey: `book-checkout:${intent.intent_id}`,
-      },
-    );
+    checkoutUrl = await startPokCheckout({
+      intentId: intent.intent_id, readerId: user.id, title: book.title,
+      origin, merchantId: pokConfig.merchantId,
+    }, createPokRepository(), createPokClient(pokConfig));
   } catch (err) {
-    // A concurrent invocation (double-click, two tabs) racing on the
-    // SAME idempotency key can land here: Stripe rejects a second
-    // request using a key still being processed by an in-flight first
-    // request, rather than queuing it. Sent back to a normal, retryable
-    // error state instead of an unhandled exception. Every other Stripe
-    // error is handled the same generic way buyBundle already handles
-    // its own checkout-creation failures -- logged and redirected, never
-    // left to crash.
-    if (err instanceof Stripe.errors.StripeIdempotencyError) {
-      redirect(`/books/${bookId}?error=Checkout+already+in+progress+-+please+try+again`);
+    // A stale checkout can never be silently resumed (see pok-checkout's
+    // assertReusableUnpaidOrder) -- tell the reader that plainly instead
+    // of implying a retry will work, since it won't: this same intent's
+    // mapping row is already claimed and reusing it is exactly what just
+    // failed. Every other failure keeps the existing generic message.
+    if (err instanceof Error && err.message === POK_CHECKOUT_CANNOT_RESUME) {
+      redirect(
+        `/books/${bookId}?error=${encodeURIComponent(
+          "We can't safely reopen this checkout. If you already paid, check your library; otherwise, please contact support to complete this purchase.",
+        )}`,
+      );
     }
-    console.error("buyBook: Stripe checkout session creation failed", {
-      bookId,
-      readerId: user.id,
-      intentId: intent.intent_id,
-      error: err,
-    });
     redirect(`/books/${bookId}?error=Could+not+start+checkout`);
   }
-
-  if (!session.url) {
-    redirect(`/books/${bookId}?error=Could+not+start+checkout`);
-  }
-
-  // Audit-only, best-effort -- fulfillment never depends on this
-  // succeeding, since the webhook's finalize_book_checkout_intent
-  // resolves everything directly from metadata.intent_id, never from
-  // this column. Performed with the ADMIN client: the request-scoped
-  // client has no direct UPDATE privilege on book_checkout_intents at
-  // all (migration 032 revokes it from authenticated/anon entirely --
-  // only the RPC and the service-role webhook may touch this table).
-  const admin = createAdminClient();
-  const { error: linkBackError } = await admin
-    .from("book_checkout_intents")
-    .update({ stripe_checkout_session_id: session.id })
-    .eq("id", intent.intent_id);
-
-  if (linkBackError) {
-    console.error("buyBook: failed to link back stripe_checkout_session_id onto the intent", {
-      bookId,
-      readerId: user.id,
-      intentId: intent.intent_id,
-      error: linkBackError,
-    });
-  }
-
-  redirect(session.url);
+  redirect(checkoutUrl);
 }
 
 type BookForFreeAcquisition = {

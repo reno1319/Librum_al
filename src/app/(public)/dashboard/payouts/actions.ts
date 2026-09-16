@@ -2,67 +2,22 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe";
-import { resolveSiteOrigin } from "@/lib/site-url";
-import { retrieveConnectedAccount } from "@/lib/connect-account";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 
-// LAUNCH-1 P2-1: shown for every failure mode below where the
-// underlying cause (a DB read/write anomaly, a Stripe API error) isn't
-// something the author can act on directly -- deliberately the SAME
-// generic message for all of them, so this string never leaks which
-// internal step failed. The specific cause always goes to the server
-// log via console.error instead, never into this redirect's own query
-// string.
-const GENERIC_CONNECT_FAILURE_REDIRECT =
-  "/dashboard/payouts?error=Something+went+wrong+connecting+your+payout+account.+Please+try+again.";
-
-// LIBRUM 2.0 CONNECT-HARDEN-1: distinct from GENERIC_CONNECT_FAILURE_REDIRECT
-// above -- this is specifically for a stored stripe_account_id that
-// Stripe no longer recognizes under the CURRENT platform/mode (the same
-// production incident checkConnectedAccountReadyForCheckout guards
-// against at checkout time). Deliberately NOT the same message: a
-// transient Stripe/network failure is worth a bare retry, but a
-// resource_missing account id never resolves itself on retry -- the
-// author needs to know reconnecting is the actual next step, and an
-// operator needs to know a reset may be required (this action never
-// clears stripe_account_id itself -- see the comment at its call site).
-const RECONNECT_REQUIRED_REDIRECT =
-  "/dashboard/payouts?error=Your+payout+account+needs+to+be+reconnected.+Please+contact+support.";
-
-// LAUNCH-1 P2-1: a permanent, deterministic idempotency key -- derived
-// only from Librum's own stable user id, no timestamp or random
-// component -- for Stripe Connect account creation specifically. Safe
-// to reuse across retries because every retry of THIS call expresses
-// the exact same intent ("get-or-create this one user's Connect
-// account"): unlike a refund retry (see
-// src/app/admin/refunds/issue-refund.ts), where a definitively-failed
-// attempt needs a genuinely NEW operation and blindly reusing a key
-// would be unsafe there, no failure mode here needs a second, different
-// Stripe account for the same retried call.
-//
-// This is NOT a uniqueness guarantee for all time -- Stripe only
-// retains an idempotency key for a bounded window before pruning it, so
-// this only closes the near-term retry/concurrency race (a
-// double-click, two tabs, a request retried after an ambiguous network
-// failure). A request that genuinely arrives after Stripe has pruned
-// the key is an operator-recovery case, not something a key can
-// prevent -- the persistence-verification and canonical-account-
-// selection logic below is what keeps THAT scenario from corrupting
-// Librum's own data, even though it can't stop Stripe from creating a
-// second, orphaned account on Stripe's side.
-function buildConnectAccountIdempotencyKey(userId: string): string {
-  return `connect-account-${userId}`;
-}
+// STRIPE-DISABLE-1: shown whenever an author reaches connectStripeAccount
+// -- new Stripe Connect account creation, and finishing onboarding for an
+// account that isn't fully payout-ready yet, are both disabled under
+// every configuration (locked product decision). Deliberately the same
+// generic, no-internal-detail message this action's failure redirects
+// already used before this patch.
+const CONNECT_ONBOARDING_UNAVAILABLE_REDIRECT =
+  "/dashboard/payouts?error=Connecting+a+payout+account+is+temporarily+unavailable.+Please+check+back+later.";
 
 export async function connectStripeAccount() {
   // AUTH-1C: defense-in-depth -- Proxy already blocks /dashboard/*
   // while a recovery session is active, so this is the second layer
-  // against a crafted direct POST. Payout-account onboarding controls
-  // where an author's future earnings are routed -- exactly the kind of
-  // account-takeover-during-the-recovery-window action this guard
-  // exists to block. Runs before any Supabase/Stripe call.
+  // against a crafted direct POST. Runs before any Supabase call.
   await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();
@@ -74,197 +29,15 @@ export async function connectStripeAccount() {
     redirect("/login");
   }
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("stripe_account_id")
-    .eq("id", user.id)
-    .single();
-
-  if (profileError) {
-    // LAUNCH-1 P2-1: a failed read must never be interpreted as "this
-    // author has no Stripe account yet" -- that misreading is exactly
-    // what would let this action create a DUPLICATE Stripe account for
-    // an author who already has one, merely because their own existing
-    // profiles row failed to load this one time.
-    console.error("connectStripeAccount: failed to read the author's profile", {
-      userId: user.id,
-      error: profileError,
-    });
-    redirect(GENERIC_CONNECT_FAILURE_REDIRECT);
-  }
-
-  let accountId = profile?.stripe_account_id;
-
-  // Every remaining path below this point needs a real Stripe client
-  // (either to mint a new Connect account or to verify/link an
-  // existing one) -- see src/lib/stripe.ts for why this must be called
-  // here, inside the action, rather than imported as a ready-made
-  // module-scope client.
-  const stripe = getStripe();
-
-  if (!accountId) {
-    let account;
-    try {
-      account = await stripe.accounts.create(
-        {
-          type: "express",
-          email: user.email,
-          capabilities: {
-            card_payments: { requested: true },
-            transfers: { requested: true },
-          },
-          metadata: { librum_user_id: user.id },
-        },
-        { idempotencyKey: buildConnectAccountIdempotencyKey(user.id) },
-      );
-    } catch (error) {
-      console.error("connectStripeAccount: Stripe account creation failed", {
-        userId: user.id,
-        error,
-      });
-      redirect(GENERIC_CONNECT_FAILURE_REDIRECT);
-    }
-
-    // Written with the admin client: regular users aren't allowed to
-    // update this column themselves (see schema.sql). Conditional on
-    // stripe_account_id still being NULL -- LAUNCH-1 P2-1: never
-    // blindly overwrite an already-established connected account if a
-    // concurrent request already won this race. `.select()` proves
-    // whether a row was actually updated; an absent `error` alone never
-    // proves that (a filter that matches nothing fails silently with
-    // zero rows touched, not an error -- the same reasoning already
-    // applied to bundle_checkout_snapshots's own link-back write in
-    // src/app/bundles/[id]/actions.ts).
-    const admin = createAdminClient();
-    const { data: updatedRows, error: persistError } = await admin
-      .from("profiles")
-      .update({ stripe_account_id: account.id })
-      .eq("id", user.id)
-      .is("stripe_account_id", null)
-      .select("stripe_account_id");
-
-    if (persistError) {
-      console.error(
-        "connectStripeAccount: failed to persist the newly-created Stripe account",
-        { userId: user.id, newlyCreatedStripeAccountId: account.id, error: persistError },
-      );
-      redirect(GENERIC_CONNECT_FAILURE_REDIRECT);
-    }
-
-    if (updatedRows && updatedRows.length > 0) {
-      // Positive proof: Postgres only returns a row here because this
-      // exact user's row existed AND still had a NULL
-      // stripe_account_id AND now holds account.id -- not merely "no
-      // error was thrown".
-      accountId = updatedRows[0].stripe_account_id;
-    } else {
-      // Zero rows updated -- ambiguous between "a concurrent request
-      // already persisted this exact account" (harmless) and "a
-      // DIFFERENT account is already there" (a possible orphan) until
-      // read back.
-      const { data: currentProfile, error: reReadError } = await admin
-        .from("profiles")
-        .select("stripe_account_id")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (reReadError || !currentProfile?.stripe_account_id) {
-        console.error(
-          "connectStripeAccount: persistence write matched zero rows and the re-read could not confirm any stored account -- failing safely",
-          {
-            userId: user.id,
-            newlyCreatedStripeAccountId: account.id,
-            error: reReadError ?? null,
-          },
-        );
-        redirect(GENERIC_CONNECT_FAILURE_REDIRECT);
-      }
-
-      if (currentProfile.stripe_account_id === account.id) {
-        // Converged: a concurrent request already wrote this exact
-        // account id first.
-        accountId = currentProfile.stripe_account_id;
-      } else {
-        // A DIFFERENT, already-persisted account wins -- it is
-        // canonical. The account just created in this invocation is
-        // logged as a possible orphan for operator attention and is
-        // deliberately left alone: no automatic Stripe-side deletion --
-        // that is a separate lifecycle problem needing its own design.
-        console.error(
-          "connectStripeAccount: a different Stripe account was already persisted for this author -- using the existing persisted account as canonical; the newly-created account may be an orphan requiring operator attention",
-          {
-            userId: user.id,
-            newlyCreatedStripeAccountId: account.id,
-            canonicalStripeAccountId: currentProfile.stripe_account_id,
-          },
-        );
-        accountId = currentProfile.stripe_account_id;
-      }
-    }
-  }
-
-  const origin = resolveSiteOrigin();
-
-  // LIBRUM 2.0 CONNECT-HARDEN-1: a stored stripe_account_id can go stale
-  // relative to the CURRENT platform/mode -- exactly the production
-  // incident this closes (see src/lib/connect-account.ts). Never pass a
-  // stored id straight to accountLinks.create() without confirming
-  // Stripe still recognizes it first: doing so for a resource_missing id
-  // would throw the same opaque Stripe error buyBook/buyBundle used to
-  // leak. This branch runs whether accountId was just freshly created
-  // above (always retrievable -- effectively a no-op pass) or was
-  // already on file (where staleness is actually possible), so there's
-  // only one check, not two.
-  //
-  // Deliberately does NOT auto-clear stripe_account_id on a "missing"
-  // result: this action has no reliable way to distinguish "the author
-  // needs to reconnect" from "something is currently wrong with Stripe
-  // itself," and silently clearing a stored id mid-request risks
-  // masking a real operator-facing data problem instead of surfacing
-  // it. The safe reset workflow is the same one already used to recover
-  // Renato Kalemi's account: an operator explicitly nulls
-  // stripe_account_id/stripe_payouts_enabled after confirming the
-  // account is genuinely stale, then the author reconnects through this
-  // same action, which at that point takes the `!accountId` branch
-  // above and mints a brand-new account under the current platform.
-  const accountCheck = await retrieveConnectedAccount(stripe, accountId);
-  if (!accountCheck.ok) {
-    if (accountCheck.reason === "missing") {
-      console.error(
-        "connectStripeAccount: the stored Stripe account id is no longer valid under the current platform/mode -- author-safe reconnect required, NOT auto-cleared",
-        { userId: user.id, stripeAccountId: accountId, detail: accountCheck.detail },
-      );
-      redirect(RECONNECT_REQUIRED_REDIRECT);
-    }
-    console.error("connectStripeAccount: failed to verify the existing Stripe account", {
-      userId: user.id,
-      stripeAccountId: accountId,
-      detail: accountCheck.detail,
-    });
-    redirect(GENERIC_CONNECT_FAILURE_REDIRECT);
-  }
-
-  let accountLink;
-  try {
-    accountLink = await stripe.accountLinks.create({
-      account: accountId,
-      refresh_url: `${origin}/dashboard/payouts`,
-      return_url: `${origin}/dashboard/payouts`,
-      type: "account_onboarding",
-    });
-  } catch (error) {
-    // The stripe_account_id persisted above is untouched by this
-    // failure -- a retry of this action re-reads it and reuses the same
-    // account rather than creating another.
-    console.error("connectStripeAccount: failed to create the Stripe onboarding link", {
-      userId: user.id,
-      stripeAccountId: accountId,
-      error,
-    });
-    redirect(GENERIC_CONNECT_FAILURE_REDIRECT);
-  }
-
-  redirect(accountLink.url);
+  // STRIPE-DISABLE-1: new Stripe Connect account creation is disabled
+  // for this patch -- fails closed here, before any profile read, any
+  // Stripe API call of any kind, and any DB mutation, whether or not
+  // this author already has a stripe_account_id on file (i.e. this
+  // covers both "never connected" and "started onboarding but not
+  // payouts-ready yet"). openStripeExpressDashboard below is the only
+  // remaining reachable action, and only for an author whose connection
+  // is already payouts-enabled.
+  redirect(CONNECT_ONBOARDING_UNAVAILABLE_REDIRECT);
 }
 
 export async function openStripeExpressDashboard() {

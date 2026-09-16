@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
-import { connectStripeAccount, openStripeExpressDashboard } from "./actions";
+import { openStripeExpressDashboard } from "./actions";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
@@ -73,17 +73,14 @@ export default async function PayoutsPage({
 
       <div className="mt-8 rounded-lg border border-border bg-surface p-6 shadow-sm">
         {!profile?.stripe_account_id ? (
-          <>
-            <p className="text-sm">
-              You haven&apos;t connected a payout account yet. You&apos;ll
-              need to do this before you can publish a paid book.
-            </p>
-            <form action={connectStripeAccount} className="mt-4">
-              <button type="submit" className={buttonClasses("primary", "md")}>
-                Connect with Stripe
-              </button>
-            </form>
-          </>
+          // STRIPE-DISABLE-1: connecting a new payout account is
+          // temporarily unavailable (locked product decision) -- a
+          // notice, not a working button. connectStripeAccount itself
+          // also independently fails closed if invoked directly.
+          <p className="text-sm text-muted">
+            Connecting a payout account is temporarily unavailable. Please
+            check back later.
+          </p>
         ) : payoutsEnabled ? (
           <>
             <p className="text-sm font-medium text-green-700">
@@ -99,17 +96,14 @@ export default async function PayoutsPage({
             </form>
           </>
         ) : (
-          <>
-            <p className="text-sm">
-              You started connecting a payout account, but Stripe still
-              needs a bit more information before you can get paid.
-            </p>
-            <form action={connectStripeAccount} className="mt-4">
-              <button type="submit" className={buttonClasses("primary", "md")}>
-                Finish setting up payouts
-              </button>
-            </form>
-          </>
+          // STRIPE-DISABLE-1: this author has an existing, not-yet-ready
+          // Stripe account, but finishing that onboarding also runs
+          // through the now-disabled connectStripeAccount -- same notice
+          // as the unconnected case above, not a working button.
+          <p className="text-sm text-muted">
+            Finishing payout setup is temporarily unavailable. Please
+            check back later.
+          </p>
         )}
       </div>
     </main>

@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { buyBundle } from "./actions";
-import { BuyBundleButton } from "./buy-bundle-button";
 import { BookCard } from "@/components/book-card";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Book, Bundle, Profile } from "@/lib/types";
@@ -131,17 +129,19 @@ export default async function BundleDetailPage({
           <span className="rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium">
             You own every book in this bundle
           </span>
-        ) : user ? (
-          <form action={buyBundle.bind(null, bundle.id)}>
-            <BuyBundleButton />
-          </form>
         ) : (
-          <Link
-            href={`/login?next=/bundles/${bundle.id}`}
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+          // STRIPE-DISABLE-1: paid bundle checkout is temporarily
+          // unavailable under every configuration (locked product
+          // decision) -- a non-clickable notice rather than a login link
+          // or a working buy form, since purchasing isn't possible for
+          // anyone right now regardless of auth state. buyBundle itself
+          // also independently fails closed for a direct/stale POST.
+          <span
+            className="cursor-not-allowed rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium text-muted"
+            aria-disabled="true"
           >
-            Log in to buy
-          </Link>
+            Paid bundle checkout coming soon
+          </span>
         )}
       </div>
 

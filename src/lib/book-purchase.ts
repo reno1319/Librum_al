@@ -60,3 +60,22 @@ export function resolveShowSample(state: BookPurchaseState): boolean {
     state === "paid-unowned"
   );
 }
+
+// STRIPE-DISABLE-1 CORRECTION: this used to read "Secure checkout with
+// Stripe." for every non-POK book, an untested inline ternary directly
+// in Book Detail's Server Component -- accurate before this patch, but
+// FALSE now that new Stripe checkout creation is disabled (buyBook can
+// no longer reach Stripe at all). Extracted as a pure function (the same
+// pattern already established by resolveBookPurchaseState/
+// resolveShowSample above) so the exact wording is pinned and testable.
+// Deliberately neutral ("Secure checkout.") rather than naming a
+// provider for the non-POK case -- this is the smallest wording fix for
+// the inaccuracy, not a UI redesign: whether the note is shown at all,
+// and the POK-specific wording, are both unchanged.
+export function resolveCheckoutSecurityNote(params: {
+  priceCents: number;
+  usePok: boolean;
+}): string | null {
+  if (params.priceCents <= 0) return null;
+  return params.usePok ? " Secure checkout with POK." : " Secure checkout.";
+}

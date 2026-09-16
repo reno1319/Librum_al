@@ -43,6 +43,36 @@ export function isStripeSecretKeyTestMode(secretKey: string | undefined): boolea
   return secretKey.startsWith("sk_test_") || secretKey.startsWith("rk_test_");
 }
 
+// STRIPE-DISABLE-1: the single, shared decision of which payment
+// provider (if any) is allowed to create a brand-new buyer checkout
+// right now. Deliberately implemented as composition over the two
+// functions above rather than a third, parallel set of ad hoc
+// comparisons -- exactly the drift risk a second independent check on
+// the same two env vars would introduce. `resolveCheckoutRegime` and
+// `resolveLedgerPaymentProvider` are left completely unchanged (and
+// still directly exported) so every existing caller and test of either
+// function is unaffected; this function is additive.
+//
+// "stripe" can never be this function's result, by construction -- the
+// only regime/provider combination it recognizes as active is the exact
+// pair (librum_ledger_v1, pok). Every other combination -- the legacy
+// default, a missing/empty/malformed value, an explicit legacy string,
+// wrong casing, or librum_ledger_v1 paired with anything other than an
+// exact "pok" -- resolves to "disabled". This is what makes "missing or
+// malformed config fails closed instead of silently falling back to
+// Stripe" hold for any new checkout-creation call site that consults
+// this function instead of re-deriving the regime/provider pair itself.
+export type ActiveCheckoutProvider = "pok" | "disabled";
+
+export function resolveActiveCheckoutProvider(params: {
+  newCheckoutRegime: string | undefined;
+  ledgerPaymentProvider: string | undefined;
+}): ActiveCheckoutProvider {
+  const regime = resolveCheckoutRegime(params.newCheckoutRegime);
+  const provider = resolveLedgerPaymentProvider(params.ledgerPaymentProvider);
+  return regime === LEDGER_V1_REGIME && provider === "pok" ? "pok" : "disabled";
+}
+
 // The SECOND reachable stage (Section 4): genuine test-mode proof is
 // only available later, once Stripe itself has returned a verified
 // object. `event.livemode` is part of the SIGNED webhook payload Stripe
