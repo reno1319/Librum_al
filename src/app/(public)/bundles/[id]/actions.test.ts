@@ -52,218 +52,27 @@ describe("buyBundle: recovery-session defense-in-depth", () => {
   });
 });
 
-// LIBRUM 2.0 CONNECT-HARDEN-1: covers buyBundle's connected-account
-// validation gate -- the bundle-side equivalent of buyBook's own gate
-// (src/app/books/[id]/actions.test.ts), same production incident, same
-// fix. Scoped narrowly to the gate itself.
-describe("buyBundle: connected-account validation gate (LIBRUM 2.0 CONNECT-HARDEN-1)", () => {
+// STRIPE-DISABLE-1: buyBundle's legacy Connect-gate branch (LIBRUM 2.0
+// CONNECT-HARDEN-1) and its ledger_v1 Stripe-fallback branch (STRIPE-
+// CUTOVER-2A Section 33) have both been REMOVED -- paid bundle checkout
+// is unavailable under every configuration until separate POK bundle
+// support is reviewed (locked product decision). The tests that used to
+// live in this file for those two branches asserted the exact
+// fail-OPEN-to-Stripe behavior this patch removes, so they are
+// superseded, not weakened -- replaced below by a matrix proving
+// buyBundle now fails closed, with zero DB/RPC/Stripe/POK calls of any
+// kind, for every configuration (including the one-time exact POK
+// config, since POK phase one still supports single books only).
+describe("buyBundle: fails closed under every configuration (STRIPE-DISABLE-1)", () => {
   const BUNDLE_ID = "bundle-1";
   const READER_ID = "reader-1";
-  const AUTHOR_ID = "author-1";
   const UNAVAILABLE_PREFIX = `/bundles/${BUNDLE_ID}?error=`;
-
-  function makeBundleRow(
-    profileOverrides: Partial<{ stripe_account_id: string | null; stripe_payouts_enabled: boolean }> = {},
-  ) {
-    return {
-      id: BUNDLE_ID,
-      status: "published",
-      author_id: AUTHOR_ID,
-      profiles: { stripe_account_id: null, stripe_payouts_enabled: false, ...profileOverrides },
-    };
-  }
-
-  let mockBundleSingle = vi.fn();
-  let mockBundleBooksSelect = vi.fn();
-
-  beforeEach(() => {
-    mockRedirect.mockClear();
-    mockAccountsRetrieve.mockReset();
-    mockCheckoutSessionsCreate.mockReset();
-    mockCreateAdminClient.mockClear();
-    mockCookieStore.get.mockImplementation(() => undefined);
-
-    mockBundleSingle = vi.fn();
-    mockBundleBooksSelect = vi.fn().mockResolvedValue({ data: [], error: null });
-    mockCreateClient.mockReset().mockResolvedValue({
-      auth: { getUser: () => Promise.resolve({ data: { user: { id: READER_ID } } }) },
-      from: (table: string) => {
-        if (table === "bundles") {
-          return { select: () => ({ eq: () => ({ single: () => mockBundleSingle() }) }) };
-        }
-        if (table === "bundle_books") {
-          return { select: () => ({ eq: () => mockBundleBooksSelect() }) };
-        }
-        throw new Error(`buyBundle gate tests: unexpected table "${table}"`);
-      },
-      rpc: () => Promise.resolve({ data: null, error: null }),
-    });
-  });
-
-  it("no stripe_account_id on file: rejects before any Stripe account lookup or membership check", async () => {
-    mockBundleSingle.mockResolvedValue({ data: makeBundleRow({ stripe_account_id: null }), error: null });
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining(UNAVAILABLE_PREFIX));
-    expect(mockAccountsRetrieve).not.toHaveBeenCalled();
-    expect(mockBundleBooksSelect).not.toHaveBeenCalled();
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
-  });
-
-  it("Stripe resource_missing (stale/wrong-platform/test-mode account): rejects with the generic message, real reason logged server-side only", async () => {
-    mockBundleSingle.mockResolvedValue({
-      data: makeBundleRow({ stripe_account_id: "acct_stale" }),
-      error: null,
-    });
-    const stripeError = Object.assign(new Error("No such destination: 'acct_stale'"), {
-      code: "resource_missing",
-    });
-    mockAccountsRetrieve.mockRejectedValue(stripeError);
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining(UNAVAILABLE_PREFIX));
-    expect(mockBundleBooksSelect).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("not ready for checkout"),
-      expect.objectContaining({ reason: "missing" }),
-    );
-    errorSpy.mockRestore();
-  });
-
-  it("connected account retrieved but payouts_enabled is false: rejects with the generic message", async () => {
-    mockBundleSingle.mockResolvedValue({
-      data: makeBundleRow({ stripe_account_id: "acct_pending" }),
-      error: null,
-    });
-    mockAccountsRetrieve.mockResolvedValue({
-      id: "acct_pending",
-      charges_enabled: true,
-      payouts_enabled: false,
-      details_submitted: true,
-      capabilities: { transfers: "active" },
-    });
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining(UNAVAILABLE_PREFIX));
-    expect(mockBundleBooksSelect).not.toHaveBeenCalled();
-  });
-
-  it("connected account retrieved but capabilities.transfers is not active: rejects with the generic message", async () => {
-    mockBundleSingle.mockResolvedValue({
-      data: makeBundleRow({ stripe_account_id: "acct_pending" }),
-      error: null,
-    });
-    mockAccountsRetrieve.mockResolvedValue({
-      id: "acct_pending",
-      charges_enabled: true,
-      payouts_enabled: true,
-      details_submitted: true,
-      capabilities: { transfers: "inactive" },
-    });
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining(UNAVAILABLE_PREFIX));
-    expect(mockBundleBooksSelect).not.toHaveBeenCalled();
-  });
-
-  // LIBRUM 2.0 CONNECT-HARDEN-1 REVIEW CORRECTION regression: proves the
-  // removed charges_enabled dependency stays removed for bundles too.
-  it("connected account has charges_enabled=false but payouts_enabled + transfers=active: gate PASSES", async () => {
-    mockBundleSingle.mockResolvedValue({
-      data: makeBundleRow({ stripe_account_id: "acct_ready" }),
-      error: null,
-    });
-    mockAccountsRetrieve.mockResolvedValue({
-      id: "acct_ready",
-      charges_enabled: false,
-      payouts_enabled: true,
-      details_submitted: true,
-      capabilities: { transfers: "active" },
-    });
-    mockBundleBooksSelect.mockResolvedValue({ data: [], error: null });
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(`/bundles/${BUNDLE_ID}`);
-  });
-
-  it("valid, fully payout-ready account: passes the gate and proceeds past it", async () => {
-    mockBundleSingle.mockResolvedValue({
-      data: makeBundleRow({ stripe_account_id: "acct_ready" }),
-      error: null,
-    });
-    mockAccountsRetrieve.mockResolvedValue({
-      id: "acct_ready",
-      charges_enabled: true,
-      payouts_enabled: true,
-      details_submitted: true,
-      capabilities: { transfers: "active" },
-    });
-    // Empty membership triggers buyBundle's own PRE-EXISTING empty-bundle
-    // redirect (a different target, with no ?error=) -- only proves the
-    // gate let execution continue, not a re-test of buyBundle's
-    // membership logic itself.
-    mockBundleBooksSelect.mockResolvedValue({ data: [], error: null });
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockAccountsRetrieve).toHaveBeenCalledWith("acct_ready");
-    expect(mockBundleBooksSelect).toHaveBeenCalled();
-    expect(mockRedirect).toHaveBeenCalledWith(`/bundles/${BUNDLE_ID}`);
-  });
-
-  it("buyer-facing redirect never contains the Stripe account id or internal Stripe error text", async () => {
-    mockBundleSingle.mockResolvedValue({
-      data: makeBundleRow({ stripe_account_id: "acct_1U4LsoIwnWBEg0IB" }),
-      error: null,
-    });
-    const stripeError = Object.assign(
-      new Error(
-        "No such destination: 'acct_1U4LsoIwnWBEg0IB'; a similar object exists in test mode, but a live mode key was used to make this request.",
-      ),
-      { code: "resource_missing" },
-    );
-    mockAccountsRetrieve.mockRejectedValue(stripeError);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    const redirectedUrl = mockRedirect.mock.calls[0][0] as string;
-    expect(redirectedUrl).not.toContain("acct_");
-    expect(redirectedUrl).not.toContain("test mode");
-    expect(redirectedUrl).not.toContain("live mode key");
-  });
-});
-
-// STRIPE-CUTOVER-2A Section 33: buyBundle's librum_ledger_v1 branch --
-// mirrors buyBook's own ledger_v1 coverage.
-describe("buyBundle: librum_ledger_v1 regime (STRIPE-CUTOVER-2A)", () => {
-  const BUNDLE_ID = "bundle-1";
-  const READER_ID = "reader-1";
-  const AUTHOR_ID = "author-1";
   const ORIGINAL_REGIME = process.env.NEW_CHECKOUT_REGIME;
-  const ORIGINAL_KEY = process.env.STRIPE_SECRET_KEY;
-
-  function makeLedgerBundleRow() {
-    return {
-      id: BUNDLE_ID,
-      status: "published",
-      author_id: AUTHOR_ID,
-      // No stripe_account_id at all -- proves the ledger_v1 branch never
-      // requires one.
-      profiles: null,
-    };
-  }
+  const ORIGINAL_PROVIDER = process.env.LEDGER_PAYMENT_PROVIDER;
 
   let mockBundleSingle = vi.fn();
   let mockBundleBooksSelect = vi.fn();
   let mockRpc = vi.fn();
-  let mockSnapshotUpdateSelect = vi.fn();
 
   beforeEach(() => {
     mockRedirect.mockClear();
@@ -271,42 +80,10 @@ describe("buyBundle: librum_ledger_v1 regime (STRIPE-CUTOVER-2A)", () => {
     mockCheckoutSessionsCreate.mockReset();
     mockCreateAdminClient.mockReset();
     mockCookieStore.get.mockImplementation(() => undefined);
-    process.env.NEW_CHECKOUT_REGIME = "librum_ledger_v1";
-    process.env.STRIPE_SECRET_KEY = "sk_test_abc123";
 
-    mockBundleSingle = vi.fn().mockResolvedValue({ data: makeLedgerBundleRow(), error: null });
-    mockBundleBooksSelect = vi.fn().mockResolvedValue({
-      data: [{ book_id: "book-a" }, { book_id: "book-b" }],
-      error: null,
-    });
-    mockRpc = vi.fn().mockImplementation((name: string) => {
-      if (name === "user_owns_book") return Promise.resolve({ data: false, error: null });
-      if (name === "create_bundle_checkout_snapshot") {
-        return Promise.resolve({
-          data: [
-            {
-              snapshot_id: "snapshot-ledger-1",
-              bundle_title: "Test Bundle",
-              bundle_price_cents_at_checkout: 250000,
-              protection_expires_at: "2026-08-24T09:00:00.000Z",
-            },
-          ],
-          error: null,
-        });
-      }
-      throw new Error(`unexpected rpc "${name}"`);
-    });
-    mockSnapshotUpdateSelect = vi.fn().mockResolvedValue({ data: [{ id: "snapshot-ledger-1" }], error: null });
-    mockCreateAdminClient.mockReturnValue({
-      from: (table: string) => {
-        if (table !== "bundle_checkout_snapshots") {
-          throw new Error(`ledger buyBundle test: unexpected admin table "${table}"`);
-        }
-        return {
-          update: () => ({ eq: () => ({ is: () => ({ select: mockSnapshotUpdateSelect }) }) }),
-        };
-      },
-    });
+    mockBundleSingle = vi.fn();
+    mockBundleBooksSelect = vi.fn();
+    mockRpc = vi.fn();
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: () => Promise.resolve({ data: { user: { id: READER_ID } } }) },
       from: (table: string) => {
@@ -316,78 +93,63 @@ describe("buyBundle: librum_ledger_v1 regime (STRIPE-CUTOVER-2A)", () => {
         if (table === "bundle_books") {
           return { select: () => ({ eq: () => mockBundleBooksSelect() }) };
         }
-        throw new Error(`ledger buyBundle test: unexpected table "${table}"`);
+        throw new Error(`buyBundle fail-closed tests: unexpected table "${table}"`);
       },
-      rpc: (...args: unknown[]) => mockRpc(...(args as [string, unknown])),
+      rpc: (...args: unknown[]) => mockRpc(...args),
     });
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
     if (ORIGINAL_REGIME === undefined) delete process.env.NEW_CHECKOUT_REGIME;
     else process.env.NEW_CHECKOUT_REGIME = ORIGINAL_REGIME;
-    if (ORIGINAL_KEY === undefined) delete process.env.STRIPE_SECRET_KEY;
-    else process.env.STRIPE_SECRET_KEY = ORIGINAL_KEY;
+    if (ORIGINAL_PROVIDER === undefined) delete process.env.LEDGER_PAYMENT_PROVIDER;
+    else process.env.LEDGER_PAYMENT_PROVIDER = ORIGINAL_PROVIDER;
   });
 
-  it("POK selection blocks unsupported bundles before snapshot creation or Stripe", async () => {
-    vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
-    await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({ target: `/bundles/${BUNDLE_ID}?error=Bundle+checkout+is+not+available+with+POK+yet` });
-    expect(mockRpc).not.toHaveBeenCalled(); expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled(); expect(mockAccountsRetrieve).not.toHaveBeenCalled();
-  });
+  const configs: Array<[string, string | undefined, string | undefined]> = [
+    ["both env vars unset (pre-cutover default)", undefined, undefined],
+    ["legacy regime explicit", "legacy_stripe_connect_v1", undefined],
+    ["ledger regime, provider stripe", "librum_ledger_v1", "stripe"],
+    // Even the one config that enables POK for BOOKS must still fail
+    // closed here -- POK phase one supports single books only.
+    ["ledger regime, provider pok (still unsupported for bundles)", "librum_ledger_v1", "pok"],
+    ["unrecognized regime, provider pok", "not_a_real_regime", "pok"],
+  ];
 
-  it("never calls the Connect account gate for a ledger_v1 bundle checkout", async () => {
-    mockCheckoutSessionsCreate.mockResolvedValue({
-      id: "cs_ledger_1",
-      url: "https://checkout.stripe.com/cs_ledger_1",
+  it.each(configs)(
+    "%s: rejects before any bundle/membership read, RPC, or Stripe/POK call",
+    async (_label, regime, provider) => {
+      delete process.env.NEW_CHECKOUT_REGIME;
+      delete process.env.LEDGER_PAYMENT_PROVIDER;
+      if (regime !== undefined) process.env.NEW_CHECKOUT_REGIME = regime;
+      if (provider !== undefined) process.env.LEDGER_PAYMENT_PROVIDER = provider;
+
+      await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({
+        target: expect.stringContaining(UNAVAILABLE_PREFIX),
+      });
+
+      expect(mockBundleSingle).not.toHaveBeenCalled();
+      expect(mockBundleBooksSelect).not.toHaveBeenCalled();
+      expect(mockRpc).not.toHaveBeenCalled();
+      expect(mockAccountsRetrieve).not.toHaveBeenCalled();
+      expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+    },
+  );
+
+  it("an unauthenticated reader is still sent to login first, never the disabled notice", async () => {
+    mockCreateClient.mockResolvedValue({
+      auth: { getUser: () => Promise.resolve({ data: { user: null } }) },
+      from: () => {
+        throw new Error("must not query any table before the login redirect");
+      },
+      rpc: () => {
+        throw new Error("must not call any RPC before the login redirect");
+      },
     });
 
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockAccountsRetrieve).not.toHaveBeenCalled();
-  });
-
-  it("freezes regime=librum_ledger_v1, currency=ALL, and the current royalty rate on create_bundle_checkout_snapshot", async () => {
-    mockCheckoutSessionsCreate.mockResolvedValue({
-      id: "cs_ledger_1",
-      url: "https://checkout.stripe.com/cs_ledger_1",
+    await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({
+      target: expect.stringContaining(`/login?next=/bundles/${BUNDLE_ID}`),
     });
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRpc).toHaveBeenCalledWith("create_bundle_checkout_snapshot", {
-      bundle_id: BUNDLE_ID,
-      p_regime: "librum_ledger_v1",
-      p_currency: "ALL",
-      p_royalty_rate_bps: 8000,
-    });
-  });
-
-  it("creates a Stripe session with currency 'all', unit_amount in minor units, and no Connect fields", async () => {
-    mockCheckoutSessionsCreate.mockResolvedValue({
-      id: "cs_ledger_1",
-      url: "https://checkout.stripe.com/cs_ledger_1",
-    });
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockCheckoutSessionsCreate).toHaveBeenCalledTimes(1);
-    const [params] = mockCheckoutSessionsCreate.mock.calls[0] as [
-      { line_items: { price_data: { currency: string; unit_amount: number } }[]; payment_intent_data?: unknown },
-    ];
-    expect(params.line_items[0].price_data.currency).toBe("all");
-    expect(params.line_items[0].price_data.unit_amount).toBe(250000);
-    expect(params.payment_intent_data).toBeUndefined();
-  });
-
-  it("fails closed and never reaches the checkout-snapshot RPC when STRIPE_SECRET_KEY is not a test key", async () => {
-    process.env.STRIPE_SECRET_KEY = "sk_live_abc123";
-    vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await expect(buyBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining(`/bundles/${BUNDLE_ID}?error=`));
-    expect(mockRpc).not.toHaveBeenCalled();
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
 });
