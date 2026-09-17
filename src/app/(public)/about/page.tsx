@@ -44,12 +44,11 @@ export default function AboutPage() {
       <section className="mt-12">
         <h2 className="font-serif text-xl font-semibold">How the money works</h2>
         <p className="mt-3 text-foreground/90">
-          Librum takes a {PLATFORM_FEE_PERCENT}% platform fee on every sale.
-          The remaining {100 - PLATFORM_FEE_PERCENT}% is transferred to the
-          author&apos;s bank account by Stripe,
-          automatically per sale — actual timing depends on Stripe&apos;s own
-          processing schedule. We never see or store payment card details.
-          See{" "}
+          Librum takes a {PLATFORM_FEE_PERCENT}% platform fee on every sale,
+          once paid publishing launches. Paid publishing and author payout
+          setup have not launched yet — authors can continue to publish
+          free books while Librum completes its payment and payout
+          systems. See{" "}
           <Link href="/how-it-works" className="text-primary underline">
             how self-publishing works
           </Link>{" "}

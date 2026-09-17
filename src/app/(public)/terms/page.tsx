@@ -42,9 +42,9 @@ export default function TermsPage() {
             Librum is a digital publishing and marketplace platform
             through which independent authors make their work available
             to readers. Librum facilitates the platform itself — book
-            listings, payment flow, digital delivery, and author payouts
-            through Stripe Connect — and charges a platform fee on each
-            sale, as described in Section 7.
+            listings, payment flow, and digital delivery — and charges a
+            platform fee on each sale, as described in Section 7. Paid
+            publishing and author payout setup have not launched yet.
           </p>
         </section>
 
@@ -116,13 +116,15 @@ export default function TermsPage() {
             7. Payments and platform fee
           </h2>
           <p className="mt-2">
-            Readers pay through Stripe. For each completed sale, the
+            Librum is currently in pre-launch testing, and paid purchasing
+            has not launched publicly. When paid purchasing launches, new
+            reader payments will be processed in ALL through POK&apos;s
+            hosted checkout page. Librum does not collect or store
+            readers&apos; card details. For each completed sale, the
             author receives {AUTHOR_SHARE_PERCENT}% of the amount actually
             charged — after any discount code or bundle pricing is
             applied — and Librum retains {PLATFORM_FEE_PERCENT}% as its
-            platform fee. Payment processing is handled by Stripe; Stripe
-            may separately affect settlement timing, but Librum
-            doesn&apos;t store card details.
+            platform fee.
           </p>
         </section>
 
@@ -166,11 +168,10 @@ export default function TermsPage() {
             10. Author payouts
           </h2>
           <p className="mt-2">
-            Stripe Connect handles author payout account onboarding and
-            bank-transfer processing. Payout availability depends on your
-            Stripe account&apos;s onboarding and status, and settlement
-            timing depends on Stripe&apos;s own processing schedule —
-            Librum doesn&apos;t guarantee instant or fixed payout timing.
+            Author payout setup is not currently available. Librum will
+            publish the applicable payout method and timing before paid
+            publishing launches. POK processes new reader payments and is
+            not represented here as Librum&apos;s author-payout provider.
           </p>
         </section>
 

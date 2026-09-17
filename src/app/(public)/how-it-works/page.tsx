@@ -13,8 +13,8 @@ const steps = [
     body: "Create an account and choose \"Author\" when you sign up.",
   },
   {
-    title: "2. Connect a payout account",
-    body: "From Dashboard > Payouts, connect with Stripe. Stripe verifies your identity and collects your bank details directly — Librum never sees or stores them. This is required before you can publish a paid book.",
+    title: "2. Payout setup",
+    body: "Paid publishing and author payout setup have not launched yet. Authors can continue to publish free books while Librum completes its payment and payout systems.",
   },
   {
     title: "3. Upload your book",
@@ -26,7 +26,7 @@ const steps = [
   },
   {
     title: "5. Get paid",
-    body: `Every sale splits automatically: you keep ${100 - PLATFORM_FEE_PERCENT}%, transferred to your bank account by Stripe. Librum keeps a ${PLATFORM_FEE_PERCENT}% platform fee. Actual bank-transfer timing depends on your Stripe account status and Stripe's own processing schedule, and refunded sales, or sales disputed and resolved against the payment, are adjusted accordingly.`,
+    body: `When paid publishing launches, the current commission terms allocate ${100 - PLATFORM_FEE_PERCENT}% to the author and ${PLATFORM_FEE_PERCENT}% to Librum. The author payout method and timing will be published before paid publishing launches.`,
   },
 ];
 

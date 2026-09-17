@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 const HOW_IT_WORKS = [
   "You set the price for your book — any price you like, including free.",
   `Librum takes a flat ${PLATFORM_FEE_PERCENT}% platform fee on every sale. That's it — no other cuts.`,
-  "The rest is transferred to your bank account by Stripe automatically, per sale — actual timing depends on your Stripe account status and Stripe's own processing schedule.",
+  "Paid publishing and author payout setup have not launched yet.",
   "No setup fees, no monthly subscription, no minimum number of sales.",
   "Refunded transactions, or disputes resolved against the payment, are adjusted accordingly.",
 ];
@@ -43,22 +43,16 @@ export default function PricingPage() {
         ))}
       </ul>
 
-      {/* LIBRUM 2.0 PRODUCT-4: /pricing previously never mentioned the
-          payout-setup requirement at all -- COPY-1's own rule (a paid
-          book needs Stripe Connect set up first; a free book never
-          does) already lives on Help/How It Works/Dashboard, but not
-          here, where an author deciding whether to price a book is
-          most likely to want it. Same wording/timing discipline as
-          those pages: no specific payout schedule is asserted, because
-          none is authoritative in this codebase -- only "per sale,
-          timing depends on your Stripe account status." */}
+      {/* TRANSITIONAL-PAYMENT-COPY-2 CORRECTION: paid-book publishing and
+          author payout setup have not launched yet -- see the approved
+          transitional author message. Deliberately does not name POK
+          here: POK is only ever named for reader checkout, never as an
+          implied author-payout provider. */}
       <h2 className="mt-10 font-serif text-xl font-semibold">Payouts</h2>
       <p className="mt-3 text-foreground/90">
-        Paid books require a connected Stripe account — set this up anytime
-        from Dashboard &gt; Payouts before you publish your first paid book.
-        Stripe verifies your identity and pays you directly; Librum never
-        sees or stores your bank details. Free books can be published
-        without connecting Stripe at all.
+        Paid publishing and author payout setup have not launched yet.
+        Authors can continue to publish free books without payout setup
+        while Librum completes its payment and payout systems.
       </p>
 
       <h2 className="mt-10 font-serif text-xl font-semibold">
