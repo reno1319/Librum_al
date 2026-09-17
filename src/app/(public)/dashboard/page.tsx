@@ -129,10 +129,10 @@ export default async function DashboardPage({
       : "pending";
   const payoutLabel =
     payoutStatus === "not-connected"
-      ? "Connect payouts"
+      ? "Payout setup not available"
       : payoutStatus === "pending"
-        ? "Finish payout setup"
-        : "Payouts active";
+        ? "Payout setup not available"
+        : "Legacy payout account on file";
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
@@ -154,9 +154,17 @@ export default async function DashboardPage({
       )}
 
       {attention.kind === "payout-setup" && (
-        <Alert variant="warning" title="Finish payout setup to publish paid books." className="mt-6">
+        <Alert
+          variant="warning"
+          title="Paid publishing and author payout setup have not launched yet."
+          className="mt-6"
+        >
+          <p>
+            You can continue to publish free books while Librum completes
+            its payment and payout systems.
+          </p>
           <Link href="/dashboard/payouts" className="focus-ring rounded-sm font-medium underline">
-            Manage payouts
+            Payout details
           </Link>
         </Alert>
       )}
@@ -236,7 +244,7 @@ export default async function DashboardPage({
             href="/dashboard/payouts"
             className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
           >
-            Manage payouts &rarr;
+            View payouts &rarr;
           </Link>
         </section>
       </div>

@@ -14,7 +14,7 @@ const faqs = [
   },
   {
     q: "How do I get paid?",
-    a: `You connect a Stripe account from Dashboard > Payouts before you can publish a paid book. Stripe verifies your identity and pays you directly — you keep ${100 - PLATFORM_FEE_PERCENT}% of every sale, Librum keeps ${PLATFORM_FEE_PERCENT}%. Payout availability and the actual bank-transfer timing depend on your Stripe account status and Stripe's own processing schedule.`,
+    a: `Paid publishing and author payout setup have not launched yet. Authors can continue to publish free books while Librum completes its payment and payout systems. When paid publishing launches, the current commission terms allocate ${100 - PLATFORM_FEE_PERCENT}% to the author and ${PLATFORM_FEE_PERCENT}% to Librum. The author payout method and timing will be published before paid publishing launches.`,
   },
   {
     q: "What happens to my earnings if a sale is refunded?",
@@ -30,7 +30,7 @@ const faqs = [
   },
   {
     q: "How do refunds work?",
-    a: "There's no self-serve refund request yet — reach out from the contact page and we'll process it manually through Stripe. Once we do, you'll lose access to the book automatically (it disappears from downloads, though it stays listed in your library marked as refunded).",
+    a: "There's no self-serve refund request yet — reach out from the contact page. Eligible historical Stripe purchases continue to use Librum's legacy Stripe refund process. The refund process for POK purchases will be published before paid sales launch. Once a refund is processed, you'll lose access to the book automatically (it disappears from downloads, though it stays listed in your library marked as refunded).",
   },
   {
     q: "What happens if I dispute a payment with my bank?",
@@ -38,7 +38,7 @@ const faqs = [
   },
   {
     q: "Is my payment information safe?",
-    a: "Yes — checkout happens on Stripe's own hosted page. Librum never sees or stores your card details.",
+    a: "Librum is currently in pre-launch testing. When paid purchases launch publicly, checkout will take place on POK's hosted payment page and will be charged in ALL — Librum never sees or stores your card details.",
   },
   {
     q: "Can readers preview a book before buying?",

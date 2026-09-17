@@ -23,10 +23,11 @@ export default function PrivacyPage() {
           </p>
           <p className="mt-2">
             <strong>If you publish as an author:</strong> the books,
-            covers, and manuscript files you upload, your public author
-            profile information, and your Stripe Connect account
-            identifier and payout status (used to send you your share of
-            sales — see &quot;Who we share it with&quot; below).
+            covers, and manuscript files you upload, and your public
+            author profile information. For authors with a historical
+            Stripe Connect account, Librum may retain the account
+            identifier and historical payout-status records (see &quot;Who
+            we share it with&quot; below).
           </p>
           <p className="mt-2">
             <strong>If you buy as a reader:</strong> your purchases,
@@ -35,10 +36,13 @@ export default function PrivacyPage() {
             purchase.
           </p>
           <p className="mt-2">
-            <strong>Payment:</strong> Stripe payment identifiers for each
-            transaction, and records of any refund or payment dispute.
-            We don&apos;t collect or store your card details — Stripe
-            handles that directly.
+            <strong>Payment:</strong> payment or order identifiers and
+            payment status from our payment processor for each
+            transaction, and records of any refund or payment dispute. We
+            don&apos;t collect or store your card details. For new reader
+            payments once paid purchasing launches publicly, this
+            processor is POK; for historical transactions, this is
+            Stripe.
           </p>
           <p className="mt-2">
             <strong>Technical:</strong> cookies used to keep you signed in
@@ -87,8 +91,13 @@ export default function PrivacyPage() {
               and file storage for covers and manuscripts.
             </li>
             <li>
-              <strong>Stripe</strong> — payment processing, refunds and
-              disputes, and author payouts through Stripe Connect.
+              <strong>Stripe</strong> — historical reader-payment records,
+              eligible legacy refunds, legacy disputes, and historical
+              Stripe Connect identifiers and related records.
+            </li>
+            <li>
+              <strong>POK</strong> — payment processing for new reader
+              purchases, once paid purchasing launches publicly.
             </li>
             <li>
               <strong>Resend</strong> — sending transactional emails, such

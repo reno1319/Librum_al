@@ -294,7 +294,7 @@ const PUBLISHING_STEPS: { title: string; body: string }[] = [
   },
   {
     title: "Sell and earn",
-    body: "Track sales and revenue from your dashboard, with author payouts handled through Stripe.",
+    body: "Paid publishing and author payout setup have not launched yet. Authors can continue to publish free books while Librum completes its payment and payout systems.",
   },
 ];
 
@@ -579,8 +579,8 @@ const PROFESSIONAL_TOOLS: { title: string; body: string; icon: Icon }[] = [
     icon: IconChart,
   },
   {
-    title: "Receive payouts through Stripe",
-    body: "Author payouts are handled securely through Stripe.",
+    title: "Payouts",
+    body: "Paid publishing and author payout setup have not launched yet. Authors can continue to publish free books while Librum completes its payment and payout systems.",
     icon: IconBank,
   },
 ];
