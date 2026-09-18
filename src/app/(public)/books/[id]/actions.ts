@@ -12,8 +12,14 @@ import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/connect-account";
 import { resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
 import { createPokClient, getPokConfig, type PokConfig } from "@/lib/pok";
-import { startPokCheckout, POK_CHECKOUT_CANNOT_RESUME } from "@/lib/pok-checkout";
+import {
+  startPokCheckout,
+  POK_CHECKOUT_CANNOT_RESUME,
+  POK_CHECKOUT_MAINTENANCE_ACTIVE,
+} from "@/lib/pok-checkout";
 import { createPokRepository } from "@/lib/pok-repository";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { redirectForMaintenance } from "@/lib/maintenance-response";
 import type { DiscountCode } from "@/lib/types";
 
 type BookForCheckout = {
@@ -33,6 +39,15 @@ type CheckoutIntentResult = {
 };
 
 export async function buyBook(bookId: string, formData: FormData) {
+  // ALL-CUTOVER APP-A: the maintenance gate is the very first statement
+  // in this function -- before redirectIfRecoverySessionActive(), before
+  // any Supabase client construction, and before any POK call. No
+  // checkout intent, provider order, or purchase row may be created
+  // while the cutover's maintenance window is active.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(`/books/${bookId}`);
+  }
+
   // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks the
   // /books/[id] page itself while a recovery session is active, so this
   // is the second layer against a crafted direct POST. Runs before any
@@ -217,6 +232,14 @@ export async function buyBook(bookId: string, formData: FormData) {
       origin, merchantId: pokConfig.merchantId,
     }, createPokRepository(), createPokClient(pokConfig));
   } catch (err) {
+    // ALL-CUTOVER APP-A: startPokCheckout()'s own defense-in-depth
+    // maintenance gate fired -- map it back to the exact same
+    // deterministic redirect this function's own top-of-function gate
+    // already produces, so the reader-visible outcome never depends on
+    // which of the two layers actually caught the maintenance window.
+    if (err instanceof Error && err.message === POK_CHECKOUT_MAINTENANCE_ACTIVE) {
+      redirectForMaintenance(`/books/${bookId}`);
+    }
     // A stale checkout can never be silently resumed (see pok-checkout's
     // assertReusableUnpaidOrder) -- tell the reader that plainly instead
     // of implying a retry will work, since it won't: this same intent's
@@ -242,6 +265,14 @@ type BookForFreeAcquisition = {
 };
 
 export async function getFreeBook(bookId: string) {
+  // ALL-CUTOVER APP-A: free acquisition still writes a purchases row
+  // (amount_cents: 0) -- a column the cutover renames/retypes -- so it
+  // is gated identically to every paid checkout path, before any
+  // Supabase client construction.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(`/books/${bookId}`);
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

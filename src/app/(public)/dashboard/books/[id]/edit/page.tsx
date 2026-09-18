@@ -22,6 +22,8 @@ import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CoverField } from "@/components/cover-field";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Series, Contributor } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -35,6 +37,11 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Edit book",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see the exhaustive
+// route audit (books.price_cents is rendered for editing below).
+export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART D: client-side-only bounds, purely a
 // UX nicety mirroring actions.ts's own authoritative
@@ -73,6 +80,13 @@ export default async function EditBookPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_cents
+  // for editing (exhaustive route audit) -- checked as the first
+  // statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { id } = await params;
   const { error, success } = await searchParams;
 

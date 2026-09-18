@@ -14,6 +14,8 @@ import {
   REFUND_SUBMITTED_SUCCESS_MESSAGE,
 } from "./refund-review-logic";
 import { executeApprovedRefund } from "./issue-refund";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { redirectForMaintenance } from "@/lib/maintenance-response";
 
 // requireStaff("refunds.resolve") here is defense in depth, not the
 // actual security boundary -- Server Actions are independent server-side
@@ -35,6 +37,11 @@ export async function reviewRefundRequest(
   decision: "approved" | "rejected",
   formData: FormData,
 ) {
+  // ALL-CUTOVER APP-A: gated before requireStaff() and any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/admin/refunds");
+  }
+
   await requireStaff("refunds.resolve");
 
   const supabase = await createClient();
@@ -105,6 +112,13 @@ export async function reviewRefundRequest(
 // ADMIN-1A: migrated from requireAdmin() to
 // requireStaff("refunds.resolve").
 export async function issueStripeRefund(refundRequestId: string) {
+  // ALL-CUTOVER APP-A: gated before requireStaff(), before
+  // redirectIfRecoverySessionActive(), and before the real Stripe
+  // refund call below.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/admin/refunds");
+  }
+
   await requireStaff("refunds.resolve");
   // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks every
   // /admin/* page while a recovery session is active, so this is the

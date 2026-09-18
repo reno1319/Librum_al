@@ -5,6 +5,8 @@ import {
   reverseAuthorTransferForLostDispute,
   type TransferReversalOutcome,
 } from "@/app/api/webhooks/stripe/route";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { maintenanceHttpResponse } from "@/lib/maintenance-response";
 
 // LAUNCH-1 P1-8: automatic reconciliation for lost-dispute transfer
 // recovery. charge.dispute.closed (the event that carries a dispute's
@@ -55,6 +57,13 @@ async function handleReconciliationRequest(request: Request): Promise<Response> 
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${configuredSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // ALL-CUTOVER APP-A: checked after authentication but before any
+  // admin client construction or Stripe call -- no reconciliation pass
+  // of any kind runs while maintenance is active.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return maintenanceHttpResponse();
   }
 
   const supabase = createAdminClient();

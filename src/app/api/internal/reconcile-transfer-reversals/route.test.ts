@@ -508,3 +508,58 @@ describe("GET and POST return identical response shapes for equivalent authentic
     expect(getBody).toEqual(postBody);
   });
 });
+
+// ALL-CUTOVER APP-A: checked AFTER authentication but before any admin
+// client construction or Stripe call.
+describe("maintenance-mode gate", () => {
+  const originalSecret = process.env.CRON_SECRET;
+
+  beforeEach(() => {
+    process.env.CRON_SECRET = "test-cron-secret";
+    process.env.ALL_CUTOVER_MAINTENANCE_MODE = "active";
+    mockCreateAdminClient.mockClear();
+  });
+
+  afterEach(() => {
+    process.env.CRON_SECRET = originalSecret;
+    delete process.env.ALL_CUTOVER_MAINTENANCE_MODE;
+  });
+
+  it("returns 503 and never constructs an admin client, for both GET and POST", async () => {
+    const getResponse = await GET(
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", {
+        method: "GET",
+        headers: { authorization: "Bearer test-cron-secret" },
+      }),
+    );
+    const postResponse = await POST(
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", {
+        method: "POST",
+        headers: { authorization: "Bearer test-cron-secret" },
+      }),
+    );
+    expect(getResponse.status).toBe(503);
+    expect(postResponse.status).toBe(503);
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+  });
+
+  it("an unauthenticated request still gets 401, not a maintenance-revealing response", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", { method: "POST" }),
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("maintenance mode off (unset) preserves existing behavior", async () => {
+    delete process.env.ALL_CUTOVER_MAINTENANCE_MODE;
+    mockAdminTables = {};
+    const response = await POST(
+      new Request("http://localhost/api/internal/reconcile-transfer-reversals", {
+        method: "POST",
+        headers: { authorization: "Bearer test-cron-secret" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(mockCreateAdminClient).toHaveBeenCalled();
+  });
+});

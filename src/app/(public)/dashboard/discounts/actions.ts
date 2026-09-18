@@ -4,8 +4,16 @@ import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
 
 export async function createDiscountCode(formData: FormData) {
+  // ALL-CUTOVER APP-A: discount amount is written by this action --
+  // gated before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/dashboard/discounts");
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -70,6 +78,12 @@ export async function createDiscountCode(formData: FormData) {
 }
 
 export async function toggleDiscountCode(id: string, currentlyActive: boolean) {
+  // ALL-CUTOVER APP-A: no existing business-error redirect convention
+  // to mirror (mutate-and-revalidate only) -- throws instead.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    throwMaintenanceError();
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -89,6 +103,11 @@ export async function toggleDiscountCode(id: string, currentlyActive: boolean) {
 }
 
 export async function deleteDiscountCode(id: string) {
+  // ALL-CUTOVER APP-A: same reasoning as toggleDiscountCode() above.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    throwMaintenanceError();
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

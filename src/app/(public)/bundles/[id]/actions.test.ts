@@ -153,3 +153,46 @@ describe("buyBundle: fails closed under every configuration (STRIPE-DISABLE-1)",
     });
   });
 });
+
+// APP A CORRECTION 2: proves buyBundle rejects through the maintenance
+// contract before redirectIfRecoverySessionActive() (the cookie read),
+// its own disabled-checkout logic, or any Supabase/Stripe/POK
+// dependency call above -- gated first per this file's own
+// ALL-CUTOVER APP-A comment, even though buyBundle is already
+// unconditionally disabled today.
+describe("buyBundle: maintenance-mode gate", () => {
+  const BUNDLE_ID = "bundle-1";
+
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockCreateClient.mockClear();
+    mockCreateAdminClient.mockClear();
+    mockCheckoutSessionsCreate.mockClear();
+    mockCookieStore.get.mockClear();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("redirects with the maintenance message before the recovery-session cookie read or any Supabase/Stripe call", async () => {
+    await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({
+      target: expect.stringContaining(`/bundles/${BUNDLE_ID}?error=`),
+    });
+
+    expect(mockCookieStore.get).not.toHaveBeenCalled();
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+  });
+
+  it("maintenance mode off (unset) preserves buyBundle's existing recovery-session check", async () => {
+    vi.unstubAllEnvs();
+    mockCookieStore.get.mockImplementation((name: string) =>
+      name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
+    );
+
+    await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({
+      target: expect.stringContaining("/reset-password"),
+    });
+    expect(mockCookieStore.get).toHaveBeenCalled();
+  });
+});

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startPokCheckout, fulfillPokCheckout, POK_CHECKOUT_CANNOT_RESUME, type FrozenPokIntent, type PokMapping, type PokRepository } from "./pok-checkout";
+import { startPokCheckout, fulfillPokCheckout, POK_CHECKOUT_CANNOT_RESUME, POK_CHECKOUT_MAINTENANCE_ACTIVE, type FrozenPokIntent, type PokMapping, type PokRepository } from "./pok-checkout";
 import type { PokOrder } from "./pok";
 
 // This test file's diagnostics coverage is scoped to the three stages
@@ -336,5 +336,38 @@ describe("POK atomic fulfillment", () => {
   it("unknown DB outcome is not treated as success", async () => {
     const { repo, orders, ready } = setup(); ready(); repo.finalize.mockResolvedValue("surprise");
     await expect(fulfillPokCheckout(callback, repo, orders)).rejects.toThrow("UNKNOWN");
+  });
+});
+
+// APP A CORRECTION 2: startPokCheckout() is the actual provider-order-
+// creation operation (V3 §3 / buyBook's own top-of-function gate is a
+// separate, earlier layer) -- this proves its own defense-in-depth
+// maintenance check rejects before repository access, intent creation/
+// reuse, or any provider order call, and that maintenance-off preserves
+// the function's already-tested normal behavior.
+describe("startPokCheckout: maintenance-mode gate (APP A CORRECTION 2)", () => {
+  beforeEach(() => vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("rejects with the dedicated sentinel before any repository or provider call", async () => {
+    const { repo, orders } = setup();
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow(
+      POK_CHECKOUT_MAINTENANCE_ACTIVE,
+    );
+    expect(repo.intent).not.toHaveBeenCalled();
+    expect(repo.mapping).not.toHaveBeenCalled();
+    expect(repo.claim).not.toHaveBeenCalled();
+    expect(repo.ready).not.toHaveBeenCalled();
+    expect(repo.reconcile).not.toHaveBeenCalled();
+    expect(orders.createOrder).not.toHaveBeenCalled();
+    expect(orders.retrieveOrder).not.toHaveBeenCalled();
+  });
+
+  it("maintenance mode off (unset) preserves the function's established creation behavior", async () => {
+    vi.unstubAllEnvs();
+    const { repo, orders } = setup();
+    const url = await startPokCheckout(input, repo, orders, now);
+    expect(typeof url).toBe("string");
+    expect(orders.createOrder).toHaveBeenCalledOnce();
   });
 });

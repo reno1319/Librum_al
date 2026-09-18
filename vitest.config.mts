@@ -35,6 +35,16 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(dirname, "src"),
+      // ALL-CUTOVER APP-A: Vitest runs under Node with no "react-server"
+      // condition, so the real server-only package (a direct dependency
+      // of src/lib/maintenance-mode.ts/maintenance-response.ts) resolves
+      // to its default export, which unconditionally throws by design.
+      // Test-only: aliased to an empty stub so those modules' own
+      // production `import "server-only"` can load under Vitest. Never
+      // read by next.config.ts or any Next.js build/dev command -- the
+      // production import target and its enforced boundary are
+      // unaffected outside a Vitest run. See vitest.server-only-stub.ts.
+      "server-only": path.resolve(dirname, "vitest.server-only-stub.ts"),
     },
   },
 });

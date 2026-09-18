@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const config = vi.hoisted(() => vi.fn());
 const fulfill = vi.hoisted(() => vi.fn());
 const repo = vi.hoisted(() => vi.fn());
@@ -37,5 +37,29 @@ describe("POK webhook", () => {
   it("provider errors expose no secret diagnostics", async () => {
     fulfill.mockRejectedValue(new Error("private secret"));
     const response = await POST(request()); expect(response.status).toBe(503); expect(await response.text()).not.toContain("private secret");
+  });
+});
+
+// ALL-CUTOVER APP-A: gated before any query parsing and before any POK
+// call -- POK is not being retired, so this is the same 503 shape the
+// route's own "pending" branch already uses, not a permanent response.
+describe("POK webhook: maintenance-mode gate", () => {
+  beforeEach(() => {
+    config.mockReset().mockReturnValue({ merchantId: "merchant" }); fulfill.mockReset(); repo.mockReset().mockReturnValue({});
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("returns 503 and never reaches POK config/repository/fulfillment", async () => {
+    const response = await POST(request());
+    expect(response.status).toBe(503);
+    expect(config).not.toHaveBeenCalled(); expect(fulfill).not.toHaveBeenCalled(); expect(repo).not.toHaveBeenCalled();
+  });
+
+  it("maintenance mode off (unset) preserves existing behavior", async () => {
+    vi.unstubAllEnvs();
+    fulfill.mockResolvedValue({ status: "fulfilled", bookId: "book" });
+    expect((await POST(request())).status).toBe(200);
+    expect(fulfill).toHaveBeenCalled();
   });
 });

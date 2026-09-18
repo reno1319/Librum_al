@@ -8,17 +8,30 @@ import { openStripeExpressDashboard } from "./actions";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Payouts",
 };
 
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see V3 §3.
+export const dynamic = "force-dynamic";
+
 export default async function PayoutsPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive dashboard payouts page (V3 §3)
+  // -- checked as the first statement, before any Supabase call and
+  // before the real Stripe accounts.retrieve() call further below.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { error } = await searchParams;
   const supabase = await createClient();
   const {

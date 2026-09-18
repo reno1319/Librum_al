@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 // LAUNCH-1 P1-11: minimal, focused coverage of ONLY the new recovery
@@ -21,8 +21,14 @@ const mockRedirect = vi.fn((url: string) => {
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+// ALL-CUTOVER APP-A: wrapped in its own named spy (not an inline
+// vi.fn() inside the mock factory) so the maintenance-mode gate tests
+// below can assert requireStaff() is never even reached.
+const mockRequireStaff = vi.fn((_permission: string) =>
+  Promise.resolve({ userId: "admin-1", role: "admin" }),
+);
 vi.mock("@/lib/staff", () => ({
-  requireStaff: vi.fn(() => Promise.resolve({ userId: "admin-1", role: "admin" })),
+  requireStaff: (permission: string) => mockRequireStaff(permission),
 }));
 
 const mockCookieStore = {
@@ -37,7 +43,7 @@ vi.mock("@/lib/stripe", () => ({ getStripe: () => ({ refunds: { create: mockRefu
 const mockExecuteApprovedRefund = vi.fn();
 vi.mock("./issue-refund", () => ({ executeApprovedRefund: () => mockExecuteApprovedRefund() }));
 
-const { issueStripeRefund } = await import("./actions");
+const { issueStripeRefund, reviewRefundRequest } = await import("./actions");
 
 describe("issueStripeRefund: recovery-session defense-in-depth", () => {
   beforeEach(() => {
@@ -79,5 +85,55 @@ describe("issueStripeRefund: ledger_v1_not_supported outcome", () => {
     expect(redirectedUrl).toContain(`/admin/refunds/${REFUND_REQUEST_ID}?error=`);
     expect(decodeURIComponent(redirectedUrl)).toContain("ledger_v1");
     expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+});
+
+// APP A CORRECTION 2: reviewRefundRequest and issueStripeRefund both
+// gate before requireStaff(), Supabase, and (for issueStripeRefund) the
+// real Stripe refund path -- proven here rather than assumed from the
+// gate's mere placement in actions.ts's own source.
+describe("reviewRefundRequest / issueStripeRefund: maintenance-mode gate (APP A CORRECTION 2)", () => {
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockRequireStaff.mockClear();
+    mockCreateClient.mockClear();
+    mockRefundsCreate.mockClear();
+    mockExecuteApprovedRefund.mockClear();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("reviewRefundRequest redirects with the maintenance message before requireStaff() or any Supabase call", async () => {
+    await expect(
+      reviewRefundRequest("refund-request-1", "approved", new FormData()),
+    ).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/admin/refunds?error="));
+    expect(mockRequireStaff).not.toHaveBeenCalled();
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it("issueStripeRefund redirects with the maintenance message before requireStaff(), any Supabase call, or the real refund executor/provider path", async () => {
+    await expect(issueStripeRefund("refund-request-1")).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/admin/refunds?error="));
+    expect(mockRequireStaff).not.toHaveBeenCalled();
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    // The real refund executor/provider path -- executeApprovedRefund
+    // (which is what actually calls Stripe's refunds.create, see
+    // issue-refund.ts) -- must never be reached while the gate holds.
+    expect(mockExecuteApprovedRefund).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+
+  it("maintenance mode off (unset) preserves issueStripeRefund's existing recovery-session check", async () => {
+    vi.unstubAllEnvs();
+    mockCookieStore.get.mockImplementation((name: string) =>
+      name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
+    );
+
+    await expect(issueStripeRefund("refund-request-1")).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/reset-password"));
+    expect(mockRequireStaff).toHaveBeenCalled();
   });
 });

@@ -14,6 +14,8 @@ import {
 import { reviewRefundRequest, issueStripeRefund } from "../actions";
 import { ReviewButtons } from "./review-buttons";
 import { IssueRefundButton } from "./issue-refund-button";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Metadata } from "next";
 
 // LIBRUM 2.0 SEO-1: static title, not a dynamic one built from the
@@ -24,6 +26,12 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Refund request",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see the exhaustive
+// route audit (refund_requests.amount_cents and
+// refund_request_items.amount_cents are both rendered below).
+export const dynamic = "force-dynamic";
 
 type AdminRefundRequestDetail = {
   id: string;
@@ -64,6 +72,14 @@ export default async function AdminRefundRequestDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders
+  // refund_requests.amount_cents and refund_request_items.amount_cents
+  // (exhaustive route audit) -- checked as the first statement, before
+  // requireStaff() (itself a Supabase query) or any other Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { id } = await params;
   const { error, success } = await searchParams;
 

@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -14,6 +16,11 @@ export const metadata: Metadata = {
   title: "Wishlist",
   description: "Books you've saved to buy later on Librum.",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see the exhaustive
+// route audit (books.price_cents is rendered via BookCard below).
+export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
 // AUTHOR-1C moved this join onto the safe public_author_profiles VIEW
@@ -25,6 +32,13 @@ type WishlistItemWithBook = {
 };
 
 export default async function WishlistPage() {
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_cents
+  // via BookCard (exhaustive route audit) -- checked as the first
+  // statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

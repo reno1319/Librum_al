@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Bundle, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -16,6 +18,10 @@ export const metadata: Metadata = {
   title: "Bundle",
   description: "A book bundle available on Librum.",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see V3 §3.
+export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
 // AUTHOR-1C moved this join onto the safe public_author_profiles VIEW
@@ -33,6 +39,12 @@ export default async function BundleDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ purchase?: string; error?: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive public bundle detail page
+  // (V3 §3) -- checked as the first statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { id } = await params;
   const { purchase, error } = await searchParams;
 

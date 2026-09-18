@@ -14,12 +14,21 @@ import { RefundRequestForm } from "@/app/(public)/library/refund-request-form";
 import { CancelRefundButton } from "@/app/(public)/library/cancel-refund-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Purchases & refunds",
   description: "Review your purchases and manage eligible refund requests.",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see the exhaustive
+// route audit (purchases.amount_cents, bundle_checkout_snapshots.
+// total_amount_cents, and their embedded item amounts are all rendered
+// below).
+export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 UI-9 / ACCOUNT-1: the transaction-history home, moved here
 // directly from the Library page (which now owns current-ownership/
@@ -51,6 +60,14 @@ export default async function AccountPurchasesPage({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders
+  // purchases.amount_cents and bundle_checkout_snapshots.
+  // total_amount_cents (exhaustive route audit) -- checked as the first
+  // statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { error, success } = await searchParams;
   const supabase = await createClient();
   const {

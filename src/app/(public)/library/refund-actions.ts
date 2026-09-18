@@ -9,6 +9,8 @@ import {
   GENERIC_REFUND_ERROR_MESSAGE,
   RPC_NOT_AUTHENTICATED_MESSAGE,
 } from "./refund-logic";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { redirectForMaintenance } from "@/lib/maintenance-response";
 
 // stripePaymentIntentId is bound server-side (see the .bind(null, ...)
 // call sites in account/purchases/page.tsx) from the reader's own
@@ -23,6 +25,11 @@ export async function requestTransactionRefund(
   stripePaymentIntentId: string,
   formData: FormData,
 ) {
+  // ALL-CUTOVER APP-A: gated before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/account/purchases");
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -74,6 +81,11 @@ export async function requestTransactionRefund(
 // anything, so this is defense in depth, not the only thing stopping a
 // reader from cancelling someone else's request.
 export async function cancelRefundRequest(refundRequestId: string) {
+  // ALL-CUTOVER APP-A: gated before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/account/purchases");
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

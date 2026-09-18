@@ -4,9 +4,19 @@ import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { createPokClient, getPokConfig, uuid } from "@/lib/pok";
 import { fulfillPokCheckout } from "@/lib/pok-checkout";
 import { createPokRepository } from "@/lib/pok-repository";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { maintenanceHttpResponse } from "@/lib/maintenance-response";
 
 export const runtime = "nodejs";
 export async function GET(request: Request) {
+  // ALL-CUTOVER APP-A: gated before any query parsing, before
+  // redirectIfRecoverySessionActive(), before any Supabase call, and
+  // before any POK call. POK is not being retired -- this is a
+  // temporary, retryable 503, not a permanent redirect.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return maintenanceHttpResponse();
+  }
+
   await redirectIfRecoverySessionActive();
   const query = new URL(request.url).searchParams;
   const intent = uuid.safeParse(query.get("intent"));

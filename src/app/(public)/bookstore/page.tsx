@@ -14,6 +14,8 @@ import { BookCard } from "@/components/book-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Bundle, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -21,6 +23,10 @@ export const metadata: Metadata = {
   title: "Bookstore",
   description: "Discover independent ebooks published by Albanian-language authors on Librum.",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see V3 §3.
+export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 UI-4: this page is the READER/discovery-and-buying
 // marketplace -- permanent product boundary, locked alongside UI-3:
@@ -267,6 +273,12 @@ export default async function BookstorePage({
     maxPrice?: string;
   }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive public discovery page (V3 §3) --
+  // checked as the first statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const rawQuery = await searchParams;
   const supabase = await createClient();
   const { q, genre, sort, minPriceCents, maxPriceCents, isFiltered } =

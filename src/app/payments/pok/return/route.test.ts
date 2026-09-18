@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ guard: vi.fn(), getUser: vi.fn(), config: vi.fn(), fulfill: vi.fn(), repo: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: (target: string) => { throw Object.assign(new Error("redirect"), { target }); } }));
 vi.mock("@/lib/recovery-guard", () => ({ redirectIfRecoverySessionActive: mocks.guard }));
@@ -42,5 +42,32 @@ describe("POK browser return", () => {
   it("verification errors expose no private details", async () => {
     mocks.fulfill.mockRejectedValue(new Error("private secret"));
     await expect(GET(request())).rejects.toMatchObject({ target: "/library?error=Payment+verification+pending" });
+  });
+});
+
+// ALL-CUTOVER APP-A: gated before any query parsing, before
+// redirectIfRecoverySessionActive(), and before any Supabase/POK call.
+// A stable 503 response, not a redirect -- POK is not being retired.
+describe("POK browser return: maintenance-mode gate", () => {
+  beforeEach(() => {
+    for (const mock of Object.values(mocks)) mock.mockReset();
+    mocks.getUser.mockResolvedValue({ data: { user: { id: "reader" } } });
+    mocks.config.mockReturnValue({ merchantId: "merchant" }); mocks.repo.mockReturnValue({});
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("returns 503 and never reaches the recovery guard, Supabase, or POK", async () => {
+    const response = await GET(request());
+    expect(response.status).toBe(503);
+    expect(mocks.guard).not.toHaveBeenCalled();
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.fulfill).not.toHaveBeenCalled();
+  });
+
+  it("maintenance mode off (unset) preserves existing behavior", async () => {
+    vi.unstubAllEnvs();
+    mocks.fulfill.mockResolvedValue({ status: "fulfilled", bookId: "book" });
+    await expect(GET(request())).rejects.toMatchObject({ target: "/books/book?purchase=success" });
   });
 });

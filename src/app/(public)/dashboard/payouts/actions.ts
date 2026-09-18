@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { redirectForMaintenance } from "@/lib/maintenance-response";
 
 // STRIPE-DISABLE-1: shown whenever an author reaches connectStripeAccount
 // -- new Stripe Connect account creation, and finishing onboarding for an
@@ -41,6 +43,14 @@ export async function connectStripeAccount() {
 }
 
 export async function openStripeExpressDashboard() {
+  // ALL-CUTOVER APP-A: gated before any Supabase/Stripe call -- this
+  // action makes a real outbound Stripe API call
+  // (accounts.createLoginLink), and no provider request may occur while
+  // the maintenance window is active.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/dashboard/payouts");
+  }
+
   // AUTH-1C: defense-in-depth, same reasoning as connectStripeAccount()
   // above -- Stripe's own Express Dashboard is where an already-
   // connected author can view/change bank details and payout

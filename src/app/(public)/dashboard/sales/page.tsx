@@ -5,12 +5,18 @@ import { platformFeeCents } from "@/lib/pricing";
 import { excludeLostDisputedRows } from "./revenue-logic";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Sales",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see V3 §3.
+export const dynamic = "force-dynamic";
 
 const CHART_DAYS = 14;
 
@@ -41,6 +47,12 @@ function netCents(amountCents: number) {
 }
 
 export default async function SalesPage() {
+  // ALL-CUTOVER APP-A: schema-sensitive dashboard sales page (V3 §3) --
+  // checked as the first statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
