@@ -1,6 +1,8 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import JSZip from "jszip";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
+import { STAGING_SUPABASE_URL } from "@/lib/protected-staging";
+import { PRODUCTION_SUPABASE_PROJECT_REF } from "@/lib/supabase/env-guard";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART B: dedicated coverage for the ONE
 // authoritative publish gate (performPublish(), exercised here only
@@ -159,7 +161,23 @@ function bookRow(overrides: Partial<{ status: string; price_cents: number; publi
   };
 }
 
+// PAID-MODE-1: paid publishing now also requires the controlled-staging
+// publishing permission (src/lib/paid-readiness.ts). Every pre-existing
+// test in this file is about the LEGACY payout gate and the publish
+// mutation, so the new permission is granted for all of them here --
+// otherwise they would silently become tests of the new gate instead of
+// their own subject. The new gate's own coverage (including that a
+// denial never reads `profiles`) is the last describe block in THIS
+// file.
+function stubPaidPublishingAllowed() {
+  vi.stubEnv("VERCEL_ENV", "preview");
+  vi.stubEnv("VERCEL_GIT_COMMIT_REF", "staging");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", STAGING_SUPABASE_URL);
+  vi.stubEnv("PAID_PUBLISHING_MODE", "controlled_staging_publishing_test");
+}
+
 function resetMocks() {
+  stubPaidPublishingAllowed();
   mockRedirect.mockClear();
   mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID } } });
   mockBookSelectResult.mockReset().mockReturnValue(bookRow());
@@ -588,5 +606,131 @@ describe("performPublish: recovery-session defense-in-depth (AUTH-1C)", () => {
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
     );
+  });
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
+// PAID-MODE-1: the new paid-publishing permission, at the same
+// authoritative gate every test above exercises. The assertion that
+// matters most in each denial case is the negative one --
+// mockProfileSelectResult is never called -- because a denial that
+// still read `profiles` would cost a query and could be used to probe
+// an author's payout state.
+describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
+  const PAID_PRICE = 999;
+
+  beforeEach(() => {
+    resetMocks();
+    // A completely configured payment provider throughout, so every
+    // denial below proves the gate denied it, not a missing provider.
+    vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1");
+    vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
+    vi.stubEnv("POK_ENVIRONMENT", "staging");
+    mockBookSelectResult.mockReturnValue(bookRow({ price_cents: PAID_PRICE }));
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["empty", ""],
+    ["wrongly cased", "CONTROLLED_STAGING_PUBLISHING_TEST"],
+    ["whitespace padded", " controlled_staging_publishing_test"],
+    ["the checkout mode's value", "controlled_staging_checkout_test"],
+    ["the superseded shared value", "controlled_staging_test"],
+    ["production", "production"],
+  ])("a %s publishing mode denies a paid book WITHOUT reading profiles", async (_label, value) => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", value as string);
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard?error=Paid+publishing+isn%27t+available+right+now",
+    );
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Vercel Production", "VERCEL_ENV", "production"],
+    ["another branch's Preview", "VERCEL_GIT_COMMIT_REF", "feat/anything"],
+    ["the production Supabase project", "NEXT_PUBLIC_SUPABASE_URL", `https://${PRODUCTION_SUPABASE_PROJECT_REF}.supabase.co`],
+  ])("denies on %s even with the mode set correctly", async (_label, key, value) => {
+    vi.stubEnv(key, value);
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard?error=Paid+publishing+isn%27t+available+right+now",
+    );
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+  });
+
+  it("the denial reveals no configuration, environment or payout state", async () => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const redirectedUrl = mockRedirect.mock.calls[0][0] as string;
+    for (const leak of ["PAID_PUBLISHING_MODE", "controlled_staging", "preview", "staging", "payout", "stripe"]) {
+      expect(redirectedUrl).not.toContain(leak);
+    }
+  });
+
+  // Additive, never substitutive: with publishing permitted, the legacy
+  // Stripe payout gate still decides, exactly as it does today.
+  it("with the mode allowed, the existing payout gate still blocks a paid book", async () => {
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard?error=Connect+your+payout+account+before+publishing",
+    );
+    expect(mockProfileSelectResult).toHaveBeenCalled();
+    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("with the mode allowed and payouts enabled, a paid book still publishes", async () => {
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockBookUpdatePayload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+    );
+  });
+
+  // Free publishing is never gated, under any configuration -- the
+  // price fork decides, and it is read from the book's own row.
+  it("a free book publishes with the mode variable unset, and reads no profile", async () => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
+    mockBookSelectResult.mockReturnValue(bookRow({ price_cents: 0 }));
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockBookUpdatePayload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+    );
+  });
+
+  // The other caller of the same helper: createBook(intent=publish)
+  // inherits the gate, and says so honestly rather than falling into
+  // its generic "please try again" message.
+  it("createBook(intent=publish) saves the draft and reports the paid-mode denial", async () => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
+    mockBookSelectResult.mockReturnValue(bookRow({ price_cents: PAID_PRICE }));
+
+    await expect(
+      createBook(await buildFormData({ price: "9.99", intent: "publish" })),
+    ).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
+    );
+    expect(mockBookInsert).toHaveBeenCalled();
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
   });
 });

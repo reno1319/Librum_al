@@ -1,5 +1,20 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
+import { STAGING_SUPABASE_URL } from "@/lib/protected-staging";
+import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/connect-account";
+
+// PAID-MODE-1: buyBook now requires a paid-checkout permission as well
+// as a provider. Every pre-existing test below that expects buyBook to
+// REACH a provider therefore has to stub the protected staging
+// deployment and the checkout mode -- otherwise it would be re-testing
+// the new gate instead of its own subject. Nothing else about those
+// tests changes.
+function stubPaidCheckoutAllowed() {
+  vi.stubEnv("VERCEL_ENV", "preview");
+  vi.stubEnv("VERCEL_GIT_COMMIT_REF", "staging");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", STAGING_SUPABASE_URL);
+  vi.stubEnv("PAID_CHECKOUT_MODE", "controlled_staging_checkout_test");
+}
 
 // LAUNCH-1 P1-11: minimal, focused coverage of ONLY the new recovery
 // guard added to buyBook -- not a re-test of buyBook's own pre-existing
@@ -53,7 +68,7 @@ describe("buyBook: POK provider selection", () => {
   const rpc = vi.fn();
   beforeEach(() => {
     vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1"); vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
-    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    vi.stubEnv("STRIPE_SECRET_KEY", ""); stubPaidCheckoutAllowed();
     mockCookieStore.get.mockImplementation(() => undefined);
     mockRedirect.mockClear(); mockCheckoutSessionsCreate.mockClear(); mockAccountsRetrieve.mockClear();
     mockPokConfig.mockReset().mockReturnValue({ merchantId: "merchant", keyId: "key", keySecret: "secret" });
@@ -159,6 +174,7 @@ describe("buyBook / getFreeBook: maintenance-mode gate", () => {
     vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1");
     vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
     vi.stubEnv("STRIPE_SECRET_KEY", "");
+    stubPaidCheckoutAllowed();
     const rpc = vi.fn().mockImplementation(async (name: string) =>
       name === "user_owns_book"
         ? { data: false }
@@ -236,6 +252,10 @@ describe("buyBook: fail-closed provider resolution (STRIPE-DISABLE-1)", () => {
     mockPokRepository.mockReset();
     mockStartPok.mockReset();
     mockCookieStore.get.mockImplementation(() => undefined);
+    // Paid checkout is PERMITTED throughout this block, so every case
+    // below still proves what it always proved: that provider
+    // resolution itself is what fails closed.
+    stubPaidCheckoutAllowed();
 
     mockBookSingle = vi.fn().mockResolvedValue({ data: makeBookRow(), error: null });
     mockRpc = vi.fn().mockResolvedValue({ data: null, error: null });
@@ -252,6 +272,7 @@ describe("buyBook: fail-closed provider resolution (STRIPE-DISABLE-1)", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     if (ORIGINAL_REGIME === undefined) delete process.env.NEW_CHECKOUT_REGIME;
     else process.env.NEW_CHECKOUT_REGIME = ORIGINAL_REGIME;
     if (ORIGINAL_PROVIDER === undefined) delete process.env.LEDGER_PAYMENT_PROVIDER;
@@ -391,5 +412,143 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
     await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/books/${BOOK_ID}` });
 
     expect(mockPurchasesUpsert).not.toHaveBeenCalled();
+  });
+});
+
+// PAID-MODE-1: the new paid-checkout permission, proved at the one live
+// call site. The point of every case here is WHERE the denial happens:
+// before provider resolution, before getPokConfig(), before any RPC and
+// before any checkout-intent row exists.
+describe("buyBook: paid-checkout mode gate (PAID-MODE-1)", () => {
+  const BOOK_ID = "book-1";
+  const READER_ID = "reader-1";
+  const AUTHOR_ID = "author-1";
+
+  let mockRpc = vi.fn();
+
+  function arrangeConfiguredProvider() {
+    // A COMPLETELY configured payment provider, so every denial below
+    // proves the gate denied it, not a missing provider.
+    vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1");
+    vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
+    vi.stubEnv("POK_ENVIRONMENT", "staging");
+    vi.stubEnv("POK_MERCHANT_ID", "22222222-2222-4222-8222-222222222222");
+    vi.stubEnv("POK_KEY_ID", "sdk-key-id");
+    vi.stubEnv("POK_KEY_SECRET", "test-only");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_GIT_COMMIT_REF", "staging");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", STAGING_SUPABASE_URL);
+  }
+
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockCookieStore.get.mockImplementation(() => undefined);
+    mockPokConfig.mockReset().mockReturnValue({ merchantId: "m", keyId: "k", keySecret: "s" });
+    mockPokClient.mockReset().mockReturnValue({});
+    mockPokRepository.mockReset().mockReturnValue({});
+    mockStartPok.mockReset().mockResolvedValue("https://pay-staging.pokpay.io/sdk-orders/test");
+    mockCheckoutSessionsCreate.mockReset();
+    mockAccountsRetrieve.mockReset();
+    mockRpc = vi.fn().mockResolvedValue({ data: false, error: null });
+    mockCreateClient.mockReset().mockResolvedValue({
+      auth: { getUser: () => Promise.resolve({ data: { user: { id: READER_ID } } }) },
+      from: (table: string) => {
+        if (table !== "books") throw new Error(`paid-mode tests: unexpected table "${table}"`);
+        return {
+          select: () => ({
+            eq: () => ({
+              single: () =>
+                Promise.resolve({
+                  data: { id: BOOK_ID, title: "T", price_cents: 999, status: "published", author_id: AUTHOR_ID },
+                  error: null,
+                }),
+            }),
+          }),
+        };
+      },
+      rpc: (...args: unknown[]) => mockRpc(...args),
+    });
+    arrangeConfiguredProvider();
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    ["absent", undefined],
+    ["empty", ""],
+    ["wrongly cased", "CONTROLLED_STAGING_CHECKOUT_TEST"],
+    ["whitespace padded", " controlled_staging_checkout_test"],
+    ["the publishing mode's value", "controlled_staging_publishing_test"],
+    ["the superseded shared value", "controlled_staging_test"],
+    ["production", "production"],
+  ])(
+    "a %s checkout mode denies before getPokConfig, any RPC and any provider call",
+    async (_label, value) => {
+      if (value !== undefined) vi.stubEnv("PAID_CHECKOUT_MODE", value);
+
+      await expect(buyBook(BOOK_ID, new FormData())).rejects.toMatchObject({
+        target: `/books/${BOOK_ID}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`,
+      });
+
+      expect(mockPokConfig).not.toHaveBeenCalled();
+      expect(mockStartPok).not.toHaveBeenCalled();
+      expect(mockRpc).not.toHaveBeenCalled();
+      expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+      expect(mockAccountsRetrieve).not.toHaveBeenCalled();
+    },
+  );
+
+  it("denies in Production even with the mode set and the provider fully configured", async () => {
+    vi.stubEnv("PAID_CHECKOUT_MODE", "controlled_staging_checkout_test");
+    vi.stubEnv("VERCEL_ENV", "production");
+
+    await expect(buyBook(BOOK_ID, new FormData())).rejects.toMatchObject({
+      target: `/books/${BOOK_ID}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`,
+    });
+    expect(mockPokConfig).not.toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("the denial reveals nothing about the environment or the configuration", async () => {
+    await expect(buyBook(BOOK_ID, new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+
+    const redirectedUrl = mockRedirect.mock.calls[0][0] as string;
+    for (const leak of [
+      "PAID_CHECKOUT_MODE",
+      "controlled_staging",
+      "preview",
+      "staging",
+      "librum_ledger_v1",
+      "pok",
+    ]) {
+      expect(redirectedUrl).not.toContain(leak);
+    }
+  });
+
+  // Maintenance stays FIRST and stronger: with both conditions active
+  // the reader sees the maintenance message, and learns nothing about
+  // the deployment's paid-mode state.
+  it("maintenance mode wins over the paid-mode denial", async () => {
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+
+    await expect(buyBook(BOOK_ID, new FormData())).rejects.toMatchObject({
+      target: expect.stringContaining("maintenance"),
+    });
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(mockPokConfig).not.toHaveBeenCalled();
+  });
+
+  it("the exact mode on the exact protected staging deployment still reaches POK", async () => {
+    vi.stubEnv("PAID_CHECKOUT_MODE", "controlled_staging_checkout_test");
+    mockRpc = vi.fn().mockImplementation(async (name: string) =>
+      name === "user_owns_book"
+        ? { data: false }
+        : { data: [{ intent_id: "intent", price_cents_at_checkout: 999, expires_at: "2026-09-15T10:30:00Z" }] },
+    );
+
+    await expect(buyBook(BOOK_ID, new FormData())).rejects.toMatchObject({
+      target: "https://pay-staging.pokpay.io/sdk-orders/test",
+    });
+    expect(mockStartPok).toHaveBeenCalled();
   });
 });

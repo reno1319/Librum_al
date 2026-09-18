@@ -13,6 +13,7 @@ import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/
 import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
@@ -681,11 +682,16 @@ export async function createBook(formData: FormData) {
   }
 
   // Publish failed -- the draft inserted above remains exactly as
-  // saved. Only two controlled, non-leaking reasons exist here (see
+  // saved. Only controlled, non-leaking reasons exist here (see
   // performPublish()'s own result type); "not_found" is not reachable
   // in practice (this is the row this same request just inserted) but
   // still falls safely into the same generic branch rather than being
   // treated as exhaustive.
+  if (publishResult.reason === "paid_mode_required") {
+    redirect(
+      "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
+    );
+  }
   if (publishResult.reason === "payout_required") {
     redirect(
       "/dashboard?success=Saved+as+draft&error=Connect+your+payout+account+before+publishing",
@@ -1030,7 +1036,7 @@ export async function updateBook(bookId: string, formData: FormData) {
 // payload object it's given.
 type PerformPublishResult =
   | { ok: true; wasNewlyPublished: boolean }
-  | { ok: false; reason: "not_found" | "payout_required" | "update_failed" };
+  | { ok: false; reason: "not_found" | "paid_mode_required" | "payout_required" | "update_failed" };
 
 async function performPublish(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -1063,6 +1069,19 @@ async function performPublish(
   // never trusted from the client -- so this can't be spoofed by
   // submitting some other "free" signal.
   if (book.price_cents > 0) {
+    // PAID-MODE-1: whether Librum may publish a PAID title at all is a
+    // product permission, and it is decided HERE -- after the book's own
+    // server-read price proves this title is paid, and strictly BEFORE
+    // the profiles read below. That order is deliberate and load-bearing
+    // twice over: a denial costs no database query, and it cannot be used
+    // to probe whether some author's payout flag is set.
+    //
+    // Additive, never substitutive: the legacy stripe_payouts_enabled
+    // gate below is untouched and still applies whenever this one passes.
+    if (!canPublishPaidTitle()) {
+      return { ok: false, reason: "paid_mode_required" };
+    }
+
     const { data: profile } = await supabase
       .from("profiles")
       .select("stripe_payouts_enabled")
@@ -1126,6 +1145,12 @@ export async function publishBook(bookId: string) {
   const result = await performPublish(supabase, bookId, user.id);
 
   if (!result.ok) {
+    // PAID-MODE-1: deliberately generic -- it names no environment
+    // variable, no deployment and no payout state. An author learns that
+    // paid publishing is closed, and nothing about why.
+    if (result.reason === "paid_mode_required") {
+      redirect("/dashboard?error=Paid+publishing+isn%27t+available+right+now");
+    }
     if (result.reason === "payout_required") {
       redirect("/dashboard?error=Connect+your+payout+account+before+publishing");
     }
