@@ -1111,9 +1111,16 @@ async function performPublish(
   // payout destination to exist yet. A destination is required to
   // WITHDRAW, which is a separate gate on a separate page.
   //
-  // resolveDashboardAttention() (src/lib/dashboard-attention.ts) still
-  // nags an author with priced books and no payout setup. That stays:
-  // it informs without blocking, which is the correct shape for this.
+  // resolveDashboardAttention()'s "payout-setup" nag went with it. In
+  // principle an informational (non-blocking) notice that Librum cannot
+  // pay out yet is the right shape, and it is worth building. What was
+  // there was not that: its copy said "You can continue to publish free
+  // books while Librum completes its payment and payout systems", which
+  // is false the moment this gate is removed, and its only action was a
+  // link to a payout page that can do nothing for the author. Honest
+  // replacement copy is a product decision, not part of this cutover,
+  // so the notice is removed rather than rewritten -- silence beats a
+  // false statement pointing at a dead end.
 
   // Only a genuine FIRST publication should notify followers --
   // otherwise every unpublish/republish toggle would spam them again.
