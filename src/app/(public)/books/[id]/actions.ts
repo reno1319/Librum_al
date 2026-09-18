@@ -11,6 +11,7 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/connect-account";
 import { resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
+import { canStartPaidCheckout } from "@/lib/paid-readiness";
 import { createPokClient, getPokConfig, type PokConfig } from "@/lib/pok";
 import {
   startPokCheckout,
@@ -81,19 +82,42 @@ export async function buyBook(bookId: string, formData: FormData) {
     redirect(`/books/${bookId}?error=This+book+is+free+-+use+the+free+download+option+instead`);
   }
 
-  // STRIPE-DISABLE-1: the ONLY point that decides whether this checkout
-  // may proceed at all, and with which provider -- server-only, never
-  // overridable by request input, and evaluated through the single
-  // shared resolution policy (src/lib/checkout-regime.ts) rather than a
-  // parallel ad hoc comparison. Every configuration other than the exact
-  // pair NEW_CHECKOUT_REGIME=librum_ledger_v1 /
-  // LEDGER_PAYMENT_PROVIDER=pok -- missing, empty, malformed,
-  // wrong-cased, the pre-cutover legacy default included -- fails closed
-  // HERE, before any RPC, POK, or Stripe call, and before any
-  // checkout-intent or other DB state is created. This intentionally
-  // removes the legacy Stripe Connect checkout path entirely: no new
-  // Stripe buyer checkout may be created by this action any more, only
-  // an exact-config POK checkout.
+  // PAID-MODE-1: whether Librum may start a PAID checkout AT ALL is a
+  // product permission, decided here, before and independently of which
+  // provider would serve it. Until this gate existed, the provider
+  // configuration immediately below was the only thing standing between
+  // a reader and a charge -- a payment provider being configured is not
+  // the same statement as "Librum is ready to take money", and this is
+  // where the two stop being conflated.
+  //
+  // Placed AFTER the free-price fork above (free acquisition is never
+  // gated -- see getFreeBook) and BEFORE provider resolution, so a
+  // denial costs no RPC, no POK call and no checkout-intent row.
+  //
+  // The denial is the same generic message the provider-disabled path
+  // uses, deliberately: a reader learns that checkout is unavailable and
+  // nothing whatsoever about this deployment's configuration.
+  if (!canStartPaidCheckout()) {
+    redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+  }
+
+  // STRIPE-DISABLE-1: the single point that decides WHICH provider may
+  // serve this checkout -- reached only after the independent paid-mode
+  // permission above has already allowed a paid checkout to proceed at
+  // all. Two separate decisions, in that order: whether Librum may take
+  // money (PAID-MODE-1, above) and who would collect it (here).
+  //
+  // Server-only, never overridable by request input, and evaluated
+  // through the single shared resolution policy
+  // (src/lib/checkout-regime.ts) rather than a parallel ad hoc
+  // comparison. Every configuration other than the exact pair
+  // NEW_CHECKOUT_REGIME=librum_ledger_v1 / LEDGER_PAYMENT_PROVIDER=pok
+  // -- missing, empty, malformed, wrong-cased, the pre-cutover legacy
+  // default included -- fails closed HERE, before any RPC, POK, or
+  // Stripe call, and before any checkout-intent or other DB state is
+  // created. This intentionally removes the legacy Stripe Connect
+  // checkout path entirely: no new Stripe buyer checkout may be created
+  // by this action any more, only an exact-config POK checkout.
   const activeProvider = resolveActiveCheckoutProvider({
     newCheckoutRegime: process.env.NEW_CHECKOUT_REGIME,
     ledgerPaymentProvider: process.env.LEDGER_PAYMENT_PROVIDER,

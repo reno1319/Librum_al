@@ -1,5 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
+import { STAGING_SUPABASE_URL } from "@/lib/protected-staging";
 
 // FIX/bundle-payout-publication-gate: dedicated coverage for
 // performBundlePublish() (the bundle equivalent of performPublish() in
@@ -157,7 +158,23 @@ function validMemberRows(count: number) {
   };
 }
 
+// PAID-MODE-1: paid publishing now also requires the controlled-staging
+// publishing permission (src/lib/paid-readiness.ts). Every pre-existing
+// test in this file is about the LEGACY payout gate and the publish
+// mutation, so the new permission is granted for all of them here --
+// otherwise they would silently become tests of the new gate instead of
+// their own subject. The new gate's own coverage (including that a
+// denial never reads `profiles`) is the last describe block in THIS
+// file.
+function stubPaidPublishingAllowed() {
+  vi.stubEnv("VERCEL_ENV", "preview");
+  vi.stubEnv("VERCEL_GIT_COMMIT_REF", "staging");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", STAGING_SUPABASE_URL);
+  vi.stubEnv("PAID_PUBLISHING_MODE", "controlled_staging_publishing_test");
+}
+
 function resetMocks() {
+  stubPaidPublishingAllowed();
   mockRedirect.mockClear();
   mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID } } });
   mockBundleSelectResult.mockReset().mockReturnValue(bundleRow());
@@ -444,5 +461,113 @@ describe("publishBundle: recovery-session defense-in-depth (existing protection,
 
     expect(mockBundleSelectResult).not.toHaveBeenCalled();
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
+// PAID-MODE-1: the same paid-publishing permission at the bundle path,
+// with the same load-bearing negative assertion -- a denial never reads
+// `profiles`, and never reaches the membership read either.
+describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => {
+  const PAID_PRICE = 1999;
+
+  beforeEach(() => {
+    resetMocks();
+    vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1");
+    vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
+    vi.stubEnv("POK_ENVIRONMENT", "staging");
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: PAID_PRICE }));
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
+    mockMemberSelectResult.mockReturnValue(validMemberRows(2));
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["empty", ""],
+    ["wrongly cased", "CONTROLLED_STAGING_PUBLISHING_TEST"],
+    ["the checkout mode's value", "controlled_staging_checkout_test"],
+    ["the superseded shared value", "controlled_staging_test"],
+    ["production", "production"],
+  ])("a %s publishing mode denies a paid bundle WITHOUT reading profiles", async (_label, value) => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", value as string);
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now",
+    );
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockMemberSelectResult).not.toHaveBeenCalled();
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("denies in Production even with the mode set correctly", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now",
+    );
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+  });
+
+  it("with the mode allowed, the existing payout gate still blocks a paid bundle", async () => {
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/bundles?error=Connect+your+payout+account+before+publishing",
+    );
+    expect(mockProfileSelectResult).toHaveBeenCalled();
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("with the mode allowed and payouts enabled, a paid bundle still publishes", async () => {
+    await publishBundle(BUNDLE_ID);
+
+    expect(mockBundleUpdatePayload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+    );
+  });
+
+  // read_failed and insufficient_members keep their exact meanings: the
+  // new gate is additive, and sits between the price fork and the
+  // profile read without displacing either outcome.
+  it("a failed bundle read still fails closed before the gate is even reached", async () => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
+    mockBundleSelectResult.mockReturnValue({ data: null, error: { message: "boom" } });
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/bundles");
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+  });
+
+  it("insufficient members is unaffected when the mode is allowed", async () => {
+    mockMemberSelectResult.mockReturnValue({
+      data: [memberRow("book-0"), memberRow("book-1", { status: "draft" })],
+      error: null,
+    });
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+    );
+  });
+
+  it("a free bundle publishes with the mode variable unset, and reads no profile", async () => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
+
+    await publishBundle(BUNDLE_ID);
+
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockBundleUpdatePayload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+    );
   });
 });

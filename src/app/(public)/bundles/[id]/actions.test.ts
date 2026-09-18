@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
+import { STAGING_SUPABASE_URL } from "@/lib/protected-staging";
 
 // LAUNCH-1 P1-11: minimal, focused coverage of ONLY the new recovery
 // guard added to buyBundle -- see the equivalent buyBook test
@@ -194,5 +198,74 @@ describe("buyBundle: maintenance-mode gate", () => {
       target: expect.stringContaining("/reset-password"),
     });
     expect(mockCookieStore.get).toHaveBeenCalled();
+  });
+});
+
+// PAID-MODE-1: buyBundle is deliberately NOT wired to the paid-mode
+// gate. Its exit is an unconditional redirect, and a satisfiable guard
+// would be weaker than a welded door -- so these tests prove the door
+// stays welded, under every combination of the new variables, and that
+// no later edit quietly replaces it with a condition.
+describe("buyBundle: unconditional closure is not softened (PAID-MODE-1)", () => {
+  const BUNDLE_ID = "bundle-1";
+
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockCreateClient.mockReset().mockResolvedValue({
+      auth: { getUser: async () => ({ data: { user: { id: "reader-1" } } }) },
+    });
+    mockCreateAdminClient.mockReset();
+    mockCheckoutSessionsCreate.mockReset();
+    mockCookieStore.get.mockImplementation(() => undefined);
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    ["no paid-mode variables at all", {}],
+    [
+      "checkout mode set on the exact protected staging deployment",
+      {
+        VERCEL_ENV: "preview",
+        VERCEL_GIT_COMMIT_REF: "staging",
+        NEXT_PUBLIC_SUPABASE_URL: STAGING_SUPABASE_URL,
+        PAID_CHECKOUT_MODE: "controlled_staging_checkout_test",
+      },
+    ],
+    [
+      "both modes set, provider fully configured",
+      {
+        VERCEL_ENV: "preview",
+        VERCEL_GIT_COMMIT_REF: "staging",
+        NEXT_PUBLIC_SUPABASE_URL: STAGING_SUPABASE_URL,
+        PAID_CHECKOUT_MODE: "controlled_staging_checkout_test",
+        PAID_PUBLISHING_MODE: "controlled_staging_publishing_test",
+        NEW_CHECKOUT_REGIME: "librum_ledger_v1",
+        LEDGER_PAYMENT_PROVIDER: "pok",
+        POK_ENVIRONMENT: "staging",
+      },
+    ],
+  ])("stays closed with %s", async (_label, env) => {
+    for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+
+    await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({
+      target: expect.stringContaining(`/bundles/${BUNDLE_ID}?error=`),
+    });
+    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+  });
+
+  // A source assertion, not a behavioural one, and deliberately so: the
+  // guarantee worth protecting is that this action never acquires a
+  // CONDITION at all. A behavioural test cannot tell "unconditionally
+  // closed" apart from "closed because the mode happens to be unset".
+  it("its source contains no paid-mode call", () => {
+    const source = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "actions.ts"),
+      "utf8",
+    );
+    expect(source).not.toContain("canStartPaidCheckout");
+    expect(source).not.toContain("canPublishPaidTitle");
+    expect(source).not.toContain("paid-readiness");
   });
 });

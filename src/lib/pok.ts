@@ -1,9 +1,9 @@
 import { z } from "zod";
+import { isProtectedStagingDeployment } from "@/lib/protected-staging";
 
 // Contract: https://payments.doc.pokpay.io/ (checked 2026-09-15).
 // No production endpoint or client-selectable base URL exists in this adapter.
 const BASE_URL = "https://api-staging.pokpay.io";
-const STAGING_REF = "erhzpapqwyfjotliqdjo";
 export const uuid = z.uuid();
 const amount = z.number().finite().nonnegative();
 export const pokOrderSchema = z.object({
@@ -85,10 +85,22 @@ export function logPokDiagnostic(stage: PokDiagnosticStage, err: unknown): void 
   }
 }
 
+// PAID-MODE-1: the three deployment-identity conditions this function
+// has always required now come from the provider-neutral predicate
+// (src/lib/protected-staging.ts), and POK_ENVIRONMENT -- the one
+// genuinely POK-specific condition -- is supplied HERE, by the POK
+// adapter that owns it. Composition only: the signature, the default
+// argument, the POK_STAGING_ONLY sentinel and the accept/reject
+// behaviour of every input are unchanged, which is why pok.test.ts
+// passes with no edit at all.
+//
+// Note the case worth reading twice: for `{ POK_ENVIRONMENT:
+// "production" }` the neutral predicate now PASSES and this function
+// still throws, because the fourth condition is its own. Deployment
+// identity and POK's own environment are two separate decisions now,
+// and only this function requires both.
 export function assertPokStaging(env: Record<string, string | undefined> = process.env): void {
-  if (env.POK_ENVIRONMENT !== "staging" || env.VERCEL_ENV !== "preview" ||
-      env.VERCEL_GIT_COMMIT_REF !== "staging" ||
-      env.NEXT_PUBLIC_SUPABASE_URL !== `https://${STAGING_REF}.supabase.co`) {
+  if (!isProtectedStagingDeployment(env) || env.POK_ENVIRONMENT !== "staging") {
     throw new Error("POK_STAGING_ONLY");
   }
 }

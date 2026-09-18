@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
 
 // PHASE-2C bundle-membership-integrity: an explicit `.returns<T[]>()`
@@ -174,7 +175,13 @@ type PerformBundlePublishResult =
   | { ok: true }
   | {
       ok: false;
-      reason: "not_found" | "read_failed" | "payout_required" | "insufficient_members" | "update_failed";
+      reason:
+        | "not_found"
+        | "read_failed"
+        | "paid_mode_required"
+        | "payout_required"
+        | "insufficient_members"
+        | "update_failed";
     };
 
 // FIX/bundle-payout-publication-gate: the bundle equivalent of
@@ -220,6 +227,15 @@ async function performBundlePublish(
   // actually be sold. price_cents is read fresh from the bundle's own
   // row here -- never trusted from the client.
   if (bundle.price_cents > 0) {
+    // PAID-MODE-1: identical placement and rationale to performPublish()
+    // (dashboard/books/actions.ts) -- after the bundle's own server-read
+    // price proves it is paid, strictly before the profiles read, so a
+    // denial costs no query and cannot probe payout state. Additive: the
+    // legacy stripe_payouts_enabled gate below is untouched.
+    if (!canPublishPaidTitle()) {
+      return { ok: false, reason: "paid_mode_required" };
+    }
+
     const { data: profile, error: profileReadError } = await supabase
       .from("profiles")
       .select("stripe_payouts_enabled")
@@ -324,6 +340,12 @@ export async function publishBundle(bundleId: string) {
   const result = await performBundlePublish(supabase, bundleId, user.id);
 
   if (!result.ok) {
+    // PAID-MODE-1: same generic message publishBook() uses for the
+    // identical situation -- it names no variable, environment or payout
+    // state.
+    if (result.reason === "paid_mode_required") {
+      redirect("/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now");
+    }
     if (result.reason === "payout_required") {
       // Same message publishBook() uses for the identical situation --
       // see performPublish() (books/actions.ts).
