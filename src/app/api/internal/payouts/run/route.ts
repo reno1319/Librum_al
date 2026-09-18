@@ -8,6 +8,8 @@ import {
   runDryRunPass,
   runReservationPass,
 } from "@/lib/payout-scheduler";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { maintenanceHttpResponse } from "@/lib/maintenance-response";
 
 // LEDGER-1E-D-D: the internal application scheduler route for the
 // payout-scheduler DB foundation (migration 053, already live in
@@ -215,6 +217,14 @@ export async function GET(request: Request): Promise<Response> {
   const authFailure = authenticate(request);
   if (authFailure) return authFailure;
 
+  // ALL-CUTOVER APP-A: checked after authentication (never reveal
+  // maintenance state to an unauthenticated caller) but before any
+  // dry-run read or reserve mutation -- no admin client is constructed
+  // and no scheduler RPC of any kind runs while maintenance is active.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return maintenanceHttpResponse();
+  }
+
   const targetMonth = deriveTiranaTargetMonth();
   return handleReserveMode(targetMonth);
 }
@@ -224,6 +234,11 @@ export async function GET(request: Request): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   const authFailure = authenticate(request);
   if (authFailure) return authFailure;
+
+  // ALL-CUTOVER APP-A: same reasoning as GET() above.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return maintenanceHttpResponse();
+  }
 
   let body: unknown;
   try {

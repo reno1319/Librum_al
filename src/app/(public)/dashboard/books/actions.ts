@@ -12,6 +12,8 @@ import { sendNewBookEmails } from "@/lib/email";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
 import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { redirectForMaintenance } from "@/lib/maintenance-response";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -427,6 +429,12 @@ async function resolveSeriesSelection(
 }
 
 export async function createBook(formData: FormData) {
+  // ALL-CUTOVER APP-A: catalog price is written by this action --
+  // gated before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/dashboard/books/new");
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -689,6 +697,12 @@ export async function createBook(formData: FormData) {
 }
 
 export async function updateBook(bookId: string, formData: FormData) {
+  // ALL-CUTOVER APP-A: catalog price is written by this action --
+  // gated before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(`/dashboard/books/${bookId}/edit`);
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -1090,6 +1104,12 @@ async function performPublish(
 }
 
 export async function publishBook(bookId: string) {
+  // ALL-CUTOVER APP-A: publish re-checks the catalog price and bundle
+  // membership state -- gated before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/dashboard");
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -1208,6 +1228,15 @@ export async function unpublishBook(bookId: string) {
   // against a crafted direct POST. A book's publish state is a public,
   // buyer-facing change, so this runs before any Supabase call, matching
   // buyBook's/buyBundle's own placement.
+  //
+  // ALL-CUTOVER APP-A: the maintenance gate runs first of all, before
+  // even the recovery-session check above it in this comment's own
+  // ordering -- unpublishing touches bundle-membership validation
+  // (migration 058) against columns this cutover renames.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/dashboard");
+  }
+
   await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();
@@ -1290,6 +1319,14 @@ export async function deleteBook(bookId: string) {
   // against a crafted direct POST. Book deletion is irreversible, so
   // this runs before any Supabase call, matching buyBook's/buyBundle's
   // own placement.
+  //
+  // ALL-CUTOVER APP-A: the maintenance gate runs first of all -- book
+  // deletion cascades into purchases/discount_codes/bundle_books rows
+  // this cutover renames or purges.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/dashboard");
+  }
+
   await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();

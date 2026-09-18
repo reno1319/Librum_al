@@ -1,6 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { pokAmountToMinor, validatePokCheckoutUrl, verifiedPokPayment, logPokDiagnostic } from "./pok";
 import type { PokOrder, PokCreateOrder } from "./pok";
+import { resolveMaintenanceMode } from "./maintenance-mode";
+
+// ALL-CUTOVER APP-A: the sentinel startPokCheckout() throws when its own
+// defense-in-depth maintenance check (see that function's own comment)
+// fires. A narrow, dedicated Error message -- the same existing
+// contract shape as POK_CHECKOUT_CANNOT_RESUME/POK_INVALID_FROZEN_INTENT
+// below -- never an HTTP response, since this is a plain library
+// module, not a Route Handler. buyBook() (the only production caller)
+// maps this back to its own top-of-function redirectForMaintenance()
+// redirect, so the caller-visible outcome is identical regardless of
+// which of the two layers actually caught the maintenance window.
+export const POK_CHECKOUT_MAINTENANCE_ACTIVE = "POK_CHECKOUT_MAINTENANCE_ACTIVE";
 
 // Surfaced to the caller (buyBook) so it can give the reader an honest
 // message instead of the generic "could not start checkout" -- thrown only
@@ -141,6 +153,15 @@ function validateIntent(intent: FrozenPokIntent | null): asserts intent is Froze
 export async function startPokCheckout(input: {
   intentId: string; readerId: string; title: string; origin: string; merchantId: string;
 }, repo: PokRepository, orders: PokOrders, now = Date.now()) {
+  // ALL-CUTOVER APP-A: defense-in-depth -- buyBook() (the only
+  // production caller) already gates before ever reaching this
+  // function, but this is the actual provider-order-creation operation
+  // itself, so it re-checks maintenance mode as its own first
+  // statement, before repository access, intent creation/reuse, POK
+  // configuration/authentication, or provider order creation.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    throw new Error(POK_CHECKOUT_MAINTENANCE_ACTIVE);
+  }
   const intent = await repo.intent(input.intentId);
   validateIntent(intent);
   if (intent.stripe_checkout_session_id) throw new Error("POK_INTENT_ALREADY_BOUND_TO_STRIPE");

@@ -4,8 +4,18 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/connect-account";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { redirectForMaintenance } from "@/lib/maintenance-response";
 
 export async function buyBundle(bundleId: string) {
+  // ALL-CUTOVER APP-A: gated first, for consistency with every other
+  // checkout entry point, even though this action is already
+  // unconditionally disabled below and never reaches Supabase or any
+  // provider today.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(`/bundles/${bundleId}`);
+  }
+
   // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks the
   // /bundles/[id] page itself while a recovery session is active, so
   // this is the second layer against a crafted direct POST. Runs before

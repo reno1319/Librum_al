@@ -547,3 +547,46 @@ describe("source-level guards", () => {
     expect(vercelJson).toContain("/api/internal/payouts/run");
   });
 });
+
+// ALL-CUTOVER APP-A: checked AFTER authentication (an unauthenticated
+// caller must never learn maintenance state) but before any admin
+// client construction or scheduler RPC, for both dry-run and reserve
+// mode alike.
+describe("maintenance-mode gate", () => {
+  const originalSecret = process.env.CRON_SECRET;
+
+  beforeEach(() => {
+    process.env.CRON_SECRET = "test-cron-secret";
+    process.env.ALL_CUTOVER_MAINTENANCE_MODE = "active";
+    mockCreateAdminClient.mockClear();
+  });
+
+  afterEach(() => {
+    process.env.CRON_SECRET = originalSecret;
+    delete process.env.ALL_CUTOVER_MAINTENANCE_MODE;
+  });
+
+  it("GET (dry-run/reserve dispatch) returns 503 and never constructs an admin client", async () => {
+    const response = await GET(authedRequest("GET"));
+    expect(response.status).toBe(503);
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+  });
+
+  it("POST dry-run mode returns 503 and never constructs an admin client", async () => {
+    const response = await POST(authedRequest("POST", { mode: "dry-run" }));
+    expect(response.status).toBe(503);
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+  });
+
+  it("an unauthenticated request still gets 401, not a maintenance-revealing response", async () => {
+    const response = await GET(new Request("http://localhost/api/internal/payouts/run", { method: "GET" }));
+    expect(response.status).toBe(401);
+  });
+
+  it("maintenance mode off (unset) preserves existing dry-run behavior", async () => {
+    delete process.env.ALL_CUTOVER_MAINTENANCE_MODE;
+    const response = await POST(authedRequest("POST", { mode: "dry-run" }));
+    expect(response.status).not.toBe(503);
+    expect(mockCreateAdminClient).toHaveBeenCalled();
+  });
+});

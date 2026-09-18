@@ -1,9 +1,19 @@
 import { createPokClient, getPokConfig, uuid } from "@/lib/pok";
 import { fulfillPokCheckout } from "@/lib/pok-checkout";
 import { createPokRepository } from "@/lib/pok-repository";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { maintenanceHttpResponse } from "@/lib/maintenance-response";
 
 export const runtime = "nodejs";
 export async function POST(request: Request) {
+  // ALL-CUTOVER APP-A: gated before any query parsing and before any
+  // POK call. POK is not being retired -- this is a temporary,
+  // retryable 503, matching the shape this route's own existing
+  // "pending" branch already uses.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return maintenanceHttpResponse();
+  }
+
   const query = new URL(request.url).searchParams;
   const intent = uuid.safeParse(query.get("intent"));
   const token = uuid.safeParse(query.get("token"));

@@ -31,6 +31,8 @@ import {
   type FinanceRawSearchParams,
   type AttentionFilterValue,
 } from "./finance-query";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type {
   FinanceRefundReconciliationRow,
   FinanceDisputeRow,
@@ -43,6 +45,10 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Finance",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see V3 §3.
+export const dynamic = "force-dynamic";
 
 function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -100,6 +106,13 @@ export default async function AdminFinancePage({
 }: {
   searchParams: Promise<FinanceRawSearchParams>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive protected admin finance page
+  // (V3 §3) -- checked as the first statement, before requireStaff()
+  // (which itself queries Supabase) or any other Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   await requireStaff("finance.view");
 
   const rawParams = await searchParams;

@@ -1,6 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
+
+// APP A CORRECTION 1: declared at module scope (not inside the describe
+// block below) so vitest's vi.mock hoisting -- which moves the vi.mock
+// calls themselves above every import, but never reorders these const
+// declarations -- can never leave the mock factories referencing
+// not-yet-initialized bindings.
+const CREATE_CLIENT_SENTINEL = new Error("CREATE_CLIENT_CALLED");
+const mockCreateClient = vi.fn(() => {
+  throw CREATE_CLIENT_SENTINEL;
+});
+const mockGetAuthorFinancialSummary = vi.fn();
+const mockListAuthorFinancialActivity = vi.fn();
+const mockGetAuthorPayoutOverview = vi.fn();
+const mockListAuthorPayoutHistory = vi.fn();
+const mockGetAuthorPayoutDestination = vi.fn();
+const mockSaveAuthorPayoutDestination = vi.fn();
+
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+vi.mock("./actions", () => ({
+  getAuthorFinancialSummary: () => mockGetAuthorFinancialSummary(),
+  listAuthorFinancialActivity: (...args: unknown[]) => mockListAuthorFinancialActivity(...args),
+  getAuthorPayoutOverview: () => mockGetAuthorPayoutOverview(),
+  listAuthorPayoutHistory: (...args: unknown[]) => mockListAuthorPayoutHistory(...args),
+  getAuthorPayoutDestination: () => mockGetAuthorPayoutDestination(),
+  saveAuthorPayoutDestination: (...args: unknown[]) => mockSaveAuthorPayoutDestination(...args),
+}));
 
 // LEDGER-1E-D-G: source-level regression coverage for the "Next payout
 // cycle" notice on /dashboard/balance, following the same no-DOM-harness
@@ -234,5 +260,60 @@ describe("Dashboard Balance: /dashboard/payouts (Stripe Connect) remains untouch
     expect(payoutsSource).not.toContain("saveAuthorPayoutDestination");
     expect(payoutsSource).not.toContain("getAuthorPayoutDestination");
     expect(payoutsSource).not.toContain("isBankPayoutSetupEnabled");
+  });
+});
+
+// APP A CORRECTION 1: schema-sensitive dashboard balance page (V3 §3) --
+// unlike the source-string-matching convention this file otherwise uses
+// throughout, this block actually imports and calls the page component
+// with the real modules mocked, since "no page-level Supabase call
+// occurs" is a runtime claim, not something a source-text match alone
+// can prove.
+describe("BalancePage: maintenance-mode gate", () => {
+  beforeEach(() => {
+    mockCreateClient.mockClear();
+    mockGetAuthorFinancialSummary.mockClear();
+    mockListAuthorFinancialActivity.mockClear();
+    mockGetAuthorPayoutOverview.mockClear();
+    mockListAuthorPayoutHistory.mockClear();
+    mockGetAuthorPayoutDestination.mockClear();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("renders the maintenance notice and performs zero Supabase/Server-Action calls", async () => {
+    const { default: BalancePage } = await import("./page");
+    const element = await BalancePage({ searchParams: Promise.resolve({}) });
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+
+    expect(html).toContain("Scheduled maintenance");
+    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(mockGetAuthorFinancialSummary).not.toHaveBeenCalled();
+    expect(mockListAuthorFinancialActivity).not.toHaveBeenCalled();
+    expect(mockGetAuthorPayoutOverview).not.toHaveBeenCalled();
+    expect(mockListAuthorPayoutHistory).not.toHaveBeenCalled();
+    expect(mockGetAuthorPayoutDestination).not.toHaveBeenCalled();
+  });
+
+  it("the notice contains no ledger amount, IBAN, or other configuration/identifier value", async () => {
+    const { default: BalancePage } = await import("./page");
+    const element = await BalancePage({ searchParams: Promise.resolve({}) });
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+
+    expect(html.toLowerCase()).not.toContain("iban");
+    expect(html).not.toMatch(/\$\d/);
+    expect(html.length).toBeLessThan(600);
+  });
+
+  it("maintenance mode off (unset) preserves existing behavior -- the page still reaches Supabase", async () => {
+    vi.unstubAllEnvs();
+    const { default: BalancePage } = await import("./page");
+    await expect(BalancePage({ searchParams: Promise.resolve({}) })).rejects.toBe(
+      CREATE_CLIENT_SENTINEL,
+    );
+    expect(mockCreateClient).toHaveBeenCalledOnce();
   });
 });

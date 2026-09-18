@@ -30,12 +30,18 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { AuthorPayoutOverviewRow } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Financial Balance",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see V3 §3.
+export const dynamic = "force-dynamic";
 
 // LEDGER-1D: the author-facing financial ledger read model --
 // everything here comes from get_author_financial_summary() and
@@ -53,6 +59,12 @@ export default async function BalancePage({
 }: {
   searchParams: Promise<{ editBank?: string; error?: string; success?: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive dashboard balance page (V3 §3)
+  // -- checked as the first statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { editBank, error: queryError, success: querySuccess } = await searchParams;
   const supabase = await createClient();
   const {

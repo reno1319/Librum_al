@@ -8,12 +8,20 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Dashboard",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see the exhaustive
+// route audit (books.price_cents is rendered via AuthorBookRow below,
+// on the main post-login author hub).
+export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 UI-6: DASHBOARD = AUTHOR OPERATIONS / WORKSPACE. This page
 // is the hub -- one prioritized next action, two cheap/authoritative
@@ -35,6 +43,13 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_cents
+  // via AuthorBookRow (exhaustive route audit) -- checked as the first
+  // statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { error, success } = await searchParams;
   const supabase = await createClient();
   const {

@@ -402,6 +402,24 @@ describe("saveAuthorPayoutDestination", () => {
   });
 });
 
+// ALL-CUTOVER APP-A: gated before even the existing rollout-switch
+// check, before any Supabase call.
+describe("saveAuthorPayoutDestination: maintenance-mode gate", () => {
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockCreateClient.mockClear();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+    vi.stubEnv("BANK_PAYOUT_SETUP_ENABLED", "true");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("redirects with the maintenance message and never reaches Supabase", async () => {
+    await expect(saveAuthorPayoutDestination(new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/dashboard/balance?error="));
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+});
+
 // BANK-PAYOUT-1E.1 Section 13: the rollout switch must be re-checked
 // independently inside the Server Action itself -- a hidden/absent form
 // is not the enforcement boundary. This block explicitly does NOT set

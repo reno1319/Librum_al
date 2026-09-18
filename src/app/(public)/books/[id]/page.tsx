@@ -28,6 +28,8 @@ import {
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { buttonClasses } from "@/components/ui/button";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
 
 // LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
@@ -91,6 +93,10 @@ type ReviewWithReader = Review & {
   profiles: Pick<Profile, "public_author_name"> | null;
 };
 
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see V3 §3.
+export const dynamic = "force-dynamic";
+
 const METADATA_DESCRIPTION_MAX = 160;
 
 function truncateForMetadata(text: string, max: number) {
@@ -131,6 +137,14 @@ export async function generateMetadata({
 }: {
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
+  // ALL-CUTOVER APP-A: no book-specific metadata (and no Supabase call
+  // via getBookForDetail) while maintenance is active -- the same {}
+  // fallback this function already uses for a draft/unpublished/
+  // nonexistent book, letting the root layout's generic metadata apply.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return {};
+  }
+
   const { id } = await params;
   const book = await getBookForDetail(id);
 
@@ -192,6 +206,12 @@ export default async function BookDetailPage({
     error?: string;
   }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive public book detail page (V3 §3)
+  // -- checked as the first statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { id } = await params;
   const {
     purchase,

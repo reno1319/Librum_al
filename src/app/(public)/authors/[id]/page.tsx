@@ -12,6 +12,8 @@ import { followAuthor, unfollowAuthor } from "./actions";
 import { groupPublishedBooksBySeries } from "@/lib/author-series";
 import { getAuthorInitials } from "@/lib/author-initials";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Bundle, Profile, Series } from "@/lib/types";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
@@ -40,6 +42,10 @@ import type { Book, Bundle, Profile, Series } from "@/lib/types";
 type PublicAuthor = Pick<Profile, "id" | "public_author_name" | "bio" | "avatar_path">;
 type SeriesRow = Pick<Series, "id" | "title">;
 
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see V3 §3.
+export const dynamic = "force-dynamic";
+
 // LIBRUM 2.0 PRODUCT-2: mirrors Book Detail's own PERF-1 pattern
 // (getBookForDetail) -- generateMetadata() and the page component are
 // separate invocations that don't otherwise see each other's data, so
@@ -63,6 +69,13 @@ export async function generateMetadata({
 }: {
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
+  // ALL-CUTOVER APP-A: no author-specific metadata (and no Supabase
+  // call via getPublicAuthor) while maintenance is active -- the same
+  // {} fallback this function already uses for a missing/non-author id.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return {};
+  }
+
   const { id } = await params;
   const author = await getPublicAuthor(id);
 
@@ -86,6 +99,12 @@ export default async function AuthorProfilePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive public author profile page
+  // (V3 §3) -- checked as the first statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { id } = await params;
   const supabase = await createClient();
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
 
@@ -6,6 +6,19 @@ import path from "path";
 // can read the same real page.tsx source without each re-reading the
 // file from disk.
 const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
+
+// APP A EXHAUSTIVE AUDIT: declared at module scope (not inside a
+// describe block) so vitest's vi.mock hoisting can never leave the mock
+// factories referencing not-yet-initialized bindings.
+const CREATE_CLIENT_SENTINEL = new Error("CREATE_CLIENT_CALLED");
+const mockCreateClient = vi.fn(() => {
+  throw CREATE_CLIENT_SENTINEL;
+});
+vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+vi.mock("../../actions", () => ({
+  updateBook: vi.fn(), addContributor: vi.fn(), removeContributor: vi.fn(),
+  publishBook: vi.fn(), unpublishBook: vi.fn(), deleteBook: vi.fn(),
+}));
 
 // LIBRUM 2.0 PRODUCT-5 EDIT-CRASH CORRECTION: a real production defect
 // -- this page (a Server Component, no "use client") was passing an
@@ -210,5 +223,57 @@ describe("Edit page: form organization", () => {
     for (const fieldName of ["title", "subtitle", "description", "language", "genre"]) {
       expect(beforeDisclosure).toContain(`name="${fieldName}"`);
     }
+  });
+});
+
+// APP A EXHAUSTIVE AUDIT: this page renders books.price_cents for
+// editing (found by the exhaustive schema-sensitive route audit, not
+// listed in V3 §3's own inventory) -- proves the maintenance gate at
+// runtime, since "no page-level Supabase call occurs" is a runtime
+// claim source-string matching alone can't establish.
+describe("EditBookPage: maintenance-mode gate", () => {
+  const BOOK_ID = "11111111-1111-4111-8111-111111111111";
+
+  beforeEach(() => {
+    mockCreateClient.mockClear();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("renders the maintenance notice and performs zero Supabase calls", async () => {
+    const { default: EditBookPage } = await import("./page");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const element = await EditBookPage({
+      params: Promise.resolve({ id: BOOK_ID }),
+      searchParams: Promise.resolve({}),
+    });
+    const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+
+    expect(html).toContain("Scheduled maintenance");
+    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it("the notice contains no book id, price, or other configuration/identifier value", async () => {
+    const { default: EditBookPage } = await import("./page");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const element = await EditBookPage({
+      params: Promise.resolve({ id: BOOK_ID }),
+      searchParams: Promise.resolve({}),
+    });
+    const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+
+    expect(html).not.toContain(BOOK_ID);
+    expect(html).not.toMatch(/\$\d/);
+    expect(html.length).toBeLessThan(600);
+  });
+
+  it("maintenance mode off (unset) preserves existing behavior -- the page still reaches Supabase", async () => {
+    vi.unstubAllEnvs();
+    const { default: EditBookPage } = await import("./page");
+    await expect(
+      EditBookPage({ params: Promise.resolve({ id: BOOK_ID }), searchParams: Promise.resolve({}) }),
+    ).rejects.toBe(CREATE_CLIENT_SENTINEL);
+    expect(mockCreateClient).toHaveBeenCalledOnce();
   });
 });

@@ -44,6 +44,7 @@ vi.mock("@/lib/pok", () => ({ getPokConfig: () => mockPokConfig(), createPokClie
 vi.mock("@/lib/pok-checkout", () => ({
   startPokCheckout: (...args: unknown[]) => mockStartPok(...args),
   POK_CHECKOUT_CANNOT_RESUME: "POK_CHECKOUT_CANNOT_RESUME",
+  POK_CHECKOUT_MAINTENANCE_ACTIVE: "POK_CHECKOUT_MAINTENANCE_ACTIVE",
 }));
 vi.mock("@/lib/pok-repository", () => ({ createPokRepository: () => mockPokRepository() }));
 const { buyBook, getFreeBook } = await import("./actions");
@@ -86,6 +87,17 @@ describe("buyBook: POK provider selection", () => {
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Could+not+start+checkout" });
     expect(rpc).not.toHaveBeenCalled(); expect(mockStartPok).not.toHaveBeenCalled(); expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
+  // APP A CORRECTION 2: startPokCheckout()'s own defense-in-depth
+  // maintenance sentinel maps back to the exact same deterministic
+  // redirect target buyBook()'s own top-of-function gate already
+  // produces -- proving the two layers are never observably different.
+  it("startPokCheckout's own maintenance sentinel redirects identically to the top-of-function gate", async () => {
+    mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_MAINTENANCE_ACTIVE"));
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({
+      target: "/books/book?error=Librum%20is%20temporarily%20unavailable%20for%20scheduled%20maintenance.%20Please%20try%20again%20shortly.",
+    });
+    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+  });
 });
 
 describe("buyBook: recovery-session defense-in-depth", () => {
@@ -104,6 +116,74 @@ describe("buyBook: recovery-session defense-in-depth", () => {
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
     expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+  });
+});
+
+// ALL-CUTOVER APP-A: buyBook/getFreeBook are both mutable checkout/
+// purchase ingress -- gated before any Supabase call, exactly like the
+// recovery-session guard above.
+describe("buyBook / getFreeBook: maintenance-mode gate", () => {
+  beforeEach(() => {
+    mockCookieStore.get.mockImplementation(() => undefined);
+    mockRedirect.mockClear();
+    mockCreateClient.mockClear();
+    mockCreateAdminClient.mockClear();
+    mockCheckoutSessionsCreate.mockClear();
+    mockStartPok.mockClear();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("buyBook redirects with the maintenance message and never reaches Supabase or POK", async () => {
+    await expect(buyBook("book-1", new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      expect.stringContaining("/books/book-1?error="),
+    );
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(mockStartPok).not.toHaveBeenCalled();
+  });
+
+  it("getFreeBook redirects with the maintenance message and never reaches Supabase", async () => {
+    await expect(getFreeBook("book-1")).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      expect.stringContaining("/books/book-1?error="),
+    );
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+  });
+
+  it("maintenance mode off (unset) preserves buyBook's existing allowed behavior", async () => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1");
+    vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    const rpc = vi.fn().mockImplementation(async (name: string) =>
+      name === "user_owns_book"
+        ? { data: false }
+        : { data: [{ intent_id: "intent", price_cents_at_checkout: 499, expires_at: "2026-09-15T10:30:00Z" }] },
+    );
+    mockCreateClient.mockResolvedValue({
+      auth: { getUser: async () => ({ data: { user: { id: "reader" } } }) },
+      rpc,
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            single: async () => ({
+              data: { id: "book", title: "Test", price_cents: 499, author_id: "author", status: "published" },
+            }),
+          }),
+        }),
+      }),
+    });
+    mockPokConfig.mockReturnValue({ merchantId: "merchant", keyId: "key", keySecret: "secret" });
+    mockStartPok.mockResolvedValue("https://pay-staging.pokpay.io/sdk-orders/test");
+
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({
+      target: "https://pay-staging.pokpay.io/sdk-orders/test",
+    });
+    expect(mockCreateClient).toHaveBeenCalled();
   });
 });
 

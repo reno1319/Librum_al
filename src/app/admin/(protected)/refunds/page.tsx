@@ -8,11 +8,18 @@ import {
   resolveProfileDisplayName,
   REVIEW_STATUS_LABELS,
 } from "./refund-review-logic";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Refund requests",
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see the exhaustive
+// route audit (refund_requests.amount_cents is rendered below).
+export const dynamic = "force-dynamic";
 
 type AdminRefundRequestRow = {
   id: string;
@@ -42,6 +49,14 @@ const STATUS_CLASS: Record<RefundRequestStatus, string> = {
 };
 
 export default async function AdminRefundsPage() {
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders
+  // refund_requests.amount_cents (exhaustive route audit) -- checked as
+  // the first statement, before requireStaff() (itself a Supabase
+  // query) or any other Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   // ADMIN-1A pre-finalize correction: src/app/admin/layout.tsx's
   // requireStaff("admin.access") only proves the caller is SOME staff
   // member, not that they hold refunds.view specifically (e.g.

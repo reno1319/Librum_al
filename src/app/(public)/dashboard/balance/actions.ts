@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { PAYOUT_DESTINATION_CURRENCY, isBankPayoutSetupEnabled } from "./balance-logic";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { redirectForMaintenance } from "@/lib/maintenance-response";
 import type {
   AuthorFinancialSummaryRow,
   AuthorFinancialActivityRow,
@@ -209,6 +211,12 @@ function mapDestinationRpcError(message: string): string {
 // The database RPC remains the sole authority on IBAN structural/
 // checksum validity; nothing here reimplements that check.
 export async function saveAuthorPayoutDestination(formData: FormData): Promise<void> {
+  // ALL-CUTOVER APP-A: gated before even the existing rollout-switch
+  // check below, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/dashboard/balance");
+  }
+
   // BANK-PAYOUT-1E.1 Section 7: fails closed independently of whether
   // the form itself is currently rendered -- Stripe Connect remains
   // the only LIVE author-payout mechanism today (see balance-logic.ts's

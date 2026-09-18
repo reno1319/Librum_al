@@ -5421,11 +5421,13 @@ describe("constructStripeEventFromApprovedSecrets", () => {
 
     expect(result.ok).toBe(true);
     expect(result.ok && result.event.type).toBe("checkout.session.completed");
-    // POST()'s own dispatch on event.type === "checkout.session.completed"
-    // (unchanged by this correction) is what routes this on to
-    // fulfillBundleSnapshot/fulfillLegacyBundle/fulfillSingleBookPurchase
-    // -- all three are already covered by their own describe blocks
-    // elsewhere in this file, using this exact event shape.
+    // ALL-CUTOVER APP-A / STRIPE-RETIREMENT: POST() itself no longer
+    // dispatches a verified event to fulfillBundleSnapshot/
+    // fulfillLegacyBundle/fulfillSingleBookPurchase at all (see
+    // route.retirement.test.ts) -- this test still proves verification
+    // alone produces an event of the shape those three functions expect,
+    // which remains true and is still exercised directly by their own
+    // describe blocks elsewhere in this file.
   });
 
   it("9. raw-body verification is preserved: a byte-for-byte re-serialized (but semantically identical) payload fails signature verification", () => {

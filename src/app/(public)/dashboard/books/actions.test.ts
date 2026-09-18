@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { randomBytes } from "crypto";
 import JSZip from "jszip";
 
@@ -28,6 +28,15 @@ const mockRedirect = vi.fn((url: string) => {
 });
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+
+// ALL-CUTOVER APP-A: unpublishBook/deleteBook call this AFTER their own
+// maintenance gate -- mocked (not left real) so the maintenance-mode
+// gate tests below can assert it's never reached, the same way
+// mockCreateClient already proves no Supabase call happens.
+const mockRedirectIfRecoverySessionActive = vi.fn();
+vi.mock("@/lib/recovery-guard", () => ({
+  redirectIfRecoverySessionActive: mockRedirectIfRecoverySessionActive,
+}));
 
 const mockGetUser = vi.fn();
 const mockInsert = vi.fn();
@@ -83,7 +92,7 @@ const mockCreateClient = vi.fn(() =>
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
-const { createBook, updateBook } = await import("./actions");
+const { createBook, updateBook, publishBook, unpublishBook, deleteBook } = await import("./actions");
 
 const USER_ID = "author-1";
 const BOOK_ID = "book-1";
@@ -1356,5 +1365,74 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
       "/dashboard/books/new?error=Could+not+read+your+uploaded+cover.+Please+try+again",
     );
     expect(mockInsert).not.toHaveBeenCalled();
+  });
+});
+
+// ALL-CUTOVER APP-A: createBook writes books.price_cents -- gated
+// before any Supabase call.
+describe("createBook: maintenance-mode gate", () => {
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockCreateClient.mockClear();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("redirects with the maintenance message and never reaches Supabase", async () => {
+    await expect(createBook(new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/dashboard/books/new?error="));
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+});
+
+// APP A CORRECTION 2: the same coverage as createBook's own
+// maintenance-mode gate test above, for updateBook/publishBook/
+// unpublishBook/deleteBook -- each of these also writes catalog price
+// or bundle-membership-relevant state (see each function's own
+// ALL-CUTOVER APP-A comment in actions.ts), and none of them had a
+// dedicated test proving the gate actually fires before this
+// correction.
+describe("updateBook/publishBook/unpublishBook/deleteBook: maintenance-mode gate", () => {
+  beforeEach(() => {
+    resetMocks();
+    mockCreateClient.mockClear();
+    mockRedirectIfRecoverySessionActive.mockClear();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("updateBook redirects with the maintenance message and never reaches Supabase", async () => {
+    await expect(updateBook(BOOK_ID, new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(
+      expect.stringContaining(`/dashboard/books/${BOOK_ID}/edit?error=`),
+    );
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it("publishBook redirects with the maintenance message and never reaches Supabase", async () => {
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/dashboard?error="));
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it("unpublishBook redirects with the maintenance message before the recovery-session check or any Supabase call", async () => {
+    await expect(unpublishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/dashboard?error="));
+    expect(mockRedirectIfRecoverySessionActive).not.toHaveBeenCalled();
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it("deleteBook redirects with the maintenance message before the recovery-session check or any Supabase call", async () => {
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/dashboard?error="));
+    expect(mockRedirectIfRecoverySessionActive).not.toHaveBeenCalled();
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it("maintenance mode off (unset) preserves updateBook's/publishBook's/unpublishBook's/deleteBook's existing behavior", async () => {
+    vi.unstubAllEnvs();
+    mockGetUser.mockReset().mockResolvedValue({ data: { user: null } });
+    await expect(updateBook(BOOK_ID, new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith("/login");
   });
 });

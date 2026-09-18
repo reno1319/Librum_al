@@ -2997,202 +2997,41 @@ export async function POST(request: Request) {
   }
   const event = verification.event;
 
-  // A failure here means Stripe was paid but Librum failed to persist the
-  // entitlement/refund it's supposed to represent -- that must never be
-  // acknowledged as a 2xx, or Stripe will never redeliver the event and
-  // the gap becomes permanent and invisible. Returning 500 tells Stripe
-  // to retry; the (book_id, reader_id) upsert and the refunded_at guard
-  // below are both already safe to run again once the underlying failure
-  // clears.
-  const failWebhook = (context: Record<string, unknown>) => {
-    console.error("Stripe webhook: critical entitlement write failed", context);
-    return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
-  };
+  // ALL-CUTOVER APP-A / STRIPE-RETIREMENT: Stripe is fully retired for
+  // this deployment (owner decision, ALL_CUTOVER_ARCHITECTURE_V3.md §2 /
+  // V4.md -- the database-side retirement audit found zero unresolved
+  // Stripe activity in Staging, and the provider-side sandbox account
+  // was never activated for live payments). This handler still performs
+  // full signature verification above (unchanged: the same raw body,
+  // the same stripe-signature header, the same
+  // constructStripeEventFromApprovedSecrets() call trying both approved
+  // secrets, the same "Missing signature"/"Invalid signature" 400
+  // responses on failure) -- the ONLY thing that changes is what
+  // happens after verification succeeds.
+  //
+  // From here on: zero database queries, zero RPC calls, zero upserts,
+  // no checkout/refund/dispute/account dispatch of any kind, for every
+  // event type. Every one of the fulfillment/reconciliation functions
+  // this file exports (fulfillBundleCheckoutByRegime,
+  // fulfillLegacyBundle, fulfillBookCheckoutByRegime,
+  // processChargeRefundedEvent, processRefundLifecycleEvent,
+  // processDisputeEvent, processAccountUpdatedEvent,
+  // reverseAuthorTransferForLostDispute, etc.) remains defined and
+  // exported below, unchanged, byte-for-byte -- reconcile-transfer-
+  // reversals/route.ts still imports reverseAuthorTransferForLostDispute
+  // from this module -- but none of them is ever called from this
+  // handler again.
+  //
+  // Only VERIFIED fields are ever logged (event.type, a redacted event
+  // id, and isStripeEventTestMode()'s boolean read of the verified
+  // event.livemode) -- never anything from the raw, pre-verification
+  // body/signature, which this function never even inspects past the
+  // signature check above.
+  console.log("stripe_webhook_retired", {
+    eventType: event.type,
+    eventIdRedacted: `${event.id.slice(0, 6)}...${event.id.slice(-4)}`,
+    testMode: isStripeEventTestMode(event),
+  });
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
-    const bundleId = session.metadata?.bundle_id;
-    const readerId = session.metadata?.reader_id;
-    const snapshotId = session.metadata?.snapshot_id;
-    // LAUNCH-1 P1-4: single-book checkouts carry metadata.intent_id
-    // (book_checkout_intents.id, migration 032) since buyBook stopped
-    // putting book_id/reader_id in Stripe metadata directly -- both are
-    // now resolved server-side, inside finalize_book_checkout_intent,
-    // from the intent row itself.
-    const intentId = session.metadata?.intent_id;
-    const paymentIntentId = extractPaymentIntentId(session.payment_intent);
-    const amountCents = session.amount_total ?? 0;
-
-    // NEW bundle checkouts (created once buyBundle is updated to use
-    // the migration-025 snapshot RPC) carry metadata.snapshot_id and
-    // are fulfilled entirely from that durable, frozen row. Checkout
-    // Sessions created before that change carry the LEGACY
-    // metadata.bundle_id + reader_id shape instead, and must keep being
-    // fulfilled by fulfillLegacyBundle below for as long as any of them
-    // could still be open -- see the Phase 9B-2 rollout plan for when
-    // that legacy branch can eventually be removed.
-    if (snapshotId) {
-      // STRIPE-CUTOVER-2A Section 12: fulfillBundleCheckoutByRegime reads
-      // the snapshot's own frozen regime and routes to fulfillBundleSnapshot
-      // (legacy, unchanged) or fulfillLedgerBundlePayment (Section 16) --
-      // POST() itself never decides this.
-      const supabase = createAdminClient();
-      const failureResponse = await fulfillBundleCheckoutByRegime(
-        supabase,
-        stripe,
-        event,
-        session,
-        snapshotId,
-        paymentIntentId,
-        amountCents,
-        failWebhook,
-      );
-      if (failureResponse) {
-        return failureResponse;
-      }
-    } else if (bundleId && readerId) {
-      // Pre-migration-025 legacy shape -- predates the regime concept
-      // entirely, exclusively legacy_stripe_connect_v1, unchanged.
-      const supabase = createAdminClient();
-      const failureResponse = await fulfillLegacyBundle(
-        supabase,
-        event,
-        session,
-        bundleId,
-        readerId,
-        paymentIntentId,
-        amountCents,
-        failWebhook,
-      );
-      if (failureResponse) {
-        return failureResponse;
-      }
-    } else if (intentId) {
-      // STRIPE-CUTOVER-2A Section 12: fulfillBookCheckoutByRegime reads
-      // the intent's own frozen regime and routes to
-      // fulfillSingleBookPurchase (legacy, unchanged) or
-      // fulfillLedgerBookPayment (Sections 13-15).
-      const supabase = createAdminClient();
-      const failureResponse = await fulfillBookCheckoutByRegime(
-        supabase,
-        stripe,
-        event,
-        session,
-        intentId,
-        paymentIntentId,
-        amountCents,
-        failWebhook,
-      );
-      if (failureResponse) {
-        return failureResponse;
-      }
-    }
-  }
-
-  // Revokes the reader's access. Only purchases made after
-  // stripe_payment_intent_id started being recorded can be matched here —
-  // see the note in migrations/011_add_refunds.sql.
-  if (event.type === "charge.refunded") {
-    const charge = event.data.object as Stripe.Charge;
-    const supabase = createAdminClient();
-    const failureResponse = await processChargeRefundedEvent(
-      supabase,
-      stripe,
-      event,
-      charge,
-      failWebhook,
-    );
-    if (failureResponse) {
-      return failureResponse;
-    }
-  }
-
-  // REFUND-1B Step 5 correction: catches a refund that was still
-  // pending/requires_action when (or if) charge.refunded fired, and has
-  // now settled to succeeded/failed -- see processRefundLifecycleEvent's
-  // own documentation above for the full rationale. refund.created is
-  // included alongside refund.updated because a refund that resolves
-  // synchronously can arrive already 'succeeded' on its very first event.
-  if (event.type === "refund.updated" || event.type === "refund.created") {
-    const refund = event.data.object as Stripe.Refund;
-    const supabase = createAdminClient();
-    const failureResponse = await processRefundLifecycleEvent(
-      supabase,
-      stripe,
-      event,
-      refund,
-      failWebhook,
-    );
-    if (failureResponse) {
-      return failureResponse;
-    }
-  }
-
-  // Log-only: gives an operator visibility into a refund that failed
-  // after being created, without attempting any automatic reversal of
-  // Librum state. No rollback semantics are implemented here -- see
-  // processRefundLifecycleEvent's own documentation for why building
-  // that machinery isn't justified by anything confirmed reachable in
-  // practice for a card-based Checkout charge.
-  if (event.type === "refund.failed") {
-    const refund = event.data.object as Stripe.Refund;
-    console.error("Stripe webhook: a refund failed after being created", {
-      eventId: event.id,
-      refundId: refund.id,
-      paymentIntentId: extractPaymentIntentId(refund.payment_intent),
-      chargeId: extractChargeId(refund.charge),
-      failureReason: refund.failure_reason ?? null,
-    });
-  }
-
-  // LAUNCH-1 P1-7A: all five charge.dispute.* event types Stripe emits
-  // (confirmed against the installed stripe@22.5.0 SDK's own Events.d.ts
-  // union -- created, updated, closed, funds_withdrawn, funds_reinstated)
-  // route into the same processDisputeEvent, which re-fetches the
-  // dispute's live state and upserts public.payment_disputes. See that
-  // function's own documentation for why one handler correctly covers
-  // all five (each is just "something about this dispute changed, go
-  // re-sync it") and why no event-ordering assumption is needed.
-  if (
-    event.type === "charge.dispute.created" ||
-    event.type === "charge.dispute.updated" ||
-    event.type === "charge.dispute.closed" ||
-    event.type === "charge.dispute.funds_withdrawn" ||
-    event.type === "charge.dispute.funds_reinstated"
-  ) {
-    const dispute = event.data.object as Stripe.Dispute;
-    const supabase = createAdminClient();
-    const failureResponse = await processDisputeEvent(
-      supabase,
-      stripe,
-      event,
-      dispute.id,
-      failWebhook,
-    );
-    if (failureResponse) {
-      return failureResponse;
-    }
-  }
-
-  // LIBRUM 2.0 CONNECT-HARDEN-1: keeps profiles.stripe_payouts_enabled in
-  // sync with live Stripe account state -- see processAccountUpdatedEvent's
-  // own documentation above. Never gates checkout (that always
-  // re-verifies live via checkConnectedAccountReadyForCheckout), but a
-  // failed DB write here still goes through failWebhook -- a transient
-  // outage should be retried by Stripe, not silently drop the sync.
-  if (event.type === "account.updated") {
-    const account = event.data.object as Stripe.Account;
-    const supabase = createAdminClient();
-    const failureResponse = await processAccountUpdatedEvent(
-      supabase,
-      event,
-      account,
-      failWebhook,
-    );
-    if (failureResponse) {
-      return failureResponse;
-    }
-  }
-
-  return NextResponse.json({ received: true });
+  return NextResponse.json({ received: true, retired: true });
 }

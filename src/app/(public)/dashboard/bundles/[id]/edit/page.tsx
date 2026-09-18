@@ -6,6 +6,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -16,6 +18,11 @@ export const metadata: Metadata = {
   title: "Edit bundle",
 };
 
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see the exhaustive
+// route audit (bundles.price_cents is rendered for editing below).
+export const dynamic = "force-dynamic";
+
 export default async function EditBundlePage({
   params,
   searchParams,
@@ -23,6 +30,13 @@ export default async function EditBundlePage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders
+  // bundles.price_cents for editing (exhaustive route audit) -- checked
+  // as the first statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { id } = await params;
   const { error } = await searchParams;
 

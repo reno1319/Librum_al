@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
 import type {
@@ -821,5 +821,57 @@ describe("AdminFinancePage", () => {
     const path = await import("path");
     const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
     expect(source).not.toContain('"use server"');
+  });
+});
+
+// APP A CORRECTION 1: schema-sensitive protected admin finance page
+// (V3 §3) -- proves the maintenance gate rejects before requireStaff()
+// (which itself queries Supabase) or any of the five finance data
+// calls, using this file's own established "call the page, expand/walk
+// the returned element tree" technique (no DOM rendering) rather than
+// source-string matching.
+describe("AdminFinancePage: maintenance-mode gate", () => {
+  beforeEach(() => {
+    mockRequireStaff.mockReset();
+    mockGetFinanceSummaryCounts.mockReset();
+    mockListRefundReconciliationStates.mockReset();
+    mockListFinanceDisputes.mockReset();
+    mockListFinanceCheckoutExceptions.mockReset();
+    mockListFinanceRefundEntitlementMismatches.mockReset();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("renders the maintenance notice before requireStaff() or any finance data call", async () => {
+    const page = await AdminFinancePage({ searchParams: Promise.resolve({}) });
+    const text = collectText(page).join(" | ");
+
+    expect(text).toContain("temporarily unavailable for scheduled maintenance");
+    expect(mockRequireStaff).not.toHaveBeenCalled();
+    expect(mockGetFinanceSummaryCounts).not.toHaveBeenCalled();
+    expect(mockListRefundReconciliationStates).not.toHaveBeenCalled();
+    expect(mockListFinanceDisputes).not.toHaveBeenCalled();
+    expect(mockListFinanceCheckoutExceptions).not.toHaveBeenCalled();
+    expect(mockListFinanceRefundEntitlementMismatches).not.toHaveBeenCalled();
+  });
+
+  it("the notice contains no refund/dispute amount, reader id, or other configuration/identifier value", async () => {
+    const page = await AdminFinancePage({ searchParams: Promise.resolve({}) });
+    const text = collectText(page).join(" | ");
+
+    expect(text).not.toMatch(/\$\d/);
+    expect(text).not.toContain("finance.view");
+  });
+
+  it("maintenance mode off (unset) preserves existing behavior -- requireStaff('finance.view') still runs", async () => {
+    vi.unstubAllEnvs();
+    mockRequireStaff.mockImplementation(() => {
+      throw new RedirectSignal("/?denied=finance.view");
+    });
+
+    await expect(
+      AdminFinancePage({ searchParams: Promise.resolve({}) }),
+    ).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRequireStaff).toHaveBeenCalledWith("finance.view");
   });
 });

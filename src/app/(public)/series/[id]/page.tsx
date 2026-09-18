@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
 import { orderSeriesBooks } from "@/lib/series-order";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Profile } from "@/lib/types";
 
 // LIBRUM 2.0 PRODUCT-3: the public series page didn't exist before this
@@ -32,6 +34,13 @@ type PublicSeriesPageData = {
   series: PublicSeries;
   books: Book[];
 };
+
+// ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
+// this route must never be statically cached -- see the exhaustive
+// route audit (getPublicSeriesPageData selects books.* below, including
+// price_cents, even though BookCard is the only render site that
+// actually displays it).
+export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 PRODUCT-3 PRE-COMMIT CORRECTION: originally two separate
 // concerns -- a cached series-row fetch, plus the page component's own
@@ -101,6 +110,14 @@ export async function generateMetadata({
 }: {
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
+  // ALL-CUTOVER APP-A: no series-specific metadata (and no Supabase call
+  // via getPublicSeriesPageData, which selects books.price_cents) while
+  // maintenance is active -- the same {} fallback this function already
+  // uses for a missing/not-public series.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return {};
+  }
+
   const { id } = await params;
   const data = await getPublicSeriesPageData(id);
 
@@ -126,6 +143,13 @@ export default async function SeriesPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_cents
+  // via BookCard (exhaustive route audit) -- checked as the first
+  // statement, before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    return <MaintenanceNotice />;
+  }
+
   const { id } = await params;
   const data = await getPublicSeriesPageData(id);
 

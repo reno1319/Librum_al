@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
 
 // PHASE-2C bundle-membership-integrity: an explicit `.returns<T[]>()`
 // shape for performBundlePublish()'s own bundle_books->books membership
@@ -43,6 +45,12 @@ async function resolveBookSelection(
 }
 
 export async function createBundle(formData: FormData) {
+  // ALL-CUTOVER APP-A: catalog price is written by this action --
+  // gated before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/dashboard/bundles");
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -95,6 +103,12 @@ export async function createBundle(formData: FormData) {
 }
 
 export async function updateBundle(bundleId: string, formData: FormData) {
+  // ALL-CUTOVER APP-A: catalog price and membership are written by this
+  // action -- gated before any Supabase call.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(`/dashboard/bundles/${bundleId}/edit`);
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -288,6 +302,14 @@ export async function publishBundle(bundleId: string) {
   // AUTH-1C: defense-in-depth, mirroring publishBook()/unpublishBook()
   // (src/app/dashboard/books/actions.ts) -- a bundle's publish state is
   // a public, buyer-facing change. Runs before any Supabase call.
+  //
+  // ALL-CUTOVER APP-A: the maintenance gate runs first of all --
+  // publish re-validates bundle-membership integrity (migration 058)
+  // against columns this cutover renames.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/dashboard/bundles");
+  }
+
   await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();
@@ -319,6 +341,15 @@ export async function publishBundle(bundleId: string) {
 export async function unpublishBundle(bundleId: string) {
   // AUTH-1C: defense-in-depth, mirroring publishBook()/unpublishBook()
   // -- same reasoning as publishBundle() above.
+  //
+  // ALL-CUTOVER APP-A: this function has no existing business-error
+  // redirect convention of its own (it mutates and revalidates only),
+  // so the maintenance rejection throws rather than inventing a new
+  // redirect target.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    throwMaintenanceError();
+  }
+
   await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();
@@ -342,6 +373,13 @@ export async function unpublishBundle(bundleId: string) {
 export async function deleteBundle(bundleId: string) {
   // AUTH-1C: defense-in-depth, mirroring deleteBook() -- bundle
   // deletion is irreversible. Runs before any Supabase call.
+  //
+  // ALL-CUTOVER APP-A: same no-existing-redirect-convention reasoning
+  // as unpublishBundle() above -- throws rather than inventing one.
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    throwMaintenanceError();
+  }
+
   await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();

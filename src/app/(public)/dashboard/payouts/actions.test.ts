@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 
 // LAUNCH-1 P2-1: connectStripeAccount() get-or-creates a Stripe Connect
@@ -70,16 +70,19 @@ const mockAccountsCreate = vi.fn();
 const mockAccountsRetrieve = vi.fn();
 const mockAccountLinksCreate = vi.fn();
 const mockCreateLoginLink = vi.fn();
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({
-    accounts: {
-      create: (...args: unknown[]) => mockAccountsCreate(...args),
-      retrieve: (...args: unknown[]) => mockAccountsRetrieve(...args),
-      createLoginLink: (...args: unknown[]) => mockCreateLoginLink(...args),
-    },
-    accountLinks: { create: (...args: unknown[]) => mockAccountLinksCreate(...args) },
-  }),
+// ALL-CUTOVER APP-A: wrapped in its own spy (not just the individual
+// method mocks below it) so the maintenance-mode gate test can assert
+// getStripe() itself is never even constructed, not merely that its
+// methods went unused.
+const mockGetStripe = vi.fn(() => ({
+  accounts: {
+    create: (...args: unknown[]) => mockAccountsCreate(...args),
+    retrieve: (...args: unknown[]) => mockAccountsRetrieve(...args),
+    createLoginLink: (...args: unknown[]) => mockCreateLoginLink(...args),
+  },
+  accountLinks: { create: (...args: unknown[]) => mockAccountLinksCreate(...args) },
 }));
+vi.mock("@/lib/stripe", () => ({ getStripe: () => mockGetStripe() }));
 
 const { connectStripeAccount, openStripeExpressDashboard } = await import("./actions");
 
@@ -104,6 +107,8 @@ function resetMocks() {
   mockAccountLinksCreate
     .mockReset()
     .mockResolvedValue({ url: "https://connect.stripe.com/setup/acct_new" });
+  mockGetStripe.mockClear();
+  mockCreateLoginLink.mockReset();
 }
 
 async function expectRedirectTo(promise: Promise<unknown>, target: string | RegExp) {
@@ -240,5 +245,41 @@ describe("openStripeExpressDashboard (AUTH-1C)", () => {
     );
 
     expect(mockCreateLoginLink).toHaveBeenCalledWith("acct_existing");
+  });
+});
+
+// APP A CORRECTION 2: openStripeExpressDashboard makes a real outbound
+// Stripe call (accounts.createLoginLink) -- proves the maintenance gate
+// rejects before the recovery-session cookie read, any Supabase call,
+// getStripe() itself, and accounts.createLoginLink. connectStripeAccount
+// is deliberately left ungated (see actions.ts's own STRIPE-DISABLE-1
+// comment): it is already unconditionally disabled before any profile
+// read or Stripe call of any kind (see "never reads the author's
+// profile at all" above), so it performs no mutation or provider call
+// for a maintenance gate to guard.
+describe("openStripeExpressDashboard: maintenance-mode gate (APP A CORRECTION 2)", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("redirects with the maintenance message before the recovery-session cookie read, Supabase, getStripe(), or createLoginLink", async () => {
+    await expectRedirectTo(openStripeExpressDashboard(), "/dashboard/payouts?error=");
+
+    expect(mockCookieStore.get).not.toHaveBeenCalled();
+    expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(mockGetStripe).not.toHaveBeenCalled();
+    expect(mockCreateLoginLink).not.toHaveBeenCalled();
+  });
+
+  it("maintenance mode off (unset) preserves the existing recovery-session check", async () => {
+    vi.unstubAllEnvs();
+    mockCookieStore.get.mockImplementation((name: string) =>
+      name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
+    );
+
+    await expectRedirectTo(openStripeExpressDashboard(), "/reset-password");
+    expect(mockCreateClient).not.toHaveBeenCalled();
   });
 });
