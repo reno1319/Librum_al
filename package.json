@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "typecheck": "next typegen && tsc --noEmit",
     "lint": "eslint",
     "test": "vitest run",
     "staging:fixtures:seed": "node --experimental-strip-types --env-file=.env.staging.local scripts/staging-fixtures/seed.mts",

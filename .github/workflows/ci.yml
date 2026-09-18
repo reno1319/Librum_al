@@ -1,0 +1,124 @@
+# Verification workflow for every change that targets `staging`, the
+# trunk branch. Before it existed the repository ran no automated checks
+# at all: a pull request's "tests pass, eslint clean" was the author's
+# claim, never something GitHub had actually run.
+#
+# This workflow reports a result; on its own it does not block a merge.
+# What turns the check into a merge gate is branch protection on
+# `staging` requiring it, configured separately after this workflow is
+# merged.
+#
+# Deliberately four separate steps rather than one aggregate command, so
+# a red run names which contract broke. In particular `next build` does
+# NOT run ESLint on Next.js 16 -- `next lint` was removed and build-time
+# linting with it (see
+# node_modules/next/dist/docs/01-app/02-guides/upgrading/version-16.md,
+# "next lint Command"), so `npm run lint` has to be its own step or
+# linting silently never runs.
+name: CI
+
+on:
+  pull_request:
+    branches: [staging]
+  push:
+    branches: [staging]
+
+# Read-only: this workflow verifies, it never writes to the repository,
+# publishes a package, or comments on a pull request.
+permissions:
+  contents: read
+
+# A newer push to the same pull request supersedes the run already in
+# flight for it. Pushes to `staging` are deliberately exempt: keying them
+# on `github.run_id` gives every trunk run its own concurrency group, so
+# every `staging` push gets its own independent run and is never
+# cancelled by a later `staging` push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      CI: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+      # NOT a credential, and deliberately not a repository secret.
+      #
+      # next.config.ts calls assertSupabaseEnvSafeForExecution() at
+      # config-load time (src/lib/supabase/env-guard.ts), which both
+      # `next typegen` and `next build` trigger, so both refuse to run
+      # without a syntactically valid Supabase project URL. This is the
+      # same obviously-fake 20-character ref the repository's own test
+      # setup already uses for exactly this purpose -- see the
+      # NEXT_PUBLIC_SUPABASE_URL comment in vitest.config.mts.
+      #
+      # What this value is, precisely:
+      #
+      #   - It satisfies the guard's configuration-shape validation and
+      #     nothing more. The guard requires a parseable
+      #     `https://<20-char-ref>.supabase.co`; this is one.
+      #   - It is not a credential. No key, token or secret of any kind
+      #     is set, referenced or needed by this workflow.
+      #   - It identifies neither real Supabase project. The two real
+      #     refs are named in tracked source
+      #     (PRODUCTION_SUPABASE_PROJECT_REF in
+      #     src/lib/supabase/env-guard.ts and the staging ref in
+      #     src/lib/pok.ts) and are deliberately not repeated here, so a
+      #     secret scan of this workflow has nothing to catch.
+      #   - The build was verified locally with exactly this value and
+      #     completed without contacting Supabase.
+      #   - It leaves the production-ref guard unchanged. With
+      #     VERCEL/VERCEL_ENV/VERCEL_PROJECT_ID all unset, the guard
+      #     classifies this run as a non-production execution, which is
+      #     precisely the classification under which the production ref
+      #     stays rejected.
+      NEXT_PUBLIC_SUPABASE_URL: "https://dummyreffortestingx0.supabase.co"
+
+    steps:
+      - name: Check out the commit under test
+        # actions/checkout v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          # Do not leave GITHUB_TOKEN in .git/config, where any later
+          # step or dependency script in the job could read it. Nothing
+          # here pushes, tags, or makes an authenticated API call, so
+          # the checkout needs no credential after it completes.
+          persist-credentials: false
+
+      - name: Set up Node.js
+        # actions/setup-node v7.0.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          # Matches the Node major the Vercel project builds on
+          # (`nodeVersion: "24.x"`), so CI and the deployment that
+          # follows it do not disagree about the runtime.
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `next typegen` must run before `tsc --noEmit`: tsconfig.json
+      # includes `.next/types/**/*.ts`, and route types (the LayoutProps
+      # and PageProps globals used in src/app) only exist once Next has
+      # generated them. Running `tsc` alone in a clean checkout reports
+      # errors that are artifacts of the missing generated types rather
+      # than real type failures. The ordering lives inside the
+      # `typecheck` script so a contributor running it locally gets the
+      # same behaviour CI does.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Production build
+        run: npm run build
