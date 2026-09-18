@@ -2,7 +2,6 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { GENRES } from "@/lib/genres";
-import { formatPrice } from "@/lib/pricing";
 import {
   parseBookstoreQuery,
   buildBookstoreHref,
@@ -16,7 +15,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
-import type { Book, Bundle, Profile } from "@/lib/types";
+import type { Book, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -56,9 +55,6 @@ export const dynamic = "force-dynamic";
 type BookWithAuthor = Book & {
   profiles: Pick<Profile, "public_author_name"> | null;
 };
-type BundleWithAuthor = Pick<Bundle, "id" | "title" | "price_cents"> & {
-  profiles: Pick<Profile, "public_author_name"> | null;
-};
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 // Hard cap while the catalog is small -- see the Phase 6 bookstore
@@ -82,12 +78,6 @@ const SEARCH_RESULT_LIMIT = 48;
 // arbitrary scale -- see the comment on search_books() in
 // supabase/schema.sql for the full reasoning.
 const SEARCH_CANDIDATE_LIMIT = 500;
-
-// A small, fixed cap on the secondary Bundles section below the main
-// grid -- bundles are a distinct product entity from books, not part
-// of the filtered book search, so they're always the same "most recent
-// published bundles" list regardless of the active book filters.
-const BUNDLE_LIMIT = 8;
 
 async function fetchSearchResults(
   supabase: SupabaseClient,
@@ -233,35 +223,6 @@ async function fetchSearchResults(
   return { books: results.slice(0, SEARCH_RESULT_LIMIT), error: hadError, totalMatched };
 }
 
-// Published bundles only -- the same "published or own author" policy
-// that already governs books also covers bundles (see schema.sql), but
-// this is a public, unauthenticated-safe listing page, so it only ever
-// asks for status = 'published' rather than relying on RLS alone to
-// hide drafts. Only the fields this section actually displays are
-// selected -- no description, no author_id-only internals.
-async function fetchPublishedBundles(
-  supabase: SupabaseClient,
-): Promise<BundleWithAuthor[]> {
-  const { data, error } = await supabase
-    .from("bundles")
-    .select("id, title, price_cents, profiles:public_author_profiles(public_author_name)")
-    .eq("status", "published")
-    .order("created_at", { ascending: false })
-    .limit(BUNDLE_LIMIT)
-    .returns<BundleWithAuthor[]>();
-
-  if (error) {
-    // Same fail-soft posture as the rest of this page -- Bundles is a
-    // secondary section, not core inventory, so a failure here just
-    // means the section doesn't render rather than erroring the whole
-    // Bookstore.
-    console.error("Bookstore: failed to load published bundles:", error);
-    return [];
-  }
-
-  return data ?? [];
-}
-
 export default async function BookstorePage({
   searchParams,
 }: {
@@ -284,17 +245,13 @@ export default async function BookstorePage({
   const { q, genre, sort, minPriceCents, maxPriceCents, isFiltered } =
     parseBookstoreQuery(rawQuery);
 
-  // Bundles are a secondary discovery feature, not part of the book
-  // search result set -- showing unrelated bundles below filtered book
-  // results would weaken the reader's search/filter mental model, so
-  // the section (and the query behind it) is skipped entirely once any
-  // search/genre/sort/price filter is active. See BundlesSection's own
-  // render site below for where this is enforced a second time,
-  // defensively, rather than relying solely on the empty array here.
-  const [{ books, error, totalMatched }, bundles] = await Promise.all([
-    fetchSearchResults(supabase, { q, genre, sort, minPriceCents, maxPriceCents }),
-    isFiltered ? Promise.resolve([]) : fetchPublishedBundles(supabase),
-  ]);
+  const { books, error, totalMatched } = await fetchSearchResults(supabase, {
+    q,
+    genre,
+    sort,
+    minPriceCents,
+    maxPriceCents,
+  });
 
   return (
     <main className="flex-1 bg-background">
@@ -321,7 +278,21 @@ export default async function BookstorePage({
           isFiltered={isFiltered}
         />
 
-        {!isFiltered && bundles.length > 0 && <BundlesSection bundles={bundles} />}
+        {/* ALL-CUTOVER: the bundles rail is gone from the storefront
+            while bundles cannot be bought. buyBundle
+            (src/app/(public)/bundles/[id]/actions.ts) is an
+            unconditional fail-closed exit until POK supports multi-book
+            orders, so this rail advertised a price and a destination
+            whose only action is a disabled button. Its BundlesSection
+            component, its fetchPublishedBundles() query and its
+            BUNDLE_LIMIT cap were removed with it rather than left
+            unreferenced -- git history is the record, and a dead query
+            that still runs on every storefront render is worse than no
+            query at all. The /bundles/[id] pages still resolve -- an
+            existing link or a bookmark is not broken, and an author's
+            own bundle management under /dashboard/bundles is untouched
+            -- the storefront simply stops recruiting new readers into a
+            dead end. */}
       </div>
     </main>
   );
@@ -419,9 +390,9 @@ function BookstoreToolbar({
                 type="number"
                 name="minPrice"
                 defaultValue={minPrice ?? ""}
-                placeholder="$0"
+                placeholder="0 ALL"
                 min="0"
-                step="0.01"
+                step="1"
                 className="focus-ring w-20 rounded-md border border-border bg-surface px-2 py-1 text-sm"
               />
             </div>
@@ -434,9 +405,9 @@ function BookstoreToolbar({
                 type="number"
                 name="maxPrice"
                 defaultValue={maxPrice ?? ""}
-                placeholder="Any"
+                placeholder="Any ALL"
                 min="0"
-                step="0.01"
+                step="1"
                 className="focus-ring w-20 rounded-md border border-border bg-surface px-2 py-1 text-sm"
               />
             </div>
@@ -572,31 +543,3 @@ function BookGrid({
   );
 }
 
-function BundlesSection({ bundles }: { bundles: BundleWithAuthor[] }) {
-  return (
-    <section className="mt-14 border-t border-border pt-10">
-      <h2 className="font-serif text-xl font-bold">Bundles</h2>
-      <p className="mt-1 text-sm text-muted">Multiple books in one collection.</p>
-      <ul className="mt-5 flex flex-col gap-2.5">
-        {bundles.map((bundle) => (
-          <li key={bundle.id}>
-            <Link
-              href={`/bundles/${bundle.id}`}
-              className="focus-ring flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-5 py-4 text-sm transition-colors hover:bg-surface-hover"
-            >
-              <span className="font-serif text-base font-semibold">{bundle.title}</span>
-              {resolvePublicAuthorName(bundle.profiles) && (
-                <span className="text-xs text-muted">
-                  by {resolvePublicAuthorName(bundle.profiles)}
-                </span>
-              )}
-              <span className="ml-auto font-semibold text-primary">
-                {formatPrice(bundle.price_cents)}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}

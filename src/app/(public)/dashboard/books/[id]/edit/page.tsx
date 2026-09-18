@@ -26,6 +26,11 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Series, Contributor } from "@/lib/types";
 import type { Metadata } from "next";
+import {
+  catalogPriceInputValue,
+  MINIMUM_PAID_CATALOG_PRICE_ALL,
+  MAXIMUM_CATALOG_PRICE_ALL,
+} from "@/lib/catalog-price";
 
 // LIBRUM 2.0 SEO-1: a static title, not "Edit <book title>" -- getting
 // the real title would mean a second query inside generateMetadata()
@@ -143,10 +148,7 @@ export default async function EditBookPage({
     : null;
   const manuscriptName = book.file_path?.split("/").pop() ?? null;
 
-  const readiness = resolvePublishReadiness({
-    book,
-    payoutsEnabled: !!profile?.stripe_payouts_enabled,
-  });
+  const readiness = resolvePublishReadiness({ book });
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
@@ -454,15 +456,17 @@ export default async function EditBookPage({
                     name="price"
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="1"
                     required
-                    defaultValue={(book.price_cents / 100).toFixed(2)}
+                    defaultValue={catalogPriceInputValue(book.price_cents)}
                     className={formControlClasses}
                   />
                   <span className="text-xs text-muted">
-                    Set to $0 for a free ebook. Librum takes a{" "}
-                    {PLATFORM_FEE_PERCENT}% platform fee — you keep the rest of
-                    every sale.
+                    Whole lek only. Set to 0 for a free ebook, or price it
+                    between {MINIMUM_PAID_CATALOG_PRICE_ALL} and{" "}
+                    {MAXIMUM_CATALOG_PRICE_ALL.toLocaleString("de-DE")} ALL.
+                    Librum takes a {PLATFORM_FEE_PERCENT}% platform fee — you
+                    keep the rest of every sale.
                   </span>
                 </label>
               </div>
@@ -547,22 +551,7 @@ export default async function EditBookPage({
 
             {book.status === "draft" ? (
               <>
-                {readiness.payoutBlocked ? (
-                  <Alert
-                    variant="warning"
-                    title="Finish payout setup to publish paid books."
-                    className="mt-4"
-                  >
-                    <Link
-                      href="/dashboard/payouts"
-                      className="focus-ring rounded-sm font-medium underline"
-                    >
-                      Manage payouts
-                    </Link>
-                  </Alert>
-                ) : (
-                  <p className="mt-4 text-sm text-muted">Ready to publish.</p>
-                )}
+                <p className="mt-4 text-sm text-muted">Ready to publish.</p>
 
                 {readiness.recommended.length > 0 && (
                   <div className="mt-4">
@@ -585,12 +574,7 @@ export default async function EditBookPage({
                 <form action={publishBook.bind(null, book.id)} className="mt-4">
                   <button
                     type="submit"
-                    disabled={readiness.payoutBlocked}
-                    className={buttonClasses(
-                      "primary",
-                      "md",
-                      "w-full disabled:cursor-not-allowed disabled:opacity-50",
-                    )}
+                    className={buttonClasses("primary", "md", "w-full")}
                   >
                     Publish book
                   </button>

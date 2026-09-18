@@ -76,7 +76,7 @@ export default async function DashboardPage({
   const allBooks = books ?? [];
   const payoutsEnabled = !!profile?.stripe_payouts_enabled;
 
-  const attention = resolveDashboardAttention({ books: allBooks, payoutsEnabled });
+  const attention = resolveDashboardAttention({ books: allBooks });
 
   const newBookAction = (
     <Link href="/dashboard/books/new" className={buttonClasses("primary", "md")}>
@@ -165,22 +165,6 @@ export default async function DashboardPage({
       {success && (
         <Alert variant="success" className="mt-4">
           {success}
-        </Alert>
-      )}
-
-      {attention.kind === "payout-setup" && (
-        <Alert
-          variant="warning"
-          title="Paid publishing and author payout setup have not launched yet."
-          className="mt-6"
-        >
-          <p>
-            You can continue to publish free books while Librum completes
-            its payment and payout systems.
-          </p>
-          <Link href="/dashboard/payouts" className="focus-ring rounded-sm font-medium underline">
-            Payout details
-          </Link>
         </Alert>
       )}
 

@@ -10,6 +10,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
+import { catalogPriceInputValue } from "@/lib/catalog-price";
 
 // LIBRUM 2.0 SEO-1: static title, same reasoning as the book-edit route
 // -- avoids a metadata-only query and its own auth/ownership check for
@@ -121,9 +122,9 @@ export default async function EditBundlePage({
             name="price"
             type="number"
             min="0"
-            step="0.01"
+            step="1"
             required
-            defaultValue={(bundle.price_cents / 100).toFixed(2)}
+            defaultValue={catalogPriceInputValue(bundle.price_cents)}
             className={`w-40 ${formControlClasses}`}
           />
         </label>

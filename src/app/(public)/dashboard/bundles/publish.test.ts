@@ -171,33 +171,36 @@ function resetMocks() {
   mockRevalidatePath.mockReset();
 }
 
-describe("publishBundle: payout-readiness gate", () => {
+// ALL-CUTOVER / STRIPE-RETIREMENT: this block was "publishBundle:
+// payout-readiness gate". The gate required stripe_payouts_enabled, a
+// column only ever set from a Stripe Connect account that
+// connectPayoutAccount() no longer creates, so it could never be
+// satisfied by any author Librum has. It is gone, and with it the three
+// cases that encoded it: "paid bundle + payouts disabled: blocked",
+// "profile read error: fail closed" (there is no profile read left to
+// fail) and the price_cents === 1 case. The failure cases that remain
+// below are the real ones -- an unreadable bundle, a missing bundle, a
+// failed update -- and they are unchanged.
+describe("publishBundle: publish outcomes", () => {
   beforeEach(resetMocks);
 
-  it("paid bundle + payouts disabled: blocked, update never attempted", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
+  // Regression for the removed gate: an author whose payouts flag is
+  // explicitly false -- the only kind Librum currently has -- must be
+  // able to publish a priced bundle, and the profile must not be read
+  // at all in deciding it.
+  it("paid bundle: published, profiles table never queried", async () => {
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 99900 }));
     mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
-
-    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=Connect+your+payout+account+before+publishing",
-    );
-    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
-  });
-
-  it("paid bundle + payouts enabled: published", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
 
     await publishBundle(BUNDLE_ID); // no redirect on success -- must not throw
 
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBundleUpdatePayload).toHaveBeenCalledWith({ status: "published" });
     expect(mockRedirect).not.toHaveBeenCalled();
     expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard/bundles");
   });
 
-  it("free bundle + payouts disabled: published, profiles table never queried", async () => {
+  it("free bundle: published, profiles table never queried", async () => {
     mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
 
     await publishBundle(BUNDLE_ID);
@@ -211,16 +214,6 @@ describe("publishBundle: payout-readiness gate", () => {
     // A genuine query-execution failure -- distinct from the "not found"
     // case below, which returns {data: null, error: null} instead.
     mockBundleSelectResult.mockReturnValue({ data: null, error: { message: "connection reset" } });
-
-    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/bundles");
-    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
-  });
-
-  it("profile read error: fail closed, update never attempted", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
-    mockProfileSelectResult.mockReturnValue({ data: null, error: { message: "connection reset" } });
 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
@@ -267,25 +260,22 @@ describe("publishBundle: payout-readiness gate", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/bundles");
   });
 
-  it("price_cents === 0 boundary: skips the payout check exactly at zero", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+  // The two former price boundaries (0 skips the payout check, 1
+  // requires it) were the gate's own edges. Price no longer changes the
+  // code path at all, which is what this asserts across the whole
+  // range at once.
+  it("price never changes the publish path", async () => {
+    for (const price_cents of [0, 1, 99, 9900, 10000000]) {
+      resetMocks();
+      mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents }));
+      mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
 
-    await publishBundle(BUNDLE_ID);
+      await publishBundle(BUNDLE_ID);
 
-    expect(mockProfileSelectResult).not.toHaveBeenCalled();
-    expect(mockRedirect).not.toHaveBeenCalled();
-  });
-
-  it("price_cents === 1 boundary: requires payout readiness at the smallest positive price", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 1 }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
-
-    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=Connect+your+payout+account+before+publishing",
-    );
+      expect(mockProfileSelectResult).not.toHaveBeenCalled();
+      expect(mockBundleUpdatePayload).toHaveBeenCalledWith({ status: "published" });
+      expect(mockRedirect).not.toHaveBeenCalled();
+    }
   });
 
   it("requires authentication before touching anything", async () => {

@@ -17,6 +17,7 @@ import { Alert } from "@/components/ui/alert";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Metadata } from "next";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 export const metadata: Metadata = {
   title: "Purchases & refunds",
@@ -190,7 +191,7 @@ export default async function AccountPurchasesPage({
           <p className="mt-6 text-sm text-muted">
             Total spent:{" "}
             <span className="font-semibold text-primary">
-              ${(totalSpentCents / 100).toFixed(2)}
+              {formatAllMinorUnits(totalSpentCents)}
             </span>
           </p>
 
@@ -232,7 +233,7 @@ export default async function AccountPurchasesPage({
                   {isBundle && (
                     <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted">
                       One purchase · {group.bookCount} books · $
-                      {(group.totalAmountCents / 100).toFixed(2)}
+                      {formatAllMinorUnits(group.totalAmountCents)}
                     </p>
                   )}
 
@@ -258,7 +259,7 @@ export default async function AccountPurchasesPage({
                                   month: "short",
                                   day: "numeric",
                                 })}{" "}
-                                · ${(purchase.amount_cents / 100).toFixed(2)}
+                                · {formatAllMinorUnits(purchase.amount_cents)}
                                 {purchase.refunded_at && (
                                   <span className="ml-2 text-red-600">Refunded</span>
                                 )}

@@ -10,52 +10,55 @@ const book = (overrides: Partial<Parameters<typeof resolveDashboardAttention>[0]
   ...overrides,
 });
 
+// ALL-CUTOVER / STRIPE-RETIREMENT: the four "payout setup" cases that
+// used to live here are gone with the "payout-setup" state itself --
+// publishing a paid book no longer requires a Stripe Connect account,
+// so there is no payout gap left for the dashboard to raise. What the
+// remaining cases pin is that the priority order survived that removal
+// intact: zero books beats a draft, and a draft beats nothing to do.
 describe("resolveDashboardAttention", () => {
-  it("zero books beats everything, even an unresolved payout gap", () => {
-    expect(
-      resolveDashboardAttention({ books: [], payoutsEnabled: false }),
-    ).toEqual({ kind: "zero-books" });
+  it("zero books beats everything", () => {
+    expect(resolveDashboardAttention({ books: [] })).toEqual({ kind: "zero-books" });
   });
 
-  it("payout setup beats a draft when a paid book exists and payouts aren't enabled", () => {
+  it("a draft is the next action, whether the book is paid", () => {
     const result = resolveDashboardAttention({
       books: [book({ id: "b1", status: "draft", price_cents: 500 })],
-      payoutsEnabled: false,
-    });
-    expect(result).toEqual({ kind: "payout-setup" });
-  });
-
-  it("draft when payout setup is not urgent (payouts already enabled)", () => {
-    const result = resolveDashboardAttention({
-      books: [book({ id: "b1", status: "draft", price_cents: 500 })],
-      payoutsEnabled: true,
     });
     expect(result).toEqual({ kind: "continue-draft", book: { id: "b1", title: "Untitled" } });
   });
 
-  it("draft when payout setup is not urgent because every book is free", () => {
+  it("a draft is the next action, whether the book is free", () => {
     const result = resolveDashboardAttention({
       books: [book({ id: "b1", status: "draft", price_cents: 0 })],
-      payoutsEnabled: false,
     });
     expect(result).toEqual({ kind: "continue-draft", book: { id: "b1", title: "Untitled" } });
   });
 
-  it("none when there are books, no drafts, and payouts are enabled", () => {
+  // Regression for the removed gate: a priced draft by an author with no
+  // payout account used to return { kind: "payout-setup" } and tell them
+  // they could only publish free books. Nothing about the price may
+  // divert the dashboard away from the draft any more.
+  it("never returns anything but the draft for a priced book with no payout account", () => {
+    const result = resolveDashboardAttention({
+      books: [book({ id: "b1", status: "draft", price_cents: 100000 })],
+    });
+    expect(result.kind).toBe("continue-draft");
+  });
+
+  it("none when there are books and no drafts", () => {
     const result = resolveDashboardAttention({
       books: [book({ id: "b1", status: "published", price_cents: 500 })],
-      payoutsEnabled: true,
     });
     expect(result).toEqual({ kind: "none" });
   });
 
-  it("none when the only unpublished-payout gap doesn't apply and no draft exists", () => {
+  it("none when a mix of free and paid books is fully published", () => {
     const result = resolveDashboardAttention({
       books: [
         book({ id: "b1", status: "published", price_cents: 0 }),
         book({ id: "b2", status: "published", price_cents: 500 }),
       ],
-      payoutsEnabled: true,
     });
     expect(result).toEqual({ kind: "none" });
   });
@@ -66,7 +69,6 @@ describe("resolveDashboardAttention", () => {
         book({ id: "older", title: "Older draft", status: "draft", price_cents: 0, created_at: "2025-01-01T00:00:00.000Z" }),
         book({ id: "newer", title: "Newer draft", status: "draft", price_cents: 0, created_at: "2026-06-01T00:00:00.000Z" }),
       ],
-      payoutsEnabled: true,
     });
     expect(result).toEqual({ kind: "continue-draft", book: { id: "newer", title: "Newer draft" } });
   });

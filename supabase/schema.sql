@@ -2820,13 +2820,26 @@ begin
     limit 1;
 
     if v_discount.id is not null then
+      -- ALL-CATALOG-2: the floor was 50, which was 50 US cents -- the
+      -- Stripe minimum charge, the same constant src/lib/pricing.ts
+      -- still calls MIN_CHARGE_CENTS. Minor units are now hundredths
+      -- of a lek, so 50 meant 0.50 ALL: a 99%-off code on any book
+      -- would have produced an order worth about half a cent, with a
+      -- rounded-to-zero author royalty behind it. The floor is now
+      -- 9900 = 99.00 ALL, MINIMUM_PAID_CATALOG_PRICE_ALL from
+      -- src/lib/catalog-price.ts, the same minimum an author is
+      -- allowed to list a paid book at in the first place. A code
+      -- that would go below it is clamped, not rejected -- that is
+      -- the behaviour this function already had, and changing it
+      -- into a visible "this code cannot apply to this book" error
+      -- is a product decision, not part of the currency cutover.
       v_price_cents := greatest(
         case
           when v_discount.percent_off is not null
             then round(v_book.price_cents::numeric * (100 - v_discount.percent_off) / 100)::integer
           else v_book.price_cents - v_discount.amount_off_cents
         end,
-        50
+        9900
       );
       v_discount_code_id := v_discount.id;
     end if;

@@ -17,7 +17,7 @@ import { BookSampleReader } from "@/components/book-sample-reader";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
 import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
-import { formatPrice, formatAllPrice } from "@/lib/pricing";
+import { formatPrice } from "@/lib/pricing";
 import { resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
 import {
   resolveBookPurchaseState,
@@ -402,21 +402,19 @@ export default async function BookDetailPage({
     owned,
     priceCents: book.price_cents,
   });
+  // Still needed by resolveCheckoutSecurityNote below, which tells the
+  // reader which provider handles their card -- a genuinely
+  // regime-dependent statement, unlike the price.
   const usePok = resolveActiveCheckoutProvider({
     newCheckoutRegime: process.env.NEW_CHECKOUT_REGIME,
     ledgerPaymentProvider: process.env.LEDGER_PAYMENT_PROVIDER,
   }) === "pok";
-  // Was `new Intl.NumberFormat("en", {style:"currency",currency:"ALL"})`,
-  // which rounds off the minor units under this runtime's default CLDR
-  // data for ALL (7.99 -> "ALL 8") -- confirmed reproducible. Reuses the
-  // existing, already-tested formatAllPrice helper (pricing.ts) that the
-  // ledger_v1 bundle-checkout price display already relies on, instead of
-  // a second, ad-hoc ALL formatter. The frozen checkout amount itself was
-  // never affected either way -- this is display-only, computed
-  // independently in pok-checkout.ts.
-  const formattedPrice = usePok && book.price_cents > 0
-    ? formatAllPrice(book.price_cents)
-    : formatPrice(book.price_cents);
+  // ALL-CATALOG-2: was a regime branch choosing between an ALL
+  // formatter here and a USD one everywhere else in the app. There is
+  // only one catalog currency, so formatPrice (src/lib/pricing.ts) now
+  // renders ALL for every surface and this page no longer needs to know
+  // which provider is active to print a price.
+  const formattedPrice = formatPrice(book.price_cents);
 
   // See resolveShowSample's own comment (src/lib/book-purchase.ts) for
   // the full rule -- omitted for "owned"/"author" (who already have

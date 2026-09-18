@@ -1,3 +1,5 @@
+import { formatAllMinorUnits } from "@/lib/catalog-price";
+
 export const PLATFORM_FEE_PERCENT = 20;
 
 // STRIPE-CUTOVER-2A Section 22: the author's royalty share, expressed in
@@ -11,47 +13,51 @@ export const PLATFORM_FEE_PERCENT = 20;
 // already-created, not-yet-finalized ledger_v1 checkout.
 export const AUTHOR_ROYALTY_RATE_BPS = (100 - PLATFORM_FEE_PERCENT) * 100;
 
-// LIBRUM 2.0 UI-4: the single shared formatter for a book/bundle price
-// as shown to readers -- was previously duplicated independently in
-// BookCard, the bookstore hero, the bundle list, and the book detail
-// page. Currency is fixed at USD to match every other price-facing
-// surface in the app (Stripe Checkout, book detail, dashboard sales) --
-// not a currency-selection feature. This remains the production default
-// for every legacy_stripe_connect_v1 surface (Section 9) -- unchanged by
-// STRIPE-CUTOVER-2A.
-export function formatPrice(priceCents: number): string {
-  return priceCents === 0 ? "Free" : `$${(priceCents / 100).toFixed(2)}`;
+// ALL-CATALOG-2: the single shared reader-facing price formatter.
+//
+// Was fixed at USD ("$9.99") while POK charged the same stored number as
+// ALL minor units -- a book advertised at $9.99 took 9.99 ALL. Librum's
+// catalog and checkout currency is ALL only (see catalog-price.ts, and
+// POK_STAGING.md's "ALL is the ledger's frozen currency; no USD-to-ALL
+// exchange is performed"), so there is no second currency for this
+// function to choose between and no regime for it to be aware of.
+//
+// Takes stored minor units (hundredths of a lek) -- the unit
+// books.price_cents, bundles.price_cents and purchases.amount_cents all
+// hold. Delegates to catalog-price.ts's lenient formatter rather than
+// formatting here, so the Albanian convention (dot groups thousands,
+// comma separates decimals) has exactly one implementation. Lenient by
+// design: this renders historical purchase amounts and legacy rows that
+// are not valid catalog prices, and a display formatter that throws
+// takes the whole page down with it.
+export function formatPrice(priceMinorUnits: number): string {
+  return priceMinorUnits === 0 ? "Free" : formatAllMinorUnits(priceMinorUnits);
 }
 
-// STRIPE-CUTOVER-2A Section 9: regime-aware formatter for a ledger_v1
-// TEST-mode price, distinct from formatPrice above (which stays fixed at
-// "$", legacy/USD) so no existing legacy-facing surface is touched by
-// this change. ALL uses two-decimal internal minor units (1 ALL = 100
-// minor units, the same "divide by 100" shape as USD cents) -- per the
-// locked product decision, this is NOT a currency conversion, just this
-// currency's own minor-unit convention, formatted with an explicit "ALL"
-// suffix (rather than a symbol) so it can never be visually mistaken for
-// a dollar amount.
-export function formatAllPrice(priceMinorUnits: number): string {
-  return priceMinorUnits === 0 ? "Free" : `${(priceMinorUnits / 100).toFixed(2)} ALL`;
-}
+// formatAllPrice() is gone, not renamed. It existed only so the single
+// book detail page could show ALL while every other surface showed USD
+// -- a split that was itself the defect. formatPrice above is now the
+// one formatter, so the regime branch at its only call site
+// (src/app/(public)/books/[id]/page.tsx) is gone too.
 
 export function platformFeeCents(priceCents: number) {
   return Math.round((priceCents * PLATFORM_FEE_PERCENT) / 100);
 }
 
-// Stripe declines card charges below $0.50 USD, so a code that would
-// discount a book past that floor just charges the floor instead.
+// ALL-CATALOG-2: MIN_CHARGE_CENTS is 50 US cents -- Stripe's old
+// minimum charge. It is kept ONLY as the subject of the two guard tests
+// that assert it never leaks into an ALL amount (see
+// src/app/(public)/books/[id]/checkout-logic.test.ts's "never reuses
+// MIN_CHARGE_CENTS as an ALL business rule"). Nothing in any production
+// path reads it, and nothing should: in lek minor units 50 is half a
+// lek.
+//
+// applyDiscount() is gone with the currency cutover. It was already
+// unreachable -- the discount arithmetic that actually runs lives in
+// create_book_checkout_intent (supabase/schema.sql) -- and it carried
+// this same USD floor. That SQL function had inherited the identical
+// literal, which is how a would-be 0.50 ALL order became possible; see
+// supabase/migrations/20260918120000_all_discount_floor.sql. Leaving a
+// dead USD-cents helper next to a live ALL catalog is how that mistake
+// gets made a second time.
 export const MIN_CHARGE_CENTS = 50;
-
-export function applyDiscount(
-  priceCents: number,
-  discount: { percent_off: number | null; amount_off_cents: number | null },
-) {
-  const discounted =
-    discount.percent_off != null
-      ? Math.round(priceCents * (1 - discount.percent_off / 100))
-      : priceCents - (discount.amount_off_cents ?? 0);
-
-  return Math.max(discounted, MIN_CHARGE_CENTS);
-}

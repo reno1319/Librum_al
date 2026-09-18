@@ -193,6 +193,119 @@ export function classifyCatalogPrice(priceAll: number): "free" | "paid" {
  */
 export function formatCatalogPriceAll(priceAll: number): string {
   assertValidCatalogPriceAll(priceAll);
-  const grouped = String(priceAll).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${grouped},00 ALL`;
+  return formatAllMinorUnits(catalogPriceAllToMinor(priceAll));
+}
+
+// ============================================================
+// ALL-CATALOG-2 (wiring patch): the minor-unit boundary.
+//
+// Everything this module exposed before this point speaks WHOLE lek --
+// the unit an author types and a reader reads. Everything Librum
+// STORES speaks hundredths of a lek: books.price_cents,
+// book_checkout_intents.price_cents_at_checkout, payments.amount_minor
+// and the whole author_ledger_entries chain are minor-unit columns, and
+// src/lib/pok-checkout.ts converts back to POK's major units with a
+// single `/ 100` at the provider boundary (see POK_STAGING.md: "POK
+// major-unit amounts are converted to/from internal hundredths
+// exactly").
+//
+// The two converters below are the ONLY sanctioned crossing between
+// those units. They live here, beside the domain they validate, rather
+// than as a bare `* 100` scattered across four Server Actions and two
+// forms -- a stray multiplication at a call site is exactly how a
+// catalog price silently becomes a hundredfold error.
+// ============================================================
+
+/** Hundredths of a lek per whole lek. ALL's own minor-unit convention. */
+export const CATALOG_MINOR_UNITS_PER_ALL = 100;
+
+/** `MINIMUM_PAID_CATALOG_PRICE_ALL` expressed in stored minor units. */
+export const MINIMUM_PAID_CATALOG_PRICE_MINOR =
+  MINIMUM_PAID_CATALOG_PRICE_ALL * CATALOG_MINOR_UNITS_PER_ALL;
+
+/** `MAXIMUM_CATALOG_PRICE_ALL` expressed in stored minor units. */
+export const MAXIMUM_CATALOG_PRICE_MINOR =
+  MAXIMUM_CATALOG_PRICE_ALL * CATALOG_MINOR_UNITS_PER_ALL;
+
+/**
+ * Whole-lek catalog price -> the minor-unit integer Librum stores.
+ * Enforces the same canonical domain every other function here does, so
+ * an out-of-domain value can never be written to the database through
+ * this path.
+ */
+export function catalogPriceAllToMinor(priceAll: number): number {
+  assertValidCatalogPriceAll(priceAll);
+  return priceAll * CATALOG_MINOR_UNITS_PER_ALL;
+}
+
+/**
+ * Stored minor units -> whole-lek catalog price. Throws for a value
+ * that is not a whole number of lek (a legacy row priced under the old
+ * USD-cents assumption, e.g. 999, is NOT a valid catalog price and must
+ * never be silently reinterpreted as one) or outside the catalog
+ * domain. Callers that merely DISPLAY an arbitrary stored amount want
+ * `formatAllMinorUnits` below instead -- display must never throw.
+ */
+export function minorToCatalogPriceAll(priceMinorUnits: number): number {
+  if (
+    !Number.isSafeInteger(priceMinorUnits) ||
+    priceMinorUnits % CATALOG_MINOR_UNITS_PER_ALL !== 0
+  ) {
+    throw new Error(INVALID_DOMAIN_MESSAGE);
+  }
+  const priceAll = priceMinorUnits / CATALOG_MINOR_UNITS_PER_ALL;
+  assertValidCatalogPriceAll(priceAll);
+  return priceAll;
+}
+
+/**
+ * LENIENT display formatter for any stored minor-unit amount, in the
+ * same Albanian convention `formatCatalogPriceAll` uses (dot groups
+ * thousands, comma separates the decimals, explicit "ALL" suffix).
+ *
+ * Deliberately does NOT enforce the catalog domain, and deliberately
+ * does not throw. It renders amounts that are legitimately not catalog
+ * prices: a past purchase, a refund amount, an author's accrued
+ * balance, a platform fee, and -- until the catalog is re-priced -- a
+ * legacy row still holding a USD-cents value. A formatter that throws
+ * takes a whole page down with it; validation belongs on input, which
+ * is what `parseCatalogPriceAll` and `catalogPriceAllToMinor` are for.
+ *
+ * A negative amount keeps its sign ahead of the digits (-1.234,50 ALL),
+ * since ledger and refund surfaces legitimately show one. A non-finite
+ * or non-integer input renders as the literal "— ALL" rather than
+ * "NaN ALL".
+ */
+export function formatAllMinorUnits(priceMinorUnits: number): string {
+  if (!Number.isSafeInteger(priceMinorUnits)) return "— ALL";
+
+  const negative = priceMinorUnits < 0;
+  const absolute = Math.abs(priceMinorUnits);
+  const whole = Math.trunc(absolute / CATALOG_MINOR_UNITS_PER_ALL);
+  const fraction = absolute % CATALOG_MINOR_UNITS_PER_ALL;
+  const grouped = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+
+  return `${negative ? "-" : ""}${grouped},${String(fraction).padStart(2, "0")} ALL`;
+}
+
+/**
+ * The value a price `<input>` should be pre-filled with for a stored
+ * amount: the whole-lek number as a bare string, or "" when the stored
+ * value is not a valid whole-lek catalog price.
+ *
+ * The empty string is the load-bearing case. Every book priced before
+ * ALL-CATALOG-2 holds a USD-cents value (999 meaning "$9.99"), which is
+ * 9.99 lek -- not a catalog price at all. Pre-filling "9.99" would
+ * invite the author to press Save on a number that means something
+ * different from what they originally chose, and pre-filling "999"
+ * would silently hundredfold it. Blank forces a deliberate re-entry,
+ * which is the only honest option: nothing in the database records
+ * which currency the original number was typed in.
+ */
+export function catalogPriceInputValue(priceMinorUnits: number): string {
+  try {
+    return String(minorToCatalogPriceAll(priceMinorUnits));
+  } catch {
+    return "";
+  }
 }

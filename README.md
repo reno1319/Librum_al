@@ -4,8 +4,14 @@ A self-publishing platform for digital ebooks — authors upload and sell,
 readers browse and buy. Built with Next.js, TypeScript, Tailwind CSS, and
 Supabase (database, auth, file storage), deployed on Vercel.
 
-**Production deployment (pre-launch):** https://librumal.vercel.app — a
-hosted build, not a completed controlled launch (see `ROADMAP.md` Phase 20).
+**There is no live production deployment.** https://librumal.vercel.app
+resolves, but it serves a stale build: no deployment has targeted the
+production environment for some time, so none of the recent work — the
+POK checkout, the ALL currency cutover, the Stripe retirement, the
+maintenance guard — is reachable there. Treat that URL as an artifact of
+an earlier deploy, not as Librum. Recent work is visible on Vercel
+preview deployments only. See `ROADMAP.md` Phase 20 for what a real
+controlled launch still requires.
 
 > See [`ROADMAP.md`](./ROADMAP.md) for full status, sequencing, and what's
 > still open — this file only covers what exists and how to run it.

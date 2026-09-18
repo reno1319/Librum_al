@@ -116,18 +116,24 @@ describe("UploadWizard: native intent controls (critical)", () => {
   });
 });
 
-describe("UploadWizard: payout context is presentational only (critical)", () => {
-  it("SaveButtons (which renders both final buttons) is declared with no access to payoutsEnabled at all", () => {
-    // SaveButtons is a module-level function, not a closure inside
-    // UploadWizard -- it structurally cannot read payoutsEnabled (a
-    // prop of UploadWizard) even if someone tried, which this asserts
-    // directly rather than relying on that structural fact alone.
-    const saveButtonsBlock = source.match(/function SaveButtons\(\)[\s\S]*?\n}/)![0];
-    expect(saveButtonsBlock).not.toContain("payoutsEnabled");
-    expect(saveButtonsBlock).not.toContain("readiness");
+// ALL-CUTOVER / STRIPE-RETIREMENT: this block used to assert that
+// payoutsEnabled reached the wizard but never gated the buttons --
+// the weaker guarantee that was possible while performPublish() still
+// had a Stripe Connect gate behind it. That gate is gone, and so is
+// the prop, so the guarantee is now the strongest available form: the
+// wizard has no notion of payout status at all, and cannot acquire one
+// without this test failing.
+describe("UploadWizard: payout status is not an input to the wizard (critical)", () => {
+  it("the word payoutsEnabled does not appear in the file", () => {
+    expect(source).not.toContain("payoutsEnabled");
   });
 
-  it("both final buttons are disabled by pending only, never by payoutsEnabled/readiness", () => {
+  it("nothing Stripe-shaped reaches the wizard", () => {
+    expect(source).not.toContain("stripe_payouts_enabled");
+    expect(source.toLowerCase()).not.toContain("stripe");
+  });
+
+  it("both final buttons are disabled by pending only", () => {
     const saveButtonsBlock = source.match(/function SaveButtons\(\)[\s\S]*?\n}/)![0];
     const disabledProps = saveButtonsBlock.match(/disabled=\{[^}]*\}/g) ?? [];
     expect(disabledProps.length).toBe(2);
@@ -136,12 +142,11 @@ describe("UploadWizard: payout context is presentational only (critical)", () =>
     }
   });
 
-  it("payoutsEnabled is used only to build the display-only readiness object, never in a disabled= expression", () => {
+  it("no disabled= expression anywhere reads the readiness object", () => {
     const disabledLines = source.split("\n").filter((line) => line.includes("disabled="));
     for (const line of disabledLines) {
-      expect(line).not.toContain("payoutsEnabled");
+      expect(line).not.toContain("readiness");
     }
-    expect(source).toContain("payoutsEnabled,\n  });");
   });
 });
 

@@ -7,17 +7,29 @@ import type { Book } from "@/lib/types";
 // resolveHomepageCta(), parseBookstoreQuery(), resolveBookPurchaseState(),
 // and resolveDashboardAttention(). This exists specifically to keep
 // "required" and "recommended" from ever being blurred together in the
-// UI: publishBook()'s only real hard gate (a paid book without payouts
-// enabled) is NOT part of getPublishChecklist() at all -- that
-// function's own docstring says its 5 items are "purely informational,
-// never blocks publishing." Cover and price are deliberately excluded
+// UI: getPublishChecklist()'s items never block publishing -- its own
+// docstring says its 5 items are "purely informational, never blocks
+// publishing." (It once stood in contrast to publishBook()'s real hard
+// gate, a paid book without Stripe payouts enabled; that gate is gone,
+// see below.) Cover and price are deliberately excluded
 // from the recommended list below: every book that can exist already
 // has a cover (createBook requires one, and there's no remove-cover
-// path), and $0/Free is a fully legitimate, intentional price, not an
-// incomplete one.
+// path), and a price of 0 (Free) is a fully legitimate, intentional
+// price, not an incomplete one.
+// ALL-CUTOVER / STRIPE-RETIREMENT: `payoutBlocked` is gone, along with
+// the `payoutsEnabled` input that produced it. It mirrored
+// performPublish()'s Stripe Connect gate, and that gate has been
+// removed -- see the note in performPublish()
+// (src/app/(public)/dashboard/books/actions.ts) for why. Removing the
+// field rather than hardcoding it to false is deliberate: it makes the
+// compiler walk every UI site that used to render a block warning,
+// instead of leaving dead props and unreachable branches behind.
+//
+// `requiredMet` is kept. It is now always true, but it is the shape the
+// UI reads, and a future genuine hard requirement belongs here rather
+// than in a new parallel field.
 export type PublishReadiness = {
   requiredMet: boolean;
-  payoutBlocked: boolean;
   recommended: ChecklistItem[];
 };
 
@@ -34,22 +46,18 @@ type ReadinessBook = Pick<Book, "description" | "keywords" | "price_cents" | "co
 
 export function resolvePublishReadiness(params: {
   book: ReadinessBook;
-  payoutsEnabled: boolean;
 }): PublishReadiness {
-  const { book, payoutsEnabled } = params;
-
-  // Mirrors publishBook()'s own real gate exactly (books/actions.ts):
-  // a free book, or a paid book with payouts already enabled, has no
-  // required blocker at all.
-  const payoutBlocked = book.price_cents > 0 && !payoutsEnabled;
+  const { book } = params;
 
   const recommended = getPublishChecklist(book).filter((item) =>
     RECOMMENDED_LABELS.has(item.label),
   );
 
+  // Nothing blocks publishing any more. getPublishChecklist()'s items
+  // are, and always were, "purely informational, never blocks
+  // publishing" -- see that function's own docstring.
   return {
-    requiredMet: !payoutBlocked,
-    payoutBlocked,
+    requiredMet: true,
     recommended,
   };
 }

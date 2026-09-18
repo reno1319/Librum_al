@@ -4,7 +4,7 @@ export type ChecklistItem = { label: string; done: boolean };
 
 type ChecklistBook = Pick<Book, "description" | "keywords" | "price_cents" | "cover_path">;
 
-// Purely informational, never blocks publishing — a $0 price or a short
+// Purely informational, never blocks publishing — a price of 0 or a short
 // description can be entirely intentional (a free book, a short story).
 // This just nudges authors toward a more complete listing.
 //
@@ -34,7 +34,9 @@ export function getPublishChecklist(book: ChecklistBook): ChecklistItem[] {
       done: book.keywords.trim().length > 0,
     },
     {
-      label: "Set a price (or keep $0 if this book is meant to be free)",
+      // ALL-CATALOG-2: was "keep $0" -- the catalog and checkout
+      // currency is ALL, and this is author-facing copy.
+      label: "Set a price (or keep it at 0 if this book is meant to be free)",
       done: book.price_cents > 0,
     },
   ];

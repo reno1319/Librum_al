@@ -1,3 +1,5 @@
+import { CATALOG_MINOR_UNITS_PER_ALL } from "@/lib/catalog-price";
+
 // LIBRUM 2.0 UI-4: pure decision/URL-building helpers extracted from
 // src/app/bookstore/page.tsx, mirroring the same "extract a pure
 // function, unit-test it directly" pattern already used by
@@ -41,15 +43,22 @@ export type ParsedBookstoreQuery = {
   isFiltered: boolean;
 };
 
-// Dollar-string price params -> integer cents, the same rounding
-// Stripe-facing code elsewhere in this codebase already uses. A
-// non-numeric or empty value simply yields "no filter" rather than an
-// error -- these are optional GET params a reader could hand-edit in
-// the URL.
+// ALL-CATALOG-2: whole-lek price params -> the minor units the books
+// table stores. Was a dollars-to-cents conversion, which filtered
+// against a currency the catalog never used.
+//
+// Deliberately NOT routed through parseCatalogPriceAll: a filter bound
+// is not a catalog price. A reader may legitimately filter from 0, or
+// up to a number no book could ever be priced at, and neither should be
+// rejected. Only the unit conversion is shared. A non-numeric or empty
+// value still yields "no filter" rather than an error -- these are
+// optional GET params a reader could hand-edit in the URL.
 function parsePriceCents(value: string | undefined): number | undefined {
   if (!value) return undefined;
-  const dollars = Number(value);
-  return Number.isFinite(dollars) ? Math.round(dollars * 100) : undefined;
+  const lek = Number(value);
+  if (!Number.isFinite(lek) || lek < 0) return undefined;
+  const minor = Math.round(lek * CATALOG_MINOR_UNITS_PER_ALL);
+  return Number.isSafeInteger(minor) ? minor : undefined;
 }
 
 export function parseBookstoreQuery(params: BookstoreQuery): ParsedBookstoreQuery {

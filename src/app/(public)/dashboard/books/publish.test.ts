@@ -178,39 +178,48 @@ function resetMocks() {
 describe("publishBook: draft -> published", () => {
   beforeEach(resetMocks);
 
-  it("publishes a free draft with no payout requirement at all", async () => {
+  it("publishes a free draft", async () => {
     mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 0, published_at: null }));
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
-    expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published", published_at: expect.any(String) }),
     );
   });
 
-  it("publishes a paid draft when payouts are enabled", async () => {
-    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 999, published_at: null }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
+  // ALL-CUTOVER / STRIPE-RETIREMENT: publishing a paid book used to
+  // require stripe_payouts_enabled, a column only ever set from a
+  // Stripe Connect account, which connectPayoutAccount() no longer
+  // creates -- so no author who did not already have one could ever
+  // publish a priced book. The gate is gone. These two cases replace
+  // the three that used to encode it: the profile is never read at all
+  // now, whatever the price, and a paid draft publishes on the same
+  // path as a free one.
+  it("publishes a paid draft, and never reads the profile to decide", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 99900, published_at: null }));
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockBookUpdatePayload).toHaveBeenCalledWith(expect.objectContaining({ status: "published" }));
+  });
+
+  // Regression for the exact defect this change closes: an author with
+  // stripe_payouts_enabled explicitly false is the ONLY kind of author
+  // Librum currently has, and they must be able to publish a priced
+  // book.
+  it("publishes a paid draft for an author whose payouts flag is false", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 99900, published_at: null }));
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(expect.objectContaining({ status: "published" }));
-  });
-
-  it("blocks a paid draft when payouts are not enabled -- book stays unpublished", async () => {
-    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 999, published_at: null }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
-
-    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?error=Connect+your+payout+account+before+publishing",
-    );
-    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
-    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+    expect(mockSendNewBookEmails).toHaveBeenCalledOnce();
   });
 
   it("sets published_at on first publish", async () => {
@@ -416,36 +425,40 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
     expect(mockSendNewBookEmails).toHaveBeenCalledOnce();
   });
 
-  it("intent=publish + paid book with payouts enabled publishes immediately", async () => {
-    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 999, published_at: null }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
-    const formData = await buildFormData({ intent: "publish", price: "9.99" });
+  // ALL-CATALOG-2: "999" is 999 lek. The submitted price is whole lek
+  // and is stored as 99900 minor units -- the wizard no longer accepts
+  // "9.99", which used to pass straight through as 999 minor units and
+  // become a 9.99 ALL charge.
+  it("intent=publish + paid book publishes immediately, and stores the price in lek minor units", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 99900, published_at: null }));
+    const formData = await buildFormData({ intent: "publish", price: "999" });
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
+    expect(mockBookInsert.mock.calls[0][0]).toMatchObject({ price_cents: 99900 });
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
     );
   });
 
-  it("intent=publish + paid book WITHOUT payouts: creation succeeds, publish is blocked, book remains a draft", async () => {
-    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 999, published_at: null }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+  // ALL-CATALOG-2: was "intent=publish + paid book WITHOUT payouts:
+  // creation succeeds, publish is blocked, book remains a draft". The
+  // payout gate is gone, so the only way a publish-intent create can
+  // now leave the book a draft is a genuine failure -- which the
+  // "DB failure during the publish step" case below still covers. What
+  // this case pins instead is the price rejection: a dollar-shaped
+  // price is refused before any row is inserted, rather than silently
+  // stored as a hundredth of its intended value.
+  it("intent=publish + a fractional (dollar-shaped) price: refused, nothing inserted", async () => {
     const formData = await buildFormData({ intent: "publish", price: "9.99" });
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    // The critical invariant: the book row was inserted (as a draft)
-    // regardless of the publish outcome.
-    expect(mockBookInsert).toHaveBeenCalledOnce();
-    expect(mockBookInsert.mock.calls[0][0]).toMatchObject({ status: "draft" });
-    // Publish was attempted and blocked -- never advanced to published.
+    expect(mockBookInsert).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
-    expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?success=Saved+as+draft&error=Connect+your+payout+account+before+publishing",
-    );
+    expect(mockRedirect.mock.calls[0][0]).toContain("/dashboard/books/new?error=");
   });
 
   it("intent=publish + a DB failure during the publish step: creation succeeds, book remains a draft, controlled error only", async () => {

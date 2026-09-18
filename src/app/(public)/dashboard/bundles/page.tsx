@@ -16,6 +16,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 export const metadata: Metadata = {
   title: "Bundles",
@@ -168,7 +169,7 @@ export default async function BundlesPage({
               <p className="font-medium">
                 {bundle.title}{" "}
                 <span className="text-muted">
-                  · ${(bundle.price_cents / 100).toFixed(2)}
+                  · {formatAllMinorUnits(bundle.price_cents)}
                 </span>
               </p>
               <p className="text-xs text-muted capitalize">

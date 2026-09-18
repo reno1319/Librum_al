@@ -84,6 +84,23 @@ describe("formatMinorAmount", () => {
   it("formats zero without throwing", () => {
     expect(formatMinorAmount(0, "USD")).toBe("$0.00");
   });
+
+  // ALL-CATALOG-2: Intl.NumberFormat's CLDR data gives ALL zero
+  // fraction digits, so routing lek through it returns "ALL 8" for 799
+  // minor units. These pin that the ledger's own currency never takes
+  // that path.
+  it("formats ALL through the catalog formatter, keeping both decimal places", () => {
+    expect(formatMinorAmount(799, "ALL")).toBe("7,99 ALL");
+  });
+
+  it("never rounds a lek amount to a whole unit", () => {
+    expect(formatMinorAmount(120050, "ALL")).toBe("1.200,50 ALL");
+    expect(formatMinorAmount(50, "ALL")).toBe("0,50 ALL");
+  });
+
+  it("renders a negative lek balance with its sign, never clamped", () => {
+    expect(formatMinorAmount(-800, "ALL")).toBe("-8,00 ALL");
+  });
 });
 
 describe("entryTypeLabel", () => {

@@ -136,14 +136,14 @@ describe("resolveSuccessBannerMessage", () => {
 });
 
 describe("getIssueRefundConfirmationMessage", () => {
-  it("formats the amount as dollars and cents and states the consequence is irreversible", () => {
+  it("formats the amount in lek and states the consequence is irreversible", () => {
     expect(getIssueRefundConfirmationMessage(699)).toBe(
-      "Issue the $6.99 refund through Stripe? This will return the payment to the reader. This action cannot be undone.",
+      "Issue the 6,99 ALL refund through Stripe? This will return the payment to the reader. This action cannot be undone.",
     );
   });
 
-  it("formats a whole-dollar amount with two decimal places", () => {
-    expect(getIssueRefundConfirmationMessage(500)).toContain("$5.00");
+  it("formats a whole-lek amount with two decimal places", () => {
+    expect(getIssueRefundConfirmationMessage(500)).toContain("5,00 ALL");
   });
 });
 

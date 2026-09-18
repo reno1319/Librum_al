@@ -17,6 +17,7 @@ import { IssueRefundButton } from "./issue-refund-button";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Metadata } from "next";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 // LIBRUM 2.0 SEO-1: static title, not a dynamic one built from the
 // requester/reader's name -- this is an admin-only page, and reusing
@@ -183,7 +184,7 @@ export default async function AdminRefundRequestDetailPage({
 
         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
           <dt className="text-muted">Requested amount</dt>
-          <dd className="font-medium">${(request.amount_cents / 100).toFixed(2)}</dd>
+          <dd className="font-medium">{formatAllMinorUnits(request.amount_cents)}</dd>
 
           <dt className="text-muted">Requested</dt>
           <dd>
@@ -249,7 +250,7 @@ export default async function AdminRefundRequestDetailPage({
                 className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-2 text-sm"
               >
                 <span>{item.books?.title ?? "Book unavailable"}</span>
-                <span className="text-muted">${(item.amount_cents / 100).toFixed(2)}</span>
+                <span className="text-muted">{formatAllMinorUnits(item.amount_cents)}</span>
               </li>
             ))}
           </ul>

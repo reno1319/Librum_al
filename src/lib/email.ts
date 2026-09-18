@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
 
@@ -42,7 +43,7 @@ export async function sendPurchaseEmails(
     admin.auth.admin.getUserById(book.author_id),
   ]);
 
-  const amount = (amountCents / 100).toFixed(2);
+  const amount = formatAllMinorUnits(amountCents);
   const bookUrl = `${origin}/books/${bookId}`;
 
   if (reader?.user?.email) {
@@ -51,7 +52,7 @@ export async function sendPurchaseEmails(
       "Your Librum purchase receipt",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">Thanks for your purchase!</h1>
-        <p>You bought <strong>${book.title}</strong> for $${amount}.</p>
+        <p>You bought <strong>${book.title}</strong> for ${amount}.</p>
         <p><a href="${bookUrl}">View your book</a></p>
       </div>`,
     );
@@ -63,7 +64,7 @@ export async function sendPurchaseEmails(
       "You made a sale on Librum",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">You made a sale!</h1>
-        <p><strong>${book.title}</strong> just sold for $${amount}.</p>
+        <p><strong>${book.title}</strong> just sold for ${amount}.</p>
         <p><a href="${origin}/dashboard/sales">View your sales</a></p>
       </div>`,
     );
@@ -89,7 +90,7 @@ export async function sendBundlePurchaseEmails(
     admin.auth.admin.getUserById(bundle.author_id),
   ]);
 
-  const amount = (amountCents / 100).toFixed(2);
+  const amount = formatAllMinorUnits(amountCents);
   const bundleUrl = `${origin}/bundles/${bundleId}`;
 
   if (reader?.user?.email) {
@@ -98,7 +99,7 @@ export async function sendBundlePurchaseEmails(
       "Your Librum purchase receipt",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">Thanks for your purchase!</h1>
-        <p>You bought the <strong>${bundle.title}</strong> bundle for $${amount}.</p>
+        <p>You bought the <strong>${bundle.title}</strong> bundle for ${amount}.</p>
         <p><a href="${bundleUrl}">View your bundle</a></p>
       </div>`,
     );
@@ -110,7 +111,7 @@ export async function sendBundlePurchaseEmails(
       "You made a sale on Librum",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">You made a sale!</h1>
-        <p>Your <strong>${bundle.title}</strong> bundle just sold for $${amount}.</p>
+        <p>Your <strong>${bundle.title}</strong> bundle just sold for ${amount}.</p>
         <p><a href="${origin}/dashboard/sales">View your sales</a></p>
       </div>`,
     );
@@ -150,7 +151,7 @@ export async function sendSnapshotBundlePurchaseEmails(
       : Promise.resolve({ data: { user: null }, error: null }),
   ]);
 
-  const amount = (amountCents / 100).toFixed(2);
+  const amount = formatAllMinorUnits(amountCents);
   // The bundle itself may no longer exist or may no longer look like
   // this purchase did -- link to the reader's library instead when
   // there's no bundle_id to point at, since that's always a valid
@@ -163,7 +164,7 @@ export async function sendSnapshotBundlePurchaseEmails(
       "Your Librum purchase receipt",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">Thanks for your purchase!</h1>
-        <p>You bought the <strong>${bundleTitle}</strong> bundle for $${amount}.</p>
+        <p>You bought the <strong>${bundleTitle}</strong> bundle for ${amount}.</p>
         <p><a href="${bundleUrl}">View your bundle</a></p>
       </div>`,
     );
@@ -175,7 +176,7 @@ export async function sendSnapshotBundlePurchaseEmails(
       "You made a sale on Librum",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">You made a sale!</h1>
-        <p>Your <strong>${bundleTitle}</strong> bundle just sold for $${amount}.</p>
+        <p>Your <strong>${bundleTitle}</strong> bundle just sold for ${amount}.</p>
         <p><a href="${origin}/dashboard/sales">View your sales</a></p>
       </div>`,
     );

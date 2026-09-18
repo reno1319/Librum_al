@@ -3,9 +3,21 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import {
+  catalogPriceAllToMinor,
+  parseCatalogPriceAll,
+  MINIMUM_PAID_CATALOG_PRICE_ALL,
+  MAXIMUM_CATALOG_PRICE_ALL,
+} from "@/lib/catalog-price";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
+
+// ALL-CATALOG-2: the author-facing rule, stated once. Named rather
+// than inlined so both the create and edit paths in this file give the
+// identical message for the identical rejection.
+const INVALID_PRICE_MESSAGE =
+  `Price must be 0 (free) or a whole number of lek from ${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}`;
 
 // PHASE-2C bundle-membership-integrity: an explicit `.returns<T[]>()`
 // shape for performBundlePublish()'s own bundle_books->books membership
@@ -62,11 +74,25 @@ export async function createBundle(formData: FormData) {
 
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
-
-  if (!title || !Number.isFinite(priceCents) || priceCents < 0) {
+  if (!title) {
     redirect("/dashboard/bundles?error=Please+fill+in+every+field");
   }
+
+  // ALL-CATALOG-2: was `Math.round(Number(formData.get("price")) * 100)`,
+  // which accepted any non-negative number and silently reinterpreted a
+  // dollars-shaped input as minor units. Parsed through the shared
+  // catalog domain instead -- whole lek, 0 or 99..100,000 -- so the
+  // authoritative server-side write can never disagree with the client
+  // gate in wizard-validation.ts about what a valid price is.
+  //
+  // Deliberately AFTER the required-field check below it: a blank form
+  // is a missing title, not an invalid price, and the author should be
+  // told the first thing rather than the second.
+  const parsedPrice = parseCatalogPriceAll(String(formData.get("price") ?? ""));
+  if (!parsedPrice.ok) {
+    redirect(`/dashboard/bundles?error=${encodeURIComponent(INVALID_PRICE_MESSAGE)}`);
+  }
+  const priceCents = catalogPriceAllToMinor(parsedPrice.priceAll);
 
   const { bookIds, error: selectionError } = await resolveBookSelection(
     supabase,
@@ -131,11 +157,25 @@ export async function updateBundle(bundleId: string, formData: FormData) {
 
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
-
-  if (!title || !Number.isFinite(priceCents) || priceCents < 0) {
+  if (!title) {
     redirect(`/dashboard/bundles/${bundleId}/edit?error=Please+fill+in+every+field`);
   }
+
+  // ALL-CATALOG-2: was `Math.round(Number(formData.get("price")) * 100)`,
+  // which accepted any non-negative number and silently reinterpreted a
+  // dollars-shaped input as minor units. Parsed through the shared
+  // catalog domain instead -- whole lek, 0 or 99..100,000 -- so the
+  // authoritative server-side write can never disagree with the client
+  // gate in wizard-validation.ts about what a valid price is.
+  //
+  // Deliberately AFTER the required-field check below it: a blank form
+  // is a missing title, not an invalid price, and the author should be
+  // told the first thing rather than the second.
+  const parsedPrice = parseCatalogPriceAll(String(formData.get("price") ?? ""));
+  if (!parsedPrice.ok) {
+    redirect(`/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(INVALID_PRICE_MESSAGE)}`);
+  }
+  const priceCents = catalogPriceAllToMinor(parsedPrice.priceAll);
 
   const { bookIds, error: selectionError } = await resolveBookSelection(
     supabase,
@@ -174,7 +214,7 @@ type PerformBundlePublishResult =
   | { ok: true }
   | {
       ok: false;
-      reason: "not_found" | "read_failed" | "payout_required" | "insufficient_members" | "update_failed";
+      reason: "not_found" | "read_failed" | "insufficient_members" | "update_failed";
     };
 
 // FIX/bundle-payout-publication-gate: the bundle equivalent of
@@ -214,26 +254,29 @@ async function performBundlePublish(
     return { ok: false, reason: "not_found" };
   }
 
-  // Free bundles never touch Stripe (buyBundle's own checkout-creation
-  // path is the only thing that ever requires payout readiness), so
-  // payout setup is only a real requirement for a bundle that will
-  // actually be sold. price_cents is read fresh from the bundle's own
-  // row here -- never trusted from the client.
-  if (bundle.price_cents > 0) {
-    const { data: profile, error: profileReadError } = await supabase
-      .from("profiles")
-      .select("stripe_payouts_enabled")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profileReadError) {
-      console.error("performBundlePublish: profile read failed", { bundleId, userId, error: profileReadError });
-      return { ok: false, reason: "read_failed" };
-    }
-    if (!profile?.stripe_payouts_enabled) {
-      return { ok: false, reason: "payout_required" };
-    }
-  }
+  // ALL-CUTOVER / STRIPE-RETIREMENT: the Stripe Connect payout gate that
+  // used to sit here is gone. It required profiles.stripe_payouts_enabled
+  // before a priced bundle could be published, and that column can only
+  // ever be set from a live Stripe Connect account -- which
+  // connectStripeAccount() (dashboard/payouts/actions.ts) now refuses to
+  // create under every configuration. The result was a closed loop: an
+  // author was told to connect a payout account, and the payout page
+  // told them connecting was unavailable. No author could publish a
+  // priced bundle at all.
+  //
+  // Removed rather than repointed at author_payout_destinations
+  // (migration 055), which sits behind its own disabled flag and would
+  // only have relocated the deadlock. The gate is also guarding a rail
+  // the money no longer uses: under POK the platform receives the whole
+  // buyer charge and the author's claim is created as
+  // author_ledger_entries rows by finalize_ledger_book_payment(), never
+  // by a Stripe transfer -- so nothing about publishing requires a
+  // payout destination to exist yet. A destination is required to
+  // WITHDRAW, which is a separate gate on a separate page.
+  //
+  // resolveDashboardAttention() (src/lib/dashboard-attention.ts) still
+  // nags an author with priced books and no payout setup. That stays:
+  // it informs without blocking, which is the correct shape for this.
 
   // PHASE-2C bundle-membership-integrity: a bundle is only validly
   // publishable if EVERY membership row resolves to a book still owned
@@ -324,11 +367,6 @@ export async function publishBundle(bundleId: string) {
   const result = await performBundlePublish(supabase, bundleId, user.id);
 
   if (!result.ok) {
-    if (result.reason === "payout_required") {
-      // Same message publishBook() uses for the identical situation --
-      // see performPublish() (books/actions.ts).
-      redirect("/dashboard/bundles?error=Connect+your+payout+account+before+publishing");
-    }
     if (result.reason === "insufficient_members") {
       redirect("/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books");
     }

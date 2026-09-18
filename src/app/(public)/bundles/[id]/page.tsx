@@ -7,6 +7,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Bundle, Profile } from "@/lib/types";
 import type { Metadata } from "next";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 // LIBRUM 2.0 SEO-1: static title, not "<bundle title> | Librum" -- same
 // reasoning as the author profile page (generateMetadata() can't see
@@ -124,14 +125,14 @@ export default async function BundleDetailPage({
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <span className="text-xl font-semibold text-primary">
-          ${(bundle.price_cents / 100).toFixed(2)}
+          {formatAllMinorUnits(bundle.price_cents)}
         </span>
         {savingsCents > 0 && (
           <span className="text-sm text-muted">
             <span className="line-through">
-              ${(originalTotalCents / 100).toFixed(2)}
+              {formatAllMinorUnits(originalTotalCents)}
             </span>{" "}
-            — you save ${(savingsCents / 100).toFixed(2)}
+            — you save {formatAllMinorUnits(savingsCents)}
           </span>
         )}
 

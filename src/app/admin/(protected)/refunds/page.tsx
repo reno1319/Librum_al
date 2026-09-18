@@ -11,6 +11,7 @@ import {
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Metadata } from "next";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 export const metadata: Metadata = {
   title: "Refund requests",
@@ -140,7 +141,7 @@ export default async function AdminRefundsPage() {
                       month: "short",
                       day: "numeric",
                     })}{" "}
-                    · ${(request.amount_cents / 100).toFixed(2)}
+                    · {formatAllMinorUnits(request.amount_cents)}
                     {request.reason && ` · "${request.reason}"`}
                   </p>
                 </div>
