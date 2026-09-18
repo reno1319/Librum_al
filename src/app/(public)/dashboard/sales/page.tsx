@@ -9,6 +9,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 export const metadata: Metadata = {
   title: "Sales",
@@ -262,7 +263,7 @@ export default async function SalesPage() {
         <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
           <p className="text-sm text-muted">Net revenue</p>
           <p className="mt-1 font-serif text-2xl font-semibold text-primary">
-            ${(totalNetCents / 100).toFixed(2)}
+            {formatAllMinorUnits(totalNetCents)}
           </p>
         </div>
         <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
@@ -296,7 +297,7 @@ export default async function SalesPage() {
             title={`${day.date.toLocaleDateString(undefined, {
               month: "short",
               day: "numeric",
-            })}: $${(day.cents / 100).toFixed(2)}`}
+            })}: ${formatAllMinorUnits(day.cents)}`}
           >
             <div
               className="w-full rounded-t bg-primary"
@@ -331,7 +332,7 @@ export default async function SalesPage() {
                 {book.unitsSold} unit{book.unitsSold === 1 ? "" : "s"}
               </span>
               <span className="text-sm font-semibold text-primary">
-                ${(book.netCents / 100).toFixed(2)}
+                {formatAllMinorUnits(book.netCents)}
               </span>
             </li>
           ))}

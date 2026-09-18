@@ -38,18 +38,15 @@ export default async function NewBookPage({
     // the name baked into dc:creator is the same reader-facing identity
     // shown on the book's own page, never the private account name.
     //
-    // LIBRUM 2.0 PUBLISHING-UX-1 PART C: stripe_payouts_enabled is the
-    // ONE new column this pass reads, mirroring the Edit Book page's own
-    // identical read (see its page.tsx) -- display-only context for the
-    // Review step's readiness section (resolvePublishReadiness()), never
-    // a pre-submit gate: Publish book can still be pressed regardless,
-    // since performPublish() (actions.ts) remains the one real
-    // server-side enforcement point. Never used to build a pre-submit
-    // link to /dashboard/payouts -- that would risk losing unsaved
-    // wizard state.
+    // ALL-CUTOVER / STRIPE-RETIREMENT: stripe_payouts_enabled is no
+    // longer read here. It fed the Review step's readiness section,
+    // which mirrored performPublish()'s Stripe Connect gate; that gate
+    // has been removed (see the note in performPublish(),
+    // src/app/(public)/dashboard/books/actions.ts), so the column now
+    // describes a rail nothing uses.
     supabase
       .from("profiles")
-      .select("display_name, public_author_name, stripe_payouts_enabled")
+      .select("display_name, public_author_name")
       .eq("id", user.id)
       .single(),
   ]);
@@ -75,7 +72,6 @@ export default async function NewBookPage({
         series={series ?? []}
         authorName={resolvePublicAuthorName(profile) ?? ""}
         authorId={user.id}
-        payoutsEnabled={!!profile?.stripe_payouts_enabled}
       />
     </main>
   );

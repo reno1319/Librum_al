@@ -11,15 +11,31 @@ import type {
   AuthorFinancialActivityRow,
   AuthorPayoutHistoryRow,
 } from "@/lib/types";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 // Integer minor units in, formatted string out -- the only place in
 // this page's code that ever divides by 100. Never used for arithmetic;
 // every balance computation happens in the SQL layer (migration 050) on
-// bigint minor units, exactly as LEDGER-1D requires. Intl.NumberFormat
-// is currency-aware (not a hardcoded "$"), so EUR/USD (or any future
-// currency the ledger holds) each render with their own correct symbol
-// and placement -- the two are never combined into one figure.
+// bigint minor units, exactly as LEDGER-1D requires.
+//
+// ALL-CATALOG-2: ALL is now handled by the catalog's own formatter, not
+// by Intl.NumberFormat. Intl's CLDR data gives ALL zero fraction
+// digits, so `format(7.99)` returns "ALL 8" -- verified in this
+// runtime, and the same rounding that src/lib/pricing.test.ts already
+// carries a regression for on the book detail page. On an author's
+// balance that is not a cosmetic defect: every row would be rounded to
+// a whole lek and the column would stop tying out against the same
+// figures on Dashboard Sales.
+//
+// Every other currency still goes through Intl, which remains
+// currency-aware (not a hardcoded "$"), so the ledger's legacy USD rows
+// -- and anything it may hold in future -- each render with their own
+// correct symbol and placement. The currencies are never combined into
+// one figure.
 export function formatMinorAmount(amountMinor: number, currency: string): string {
+  if (currency === "ALL") {
+    return formatAllMinorUnits(amountMinor);
+  }
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency,

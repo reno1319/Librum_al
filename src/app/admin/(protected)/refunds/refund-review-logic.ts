@@ -1,4 +1,5 @@
 import type { RefundRequestStatus } from "@/lib/types";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 // Matches refund_requests.admin_notes's own cap, enforced by
 // review_refund_request() itself (migration 029:
@@ -94,8 +95,8 @@ export function resolveSuccessBannerMessage(
 // so this confirmation text can never be more (or less) authoritative
 // than what actually happens next.
 export function getIssueRefundConfirmationMessage(amountCents: number): string {
-  const amount = (amountCents / 100).toFixed(2);
-  return `Issue the $${amount} refund through Stripe? This will return the payment to the reader. This action cannot be undone.`;
+  const amount = formatAllMinorUnits(amountCents);
+  return `Issue the ${amount} refund through Stripe? This will return the payment to the reader. This action cannot be undone.`;
 }
 
 // Sorts requested (actionable) items first, then by most recently

@@ -5,6 +5,11 @@ import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { createBook } from "../actions";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import {
+  formatAllMinorUnits,
+  MINIMUM_PAID_CATALOG_PRICE_ALL,
+  MAXIMUM_CATALOG_PRICE_ALL,
+} from "@/lib/catalog-price";
 import { GENRES } from "@/lib/genres";
 import { LANGUAGES, getLanguageLabel } from "@/lib/languages";
 import { resolvePublishReadiness } from "@/lib/publish-readiness";
@@ -90,18 +95,10 @@ export function UploadWizard({
   series,
   authorName,
   authorId,
-  payoutsEnabled,
 }: {
   series: Series[];
   authorName: string;
   authorId: string;
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART C: display-only context for the
-  // Review step's readiness section -- never a pre-submit gate. Publish
-  // book can still be pressed even when this is false; performPublish()
-  // (actions.ts) remains the one real, server-side enforcement point,
-  // exactly as before this prop existed. See page.tsx for the one
-  // narrow profile read that supplies it.
-  payoutsEnabled: boolean;
 }) {
   const [step, setStep] = useState(1);
   const [stepError, setStepError] = useState("");
@@ -171,7 +168,6 @@ export function UploadWizard({
       price_cents: priceCents,
       cover_path: cover ? "pending" : null,
     },
-    payoutsEnabled,
   });
 
   return (
@@ -415,20 +411,23 @@ export function UploadWizard({
       {/* Step 3: Price & Earnings */}
       <div className={step === 3 ? "flex flex-col gap-4" : "hidden"}>
         <label className="flex flex-col gap-1 text-sm">
-          Price (USD)
+          Price (ALL)
           <input
             name="price"
             type="number"
             min="0"
-            step="0.01"
+            step="1"
             required
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             className={formControlClasses}
           />
           <span className="text-xs text-muted">
-            Set to $0 for a free ebook. Librum takes a {PLATFORM_FEE_PERCENT}%
-            platform fee — you keep the rest of every sale.
+            Whole lek only. Set to 0 for a free ebook, or price it between{" "}
+            {MINIMUM_PAID_CATALOG_PRICE_ALL} and{" "}
+            {MAXIMUM_CATALOG_PRICE_ALL.toLocaleString("de-DE")} ALL. Librum
+            takes a {PLATFORM_FEE_PERCENT}% platform fee — you keep the rest of
+            every sale.
           </span>
         </label>
 
@@ -443,16 +442,16 @@ export function UploadWizard({
             <div className="flex flex-col gap-2">
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-muted">Sale price</span>
-                <span>${(priceCents / 100).toFixed(2)}</span>
+                <span>{formatAllMinorUnits(priceCents)}</span>
               </div>
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-muted">Librum platform fee ({PLATFORM_FEE_PERCENT}%)</span>
-                <span>-${(feeCents / 100).toFixed(2)}</span>
+                <span>-{formatAllMinorUnits(feeCents)}</span>
               </div>
               <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
                 <span className="font-medium text-foreground">You earn per sale</span>
                 <span className="font-serif text-lg font-semibold text-primary">
-                  ${(earningsCents / 100).toFixed(2)}
+                  {formatAllMinorUnits(earningsCents)}
                 </span>
               </div>
             </div>
@@ -527,19 +526,13 @@ export function UploadWizard({
             {isFreeBook
               ? "Free"
               : priceValid
-                ? `$${(priceCents / 100).toFixed(2)} · you earn $${(earningsCents / 100).toFixed(2)} per sale`
+                ? `${formatAllMinorUnits(priceCents)} · you earn ${formatAllMinorUnits(earningsCents)} per sale`
                 : "—"}
           </p>
         </div>
 
         <div className="rounded-lg border border-border bg-surface p-4 text-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-muted">Readiness</p>
-          {readiness.payoutBlocked && (
-            <p className="mt-2 text-red-800">
-              Finish payout setup to publish paid books. Your book will still
-              be saved as a draft either way.
-            </p>
-          )}
           {readiness.recommended.filter((item) => !item.done).length > 0 && (
             <ul className="mt-2 flex flex-col gap-1 pl-4 text-xs text-muted list-disc">
               {readiness.recommended
@@ -549,7 +542,7 @@ export function UploadWizard({
                 ))}
             </ul>
           )}
-          {!readiness.payoutBlocked && readiness.recommended.every((item) => item.done) && (
+          {readiness.recommended.every((item) => item.done) && (
             <p className="mt-2 text-muted">Looks good — ready to publish.</p>
           )}
         </div>

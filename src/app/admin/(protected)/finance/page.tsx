@@ -41,6 +41,7 @@ import type {
   RefundOperationalState,
 } from "@/lib/types";
 import type { Metadata } from "next";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 export const metadata: Metadata = {
   title: "Finance",
@@ -61,7 +62,7 @@ function formatTimestamp(iso: string): string {
 }
 
 function formatAmount(amountCents: number): string {
-  return `$${(amountCents / 100).toFixed(2)}`;
+  return formatAllMinorUnits(amountCents);
 }
 
 function resolveReaderDisplay(readerId: string | null, displayName: string | null): string {

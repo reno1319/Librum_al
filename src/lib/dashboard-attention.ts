@@ -7,13 +7,23 @@ import type { Book } from "@/lib/types";
 // parseBookstoreQuery(), and src/lib/book-purchase.ts's
 // resolveBookPurchaseState(). Priority, highest first: zero books (the
 // EmptyState itself becomes the next-action experience, so the page
-// renders nothing else once this is the result) > payout setup blocking
-// a paid book from publishing > continuing the most recent draft > no
-// action needed. Deliberately never stacks more than one -- the whole
-// point is ONE prioritized thing to do, not a wall of alerts.
+// renders nothing else once this is the result) > continuing the most
+// recent draft > no action needed. Deliberately never stacks more than
+// one -- the whole point is ONE prioritized thing to do, not a wall of
+// alerts.
+//
+// ALL-CUTOVER / STRIPE-RETIREMENT: the "payout-setup" state is gone,
+// along with the `payoutsEnabled` input that produced it. It mirrored
+// performPublish()'s Stripe Connect gate, and that gate has been
+// removed -- see the note in performPublish()
+// (src/app/(public)/dashboard/books/actions.ts). Leaving it in place
+// would have told an author with a priced draft that they can only
+// publish free books, which is no longer true, and pointed them at a
+// payout page that cannot do anything for them. Removing the variant
+// rather than making it unreachable is deliberate: it makes the
+// compiler walk every render site.
 export type DashboardAttentionState =
   | { kind: "zero-books" }
-  | { kind: "payout-setup" }
   | { kind: "continue-draft"; book: Pick<Book, "id" | "title"> }
   | { kind: "none" };
 
@@ -21,19 +31,11 @@ type AttentionBook = Pick<Book, "id" | "title" | "status" | "price_cents" | "cre
 
 export function resolveDashboardAttention(params: {
   books: AttentionBook[];
-  payoutsEnabled: boolean;
 }): DashboardAttentionState {
-  const { books, payoutsEnabled } = params;
+  const { books } = params;
 
   if (books.length === 0) {
     return { kind: "zero-books" };
-  }
-
-  // Mirrors publishBook()'s own real gate exactly (books/actions.ts):
-  // payout setup only blocks a book priced above $0 -- a free-book-only
-  // author never sees this, since it wouldn't actually be true for them.
-  if (!payoutsEnabled && books.some((book) => book.price_cents > 0)) {
-    return { kind: "payout-setup" };
   }
 
   const drafts = books.filter((book) => book.status === "draft");

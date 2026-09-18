@@ -10,6 +10,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, DiscountCode } from "@/lib/types";
 import type { Metadata } from "next";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 export const metadata: Metadata = {
   title: "Discounts",
@@ -154,7 +155,7 @@ export default async function DiscountsPage({
           const value =
             code.percent_off != null
               ? `${code.percent_off}% off`
-              : `$${((code.amount_off_cents ?? 0) / 100).toFixed(2)} off`;
+              : `${formatAllMinorUnits(code.amount_off_cents ?? 0)} off`;
 
           return (
             <li

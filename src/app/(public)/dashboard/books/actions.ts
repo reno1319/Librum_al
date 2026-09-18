@@ -4,6 +4,12 @@ import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import {
+  catalogPriceAllToMinor,
+  parseCatalogPriceAll,
+  MINIMUM_PAID_CATALOG_PRICE_ALL,
+  MAXIMUM_CATALOG_PRICE_ALL,
+} from "@/lib/catalog-price";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { GENRES } from "@/lib/genres";
 import { isSupportedLanguage } from "@/lib/languages";
@@ -14,6 +20,12 @@ import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-val
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
+
+// ALL-CATALOG-2: the author-facing rule, stated once. Named rather
+// than inlined so both the create and edit paths in this file give the
+// identical message for the identical rejection.
+const INVALID_PRICE_MESSAGE =
+  `Price must be 0 (free) or a whole number of lek from ${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}`;
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -449,7 +461,6 @@ export async function createBook(formData: FormData) {
   const keywords = normalizeKeywords(formData.get("keywords"));
   const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
-  const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
   const coverStoragePath = String(formData.get("coverStoragePath") ?? "").trim();
   const cover = formData.get("cover") as File | null;
   const coverProvided = coverStoragePath !== "" || (!!cover && cover.size > 0);
@@ -460,12 +471,26 @@ export async function createBook(formData: FormData) {
   if (
     !title ||
     !coverProvided ||
-    !manuscriptProvided ||
-    !Number.isFinite(priceCents) ||
-    priceCents < 0
+    !manuscriptProvided
   ) {
     redirect("/dashboard/books/new?error=Please+fill+in+every+field");
   }
+
+  // ALL-CATALOG-2: was `Math.round(Number(formData.get("price")) * 100)`,
+  // which accepted any non-negative number and silently reinterpreted a
+  // dollars-shaped input as minor units. Parsed through the shared
+  // catalog domain instead -- whole lek, 0 or 99..100,000 -- so the
+  // authoritative server-side write can never disagree with the client
+  // gate in wizard-validation.ts about what a valid price is.
+  //
+  // Deliberately AFTER the required-field check above: a blank form is
+  // a missing title, not an invalid price, and the author should be
+  // told the first thing rather than the second.
+  const parsedPrice = parseCatalogPriceAll(String(formData.get("price") ?? ""));
+  if (!parsedPrice.ok) {
+    redirect(`/dashboard/books/new?error=${encodeURIComponent(INVALID_PRICE_MESSAGE)}`);
+  }
+  const priceCents = catalogPriceAllToMinor(parsedPrice.priceAll);
 
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
     redirect("/dashboard/books/new?error=Please+choose+a+genre");
@@ -686,11 +711,6 @@ export async function createBook(formData: FormData) {
   // in practice (this is the row this same request just inserted) but
   // still falls safely into the same generic branch rather than being
   // treated as exhaustive.
-  if (publishResult.reason === "payout_required") {
-    redirect(
-      "/dashboard?success=Saved+as+draft&error=Connect+your+payout+account+before+publishing",
-    );
-  }
   redirect(
     "/dashboard?success=Saved+as+draft&error=We+couldn%27t+publish+your+book+yet.+Please+try+again+from+your+dashboard",
   );
@@ -733,11 +753,25 @@ export async function updateBook(bookId: string, formData: FormData) {
   const keywords = normalizeKeywords(formData.get("keywords"));
   const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
-  const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
-
-  if (!title || !Number.isFinite(priceCents) || priceCents < 0) {
+  if (!title) {
     redirect(`/dashboard/books/${bookId}/edit?error=Please+fill+in+every+field`);
   }
+
+  // ALL-CATALOG-2: was `Math.round(Number(formData.get("price")) * 100)`,
+  // which accepted any non-negative number and silently reinterpreted a
+  // dollars-shaped input as minor units. Parsed through the shared
+  // catalog domain instead -- whole lek, 0 or 99..100,000 -- so the
+  // authoritative server-side write can never disagree with the client
+  // gate in wizard-validation.ts about what a valid price is.
+  //
+  // Deliberately AFTER the required-field check below it: a blank form
+  // is a missing title, not an invalid price, and the author should be
+  // told the first thing rather than the second.
+  const parsedPrice = parseCatalogPriceAll(String(formData.get("price") ?? ""));
+  if (!parsedPrice.ok) {
+    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(INVALID_PRICE_MESSAGE)}`);
+  }
+  const priceCents = catalogPriceAllToMinor(parsedPrice.priceAll);
 
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
     redirect(`/dashboard/books/${bookId}/edit?error=Please+choose+a+genre`);
@@ -1030,7 +1064,7 @@ export async function updateBook(bookId: string, formData: FormData) {
 // payload object it's given.
 type PerformPublishResult =
   | { ok: true; wasNewlyPublished: boolean }
-  | { ok: false; reason: "not_found" | "payout_required" | "update_failed" };
+  | { ok: false; reason: "not_found" | "update_failed" };
 
 async function performPublish(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -1048,7 +1082,7 @@ async function performPublish(
 
   const { data: book } = await supabase
     .from("books")
-    .select("status, price_cents, published_at")
+    .select("status, published_at")
     .eq("id", bookId)
     .eq("author_id", userId)
     .single();
@@ -1057,22 +1091,29 @@ async function performPublish(
     return { ok: false, reason: "not_found" };
   }
 
-  // Free books never touch Stripe (see getFreeBook), so payout
-  // readiness is only a real requirement for a book that will actually
-  // be sold. price_cents is read fresh from the book's own row here --
-  // never trusted from the client -- so this can't be spoofed by
-  // submitting some other "free" signal.
-  if (book.price_cents > 0) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("stripe_payouts_enabled")
-      .eq("id", userId)
-      .single();
-
-    if (!profile?.stripe_payouts_enabled) {
-      return { ok: false, reason: "payout_required" };
-    }
-  }
+  // ALL-CUTOVER / STRIPE-RETIREMENT: the Stripe Connect payout gate that
+  // used to sit here is gone. It required profiles.stripe_payouts_enabled
+  // before a priced book could be published, and that column can only
+  // ever be set from a live Stripe Connect account -- which
+  // connectStripeAccount() (dashboard/payouts/actions.ts) now refuses to
+  // create under every configuration. The result was a closed loop: an
+  // author was told to connect a payout account, and the payout page
+  // told them connecting was unavailable. No author could publish a
+  // priced book at all.
+  //
+  // Removed rather than repointed at author_payout_destinations
+  // (migration 055), which sits behind its own disabled flag and would
+  // only have relocated the deadlock. The gate is also guarding a rail
+  // the money no longer uses: under POK the platform receives the whole
+  // buyer charge and the author's claim is created as
+  // author_ledger_entries rows by finalize_ledger_book_payment(), never
+  // by a Stripe transfer -- so nothing about publishing requires a
+  // payout destination to exist yet. A destination is required to
+  // WITHDRAW, which is a separate gate on a separate page.
+  //
+  // resolveDashboardAttention() (src/lib/dashboard-attention.ts) still
+  // nags an author with priced books and no payout setup. That stays:
+  // it informs without blocking, which is the correct shape for this.
 
   // Only a genuine FIRST publication should notify followers --
   // otherwise every unpublish/republish toggle would spam them again.
@@ -1126,9 +1167,6 @@ export async function publishBook(bookId: string) {
   const result = await performPublish(supabase, bookId, user.id);
 
   if (!result.ok) {
-    if (result.reason === "payout_required") {
-      redirect("/dashboard?error=Connect+your+payout+account+before+publishing");
-    }
     // "not_found" (no such book, or not owned by this user) and
     // "update_failed" both redirect back to the dashboard -- the
     // former matches this function's own pre-extraction behavior

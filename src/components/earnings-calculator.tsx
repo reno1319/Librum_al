@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
 import { formControlClasses } from "@/lib/form-styles";
+import { formatAllMinorUnits } from "@/lib/catalog-price";
 
 // LIBRUM 2.0 PRODUCT-4: an estimate, not a claim about take-home pay --
 // see calculateAuthorEarnings (src/lib/earnings-calculator.ts) for why
@@ -15,7 +16,7 @@ import { formControlClasses } from "@/lib/form-styles";
 // a "use client" island for live recompute-on-type only, the rest of
 // /pricing stays a Server Component.
 function centsToDollarString(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+  return formatAllMinorUnits(cents);
 }
 
 export function EarningsCalculator() {

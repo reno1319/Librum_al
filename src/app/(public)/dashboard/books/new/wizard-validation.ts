@@ -1,4 +1,5 @@
 import { platformFeeCents } from "@/lib/pricing";
+import { catalogPriceAllToMinor, parseCatalogPriceAll } from "@/lib/catalog-price";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART C: pure step-gating decisions for the
 // New Book wizard, extracted so upload-wizard.tsx's own "can I go to
@@ -33,10 +34,14 @@ export function canAdvanceFromFiles(params: {
   return params.coverReady && params.manuscriptReady;
 }
 
+// ALL-CATALOG-2: was `Number(price) >= 0`, which accepted anything
+// non-negative -- 0.01, 7.5, 1e9 -- and then rounded it to cents. The
+// catalog domain is whole lek: exactly 0, or 99 through 100,000. That
+// rule now lives in exactly one place (parseCatalogPriceAll), so this
+// gate and the Server Action that ultimately writes the row can never
+// disagree about what a valid price is.
 export function canAdvanceFromPrice(params: { price: string }): boolean {
-  if (params.price.trim().length === 0) return false;
-  const value = Number(params.price);
-  return Number.isFinite(value) && value >= 0;
+  return parseCatalogPriceAll(params.price).ok;
 }
 
 export type WizardPriceSummary = {
@@ -56,9 +61,14 @@ export type WizardPriceSummary = {
 // src/lib/earnings-calculator.ts's own comment for why reusing it,
 // rather than reimplementing the 20% split here, is load-bearing).
 export function resolveWizardPriceSummary(price: string): WizardPriceSummary {
-  const priceNum = Number(price);
-  const priceValid = Number.isFinite(priceNum) && priceNum >= 0;
-  const priceCents = priceValid ? Math.round(priceNum * 100) : 0;
+  // ALL-CATALOG-2: parses through the shared catalog domain instead of
+  // a bare Number() * 100, so the earnings preview can never be
+  // computed from a price the author will not actually be allowed to
+  // save. priceCents is, and always was, minor units -- what changes is
+  // that they are now hundredths of a lek rather than US cents.
+  const parsed = parseCatalogPriceAll(price);
+  const priceValid = parsed.ok;
+  const priceCents = parsed.ok ? catalogPriceAllToMinor(parsed.priceAll) : 0;
   const isFreeBook = priceValid && priceCents === 0;
   const feeCents = isFreeBook ? 0 : platformFeeCents(priceCents);
   const earningsCents = isFreeBook ? 0 : priceCents - feeCents;
