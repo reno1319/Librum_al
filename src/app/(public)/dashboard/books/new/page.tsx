@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { UploadWizard } from "./upload-wizard";
 import { Alert } from "@/components/ui/alert";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import type { Series } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -38,18 +39,15 @@ export default async function NewBookPage({
     // the name baked into dc:creator is the same reader-facing identity
     // shown on the book's own page, never the private account name.
     //
-    // LIBRUM 2.0 PUBLISHING-UX-1 PART C: stripe_payouts_enabled is the
-    // ONE new column this pass reads, mirroring the Edit Book page's own
-    // identical read (see its page.tsx) -- display-only context for the
-    // Review step's readiness section (resolvePublishReadiness()), never
-    // a pre-submit gate: Publish book can still be pressed regardless,
-    // since performPublish() (actions.ts) remains the one real
-    // server-side enforcement point. Never used to build a pre-submit
-    // link to /dashboard/payouts -- that would risk losing unsaved
-    // wizard state.
+    // LIBRUM 2.0 PUBLISHING-UX-1 PART C / PR-G: this read used to also
+    // fetch stripe_payouts_enabled, to feed the Review step's readiness
+    // section. That column is gone from this select: paid publishing is
+    // now decided by canPublishPaidTitle() (below), which is a server
+    // capability and not an author-specific database column, so this page
+    // is back to reading nothing but the author's names.
     supabase
       .from("profiles")
-      .select("display_name, public_author_name, stripe_payouts_enabled")
+      .select("display_name, public_author_name")
       .eq("id", user.id)
       .single(),
   ]);
@@ -71,11 +69,18 @@ export default async function NewBookPage({
         </Alert>
       )}
 
+      {/* paidPublishingAvailable is display-only context for the Review
+          step's readiness section, never a pre-submit gate: Publish book
+          can still be pressed regardless, since performPublish()
+          (actions.ts) remains the one real server-side enforcement point.
+          It is evaluated HERE rather than inside the wizard because the
+          wizard is a client component and @/lib/paid-readiness is
+          server-only. */}
       <UploadWizard
         series={series ?? []}
         authorName={resolvePublicAuthorName(profile) ?? ""}
         authorId={user.id}
-        payoutsEnabled={!!profile?.stripe_payouts_enabled}
+        paidPublishingAvailable={canPublishPaidTitle()}
       />
     </main>
   );

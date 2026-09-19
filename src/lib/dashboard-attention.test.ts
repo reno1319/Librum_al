@@ -11,51 +11,94 @@ const book = (overrides: Partial<Parameters<typeof resolveDashboardAttention>[0]
 });
 
 describe("resolveDashboardAttention", () => {
-  it("zero books beats everything, even an unresolved payout gap", () => {
+  it("zero books beats everything, even unavailable paid publishing", () => {
     expect(
-      resolveDashboardAttention({ books: [], payoutsEnabled: false }),
+      resolveDashboardAttention({ books: [], paidPublishingAvailable: false }),
     ).toEqual({ kind: "zero-books" });
   });
 
-  it("payout setup beats a draft when a paid book exists and payouts aren't enabled", () => {
+  // PR-G: this is the assertion that REVERSED. The paid-publishing slot
+  // used to outrank continue-draft, which permanently suppressed the
+  // draft prompt for every author with a priced book (nothing they could
+  // do ever cleared the higher slot). An actionable prompt now wins.
+  it("an actionable draft beats paid publishing being unavailable", () => {
     const result = resolveDashboardAttention({
       books: [book({ id: "b1", status: "draft", price_cents: 500 })],
-      payoutsEnabled: false,
-    });
-    expect(result).toEqual({ kind: "payout-setup" });
-  });
-
-  it("draft when payout setup is not urgent (payouts already enabled)", () => {
-    const result = resolveDashboardAttention({
-      books: [book({ id: "b1", status: "draft", price_cents: 500 })],
-      payoutsEnabled: true,
+      paidPublishingAvailable: false,
     });
     expect(result).toEqual({ kind: "continue-draft", book: { id: "b1", title: "Untitled" } });
   });
 
-  it("draft when payout setup is not urgent because every book is free", () => {
-    const result = resolveDashboardAttention({
-      books: [book({ id: "b1", status: "draft", price_cents: 0 })],
-      payoutsEnabled: false,
-    });
-    expect(result).toEqual({ kind: "continue-draft", book: { id: "b1", title: "Untitled" } });
-  });
-
-  it("none when there are books, no drafts, and payouts are enabled", () => {
+  it("paid publishing being unavailable is reported when no draft action exists", () => {
     const result = resolveDashboardAttention({
       books: [book({ id: "b1", status: "published", price_cents: 500 })],
-      payoutsEnabled: true,
+      paidPublishingAvailable: false,
+    });
+    expect(result).toEqual({ kind: "paid-publishing-unavailable" });
+  });
+
+  // The draft prompt is not permanently suppressed: an author with both a
+  // draft and a published priced book is told about the draft, and once
+  // the draft is dealt with the paid-publishing notice is still reachable.
+  it("the draft prompt is never permanently suppressed by unavailable paid publishing", () => {
+    const withDraft = resolveDashboardAttention({
+      books: [
+        book({ id: "published", status: "published", price_cents: 500 }),
+        book({ id: "draft", status: "draft", price_cents: 500 }),
+      ],
+      paidPublishingAvailable: false,
+    });
+    expect(withDraft).toEqual({ kind: "continue-draft", book: { id: "draft", title: "Untitled" } });
+
+    const draftResolved = resolveDashboardAttention({
+      books: [
+        book({ id: "published", status: "published", price_cents: 500 }),
+        book({ id: "draft", status: "published", price_cents: 500 }),
+      ],
+      paidPublishingAvailable: false,
+    });
+    expect(draftResolved).toEqual({ kind: "paid-publishing-unavailable" });
+  });
+
+  it("draft when paid publishing is available", () => {
+    const result = resolveDashboardAttention({
+      books: [book({ id: "b1", status: "draft", price_cents: 500 })],
+      paidPublishingAvailable: true,
+    });
+    expect(result).toEqual({ kind: "continue-draft", book: { id: "b1", title: "Untitled" } });
+  });
+
+  it("draft when paid publishing is irrelevant because every book is free", () => {
+    const result = resolveDashboardAttention({
+      books: [book({ id: "b1", status: "draft", price_cents: 0 })],
+      paidPublishingAvailable: false,
+    });
+    expect(result).toEqual({ kind: "continue-draft", book: { id: "b1", title: "Untitled" } });
+  });
+
+  it("none when a free-book-only author has no drafts and paid publishing is unavailable", () => {
+    const result = resolveDashboardAttention({
+      books: [book({ id: "b1", status: "published", price_cents: 0 })],
+      paidPublishingAvailable: false,
     });
     expect(result).toEqual({ kind: "none" });
   });
 
-  it("none when the only unpublished-payout gap doesn't apply and no draft exists", () => {
+  it("none when there are books, no drafts, and paid publishing is available", () => {
+    const result = resolveDashboardAttention({
+      books: [book({ id: "b1", status: "published", price_cents: 500 })],
+      paidPublishingAvailable: true,
+    });
+    expect(result).toEqual({ kind: "none" });
+  });
+
+  it("none when the paid-publishing gap doesn't apply and no draft exists", () => {
     const result = resolveDashboardAttention({
       books: [
         book({ id: "b1", status: "published", price_cents: 0 }),
         book({ id: "b2", status: "published", price_cents: 500 }),
       ],
-      payoutsEnabled: true,
+      paidPublishingAvailable: true,
     });
     expect(result).toEqual({ kind: "none" });
   });
@@ -66,7 +109,7 @@ describe("resolveDashboardAttention", () => {
         book({ id: "older", title: "Older draft", status: "draft", price_cents: 0, created_at: "2025-01-01T00:00:00.000Z" }),
         book({ id: "newer", title: "Newer draft", status: "draft", price_cents: 0, created_at: "2026-06-01T00:00:00.000Z" }),
       ],
-      payoutsEnabled: true,
+      paidPublishingAvailable: true,
     });
     expect(result).toEqual({ kind: "continue-draft", book: { id: "newer", title: "Newer draft" } });
   });

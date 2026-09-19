@@ -7,17 +7,27 @@ import type { Book } from "@/lib/types";
 // resolveHomepageCta(), parseBookstoreQuery(), resolveBookPurchaseState(),
 // and resolveDashboardAttention(). This exists specifically to keep
 // "required" and "recommended" from ever being blurred together in the
-// UI: publishBook()'s only real hard gate (a paid book without payouts
-// enabled) is NOT part of getPublishChecklist() at all -- that
-// function's own docstring says its 5 items are "purely informational,
-// never blocks publishing." Cover and price are deliberately excluded
-// from the recommended list below: every book that can exist already
-// has a cover (createBook requires one, and there's no remove-cover
-// path), and $0/Free is a fully legitimate, intentional price, not an
-// incomplete one.
+// UI: publishBook()'s only real hard gate (a paid book while paid
+// publishing is unavailable) is NOT part of getPublishChecklist() at
+// all -- that function's own docstring says its 5 items are "purely
+// informational, never blocks publishing." Cover and price are
+// deliberately excluded from the recommended list below: every book
+// that can exist already has a cover (createBook requires one, and
+// there's no remove-cover path), and a free price is a fully
+// legitimate, intentional price, not an incomplete one.
+//
+// PR-G: `paidPublishingBlocked` is provider-neutral on purpose. It was
+// `payoutBlocked` and was fed by profiles.stripe_payouts_enabled; that
+// Stripe Connect prerequisite is gone from performPublish(), and the
+// input is now canPublishPaidTitle(). The state itself survives the
+// rename because the question it answers survives: an author with a
+// priced draft still needs to be told, before they press Publish,
+// whether this draft can go live.
+//
+// `requiredMet` was removed here, not renamed: it had no production
+// consumer and was exactly `!payoutBlocked`.
 export type PublishReadiness = {
-  requiredMet: boolean;
-  payoutBlocked: boolean;
+  paidPublishingBlocked: boolean;
   recommended: ChecklistItem[];
 };
 
@@ -34,22 +44,22 @@ type ReadinessBook = Pick<Book, "description" | "keywords" | "price_cents" | "co
 
 export function resolvePublishReadiness(params: {
   book: ReadinessBook;
-  payoutsEnabled: boolean;
+  paidPublishingAvailable: boolean;
 }): PublishReadiness {
-  const { book, payoutsEnabled } = params;
+  const { book, paidPublishingAvailable } = params;
 
-  // Mirrors publishBook()'s own real gate exactly (books/actions.ts):
-  // a free book, or a paid book with payouts already enabled, has no
-  // required blocker at all.
-  const payoutBlocked = book.price_cents > 0 && !payoutsEnabled;
+  // Mirrors performPublish()'s own real gate exactly (books/actions.ts):
+  // a free book, or a paid book while paid publishing is available, has
+  // no required blocker at all. The caller supplies the value -- this
+  // module stays pure and is never allowed to read the environment.
+  const paidPublishingBlocked = book.price_cents > 0 && !paidPublishingAvailable;
 
   const recommended = getPublishChecklist(book).filter((item) =>
     RECOMMENDED_LABELS.has(item.label),
   );
 
   return {
-    requiredMet: !payoutBlocked,
-    payoutBlocked,
+    paidPublishingBlocked,
     recommended,
   };
 }

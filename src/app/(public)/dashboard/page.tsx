@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getPublishChecklist } from "@/lib/publish-checklist";
 import { resolveDashboardAttention } from "@/lib/dashboard-attention";
+import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { AuthorBookRow } from "@/components/author-book-row";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
@@ -36,6 +37,14 @@ export const dynamic = "force-dynamic";
 // (stripe_account_id, alongside the existing stripe_payouts_enabled)
 // to distinguish "never connected" from "connected but pending" for
 // the payout status block, not a new query.
+//
+// PR-G: stripe_payouts_enabled is read HERE AND ONLY HERE on this page,
+// and only to choose the payout status LABEL. It is NOT a publishing
+// input any more and must never become one again: paid publishing is
+// decided by canPublishPaidTitle() alone (see performPublish() in
+// dashboard/books/actions.ts, which reads no profiles row at all). The
+// column stays because an author's legacy Stripe Connect state is real
+// operational history that later payout work will still need to know.
 const RECENT_BOOKS_LIMIT = 5;
 
 export default async function DashboardPage({
@@ -74,9 +83,15 @@ export default async function DashboardPage({
     .returns<Book[]>();
 
   const allBooks = books ?? [];
+  // Payout STATUS only -- see the note at the top of this file. The
+  // attention decision below takes the paid-publishing capability
+  // instead, which is the thing performPublish() actually enforces.
   const payoutsEnabled = !!profile?.stripe_payouts_enabled;
 
-  const attention = resolveDashboardAttention({ books: allBooks, payoutsEnabled });
+  const attention = resolveDashboardAttention({
+    books: allBooks,
+    paidPublishingAvailable: canPublishPaidTitle(),
+  });
 
   const newBookAction = (
     <Link href="/dashboard/books/new" className={buttonClasses("primary", "md")}>
@@ -168,19 +183,28 @@ export default async function DashboardPage({
         </Alert>
       )}
 
-      {attention.kind === "payout-setup" && (
+      {/* PR-G: this copy must stay CONDITIONAL, never a hardcoded banner.
+          On the protected staging deployment with PAID_PUBLISHING_MODE set,
+          canPublishPaidTitle() is true and this alert correctly disappears;
+          hardcoding it would make the app lie during that controlled test. */}
+      {attention.kind === "paid-publishing-unavailable" && (
         <Alert
           variant="warning"
           title="Paid publishing and author payout setup have not launched yet."
           className="mt-6"
         >
+          {/* PR-G: the "Payout details" link to /dashboard/payouts was
+              removed from THIS alert only. That page cannot change this
+              outcome -- paid publishing is gated by canPublishPaidTitle()
+              and nothing on the payouts page affects it -- so the link was
+              a dead end from the alert that tells an author they cannot
+              publish a priced title. The payout-status block further down
+              this page, and its own links, are unchanged: they report real
+              author-payout state, which is a different question. */}
           <p>
             You can continue to publish free books while Librum completes
             its payment and payout systems.
           </p>
-          <Link href="/dashboard/payouts" className="focus-ring rounded-sm font-medium underline">
-            Payout details
-          </Link>
         </Alert>
       )}
 

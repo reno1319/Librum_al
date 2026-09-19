@@ -13,6 +13,7 @@ import { GENRES } from "@/lib/genres";
 import { LANGUAGES, isSupportedLanguage } from "@/lib/languages";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { resolvePublishReadiness } from "@/lib/publish-readiness";
+import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 import { formControlClasses } from "@/lib/form-styles";
 import { DeleteBookButton } from "@/app/(public)/dashboard/delete-book-button";
@@ -63,10 +64,13 @@ const EDITION_MAX_LENGTH = 100;
 // position:sticky, no client state -- so document/tab order stays
 // exactly this list on every viewport; only the visual column changes.
 //
-// The ONE new query this pass adds is stripe_payouts_enabled on the
-// existing per-page profile lookup -- needed so the Publishing
-// section's readiness block can tell a paid draft whether payouts are
-// actually set up. Nothing else about this page's query count changed.
+// PR-G: this pass once added stripe_payouts_enabled to the existing
+// per-page profile lookup, so the Publishing section's readiness block
+// could tell a paid draft whether payouts were set up. That column is
+// gone from the select again -- paid publishing is decided by
+// canPublishPaidTitle(), a server capability rather than an
+// author-specific column -- and the profile lookup is back to reading
+// only the author's names.
 //
 // createBook/updateBook/publishBook/unpublishBook/deleteBook/
 // addContributor/removeContributor are reused completely unchanged --
@@ -123,10 +127,9 @@ export default async function EditBookPage({
     .order("created_at")
     .returns<Contributor[]>();
 
-  // The one new query approved for UI-7 -- presentation/readiness only.
-  // publishBook() independently re-derives this same value server-side
-  // and remains the sole authority; this read can never be more than a
-  // display hint.
+  // Presentation only. publishBook() independently re-derives the
+  // publishing decision server-side and remains the sole authority;
+  // nothing read here can ever be more than a display hint.
   // LIBRUM 2.0 AUTHOR-1B: public_author_name added alongside
   // display_name -- resolved via resolvePublicAuthorName() below, so the
   // name threaded into ManuscriptField (and from there into the EPUB's
@@ -134,7 +137,7 @@ export default async function EditBookPage({
   // own page, never the private account name.
   const { data: profile } = await supabase
     .from("profiles")
-    .select("stripe_payouts_enabled, display_name, public_author_name")
+    .select("display_name, public_author_name")
     .eq("id", user.id)
     .single();
 
@@ -145,7 +148,7 @@ export default async function EditBookPage({
 
   const readiness = resolvePublishReadiness({
     book,
-    payoutsEnabled: !!profile?.stripe_payouts_enabled,
+    paidPublishingAvailable: canPublishPaidTitle(),
   });
 
   return (
@@ -547,18 +550,32 @@ export default async function EditBookPage({
 
             {book.status === "draft" ? (
               <>
-                {readiness.payoutBlocked ? (
+                {/* PR-G: this replaced "Finish payout setup to publish paid
+                    books." above a "Manage payouts" link. Stated precisely,
+                    because the looser version of this is wrong: the payouts
+                    page can neither create a new Stripe Connect account nor
+                    finish onboarding one (connectStripeAccount fails closed
+                    under every configuration since STRIPE-DISABLE-1), but
+                    legacy payout state may well still exist -- an already
+                    connected account, kept current by the account.updated
+                    webhook, can have stripe_payouts_enabled set to true.
+                    Whichever it is makes no difference here: since the
+                    Stripe prerequisite was removed, canPublishPaidTitle()
+                    is the sole paid-publishing gate, and nothing on the
+                    payouts page can change its answer. So "Manage payouts"
+                    could only ever send an author somewhere that cannot
+                    unblock them, and it was correctly removed from THIS
+                    publishing notice. The copy must stay CONDITIONAL and
+                    never become a hardcoded banner: with
+                    PAID_PUBLISHING_MODE set on the protected staging
+                    deployment this branch correctly disappears. */}
+                {readiness.paidPublishingBlocked ? (
                   <Alert
                     variant="warning"
-                    title="Finish payout setup to publish paid books."
+                    title="Paid publishing hasn't launched yet."
                     className="mt-4"
                   >
-                    <Link
-                      href="/dashboard/payouts"
-                      className="focus-ring rounded-sm font-medium underline"
-                    >
-                      Manage payouts
-                    </Link>
+                    <p>You can publish free books now.</p>
                   </Alert>
                 ) : (
                   <p className="mt-4 text-sm text-muted">Ready to publish.</p>
@@ -585,7 +602,7 @@ export default async function EditBookPage({
                 <form action={publishBook.bind(null, book.id)} className="mt-4">
                   <button
                     type="submit"
-                    disabled={readiness.payoutBlocked}
+                    disabled={readiness.paidPublishingBlocked}
                     className={buttonClasses(
                       "primary",
                       "md",
