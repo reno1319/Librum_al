@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 import { STAGING_SUPABASE_URL } from "@/lib/protected-staging";
 
-// FIX/bundle-payout-publication-gate: dedicated coverage for
+// PR-G: dedicated coverage for
 // performBundlePublish() (the bundle equivalent of performPublish() in
 // dashboard/books/publish.test.ts), exercised here only indirectly
 // through publishBundle() since performBundlePublish() itself is
@@ -149,7 +149,7 @@ function memberRow(bookId: string, overrides: Partial<{ author_id: string; statu
 }
 
 // Convenience for the common "N fully valid members" case used as the
-// default across the pre-existing payout-gate tests, none of which are
+// default across the pre-existing publish-gate tests, none of which are
 // concerned with membership validity at all.
 function validMemberRows(count: number) {
   return {
@@ -158,14 +158,12 @@ function validMemberRows(count: number) {
   };
 }
 
-// PAID-MODE-1: paid publishing now also requires the controlled-staging
-// publishing permission (src/lib/paid-readiness.ts). Every pre-existing
-// test in this file is about the LEGACY payout gate and the publish
-// mutation, so the new permission is granted for all of them here --
-// otherwise they would silently become tests of the new gate instead of
-// their own subject. The new gate's own coverage (including that a
-// denial never reads `profiles`) is the last describe block in THIS
-// file.
+// PAID-MODE-1: paid publishing requires the controlled-staging
+// publishing permission (src/lib/paid-readiness.ts). Since PR-G that is
+// the ONLY thing it requires. The permission is granted for every
+// pre-existing test here -- otherwise they would silently become tests
+// of that gate instead of their own subject -- and the gate's own
+// coverage is the last describe block in THIS file.
 function stubPaidPublishingAllowed() {
   vi.stubEnv("VERCEL_ENV", "preview");
   vi.stubEnv("VERCEL_GIT_COMMIT_REF", "staging");
@@ -178,6 +176,10 @@ function resetMocks() {
   mockRedirect.mockClear();
   mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID } } });
   mockBundleSelectResult.mockReset().mockReturnValue(bundleRow());
+  // PR-G: `profiles` is no longer read by performBundlePublish() at ANY
+  // price. The mock is deliberately RETAINED, returning the row the
+  // removed gate would have rejected, so every successful paid publish
+  // below is also proof that nothing read it.
   mockProfileSelectResult.mockReset().mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
   mockMemberSelectResult.mockReset().mockReturnValue(validMemberRows(2));
   mockMemberQueryColumns.mockClear();
@@ -188,33 +190,41 @@ function resetMocks() {
   mockRevalidatePath.mockReset();
 }
 
-describe("publishBundle: payout-readiness gate", () => {
+describe("publishBundle: paid-publishing readiness gate", () => {
   beforeEach(resetMocks);
 
-  it("paid bundle + payouts disabled: blocked, update never attempted", async () => {
+  // PR-G: replaces the "paid bundle + payouts disabled: blocked" /
+  // "+ payouts enabled: published" pair. The profile mock still reports
+  // payouts disabled (see resetMocks), so publication succeeding IS the
+  // proof the Stripe prerequisite is gone.
+  it("paid bundle publishes with the capability allowed, reading no profile", async () => {
     mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
-
-    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=Connect+your+payout+account+before+publishing",
-    );
-    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
-  });
-
-  it("paid bundle + payouts enabled: published", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
 
     await publishBundle(BUNDLE_ID); // no redirect on success -- must not throw
 
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBundleUpdatePayload).toHaveBeenCalledWith({ status: "published" });
     expect(mockRedirect).not.toHaveBeenCalled();
     expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard/bundles");
   });
 
-  it("free bundle + payouts disabled: published, profiles table never queried", async () => {
+  it("paid bundle publishes when stripe_payouts_enabled is null, and when the profile row is missing entirely", async () => {
+    for (const profileResult of [
+      { data: { stripe_payouts_enabled: null }, error: null },
+      { data: null, error: null },
+    ]) {
+      resetMocks();
+      mockProfileSelectResult.mockReturnValue(profileResult);
+      mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
+
+      await publishBundle(BUNDLE_ID);
+
+      expect(mockProfileSelectResult).not.toHaveBeenCalled();
+      expect(mockBundleUpdatePayload).toHaveBeenCalledWith({ status: "published" });
+    }
+  });
+
+  it("free bundle: published, profiles table never queried", async () => {
     mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
 
     await publishBundle(BUNDLE_ID);
@@ -235,14 +245,19 @@ describe("publishBundle: payout-readiness gate", () => {
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
 
-  it("profile read error: fail closed, update never attempted", async () => {
+  // PR-G: the profile-read "read_failed" case is gone with the read
+  // itself. "read_failed" is NOT gone from the result union -- the
+  // bundle read above and the membership read below both still produce
+  // it, and both keep their own coverage.
+  it("a profile read failure is impossible now: a paid bundle publishes however profiles would have answered", async () => {
     mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
     mockProfileSelectResult.mockReturnValue({ data: null, error: { message: "connection reset" } });
 
-    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+    await publishBundle(BUNDLE_ID);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/bundles");
-    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockBundleUpdatePayload).toHaveBeenCalledWith({ status: "published" });
+    expect(mockRedirect).not.toHaveBeenCalled();
   });
 
   it("unauthorized/missing bundle: blocked, update never attempted", async () => {
@@ -284,25 +299,27 @@ describe("publishBundle: payout-readiness gate", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/bundles");
   });
 
-  it("price_cents === 0 boundary: skips the payout check exactly at zero", async () => {
+  it("price_cents === 0 boundary: skips the capability check exactly at zero", async () => {
     mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
 
     await publishBundle(BUNDLE_ID);
 
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockBundleUpdatePayload).toHaveBeenCalledWith({ status: "published" });
     expect(mockRedirect).not.toHaveBeenCalled();
   });
 
-  it("price_cents === 1 boundary: requires payout readiness at the smallest positive price", async () => {
+  it("price_cents === 1 boundary: requires the capability at the smallest positive price", async () => {
     mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 1 }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=Connect+your+payout+account+before+publishing",
+      "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now",
     );
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
 
   it("requires authentication before touching anything", async () => {
@@ -410,8 +427,8 @@ describe("publishBundle: bundle-membership-integrity gate (PHASE-2C)", () => {
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     // A genuine read failure falls into the generic "read_failed" branch
-    // -- the SAME redirect target as a bundle/profile read failure above
-    // -- never the more specific "insufficient_members" message, which
+    // -- the SAME redirect target as a bundle read failure above --
+    // never the more specific "insufficient_members" message, which
     // would misleadingly imply the membership was actually read and
     // found wanting.
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/bundles");
@@ -466,9 +483,10 @@ describe("publishBundle: recovery-session defense-in-depth (existing protection,
 
 afterEach(() => vi.unstubAllEnvs());
 
-// PAID-MODE-1: the same paid-publishing permission at the bundle path,
-// with the same load-bearing negative assertion -- a denial never reads
-// `profiles`, and never reaches the membership read either.
+// PAID-MODE-1 / PR-G: the same paid-publishing permission at the bundle
+// path, and since PR-G the sole gate. The load-bearing negative
+// assertion now holds in EVERY case, allowed or denied: `profiles` is
+// never read, and a denial never reaches the membership read either.
 describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => {
   const PAID_PRICE = 1999;
 
@@ -478,7 +496,8 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
     vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
     vi.stubEnv("POK_ENVIRONMENT", "staging");
     mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: PAID_PRICE }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
+    // Left at the value the REMOVED gate would have rejected, on purpose.
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
     mockMemberSelectResult.mockReturnValue(validMemberRows(2));
   });
 
@@ -513,29 +532,38 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
   });
 
-  it("with the mode allowed, the existing payout gate still blocks a paid bundle", async () => {
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+  // PR-G, the canonical proof, mirroring books/publish.test.ts: with the
+  // capability ALLOWED, a paid bundle publishes and `profiles` is never
+  // read. It replaced "the existing payout gate still blocks a paid
+  // bundle" (removed behaviour) and its payouts-enabled twin.
+  it("with the capability allowed, a paid bundle publishes and no profile is ever read", async () => {
+    await publishBundle(BUNDLE_ID);
+
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockBundleUpdatePayload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+    );
+    expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  // Removing the prerequisite did not bypass the capability.
+  it("with the capability denied, a paid bundle stays unpublished however the payout flag reads", async () => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=Connect+your+payout+account+before+publishing",
+      "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now",
     );
-    expect(mockProfileSelectResult).toHaveBeenCalled();
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockMemberSelectResult).not.toHaveBeenCalled();
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
 
-  it("with the mode allowed and payouts enabled, a paid bundle still publishes", async () => {
-    await publishBundle(BUNDLE_ID);
-
-    expect(mockBundleUpdatePayload).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "published" }),
-    );
-  });
-
   // read_failed and insufficient_members keep their exact meanings: the
-  // new gate is additive, and sits between the price fork and the
-  // profile read without displacing either outcome.
+  // capability sits between the price fork and the membership read
+  // without displacing either outcome.
   it("a failed bundle read still fails closed before the gate is even reached", async () => {
     vi.stubEnv("PAID_PUBLISHING_MODE", "");
     mockBundleSelectResult.mockReturnValue({ data: null, error: { message: "boom" } });

@@ -84,13 +84,16 @@ export type FixtureBookDefinition = {
   seriesPosition: number | null;
 };
 
-// LIBRUM-2.0 PHASE-1C correction pass 2, item 5: performPublish() blocks
-// any price_cents > 0 draft->published transition unless the author's
-// stripe_payouts_enabled is true (src/app/(public)/dashboard/books/
-// actions.ts:1028-1038), and this fixture design must never set that
-// flag (payout/bank-payout enablement stays disabled throughout). Book
-// D and Book U are therefore both FREE -- their publish/unpublish/
-// republish transitions must never hit that gate.
+// LIBRUM-2.0 PHASE-1C correction pass 2, item 5, restated after PR-G:
+// performPublish() (src/app/(public)/dashboard/books/actions.ts) blocks
+// any price_cents > 0 draft->published transition unless
+// canPublishPaidTitle() allows it, and that capability denies wherever
+// PAID_PUBLISHING_MODE is unset -- which is every environment. The gate
+// used to be the author's stripe_payouts_enabled flag; the fixture
+// design is unchanged and its reason is now stronger, not weaker, since
+// no per-author flag can unblock it either. Book D and Book U are
+// therefore both FREE -- their publish/unpublish/republish transitions
+// must never hit that gate.
 export const FIXTURE_BOOKS: readonly FixtureBookDefinition[] = [
   {
     id: "00000000-f1c9-4000-8000-000000000001",

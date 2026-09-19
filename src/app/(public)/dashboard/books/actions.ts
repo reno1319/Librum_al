@@ -692,11 +692,6 @@ export async function createBook(formData: FormData) {
       "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
     );
   }
-  if (publishResult.reason === "payout_required") {
-    redirect(
-      "/dashboard?success=Saved+as+draft&error=Connect+your+payout+account+before+publishing",
-    );
-  }
   redirect(
     "/dashboard?success=Saved+as+draft&error=We+couldn%27t+publish+your+book+yet.+Please+try+again+from+your+dashboard",
   );
@@ -1036,7 +1031,7 @@ export async function updateBook(bookId: string, formData: FormData) {
 // payload object it's given.
 type PerformPublishResult =
   | { ok: true; wasNewlyPublished: boolean }
-  | { ok: false; reason: "not_found" | "paid_mode_required" | "payout_required" | "update_failed" };
+  | { ok: false; reason: "not_found" | "paid_mode_required" | "update_failed" };
 
 async function performPublish(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -1063,33 +1058,38 @@ async function performPublish(
     return { ok: false, reason: "not_found" };
   }
 
-  // Free books never touch Stripe (see getFreeBook), so payout
-  // readiness is only a real requirement for a book that will actually
-  // be sold. price_cents is read fresh from the book's own row here --
-  // never trusted from the client -- so this can't be spoofed by
-  // submitting some other "free" signal.
+  // Only a book that will actually be sold needs paid-publishing
+  // authorization at all. price_cents is read fresh from the book's own
+  // row here -- never trusted from the client -- so this can't be
+  // spoofed by submitting some other "free" signal.
   if (book.price_cents > 0) {
-    // PAID-MODE-1: whether Librum may publish a PAID title at all is a
-    // product permission, and it is decided HERE -- after the book's own
-    // server-read price proves this title is paid, and strictly BEFORE
-    // the profiles read below. That order is deliberate and load-bearing
-    // twice over: a denial costs no database query, and it cannot be used
-    // to probe whether some author's payout flag is set.
+    // PAID-MODE-1 / PR-G: whether Librum may publish a PAID title at all
+    // is a product permission, decided HERE -- after the book's own
+    // server-read price proves this title is paid. Since PR G this is the
+    // SOLE authorization for paid publishing.
     //
-    // Additive, never substitutive: the legacy stripe_payouts_enabled
-    // gate below is untouched and still applies whenever this one passes.
+    // The legacy profiles.stripe_payouts_enabled prerequisite that used
+    // to sit below it is gone. Stated precisely, because the looser
+    // version of this claim is wrong: connectStripeAccount()
+    // (dashboard/payouts/actions.ts) fails closed under every
+    // configuration since STRIPE-DISABLE-1, so no author can CREATE a
+    // Connect account or finish onboarding one. That is not the same as
+    // the flag being unsettable -- processAccountUpdatedEvent()
+    // (api/webhooks/stripe/route.ts) writes it from Stripe's own
+    // account.updated event, so a pre-existing connected account could
+    // still flip it to true. The prerequisite was removed for a
+    // different reason: it is provider-specific author-payout state, and
+    // provider-specific payout state is not a valid permission to
+    // publish a priced title. Removing it does not weaken this gate:
+    // canPublishPaidTitle() still denies in every environment where
+    // PAID_PUBLISHING_MODE is unset, which is everywhere today.
+    //
+    // Consequence worth stating plainly: performPublish() now reads no
+    // `profiles` row at ANY price. A denial costs no database query and
+    // cannot be used to probe another author's state -- the property the
+    // old ordering bought, now unconditional.
     if (!canPublishPaidTitle()) {
       return { ok: false, reason: "paid_mode_required" };
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("stripe_payouts_enabled")
-      .eq("id", userId)
-      .single();
-
-    if (!profile?.stripe_payouts_enabled) {
-      return { ok: false, reason: "payout_required" };
     }
   }
 
@@ -1150,9 +1150,6 @@ export async function publishBook(bookId: string) {
     // paid publishing is closed, and nothing about why.
     if (result.reason === "paid_mode_required") {
       redirect("/dashboard?error=Paid+publishing+isn%27t+available+right+now");
-    }
-    if (result.reason === "payout_required") {
-      redirect("/dashboard?error=Connect+your+payout+account+before+publishing");
     }
     // "not_found" (no such book, or not owned by this user) and
     // "update_failed" both redirect back to the dashboard -- the
