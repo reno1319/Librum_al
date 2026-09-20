@@ -66,10 +66,12 @@ describe("manifest referential integrity", () => {
     }
   });
 
-  // PHASE-1C correction pass 2, item 5: draft-publish and unpublish/
-  // republish targets must be free, since performPublish() blocks a
-  // priced draft->published transition unless stripe_payouts_enabled is
-  // true, and this design must never set that flag.
+  // PHASE-1C correction pass 2, item 5, restated after PR-G:
+  // draft-publish and unpublish/republish targets must be free, since
+  // performPublish() blocks a priced draft->published transition unless
+  // canPublishPaidTitle() allows it, and that capability denies wherever
+  // PAID_PUBLISHING_MODE is unset. (It was the author's
+  // stripe_payouts_enabled flag before PR-G; see manifest.mts.)
   it("the draft-publish and unpublish/republish targets are free", () => {
     expect(fixtureBookByRole("draft-publish-target").priceCents).toBe(0);
     expect(fixtureBookByRole("unpublish-republish-target").priceCents).toBe(0);

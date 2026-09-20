@@ -155,10 +155,12 @@ export const PAYOUT_DESTINATION_CURRENCY = "ALL";
 // literal "true". Every other value -- missing, empty, "false", "1",
 // "yes", differently-cased ("True"/"TRUE"), or anything malformed -- is
 // disabled. Stripe Connect remains the only LIVE author-payout
-// mechanism today (profiles.stripe_payouts_enabled still gates paid-
-// book publishing); this switch stays unset in every environment as of
-// this change, so the bank-setup UI/write path is OFF by default,
-// deliberately, until a future, separate cutover task turns it on.
+// mechanism today (PR-G: it no longer gates paid-book publishing --
+// profiles.stripe_payouts_enabled is now author-payout state only, and
+// publishing is gated by canPublishPaidTitle() alone); this switch stays
+// unset in every environment as of this change, so the bank-setup
+// UI/write path is OFF by default, deliberately, until a future,
+// separate cutover task turns it on.
 // ---------------------------------------------------------------------
 export function isBankPayoutSetupEnabled(raw: string | undefined): boolean {
   return raw?.trim() === "true";

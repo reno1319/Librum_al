@@ -90,18 +90,21 @@ export function UploadWizard({
   series,
   authorName,
   authorId,
-  payoutsEnabled,
+  paidPublishingAvailable,
 }: {
   series: Series[];
   authorName: string;
   authorId: string;
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART C: display-only context for the
-  // Review step's readiness section -- never a pre-submit gate. Publish
-  // book can still be pressed even when this is false; performPublish()
-  // (actions.ts) remains the one real, server-side enforcement point,
-  // exactly as before this prop existed. See page.tsx for the one
-  // narrow profile read that supplies it.
-  payoutsEnabled: boolean;
+  // LIBRUM 2.0 PUBLISHING-UX-1 PART C / PR-G: display-only context for
+  // the Review step's readiness section -- never a pre-submit gate.
+  // Publish book can still be pressed even when this is false;
+  // performPublish() (actions.ts) remains the one real, server-side
+  // enforcement point, exactly as before this prop existed.
+  //
+  // It arrives as a PROP and must keep arriving as one: this is a client
+  // component, the capability lives in @/lib/paid-readiness, and that
+  // module is server-only. See page.tsx, which evaluates it.
+  paidPublishingAvailable: boolean;
 }) {
   const [step, setStep] = useState(1);
   const [stepError, setStepError] = useState("");
@@ -171,7 +174,7 @@ export function UploadWizard({
       price_cents: priceCents,
       cover_path: cover ? "pending" : null,
     },
-    payoutsEnabled,
+    paidPublishingAvailable,
   });
 
   return (
@@ -534,10 +537,15 @@ export function UploadWizard({
 
         <div className="rounded-lg border border-border bg-surface p-4 text-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-muted">Readiness</p>
-          {readiness.payoutBlocked && (
+          {/* PR-G: replaces "Finish payout setup to publish paid books."
+              -- there is no payout setup to finish, and nothing an author
+              can do here changes this. Stays CONDITIONAL, never a
+              hardcoded line: with PAID_PUBLISHING_MODE set on the
+              protected staging deployment it correctly disappears. */}
+          {readiness.paidPublishingBlocked && (
             <p className="mt-2 text-red-800">
-              Finish payout setup to publish paid books. Your book will still
-              be saved as a draft either way.
+              Paid publishing hasn&apos;t launched yet. Your book will still
+              be saved as a draft.
             </p>
           )}
           {readiness.recommended.filter((item) => !item.done).length > 0 && (
@@ -549,7 +557,7 @@ export function UploadWizard({
                 ))}
             </ul>
           )}
-          {!readiness.payoutBlocked && readiness.recommended.every((item) => item.done) && (
+          {!readiness.paidPublishingBlocked && readiness.recommended.every((item) => item.done) && (
             <p className="mt-2 text-muted">Looks good — ready to publish.</p>
           )}
         </div>

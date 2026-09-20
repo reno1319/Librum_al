@@ -179,20 +179,23 @@ type PerformBundlePublishResult =
         | "not_found"
         | "read_failed"
         | "paid_mode_required"
-        | "payout_required"
         | "insufficient_members"
         | "update_failed";
     };
 
-// FIX/bundle-payout-publication-gate: the bundle equivalent of
-// performPublish() (books/actions.ts) -- a bundle with a real price must
-// not publish unless the owning author's payout setup is enabled, for
-// exactly the same reason a priced book can't: buyBundle() (bundles/[id]/
-// actions.ts) requires bundle.profiles.stripe_account_id before it will
-// ever construct a Stripe Checkout Session, so a published-but-unsellable
-// bundle is otherwise fully public and looks purchasable while every
-// checkout attempt dead-ends. This was the ONLY gap: publishBundle()
-// previously updated status unconditionally with no payout check at all.
+// PR-G: the bundle equivalent of performPublish() (books/actions.ts) --
+// a bundle with a real price publishes only when canPublishPaidTitle()
+// allows it, and since PR G that capability is the sole authorization.
+//
+// This block previously justified a stripe_payouts_enabled prerequisite
+// by saying buyBundle() (bundles/[id]/actions.ts) requires
+// bundle.profiles.stripe_account_id before it will ever construct a
+// Stripe Checkout Session. That justification was already false on
+// staging: buyBundle() has been an unconditional fail-closed redirect
+// since STRIPE-DISABLE-1 and constructs no Checkout Session at all. The
+// prerequisite is removed along with the claim -- publishBundle() is
+// still not unconditional, because canPublishPaidTitle() denies whenever
+// PAID_PUBLISHING_MODE is unset, which is everywhere today.
 //
 // Every Supabase read below inspects BOTH `data` and `error` explicitly --
 // `.maybeSingle()` returns `{data: null, error: null}` for an ordinary
@@ -221,33 +224,19 @@ async function performBundlePublish(
     return { ok: false, reason: "not_found" };
   }
 
-  // Free bundles never touch Stripe (buyBundle's own checkout-creation
-  // path is the only thing that ever requires payout readiness), so
-  // payout setup is only a real requirement for a bundle that will
-  // actually be sold. price_cents is read fresh from the bundle's own
+  // Only a bundle that will actually be sold needs paid-publishing
+  // authorization at all. price_cents is read fresh from the bundle's own
   // row here -- never trusted from the client.
   if (bundle.price_cents > 0) {
-    // PAID-MODE-1: identical placement and rationale to performPublish()
-    // (dashboard/books/actions.ts) -- after the bundle's own server-read
-    // price proves it is paid, strictly before the profiles read, so a
-    // denial costs no query and cannot probe payout state. Additive: the
-    // legacy stripe_payouts_enabled gate below is untouched.
+    // PAID-MODE-1 / PR-G: identical placement and rationale to
+    // performPublish() (dashboard/books/actions.ts) -- after the bundle's
+    // own server-read price proves it is paid, and since PR G the sole
+    // paid-publishing gate. A denial still costs nothing further: the
+    // membership integrity read below is reached only once the capability
+    // has allowed the publication, and no `profiles` row is read at any
+    // price.
     if (!canPublishPaidTitle()) {
       return { ok: false, reason: "paid_mode_required" };
-    }
-
-    const { data: profile, error: profileReadError } = await supabase
-      .from("profiles")
-      .select("stripe_payouts_enabled")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profileReadError) {
-      console.error("performBundlePublish: profile read failed", { bundleId, userId, error: profileReadError });
-      return { ok: false, reason: "read_failed" };
-    }
-    if (!profile?.stripe_payouts_enabled) {
-      return { ok: false, reason: "payout_required" };
     }
   }
 
@@ -345,11 +334,6 @@ export async function publishBundle(bundleId: string) {
     // state.
     if (result.reason === "paid_mode_required") {
       redirect("/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now");
-    }
-    if (result.reason === "payout_required") {
-      // Same message publishBook() uses for the identical situation --
-      // see performPublish() (books/actions.ts).
-      redirect("/dashboard/bundles?error=Connect+your+payout+account+before+publishing");
     }
     if (result.reason === "insufficient_members") {
       redirect("/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books");

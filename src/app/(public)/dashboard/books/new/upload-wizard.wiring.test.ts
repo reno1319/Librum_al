@@ -116,18 +116,23 @@ describe("UploadWizard: native intent controls (critical)", () => {
   });
 });
 
-describe("UploadWizard: payout context is presentational only (critical)", () => {
-  it("SaveButtons (which renders both final buttons) is declared with no access to payoutsEnabled at all", () => {
+// PR-G: the prop is `paidPublishingAvailable` now, not `payoutsEnabled`.
+// The intent of these three tests is unchanged and is the point of
+// keeping them: SaveButtons structurally cannot read the value, and the
+// value never reaches a disabled= expression. Only the identifier moved.
+describe("UploadWizard: paid-publishing context is presentational only (critical)", () => {
+  it("SaveButtons (which renders both final buttons) is declared with no access to paidPublishingAvailable at all", () => {
     // SaveButtons is a module-level function, not a closure inside
-    // UploadWizard -- it structurally cannot read payoutsEnabled (a
-    // prop of UploadWizard) even if someone tried, which this asserts
+    // UploadWizard -- it structurally cannot read paidPublishingAvailable
+    // (a prop of UploadWizard) even if someone tried, which this asserts
     // directly rather than relying on that structural fact alone.
     const saveButtonsBlock = source.match(/function SaveButtons\(\)[\s\S]*?\n}/)![0];
+    expect(saveButtonsBlock).not.toContain("paidPublishingAvailable");
     expect(saveButtonsBlock).not.toContain("payoutsEnabled");
     expect(saveButtonsBlock).not.toContain("readiness");
   });
 
-  it("both final buttons are disabled by pending only, never by payoutsEnabled/readiness", () => {
+  it("both final buttons are disabled by pending only, never by paidPublishingAvailable/readiness", () => {
     const saveButtonsBlock = source.match(/function SaveButtons\(\)[\s\S]*?\n}/)![0];
     const disabledProps = saveButtonsBlock.match(/disabled=\{[^}]*\}/g) ?? [];
     expect(disabledProps.length).toBe(2);
@@ -136,12 +141,55 @@ describe("UploadWizard: payout context is presentational only (critical)", () =>
     }
   });
 
-  it("payoutsEnabled is used only to build the display-only readiness object, never in a disabled= expression", () => {
+  it("paidPublishingAvailable is used only to build the display-only readiness object, never in a disabled= expression", () => {
     const disabledLines = source.split("\n").filter((line) => line.includes("disabled="));
     for (const line of disabledLines) {
-      expect(line).not.toContain("payoutsEnabled");
+      expect(line).not.toContain("paidPublishingAvailable");
     }
-    expect(source).toContain("payoutsEnabled,\n  });");
+
+    // Re-pinned, deliberately less brittle than the trailing-comma match
+    // this replaced ("payoutsEnabled,\n  });"): assert the value is
+    // passed into the resolvePublishReadiness() call itself, which is
+    // the property that actually matters, rather than to whitespace.
+    const readinessCall = source.match(/resolvePublishReadiness\(\{[\s\S]*?\n  \}\);/);
+    expect(readinessCall).not.toBeNull();
+    expect(readinessCall![0]).toContain("paidPublishingAvailable,");
+  });
+
+  // PR-G: the client component must never import the server-only
+  // capability module. It receives the already-evaluated boolean as a
+  // prop from page.tsx, and that is the only way it may arrive.
+  it("never imports the server-only paid-readiness module, in ANY import form", () => {
+    // Matched as an IMPORT STATEMENT, not as a bare substring -- the
+    // prop's own doc comment names the module on purpose, to say why the
+    // value arrives as a prop rather than an import.
+    //
+    // The pattern must cover BOTH forms, and the self-check below is what
+    // stops it being narrowed back to the first:
+    //   import { x } from "@/lib/paid-readiness";   (named / default)
+    //   import "@/lib/paid-readiness";              (bare side-effect)
+    // A side-effect import of a `server-only` module is exactly as fatal
+    // in a client component as a named one, so a matcher that sees only
+    // `from "..."` would let the real failure through.
+    const IMPORT_STATEMENT = /^import\b[\s\S]*?;$/gm;
+
+    const sideEffectSample = 'import "@/lib/paid-readiness";';
+    const fromSample = 'import { canPublishPaidTitle } from "@/lib/paid-readiness";';
+    expect(sideEffectSample.match(IMPORT_STATEMENT)).toEqual([sideEffectSample]);
+    expect(fromSample.match(IMPORT_STATEMENT)).toEqual([fromSample]);
+
+    const statements = source.match(IMPORT_STATEMENT) ?? [];
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements) {
+      // The module specifier is the quoted string this statement ends on,
+      // in either form.
+      const specifier = statement.match(/"([^"]+)"\s*;$/)?.[1];
+      expect(specifier).toBeDefined();
+      expect(specifier).not.toContain("paid-readiness");
+      expect(specifier).not.toContain("server-only");
+    }
+
+    expect(source).not.toMatch(/canPublishPaidTitle\s*\(/);
   });
 });
 

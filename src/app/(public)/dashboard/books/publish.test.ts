@@ -161,14 +161,12 @@ function bookRow(overrides: Partial<{ status: string; price_cents: number; publi
   };
 }
 
-// PAID-MODE-1: paid publishing now also requires the controlled-staging
-// publishing permission (src/lib/paid-readiness.ts). Every pre-existing
-// test in this file is about the LEGACY payout gate and the publish
-// mutation, so the new permission is granted for all of them here --
-// otherwise they would silently become tests of the new gate instead of
-// their own subject. The new gate's own coverage (including that a
-// denial never reads `profiles`) is the last describe block in THIS
-// file.
+// PAID-MODE-1: paid publishing requires the controlled-staging
+// publishing permission (src/lib/paid-readiness.ts). Since PR-G that is
+// the ONLY thing it requires. The permission is granted for every
+// pre-existing test here -- otherwise they would silently become tests
+// of that gate instead of their own subject -- and the gate's own
+// coverage is the last describe block in THIS file.
 function stubPaidPublishingAllowed() {
   vi.stubEnv("VERCEL_ENV", "preview");
   vi.stubEnv("VERCEL_GIT_COMMIT_REF", "staging");
@@ -181,6 +179,11 @@ function resetMocks() {
   mockRedirect.mockClear();
   mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID } } });
   mockBookSelectResult.mockReset().mockReturnValue(bookRow());
+  // PR-G: `profiles` is no longer read by performPublish() at ANY price.
+  // The mock is deliberately RETAINED, and deliberately returns the row
+  // the removed gate would have rejected -- so every test below that
+  // reaches a successful paid publish is simultaneously proof that
+  // nothing read it. Do not delete this mock along with the gate.
   mockProfileSelectResult.mockReset().mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
   mockBookUpdatePayload.mockClear();
   mockBookUpdateResult.mockReset().mockReturnValue({ error: null });
@@ -208,27 +211,35 @@ describe("publishBook: draft -> published", () => {
     );
   });
 
-  it("publishes a paid draft when payouts are enabled", async () => {
+  // PR-G: this replaces "publishes a paid draft when payouts are enabled"
+  // and its blocked twin. The profile mock is left returning
+  // stripe_payouts_enabled: false (see resetMocks), so the publication
+  // succeeding IS the proof that the Stripe prerequisite is gone, and the
+  // not-called assertion is the proof it was not merely ignored.
+  it("publishes a paid draft with the capability allowed, reading no profile", async () => {
     mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 999, published_at: null }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(expect.objectContaining({ status: "published" }));
   });
 
-  it("blocks a paid draft when payouts are not enabled -- book stays unpublished", async () => {
-    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 999, published_at: null }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+  it("publishes a paid draft when stripe_payouts_enabled is null, and when the profile row is missing entirely", async () => {
+    for (const profileResult of [
+      { data: { stripe_payouts_enabled: null }, error: null },
+      { data: null, error: null },
+    ]) {
+      resetMocks();
+      mockProfileSelectResult.mockReturnValue(profileResult);
+      mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 999, published_at: null }));
 
-    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+      await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?error=Connect+your+payout+account+before+publishing",
-    );
-    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
-    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+      expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+      expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    }
   });
 
   it("sets published_at on first publish", async () => {
@@ -434,35 +445,20 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
     expect(mockSendNewBookEmails).toHaveBeenCalledOnce();
   });
 
-  it("intent=publish + paid book with payouts enabled publishes immediately", async () => {
+  // PR-G: the same pair of tests as publishBook's, through the other
+  // caller of the same helper. The blocked-without-payouts twin is gone
+  // with the behaviour; the paid-mode denial for this caller is covered
+  // in the paid-publishing describe block below.
+  it("intent=publish + paid book publishes immediately with the capability allowed, reading no profile", async () => {
     mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 999, published_at: null }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
     const formData = await buildFormData({ intent: "publish", price: "9.99" });
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
-    );
-  });
-
-  it("intent=publish + paid book WITHOUT payouts: creation succeeds, publish is blocked, book remains a draft", async () => {
-    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_cents: 999, published_at: null }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
-    const formData = await buildFormData({ intent: "publish", price: "9.99" });
-
-    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
-
-    // The critical invariant: the book row was inserted (as a draft)
-    // regardless of the publish outcome.
-    expect(mockBookInsert).toHaveBeenCalledOnce();
-    expect(mockBookInsert.mock.calls[0][0]).toMatchObject({ status: "draft" });
-    // Publish was attempted and blocked -- never advanced to published.
-    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
-    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
-    expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?success=Saved+as+draft&error=Connect+your+payout+account+before+publishing",
     );
   });
 
@@ -611,12 +607,12 @@ describe("performPublish: recovery-session defense-in-depth (AUTH-1C)", () => {
 
 afterEach(() => vi.unstubAllEnvs());
 
-// PAID-MODE-1: the new paid-publishing permission, at the same
-// authoritative gate every test above exercises. The assertion that
-// matters most in each denial case is the negative one --
-// mockProfileSelectResult is never called -- because a denial that
-// still read `profiles` would cost a query and could be used to probe
-// an author's payout state.
+// PAID-MODE-1 / PR-G: the paid-publishing permission, at the same
+// authoritative gate every test above exercises, and since PR-G the SOLE
+// gate. mockProfileSelectResult must never be called in ANY case here,
+// allowed or denied: a denial that still read `profiles` would cost a
+// query and could probe an author's state, and an allow that read it
+// would mean the removed prerequisite had merely moved.
 describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
   const PAID_PRICE = 999;
 
@@ -628,7 +624,9 @@ describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
     vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
     vi.stubEnv("POK_ENVIRONMENT", "staging");
     mockBookSelectResult.mockReturnValue(bookRow({ price_cents: PAID_PRICE }));
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
+    // Left at the value the REMOVED gate would have rejected, on purpose
+    // -- see resetMocks. Nothing in this block may read it.
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
   });
 
   it.each([
@@ -668,7 +666,6 @@ describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
 
   it("the denial reveals no configuration, environment or payout state", async () => {
     vi.stubEnv("PAID_PUBLISHING_MODE", "");
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
@@ -678,27 +675,38 @@ describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
     }
   });
 
-  // Additive, never substitutive: with publishing permitted, the legacy
-  // Stripe payout gate still decides, exactly as it does today.
-  it("with the mode allowed, the existing payout gate still blocks a paid book", async () => {
-    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
+  // PR-G, the canonical proof, and the assertion the old tests could not
+  // make: with the capability ALLOWED, a paid book publishes and the
+  // `profiles` row is never read. This replaced two tests -- "the
+  // existing payout gate still blocks a paid book" (that behaviour is
+  // removed) and its payouts-enabled twin (the flag no longer
+  // participates). It is what stops the removal from being reintroduced
+  // under another name: any new per-author publishing prerequisite read
+  // from `profiles` fails here.
+  it("with the capability allowed, a paid book publishes and no profile is ever read", async () => {
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
+    expect(mockBookUpdatePayload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+    );
+  });
+
+  // Removing the prerequisite did not bypass the capability: denial is
+  // still total, and the book row is never touched.
+  it("with the capability denied, a paid book stays a draft however the payout flag reads", async () => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
+    mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: true }, error: null });
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?error=Connect+your+payout+account+before+publishing",
+      "/dashboard?error=Paid+publishing+isn%27t+available+right+now",
     );
-    expect(mockProfileSelectResult).toHaveBeenCalled();
+    expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
-  });
-
-  it("with the mode allowed and payouts enabled, a paid book still publishes", async () => {
-    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
-    expect(mockBookUpdatePayload).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "published" }),
-    );
+    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
   });
 
   // Free publishing is never gated, under any configuration -- the
