@@ -17,6 +17,10 @@ import {
   startPokCheckout,
   POK_CHECKOUT_CANNOT_RESUME,
   POK_CHECKOUT_MAINTENANCE_ACTIVE,
+  POK_CHECKOUT_IN_PROGRESS,
+  POK_CHECKOUT_AMBIGUOUS,
+  POK_CHECKOUT_ATTEMPT_RETIRED,
+  probeProviderAttempt,
 } from "@/lib/pok-checkout";
 import { createPokRepository } from "@/lib/pok-repository";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
@@ -32,12 +36,66 @@ type BookForCheckout = {
 };
 
 // The shape create_book_checkout_intent (migration 032) returns.
+//
+// STALE-CHECKOUT-1: quote_status is new, and it is the whole point --
+// the RPC used to answer "here is your intent" and say nothing about
+// WHICH of several very different situations produced it. A reused quote
+// whose economics no longer match the reader's request is not the same
+// event as a freshly minted one, and treating them alike is how a newly
+// entered discount code was silently ignored and the reader charged the
+// old price.
+type CheckoutQuoteStatus =
+  // A brand-new quote at the CURRENT price, code, publication state and
+  // regime. Any stale predecessor was superseded atomically first.
+  | "minted"
+  // The existing quote, whose economics are identical to this request's.
+  | "reused"
+  // The economics moved, but the old attempt may still be payable, so
+  // nothing was mutated. Needs a provider round trip, or a deliberate
+  // reader choice.
+  | "conflict_attempt_unresolved"
+  // The intent's own 23 hours elapsed, but its attempt has a recorded
+  // provider order id (or an id-less window still inside the margin), so
+  // local expiry alone may not retire it.
+  | "blocked_expired_attempt_unresolved"
+  // A legacy Stripe-bound quote. Never superseded: its session may still
+  // be payable and this code can no longer reach Stripe to find out.
+  | "blocked_legacy_attempt"
+  // Deliberate-resume only: the exact intent the reader confirmed is no
+  // longer the eligible candidate. Never resumes something else.
+  | "expected_intent_changed"
+  // The temporary per-reader, per-book supersession guard.
+  | "supersession_rate_limited";
+
 type CheckoutIntentResult = {
-  intent_id: string;
-  price_cents_at_checkout: number;
+  intent_id: string | null;
+  price_cents_at_checkout: number | null;
   discount_code_id: string | null;
-  expires_at: string;
+  expires_at: string | null;
+  quote_status: CheckoutQuoteStatus;
 };
+
+// STALE-CHECKOUT-1: reader-facing copy, kept in one place so the same
+// situation always reads the same way. Every one of these is an honest
+// statement of what Librum actually knows -- none of them implies a
+// retry will work when it will not, and none of them claims a discount
+// was applied when it was not.
+const CHECKOUT_IN_PROGRESS_MESSAGE =
+  "Your checkout is starting. Please try again in a moment.";
+const CHECKOUT_AMBIGUOUS_MESSAGE =
+  "We can't safely reopen your previous checkout yet. Please try again in a few minutes.";
+const CHECKOUT_NEEDS_REVIEW_MESSAGE =
+  "This purchase needs review. If you already paid, check your library; otherwise please contact support.";
+const CHECKOUT_LEGACY_BLOCKED_MESSAGE =
+  "An earlier checkout for this book must finish or expire before you can start a new one.";
+const CHECKOUT_RATE_LIMITED_MESSAGE =
+  "Too many checkout attempts for this book. Please try again later.";
+// A payment was found but not yet PROVEN (POK reported the order
+// completed without capture evidence we can verify). The reader must not
+// be invited to pay again -- that is the one outcome with no remedy,
+// since no refund path exists yet.
+const CHECKOUT_PENDING_VERIFICATION_MESSAGE =
+  "We haven't been able to confirm your payment yet. Check your library in a few minutes before paying again.";
 
 export async function buyBook(bookId: string, formData: FormData) {
   // ALL-CUTOVER APP-A: the maintenance gate is the very first statement
@@ -180,14 +238,29 @@ export async function buyBook(bookId: string, formData: FormData) {
     }
   }
 
-  // The sole source of truth for what Stripe actually charges from this
+  // STALE-CHECKOUT-1: the deliberate-resume inputs. They arrive ONLY
+  // from the separate second form the book page renders beside the
+  // ordinary buy button (never as its default submit), and they are
+  // validated here before they reach SQL. The intent id is a SELECTOR,
+  // never authorization: create_book_checkout_intent independently
+  // enforces auth.uid(), book identity and ownership, and resumes only
+  // the exact intent it would have selected anyway.
+  const resumeExisting = String(formData.get("resume_existing") ?? "") === "1";
+  const expectedIntentRaw = String(formData.get("expected_intent_id") ?? "").trim();
+  const expectedIntentId =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedIntentRaw)
+      ? expectedIntentRaw
+      : null;
+  const acceptExistingQuote = resumeExisting && expectedIntentId !== null;
+
+  // The sole source of truth for what POK actually charges from this
   // point forward -- price, the resolved discount, and this attempt's
   // own durable identity are all frozen atomically by this one call
-  // (migration 032's create_book_checkout_intent, evolved by migration
-  // 056). Never trusts book.price_cents or the discount lookup above for
-  // the actual charge -- both are re-derived server-side inside the RPC,
-  // which is directly callable by any authenticated client and so can
-  // never trust a caller-supplied price.
+  // (migration 032's create_book_checkout_intent, evolved by migrations
+  // 056 and STALE-CHECKOUT-1). Never trusts book.price_cents or the
+  // discount lookup above for the actual charge -- both are re-derived
+  // server-side inside the RPC, which is directly callable by any
+  // authenticated client and so can never trust a caller-supplied price.
   //
   // STRIPE-DISABLE-1: `activeProvider === "pok"` above already proves the
   // regime is exactly librum_ledger_v1 (see resolveActiveCheckoutProvider) --
@@ -197,46 +270,157 @@ export async function buyBook(bookId: string, formData: FormData) {
   // this exact call -- ALL (no FX) and AUTHOR_ROYALTY_RATE_BPS (the
   // current platform rate snapshotted ONCE, never recomputed later at
   // webhook/finalization time).
-  const { data: intentRows, error: intentError } = await supabase.rpc(
-    "create_book_checkout_intent",
-    {
-      book_id: bookId,
-      p_discount_code: rawCode || null,
-      p_regime: "librum_ledger_v1",
-      p_currency: "ALL",
-      p_royalty_rate_bps: AUTHOR_ROYALTY_RATE_BPS,
-    },
-  );
+  const createQuote = async (
+    accept: boolean,
+    expected: string | null,
+  ): Promise<CheckoutIntentResult> => {
+    const { data: intentRows, error: intentError } = await supabase.rpc(
+      "create_book_checkout_intent",
+      {
+        book_id: bookId,
+        p_discount_code: rawCode || null,
+        p_regime: "librum_ledger_v1",
+        p_currency: "ALL",
+        p_royalty_rate_bps: AUTHOR_ROYALTY_RATE_BPS,
+        p_accept_existing_quote: accept,
+        p_expected_intent_id: expected,
+      },
+    );
 
-  const intent = (intentRows as CheckoutIntentResult[] | null)?.[0];
+    const row = (intentRows as CheckoutIntentResult[] | null)?.[0];
 
-  if (intentError || !intent) {
-    console.error("buyBook: create_book_checkout_intent failed", {
-      bookId,
-      readerId: user.id,
-      error: intentError,
-    });
-    redirect(`/books/${bookId}?error=Could+not+start+checkout`);
+    if (intentError || !row) {
+      console.error("buyBook: create_book_checkout_intent failed", {
+        bookId,
+        readerId: user.id,
+        error: intentError,
+      });
+      redirect(`/books/${bookId}?error=Could+not+start+checkout`);
+    }
+    return row;
+  };
+
+  // A function DECLARATION, not a const arrow: TypeScript only treats a
+  // call as never-returning for control-flow analysis when the callee is
+  // a function declaration (or an explicitly typed const). As an arrow
+  // this narrowed nothing, and every `result` assignment after it looked
+  // possibly-unassigned.
+  function failClosed(message: string): never {
+    redirect(`/books/${bookId}?error=${encodeURIComponent(message)}`);
+  }
+
+  let quote = await createQuote(acceptExistingQuote, expectedIntentId);
+
+  // STALE-CHECKOUT-1: the reader deliberately confirmed a specific quote
+  // and it is no longer the eligible candidate. Re-evaluate EXACTLY once,
+  // and never back into accept mode -- resuming "whatever is there now"
+  // is precisely the silent substitution this status exists to prevent.
+  if (quote.quote_status === "expected_intent_changed") {
+    quote = await createQuote(false, null);
+    if (quote.quote_status === "expected_intent_changed") {
+      failClosed(CHECKOUT_AMBIGUOUS_MESSAGE);
+    }
+  }
+
+  if (quote.quote_status === "blocked_legacy_attempt") {
+    failClosed(CHECKOUT_LEGACY_BLOCKED_MESSAGE);
+  }
+  if (quote.quote_status === "supersession_rate_limited") {
+    failClosed(CHECKOUT_RATE_LIMITED_MESSAGE);
+  }
+
+  // At most ONE replacement quote is ever minted per reader action --
+  // shared by the probe path below and the claim-race path further down,
+  // so the two cannot compound into a loop.
+  let replacementUsed = false;
+
+  // STALE-CHECKOUT-1: SQL refused to decide, because the old attempt may
+  // still accept payment and only an authenticated provider retrieval can
+  // say. Nothing has been mutated at this point, and nothing will be
+  // unless the probe proves the attempt dead.
+  if (quote.quote_status === "conflict_attempt_unresolved" ||
+      quote.quote_status === "blocked_expired_attempt_unresolved") {
+    const conflictingIntentId = quote.intent_id;
+    const wasConflict = quote.quote_status === "conflict_attempt_unresolved";
+    if (!conflictingIntentId) {
+      failClosed(CHECKOUT_AMBIGUOUS_MESSAGE);
+    }
+    const resolution = await probeProviderAttempt(
+      { intentId: conflictingIntentId, merchantId: pokConfig.merchantId },
+      createPokRepository(),
+      createPokClient(pokConfig),
+    );
+    switch (resolution.kind) {
+      case "retired":
+        // The attempt is provably dead and its intent superseded, in one
+        // transaction. This is the ONLY outcome that permits a
+        // replacement.
+        if (acceptExistingQuote) {
+          // ...except on the deliberate-accept path. Retiring and
+          // minting here would charge a DIFFERENT amount than the one
+          // the reader just clicked to confirm, which is exactly the
+          // harm the conflict notice exists to prevent. Tell them, and
+          // let them choose again against the current price.
+          redirect(`/books/${bookId}?checkout_expired=1`);
+        }
+        replacementUsed = true;
+        quote = await createQuote(false, null);
+        if (quote.quote_status !== "minted" && quote.quote_status !== "reused") {
+          failClosed(CHECKOUT_AMBIGUOUS_MESSAGE);
+        }
+        break;
+      case "fulfilled":
+        redirect(`/books/${bookId}?purchase=success`);
+        break;
+      case "fulfilment_pending":
+        failClosed(CHECKOUT_PENDING_VERIFICATION_MESSAGE);
+        break;
+      case "blocked":
+      case "needs_reconciliation":
+        failClosed(CHECKOUT_NEEDS_REVIEW_MESSAGE);
+        break;
+      case "resumable":
+        if (wasConflict) {
+          // A genuinely live quote at the OLD amount. Never silently
+          // resumed, and never silently re-priced: the book page renders
+          // the frozen amount, says plainly that the new price or code is
+          // not applied to it, and offers resuming as a separate,
+          // deliberate second action.
+          redirect(`/books/${bookId}?checkout_conflict=${conflictingIntentId}`);
+        }
+        failClosed(CHECKOUT_IN_PROGRESS_MESSAGE);
+        break;
+      case "in_progress":
+        failClosed(CHECKOUT_IN_PROGRESS_MESSAGE);
+        break;
+      default:
+        failClosed(CHECKOUT_AMBIGUOUS_MESSAGE);
+    }
+  }
+
+  if (quote.quote_status !== "minted" && quote.quote_status !== "reused") {
+    failClosed(CHECKOUT_AMBIGUOUS_MESSAGE);
   }
 
   // `intentRows as CheckoutIntentResult[] | null` above is a
   // compile-time cast only -- it gives no runtime guarantee the RPC
   // actually returned well-formed values. Every field that flows into
-  // the Stripe call below is checked explicitly before that call is
+  // the provider call below is checked explicitly before that call is
   // ever made.
   const isIntentUsable =
-    typeof intent.intent_id === "string" &&
-    intent.intent_id.length > 0 &&
-    typeof intent.price_cents_at_checkout === "number" &&
-    Number.isInteger(intent.price_cents_at_checkout) &&
-    intent.price_cents_at_checkout > 0 &&
-    Number.isFinite(Date.parse(intent.expires_at));
+    typeof quote.intent_id === "string" &&
+    quote.intent_id.length > 0 &&
+    typeof quote.price_cents_at_checkout === "number" &&
+    Number.isInteger(quote.price_cents_at_checkout) &&
+    quote.price_cents_at_checkout > 0 &&
+    typeof quote.expires_at === "string" &&
+    Number.isFinite(Date.parse(quote.expires_at));
 
   if (!isIntentUsable) {
     console.error("buyBook: checkout intent RPC returned a malformed result", {
       bookId,
       readerId: user.id,
-      intent,
+      quoteStatus: quote.quote_status,
     });
     redirect(`/books/${bookId}?error=Could+not+start+checkout`);
   }
@@ -249,12 +433,15 @@ export async function buyBook(bookId: string, formData: FormData) {
   // made unreachable, per the locked product decision. `activeProvider
   // === "pok"` (checked above, before any RPC call) is this function's
   // only path past this point.
-  let checkoutUrl: string;
-  try {
-    checkoutUrl = await startPokCheckout({
-      intentId: intent.intent_id, readerId: user.id, title: book.title,
+  const runCheckout = async (intentId: string) =>
+    startPokCheckout({
+      intentId, readerId: user.id, title: book.title,
       origin, merchantId: pokConfig.merchantId,
     }, createPokRepository(), createPokClient(pokConfig));
+
+  let result: Awaited<ReturnType<typeof runCheckout>>;
+  try {
+    result = await runCheckout(quote.intent_id as string);
   } catch (err) {
     // ALL-CUTOVER APP-A: startPokCheckout()'s own defense-in-depth
     // maintenance gate fired -- map it back to the exact same
@@ -264,21 +451,57 @@ export async function buyBook(bookId: string, formData: FormData) {
     if (err instanceof Error && err.message === POK_CHECKOUT_MAINTENANCE_ACTIVE) {
       redirectForMaintenance(`/books/${bookId}`);
     }
-    // A stale checkout can never be silently resumed (see pok-checkout's
-    // assertReusableUnpaidOrder) -- tell the reader that plainly instead
-    // of implying a retry will work, since it won't: this same intent's
-    // mapping row is already claimed and reusing it is exactly what just
-    // failed. Every other failure keeps the existing generic message.
-    if (err instanceof Error && err.message === POK_CHECKOUT_CANNOT_RESUME) {
-      redirect(
-        `/books/${bookId}?error=${encodeURIComponent(
-          "We can't safely reopen this checkout. If you already paid, check your library; otherwise, please contact support to complete this purchase.",
-        )}`,
+    // STALE-CHECKOUT-1: the claim race resolved into a retirement while
+    // we were starting -- the attempt was proved dead and superseded
+    // atomically. One replacement, never a loop: if the single
+    // replacement allowance is already spent, fail closed instead.
+    if (err instanceof Error && err.message === POK_CHECKOUT_ATTEMPT_RETIRED && !replacementUsed && !acceptExistingQuote) {
+      replacementUsed = true;
+      const replacement = await createQuote(false, null);
+      if ((replacement.quote_status !== "minted" && replacement.quote_status !== "reused") ||
+          typeof replacement.intent_id !== "string") {
+        failClosed(CHECKOUT_AMBIGUOUS_MESSAGE);
+      }
+      try {
+        result = await runCheckout(replacement.intent_id as string);
+      } catch {
+        redirect(`/books/${bookId}?error=Could+not+start+checkout`);
+      }
+    } else if (err instanceof Error && err.message === POK_CHECKOUT_ATTEMPT_RETIRED) {
+      failClosed(CHECKOUT_AMBIGUOUS_MESSAGE);
+    } else if (err instanceof Error && err.message === POK_CHECKOUT_IN_PROGRESS) {
+      // Another request for this same intent is mid-creation. Exactly one
+      // provider order exists and no second payable one is created.
+      failClosed(CHECKOUT_IN_PROGRESS_MESSAGE);
+    } else if (err instanceof Error && err.message === POK_CHECKOUT_AMBIGUOUS) {
+      failClosed(CHECKOUT_AMBIGUOUS_MESSAGE);
+    } else if (err instanceof Error && err.message === POK_CHECKOUT_CANNOT_RESUME) {
+      // A stale checkout can never be silently resumed -- tell the reader
+      // that plainly instead of implying a retry will work.
+      failClosed(
+        "We can't safely reopen this checkout. If you already paid, check your library; otherwise, please contact support to complete this purchase.",
       );
+    } else {
+      redirect(`/books/${bookId}?error=Could+not+start+checkout`);
     }
-    redirect(`/books/${bookId}?error=Could+not+start+checkout`);
   }
-  redirect(checkoutUrl);
+
+  // STALE-CHECKOUT-1: startPokCheckout no longer returns a bare URL. A
+  // completed order found while resuming routes to fulfilment rather
+  // than to a second payable order -- the classifier can only return
+  // RETIRE_SAFE for an order with no completion, refund, transaction or
+  // capture evidence, so a completed order is never retired and its
+  // intent is never superseded.
+  if (result.kind === "fulfilled") {
+    redirect(`/books/${result.bookId}?purchase=success`);
+  }
+  if (result.kind === "fulfilment_pending") {
+    redirect(`/books/${result.bookId}?error=${encodeURIComponent(CHECKOUT_PENDING_VERIFICATION_MESSAGE)}`);
+  }
+  if (result.kind === "blocked") {
+    redirect(`/books/${result.bookId}?error=${encodeURIComponent(CHECKOUT_NEEDS_REVIEW_MESSAGE)}`);
+  }
+  redirect(result.url);
 }
 
 type BookForFreeAcquisition = {

@@ -85,6 +85,58 @@ export function logPokDiagnostic(stage: PokDiagnosticStage, err: unknown): void 
   }
 }
 
+// STALE-CHECKOUT-1: a SECOND, deliberately separate diagnostic channel
+// for the small set of events that mean "a human has to look at this",
+// as distinct from logPokDiagnostic's ordinary per-stage failures. It is
+// separate rather than another stage value because these lines carry
+// IDENTIFIERS -- which intent, which claim, which provider order -- and
+// that is the whole point of them: an orphaned provider order is
+// worthless in a log that cannot name it.
+//
+// What it may carry is therefore an explicit allowlist of three opaque
+// identifiers plus a state string, and nothing else. It NEVER carries
+// the checkout URL, the webhook token, any credential, or any provider
+// response body. The webhook token in particular is the callback's only
+// secret and must not reach any log: it is not a field of this type, so
+// a caller cannot pass one without a type error.
+export type PokCriticalCode =
+  // POK created an order and the first attempt to record its id failed.
+  // The reader was never handed a URL, so the order expires unpaid --
+  // but it is unnameable to us unless this line exists.
+  | "orphan_provider_order"
+  // A callback verified real money on a mapping we had already retired.
+  // Reaching this means the retirement classifier was wrong, and staging
+  // must surface that loudly rather than silently doing the right thing.
+  | "fulfilment_on_retired_mapping"
+  // A recordProviderOrder attempt failed and is about to be retried.
+  | "provider_order_persistence_retry";
+
+export type PokCriticalDetail = {
+  intentId: string;
+  creationClaimId?: string;
+  providerOrderId?: string;
+  mappingState?: string;
+  attempt?: number;
+};
+
+export function logPokCritical(code: PokCriticalCode, detail: PokCriticalDetail): void {
+  try {
+    // Rebuilt field by field rather than spread, so a caller passing an
+    // object with extra properties (a wider object still satisfies the
+    // type) can never widen what is actually written.
+    console.error("pok_critical", {
+      code,
+      intentId: detail.intentId,
+      creationClaimId: detail.creationClaimId,
+      providerOrderId: detail.providerOrderId,
+      mappingState: detail.mappingState,
+      attempt: detail.attempt,
+    });
+  } catch {
+    // Logging must never throw or disrupt the caller's own handling.
+  }
+}
+
 // PAID-MODE-1: the three deployment-identity conditions this function
 // has always required now come from the provider-neutral predicate
 // (src/lib/protected-staging.ts), and POK_ENVIRONMENT -- the one

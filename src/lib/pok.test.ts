@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { assertPokStaging, createPokClient, getPokConfig, logPokDiagnostic, pokAmountToMinor, validatePokCheckoutUrl, verifiedPokPayment, type PokOrder } from "./pok";
+import { assertPokStaging, createPokClient, getPokConfig, logPokCritical, logPokDiagnostic, pokAmountToMinor, validatePokCheckoutUrl, verifiedPokPayment, type PokOrder } from "./pok";
 
 const orderId = "11111111-1111-4111-8111-111111111111";
 const merchantId = "22222222-2222-4222-8222-222222222222";
@@ -381,5 +381,66 @@ describe("logPokDiagnostic", () => {
   it("never throws for a non-Error thrown value", () => {
     expect(() => logPokDiagnostic("checkout_url", "a plain string, not an Error")).not.toThrow();
     expect(consoleError).toHaveBeenCalledWith("pok_diagnostic", { stage: "checkout_url", code: "unknown" });
+  });
+});
+
+// STALE-CHECKOUT-1: logPokCritical is a SEPARATE channel from
+// logPokDiagnostic. Diagnostics map an exception through a closed
+// vocabulary; this one carries identifiers a human needs in order to go
+// find an order at POK. That makes what it may NOT carry the whole point
+// of these tests: no checkout URL, no webhook token, no credentials.
+describe("logPokCritical", () => {
+  let consoleError: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined); });
+  afterEach(() => consoleError.mockRestore());
+
+  it.each([
+    "orphan_provider_order", "fulfilment_on_retired_mapping", "provider_order_persistence_retry",
+  ] as const)("logs %s under the pok_critical channel with its identifiers", (code) => {
+    logPokCritical(code, {
+      intentId: "11111111-1111-4111-8111-111111111111",
+      creationClaimId: "22222222-2222-4222-8222-222222222222",
+      providerOrderId: "33333333-3333-4333-8333-333333333333",
+      mappingState: "retired", attempt: 2,
+    });
+    expect(consoleError).toHaveBeenCalledWith("pok_critical", {
+      code,
+      intentId: "11111111-1111-4111-8111-111111111111",
+      creationClaimId: "22222222-2222-4222-8222-222222222222",
+      providerOrderId: "33333333-3333-4333-8333-333333333333",
+      mappingState: "retired", attempt: 2,
+    });
+  });
+
+  // The detail object is rebuilt field by field rather than spread, so a
+  // caller passing a WIDER object (one that happens to carry a token, a
+  // URL or a secret alongside the identifiers) cannot widen the log.
+  // This is the regression that guarantee exists for.
+  it("never logs a field outside its own closed shape, however wide the caller's object is", () => {
+    const widened = {
+      intentId: "11111111-1111-4111-8111-111111111111",
+      webhookToken: "tok_do_not_log_this",
+      checkoutUrl: "https://pay-staging.pokpay.io/sdk-orders/33333333-3333-4333-8333-333333333333",
+      keySecret: "sk_live_do_not_log_this_1234567890",
+    };
+    logPokCritical("orphan_provider_order", widened);
+    const loggedPayload = JSON.stringify(consoleError.mock.calls);
+    expect(loggedPayload).not.toContain("tok_do_not_log_this");
+    expect(loggedPayload).not.toContain("sk_live_do_not_log_this_1234567890");
+    expect(loggedPayload).not.toContain("pay-staging.pokpay.io");
+    expect(loggedPayload).toContain("11111111-1111-4111-8111-111111111111");
+  });
+
+  it("omits nothing and invents nothing when only the intent id is known", () => {
+    logPokCritical("orphan_provider_order", { intentId: "11111111-1111-4111-8111-111111111111" });
+    expect(consoleError).toHaveBeenCalledWith("pok_critical", {
+      code: "orphan_provider_order", intentId: "11111111-1111-4111-8111-111111111111",
+      creationClaimId: undefined, providerOrderId: undefined, mappingState: undefined, attempt: undefined,
+    });
+  });
+
+  it("never throws even if console.error itself throws", () => {
+    consoleError.mockImplementation(() => { throw new Error("logging transport down"); });
+    expect(() => logPokCritical("orphan_provider_order", { intentId: "x" })).not.toThrow();
   });
 });
