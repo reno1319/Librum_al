@@ -78,13 +78,41 @@ insert into public.discount_codes (id, author_id, book_id, code, amount_off_cent
   ('d0000000-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111111', 'b0000000-0000-0000-0000-000000000001', 'EXPIRED', 100, true, now() - interval '1 day');
 
 -- Helper: run create_book_checkout_intent as a given reader.
-create function pg_temp.create_intent_as(p_reader uuid, p_book uuid, p_code text default null)
-returns table (intent_id uuid, price_cents_at_checkout integer, discount_code_id uuid, expires_at timestamptz)
+--
+-- STALE-CHECKOUT-1: the RPC's RETURNS TABLE gained a fifth column,
+-- quote_status, so this helper's own explicit 4-column declaration --
+-- which `return query select *` fed directly -- no longer matches and
+-- had to be widened. The two trailing accept-path parameters are
+-- defaulted here exactly as they are in the RPC, so every existing
+-- three-argument call site in this file is unchanged.
+create function pg_temp.create_intent_as(
+  p_reader uuid, p_book uuid, p_code text default null,
+  p_accept boolean default false, p_expected uuid default null)
+returns table (intent_id uuid, price_cents_at_checkout integer, discount_code_id uuid,
+               expires_at timestamptz, quote_status text)
 language plpgsql as $$
 begin
   perform set_config('request.jwt.claim.sub', p_reader::text, true);
   set local role authenticated;
-  return query select * from public.create_book_checkout_intent(p_book, p_code);
+  return query select * from public.create_book_checkout_intent(
+    p_book, p_code, 'legacy_stripe_connect_v1', 'USD', null, p_accept, p_expected);
+  reset role;
+end;
+$$;
+
+-- Helper: mint a ledger_v1/ALL quote, the only regime a POK attempt may
+-- ever be claimed for.
+create function pg_temp.create_ledger_intent_as(
+  p_reader uuid, p_book uuid, p_code text default null,
+  p_accept boolean default false, p_expected uuid default null)
+returns table (intent_id uuid, price_cents_at_checkout integer, discount_code_id uuid,
+               expires_at timestamptz, quote_status text)
+language plpgsql as $$
+begin
+  perform set_config('request.jwt.claim.sub', p_reader::text, true);
+  set local role authenticated;
+  return query select * from public.create_book_checkout_intent(
+    p_book, p_code, 'librum_ledger_v1', 'ALL', 7000, p_accept, p_expected);
   reset role;
 end;
 $$;
@@ -404,6 +432,63 @@ begin
 
   delete from public.book_checkout_intents where reader_id in
     ('22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333333');
+end $$;
+
+-- STALE-CHECKOUT-1: the LEGACY regime's own quote statuses.
+--
+-- 059_stale_checkout_attempt_repair.test.sql covers the decision table
+-- for ledger_v1/POK, which is where attempts and retirement exist. This
+-- block covers what that file cannot: that adding supersession did not
+-- quietly change how a legacy_stripe_connect_v1/USD quote behaves, and
+-- that the status column tells the truth on this path too. A legacy
+-- quote can never have a POK attempt, so every outcome here is decided
+-- entirely by economics.
+do $$
+declare
+  a record;
+  b record;
+  c record;
+begin
+  select * into a from pg_temp.create_intent_as(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+  perform pg_temp.assert(a.quote_status = 'minted',
+    'part6c: a first legacy quote reports minted');
+
+  select * into b from pg_temp.create_intent_as(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+  perform pg_temp.assert(b.quote_status = 'reused' and b.intent_id = a.intent_id,
+    'part6c: an unchanged legacy quote reports reused, not a second mint');
+
+  -- Changed economics with no attempt: supersede and re-mint, exactly
+  -- as before the repair -- only now the superseded row says WHY.
+  select * into c from pg_temp.create_intent_as(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 'HALFOFF');
+  perform pg_temp.assert(c.quote_status = 'minted' and c.intent_id <> a.intent_id,
+    'part6c: a repriced legacy quote mints a new intent');
+  perform pg_temp.assert(
+    (select superseded_reason = 'quote_stale' from public.book_checkout_intents where id = a.intent_id),
+    'part6c: the displaced legacy quote must record quote_stale');
+  perform pg_temp.assert(
+    (select currency = 'USD' and regime = 'legacy_stripe_connect_v1'
+       from public.book_checkout_intents where id = c.intent_id),
+    'part6c: the replacement must keep the legacy regime and currency it was asked for');
+
+  -- A legacy quote bound to a Stripe session is never superseded: that
+  -- session may still be payable and this code can no longer ask Stripe.
+  update public.book_checkout_intents
+    set stripe_checkout_session_id = 'cs_legacy_block' where id = c.intent_id;
+  declare d record;
+  begin
+    select * into d from pg_temp.create_intent_as(
+      '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+    perform pg_temp.assert(d.quote_status = 'blocked_legacy_attempt',
+      'part6c: a Stripe-bound legacy quote must block rather than be superseded');
+    perform pg_temp.assert(
+      (select superseded_at is null from public.book_checkout_intents where id = c.intent_id),
+      'part6c: a Stripe-bound quote must never be superseded');
+  end;
+
+  delete from public.book_checkout_intents where reader_id = '22222222-2222-2222-2222-222222222222';
 end $$;
 
 -- ============================================================
@@ -849,8 +934,59 @@ begin
   -- widen a parameter list -- see that migration's own Part 10
   -- comment). The grant behavior itself (anon denied, authenticated
   -- allowed) is unchanged.
-  perform pg_temp.assert(not has_function_privilege('anon', 'public.create_book_checkout_intent(uuid,text,text,text,integer)', 'EXECUTE'), 'part9: anon must not have EXECUTE on create_book_checkout_intent');
-  perform pg_temp.assert(has_function_privilege('authenticated', 'public.create_book_checkout_intent(uuid,text,text,text,integer)', 'EXECUTE'), 'part9: authenticated must have EXECUTE on create_book_checkout_intent');
+  --
+  -- STALE-CHECKOUT-1: two more trailing, defaulted parameters
+  -- (p_accept_existing_quote, p_expected_intent_id), again via
+  -- drop+recreate, so the five-argument signature no longer exists as a
+  -- distinct function either. The grant behaviour is still unchanged.
+  perform pg_temp.assert(not has_function_privilege('anon', 'public.create_book_checkout_intent(uuid,text,text,text,integer,boolean,uuid)', 'EXECUTE'), 'part9: anon must not have EXECUTE on create_book_checkout_intent');
+  perform pg_temp.assert(has_function_privilege('authenticated', 'public.create_book_checkout_intent(uuid,text,text,text,integer,boolean,uuid)', 'EXECUTE'), 'part9: authenticated must have EXECUTE on create_book_checkout_intent');
+  perform pg_temp.assert(
+    not exists (
+      select 1 from pg_proc p
+      where p.pronamespace = 'public'::regnamespace
+        and p.proname = 'create_book_checkout_intent'
+        and p.pronargs <> 7
+    ),
+    'part9: no older create_book_checkout_intent overload may survive the drop+recreate');
+
+  -- STALE-CHECKOUT-1: the three new privileged functions.
+  perform pg_temp.assert(not has_function_privilege('anon', 'public.retire_book_checkout_attempt(uuid,uuid,text,text,text)', 'EXECUTE'), 'part9: anon must not have EXECUTE on retire_book_checkout_attempt');
+  perform pg_temp.assert(not has_function_privilege('authenticated', 'public.retire_book_checkout_attempt(uuid,uuid,text,text,text)', 'EXECUTE'), 'part9: authenticated must not have EXECUTE on retire_book_checkout_attempt');
+  perform pg_temp.assert(has_function_privilege('service_role', 'public.retire_book_checkout_attempt(uuid,uuid,text,text,text)', 'EXECUTE'), 'part9: service_role must have EXECUTE on retire_book_checkout_attempt');
+
+  perform pg_temp.assert(not has_function_privilege('anon', 'public.claim_pok_book_checkout_order(uuid,text,uuid,uuid,integer)', 'EXECUTE'), 'part9: anon must not have EXECUTE on claim_pok_book_checkout_order');
+  perform pg_temp.assert(not has_function_privilege('authenticated', 'public.claim_pok_book_checkout_order(uuid,text,uuid,uuid,integer)', 'EXECUTE'), 'part9: authenticated must not have EXECUTE on claim_pok_book_checkout_order');
+  perform pg_temp.assert(has_function_privilege('service_role', 'public.claim_pok_book_checkout_order(uuid,text,uuid,uuid,integer)', 'EXECUTE'), 'part9: service_role must have EXECUTE on claim_pok_book_checkout_order');
+
+  perform pg_temp.assert(not has_function_privilege('anon', 'public.get_book_checkout_quote(uuid,uuid)', 'EXECUTE'), 'part9: anon must not have EXECUTE on get_book_checkout_quote');
+  perform pg_temp.assert(has_function_privilege('authenticated', 'public.get_book_checkout_quote(uuid,uuid)', 'EXECUTE'), 'part9: authenticated must have EXECUTE on get_book_checkout_quote');
+
+  -- The entitlement core stays callable by NOBODY but its two owning
+  -- wrappers -- the advisory-lock move must not have widened it.
+  perform pg_temp.assert(not has_function_privilege('service_role', 'public.finalize_book_checkout_intent_entitlement_core(uuid,text,text,integer)', 'EXECUTE'), 'part9: service_role must not have EXECUTE on the entitlement core');
+  perform pg_temp.assert(not has_function_privilege('authenticated', 'public.finalize_book_checkout_intent_entitlement_core(uuid,text,text,integer)', 'EXECUTE'), 'part9: authenticated must not have EXECUTE on the entitlement core');
+
+  -- Every new privileged function must be SECURITY DEFINER with an
+  -- empty search_path -- the property that makes schema-qualification
+  -- load-bearing rather than stylistic.
+  perform pg_temp.assert(
+    not exists (
+      select 1 from pg_proc p
+      where p.pronamespace = 'public'::regnamespace
+        and p.proname in ('create_book_checkout_intent', 'retire_book_checkout_attempt',
+                          'claim_pok_book_checkout_order', 'get_book_checkout_quote',
+                          'enforce_book_checkout_intents_transition_rules',
+                          'enforce_pok_book_checkout_orders_transition_rules')
+        and (p.prosecdef is not true and p.proname <> 'enforce_book_checkout_intents_transition_rules'
+             and p.proname <> 'enforce_pok_book_checkout_orders_transition_rules'
+             or coalesce(array_to_string(p.proconfig, ','), '') <> 'search_path=""')
+    ),
+    'part9: every new privileged function must set search_path = '''' (and the RPCs must be SECURITY DEFINER)');
+
+  perform pg_temp.assert(not has_table_privilege('authenticated', 'public.pok_book_checkout_orders', 'SELECT'), 'part9: authenticated must not have SELECT on pok_book_checkout_orders');
+  perform pg_temp.assert(not has_table_privilege('authenticated', 'public.pok_book_checkout_orders', 'UPDATE'), 'part9: authenticated must not have UPDATE on pok_book_checkout_orders');
+  perform pg_temp.assert(not has_table_privilege('authenticated', 'public.pok_book_checkout_orders', 'INSERT'), 'part9: authenticated must not have INSERT on pok_book_checkout_orders');
 end $$;
 
 select 'ALL PASSED: 032_book_checkout_intents.test.sql' as result;

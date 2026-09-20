@@ -55,11 +55,28 @@ const mockPokConfig = vi.fn();
 const mockPokClient = vi.fn();
 const mockPokRepository = vi.fn();
 const mockStartPok = vi.fn();
+const mockProbe = vi.fn();
+// STALE-CHECKOUT-1: startPokCheckout returns a RESULT now, not a bare
+// URL -- a completed order found while resuming has to be able to say
+// "this is paid" instead of handing back a second payable link.
+const CHECKOUT_URL = "https://pay-staging.pokpay.io/sdk-orders/test";
+const checkoutUrlResult = { kind: "checkout_url", url: CHECKOUT_URL };
+// Every quote the RPC returns now carries its own status. A row without
+// one is malformed, and buyBook fails closed on it by design, so the
+// fixtures state it explicitly rather than relying on a default.
+function mintedQuote(priceCents: number, intentId = "intent") {
+  return [{ intent_id: intentId, price_cents_at_checkout: priceCents, discount_code_id: null,
+    expires_at: "2026-09-15T10:30:00Z", quote_status: "minted" }];
+}
 vi.mock("@/lib/pok", () => ({ getPokConfig: () => mockPokConfig(), createPokClient: () => mockPokClient() }));
 vi.mock("@/lib/pok-checkout", () => ({
   startPokCheckout: (...args: unknown[]) => mockStartPok(...args),
+  probeProviderAttempt: (...args: unknown[]) => mockProbe(...args),
   POK_CHECKOUT_CANNOT_RESUME: "POK_CHECKOUT_CANNOT_RESUME",
   POK_CHECKOUT_MAINTENANCE_ACTIVE: "POK_CHECKOUT_MAINTENANCE_ACTIVE",
+  POK_CHECKOUT_IN_PROGRESS: "POK_CHECKOUT_IN_PROGRESS",
+  POK_CHECKOUT_AMBIGUOUS: "POK_CHECKOUT_AMBIGUOUS",
+  POK_CHECKOUT_ATTEMPT_RETIRED: "POK_CHECKOUT_ATTEMPT_RETIRED",
 }));
 vi.mock("@/lib/pok-repository", () => ({ createPokRepository: () => mockPokRepository() }));
 const { buyBook, getFreeBook } = await import("./actions");
@@ -73,9 +90,10 @@ describe("buyBook: POK provider selection", () => {
     mockRedirect.mockClear(); mockCheckoutSessionsCreate.mockClear(); mockAccountsRetrieve.mockClear();
     mockPokConfig.mockReset().mockReturnValue({ merchantId: "merchant", keyId: "key", keySecret: "secret" });
     mockPokClient.mockReturnValue({}); mockPokRepository.mockReturnValue({});
-    mockStartPok.mockReset().mockResolvedValue("https://pay-staging.pokpay.io/sdk-orders/test");
+    mockStartPok.mockReset().mockResolvedValue(checkoutUrlResult);
+    mockProbe.mockReset();
     rpc.mockReset().mockImplementation(async (name: string) => name === "user_owns_book"
-      ? { data: false } : { data: [{ intent_id: "intent", price_cents_at_checkout: 499, expires_at: "2026-09-15T10:30:00Z" }] });
+      ? { data: false } : { data: mintedQuote(499) });
     mockCreateClient.mockResolvedValue({ auth: { getUser: async () => ({ data: { user: { id: "reader" } } }) }, rpc,
       from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { id: "book", title: "Test", price_cents: 499, author_id: "author", status: "published", profiles: null } }) }) }) }) });
   });
@@ -178,7 +196,7 @@ describe("buyBook / getFreeBook: maintenance-mode gate", () => {
     const rpc = vi.fn().mockImplementation(async (name: string) =>
       name === "user_owns_book"
         ? { data: false }
-        : { data: [{ intent_id: "intent", price_cents_at_checkout: 499, expires_at: "2026-09-15T10:30:00Z" }] },
+        : { data: mintedQuote(499) },
     );
     mockCreateClient.mockResolvedValue({
       auth: { getUser: async () => ({ data: { user: { id: "reader" } } }) },
@@ -194,7 +212,7 @@ describe("buyBook / getFreeBook: maintenance-mode gate", () => {
       }),
     });
     mockPokConfig.mockReturnValue({ merchantId: "merchant", keyId: "key", keySecret: "secret" });
-    mockStartPok.mockResolvedValue("https://pay-staging.pokpay.io/sdk-orders/test");
+    mockStartPok.mockResolvedValue(checkoutUrlResult);
 
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
       target: "https://pay-staging.pokpay.io/sdk-orders/test",
@@ -446,7 +464,8 @@ describe("buyBook: paid-checkout mode gate (PAID-MODE-1)", () => {
     mockPokConfig.mockReset().mockReturnValue({ merchantId: "m", keyId: "k", keySecret: "s" });
     mockPokClient.mockReset().mockReturnValue({});
     mockPokRepository.mockReset().mockReturnValue({});
-    mockStartPok.mockReset().mockResolvedValue("https://pay-staging.pokpay.io/sdk-orders/test");
+    mockStartPok.mockReset().mockResolvedValue(checkoutUrlResult);
+    mockProbe.mockReset();
     mockCheckoutSessionsCreate.mockReset();
     mockAccountsRetrieve.mockReset();
     mockRpc = vi.fn().mockResolvedValue({ data: false, error: null });
@@ -543,12 +562,258 @@ describe("buyBook: paid-checkout mode gate (PAID-MODE-1)", () => {
     mockRpc = vi.fn().mockImplementation(async (name: string) =>
       name === "user_owns_book"
         ? { data: false }
-        : { data: [{ intent_id: "intent", price_cents_at_checkout: 999, expires_at: "2026-09-15T10:30:00Z" }] },
+        : { data: mintedQuote(999) },
     );
 
     await expect(buyBook(BOOK_ID, new FormData())).rejects.toMatchObject({
       target: "https://pay-staging.pokpay.io/sdk-orders/test",
     });
     expect(mockStartPok).toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// STALE-CHECKOUT-1: buyBook's quote-status handling.
+//
+// The repair's whole premise is that create_book_checkout_intent now
+// answers with a STATUS, not just a row, and that every one of those
+// statuses has a distinct, honest reader-visible outcome. A status
+// falling through to the generic "Could not start checkout" would hide
+// exactly the lockout this work exists to remove, so each is asserted
+// by its exact redirect target.
+// ============================================================
+describe("buyBook: stale-checkout quote statuses", () => {
+  const READER = "reader";
+  const INTENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  let rpc: ReturnType<typeof vi.fn>;
+  let quoteRows: unknown[];
+
+  function msg(text: string) {
+    return `/books/book?error=${encodeURIComponent(text)}`;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1");
+    vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    stubPaidCheckoutAllowed();
+    mockCookieStore.get.mockImplementation(() => undefined);
+    mockRedirect.mockClear();
+    mockPokConfig.mockReset().mockReturnValue({ merchantId: "merchant", keyId: "k", keySecret: "s" });
+    mockPokClient.mockReset().mockReturnValue({});
+    mockPokRepository.mockReset().mockReturnValue({});
+    mockStartPok.mockReset().mockResolvedValue(checkoutUrlResult);
+    mockProbe.mockReset();
+    quoteRows = mintedQuote(499, INTENT);
+    rpc = vi.fn().mockImplementation(async (name: string) =>
+      name === "user_owns_book" ? { data: false } : { data: quoteRows });
+    mockCreateClient.mockReset().mockResolvedValue({
+      auth: { getUser: async () => ({ data: { user: { id: READER } } }) },
+      rpc,
+      from: () => ({ select: () => ({ eq: () => ({ single: async () => ({
+        data: { id: "book", title: "Test", price_cents: 499, author_id: "author", status: "published", profiles: null },
+      }) }) }) }),
+    });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  function quote(status: string, extra: Record<string, unknown> = {}) {
+    quoteRows = [{ intent_id: INTENT, price_cents_at_checkout: 499, discount_code_id: null,
+      expires_at: "2026-09-15T10:30:00Z", quote_status: status, ...extra }];
+  }
+
+  it.each([
+    ["blocked_legacy_attempt", "An earlier checkout for this book must finish or expire before you can start a new one."],
+    ["supersession_rate_limited", "Too many checkout attempts for this book. Please try again later."],
+  ])("maps the %s status to its own honest message, never the generic one", async (status, text) => {
+    quote(status);
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: msg(text) });
+    expect(mockStartPok).not.toHaveBeenCalled();
+    expect(mockProbe).not.toHaveBeenCalled();
+  });
+
+  it("reuses an eligible quote without minting a replacement", async () => {
+    quote("reused");
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: CHECKOUT_URL });
+    expect(rpc).toHaveBeenCalledTimes(2); // user_owns_book + one create call
+  });
+
+  // The probe is the ONLY thing allowed to move a possibly-live attempt
+  // to terminal, and only after an authenticated provider retrieval.
+  it.each(["conflict_attempt_unresolved", "blocked_expired_attempt_unresolved"])(
+    "probes the provider before deciding anything about a %s attempt", async (status) => {
+    quote(status);
+    mockProbe.mockResolvedValue({ kind: "ambiguous" });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({
+      target: msg("We can't safely reopen your previous checkout yet. Please try again in a few minutes."),
+    });
+    expect(mockProbe).toHaveBeenCalledWith(
+      expect.objectContaining({ intentId: INTENT, merchantId: "merchant" }),
+      expect.anything(), expect.anything(),
+    );
+    expect(mockStartPok).not.toHaveBeenCalled();
+  });
+
+  it("sends a still-live conflicting quote to the book page's conflict notice, carrying only the intent id", async () => {
+    quote("conflict_attempt_unresolved");
+    mockProbe.mockResolvedValue({ kind: "resumable", url: CHECKOUT_URL });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({
+      target: `/books/book?checkout_conflict=${INTENT}`,
+    });
+    // The reader is NEVER silently sent to the old amount's checkout.
+    expect(mockStartPok).not.toHaveBeenCalled();
+  });
+
+  it("mints exactly one replacement after a probe proves the attempt retired", async () => {
+    quote("conflict_attempt_unresolved");
+    mockProbe.mockResolvedValue({ kind: "retired" });
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === "user_owns_book") return { data: false };
+      return { data: args.p_accept_existing_quote ? quoteRows : mintedQuote(499, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb") };
+    });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: CHECKOUT_URL });
+    expect(mockStartPok).toHaveBeenCalledWith(
+      expect.objectContaining({ intentId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }),
+      expect.anything(), expect.anything(),
+    );
+  });
+
+  it.each([
+    [{ kind: "fulfilled", bookId: "book" }, "/books/book?purchase=success"],
+    [{ kind: "fulfilment_pending", bookId: "book" }, null],
+    [{ kind: "blocked", bookId: "book" }, null],
+    [{ kind: "needs_reconciliation" }, null],
+    [{ kind: "in_progress" }, null],
+  ] as const)("never mints a replacement for probe outcome %j", async (resolution, target) => {
+    quote("conflict_attempt_unresolved");
+    mockProbe.mockResolvedValue(resolution);
+    const call = buyBook("book", new FormData());
+    if (target) {
+      await expect(call).rejects.toMatchObject({ target });
+    } else {
+      await expect(call).rejects.toBeInstanceOf(RedirectSignal);
+    }
+    expect(mockStartPok).not.toHaveBeenCalled();
+  });
+
+  // ---- the deliberate resume, bound to one exact intent ----
+
+  function resumeForm(intentId: string) {
+    const form = new FormData();
+    form.set("resume_existing", "1");
+    form.set("expected_intent_id", intentId);
+    return form;
+  }
+
+  it("passes the reader's deliberate acceptance through to SQL as the exact expected intent", async () => {
+    quote("reused");
+    await expect(buyBook("book", resumeForm(INTENT))).rejects.toMatchObject({ target: CHECKOUT_URL });
+    expect(rpc).toHaveBeenCalledWith("create_book_checkout_intent", expect.objectContaining({
+      p_accept_existing_quote: true, p_expected_intent_id: INTENT,
+    }));
+  });
+
+  it("ignores a malformed expected_intent_id rather than resuming something else", async () => {
+    quote("minted");
+    await expect(buyBook("book", resumeForm("not-a-uuid"))).rejects.toMatchObject({ target: CHECKOUT_URL });
+    expect(rpc).toHaveBeenCalledWith("create_book_checkout_intent", expect.objectContaining({
+      p_accept_existing_quote: false, p_expected_intent_id: null,
+    }));
+  });
+
+  it("re-evaluates ONCE when the accepted quote changed underneath, and never back into accept mode", async () => {
+    quote("expected_intent_changed");
+    const calls: Array<Record<string, unknown>> = [];
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === "user_owns_book") return { data: false };
+      calls.push(args);
+      return { data: calls.length === 1 ? quoteRows : mintedQuote(499, INTENT) };
+    });
+    await expect(buyBook("book", resumeForm(INTENT))).rejects.toMatchObject({ target: CHECKOUT_URL });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ p_accept_existing_quote: true, p_expected_intent_id: INTENT });
+    expect(calls[1]).toMatchObject({ p_accept_existing_quote: false, p_expected_intent_id: null });
+  });
+
+  it("fails closed rather than looping when the re-evaluation changes again", async () => {
+    quote("expected_intent_changed");
+    await expect(buyBook("book", resumeForm(INTENT))).rejects.toMatchObject({
+      target: msg("We can't safely reopen your previous checkout yet. Please try again in a few minutes."),
+    });
+    expect(mockStartPok).not.toHaveBeenCalled();
+  });
+
+  // The accepted quote lapsed between the notice and the click. Minting
+  // a replacement here would charge a different amount than the one the
+  // reader just confirmed, so it never happens on this path.
+  it("tells the reader their accepted quote lapsed instead of silently re-pricing it", async () => {
+    quote("blocked_expired_attempt_unresolved");
+    mockProbe.mockResolvedValue({ kind: "retired" });
+    await expect(buyBook("book", resumeForm(INTENT))).rejects.toMatchObject({
+      target: "/books/book?checkout_expired=1",
+    });
+    expect(mockStartPok).not.toHaveBeenCalled();
+  });
+
+  // ---- the claim race, resolved into a retirement mid-start ----
+
+  it("allows exactly one replacement when startPokCheckout reports the attempt retired", async () => {
+    quote("minted");
+    mockStartPok
+      .mockRejectedValueOnce(new Error("POK_CHECKOUT_ATTEMPT_RETIRED"))
+      .mockResolvedValueOnce(checkoutUrlResult);
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: CHECKOUT_URL });
+    expect(mockStartPok).toHaveBeenCalledTimes(2);
+  });
+
+  it("never loops: a second retirement report fails closed instead of minting again", async () => {
+    quote("minted");
+    mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_ATTEMPT_RETIRED"));
+    await expect(buyBook("book", new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockStartPok).toHaveBeenCalledTimes(2);
+  });
+
+  it("never mints a replacement on the deliberate-accept path even when the attempt is retired mid-start", async () => {
+    quote("reused");
+    mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_ATTEMPT_RETIRED"));
+    await expect(buyBook("book", resumeForm(INTENT))).rejects.toMatchObject({
+      target: msg("We can't safely reopen your previous checkout yet. Please try again in a few minutes."),
+    });
+    expect(mockStartPok).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["POK_CHECKOUT_IN_PROGRESS", "Your checkout is starting. Please try again in a moment."],
+    ["POK_CHECKOUT_AMBIGUOUS", "We can't safely reopen your previous checkout yet. Please try again in a few minutes."],
+  ])("maps the %s sentinel to its own message", async (sentinel, text) => {
+    quote("minted");
+    mockStartPok.mockRejectedValue(new Error(sentinel));
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: msg(text) });
+  });
+
+  it.each([
+    [{ kind: "fulfilled", bookId: "book" }, "/books/book?purchase=success"],
+    [{ kind: "fulfilment_pending", bookId: "book" },
+      "/books/book?error=We%20haven't%20been%20able%20to%20confirm%20your%20payment%20yet.%20Check%20your%20library%20in%20a%20few%20minutes%20before%20paying%20again."],
+    [{ kind: "blocked", bookId: "book" },
+      "/books/book?error=This%20purchase%20needs%20review.%20If%20you%20already%20paid%2C%20check%20your%20library%3B%20otherwise%20please%20contact%20support."],
+  ] as const)("routes the %j checkout result away from a second payable link", async (result, target) => {
+    quote("minted");
+    mockStartPok.mockResolvedValue(result);
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target });
+  });
+
+  it("fails closed on a malformed quote row rather than guessing a price", async () => {
+    quoteRows = [{ intent_id: INTENT, price_cents_at_checkout: null, expires_at: null, quote_status: "minted" }];
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({
+      target: "/books/book?error=Could+not+start+checkout",
+    });
+    expect(mockStartPok).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on an unrecognized quote status", async () => {
+    quote("some_status_this_code_has_never_seen");
+    await expect(buyBook("book", new FormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockStartPok).not.toHaveBeenCalled();
   });
 });

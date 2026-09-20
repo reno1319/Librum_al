@@ -193,6 +193,23 @@ export async function generateMetadata({
   };
 }
 
+// STALE-CHECKOUT-1: the only shape a checkout_conflict query parameter
+// is ever allowed to have. It selects a row; it never carries data.
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The frozen quote as get_book_checkout_quote returns it. price and
+// currency come from the database row, never from the URL.
+type HeldQuote = {
+  intent_id: string;
+  price_cents_at_checkout: number;
+  currency: string;
+  discount_code_id: string | null;
+  expires_at: string;
+  provider_window_ends_at: string | null;
+  quote_state: string;
+};
+
 export default async function BookDetailPage({
   params,
   searchParams,
@@ -204,6 +221,12 @@ export default async function BookDetailPage({
     review?: string;
     report?: string;
     error?: string;
+    // STALE-CHECKOUT-1: an INTENT ID, never an amount. The frozen
+    // economics shown to the reader are read back from the database
+    // under that id; nothing about the money this page displays or that
+    // a resume submits can be steered from the query string.
+    checkout_conflict?: string;
+    checkout_expired?: string;
   }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive public book detail page (V3 §3)
@@ -219,6 +242,8 @@ export default async function BookDetailPage({
     review: reviewStatus,
     report: reportStatus,
     error,
+    checkout_conflict: checkoutConflict,
+    checkout_expired: checkoutExpired,
   } = await searchParams;
 
   const supabase = await createClient();
@@ -418,6 +443,36 @@ export default async function BookDetailPage({
     ? formatAllPrice(book.price_cents)
     : formatPrice(book.price_cents);
 
+  // STALE-CHECKOUT-1: the held-quote notice. buyBook redirects here with
+  // ?checkout_conflict=<intent id> when the reader has an unresolved
+  // paid attempt whose frozen economics no longer match what this page
+  // would quote today (a price change, or a promo code they just typed).
+  //
+  // Everything shown about that quote is read back HERE, server-side,
+  // from the exact intent id, through get_book_checkout_quote -- which
+  // enforces auth.uid() ownership and the book id inside SECURITY
+  // DEFINER, so a foreign or mismatched id returns no rows and this
+  // renders nothing at all. The amount is never taken from the query
+  // string, and the id is validated as a UUID before it is used, so a
+  // crafted link can neither display a false price nor point the resume
+  // form at someone else's intent.
+  const conflictIntentId =
+    typeof checkoutConflict === "string" && UUID_PATTERN.test(checkoutConflict)
+      ? checkoutConflict
+      : null;
+  let heldQuote: HeldQuote | null = null;
+  if (conflictIntentId && user) {
+    const { data: quoteRows } = await supabase.rpc("get_book_checkout_quote", {
+      p_intent_id: conflictIntentId,
+      p_book_id: book.id,
+    });
+    const row = (quoteRows as HeldQuote[] | null)?.[0];
+    // Only a still-unresolved attempt gets the resume form. A quote that
+    // has since been fulfilled, completed, superseded or expired is
+    // stale UI, not an offer -- the reader simply buys again.
+    if (row && row.quote_state === "unresolved_conflict") heldQuote = row;
+  }
+
   // See resolveShowSample's own comment (src/lib/book-purchase.ts) for
   // the full rule -- omitted for "owned"/"author" (who already have
   // Download EPUB), shown otherwise, identically regardless of whether
@@ -582,6 +637,59 @@ export default async function BookDetailPage({
           {reportStatus === "success" && (
             <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
               Thanks — we&apos;ve received your report and will take a look.
+            </p>
+          )}
+          {/* STALE-CHECKOUT-1: the held-quote conflict notice. It states
+              the frozen amount, says plainly that today's price and any
+              code just entered are NOT applied to it, and offers the
+              deliberate resume as its own separate form -- never as a
+              silent continuation of the buy button, which is how a
+              reader would otherwise be charged an amount they never
+              agreed to. */}
+          {heldQuote && (
+            <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <p className="font-medium">
+                You already have a checkout in progress for this book.
+              </p>
+              <p className="mt-1">
+                It is held at{" "}
+                <strong>
+                  {heldQuote.currency === "ALL"
+                    ? formatAllPrice(heldQuote.price_cents_at_checkout)
+                    : formatPrice(heldQuote.price_cents_at_checkout)}
+                </strong>
+                . That is the amount you would pay. Today&apos;s price and any
+                promo code you just entered are <strong>not</strong> applied to
+                it.
+              </p>
+              <p className="mt-1">
+                You can finish that checkout, or wait for it to lapse and start
+                a new one at the current price.
+              </p>
+              <form
+                action={buyBook.bind(null, book.id)}
+                className="mt-2 flex flex-wrap items-center gap-2"
+              >
+                <input type="hidden" name="resume_existing" value="1" />
+                <input
+                  type="hidden"
+                  name="expected_intent_id"
+                  value={heldQuote.intent_id}
+                />
+                <button type="submit" className={buttonClasses("primary", "sm")}>
+                  Continue that checkout
+                </button>
+              </form>
+            </div>
+          )}
+          {/* The accepted quote lapsed between the notice being rendered
+              and the reader pressing Continue. Deliberately NOT
+              auto-minted into a fresh one: that would silently move the
+              reader onto a different price they never saw. */}
+          {checkoutExpired === "1" && (
+            <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              That checkout lapsed before it could be resumed, so nothing was
+              charged. You can start a new one at the current price.
             </p>
           )}
           {error && (
