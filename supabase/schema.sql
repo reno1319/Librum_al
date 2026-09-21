@@ -10310,6 +10310,11 @@ create table public.pok_book_checkout_orders (
   provider_window_ends_at timestamptz,
   retired_at timestamptz,
   retired_reason text,
+  -- POK-FULFILMENT-1: DATABASE-OWNED. Declared LAST so that `attnum`
+  -- matches what `add column` produces in the migration; a database built
+  -- from this file and one built from base + migration have to agree on
+  -- column order, not merely on column names.
+  fulfilment_gap_first_seen_at timestamptz,
 
   check (length(btrim(merchant_custom_reference)) > 0),
   -- STALE-CHECKOUT-1: named explicitly to match the migration; see the
@@ -10325,6 +10330,13 @@ create table public.pok_book_checkout_orders (
     check (retired_reason is null or retired_reason in
            ('provider_attempt_expired', 'provider_attempt_canceled',
             'provider_window_elapsed_no_order_id')),
+  -- POK-FULFILMENT-1: named explicitly, for the same reason the three
+  -- above are. A backward database-system clock adjustment can make this
+  -- reject an otherwise legitimate write; that direction is fail-closed
+  -- and is preferred to a marker claiming a gap predating the mapping.
+  constraint pok_book_checkout_orders_gap_first_seen_after_created_check
+    check (fulfilment_gap_first_seen_at is null
+           or fulfilment_gap_first_seen_at >= created_at),
   check (provider_order_id is null or length(btrim(provider_order_id)) > 0),
   check (checkout_url is null or checkout_url ~ '^https://([A-Za-z0-9-]+\.)*pokpay\.io(/|$)'),
   check (
@@ -10332,6 +10344,9 @@ create table public.pok_book_checkout_orders (
     or (state <> 'ready')
   )
 );
+
+comment on column public.pok_book_checkout_orders.fulfilment_gap_first_seen_at is
+  'POK-FULFILMENT-1: the database time at which this mapping first recorded a transient fulfilment-evidence gap. Database-owned: set once by the transition trigger, never supplied, changed or cleared by application code. Diagnostic history, never entitlement -- book_checkout_intents.fulfilled_at is the entitlement authority.';
 
 alter table public.pok_book_checkout_orders enable row level security;
 revoke all on public.pok_book_checkout_orders from public, anon, authenticated, service_role;
@@ -10364,6 +10379,18 @@ language plpgsql
 set search_path = ''
 as $$
 begin
+  -- POK-FULFILMENT-1: INSERT may not supply the database-owned marker.
+  -- `old` does not exist on this path, so it returns before the
+  -- retirement guards, which are UPDATE rules by construction.
+  if tg_op = 'INSERT' then
+    if new.fulfilment_gap_first_seen_at is not null then
+      raise exception
+        'pok_book_checkout_orders: fulfilment_gap_first_seen_at is database-owned (intent %)',
+        new.intent_id;
+    end if;
+    return new;
+  end if;
+
   if old.state = 'retired' then
     if new.state is distinct from old.state then
       raise exception
@@ -10377,12 +10404,73 @@ begin
         old.intent_id;
     end if;
   end if;
+
+  -- POK-FULFILMENT-1: fulfilment_gap_first_seen_at is DATABASE-OWNED.
+  --
+  -- The branch ORDER is load-bearing. Rejection of a supplied value comes
+  -- BEFORE the stamping branch, so a statement that writes both a
+  -- fulfilment_gap_* error code and its own timestamp is refused rather
+  -- than quietly having its timestamp replaced -- the two look identical
+  -- from the row afterwards, and only one of them tells the author their
+  -- write was wrong.
+  --
+  -- Concurrent first observations converge without any of this raising:
+  -- the second writer blocks on the row lock, re-evaluates against the
+  -- committed version where the marker is already non-null, and -- since
+  -- its UPDATE does not name the column, so NEW carries OLD -- takes the
+  -- first branch with nothing distinct, preserving the first writer's
+  -- value.
+  if old.fulfilment_gap_first_seen_at is not null then
+    if new.fulfilment_gap_first_seen_at is distinct from old.fulfilment_gap_first_seen_at then
+      raise exception
+        'pok_book_checkout_orders: fulfilment_gap_first_seen_at is immutable (intent %)',
+        old.intent_id;
+    end if;
+  elsif new.fulfilment_gap_first_seen_at is not null then
+    raise exception
+      'pok_book_checkout_orders: fulfilment_gap_first_seen_at is database-owned (intent %)',
+      old.intent_id;
+  elsif new.last_error_code like 'fulfilment\_gap\_%'
+        and new.state in ('ready', 'needs_reconciliation') then
+    -- `\_` is a LITERAL underscore: backslash is LIKE's default escape
+    -- character, and an unescaped `_` is a single-character wildcard that
+    -- would also match, say, 'fulfilment5gap9...'. The prefix split is
+    -- the whole mechanism by which a TERMINAL observation
+    -- (fulfilment_blocked_*) can never create this marker, and
+    -- 'creation_unconfirmed' -- the only last_error_code any earlier
+    -- release writes -- matches neither.
+    --
+    -- The state condition is about the RESULTING row, not about which
+    -- row the statement started from, and it is worth stating exactly
+    -- what that does and does not guarantee.
+    --
+    -- What it guarantees: a row whose resulting state is still
+    -- 'creating', or is 'retired', is never stamped. A retired row
+    -- additionally cannot leave 'retired' at all -- the retirement guard
+    -- above rejects any such update before this branch is reached.
+    --
+    -- What it does NOT guarantee: a hypothetical statement that moved a
+    -- mapping from 'creating' to 'ready' or 'needs_reconciliation' while
+    -- carrying a fulfilment_gap_* code WOULD stamp the marker, because
+    -- the resulting row satisfies every condition. No such statement
+    -- exists in the application: the only writer of a fulfilment_gap_*
+    -- code is recordFulfilmentObservation, whose compare-and-set admits
+    -- only rows already in 'ready' or 'needs_reconciliation', so it
+    -- matches no 'creating' row and cannot be the statement that moves
+    -- one. supabase/tests/059 pins both halves -- the transition that
+    -- would stamp, and the CAS that never produces it.
+    --
+    -- A null last_error_code makes the LIKE comparison UNKNOWN, which is
+    -- not true, so it falls through and the marker stays null.
+    new.fulfilment_gap_first_seen_at := pg_catalog.now();
+  end if;
+
   return new;
 end;
 $$;
 
 create trigger pok_book_checkout_orders_enforce_transition_rules
-  before update on public.pok_book_checkout_orders
+  before insert or update on public.pok_book_checkout_orders
   for each row
   execute function public.enforce_pok_book_checkout_orders_transition_rules();
 

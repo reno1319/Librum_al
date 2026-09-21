@@ -457,7 +457,37 @@ export async function probeProviderAttempt(input: {
       return { kind: "needs_reconciliation" };
     }
     case "RESUMABLE": {
-      if (mapping.state === "ready" && mapping.checkout_url) {
+      // POK-FULFILMENT-1 (the resume correction, and the rollback floor).
+      //
+      // This gate used to read `mapping.state === "ready"`. Nothing in
+      // the system ever writes 'ready' BACK: repo.ready() is the only
+      // writer of that state and it CASes on state = 'creating'. So the
+      // first thing that moved a mapping to 'needs_reconciliation' --
+      // including this repair's own diagnostic write -- locked the reader
+      // out of a checkout URL they were still holding, for the whole
+      // 23-hour life of the intent, even though POK had just told us the
+      // order is open, correctly priced and unpaid.
+      //
+      // The URL itself is the right gate, and it is exactly as strong.
+      // Everything that could make handing it back unsafe has already
+      // been decided ABOVE this line: a retired mapping returned at the
+      // top of this function, an id-less mapping returned before the
+      // provider call, and RESUMABLE is only reached after an
+      // authenticated retrieval proved the order open, correctly bound,
+      // correctly priced and provably uncaptured. The stored URL is then
+      // re-validated against the stored order id, so a URL that does not
+      // name this exact order can never be handed out.
+      //
+      // Against today's staging this change is provably a NO-OP, which is
+      // what qualifies it as a permanent rollback floor: checkout_url is
+      // written only by repo.ready() (creating -> ready); repo.reconcile()
+      // requires state = 'creating', so it can never leave a
+      // needs_reconciliation row holding a URL; and
+      // create_book_checkout_intent's mapping UPDATE requires
+      // provider_order_id is null, which a ready row never has. So
+      // checkout_url non-null currently implies state is 'ready' or
+      // 'retired', and retired already returned above.
+      if (mapping.checkout_url) {
         return { kind: "resumable", url: validatePokCheckoutUrl(mapping.checkout_url, mapping.provider_order_id) };
       }
       // An order exists but no URL was ever stored, so there is nothing

@@ -804,3 +804,73 @@ describe("POK_CHECKOUT_CANNOT_RESUME", () => {
     expect(orders.createOrder).not.toHaveBeenCalled();
   });
 });
+
+// POK-FULFILMENT-1, partition 1: the URL-based RESUMABLE gate.
+//
+// The lockout this correction removes. Nothing in the system ever writes
+// 'ready' BACK -- repo.ready() is the only writer of that state and it
+// CASes on state = 'creating' -- so gating resume on the state meant the
+// first write that moved a mapping to 'needs_reconciliation' cost the
+// reader the checkout URL they were still holding, for the rest of the
+// intent's 23-hour life, even though POK had just said the order was
+// open, correctly priced and unpaid.
+//
+// Flagging is done here through repo.reconcile(), the only writer of
+// 'needs_reconciliation' that exists at this commit; the same gate is
+// what the diagnostic writes added in partition 2 depend on.
+describe("POK-FULFILMENT-1: the URL-based resume gate", () => {
+  it("resumes a flagged mapping that still holds a valid checkout URL", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    await repo.reconcile();
+    orders.retrieveOrder.mockResolvedValue(order);
+    expect(await probeProviderAttempt({ intentId: id, merchantId }, repo, orders, now))
+      .toEqual({ kind: "resumable", url });
+    expect(orders.createOrder).not.toHaveBeenCalled();
+    expect(repo.retire).not.toHaveBeenCalled();
+  });
+
+  it("flag THEN resume: startPokCheckout hands the SAME url back, creating no second order", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    await repo.reconcile();
+    orders.retrieveOrder.mockResolvedValue(order);
+    expect(await startPokCheckout(input, repo, orders, now)).toEqual({ kind: "checkout_url", url });
+    expect(orders.createOrder).not.toHaveBeenCalled();
+  });
+
+  it("a needs_reconciliation mapping with NO stored URL resumes nothing and retires nothing", async () => {
+    const { repo, orders, order, ready, currentMapping } = setup(); ready();
+    await repo.reconcile();
+    repo.mapping.mockResolvedValue({ ...currentMapping()!, checkout_url: null });
+    orders.retrieveOrder.mockResolvedValue(order);
+    expect(await probeProviderAttempt({ intentId: id, merchantId }, repo, orders, now))
+      .toEqual({ kind: "resumable", url: null });
+    expect(repo.retire).not.toHaveBeenCalled();
+  });
+
+  it("a RETIRED mapping never resumes, even while it still holds a URL", async () => {
+    const { repo, orders, retired } = setup(); retired();
+    expect(await probeProviderAttempt({ intentId: id, merchantId }, repo, orders, now)).toEqual({ kind: "retired" });
+    // The retired exit is above the provider call, so no retrieval even
+    // happens and the URL is never re-validated, let alone handed back.
+    expect(orders.retrieveOrder).not.toHaveBeenCalled();
+  });
+
+  it("an id-less mapping never resumes, whatever it carries", async () => {
+    const { repo, orders, blocked } = setup(); blocked("needs_reconciliation");
+    expect(await probeProviderAttempt({ intentId: id, merchantId }, repo, orders, now))
+      .toEqual({ kind: "needs_reconciliation" });
+    expect(orders.retrieveOrder).not.toHaveBeenCalled();
+  });
+
+  it("re-validates the stored URL against the stored order id before handing it back", async () => {
+    const { repo, orders, order, ready, currentMapping } = setup(); ready();
+    await repo.reconcile();
+    // A URL naming a DIFFERENT order must never be handed out, whatever
+    // state the mapping is in.
+    repo.mapping.mockResolvedValue({ ...currentMapping()!,
+      checkout_url: `https://pay-staging.pokpay.io/sdk-orders/${paymentId}` });
+    orders.retrieveOrder.mockResolvedValue(order);
+    await expect(probeProviderAttempt({ intentId: id, merchantId }, repo, orders, now))
+      .rejects.toThrow("POK_UNTRUSTED_CHECKOUT_URL");
+  });
+});
