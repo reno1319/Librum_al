@@ -54,6 +54,24 @@
 # that is later compared, so a matching error message can never be
 # mistaken for matching catalog output.
 #
+# CORRECTED 21 September 2026: this file used to compare the WORKING
+# TREE's supabase/schema.sql against its pinned base plus this
+# migration. That premise held only while the working tree was exactly
+# that base plus exactly this migration, so the first later schema change
+# -- the ALL catalog expansion -- turned its documented default
+# invocation red, reporting that change as a difference although nothing
+# about POK-FULFILMENT-1 had moved. A harness that goes red for work it
+# was never about is a harness people learn to skip.
+#
+# It now compares its OWN INTRODUCTION BOUNDARY: the schema.sql at the
+# commit that first added this migration, against that migration's base
+# plus this migration. Both sides are fixed points in history, so the
+# default invocation is stable no matter what later work does to the
+# working tree, and it keeps testing the one thing it was written to
+# test. The only working-tree input left is the migration FILE itself --
+# deliberately, because an applied migration must never be edited, and
+# this is one of the few places that would notice.
+#
 # Usage, from the repository root:
 #
 #   ./supabase/tests/060_pok_fulfilment_gap_first_seen_catalog_equivalence.sh
@@ -68,22 +86,127 @@ set -euo pipefail
 
 # The commit whose supabase/schema.sql is the BASE this migration was
 # written against: origin/staging at the time, the merge of PR #19.
-# Overridable so the harness keeps working after the migration itself has
-# been merged and later work moves the trunk on.
 BASE_REF="${BASE_REF:-30ab7cb9f6ee07056492a2a0a2de1d59d302d0cd}"
 MIGRATION="${MIGRATION:-supabase/migrations/20260920181856_pok_fulfilment_gap_first_seen.sql}"
 STUB="${STUB:-supabase/tests/00_stub_supabase_platform.sql}"
-SCHEMA="${SCHEMA:-supabase/schema.sql}"
+# The path of the schema snapshot inside the repository. `SCHEMA` and
+# `PATCHED_REF` are the overrides; see resolve_patched_schema.
+SCHEMA_PATH="${SCHEMA_PATH:-supabase/schema.sql}"
+# The identifier that must be ABSENT from the base schema and PRESENT in
+# the patched one. This is what makes "we resolved the wrong schema" a
+# named failure instead of a confusing diff.
+MARKER="${MARKER:-fulfilment_gap_first_seen_at}"
+# This migration is merged, so there is no pre-commit case to allow. A
+# tree that does not carry it is a tree this harness has nothing to say
+# about, and it fails rather than comparing the working tree.
+ALLOW_WORKTREE=0
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-for f in "$MIGRATION" "$STUB" "$SCHEMA"; do
+for f in "$MIGRATION" "$STUB"; do
   if [ ! -f "$f" ]; then
     echo "FAIL: $f not found -- run this from a checkout that carries the patch" >&2
     exit 1
   fi
 done
+
+# ============================================================
+# Which "patched schema" is this harness comparing?
+#
+# This is the question that made the first version of this file go stale
+# the moment the trunk moved. A catalog-equivalence harness has to
+# compare the schema AS OF THIS MIGRATION'S INTRODUCTION against that
+# migration's own base -- not against whatever the working tree happens
+# to contain later. Pinning the base alone is not enough: the patched
+# side has to be pinned to the same boundary, or every later schema
+# change is reported as a difference and the harness is red forever
+# through no fault of the change under test.
+#
+# Resolution order, highest precedence first:
+#
+#   SCHEMA       an explicit FILE to use as the patched schema. Wins over
+#                everything. `SCHEMA=supabase/schema.sql` forces the
+#                working-tree comparison at any time.
+#   PATCHED_REF  an explicit COMMIT whose supabase/schema.sql is the
+#                patched schema.
+#   (automatic)  the single commit that first ADDED this migration. Once
+#                the migration is committed, this is the introduction
+#                boundary and never moves again.
+#   (worktree)   only when the migration is NOT in this history at all --
+#                the pre-commit case, where the patch is staged and the
+#                working tree IS the patched schema. Harnesses for
+#                already-merged migrations disable this.
+#
+# Zero candidate commits where the worktree fallback is not allowed, or
+# more than one candidate, is a hard failure with the candidates named.
+# It never silently falls back to a schema that is not the boundary,
+# because a comparison against the wrong schema does not report "wrong
+# schema" -- it reports whatever unrelated change happens to be in the
+# tree, which is exactly how a harness teaches people to ignore it.
+resolve_patched_schema() {
+  if [ -n "${SCHEMA:-}" ]; then
+    if [ ! -f "$SCHEMA" ]; then
+      echo "FAIL: SCHEMA=$SCHEMA is not a readable file" >&2
+      exit 1
+    fi
+    PATCHED_FILE="$SCHEMA"
+    PATCHED_LABEL="explicit file $SCHEMA"
+    return
+  fi
+
+  if [ -z "${PATCHED_REF:-}" ]; then
+    local candidates count
+    candidates="$(git log --full-history --diff-filter=A --format=%H -- "$MIGRATION" || true)"
+    count="$(printf '%s' "$candidates" | grep -c . || true)"
+
+    if [ "$count" -gt 1 ]; then
+      echo "FAIL: $MIGRATION was added by more than one commit, so its introduction boundary is ambiguous:" >&2
+      printf '%s\n' "$candidates" | sed 's/^/  /' >&2
+      echo "  pass PATCHED_REF=<commit> (or SCHEMA=<file>) to say which schema is the patched one" >&2
+      exit 1
+    fi
+
+    if [ "$count" -eq 1 ]; then
+      PATCHED_REF="$candidates"
+    else
+      # Not in this history. Either the patch is not committed yet, or
+      # this harness is being run somewhere it does not belong.
+      if [ "${ALLOW_WORKTREE:-0}" != "1" ]; then
+        echo "FAIL: no commit in this history adds $MIGRATION, and this harness does not compare working trees." >&2
+        echo "  It pins an already-introduced migration; pass PATCHED_REF=<commit> or SCHEMA=<file> if you mean something else." >&2
+        exit 1
+      fi
+      if [ ! -f "$MIGRATION" ]; then
+        echo "FAIL: $MIGRATION is neither committed nor present in the working tree" >&2
+        exit 1
+      fi
+      if git cat-file -e "HEAD:$MIGRATION" 2>/dev/null; then
+        echo "FAIL: $MIGRATION exists at HEAD but no commit adds it -- refusing to guess its introduction boundary" >&2
+        exit 1
+      fi
+      PATCHED_FILE="$SCHEMA_PATH"
+      PATCHED_LABEL="working tree $SCHEMA_PATH (migration not committed yet)"
+      # The pre-commit comparison is only as good as the tree it reads,
+      # so say so out loud when the tree is not what is staged. A warning
+      # rather than a failure: an author iterating before `git add`
+      # should still be able to run this.
+      if ! git diff --quiet -- "$SCHEMA_PATH" "$MIGRATION" 2>/dev/null; then
+        echo "  NOTE: the working tree differs from the index for $SCHEMA_PATH or $MIGRATION;" >&2
+        echo "        this run compares the WORKING TREE, not what is staged." >&2
+      fi
+      return
+    fi
+  fi
+
+  if ! git cat-file -e "${PATCHED_REF}:${SCHEMA_PATH}" 2>/dev/null; then
+    echo "FAIL: ${PATCHED_REF}:${SCHEMA_PATH} is not readable" >&2
+    exit 1
+  fi
+  git show "${PATCHED_REF}:${SCHEMA_PATH}" > "$WORKDIR/patched_schema.sql"
+  PATCHED_FILE="$WORKDIR/patched_schema.sql"
+  PATCHED_LABEL="${PATCHED_REF:0:9}:$SCHEMA_PATH (the commit that introduced this migration)"
+}
 
 SUFFIX="$$"
 DB_A="librum_catalog_a_${SUFFIX}"
@@ -98,13 +221,29 @@ cleanup() {
 trap cleanup EXIT
 
 # The base schema is read from git rather than from the working tree: the
-# working tree's copy is the PATCHED one, and comparing a file against
-# itself proves nothing.
-if ! git cat-file -e "${BASE_REF}:${SCHEMA}" 2>/dev/null; then
-  echo "FAIL: ${BASE_REF}:${SCHEMA} is not readable -- pass BASE_REF=<commit> for the base this migration targets" >&2
+# working tree's copy may be the PATCHED one, and comparing a file
+# against itself proves nothing.
+if ! git cat-file -e "${BASE_REF}:${SCHEMA_PATH}" 2>/dev/null; then
+  echo "FAIL: ${BASE_REF}:${SCHEMA_PATH} is not readable -- pass BASE_REF=<commit> for the base this migration targets" >&2
   exit 1
 fi
-git show "${BASE_REF}:${SCHEMA}" > "$WORKDIR/base_schema.sql"
+git show "${BASE_REF}:${SCHEMA_PATH}" > "$WORKDIR/base_schema.sql"
+
+resolve_patched_schema
+echo "  patched schema: $PATCHED_LABEL"
+
+# Both halves of the boundary are asserted, not assumed. A base that
+# already carries the change, or a "patched" schema that does not, means
+# the wrong schema was resolved -- and every comparison below would then
+# pass or fail for a reason that has nothing to do with this migration.
+if grep -q "$MARKER" "$WORKDIR/base_schema.sql"; then
+  echo "FAIL: ${BASE_REF}:${SCHEMA_PATH} already mentions $MARKER -- that is not the base this migration expands" >&2
+  exit 1
+fi
+if ! grep -q "$MARKER" "$PATCHED_FILE"; then
+  echo "FAIL: the resolved patched schema ($PATCHED_LABEL) does not mention $MARKER -- it does not carry this migration" >&2
+  exit 1
+fi
 
 build() {
   local db="$1"; shift
@@ -120,9 +259,9 @@ build() {
   done
 }
 
-echo "  building A: patched $SCHEMA"
-build "$DB_A" "$STUB" "$SCHEMA"
-echo "  building B: ${BASE_REF:0:9}:$SCHEMA + $MIGRATION"
+echo "  building A: $PATCHED_LABEL"
+build "$DB_A" "$STUB" "$PATCHED_FILE"
+echo "  building B: ${BASE_REF:0:9}:$SCHEMA_PATH + $MIGRATION"
 build "$DB_B" "$STUB" "$WORKDIR/base_schema.sql" "$MIGRATION"
 
 FAILURES=0
@@ -321,4 +460,4 @@ if [ "$FAILURES" -ne 0 ]; then
   exit 1
 fi
 
-echo "PASS: 060_pok_fulfilment_gap_first_seen_catalog_equivalence.sh -- $SECTIONS catalog sections identical between patched schema.sql and ${BASE_REF:0:9} + migration, none empty"
+echo "PASS: 060_pok_fulfilment_gap_first_seen_catalog_equivalence.sh -- $SECTIONS catalog sections identical between $PATCHED_LABEL and ${BASE_REF:0:9} + migration, none empty"
