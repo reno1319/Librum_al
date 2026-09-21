@@ -1008,6 +1008,501 @@ begin
   perform pg_temp.assert(
     not has_table_privilege('anon', 'public.pok_book_checkout_orders', 'select'),
     'part9: anon must not select pok_book_checkout_orders directly');
+
+  -- POK-FULFILMENT-1: the transition trigger function, absolutely.
+  --
+  -- Both build paths issue `revoke all ... from public, anon,
+  -- authenticated` on this function, and the catalog-equivalence harness
+  -- proves the two ACLs match each other -- which is a relative claim.
+  -- These are the absolute ones. A function whose proacl is NULL carries
+  -- PostgreSQL's DEFAULT, and the default for a function is EXECUTE to
+  -- PUBLIC, so "no explicit grant" is not the same fact as "not
+  -- executable" and is asserted separately from it.
+  perform pg_temp.assert(
+    (select p.proacl is not null from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname = 'enforce_pok_book_checkout_orders_transition_rules'),
+    'part9: the transition trigger function must carry an explicit ACL, never the PUBLIC default');
+  perform pg_temp.assert(
+    not exists (
+      select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+        lateral aclexplode(p.proacl) a
+       where n.nspname = 'public'
+         and p.proname = 'enforce_pok_book_checkout_orders_transition_rules'
+         and a.grantee = 0 and a.privilege_type = 'EXECUTE'),
+    'part9: no PUBLIC EXECUTE grant may exist on the transition trigger function');
+  -- has_function_privilege resolves PUBLIC grants and role inheritance,
+  -- so these two cover the indirect route as well as the direct one.
+  foreach f in array array['anon', 'authenticated']
+  loop
+    perform pg_temp.assert(
+      not has_function_privilege(f, (
+        select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public'
+           and p.proname = 'enforce_pok_book_checkout_orders_transition_rules' limit 1), 'execute'),
+      format('part9: %s must not execute the transition trigger function, by any route', f));
+  end loop;
+end $$;
+
+-- ============================================================
+-- Part 10: POK-FULFILMENT-1 -- the database-owned first-seen marker.
+--
+-- These are the LOAD-BEARING assertions for this repair. The application
+-- decides how long to keep asking POK about a completed order that is
+-- missing one of four optional fields, and it computes that from two
+-- database timestamps: fulfilment_gap_first_seen_at (stamped once) and
+-- updated_at (stamped on every write). Every property the bound depends
+-- on lives in the trigger below, not in the application, so a Vitest mock
+-- asserting them would only be asserting what the mock was told to say.
+--
+-- What is deliberately NOT claimed here: this file runs on ONE
+-- connection, so it cannot race two real backends for the first
+-- observation. What it proves instead is the MECHANISM that makes that
+-- race converge -- an UPDATE that does not name the column carries OLD
+-- into NEW, so the preserving branch fires and the first writer's value
+-- survives any number of later writes. The row lock that serialises the
+-- two writers is Postgres' own, and this repair does not change it.
+-- ============================================================
+
+-- Put a claimed mapping into the 'ready' shape a live attempt has: an
+-- order id and a checkout URL, which the table's own CHECK requires
+-- before state may read 'ready'.
+create function pg_temp.make_ready(p_intent uuid, p_order text) returns void
+language sql as $$
+  update public.pok_book_checkout_orders
+     set provider_order_id = p_order,
+         checkout_url = 'https://pay-staging.pokpay.io/sdk-orders/' || p_order,
+         state = 'ready'
+   where intent_id = p_intent;
+$$;
+
+-- EXACTLY the statement src/lib/pok-repository.ts issues, including its
+-- compare-and-set and its RETURNING list. Tests below assert on the row
+-- count, so a CAS that silently matches nothing cannot pass as a write.
+create function pg_temp.observe(p_intent uuid, p_code text)
+returns table (matched integer, first_seen timestamptz, observed_at timestamptz)
+language plpgsql as $$
+begin
+  return query
+  update public.pok_book_checkout_orders m
+     set state = 'needs_reconciliation', last_error_code = p_code
+   where m.intent_id = p_intent
+     and m.provider_order_id is not null
+     and m.state in ('ready', 'needs_reconciliation')
+  returning 1, m.fulfilment_gap_first_seen_at, m.updated_at;
+end;
+$$;
+
+create function pg_temp.first_seen(p_intent uuid) returns timestamptz language sql as $$
+  select fulfilment_gap_first_seen_at from public.pok_book_checkout_orders where intent_id = p_intent;
+$$;
+
+do $$
+declare
+  v_intent uuid;
+  v_first timestamptz;
+  v_second timestamptz;
+  v_rows integer;
+  v_created timestamptz;
+begin
+  select intent_id into v_intent
+    from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                          'b0000000-0000-0000-0000-000000000001');
+  perform pg_temp.claim(v_intent);
+
+  -- A fresh mapping has never observed a gap.
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is null,
+    'part10: a newly claimed mapping must carry no first-seen marker');
+
+  -- ---- A 'creating' mapping: what each guard actually covers ----
+  --
+  -- Two independent guards, asserted separately because they fail for
+  -- different reasons. First the application's own CAS, which excludes
+  -- 'creating' precisely because the order id is recorded several
+  -- statements BEFORE repo.ready() runs: flagging the row in that window
+  -- would make ready() match zero rows and the reader would never receive
+  -- a checkout URL at all.
+  update public.pok_book_checkout_orders
+     set provider_order_id = 'ord_p060_creating' where intent_id = v_intent;
+  select count(*) into v_rows from pg_temp.observe(v_intent, 'fulfilment_gap_transaction_id_absent');
+  perform pg_temp.assert(v_rows = 0,
+    'part10: the application CAS must match ZERO rows against a creating mapping');
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is null,
+    'part10: a creating mapping must not acquire the marker through the CAS');
+
+  -- Second the trigger itself, reached by a direct write that ignores the
+  -- CAS entirely. The stamping branch requires the RESULTING state to be
+  -- ready or needs_reconciliation, so the database refuses independently
+  -- of what the application does.
+  update public.pok_book_checkout_orders
+     set last_error_code = 'fulfilment_gap_transaction_id_absent' where intent_id = v_intent;
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is null,
+    'part10: the trigger must not stamp a mapping whose resulting state is creating');
+
+  -- The specified stamping condition is about the RESULTING row, not
+  -- about which column the statement names, so a transition that carries
+  -- a lingering gap code into an eligible state does stamp the marker.
+  -- That is the rule as written, and it is asserted rather than left to
+  -- be discovered: it is unreachable in production because the CAS never
+  -- writes a gap code onto a creating row in the first place.
+  perform pg_temp.make_ready(v_intent, 'ord_p060_creating');
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is not null,
+    'part10: a transition into an eligible state with a gap code present must stamp the marker');
+
+  -- ---- The first eligible observation stamps it ----
+  --
+  -- Restart from a clean mapping, so what is measured below is the
+  -- observation itself rather than the transition above.
+  delete from public.pok_book_checkout_orders where intent_id = v_intent;
+  delete from public.book_checkout_intents where id = v_intent;
+  select intent_id into v_intent
+    from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                          'b0000000-0000-0000-0000-000000000001');
+  perform pg_temp.claim(v_intent);
+  perform pg_temp.make_ready(v_intent, 'ord_p060_first');
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is null,
+    'part10: becoming ready with no error code must not create a marker');
+
+  select count(*), min(first_seen) into v_rows, v_first
+    from pg_temp.observe(v_intent, 'fulfilment_gap_transaction_id_absent');
+  perform pg_temp.assert(v_rows = 1, 'part10: the CAS must match a ready mapping');
+  perform pg_temp.assert(v_first is not null,
+    'part10: the first eligible gap observation must stamp the marker in the SAME statement');
+  -- Necessary but NOT sufficient: every statement in this file shares one
+  -- transaction timestamp, so this equality also holds for an
+  -- implementation that stamped the marker from the row's pre-existing
+  -- updated_at. The dedicated block below separates the two.
+  perform pg_temp.assert(v_first = now(),
+    'part10: the marker must be stamped from the database transaction clock');
+
+  select created_at into v_created from public.pok_book_checkout_orders where intent_id = v_intent;
+  perform pg_temp.assert(v_first >= v_created,
+    'part10: the marker must not predate the mapping');
+
+  -- ---- A DIFFERENT gap code preserves it (A -> B) ----
+  select min(first_seen) into v_second
+    from pg_temp.observe(v_intent, 'fulfilment_gap_captured_amount_absent');
+  perform pg_temp.assert(v_second = v_first,
+    'part10: a second, different gap code must not move the marker');
+
+  -- ---- A -> B -> A -> B alternation cannot extend the window ----
+  --
+  -- This is the case that killed updated_at as a first-seen marker: its
+  -- stamp trigger is unconditional, so alternating codes reset it on
+  -- every callback and the retry would never end.
+  perform pg_temp.observe(v_intent, 'fulfilment_gap_transaction_id_absent');
+  perform pg_temp.observe(v_intent, 'fulfilment_gap_captured_amount_absent');
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) = v_first,
+    'part10: alternating gap codes must never move the marker');
+  perform pg_temp.assert(
+    (select last_error_code from public.pok_book_checkout_orders where intent_id = v_intent)
+      = 'fulfilment_gap_captured_amount_absent',
+    'part10: the LATEST observation must still be recorded -- the marker exists so that it can be');
+
+  -- ---- An unrelated update preserves it ----
+  update public.pok_book_checkout_orders
+     set checkout_url = 'https://pay-staging.pokpay.io/sdk-orders/ord_p060_other'
+   where intent_id = v_intent;
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) = v_first,
+    'part10: an unrelated update must not move the marker');
+
+  -- ---- Rewriting or clearing it RAISES, never silently coerces ----
+  begin
+    update public.pok_book_checkout_orders
+       set fulfilment_gap_first_seen_at = now() + interval '1 hour' where intent_id = v_intent;
+    perform pg_temp.not_rejected('part10: rewriting the marker must be rejected');
+  exception when raise_exception then null;
+  end;
+  begin
+    update public.pok_book_checkout_orders
+       set fulfilment_gap_first_seen_at = null where intent_id = v_intent;
+    perform pg_temp.not_rejected('part10: clearing the marker must be rejected');
+  exception when raise_exception then null;
+  end;
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) = v_first,
+    'part10: a rejected write must leave the marker exactly as it was');
+
+  -- ---- The named CHECK rejects a marker predating created_at ----
+  --
+  -- Reached by moving created_at forward rather than by writing the
+  -- marker, because the trigger refuses the latter before any constraint
+  -- is evaluated. Same invariant, and it is the direction a BACKWARD
+  -- database-system clock adjustment would produce.
+  begin
+    update public.pok_book_checkout_orders
+       set created_at = now() + interval '1 hour' where intent_id = v_intent;
+    perform pg_temp.assert(false,
+      'part10: a marker earlier than created_at must violate the named CHECK');
+  exception when check_violation then null;
+  end;
+
+  delete from public.pok_book_checkout_orders where intent_id = v_intent;
+  delete from public.book_checkout_intents where id = v_intent;
+end $$;
+
+-- ---- The marker is the DATABASE CLOCK, not the row's own updated_at ----
+--
+-- Why this needs its own fixture. The enforce trigger runs BEFORE
+-- pok_book_checkout_orders_set_updated_at -- trigger order is
+-- alphabetical and 'enforce' precedes 'set' -- so at the moment the
+-- marker is stamped, new.updated_at still carries whatever the PREVIOUS
+-- statement wrote. Inside this file's single transaction that value is
+-- also now(), which means every assertion above passes unchanged for an
+-- implementation that stamped the marker from new.updated_at instead of
+-- pg_catalog.now(). The only shape that separates them is a mapping
+-- whose last write happened BEFORE this transaction, built by inserting
+-- the row directly with backdated timestamps: set_updated_at is a BEFORE
+-- UPDATE trigger only, so an INSERT may supply updated_at and no UPDATE
+-- ever can.
+--
+-- What the distinction costs if it is wrong. The application's retry
+-- bound is (updated_at - fulfilment_gap_first_seen_at), both read from
+-- the same returned row. A marker inherited from the pre-existing
+-- updated_at would date the gap from the last unrelated write to the
+-- mapping, so an attempt that had been sitting in 'ready' for an hour
+-- would be born already past the window and its FIRST transient gap --
+-- exactly the case this repair exists to retry -- would be reported
+-- terminal on the spot.
+do $$
+declare
+  v_intent uuid;
+  v_first timestamptz;
+  v_observed timestamptz;
+  v_stale constant timestamptz := now() - interval '90 minutes';
+begin
+  select intent_id into v_intent
+    from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                          'b0000000-0000-0000-0000-000000000001');
+  -- Inserted rather than claimed: claim_pok_book_checkout_order
+  -- necessarily writes now() into both timestamps. Every value here is a
+  -- local fixture; none of it came from a provider.
+  insert into public.pok_book_checkout_orders
+    (intent_id, merchant_custom_reference, provider_order_id, checkout_url,
+     creation_claim_id, state, created_at, updated_at)
+  values (v_intent, 'book:' || v_intent::text, 'ord_p060_clock',
+          'https://pay-staging.pokpay.io/sdk-orders/ord_p060_clock',
+          gen_random_uuid(), 'ready',
+          now() - interval '2 hours', v_stale);
+
+  select min(first_seen), min(observed_at) into v_first, v_observed
+    from pg_temp.observe(v_intent, 'fulfilment_gap_auto_capture_absent');
+
+  perform pg_temp.assert(v_first is not null,
+    'part10: an eligible observation on a backdated mapping must stamp the marker');
+  perform pg_temp.assert(v_first = now(),
+    'part10: the marker must be the database transaction clock');
+  perform pg_temp.assert(v_first > v_stale,
+    'part10: the marker must NOT be inherited from the row''s previous updated_at');
+  -- The companion fact the elapsed computation rests on: the same
+  -- statement refreshes updated_at, so a FIRST observation always
+  -- measures an elapsed window of exactly zero, however old the row is.
+  perform pg_temp.assert(v_observed = now(),
+    'part10: the returned updated_at must be refreshed to the database clock');
+  perform pg_temp.assert(v_observed = v_first,
+    'part10: a first observation must measure a zero elapsed window');
+
+  delete from public.pok_book_checkout_orders where intent_id = v_intent;
+  delete from public.book_checkout_intents where id = v_intent;
+end $$;
+
+-- ---- A TERMINAL observation never creates the marker ----
+--
+-- The whole reason last_error_code carries two prefixes. Everything that
+-- cannot be resolved by asking POK again is fulfilment_blocked_*, and the
+-- trigger keys only on the literal fulfilment_gap_ prefix -- so "a
+-- terminal observation never starts a retry clock" is readable from the
+-- code vocabulary alone.
+do $$
+declare
+  v_intent uuid;
+  v_code text;
+begin
+  foreach v_code in array array[
+    'fulfilment_blocked_refunded',
+    'fulfilment_blocked_captured_amount_mismatch',
+    'fulfilment_blocked_active_other_session',
+    -- The rollback-era code: the ONLY last_error_code any release before
+    -- this one writes. A database carrying this migration while the old
+    -- application is still deployed must leave the marker null, which is
+    -- what makes the migration-first deployment order safe.
+    'creation_unconfirmed',
+    -- Near misses for the LIKE pattern. `_` is escaped in the trigger, so
+    -- it is a literal underscore rather than a single-character wildcard.
+    'fulfilment5gap9transaction_id_absent',
+    'fulfilment_gap',
+    'gap_transaction_id_absent']
+  loop
+    select intent_id into v_intent
+      from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                            'b0000000-0000-0000-0000-000000000001');
+    perform pg_temp.claim(v_intent);
+    perform pg_temp.make_ready(v_intent, 'ord_p060_' || md5(v_code));
+    perform pg_temp.observe(v_intent, v_code);
+    perform pg_temp.assert(pg_temp.first_seen(v_intent) is null,
+      format('part10: last_error_code %L must not create the first-seen marker', v_code));
+    delete from public.pok_book_checkout_orders where intent_id = v_intent;
+    delete from public.book_checkout_intents where id = v_intent;
+  end loop;
+end $$;
+
+-- ---- A RETIRED mapping, both guards ----
+--
+-- Stated precisely, because an earlier draft of this suite claimed
+-- something false: the retirement-facts guard above does NOT fire on an
+-- update that changes only last_error_code, so it is not what protects a
+-- retired row here. Two other things are, and both are asserted.
+do $$
+declare
+  v_intent uuid;
+  v_rows integer;
+begin
+  select intent_id into v_intent
+    from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                          'b0000000-0000-0000-0000-000000000001');
+  perform pg_temp.claim(v_intent);
+  perform pg_temp.make_ready(v_intent, 'ord_p060_retired');
+  update public.pok_book_checkout_orders
+     set state = 'retired', retired_at = now(), retired_reason = 'provider_attempt_expired'
+   where intent_id = v_intent;
+
+  -- 1. The application's CAS matches ZERO retired rows. This is the
+  --    guarantee production actually runs on.
+  select count(*) into v_rows
+    from pg_temp.observe(v_intent, 'fulfilment_gap_transaction_id_absent');
+  perform pg_temp.assert(v_rows = 0,
+    'part10: the application CAS must match ZERO retired rows');
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is null,
+    'part10: no retired row may receive the marker through the application path');
+  perform pg_temp.assert(
+    (select state from public.pok_book_checkout_orders where intent_id = v_intent) = 'retired',
+    'part10: the retired row must be left exactly as it was');
+
+  -- 2. The trigger refuses independently, through the stamping branch's
+  --    own state condition, even for a direct last_error_code-only write
+  --    that never goes near the CAS.
+  update public.pok_book_checkout_orders
+     set last_error_code = 'fulfilment_gap_transaction_id_absent' where intent_id = v_intent;
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is null,
+    'part10: the trigger must not stamp a retired mapping even on a direct write');
+
+  delete from public.pok_book_checkout_orders where intent_id = v_intent;
+  delete from public.book_checkout_intents where id = v_intent;
+end $$;
+
+-- ---- INSERT may not supply the marker ----
+do $$
+declare
+  v_intent uuid;
+begin
+  select intent_id into v_intent
+    from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                          'b0000000-0000-0000-0000-000000000001');
+  begin
+    insert into public.pok_book_checkout_orders
+      (intent_id, merchant_custom_reference, creation_claim_id, fulfilment_gap_first_seen_at)
+    values (v_intent, 'book:' || v_intent::text, gen_random_uuid(), now());
+    perform pg_temp.not_rejected('part10: an INSERT supplying the marker must be rejected');
+  exception when raise_exception then null;
+  end;
+  perform pg_temp.assert(
+    not exists (select 1 from public.pok_book_checkout_orders where intent_id = v_intent),
+    'part10: the rejected INSERT must have created no row');
+
+  -- An ordinary INSERT is unaffected, and stamps nothing: a brand-new
+  -- mapping has by definition never observed a gap.
+  perform pg_temp.claim(v_intent);
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is null,
+    'part10: an ordinary claim must insert with a null marker');
+
+  delete from public.pok_book_checkout_orders where intent_id = v_intent;
+  delete from public.book_checkout_intents where id = v_intent;
+end $$;
+
+-- ---- An explicitly supplied value is rejected even alongside a gap code ----
+--
+-- The branch ORDER is what this asserts. If the stamping branch ran
+-- first, this statement would be accepted and its timestamp quietly
+-- replaced -- indistinguishable, from the row afterwards, from a correct
+-- write, and the author would never learn they wrote to a column they do
+-- not own.
+do $$
+declare
+  v_intent uuid;
+begin
+  select intent_id into v_intent
+    from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                          'b0000000-0000-0000-0000-000000000001');
+  perform pg_temp.claim(v_intent);
+  perform pg_temp.make_ready(v_intent, 'ord_p060_supplied');
+
+  begin
+    update public.pok_book_checkout_orders
+       set state = 'needs_reconciliation',
+           last_error_code = 'fulfilment_gap_transaction_id_absent',
+           fulfilment_gap_first_seen_at = now() - interval '1 second'
+     where intent_id = v_intent;
+    perform pg_temp.not_rejected(
+      'part10: supplying the marker must be rejected even when the error code is a gap code');
+  exception when raise_exception then null;
+  end;
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is null,
+    'part10: the rejected write must have stamped nothing');
+
+  delete from public.pok_book_checkout_orders where intent_id = v_intent;
+  delete from public.book_checkout_intents where id = v_intent;
+end $$;
+
+-- ---- A flagged mapping never unlocks a replacement quote ----
+--
+-- The marker and the needs_reconciliation state are DIAGNOSTICS. They
+-- must not become a route to minting a second payable order, and they
+-- must not block a legitimate one either. Both directions, because a
+-- one-sided assertion here would be satisfied by a system that simply
+-- refuses everything.
+do $$
+declare
+  v_intent uuid;
+  v_status text;
+  v_replacement uuid;
+begin
+  select intent_id into v_intent
+    from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                          'b0000000-0000-0000-0000-000000000001');
+  perform pg_temp.claim(v_intent);
+  perform pg_temp.make_ready(v_intent, 'ord_p060_live');
+  perform pg_temp.observe(v_intent, 'fulfilment_gap_transaction_id_absent');
+
+  -- The attempt still has an order id and is not retired, so SQL still
+  -- classifies it 'possibly_live'. A flag is not proof of death.
+  select intent_id, quote_status into v_replacement, v_status
+    from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                          'b0000000-0000-0000-0000-000000000001');
+  perform pg_temp.assert(v_replacement = v_intent,
+    'part10: a flagged but unretired attempt must return the SAME intent, never a replacement');
+  perform pg_temp.assert(
+    (select superseded_at from public.book_checkout_intents where id = v_intent) is null,
+    'part10: a diagnostic flag must never supersede the intent');
+
+  -- Once the payment has actually been fulfilled, the candidate loop
+  -- skips the intent entirely on fulfilled_at -- the mapping's own state
+  -- and marker are never consulted, and the retained diagnostic history
+  -- changes nothing.
+  update public.book_checkout_intents
+     set completed_at = now(), fulfilled_at = now() where id = v_intent;
+  perform pg_temp.assert(pg_temp.first_seen(v_intent) is not null,
+    'part10: a later fulfilment must NOT erase the diagnostic history');
+
+  select intent_id into v_replacement
+    from pg_temp.quote_as('22222222-2222-2222-2222-222222222222',
+                          'b0000000-0000-0000-0000-000000000001');
+  perform pg_temp.assert(v_replacement is distinct from v_intent,
+    'part10: a fulfilled intent must not be returned again as a live quote');
+  perform pg_temp.assert(
+    (select superseded_at from public.book_checkout_intents where id = v_intent) is null,
+    'part10: a fulfilled intent must never be superseded by the minting path');
+
+  delete from public.pok_book_checkout_orders where intent_id in (v_intent, v_replacement);
+  delete from public.book_checkout_intents where id in (v_intent, v_replacement);
 end $$;
 
 do $$

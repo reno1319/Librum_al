@@ -8,7 +8,11 @@ export function createPokRepository(): PokRepository {
   return {
     async intent(id) {
       const { data, error } = await db.from("book_checkout_intents")
-        .select("id,book_id,reader_id,regime,currency,price_cents_at_checkout,expires_at,stripe_checkout_session_id").eq("id", id).maybeSingle<FrozenPokIntent>();
+        // POK-FULFILMENT-1: fulfilled_at and reconciliation_reason are
+        // read for ONE purpose -- telling the two already_finalized
+        // meanings apart after finalization. fulfilled_at stays the sole
+        // entitlement authority; nothing here writes either column.
+        .select("id,book_id,reader_id,regime,currency,price_cents_at_checkout,expires_at,stripe_checkout_session_id,fulfilled_at,reconciliation_reason").eq("id", id).maybeSingle<FrozenPokIntent>();
       if (error) throw new Error("POK_INTENT_READ_FAILED");
       return data;
     },
@@ -85,6 +89,47 @@ export function createPokRepository(): PokRepository {
         .update({ state: "needs_reconciliation", last_error_code: "creation_unconfirmed" })
         .eq("intent_id", id).eq("creation_claim_id", claimId).eq("state", "creating");
       if (error) throw new Error("POK_RECONCILIATION_WRITE_FAILED");
+    },
+    // POK-FULFILMENT-1: ONE statement -- write the observation, return
+    // the timing. There is deliberately no pre-write read: a read-then-
+    // decide pair yields a STALE first-seen value whenever two callbacks
+    // race, and the value this decision needs is the one the database
+    // holds AFTER this write.
+    //
+    // The CAS is a single `in` predicate rather than two negations, so
+    // there is one thing to read and no way to satisfy three of four
+    // conditions. It matches neither 'creating' nor 'retired':
+    //
+    //   retired   terminal. A diagnostic write must not disturb it, and
+    //             the mapping's own transition trigger additionally
+    //             refuses to stamp the marker on any row whose resulting
+    //             state is not ready/needs_reconciliation.
+    //   creating  the id is recorded several statements BEFORE
+    //             repo.ready() runs, so a callback landing in that window
+    //             would move the row to needs_reconciliation, make
+    //             ready()'s own `state = 'creating'` CAS match zero rows,
+    //             and leave the reader with no checkout_url at all.
+    //
+    // A zero-row result is NOT an error -- it is exactly those states --
+    // so it returns null and the caller answers terminally rather than
+    // asking the provider to retry into a state with no bounded exit.
+    // A real write failure throws.
+    //
+    // The returned pair are two readings of the DATABASE clock inside one
+    // transaction: the transition trigger stamps
+    // fulfilment_gap_first_seen_at (once, immutably) and the existing
+    // unconditional trigger stamps updated_at. No application clock is
+    // involved in the retry decision at any point.
+    async recordFulfilmentObservation(id, code) {
+      const { data, error } = await db.from("pok_book_checkout_orders")
+        .update({ state: "needs_reconciliation", last_error_code: code })
+        .eq("intent_id", id)
+        .not("provider_order_id", "is", null)
+        .in("state", ["ready", "needs_reconciliation"])
+        .select("fulfilment_gap_first_seen_at,updated_at")
+        .maybeSingle<{ fulfilment_gap_first_seen_at: string | null; updated_at: string }>();
+      if (error) throw new Error("POK_FULFILMENT_OBSERVATION_WRITE_FAILED");
+      return data;
     },
     // STALE-CHECKOUT-1: ONE atomic call. The mapping moves to 'retired'
     // and the intent is superseded in the same transaction under the same

@@ -30,7 +30,17 @@ export async function GET(request: Request) {
     const config = getPokConfig();
     const result = await fulfillPokCheckout({ intentId: intent.data, token: token.data, readerId: user.id, merchantId: config.merchantId },
       createPokRepository(), createPokClient(config));
+    // POK-FULFILMENT-1: four statuses, four destinations. Before this,
+    // 'blocked' and 'pending' were indistinguishable to the reader --
+    // both said "verification pending", so someone whose payment needed a
+    // human, or whose order had died unpaid, was told to keep waiting for
+    // something that was never going to arrive.
+    //
+    // Each message is a fixed literal. No cause, no last_error_code, no
+    // timestamp and no provider text ever reaches the query string.
     destination = result.status === "fulfilled" ? `/books/${result.bookId}?purchase=success`
+      : result.status === "closed_unpaid" ? `/books/${result.bookId}?error=Payment+was+not+completed`
+      : result.status === "blocked" ? `/books/${result.bookId}?error=Payment+needs+review`
       : `/books/${result.bookId}?error=Payment+verification+pending`;
   } catch { /* generic, non-secret diagnostic only */ }
   redirect(destination);

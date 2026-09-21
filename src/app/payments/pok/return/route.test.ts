@@ -39,6 +39,35 @@ describe("POK browser return", () => {
     mocks.fulfill.mockResolvedValue({ status: "pending", bookId: "book" });
     await expect(GET(request())).rejects.toMatchObject({ target: "/books/book?error=Payment+verification+pending" });
   });
+  // POK-FULFILMENT-1: four statuses, four DISTINCT destinations. Before
+  // this, 'blocked' and 'closed_unpaid' both read as "verification
+  // pending", so a reader whose payment needed a human -- or whose order
+  // had died unpaid -- was told to keep waiting for something that was
+  // never going to arrive.
+  it.each([
+    { status: "fulfilled", target: "/books/book?purchase=success" },
+    { status: "pending", target: "/books/book?error=Payment+verification+pending" },
+    { status: "closed_unpaid", target: "/books/book?error=Payment+was+not+completed" },
+    { status: "blocked", target: "/books/book?error=Payment+needs+review" },
+  ])("sends $status to its own destination", async ({ status, target }) => {
+    mocks.fulfill.mockResolvedValue({ status, bookId: "book" });
+    await expect(GET(request())).rejects.toMatchObject({ target });
+  });
+  it("gives the four statuses four distinct destinations", async () => {
+    const targets = new Set<string>();
+    for (const status of ["fulfilled", "pending", "closed_unpaid", "blocked"]) {
+      mocks.fulfill.mockResolvedValue({ status, bookId: "book" });
+      targets.add(await GET(request()).then(() => "", (err: { target: string }) => err.target));
+    }
+    expect(targets.size).toBe(4);
+  });
+  it("never puts a cause, an error code or a timestamp in the redirect", async () => {
+    mocks.fulfill.mockResolvedValue({ status: "blocked", bookId: "book" });
+    const target = await GET(request()).then(() => "", (err: { target: string }) => err.target);
+    for (const secret of [token, "fulfilment_gap_", "fulfilment_blocked_", "2026-"]) {
+      expect(target).not.toContain(secret);
+    }
+  });
   it("verification errors expose no private details", async () => {
     mocks.fulfill.mockRejectedValue(new Error("private secret"));
     await expect(GET(request())).rejects.toMatchObject({ target: "/library?error=Payment+verification+pending" });
