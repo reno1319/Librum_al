@@ -46,11 +46,10 @@ that is superseded in full by the record below.
   inclusive** for a paid book. Any nonzero fractional catalog price is
   rejected, never rounded or clamped; any value above 100,000 ALL is
   invalid. The misleading `_cents` naming is not reused for this
-  whole-ALL semantics — a future explicit name such as `price_all` is
-  used instead, introduced only by a later, separately reviewed
-  migration (never in the same patch that merely establishes this
-  record, and never as a rename or reinterpretation of the existing
-  column).
+  whole-ALL semantics — the explicit name `price_all` is used instead,
+  introduced by a later, separately reviewed migration (never in the
+  same patch that merely establishes this record, and never as a rename
+  or reinterpretation of the existing column).
 - **Leading zeros are accepted and normalized, not rejected.** `"099"`
   and `"00099"` both parse to 99 ALL, the same value `"99"` alone means;
   `"00"`/`"000,00"` parse to the free price 0. Grouping separators are a
@@ -71,14 +70,42 @@ that is superseded in full by the record below.
   thousands separator, exactly two display decimals are always shown.
   This is a confirmed decision, not an implementation choice left to a
   later patch.
-- **Exact decimal ALL financial accounting.** Catalog prices are
-  whole-ALL integers, but financial calculations (discounts, author
-  earnings, commission, refunds, reversals) must preserve qindarka
-  exactly — e.g. a calculated 69.30 ALL stays exactly 69.30, never a
-  binary-floating-point approximation. Future financial values use exact
-  PostgreSQL `numeric`/`decimal` storage for this, never a float. This is
-  a distinct representation from the catalog's whole-ALL integers, not
-  the same field reused twice.
+- **Integer minor-unit ALL accounting (corrected 21 September 2026).**
+  There are two units in this system, and exactly two:
+
+  - **Catalog prices and fixed catalog discounts are whole-ALL
+    integers.** `price_all = 99` is ninety-nine lek.
+  - **Transaction accounting is integer minor units, 100 minor units to
+    one ALL.** `99.00 ALL` is `9900`; `179.10 ALL` is `17910`. Payments,
+    refunds, author-ledger entries and payouts use the integer
+    minor-unit model this schema already has, normally `bigint`.
+
+  Qindarka is therefore preserved exactly — by counting in minor units,
+  not by storing a decimal. Never a binary float.
+
+  **No second persistent decimal representation is proposed, now or
+  later.** PostgreSQL `numeric` may be used as an *intermediate* in a
+  calculation where one is genuinely needed, and never as a stored money
+  column beside the minor-unit ledger. Two persistent representations of
+  the same money can disagree, and nothing then says which one is the
+  amount owed.
+
+  **Sub-minor-unit results need a rule before they are stored.** Any
+  calculation that lands below one whole minor unit — a percentage
+  share, a commission split, an allocation across several parties —
+  requires an explicit, deterministic rounding or allocation rule,
+  decided and reviewed *before* the result is persisted, so that the
+  same inputs always produce the same stored integers and the parts
+  always sum back to the whole. No such rule is adopted by this record;
+  it is later, separately reviewed work.
+
+  **Correction notice.** An earlier version of this bullet said future
+  financial values would use exact PostgreSQL `numeric`/`decimal`
+  storage, "a distinct representation from the catalog's whole-ALL
+  integers". That would have introduced a second persistent money
+  representation alongside the integer minor-unit ledger that already
+  exists and is already in use. Exactness comes from integers, not from
+  a decimal type.
 - **ALL-only financial currency.** Every payment, purchase, refund,
   ledger entry, reversal, and payout must explicitly record
   `currency = ALL` going forward.
@@ -89,30 +116,60 @@ that is superseded in full by the record below.
   payout obligation, or other monetary ledger entry. A paid book can
   never become free through an ordinary discount — only an explicit
   catalog price of zero is free.
-- **Discount rule.** A paid book's final discounted checkout price must
-  remain a whole number of ALL, and at least 99 ALL. A discount that
-  would produce a fractional ALL result, or a value from 0.01 through
-  98.99 ALL, is rejected for that checkout — never clamped, rounded, or
-  otherwise silently altered upward or downward. Zero is valid only when
-  the book itself is explicitly published as free (see "Free
-  acquisition" above); a discount can never be the mechanism that makes
-  an otherwise-paid book free.
+- **Discount rule (corrected 21 September 2026).** Catalog prices are
+  whole ALL; a discount's *result* need not be. A percentage discount
+  may produce qindarka, and that result is carried exactly as an integer
+  number of minor units — 10% off 199 ALL is exactly `179,10 ALL`,
+  which is `17910` minor units, never rounded to 179 or 180 ALL. What is
+  bounded is the amount actually charged: **a paid checkout's final
+  price must be at least `99,00 ALL`, which is `9900` minor units.** A
+  discount that would produce a final price below that floor, and any
+  other invalid discount, is **rejected explicitly for that checkout** —
+  never clamped to the floor, never rounded, never silently altered
+  upward or downward, and never silently ignored so that the
+  undiscounted price is charged instead. Zero is valid only when the
+  book itself is explicitly published as free (see "Free acquisition"
+  above); a discount can never be the mechanism that makes an
+  otherwise-paid book free.
+
+  **What this corrects, and why the old rule could not stand.** An
+  earlier version of this rule additionally required the discounted
+  total itself to remain a whole number of ALL. That requirement had no
+  safe implementation, for a reason that needs no survey of what is
+  currently in any database: a percentage of a whole-ALL price is
+  generally *not* a whole number of ALL. Most percentages of most prices
+  in the 99–100,000 band land on qindarka — 10% off 199 ALL is 179,10 —
+  so a rule forbidding that result forbids the ordinary outcome of the
+  ordinary discount, leaving exactly three options: round it, clamp it,
+  or reject discounts that are otherwise perfectly valid. The first two
+  are precisely what the rest of this record forbids, and the third
+  throws away legitimate discounts to satisfy a constraint nothing
+  needed. The floor belongs on the amount charged. Qindarka in a
+  calculated result is expected, and is carried exactly by the integer
+  minor-unit accounting described above — `179,10 ALL` is the integer
+  `17910` — not by the whole-ALL catalog integers.
 - **Commission and POK-fee rule.** Librum's existing configured
   commission rules are kept as-is for now, and only after their exact
   behavior is audited in a later, separately reviewed patch — this
   record does not invent, change, or assume any specific commission
   percentage. The author's contractual share is calculated from the
   book's sale price. Librum absorbs POK's processing fees; those fees
-  never reduce the author's contractual share. Exact commission/
-  author-share results preserve qindarka using exact decimal accounting
-  (see "Exact decimal ALL financial accounting" above) — never a
-  binary-floating-point approximation.
+  never reduce the author's contractual share. Commission and
+  author-share results are computed and stored in integer minor units
+  (see "Integer minor-unit ALL accounting" above) — never a
+  binary-floating-point approximation, and never a second stored decimal
+  representation. Where a share lands below one whole minor unit, the
+  explicit rounding/allocation rule required by that bullet applies.
 - **POK is selected; its create-order integration is implemented and
-  staging-verified; the remaining work is completion, not selection.**
-  POK's checkout-page creation was verified working in staging at 499
-  ALL — this proves the create-order integration path, not full
-  payment/fulfillment/refund handling, which is genuinely not yet built
-  (see Phases 9–12 below). Do not read this record as claiming full POK
+  has been observed working against POK's *sandbox*; the remaining work
+  is completion, not selection.** What was observed, precisely: a
+  **sandbox order was created and a sandbox hosted-checkout page was
+  returned**, at 499 ALL. That is an observation of the
+  create-order/redirect path in a sandbox, and nothing more. **No
+  completed real POK payment has ever occurred** — no money has moved,
+  no real instrument has been charged, and no fulfilment, refund or
+  payout has been exercised end to end (see Phases 9–12 below). Do not
+  read this record as claiming a real payment, that full POK
   payment/fulfillment/refund is already verified, that 99 ALL has been
   independently probed, that production is ready, that test data has
   already been deleted, or that Stripe code has already been disabled or
@@ -215,10 +272,15 @@ No proposal below implies a supported USD catalog mode, USD author
 editing/display/checkout, a future USD/ALL choice, existing test books
 remaining sellable as legacy books, Stripe as an allowed default or
 fallback once disabled, or a symmetric legacy-Stripe currency constraint
-as a future requirement — none of that is proposed here. A future
-nullable `currency_code`-style column, if retained for audit clarity,
-permits only `ALL` when non-null; no exact migration DDL is specified
-here, that is reviewed separately.
+as a future requirement — none of that is proposed here.
+
+The nullable `currency_code`-style column this section once floated as
+an audit-clarity option is **not** being added, and the ALL-only column
+names below are the reason: `price_all` and `amount_off_all` are ALL-only
+by name, so a second, mutable currency fact standing beside them could
+only ever agree redundantly or disagree — and there is no principled way
+to resolve a disagreement between two fields that were supposed to be
+one. The ALL-only name is the audit record.
 
 1. **Pure foundation contract and utilities** — this patch: the decision
    record above, and the unwired `src/lib/catalog-price.ts` primitives.
@@ -232,10 +294,15 @@ here, that is reviewed separately.
    end-to-end between this phase and Phase 7 — accepted, since Librum is
    pre-launch.
 3. **Schema expansion for ALL** — add new, nullable, ALL-only fields
-   (e.g. a future `price_all`, and an audit-clarity `currency_code`
-   permitting only `ALL` when non-null) alongside the untouched legacy
-   `price_cents` field. Old test rows keep null new fields; nothing is
-   backfilled by inference.
+   alongside the untouched legacy `price_cents` / `amount_off_cents`
+   fields: `books.price_all` and `bundles.price_all` (whole ALL — null,
+   `0` for an explicitly free title, or 99 through 100,000), and
+   `discount_codes.amount_off_all` (whole ALL, 1 through 100,000). The
+   two-column discount exclusive-or is replaced by an
+   exactly-one-of-three constraint so an ALL-only discount code is
+   representable at all. No `currency_code` column (see above). No
+   default, no backfill, no index: old test rows keep null new fields,
+   and nothing is backfilled by inference.
 4. **Authoritative ALL pricing and intent logic** — deploy code that
    understands the new fields; `create_book_checkout_intent` (or its
    replacement) is corrected to check the book's own ALL fields
@@ -247,9 +314,12 @@ here, that is reviewed separately.
    with explicit ALL pricing (using this patch's parser/formatter);
    storefront display reads the book's own ALL fields; free acquisition
    wiring confirmed unaffected (already provider/ledger-free today).
-6. **Ledger, refund, payout, and admin work** — exact-decimal ALL
-   financial snapshots; admin finance reporting becomes ALL-aware.
-   Historical rows/records are never mutated by this phase.
+6. **Ledger, refund, payout, and admin work** — ALL financial snapshots
+   in integer minor units, on the existing minor-unit ledger model (no
+   new decimal money column); the deterministic rounding/allocation rule
+   for sub-minor-unit results is settled here; admin finance reporting
+   becomes ALL-aware. Historical rows/records are never mutated by this
+   phase.
 7. **Complete POK staging lifecycle** — create-order, return, webhook,
    fulfillment, idempotency, refund, reversal, and access-revocation
    tests, end to end on staging.

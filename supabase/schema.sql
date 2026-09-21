@@ -413,8 +413,33 @@ create table public.books (
   -- republish cycle. See migration 044's own comment for full semantics.
   published_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- ALL-CATALOG-1: the ALL-only catalog price, in WHOLE ALL. Declared
+  -- LAST so that `attnum` matches what `add column` produces in the
+  -- migration; a database built from this file and one built from base
+  -- plus the migration have to agree on column order, not merely on
+  -- column names. Named CHECK for the same reason the constraint is
+  -- named in the migration: an anonymous one is auto-named from
+  -- declaration order, which the two build paths do not share.
+  --
+  -- The unit is WHOLE ALL, and it is a CATALOG unit, not a ledger one:
+  -- transaction accounting in this schema is integer MINOR UNITS, 100
+  -- to one ALL, so `price_all = 99` is the same money as a ledger
+  -- amount of 9900. There is no second persistent money representation
+  -- beside that minor-unit ledger.
+  --
+  -- `0` is an explicit free price and is deliberately outside the paid
+  -- band: 1..98 is not admitted, because such a row could never be
+  -- charged (a paid checkout's final price is at least 99.00 ALL, 9900
+  -- minor units) and would be neither free nor sellable.
+  price_all integer
+    constraint books_price_all_range_check
+    check (price_all is null or price_all = 0
+           or (price_all >= 99 and price_all <= 100000))
 );
+
+comment on column public.books.price_all is
+  'Catalog price in WHOLE ALL (99 = ninety-nine lek), or null for a row with no authored ALL price. 0 means explicitly free and bypasses POK; every other valid value is 99..100000. Never derived from price_cents, which is legacy USD minor units. Transaction accounting stays in integer minor units, 100 per ALL.';
 
 alter table public.books enable row level security;
 
@@ -645,8 +670,18 @@ create table public.bundles (
   price_cents integer not null default 0 check (price_cents >= 0),
   status text not null default 'draft' check (status in ('draft', 'published')),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- ALL-CATALOG-1: see the note on public.books.price_all -- same
+  -- domain, same reason for the explicit name and the trailing
+  -- position.
+  price_all integer
+    constraint bundles_price_all_range_check
+    check (price_all is null or price_all = 0
+           or (price_all >= 99 and price_all <= 100000))
 );
+
+comment on column public.bundles.price_all is
+  'Catalog price in WHOLE ALL (99 = ninety-nine lek), or null for a row with no authored ALL price. 0 means explicitly free and bypasses POK; every other valid value is 99..100000. Never derived from price_cents, which is legacy USD minor units. Transaction accounting stays in integer minor units, 100 per ALL.';
 
 alter table public.bundles enable row level security;
 
@@ -1307,9 +1342,31 @@ create table public.discount_codes (
   active boolean not null default true,
   expires_at timestamptz,
   created_at timestamptz not null default now(),
+  -- ALL-CATALOG-1: the fixed discount in WHOLE ALL, declared LAST so
+  -- that `attnum` matches what `add column` produces in the migration.
+  -- The lower bound is 1, not 0: a zero fixed discount is a code that
+  -- does nothing, indistinguishable at checkout from a code that failed
+  -- to apply, and a discount may never be the mechanism that makes a
+  -- paid book free.
+  amount_off_all integer
+    constraint discount_codes_amount_off_all_range_check
+    check (amount_off_all is null
+           or (amount_off_all >= 1 and amount_off_all <= 100000)),
+
   unique (book_id, code),
-  check ((percent_off is null) <> (amount_off_cents is null))
+  -- ALL-CATALOG-1: replaces the anonymous two-column exclusive-or
+  -- `(percent_off is null) <> (amount_off_cents is null)`, which could
+  -- not express "exactly one of three" and would have made an ALL-only
+  -- discount code unrepresentable. Named explicitly, and identically in
+  -- the migration, because the constraint it replaced was auto-named
+  -- `discount_codes_check` from its declaration order -- exactly the
+  -- thing the two build paths do not share.
+  constraint discount_codes_exactly_one_discount_type_check
+    check (num_nonnulls(percent_off, amount_off_cents, amount_off_all) = 1)
 );
+
+comment on column public.discount_codes.amount_off_all is
+  'Fixed discount in WHOLE ALL (1..100000), or null. Whether a code yields a legal final price for a given book is decided at checkout and rejected there when it does not -- never clamped.';
 
 alter table public.discount_codes enable row level security;
 
