@@ -3,6 +3,7 @@ import {
   startPokCheckout, fulfillPokCheckout, probeProviderAttempt, classifyProviderAttempt,
   POK_CHECKOUT_CANNOT_RESUME, POK_CHECKOUT_MAINTENANCE_ACTIVE, POK_CHECKOUT_IN_PROGRESS,
   POK_CHECKOUT_AMBIGUOUS, POK_CHECKOUT_ATTEMPT_RETIRED, POK_EXPIRY_SAFETY_MARGIN_MS,
+  POK_FULFILMENT_TRANSIENT_GAP_RETRY_WINDOW_MS,
   type FrozenPokIntent, type PokMapping, type PokRepository, type PokRetireOutcome,
   type PokClaimOutcome,
 } from "./pok-checkout";
@@ -37,9 +38,18 @@ afterEach(() => vi.useRealTimers());
 const input = { intentId: id, readerId: "reader", merchantId, title: "Test", origin: "https://librum.example" };
 const callback = { intentId: id, token: "callback", merchantId };
 const url = `https://pay-staging.pokpay.io/sdk-orders/${orderId}`;
+// POK-FULFILMENT-1: the mock "database clock". Every timing decision in
+// the fulfilment path is computed from two timestamps the DATABASE
+// returns, never from Date.now(), so the tests drive this clock rather
+// than the system one. A test that moved the system clock instead would
+// be asserting something the production code does not read.
+let dbClock = now;
+
 function setup(change: Partial<FrozenPokIntent> = {}) {
+  dbClock = now;
   const intent: FrozenPokIntent = { id, book_id: "book", reader_id: "reader", regime: "librum_ledger_v1", currency: "ALL", price_cents_at_checkout: 499,
-    expires_at: "2026-09-15T10:30:00Z", stripe_checkout_session_id: null, ...change };
+    expires_at: "2026-09-15T10:30:00Z", stripe_checkout_session_id: null,
+    fulfilled_at: null, reconciliation_reason: null, ...change };
   let mapping: PokMapping | null = null;
   let retireOutcome: PokRetireOutcome = "retired_and_superseded";
   const repo = {
@@ -54,7 +64,8 @@ function setup(change: Partial<FrozenPokIntent> = {}) {
       if (mapping) return { outcome: "already_claimed" as const };
       mapping = { intent_id: row.intentId, merchant_custom_reference: row.reference, provider_order_id: null,
         checkout_url: null, webhook_token: row.webhookToken, creation_claim_id: row.claimId, state: "creating",
-        provider_window_ends_at: new Date(now + row.requestedWindowMinutes * 60_000).toISOString() };
+        provider_window_ends_at: new Date(now + row.requestedWindowMinutes * 60_000).toISOString(),
+        last_error_code: null, fulfilment_gap_first_seen_at: null };
       return { outcome: "claimed" as const, grantedWindowMinutes: row.requestedWindowMinutes };
     }),
     // The precise CAS of the real repository: it matches the same claim
@@ -67,8 +78,40 @@ function setup(change: Partial<FrozenPokIntent> = {}) {
       }
       mapping = { ...mapping, provider_order_id: providerId };
     }),
-    ready: vi.fn(async (_id: string, _claim: string, checkout: string) => { mapping = { ...mapping!, state: "ready", checkout_url: checkout }; }),
-    reconcile: vi.fn(async () => { if (mapping) mapping = { ...mapping, state: "needs_reconciliation" }; }),
+    ready: vi.fn(async (_id: string, _claim: string, checkout: string) => {
+      // The REAL CAS: `state = 'creating'`. Modelled rather than assumed,
+      // because the whole reason the fulfilment CAS excludes 'creating'
+      // is that a diagnostic write landing here makes this match zero
+      // rows -- and a mock that ignored the state could never show it.
+      if (!mapping || mapping.state !== "creating") throw new Error("POK_LINK_FAILED");
+      mapping = { ...mapping, state: "ready", checkout_url: checkout };
+    }),
+    reconcile: vi.fn(async () => {
+      if (mapping && mapping.state === "creating") {
+        mapping = { ...mapping, state: "needs_reconciliation", last_error_code: "creation_unconfirmed" };
+      }
+    }),
+    // POK-FULFILMENT-1. This mock models the real STATEMENT and the real
+    // TRIGGER, not a boolean: the compare-and-set that excludes 'creating'
+    // and 'retired', the unconditional updated_at stamp, and the
+    // transition trigger's own branches -- stamp once when the resulting
+    // state is eligible and the code carries the literal gap prefix,
+    // preserve forever after. The SQL suite (059 part 10) is what proves
+    // the database actually behaves this way; this mock exists so the
+    // application logic above it is exercised against the same rules.
+    recordFulfilmentObservation: vi.fn(async (_id: string, code: string) => {
+      if (!mapping || mapping.provider_order_id === null ||
+          (mapping.state !== "ready" && mapping.state !== "needs_reconciliation")) {
+        return null;
+      }
+      dbClock += 1;
+      const state = "needs_reconciliation" as const;
+      const firstSeen = mapping.fulfilment_gap_first_seen_at !== null
+        ? mapping.fulfilment_gap_first_seen_at
+        : code.startsWith("fulfilment_gap_") ? new Date(dbClock).toISOString() : null;
+      mapping = { ...mapping, state, last_error_code: code, fulfilment_gap_first_seen_at: firstSeen };
+      return { fulfilment_gap_first_seen_at: firstSeen, updated_at: new Date(dbClock).toISOString() };
+    }),
     retire: vi.fn(async () => {
       if (retireOutcome === "retired_and_superseded" && mapping) mapping = { ...mapping, state: "retired" };
       return retireOutcome;
@@ -93,12 +136,14 @@ function setup(change: Partial<FrozenPokIntent> = {}) {
   function ready() {
     mapping = { intent_id: id, merchant_custom_reference: `book:${id}`, provider_order_id: orderId, checkout_url: url,
       webhook_token: callback.token, creation_claim_id: "claim", state: "ready",
-      provider_window_ends_at: "2026-09-15T10:30:00Z" };
+      provider_window_ends_at: "2026-09-15T10:30:00Z",
+      last_error_code: null, fulfilment_gap_first_seen_at: null };
   }
   function blocked(state: PokMapping["state"] = "needs_reconciliation") {
     mapping = { intent_id: id, merchant_custom_reference: `book:${id}`, provider_order_id: null, checkout_url: null,
       webhook_token: "prior", creation_claim_id: "prior-claim", state,
-      provider_window_ends_at: "2026-09-15T10:30:00Z" };
+      provider_window_ends_at: "2026-09-15T10:30:00Z",
+      last_error_code: null, fulfilment_gap_first_seen_at: null };
   }
   function retired() {
     ready();
@@ -106,7 +151,13 @@ function setup(change: Partial<FrozenPokIntent> = {}) {
   }
   function setRetireOutcome(outcome: PokRetireOutcome) { retireOutcome = outcome; }
   function currentMapping() { return mapping; }
-  return { repo, orders, order, ready, blocked, retired, setRetireOutcome, currentMapping };
+  function setMapping(patch: Partial<PokMapping>) { mapping = { ...mapping!, ...patch }; }
+  // Only ever used to model what the DATABASE did during finalization --
+  // the entitlement core writes these columns, this file never does.
+  function settleIntent(patch: Partial<FrozenPokIntent>) { Object.assign(intent, patch); }
+  function advanceDbClock(ms: number) { dbClock += ms; }
+  return { repo, orders, order, ready, blocked, retired, setRetireOutcome, currentMapping,
+    setMapping, settleIntent, advanceDbClock };
 }
 describe("POK durable creation", () => {
   it("uses frozen server amount and serializes concurrent double clicks", async () => {
@@ -525,14 +576,19 @@ describe("classifyProviderAttempt", () => {
   it.each([
     { label: "open and provably unpaid", change: {}, expected: { outcome: "RESUMABLE" } },
     { label: "completed, not refunded", change: { isCompleted: true, transactionId: paymentId, capturedAmount: 4.99 }, expected: { outcome: "FULFIL" } },
-    { label: "refunded", change: { isRefunded: true }, expected: { outcome: "BLOCKED_RECONCILE" } },
-    { label: "completed AND refunded", change: { isCompleted: true, isRefunded: true }, expected: { outcome: "BLOCKED_RECONCILE" } },
+    { label: "refunded", change: { isRefunded: true }, expected: { outcome: "BLOCKED_RECONCILE", cause: "refunded" } },
+    { label: "completed AND refunded", change: { isCompleted: true, isRefunded: true }, expected: { outcome: "BLOCKED_RECONCILE", cause: "completed_and_reversed" } },
     { label: "canceled, clean", change: { isCanceled: true }, expected: { outcome: "RETIRE_SAFE", reason: "provider_attempt_canceled" } },
     { label: "expired past the margin", change: { expiresAt: "2026-09-15T09:50:00Z" }, expected: { outcome: "RETIRE_SAFE", reason: "provider_attempt_expired" } },
-    { label: "unparseable expiry", change: { expiresAt: "nope" }, expected: { outcome: "BLOCKED_AMBIGUOUS" } },
-    { label: "absent capture evidence", change: { capturedAmount: undefined }, expected: { outcome: "BLOCKED_AMBIGUOUS" } },
-    { label: "absent isCanceled", change: { isCanceled: undefined }, expected: { outcome: "BLOCKED_AMBIGUOUS" } },
-    { label: "absent isRefunded", change: { isRefunded: undefined as unknown as boolean }, expected: { outcome: "BLOCKED_RECONCILE" } },
+    { label: "unparseable expiry", change: { expiresAt: "nope" }, expected: { outcome: "BLOCKED_AMBIGUOUS", cause: "provider_expiry_unreadable" } },
+    { label: "absent capture evidence", change: { capturedAmount: undefined }, expected: { outcome: "BLOCKED_AMBIGUOUS", cause: "capture_evidence_absent" } },
+    { label: "absent isCanceled", change: { isCanceled: undefined }, expected: { outcome: "BLOCKED_AMBIGUOUS", cause: "cancellation_state_absent" } },
+    // The one shape verifiedPokPayment's own conjunction would let
+    // through (an absent isRefunded is falsy there, exactly as it always
+    // has been). It never reaches that function, because rule 4 refuses
+    // it here first -- which is why the conjunction did not need to
+    // change to stay safe.
+    { label: "absent isRefunded", change: { isRefunded: undefined as unknown as boolean }, expected: { outcome: "BLOCKED_RECONCILE", cause: "refunded" } },
   ])("classifies $label", ({ change, expected }) => {
     expect(classifyProviderAttempt({ ...base, ...change }, binding, now)).toEqual(expected);
   });
@@ -554,13 +610,13 @@ describe("classifyProviderAttempt", () => {
     // The other half of the same rule: absence is not permission to hand
     // a payable URL back.
     expect(classifyProviderAttempt({ ...base, autoCapture: undefined }, binding, now))
-      .toEqual({ outcome: "BLOCKED_AMBIGUOUS" });
+      .toEqual({ outcome: "BLOCKED_AMBIGUOUS", cause: "auto_capture_absent" });
   });
   it("blocks an expired order whose autoCapture is explicitly FALSE, rather than retiring it", () => {
     // Explicitly false is a contradiction, not an absence, so it
     // legitimately outranks the expiry.
     expect(classifyProviderAttempt({ ...base, autoCapture: false, expiresAt: expiredLongAgo }, binding, now))
-      .toEqual({ outcome: "BLOCKED_RECONCILE" });
+      .toEqual({ outcome: "BLOCKED_RECONCILE", cause: "auto_capture_disabled" });
   });
   it("resumes only when autoCapture is explicitly true, unexpired, with an explicit zero capture", () => {
     expect(classifyProviderAttempt({ ...base, autoCapture: true, capturedAmount: 0 }, binding, now))
@@ -587,9 +643,9 @@ describe("classifyProviderAttempt", () => {
   it("still blocks a CONTRADICTED expiry: evidence of payment outranks the expiry, absence does not", () => {
     // The two directions of the same ordering rule, side by side.
     expect(classifyProviderAttempt({ ...base, transactionId: paymentId, expiresAt: expiredLongAgo }, binding, now))
-      .toEqual({ outcome: "BLOCKED_RECONCILE" });
+      .toEqual({ outcome: "BLOCKED_RECONCILE", cause: "payment_evidence_on_open_order" });
     expect(classifyProviderAttempt({ ...base, capturedAmount: 4.99, expiresAt: expiredLongAgo }, binding, now))
-      .toEqual({ outcome: "BLOCKED_RECONCILE" });
+      .toEqual({ outcome: "BLOCKED_RECONCILE", cause: "payment_evidence_on_open_order" });
   });
 
   it("lets a proven expiry outrank an absent isCanceled, so a missing field can never make the lockout permanent", () => {
@@ -601,7 +657,7 @@ describe("classifyProviderAttempt", () => {
   });
   it("refuses to retire a refunded order even once it has expired", () => {
     expect(classifyProviderAttempt({ ...base, isRefunded: true, expiresAt: "2026-09-15T09:50:00Z" }, binding, now))
-      .toEqual({ outcome: "BLOCKED_RECONCILE" });
+      .toEqual({ outcome: "BLOCKED_RECONCILE", cause: "refunded" });
   });
 });
 
@@ -660,9 +716,13 @@ describe("probeProviderAttempt", () => {
 });
 describe("POK atomic fulfillment", () => {
   it("retries use the first verified observation timestamp", async () => {
-    const { repo, orders, ready } = setup(); ready();
+    const { repo, orders, ready, settleIntent } = setup(); ready();
     expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("fulfilled");
     repo.finalize.mockResolvedValue("already_finalized");
+    // POK-FULFILMENT-1: already_finalized is now answered from the
+    // post-finalization re-read, so the "database" has to actually carry
+    // the entitlement the first call created.
+    settleIntent({ fulfilled_at: "2026-09-15T10:05:00Z" });
     expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("fulfilled");
     expect(repo.finalize.mock.calls[0]).toEqual(repo.finalize.mock.calls[1]);
     expect(repo.finalize).toHaveBeenCalledWith(expect.objectContaining({ minor: 499, paymentId, currency: "ALL", paidAt: "2026-09-15T10:05:00Z" }));
@@ -734,9 +794,19 @@ describe("POK atomic fulfillment", () => {
     expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
     expect(repo.recordEvent).not.toHaveBeenCalled(); expect(repo.finalize).not.toHaveBeenCalled();
   });
-  it("authenticated mismatched amount cannot fulfill", async () => {
-    const { repo, orders, order, ready } = setup(); ready(); orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId, capturedAmount: 5 });
-    await expect(fulfillPokCheckout(callback, repo, orders)).rejects.toThrow(); expect(repo.finalize).not.toHaveBeenCalled();
+  it("authenticated mismatched amount is BLOCKED and durably recorded, never thrown into a retry", async () => {
+    // Previously this THREW POK_AMOUNT_CURRENCY_MISMATCH, which the
+    // webhook route turned into a 503 -- an endless retry for an amount
+    // that will never change. It is a terminal reconciliation fact, and
+    // it is written down before it is acknowledged.
+    const { repo, orders, order, ready, currentMapping } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId, capturedAmount: 5 });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    expect(repo.finalize).not.toHaveBeenCalled();
+    expect(repo.recordEvent).not.toHaveBeenCalled();
+    expect(repo.recordFulfilmentObservation).toHaveBeenCalledWith(id, "fulfilment_blocked_captured_amount_mismatch");
+    // A terminal cause must never start the transient retry clock.
+    expect(currentMapping()).toMatchObject({ fulfilment_gap_first_seen_at: null });
   });
   it.each(["active_other_session", "blocked_book_or_reader_deleted", "blocked_disputed_lost"])("does not report success for DB outcome %s", async outcome => {
     const { repo, orders, ready } = setup(); ready(); repo.finalize.mockResolvedValue(outcome);
@@ -805,23 +875,376 @@ describe("POK_CHECKOUT_CANNOT_RESUME", () => {
   });
 });
 
-// POK-FULFILMENT-1, partition 1: the URL-based RESUMABLE gate.
-//
-// The lockout this correction removes. Nothing in the system ever writes
-// 'ready' BACK -- repo.ready() is the only writer of that state and it
-// CASes on state = 'creating' -- so gating resume on the state meant the
-// first write that moved a mapping to 'needs_reconciliation' cost the
-// reader the checkout URL they were still holding, for the rest of the
-// intent's 23-hour life, even though POK had just said the order was
-// open, correctly priced and unpaid.
-//
-// Flagging is done here through repo.reconcile(), the only writer of
-// 'needs_reconciliation' that exists at this commit; the same gate is
-// what the diagnostic writes added in partition 2 depend on.
+
+// ============================================================
+// POK-FULFILMENT-1
+// ============================================================
+
+// A COMPLETED order missing one of the four transient optional fields.
+// Built explicitly rather than by mutating the shared fixture, because a
+// fixture that claims "unpaid" while reporting a capture is the
+// contradiction the classifier exists to reject.
+const completedGapOrders = {
+  transaction_id_absent: { isCompleted: true, capturedAmount: 4.99, transactionId: null },
+  captured_amount_absent: { isCompleted: true, transactionId: paymentId, capturedAmount: undefined },
+  auto_capture_absent: { isCompleted: true, transactionId: paymentId, capturedAmount: 4.99, autoCapture: undefined },
+  cancellation_state_absent: { isCompleted: true, transactionId: paymentId, capturedAmount: 4.99, isCanceled: undefined },
+} as const;
+
+describe("POK-FULFILMENT-1: the mid-creation window", () => {
+  // The second route to the 23-hour lockout, and the reason the
+  // fulfilment CAS excludes 'creating'. Between recordProviderOrder and
+  // repo.ready the mapping is 'creating' WITH an order id, which is
+  // enough to pass the callback's own guard.
+  it("a callback arriving mid-creation mutates nothing and cannot stop the checkout URL being stored", async () => {
+    const consoleError = spyOnConsoleError();
+    const { repo, orders, order, currentMapping } = setup();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders.transaction_id_absent });
+
+    // A deterministic hook, not a timer and not microtask luck: the
+    // callback runs at exactly the point in startPokCheckout's call graph
+    // where the window is open.
+    let callbackResult: Awaited<ReturnType<typeof fulfillPokCheckout>> | undefined;
+    const realRecord = repo.recordProviderOrder.getMockImplementation()!;
+    repo.recordProviderOrder.mockImplementation(async (intentId, claimId, providerId) => {
+      await realRecord(intentId, claimId, providerId);
+      expect(currentMapping()).toMatchObject({ state: "creating", provider_order_id: orderId });
+      callbackResult = await fulfillPokCheckout(
+        { intentId: id, token: currentMapping()!.webhook_token, merchantId }, repo, orders);
+    });
+
+    expect(await startPokCheckout(input, repo, orders, now)).toEqual({ kind: "checkout_url", url });
+    // The callback found no durable home, so it answered terminally --
+    // never 'pending', which the webhook route turns into a 503 that a
+    // crashed id-bearing 'creating' row has no bounded exit from.
+    expect(callbackResult).toEqual({ status: "blocked", bookId: "book" });
+    expect(repo.recordFulfilmentObservation).toHaveBeenCalledTimes(1);
+    expect(await repo.recordFulfilmentObservation.mock.results[0].value).toBeNull();
+    expect(consoleError).toHaveBeenCalledWith("pok_critical", expect.objectContaining({
+      code: "fulfilment_observation_unrecorded", intentId: id, providerOrderId: orderId,
+      mappingState: "creating", cause: "transaction_id_absent",
+    }));
+    // The mapping reached 'ready' with a URL: ready()'s own
+    // `state = 'creating'` CAS was never broken.
+    expect(currentMapping()).toMatchObject({
+      state: "ready", checkout_url: url, last_error_code: null, fulfilment_gap_first_seen_at: null,
+    });
+    consoleError.mockRestore();
+  });
+
+  it("a VERIFIED payment arriving mid-creation still records the event and finalizes", async () => {
+    // The state exclusion touches only the diagnostic write. Money must
+    // never be discarded because of where the mapping happened to be --
+    // and this is the fact that makes answering 200 to an UNVERIFIED
+    // mid-creation callback defensible at all.
+    const { repo, orders, currentMapping } = setup();
+    let callbackResult: Awaited<ReturnType<typeof fulfillPokCheckout>> | undefined;
+    const realRecord = repo.recordProviderOrder.getMockImplementation()!;
+    repo.recordProviderOrder.mockImplementation(async (intentId, claimId, providerId) => {
+      await realRecord(intentId, claimId, providerId);
+      callbackResult = await fulfillPokCheckout(
+        { intentId: id, token: currentMapping()!.webhook_token, merchantId }, repo, orders);
+    });
+    await startPokCheckout(input, repo, orders, now);
+    expect(callbackResult).toEqual({ status: "fulfilled", bookId: "book" });
+    expect(repo.recordEvent).toHaveBeenCalledTimes(1);
+    expect(repo.finalize).toHaveBeenCalledTimes(1);
+    expect(repo.recordFulfilmentObservation).not.toHaveBeenCalled();
+    expect(currentMapping()).toMatchObject({ state: "ready", checkout_url: url });
+  });
+
+  it("the CAS matches zero rows against a RETIRED mapping and leaves it untouched", async () => {
+    const consoleError = spyOnConsoleError();
+    const { repo, orders, order, retired, currentMapping } = setup(); retired();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders.captured_amount_absent });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    expect(await repo.recordFulfilmentObservation.mock.results[0].value).toBeNull();
+    expect(currentMapping()).toMatchObject({
+      state: "retired", last_error_code: null, fulfilment_gap_first_seen_at: null,
+    });
+    consoleError.mockRestore();
+  });
+});
+
+describe("POK-FULFILMENT-1: the transient gap window", () => {
+  it.each(Object.keys(completedGapOrders) as (keyof typeof completedGapOrders)[])(
+    "records %s durably and answers pending on the first observation", async (gap) => {
+    const { repo, orders, order, ready, currentMapping } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders[gap] });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("pending");
+    expect(repo.recordFulfilmentObservation).toHaveBeenCalledWith(id, `fulfilment_gap_${gap}`);
+    expect(currentMapping()).toMatchObject({
+      state: "needs_reconciliation", last_error_code: `fulfilment_gap_${gap}`,
+    });
+    expect(currentMapping()!.fulfilment_gap_first_seen_at).not.toBeNull();
+    // No incomplete evidence ever reaches entitlement.
+    expect(repo.recordEvent).not.toHaveBeenCalled();
+    expect(repo.finalize).not.toHaveBeenCalled();
+  });
+
+  it("answers pending strictly INSIDE the window and blocked at the boundary, from database timestamps alone", async () => {
+    const { repo, orders, order, ready, advanceDbClock } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders.transaction_id_absent });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("pending");
+
+    // Each observation advances the mock database clock by exactly 1ms
+    // before stamping updated_at, so the marker sits at now+1 and this
+    // advance lands the second observation at now+WINDOW: elapsed is
+    // WINDOW-1, one millisecond inside.
+    advanceDbClock(POK_FULFILMENT_TRANSIENT_GAP_RETRY_WINDOW_MS - 2);
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("pending");
+
+    // The next observation is its own 1ms later, landing elapsed at
+    // exactly WINDOW. The comparison is strict (`<`), so the boundary
+    // itself is terminal -- asserted here rather than left to a value
+    // comfortably past it, which would pass for either comparison.
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    // Nothing about the system clock decided any of that.
+    expect(vi.getMockedSystemTime()?.getTime()).toBe(now);
+  });
+
+  it("alternating A -> B -> A -> B gap codes cannot push the deadline forward", async () => {
+    // The case that killed updated_at as a first-seen marker: its stamp
+    // trigger is unconditional, so keeping last_error_code current would
+    // reset the start point on every callback and 503 forever.
+    const { repo, orders, order, ready, currentMapping, advanceDbClock } = setup(); ready();
+    const sequence = ["transaction_id_absent", "captured_amount_absent",
+      "transaction_id_absent", "captured_amount_absent"] as const;
+    const statuses: string[] = [];
+    for (const [index, gap] of sequence.entries()) {
+      orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders[gap] });
+      if (index > 0) advanceDbClock(POK_FULFILMENT_TRANSIENT_GAP_RETRY_WINDOW_MS / 3);
+      statuses.push((await fulfillPokCheckout(callback, repo, orders)).status);
+    }
+    const marker = currentMapping()!.fulfilment_gap_first_seen_at;
+    expect(marker).toBe(new Date(now + 1).toISOString());
+    // The LATEST observation is still recorded -- keeping it current is
+    // the whole reason a separate immutable marker exists.
+    expect(currentMapping()!.last_error_code).toBe("fulfilment_gap_captured_amount_absent");
+    // Three inside the window, the fourth past it. Under the old
+    // updated_at scheme every one of these would have been 'pending'.
+    expect(statuses).toEqual(["pending", "pending", "pending", "blocked"]);
+  });
+
+  it("an unrelated mapping update between observations does not move the marker", async () => {
+    const { repo, orders, order, ready, currentMapping, setMapping, advanceDbClock } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders.auto_capture_absent });
+    await fulfillPokCheckout(callback, repo, orders);
+    const marker = currentMapping()!.fulfilment_gap_first_seen_at;
+
+    // Something else writes the row: exactly what the database trigger's
+    // preserving branch exists for.
+    setMapping({ checkout_url: `${url}` });
+    advanceDbClock(POK_FULFILMENT_TRANSIENT_GAP_RETRY_WINDOW_MS);
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    expect(currentMapping()!.fulfilment_gap_first_seen_at).toBe(marker);
+  });
+
+  it("two concurrent first observations converge on one marker and both answer pending", async () => {
+    const { repo, orders, order, ready, currentMapping } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders.transaction_id_absent });
+    const [a, b] = await Promise.all([
+      fulfillPokCheckout(callback, repo, orders),
+      fulfillPokCheckout(callback, repo, orders),
+    ]);
+    expect([a.status, b.status]).toEqual(["pending", "pending"]);
+    expect(repo.recordFulfilmentObservation).toHaveBeenCalledTimes(2);
+    const markers = await Promise.all(repo.recordFulfilmentObservation.mock.results.map(r => r.value));
+    expect(markers[0]).not.toBeNull();
+    expect(markers[0]!.fulfilment_gap_first_seen_at).toBe(markers[1]!.fulfilment_gap_first_seen_at);
+    expect(currentMapping()!.fulfilment_gap_first_seen_at).toBe(markers[0]!.fulfilment_gap_first_seen_at);
+    // The SQL suite is what proves the database actually preserves the
+    // first writer's value under a real row lock; this asserts the
+    // application does not overwrite it from its own read.
+  });
+
+  it("a later COMPLETE retrieval fulfils normally, long after the window closed", async () => {
+    const { repo, orders, order, ready, currentMapping, advanceDbClock } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders.captured_amount_absent });
+    await fulfillPokCheckout(callback, repo, orders);
+    const marker = currentMapping()!.fulfilment_gap_first_seen_at;
+
+    advanceDbClock(POK_FULFILMENT_TRANSIENT_GAP_RETRY_WINDOW_MS * 10);
+    orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId, capturedAmount: 4.99 });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("fulfilled");
+    expect(repo.finalize).toHaveBeenCalledTimes(1);
+    // The window gates the HTTP answer, never the verification -- and the
+    // diagnostic history survives the success.
+    expect(currentMapping()!.fulfilment_gap_first_seen_at).toBe(marker);
+    expect(currentMapping()!.last_error_code).toBe("fulfilment_gap_captured_amount_absent");
+  });
+
+  it("a mapping already flagged and fulfilled keeps its history when a later callback arrives", async () => {
+    const { repo, orders, ready, settleIntent, setMapping, currentMapping } = setup(); ready();
+    setMapping({ state: "needs_reconciliation", last_error_code: "fulfilment_gap_transaction_id_absent",
+      fulfilment_gap_first_seen_at: new Date(now).toISOString() });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("fulfilled");
+    repo.finalize.mockResolvedValue("already_finalized");
+    settleIntent({ fulfilled_at: "2026-09-15T10:05:00Z" });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("fulfilled");
+    expect(currentMapping()!.fulfilment_gap_first_seen_at).toBe(new Date(now).toISOString());
+  });
+
+  it("a TERMINAL cause never creates the retry marker", async () => {
+    const { repo, orders, order, ready, currentMapping } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, isCompleted: true, transactionId: paymentId,
+      capturedAmount: 4.99, isRefunded: true });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    expect(repo.recordFulfilmentObservation).toHaveBeenCalledWith(id, "fulfilment_blocked_completed_and_reversed");
+    expect(currentMapping()).toMatchObject({ fulfilment_gap_first_seen_at: null });
+  });
+
+  it("treats an invariant violation -- a matched write with no marker -- as terminal, never as a retry", async () => {
+    const consoleError = spyOnConsoleError();
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders.transaction_id_absent });
+    repo.recordFulfilmentObservation.mockResolvedValue({
+      fulfilment_gap_first_seen_at: null, updated_at: new Date(now).toISOString() });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    expect(consoleError).toHaveBeenCalledWith("pok_critical", expect.objectContaining({
+      code: "fulfilment_gap_marker_absent", cause: "transaction_id_absent",
+    }));
+    consoleError.mockRestore();
+  });
+
+  it("propagates a write FAILURE, which is the one legitimate retry", async () => {
+    // A failed write is another chance to record. A write that matched
+    // nothing is not.
+    const { repo, orders, order, ready } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders.transaction_id_absent });
+    repo.recordFulfilmentObservation.mockRejectedValue(new Error("POK_FULFILMENT_OBSERVATION_WRITE_FAILED"));
+    await expect(fulfillPokCheckout(callback, repo, orders)).rejects.toThrow("POK_FULFILMENT_OBSERVATION_WRITE_FAILED");
+  });
+
+  it("no unverified shape ever reaches event recording or finalization", async () => {
+    const consoleError = spyOnConsoleError();
+    const unverified = [
+      ...Object.values(completedGapOrders),
+      { isCompleted: true, transactionId: paymentId, capturedAmount: 0 },
+      { isCompleted: true, transactionId: paymentId, capturedAmount: 4.98 },
+      { isCompleted: true, transactionId: paymentId, capturedAmount: 4.99, finalAmount: 5 },
+      { isCompleted: true, transactionId: paymentId, capturedAmount: 4.99, currencyCode: "EUR", originalCurrencyCode: "EUR" },
+      { isCompleted: true, transactionId: paymentId, capturedAmount: 4.99, originalCurrencyCode: "EUR" },
+      { isCompleted: true, transactionId: paymentId, capturedAmount: 4.99, isRefunded: true },
+      { isCompleted: true, transactionId: paymentId, capturedAmount: 4.99, isCanceled: true },
+      { isCompleted: true, transactionId: paymentId, capturedAmount: 4.99, autoCapture: false },
+      { isCompleted: false, transactionId: paymentId },
+      { isCompleted: false, capturedAmount: undefined },
+      { isCompleted: false, isCanceled: undefined },
+      { isCompleted: false, expiresAt: "not-a-date" },
+      { isCompleted: false, expiresAt: "2026-09-15T09:50:00Z" },
+    ];
+    for (const change of unverified) {
+      const fresh = setup(); fresh.ready();
+      fresh.orders.retrieveOrder.mockResolvedValue({ ...fresh.order, ...change } as PokOrder);
+      const result = await fulfillPokCheckout(callback, fresh.repo, fresh.orders).catch(() => ({ status: "threw" }));
+      expect({ change, recordEvent: fresh.repo.recordEvent.mock.calls.length,
+        finalize: fresh.repo.finalize.mock.calls.length, status: result.status })
+        .toEqual({ change, recordEvent: 0, finalize: 0, status: expect.not.stringMatching(/^fulfilled$/) });
+    }
+    consoleError.mockRestore();
+  });
+});
+
+describe("POK-FULFILMENT-1: closed_unpaid", () => {
+  it.each([
+    { label: "expired past the margin", change: { expiresAt: "2026-09-15T09:50:00Z" } },
+    { label: "explicitly cancelled with no payment evidence", change: { isCanceled: true } },
+  ])("reports a dead, unpaid order as closed_unpaid rather than pending: $label", async ({ change }) => {
+    // 'pending' becomes a 503 in the webhook route. A dead order will
+    // never become alive, so retrying it is the unbounded loop again.
+    const { repo, orders, order, ready, currentMapping } = setup(); ready();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...change });
+    expect(await fulfillPokCheckout(callback, repo, orders)).toEqual({ status: "closed_unpaid", bookId: "book" });
+    // A callback never retires anything: retirement is the probe's
+    // decision, made under a reader's own request.
+    expect(repo.retire).not.toHaveBeenCalled();
+    expect(repo.recordFulfilmentObservation).not.toHaveBeenCalled();
+    expect(currentMapping()).toMatchObject({ state: "ready" });
+  });
+
+  it("a probe whose two retrievals disagree about payment is AMBIGUOUS, never a retirement", async () => {
+    const { repo, orders, order, ready } = setup(); ready();
+    // First retrieval says completed; the second (inside fulfilment) says
+    // expired and unpaid. Two readings of one order disagreeing is not
+    // evidence of death.
+    orders.retrieveOrder
+      .mockResolvedValueOnce({ ...order, isCompleted: true, transactionId: paymentId, capturedAmount: 4.99 })
+      .mockResolvedValue({ ...order, expiresAt: "2026-09-15T09:50:00Z" });
+    expect(await probeProviderAttempt({ intentId: id, merchantId }, repo, orders, now)).toEqual({ kind: "ambiguous" });
+    expect(repo.retire).not.toHaveBeenCalled();
+  });
+});
+
+describe("POK-FULFILMENT-1: already_finalized", () => {
+  it("reports fulfilled ONLY when the post-finalization re-read carries fulfilled_at", async () => {
+    const { repo, orders, ready, settleIntent } = setup(); ready();
+    repo.finalize.mockResolvedValue("already_finalized");
+    settleIntent({ fulfilled_at: "2026-09-15T10:05:00Z" });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("fulfilled");
+    // The re-read is a second intent() call, after finalization.
+    expect(repo.intent.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(repo.recordFulfilmentObservation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    // NOT lack of ownership: active_other_session requires a purchases
+    // row for this SAME reader and book, so the reader owns it. What it
+    // reports is a SECOND captured payment with no refund path.
+    { reason: "active_other_session", code: "fulfilment_blocked_active_other_session" },
+    { reason: "book_or_reader_deleted", code: "fulfilment_blocked_book_or_reader_deleted" },
+    { reason: "disputed_lost", code: "fulfilment_blocked_disputed_lost" },
+  ] as const)("reports BLOCKED, never fulfilled, when the re-read shows $reason", async ({ reason, code }) => {
+    const { repo, orders, ready, settleIntent } = setup(); ready();
+    repo.finalize.mockResolvedValue("already_finalized");
+    settleIntent({ fulfilled_at: null, reconciliation_reason: reason });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    expect(repo.recordFulfilmentObservation).toHaveBeenCalledWith(id, code);
+  });
+
+  it("reports BLOCKED and a critical diagnostic when the re-read shows neither", async () => {
+    // Forbidden by book_checkout_intents' own CHECK, so reaching it means
+    // the re-read failed rather than that the state exists.
+    const consoleError = spyOnConsoleError();
+    const { repo, orders, ready } = setup(); ready();
+    repo.finalize.mockResolvedValue("already_finalized");
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    expect(consoleError).toHaveBeenCalledWith("pok_critical", expect.objectContaining({
+      code: "fulfilment_finalized_without_entitlement", intentId: id,
+    }));
+    expect(repo.recordFulfilmentObservation).toHaveBeenCalledWith(id, "fulfilment_blocked_finalization_without_entitlement");
+    consoleError.mockRestore();
+  });
+
+  it("reports BLOCKED when the intent cannot be re-read at all", async () => {
+    const consoleError = spyOnConsoleError();
+    const { repo, orders, ready } = setup(); ready();
+    repo.finalize.mockResolvedValue("already_finalized");
+    const realIntent = repo.intent.getMockImplementation()!;
+    repo.intent.mockImplementationOnce(realIntent).mockResolvedValue(null as unknown as FrozenPokIntent);
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    consoleError.mockRestore();
+  });
+
+  it.each(["active_other_session", "blocked_book_or_reader_deleted", "blocked_disputed_lost"] as const)(
+    "durably records the direct finalization outcome %s", async (outcome) => {
+    const { repo, orders, ready } = setup(); ready();
+    repo.finalize.mockResolvedValue(outcome);
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("blocked");
+    expect(repo.recordFulfilmentObservation).toHaveBeenCalledWith(
+      id, expect.stringMatching(/^fulfilment_blocked_/));
+  });
+});
+
 describe("POK-FULFILMENT-1: the URL-based resume gate", () => {
   it("resumes a flagged mapping that still holds a valid checkout URL", async () => {
-    const { repo, orders, order, ready } = setup(); ready();
-    await repo.reconcile();
+    // The lockout this correction removes. Nothing ever writes 'ready'
+    // BACK -- repo.ready CASes on 'creating' -- so gating resume on the
+    // state meant the first diagnostic write cost the reader the URL they
+    // were still holding for the rest of the intent's 23-hour life.
+    const { repo, orders, order, ready, setMapping } = setup(); ready();
+    setMapping({ state: "needs_reconciliation", last_error_code: "fulfilment_gap_transaction_id_absent",
+      fulfilment_gap_first_seen_at: new Date(now).toISOString() });
     orders.retrieveOrder.mockResolvedValue(order);
     expect(await probeProviderAttempt({ intentId: id, merchantId }, repo, orders, now))
       .toEqual({ kind: "resumable", url });
@@ -829,18 +1252,19 @@ describe("POK-FULFILMENT-1: the URL-based resume gate", () => {
     expect(repo.retire).not.toHaveBeenCalled();
   });
 
-  it("flag THEN resume: startPokCheckout hands the SAME url back, creating no second order", async () => {
+  it("flag THEN resume: a full round trip through startPokCheckout", async () => {
     const { repo, orders, order, ready } = setup(); ready();
-    await repo.reconcile();
+    orders.retrieveOrder.mockResolvedValue({ ...order, ...completedGapOrders.transaction_id_absent });
+    expect((await fulfillPokCheckout(callback, repo, orders)).status).toBe("pending");
+    // POK's next answer is the ordinary open-and-unpaid shape.
     orders.retrieveOrder.mockResolvedValue(order);
     expect(await startPokCheckout(input, repo, orders, now)).toEqual({ kind: "checkout_url", url });
     expect(orders.createOrder).not.toHaveBeenCalled();
   });
 
   it("a needs_reconciliation mapping with NO stored URL resumes nothing and retires nothing", async () => {
-    const { repo, orders, order, ready, currentMapping } = setup(); ready();
-    await repo.reconcile();
-    repo.mapping.mockResolvedValue({ ...currentMapping()!, checkout_url: null });
+    const { repo, orders, order, ready, setMapping } = setup(); ready();
+    setMapping({ state: "needs_reconciliation", checkout_url: null });
     orders.retrieveOrder.mockResolvedValue(order);
     expect(await probeProviderAttempt({ intentId: id, merchantId }, repo, orders, now))
       .toEqual({ kind: "resumable", url: null });
@@ -863,14 +1287,43 @@ describe("POK-FULFILMENT-1: the URL-based resume gate", () => {
   });
 
   it("re-validates the stored URL against the stored order id before handing it back", async () => {
-    const { repo, orders, order, ready, currentMapping } = setup(); ready();
-    await repo.reconcile();
+    const { repo, orders, order, ready, setMapping } = setup(); ready();
     // A URL naming a DIFFERENT order must never be handed out, whatever
     // state the mapping is in.
-    repo.mapping.mockResolvedValue({ ...currentMapping()!,
+    setMapping({ state: "needs_reconciliation",
       checkout_url: `https://pay-staging.pokpay.io/sdk-orders/${paymentId}` });
     orders.retrieveOrder.mockResolvedValue(order);
     await expect(probeProviderAttempt({ intentId: id, merchantId }, repo, orders, now))
       .rejects.toThrow("POK_UNTRUSTED_CHECKOUT_URL");
+  });
+});
+
+describe("POK-FULFILMENT-1: rollback-era compatibility", () => {
+  it("a marker written by this release changes no verdict on any path", async () => {
+    // The additive column stays inert: the reverted application never
+    // selects, writes or names it, and a mapping that carries one behaves
+    // exactly as one that does not.
+    const { repo, orders, order, ready, setMapping } = setup(); ready();
+    setMapping({ fulfilment_gap_first_seen_at: new Date(now - 86_400_000).toISOString(),
+      last_error_code: "fulfilment_gap_captured_amount_absent" });
+    orders.retrieveOrder.mockResolvedValue(order);
+    expect(await startPokCheckout(input, repo, orders, now)).toEqual({ kind: "checkout_url", url });
+
+    const fresh = setup(); fresh.ready();
+    fresh.setMapping({ fulfilment_gap_first_seen_at: new Date(now - 86_400_000).toISOString() });
+    expect((await fulfillPokCheckout(callback, fresh.repo, fresh.orders)).status).toBe("fulfilled");
+  });
+
+  it("the rollback-era error code is not a gap code, so it can never start a retry clock", async () => {
+    // repo.reconcile is the ONLY last_error_code writer in every release
+    // before this one. If it matched the gap prefix, a migrated database
+    // running the old application would stamp markers.
+    const { repo, orders, currentMapping } = setup();
+    orders.createOrder.mockRejectedValue(new Error("timeout"));
+    await expect(startPokCheckout(input, repo, orders, now)).rejects.toThrow("RECONCILIATION");
+    expect(currentMapping()).toMatchObject({
+      state: "needs_reconciliation", last_error_code: "creation_unconfirmed",
+      fulfilment_gap_first_seen_at: null,
+    });
   });
 });

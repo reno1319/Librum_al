@@ -5,9 +5,14 @@ import {
   verifiedPokPayment,
   logPokDiagnostic,
   logPokCritical,
+  pokFulfilmentGapCode,
+  pokFulfilmentBlockedCode,
   uuid,
 } from "./pok";
-import type { PokOrder, PokCreateOrder } from "./pok";
+import type {
+  PokOrder, PokCreateOrder, PokFulfilmentGap, PokFulfilmentBlockedCause,
+  PokAttemptAmbiguityCause,
+} from "./pok";
 import { resolveMaintenanceMode } from "./maintenance-mode";
 
 // ALL-CUTOVER APP-A: the sentinel startPokCheckout() throws when its own
@@ -84,10 +89,19 @@ export const POK_EXPIRY_SAFETY_MARGIN_MS = 120_000;
 // own expiresAt is the authority. The locally-requested window justifies
 // retirement in exactly one place, an ID-LESS attempt, and that decision
 // lives in SQL.
+//
+// POK-FULFILMENT-1: the two blocking outcomes now carry a CAUSE from the
+// closed vocabulary in pok.ts. It is what makes a terminal observation
+// durably recordable (`fulfilment_blocked_<cause>`) and what a critical
+// diagnostic names -- never free text, never a provider message. The
+// ambiguity cause is a SEPARATE type from the blocked cause on purpose:
+// an ambiguous order may still be paid, so its cause must never be
+// writable as a durable last_error_code, and the type system is what
+// enforces that rather than a comment.
 export type ProviderAttemptClass =
   | { outcome: "FULFIL" }
-  | { outcome: "BLOCKED_RECONCILE" }
-  | { outcome: "BLOCKED_AMBIGUOUS" }
+  | { outcome: "BLOCKED_RECONCILE"; cause: PokFulfilmentBlockedCause }
+  | { outcome: "BLOCKED_AMBIGUOUS"; cause: PokAttemptAmbiguityCause }
   | { outcome: "RETIRE_SAFE"; reason: "provider_attempt_expired" | "provider_attempt_canceled" }
   | { outcome: "RESUMABLE" };
 
@@ -101,7 +115,7 @@ export function classifyProviderAttempt(
   // "verify a PAYMENT", not "confirm this is the right order".
   if (order.id !== binding.orderId || order.merchantCustomReference !== binding.reference ||
       order.merchant?.id !== binding.merchantId) {
-    return { outcome: "BLOCKED_RECONCILE" };
+    return { outcome: "BLOCKED_RECONCILE", cause: "order_binding_mismatch" };
   }
   // 2. Economics: verified UNCONDITIONALLY, not only once a payment is
   // confirmed. An order silently bound to the wrong amount, or a
@@ -111,15 +125,20 @@ export function classifyProviderAttempt(
   try {
     finalMinor = pokAmountToMinor(order.finalAmount);
   } catch {
-    return { outcome: "BLOCKED_RECONCILE" };
+    return { outcome: "BLOCKED_RECONCILE", cause: "final_amount_unconvertible" };
   }
-  if (finalMinor !== binding.expectedMinor || order.currencyCode !== binding.currency ||
-      order.originalCurrencyCode !== binding.currency) {
-    return { outcome: "BLOCKED_RECONCILE" };
+  if (finalMinor !== binding.expectedMinor) {
+    return { outcome: "BLOCKED_RECONCILE", cause: "final_amount_mismatch" };
+  }
+  if (order.currencyCode !== binding.currency) {
+    return { outcome: "BLOCKED_RECONCILE", cause: "currency_mismatch" };
+  }
+  if (order.originalCurrencyCode !== binding.currency) {
+    return { outcome: "BLOCKED_RECONCILE", cause: "original_currency_mismatch" };
   }
   // 3. A self-contradiction is never resolved in either direction.
   if (order.isCompleted === true && (order.isRefunded === true || order.isCanceled === true)) {
-    return { outcome: "BLOCKED_RECONCILE" };
+    return { outcome: "BLOCKED_RECONCILE", cause: "completed_and_reversed" };
   }
   // 4. Refunded is a RECONCILIATION fact, never entitlement and never
   // retirement: money moved and came back. `!== false` rather than
@@ -133,7 +152,7 @@ export function classifyProviderAttempt(
   // that can never resolve. A refunded order would have been retried
   // forever.
   if (order.isRefunded !== false) {
-    return { outcome: "BLOCKED_RECONCILE" };
+    return { outcome: "BLOCKED_RECONCILE", cause: "refunded" };
   }
   // 5. Completed and not refunded: money arrived. Fulfilment re-verifies
   // the actual CAPTURED amount; this is only the routing decision.
@@ -147,7 +166,7 @@ export function classifyProviderAttempt(
     if (order.transactionId === null && !(typeof order.capturedAmount === "number" && order.capturedAmount > 0)) {
       return { outcome: "RETIRE_SAFE", reason: "provider_attempt_canceled" };
     }
-    return { outcome: "BLOCKED_RECONCILE" };
+    return { outcome: "BLOCKED_RECONCILE", cause: "cancellation_contradicted" };
   }
   // 7. CONTRADICTION, not mere absence. A transaction id, a positive
   // capture, or autoCapture explicitly reading `false` on an order that
@@ -167,9 +186,12 @@ export function classifyProviderAttempt(
   //
   // Absence is not evidence of contradiction. It is handled AFTER the
   // expiry rule, as ambiguity, in rule 10.
-  if (order.transactionId !== null || order.autoCapture === false ||
+  if (order.autoCapture === false) {
+    return { outcome: "BLOCKED_RECONCILE", cause: "auto_capture_disabled" };
+  }
+  if (order.transactionId !== null ||
       (typeof order.capturedAmount === "number" && order.capturedAmount > 0)) {
-    return { outcome: "BLOCKED_RECONCILE" };
+    return { outcome: "BLOCKED_RECONCILE", cause: "payment_evidence_on_open_order" };
   }
   // 8. An UNPARSEABLE authoritative expiry is ambiguity, at ANY age, and
   // never retirement. Falling back to our own locally-requested window
@@ -189,7 +211,7 @@ export function classifyProviderAttempt(
   // POK_INVALID_ORDER_SHAPE first.
   const expiresAt = Date.parse(order.expiresAt);
   if (!Number.isFinite(expiresAt)) {
-    return { outcome: "BLOCKED_AMBIGUOUS" };
+    return { outcome: "BLOCKED_AMBIGUOUS", cause: "provider_expiry_unreadable" };
   }
   // 9. A PROVEN expiry retires, and it outranks every merely absent
   // field below it. Everything that could contradict "dead and unpaid"
@@ -225,8 +247,11 @@ export function classifyProviderAttempt(
   // above it. A missing optional field must be able to stop a RESUME
   // without also being able to stop a RETIREMENT -- otherwise one
   // omitted field makes the lockout permanent again.
-  if (order.isCanceled !== false || order.autoCapture !== true) {
-    return { outcome: "BLOCKED_AMBIGUOUS" };
+  if (order.isCanceled !== false) {
+    return { outcome: "BLOCKED_AMBIGUOUS", cause: "cancellation_state_absent" };
+  }
+  if (order.autoCapture !== true) {
+    return { outcome: "BLOCKED_AMBIGUOUS", cause: "auto_capture_absent" };
   }
   // 11. POK's docs never state what an ABSENT capturedAmount means on an
   // order still called open, and this has not been confirmed against a
@@ -236,7 +261,7 @@ export function classifyProviderAttempt(
     return { outcome: "RESUMABLE" };
   }
   // 12. Open, unexpired, but we cannot prove nothing was captured.
-  return { outcome: "BLOCKED_AMBIGUOUS" };
+  return { outcome: "BLOCKED_AMBIGUOUS", cause: "capture_evidence_absent" };
 }
 
 export type PokMapping = {
@@ -244,11 +269,43 @@ export type PokMapping = {
   checkout_url: string | null; webhook_token: string; creation_claim_id: string;
   state: "creating" | "ready" | "needs_reconciliation" | "retired";
   provider_window_ends_at: string | null;
+  // POK-FULFILMENT-1. The repository already selects "*", so both of
+  // these arrive without widening the query; declaring them is what makes
+  // them readable. Neither is entitlement evidence: they record the last
+  // provider observation that required attention, plus the immutable
+  // database time of the FIRST transient fulfilment gap on this mapping.
+  last_error_code: string | null;
+  fulfilment_gap_first_seen_at: string | null;
 };
 export type FrozenPokIntent = {
   id: string; book_id: string; reader_id: string; regime: string; currency: string;
   price_cents_at_checkout: number; expires_at: string; stripe_checkout_session_id: string | null;
+  // POK-FULFILMENT-1: `fulfilled_at` is THE entitlement authority, and the
+  // only reason it is read here is the already_finalized correction --
+  // that outcome is returned when EITHER fulfilled_at or
+  // reconciliation_reason is set (schema.sql's entitlement core), so
+  // mapping it unconditionally to "fulfilled" reported a masked second
+  // charge as a successful purchase.
+  fulfilled_at: string | null;
+  reconciliation_reason: string | null;
 };
+
+// POK-FULFILMENT-1: how long a COMPLETED order is allowed to keep missing
+// one of the four transient optional fields before the answer stops being
+// "ask again".
+//
+// This is a LOCAL POLICY, chosen conservatively, pending controlled
+// sandbox evidence and confirmation of POK's own webhook retry behaviour
+// (POK_STAGING.md checklist item 7). It is deliberately NOT derived from
+// the provider's 30-minute order lifetime: that window governs how long
+// an order can be PAID, not how long POK takes to populate capture fields
+// on an order it already reports complete. Changing this value is a
+// policy decision, not a correction to a provider fact.
+//
+// The window gates the HTTP ANSWER only. It never gates verification: a
+// later retrieval carrying complete evidence fulfils normally, inside the
+// window or long after it.
+export const POK_FULFILMENT_TRANSIENT_GAP_RETRY_WINDOW_MS = 600_000;
 
 // STALE-CHECKOUT-1: the claim is now an RPC outcome, not a JavaScript
 // reading of SQLSTATE 23505. The old code treated ANY unique violation --
@@ -280,6 +337,32 @@ export interface PokRepository {
   recordProviderOrder(id: string, claimId: string, orderId: string): Promise<void>;
   ready(id: string, claimId: string, url: string): Promise<void>;
   reconcile(id: string, claimId: string): Promise<void>;
+  // POK-FULFILMENT-1: ONE statement that writes the observation and
+  // returns the timing, so no pre-write read can feed the decision and no
+  // application clock is involved anywhere.
+  //
+  // It matches `provider_order_id is not null and state in ('ready',
+  // 'needs_reconciliation')`. Both exclusions are load-bearing:
+  //   retired   -- terminal; a diagnostic write must not disturb it.
+  //   creating  -- the mapping is mid-creation WITH an order id (the id
+  //                is written at recordProviderOrderWithRetry, several
+  //                statements before repo.ready). Flagging it there would
+  //                make ready() match zero rows -> POK_LINK_FAILED -> no
+  //                checkout_url ever stored -> the 23-hour lockout by a
+  //                second route.
+  //
+  // Returns null when nothing matched, which is not an error: it means
+  // exactly those states, or a mapping that has gone. An actual write
+  // FAILURE throws, and that is the one legitimate 503 -- another chance
+  // to record.
+  //
+  // The two returned timestamps are two readings of the DATABASE clock in
+  // one transaction: `fulfilment_gap_first_seen_at` is stamped by the
+  // transition trigger (immutable once set), `updated_at` by the existing
+  // unconditional stamp trigger. Their difference is the elapsed time.
+  recordFulfilmentObservation(id: string, code: string): Promise<
+    { fulfilment_gap_first_seen_at: string | null; updated_at: string } | null
+  >;
   retire(args: {
     intentId: string; expectedClaimId: string; expectedProviderOrderId: string | null;
     expectedState: string; retiredReason: string;
@@ -437,6 +520,14 @@ export async function probeProviderAttempt(input: {
       }, repo, orders);
       if (result.status === "fulfilled") return { kind: "fulfilled", bookId: result.bookId };
       if (result.status === "blocked") return { kind: "blocked", bookId: result.bookId };
+      // POK-FULFILMENT-1: closed_unpaid is reachable here only as a
+      // CONTRADICTION. This branch was entered because the classifier
+      // said FULFIL -- the order was completed -- and fulfilment then
+      // re-retrieved it and got RETIRE_SAFE, i.e. dead and unpaid. Two
+      // retrievals of one order disagreeing about whether it was paid is
+      // not evidence of death, so it must never reach the retirement
+      // path: it is ambiguity, and ambiguity mutates nothing.
+      if (result.status === "closed_unpaid") return { kind: "ambiguous" };
       return { kind: "fulfilment_pending", bookId: result.bookId };
     }
     case "RETIRE_SAFE": {
@@ -648,9 +739,26 @@ export async function startPokCheckout(input: {
   }
 }
 
+// POK-FULFILMENT-1: the four statuses a callback can produce, and what
+// each one means to the HTTP layer.
+//
+//   fulfilled      the reader owns the book. book_checkout_intents.
+//                  fulfilled_at is non-null -- that column, and nothing
+//                  on the mapping, is the authority for saying so.
+//   pending        ask again. The ONLY status that becomes a 503, and it
+//                  is returned only where a later retrieval of the same
+//                  order can genuinely change the answer.
+//   closed_unpaid  the order is dead and no money arrived. Terminal, and
+//                  explicitly NOT "pending": a 503 here would be a retry
+//                  signal for a state no retry resolves.
+//   blocked        a human has to look. Terminal, and durably recorded
+//                  before it is acknowledged.
+export type PokFulfilmentStatus = "fulfilled" | "pending" | "closed_unpaid" | "blocked";
+export type PokFulfilmentResult = { status: PokFulfilmentStatus; bookId: string };
+
 export async function fulfillPokCheckout(input: {
   intentId: string; token: string; merchantId: string; readerId?: string;
-}, repo: PokRepository, orders: PokOrders) {
+}, repo: PokRepository, orders: PokOrders): Promise<PokFulfilmentResult> {
   const mapping = await repo.mapping(input.intentId);
   // STALE-CHECKOUT-1: the state guard was `mapping.state !== "ready"`,
   // which silently DROPPED a real payment whenever the mapping had moved
@@ -682,36 +790,145 @@ export async function fulfillPokCheckout(input: {
     merchantId: input.merchantId, expectedMinor: intent.price_cents_at_checkout,
     currency: intent.currency,
   };
-  // The classifier is the single gate for both paths now. Its rule 4 is
-  // what stops a refunded order being reported as "pending" and retried
-  // forever by the webhook route's 503.
+
+  // POK-FULFILMENT-1: every durable observation goes through this one
+  // helper, so there is exactly one place that decides what a write
+  // matching no row means. `blocked` is always the answer when nothing
+  // was written, and never 503 -- see recordFulfilmentObservation's own
+  // comment for why a 503 on a 'creating' mapping would be UNBOUNDED
+  // rather than merely wasteful.
+  const bookId = intent.book_id;
+  const critical = (
+    code: "fulfilment_observation_unrecorded" | "fulfilment_gap_marker_absent"
+        | "fulfilment_finalized_without_entitlement",
+    cause?: PokFulfilmentBlockedCause | PokFulfilmentGap,
+  ) => logPokCritical(code, {
+    intentId: input.intentId, creationClaimId: mapping.creation_claim_id,
+    providerOrderId: mapping.provider_order_id ?? undefined,
+    mappingState: mapping.state, cause,
+  });
+
+  // A TERMINAL observation: durably recorded first, acknowledged only
+  // after the write statement succeeded. A write error propagates and
+  // becomes the route's 503, which is another chance to record -- the one
+  // retry that is not a loop.
+  const recordTerminal = async (cause: PokFulfilmentBlockedCause): Promise<PokFulfilmentResult> => {
+    const written = await repo.recordFulfilmentObservation(
+      input.intentId, pokFulfilmentBlockedCode(cause));
+    if (!written) critical("fulfilment_observation_unrecorded", cause);
+    return { status: "blocked", bookId };
+  };
+
   const verdict = classifyProviderAttempt(order, binding, Date.now());
   if (verdict.outcome === "BLOCKED_RECONCILE") {
-    return { status: "blocked" as const, bookId: intent.book_id };
+    return await recordTerminal(verdict.cause);
+  }
+  if (verdict.outcome === "RETIRE_SAFE") {
+    // Provably dead and unpaid, by POK's own expiry or its own
+    // cancellation. Nothing is retired from a CALLBACK -- retirement is
+    // probeProviderAttempt's decision, made under a reader's own request
+    // -- but reporting this as "pending" would be a 503 for a state that
+    // can never resolve.
+    return { status: "closed_unpaid", bookId };
   }
   if (verdict.outcome !== "FULFIL") {
-    return { status: "pending" as const, bookId: intent.book_id };
+    // RESUMABLE or BLOCKED_AMBIGUOUS. The order is open, or its status is
+    // unprovable; either way a later retrieval can still change the
+    // answer, so this is the one genuinely retryable state.
+    return { status: "pending", bookId };
   }
-  const facts = verifiedPokPayment(order, binding);
-  if (!facts) return { status: "pending" as const, bookId: intent.book_id };
+
+  const payment = verifiedPokPayment(order, binding);
+  if (!payment.verified) {
+    if (payment.kind === "blocked") {
+      // A COMPLETED order whose evidence contradicts itself: a capture of
+      // nothing, a partial capture, a converted currency. Each of these
+      // used to THROW, which the webhook route turned into a 503 and
+      // retried forever.
+      return await recordTerminal(payment.cause);
+    }
+    // One of the four transient gaps on a completed order. Record it
+    // durably FIRST -- the same statement produces the timing -- then
+    // decide whether asking POK again is still reasonable.
+    const written = await repo.recordFulfilmentObservation(
+      input.intentId, pokFulfilmentGapCode(payment.gap));
+    if (!written) {
+      critical("fulfilment_observation_unrecorded", payment.gap);
+      return { status: "blocked", bookId };
+    }
+    const firstSeen = written.fulfilment_gap_first_seen_at === null
+      ? Number.NaN : Date.parse(written.fulfilment_gap_first_seen_at);
+    const observedAt = Date.parse(written.updated_at);
+    if (!Number.isFinite(firstSeen) || !Number.isFinite(observedAt)) {
+      // The row matched, so the trigger MUST have stamped the marker in
+      // that same statement. A null or unparseable value here is an
+      // invariant violation, not a state -- and the safe direction is the
+      // terminal answer, never an unbounded retry.
+      critical("fulfilment_gap_marker_absent", payment.gap);
+      return { status: "blocked", bookId };
+    }
+    // Both timestamps come from the database, in one transaction, so this
+    // difference cannot be stretched by an application clock, by
+    // alternating error codes, or by an unrelated update -- the marker is
+    // immutable once set.
+    return observedAt - firstSeen < POK_FULFILMENT_TRANSIENT_GAP_RETRY_WINDOW_MS
+      ? { status: "pending", bookId }
+      : { status: "blocked", bookId };
+  }
+
   // POK does not document a payment-success timestamp in this response.
   // Use the durable FIRST verified observation (event.received_at), not a
   // freshly recomputed clock or order.createdAt. Stable across concurrent retries.
-  const event = await repo.recordEvent(facts.paymentId);
+  const event = await repo.recordEvent(payment.paymentId);
   if (!Number.isFinite(Date.parse(event.received_at))) throw new Error("POK_INVALID_EVENT_TIMESTAMP");
   const outcome = await repo.finalize({
-    eventId: event.id, intentId: intent.id, paymentId: facts.paymentId,
-    minor: facts.actualMinor, currency: facts.currency, paidAt: event.received_at,
+    eventId: event.id, intentId: intent.id, paymentId: payment.paymentId,
+    minor: payment.actualMinor, currency: payment.currency, paidAt: event.received_at,
   });
-  if (outcome === "eligible_fulfilled" || outcome === "already_finalized") {
-    return { status: "fulfilled" as const, bookId: intent.book_id };
+  if (outcome === "eligible_fulfilled") {
+    return { status: "fulfilled", bookId };
+  }
+  if (outcome === "already_finalized") {
+    // POK-FULFILMENT-1, the already_finalized correction. The entitlement
+    // core returns this when EITHER fulfilled_at OR reconciliation_reason
+    // is set (schema.sql), so mapping it straight to "fulfilled" reported
+    // a masked SECOND CAPTURED PAYMENT as a successful purchase. Only the
+    // post-finalization re-read can tell the two apart, and only
+    // fulfilled_at may answer it.
+    const settled = await repo.intent(input.intentId);
+    if (settled?.fulfilled_at) {
+      return { status: "fulfilled", bookId };
+    }
+    switch (settled?.reconciliation_reason) {
+      case "active_other_session":
+        // NOT "someone else owns it": that outcome requires a purchases
+        // row for this SAME reader and book, so this reader already owns
+        // the book. What it actually reports is a second captured payment
+        // with no refund path -- which reaches the admin finance
+        // exceptions surface through the intent, because that view
+        // filters completed_at is not null and fulfilled_at is null.
+        return await recordTerminal("active_other_session");
+      case "book_or_reader_deleted":
+        return await recordTerminal("book_or_reader_deleted");
+      case "disputed_lost":
+        return await recordTerminal("disputed_lost");
+      default:
+        // Neither fulfilled nor reconciled is FORBIDDEN by
+        // book_checkout_intents' own CHECK ((reconciliation_reason is not
+        // null) = (completed_at is not null and fulfilled_at is null)),
+        // so reaching here means the re-read failed rather than that this
+        // state exists. Never report entitlement on a read we do not
+        // trust.
+        critical("fulfilment_finalized_without_entitlement");
+        return await recordTerminal("finalization_without_entitlement");
+    }
   }
   // A verified second payment that cannot fulfil is NEVER discarded: the
   // finalization RPC has already written completed_at plus a
   // reconciliation_reason, which the existing admin reconciliation query
   // surfaces. "blocked" is the honest answer, not "pending".
-  if (["active_other_session", "blocked_book_or_reader_deleted", "blocked_disputed_lost"].includes(outcome)) {
-    return { status: "blocked" as const, bookId: intent.book_id };
-  }
+  if (outcome === "active_other_session") return await recordTerminal("active_other_session");
+  if (outcome === "blocked_book_or_reader_deleted") return await recordTerminal("book_or_reader_deleted");
+  if (outcome === "blocked_disputed_lost") return await recordTerminal("disputed_lost");
   throw new Error("POK_UNKNOWN_FINALIZATION_OUTCOME");
 }

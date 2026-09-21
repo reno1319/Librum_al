@@ -109,7 +109,26 @@ export type PokCriticalCode =
   // must surface that loudly rather than silently doing the right thing.
   | "fulfilment_on_retired_mapping"
   // A recordProviderOrder attempt failed and is about to be retried.
-  | "provider_order_persistence_retry";
+  | "provider_order_persistence_retry"
+  // POK-FULFILMENT-1: a provider observation that needed a durable record
+  // matched NO mapping row -- the mapping is 'creating', 'retired',
+  // id-less, or gone. Nothing was mutated. This line is the only record
+  // that observation ever existed, which is precisely why it carries the
+  // identifiers.
+  | "fulfilment_observation_unrecorded"
+  // POK-FULFILMENT-1: the observation write DID match a row on a transient
+  // gap path, and the database-owned first-seen marker came back null (or
+  // unparseable) anyway. That is an invariant violation, not a state: the
+  // trigger must have stamped it in the same statement.
+  | "fulfilment_gap_marker_absent"
+  // POK-FULFILMENT-1: finalization answered already_finalized and the
+  // post-finalization re-read showed NEITHER fulfilled_at nor a
+  // reconciliation_reason. CHECK constraint
+  // book_checkout_intents_check (reconciliation_reason is not null) =
+  // (completed_at is not null and fulfilled_at is null) FORBIDS that pair,
+  // so reaching it means the re-read itself failed rather than that the
+  // state exists.
+  | "fulfilment_finalized_without_entitlement";
 
 export type PokCriticalDetail = {
   intentId: string;
@@ -117,6 +136,11 @@ export type PokCriticalDetail = {
   providerOrderId?: string;
   mappingState?: string;
   attempt?: number;
+  // POK-FULFILMENT-1: a CLOSED vocabulary value only (see
+  // PokFulfilmentGap / PokFulfilmentBlockedCause below), never free text,
+  // never a provider message and never a response body. Typed rather than
+  // `string` so a caller cannot pass one.
+  cause?: PokFulfilmentGap | PokFulfilmentBlockedCause | PokAttemptAmbiguityCause;
 };
 
 export function logPokCritical(code: PokCriticalCode, detail: PokCriticalDetail): void {
@@ -131,11 +155,121 @@ export function logPokCritical(code: PokCriticalCode, detail: PokCriticalDetail)
       providerOrderId: detail.providerOrderId,
       mappingState: detail.mappingState,
       attempt: detail.attempt,
+      cause: detail.cause,
     });
   } catch {
     // Logging must never throw or disrupt the caller's own handling.
   }
 }
+
+// ============================================================
+// POK-FULFILMENT-1: the closed vocabulary of fulfilment-evidence
+// outcomes, and the two `last_error_code` prefixes built from it.
+//
+// The split into two prefixes is LOAD-BEARING, not cosmetic. Only
+// `fulfilment_gap_` codes are transient: the four optional fields a
+// completed POK order may not yet carry, each of which a later retrieval
+// of the SAME order can still supply. The database trigger keys the
+// immutable first-seen marker on that exact literal prefix, so
+// "a terminal observation never creates the retry marker" is enforced by
+// Postgres from this vocabulary alone -- nothing in the application has
+// to remember the rule.
+//
+// Everything else is `fulfilment_blocked_`: a contradiction, a mismatch,
+// an unreadable provider field or a finalization outcome. None of them is
+// resolved by asking POK the same question again.
+//
+// What these codes are NOT: they are never entitlement evidence. The sole
+// entitlement authority is book_checkout_intents.fulfilled_at, written
+// only inside the finalization core. A mapping's state and
+// last_error_code record the last observation that required attention --
+// diagnostic history, retained even after a later success.
+// ============================================================
+
+// The four TRANSIENT gaps. Each is an optional() field of pokOrderSchema
+// that a completed order did not carry on THIS retrieval, and which a
+// later retrieval of the same order can supply -- retrieveOrder uses
+// `?loadTransaction=true`, so transactionId in particular is known to be
+// able to come and go between reads of one order.
+export type PokFulfilmentGap =
+  | "transaction_id_absent"
+  | "captured_amount_absent"
+  | "auto_capture_absent"
+  | "cancellation_state_absent";
+
+// Everything TERMINAL. Asking POK again cannot change any of these: a
+// contradiction stays contradictory, a mismatched amount stays
+// mismatched, and a finalization outcome is already durable in
+// book_checkout_intents.
+export type PokFulfilmentBlockedCause =
+  // Identity and economics, decided by classifyProviderAttempt before
+  // any payment question is asked.
+  | "order_binding_mismatch"
+  | "final_amount_unconvertible"
+  | "final_amount_mismatch"
+  | "currency_mismatch"
+  | "original_currency_mismatch"
+  // The provider's own answer disagrees with itself.
+  | "completed_and_reversed"
+  | "refunded"
+  | "cancellation_contradicted"
+  | "payment_evidence_on_open_order"
+  | "auto_capture_disabled"
+  // Payment verification of a completed order, where the failure is a
+  // contradiction rather than an absence.
+  | "not_completed"
+  | "cancellation_reported"
+  | "captured_amount_unconvertible"
+  | "captured_amount_mismatch"
+  // Finalization outcomes. The intent already carries completed_at plus
+  // the matching reconciliation_reason, which the admin finance
+  // exceptions surface reads; the mapping code is POK-side history.
+  | "active_other_session"
+  | "book_or_reader_deleted"
+  | "disputed_lost"
+  | "finalization_without_entitlement";
+
+// AMBIGUITY, which is neither of the two above and is deliberately its
+// own type rather than another member of PokFulfilmentBlockedCause. The
+// order may still be paid, so none of these is ever written as a durable
+// last_error_code and none of them may carry either prefix -- keeping
+// them out of the blocked union is what makes that a type error rather
+// than a review note.
+export type PokAttemptAmbiguityCause =
+  | "provider_expiry_unreadable"
+  | "cancellation_state_absent"
+  | "auto_capture_absent"
+  | "capture_evidence_absent";
+
+// The literal the database trigger matches with
+// `like 'fulfilment\_gap\_%'`. Changing either of these two strings
+// without changing the migration silently disconnects the retry marker.
+export const POK_FULFILMENT_GAP_CODE_PREFIX = "fulfilment_gap_";
+export const POK_FULFILMENT_BLOCKED_CODE_PREFIX = "fulfilment_blocked_";
+
+export function pokFulfilmentGapCode(gap: PokFulfilmentGap): string {
+  return `${POK_FULFILMENT_GAP_CODE_PREFIX}${gap}`;
+}
+export function pokFulfilmentBlockedCode(cause: PokFulfilmentBlockedCause): string {
+  return `${POK_FULFILMENT_BLOCKED_CODE_PREFIX}${cause}`;
+}
+
+// The result of asking "did this order pay, and can we prove it?".
+//
+// It replaces a null-or-throw contract that conflated three different
+// answers. `capturedAmount: 0` threw POK_INVALID_AMOUNT and a partial
+// capture threw POK_AMOUNT_CURRENCY_MISMATCH, both of which the webhook
+// route turned into a 503 -- a RETRY signal for states no retry resolves.
+// A missing optional field returned null, which became "pending" and the
+// same unbounded 503.
+//
+// What has NOT changed by one field is the acceptance conjunction below.
+// Every shape that fails to verify today still fails to verify; only the
+// classification of the failure is new.
+export type PokPaymentVerdict =
+  | { verified: true; paymentId: string; actualMinor: number; currency: string }
+  | { verified: false; kind: "gap"; gap: PokFulfilmentGap }
+  | { verified: false; kind: "blocked"; cause: PokFulfilmentBlockedCause };
 
 // PAID-MODE-1: the three deployment-identity conditions this function
 // has always required now come from the provider-neutral predicate
@@ -455,18 +589,92 @@ export function createPokClient(config: PokConfig, fetcher: typeof fetch = fetch
   };
 }
 
+// POK-FULFILMENT-1: the SAME acceptance conjunction as before, returning
+// a typed verdict instead of null-or-throw.
+//
+// Read the accept path first: every condition that had to hold for this
+// function to return payment facts still has to hold, in the same
+// combination. Nothing below widens it. What changed is that each way of
+// failing now says WHICH way, so the caller can tell a field that may
+// still arrive (gap) from one that never will (blocked) -- and so that
+// neither becomes an unbounded 503.
+//
+// The identity check still THROWS rather than returning a verdict. It is
+// not a payment question at all: reaching it means we retrieved an order
+// that is not the one this mapping created, and no caller should be able
+// to fold that into an ordinary outcome. In practice
+// classifyProviderAttempt's rule 1 has already returned
+// BLOCKED_RECONCILE for that shape, so this is a second, independent
+// floor rather than the primary guard.
 export function verifiedPokPayment(order: PokOrder, binding: {
   orderId: string; reference: string; merchantId: string; expectedMinor: number; currency: string;
-}) {
+}): PokPaymentVerdict {
   if (order.id !== binding.orderId || order.merchantCustomReference !== binding.reference ||
       order.merchant?.id !== binding.merchantId) throw new Error("POK_ORDER_BINDING_MISMATCH");
-  if (!order.isCompleted || order.isRefunded || order.isCanceled !== false || !order.transactionId ||
-      order.autoCapture !== true || order.capturedAmount === undefined) return null;
-  // Require actual captured amount, not the requested finalAmount alone.
-  const actualMinor = pokAmountToMinor(order.capturedAmount);
-  if (actualMinor !== binding.expectedMinor || pokAmountToMinor(order.finalAmount) !== actualMinor ||
-      order.currencyCode !== binding.currency || order.originalCurrencyCode !== binding.currency) {
-    throw new Error("POK_AMOUNT_CURRENCY_MISMATCH");
+
+  // --- Terminal states, in the same order the old disjunction read. ---
+  if (!order.isCompleted) return { verified: false, kind: "blocked", cause: "not_completed" };
+  if (order.isRefunded) return { verified: false, kind: "blocked", cause: "refunded" };
+
+  // --- Absence vs contradiction, for each optional() field. ---
+  //
+  // This is the whole point of the split. `isCanceled` missing is a gap:
+  // POK may report it on a later retrieval of the same order. `isCanceled
+  // === true` on a completed order is a contradiction and can only get
+  // worse by being retried.
+  if (order.isCanceled === undefined) {
+    return { verified: false, kind: "gap", gap: "cancellation_state_absent" };
   }
-  return { paymentId: order.transactionId, actualMinor, currency: order.currencyCode };
+  if (order.isCanceled !== false) {
+    return { verified: false, kind: "blocked", cause: "cancellation_reported" };
+  }
+  // retrieveOrder asks for `?loadTransaction=true`, so a transaction id
+  // is exactly the kind of field a completed order can be missing on one
+  // read and carry on the next.
+  if (!order.transactionId) {
+    return { verified: false, kind: "gap", gap: "transaction_id_absent" };
+  }
+  if (order.autoCapture === undefined) {
+    return { verified: false, kind: "gap", gap: "auto_capture_absent" };
+  }
+  if (order.autoCapture !== true) {
+    return { verified: false, kind: "blocked", cause: "auto_capture_disabled" };
+  }
+  if (order.capturedAmount === undefined) {
+    return { verified: false, kind: "gap", gap: "captured_amount_absent" };
+  }
+
+  // --- Economics. Require the actual CAPTURED amount, never the
+  // requested finalAmount alone. Every one of these used to throw
+  // POK_AMOUNT_CURRENCY_MISMATCH or POK_INVALID_AMOUNT; each is terminal,
+  // and none of them is a retry. ---
+  let actualMinor: number;
+  try {
+    actualMinor = pokAmountToMinor(order.capturedAmount);
+  } catch {
+    // capturedAmount 0 lands here: pokAmountToMinor rejects a
+    // non-positive amount. A completed order that captured nothing is a
+    // contradiction, not a pending payment.
+    return { verified: false, kind: "blocked", cause: "captured_amount_unconvertible" };
+  }
+  let finalMinor: number;
+  try {
+    finalMinor = pokAmountToMinor(order.finalAmount);
+  } catch {
+    return { verified: false, kind: "blocked", cause: "final_amount_unconvertible" };
+  }
+  if (actualMinor !== binding.expectedMinor) {
+    return { verified: false, kind: "blocked", cause: "captured_amount_mismatch" };
+  }
+  if (finalMinor !== actualMinor) {
+    return { verified: false, kind: "blocked", cause: "final_amount_mismatch" };
+  }
+  if (order.currencyCode !== binding.currency) {
+    return { verified: false, kind: "blocked", cause: "currency_mismatch" };
+  }
+  // No FX is implemented, so a converted order is never acceptable.
+  if (order.originalCurrencyCode !== binding.currency) {
+    return { verified: false, kind: "blocked", cause: "original_currency_mismatch" };
+  }
+  return { verified: true, paymentId: order.transactionId, actualMinor, currency: order.currencyCode };
 }

@@ -29,6 +29,27 @@ describe("POK webhook", () => {
   it("terminal business blocks are acknowledged", async () => {
     fulfill.mockResolvedValue({ status: "blocked" }); expect((await POST(request())).status).toBe(200);
   });
+  // POK-FULFILMENT-1: the complete status-to-code mapping, asserted as a
+  // table so that adding a fifth status without deciding its HTTP answer
+  // fails here. 'pending' is the only retry; everything else is
+  // acknowledged, which is what bounds the 503 loop.
+  it.each([
+    { status: "fulfilled", code: 200 },
+    { status: "pending", code: 503 },
+    { status: "closed_unpaid", code: 200 },
+    { status: "blocked", code: 200 },
+  ])("answers $code for $status", async ({ status, code }) => {
+    fulfill.mockResolvedValue({ status, bookId: "book" });
+    expect((await POST(request())).status).toBe(code);
+  });
+  it("never leaks a cause, an error code, a timestamp, an order id or a token in the body", async () => {
+    fulfill.mockResolvedValue({ status: "blocked", bookId: "book" });
+    const body = await (await POST(request())).text();
+    expect(JSON.parse(body)).toEqual({ received: true, status: "blocked" });
+    for (const secret of [token, "fulfilment_gap_", "fulfilment_blocked_", "first_seen", "2026-"]) {
+      expect(body).not.toContain(secret);
+    }
+  });
   it("configuration failure cannot reach DB or payment API", async () => {
     config.mockImplementation(() => { throw new Error("POK_STAGING_ONLY"); });
     const response = await POST(request()); expect(response.status).toBe(503);

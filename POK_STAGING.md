@@ -213,6 +213,150 @@ for it reach for the same two locks in opposite orders and deadlock.
 `supabase/tests/059_retire_vs_finalize_contention.sh` constructs that cycle
 deterministically rather than racing for it.
 
+## Fulfilment evidence gaps (POK-FULFILMENT-1)
+
+A POK callback for an order POK itself calls COMPLETE cannot always verify the
+payment: `transactionId`, `capturedAmount`, `autoCapture` and `isCanceled` are
+`optional()` in the response schema, and merchant retrieval uses
+`?loadTransaction=true`, so a field can genuinely be absent on one read and
+present on the next. Before this repair every one of those answers was
+"pending", which the webhook route turns into a 503 -- a retry signal with no
+way to stop. So were a capture of zero, a partial capture and a converted
+currency, none of which any retry can change.
+
+What each answer means now:
+
+| status | HTTP | when |
+| --- | --- | --- |
+| `fulfilled` | 200 | `book_checkout_intents.fulfilled_at` is set |
+| `pending` | 503 | open, unprovable, or a transient gap still inside the window |
+| `closed_unpaid` | 200 | POK's own expiry or cancellation, with no payment evidence |
+| `blocked` | 200 | terminal; durably recorded before it is acknowledged |
+
+The acceptance conjunction in `verifiedPokPayment` is unchanged, field for
+field. Only the classification of failure is new: no response shape that is
+refused today becomes sufficient evidence for entitlement.
+
+**The retry window, and exactly what justifies it.**
+`POK_FULFILMENT_TRANSIENT_GAP_RETRY_WINDOW_MS` is ten minutes. That is a
+CONSERVATIVE LOCAL POLICY, pending controlled sandbox evidence and confirmation
+of POK's own webhook retry behaviour (checklist item 7 below). It is
+deliberately NOT derived from the 30-minute provider order lifetime: that window
+governs how long an order can be PAID, not how long POK takes to populate
+capture fields on an order it already reports complete. Changing the value later
+is a policy decision, not a correction to a provider fact. The window gates the
+HTTP answer only -- a later retrieval carrying complete evidence fulfils
+normally, inside the window or long after it.
+
+Ten minutes is a NOMINAL database-clock window, and it is neither a wall-clock
+minimum nor a wall-clock cutoff. Both timestamps the elapsed time is computed
+from -- `fulfilment_gap_first_seen_at` and `updated_at` -- are stamped from
+`now()`, which in PostgreSQL is the TRANSACTION-START time, not the instant the
+row was actually written. Under row-lock contention those two differ, and the
+skew runs in BOTH directions:
+
+- if the FIRST observation waited for the mapping's row lock, its transaction
+  had already started when the wait began, so `fulfilment_gap_first_seen_at` is
+  backdated by roughly that wait. The gap then looks OLDER than it is, and the
+  retries can end about that much EARLY.
+- if a LATER observation waited, its `updated_at` is backdated the same way, the
+  gap looks YOUNGER than it is, and the retries run on a little longer.
+
+So the boundary can move either way by roughly the length of a lock wait. What
+that cannot do is weaken anything that matters: it does not touch the payment-
+evidence conjunction, it cannot grant entitlement, and it cannot turn an
+unverified response into a verified one. The only thing it shifts is WHEN an
+unverified callback stops being answered with retry/503 and starts being
+answered with blocked/200 -- and either side of that boundary, a later complete
+response still fulfils normally. The ten-minute value itself remains a
+conservative local policy pending controlled sandbox evidence.
+
+**The clock is the database's, never the application's.** Migration
+`20260920181856_pok_fulfilment_gap_first_seen.sql` adds
+`pok_book_checkout_orders.fulfilment_gap_first_seen_at`, and the observation is
+ONE statement that writes and returns: the transition trigger stamps the marker
+from `pg_catalog.now()` the first time an eligible row records a
+`fulfilment_gap_*` code, the existing unconditional trigger stamps `updated_at`,
+and the elapsed time is the difference between those two database timestamps.
+`updated_at` alone could not do this job: its stamp trigger is unconditional, so
+two gap codes alternating A -> B -> A -> B would reset the start point on every
+callback and retry forever.
+
+The marker is DATABASE-OWNED and immutable. Supplying it on an INSERT or an
+UPDATE, rewriting it, or clearing it all RAISE -- they are not silently coerced,
+because the only statement that can trigger the raise is a deliberate write to a
+column the application is not allowed to write. `last_error_code` carries two
+prefixes for the same reason: only `fulfilment_gap_*` starts the retry clock,
+and every terminal observation is `fulfilment_blocked_*`, so "a terminal
+observation never starts a retry" is enforced by Postgres from the code
+vocabulary alone. `creation_unconfirmed`, the only `last_error_code` any earlier
+release writes, matches neither.
+
+**Two corrections to behaviour that were quietly wrong.**
+
+- **Resume was gated on the mapping's state.** Nothing ever writes `ready`
+  back -- `repo.ready()` is its only writer and it compare-and-sets on
+  `creating` -- so the first thing that moved a mapping to
+  `needs_reconciliation` cost the reader the checkout URL they were still
+  holding, for the remaining life of the intent. The stored URL is the gate
+  now, re-validated against the stored provider order id. Retired and id-less
+  mappings still exit before any of this.
+- **`already_finalized` was reported as `fulfilled` unconditionally.** The
+  entitlement core returns it when EITHER `fulfilled_at` OR
+  `reconciliation_reason` is set, so a masked second captured payment
+  (`active_other_session`) was reported to the reader as a successful purchase.
+  It is now answered from a post-finalization re-read, and only a non-null
+  `fulfilled_at` reports success. The re-read is required for
+  `already_finalized` specifically, and only for it: that outcome covers
+  reconciliation-only completion as well as entitlement, so it does not by
+  itself say which happened. `eligible_fulfilled` needs no re-read, and does not
+  get one -- it rests on the atomic finalization RPC's own contract, which is
+  that the outcome is returned by the same transaction that set `fulfilled_at`.
+  Re-reading there would weaken the claim rather than strengthen it, by turning
+  one transactional fact into two statements that a concurrent write could
+  separate.
+
+**A callback landing mid-creation changes nothing.** Between the provider order
+id being recorded and `repo.ready()` running, the mapping is `creating` WITH an
+order id. The observation write excludes that state (and `retired`): flagging
+there would make `ready()` match zero rows and the reader would never receive a
+URL at all. Such a callback emits one bounded `pok_critical` line and answers
+`blocked`/200. That deliberately discards provider retry for UNVERIFIED
+evidence, and it is the safer trade: a process death in that window leaves an
+id-bearing `creating` row whose only exit is a reader's own `buyBook` call,
+which no provider retry can reach, so a 503 there would be unbounded by
+construction. A VERIFIED payment arriving in the same window is unaffected and
+still finalizes -- the state exclusion touches only the diagnostic write.
+
+**What these records are not.** The mapping's `state`, `last_error_code` and
+`fulfilment_gap_first_seen_at` are the last observation that required attention
+plus the immutable time of the first transient gap. They are DIAGNOSTIC HISTORY,
+retained after a later success, and never entitlement.
+`book_checkout_intents.fulfilled_at` is the entitlement authority, and no
+reconciliation marker can unlock minting a replacement quote.
+
+**Operator rule, and be honest about the surface.** To answer "what happened to
+this payment?", join the mapping to its intent and read
+`book_checkout_intents.fulfilled_at`: non-null means resolved, whatever the
+mapping says. A masked second charge DOES reach the admin finance page --
+`list_finance_checkout_exceptions` filters `completed_at is not null and
+fulfilled_at is null` behind `finance.view`. The raw mapping diagnostics reach
+no staff interface at all: one file touches that table and its grants stop at
+`service_role`, so reading `last_error_code` or the marker needs direct database
+credentials.
+
+**Residual risk.** A BACKWARD database-system clock adjustment between a
+mapping's creation and its first gap observation would make the stamped marker
+precede `created_at`, and the named CHECK would then reject an otherwise
+legitimate write. That fails closed: the UPDATE raises, the route answers 503,
+and the observation is retried.
+
+`supabase/tests/060_pok_fulfilment_gap_first_seen_catalog_equivalence.sh`
+compares a database built from `supabase/schema.sql` against one built from the
+base schema plus this migration, across thirteen catalogs including ACLs, RLS
+and full function bodies, and fails on an empty comparison rather than passing
+vacuously.
+
 ## Sandbox checklist after explicit deployment approval
 
 1. Review this draft, particularly the API proof fields, ALL prices, and scope.

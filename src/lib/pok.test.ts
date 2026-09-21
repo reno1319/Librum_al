@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { assertPokStaging, createPokClient, getPokConfig, logPokCritical, logPokDiagnostic, pokAmountToMinor, validatePokCheckoutUrl, verifiedPokPayment, type PokOrder } from "./pok";
+import { assertPokStaging, createPokClient, getPokConfig, logPokCritical, logPokDiagnostic, pokAmountToMinor,
+  pokFulfilmentBlockedCode, pokFulfilmentGapCode, POK_FULFILMENT_BLOCKED_CODE_PREFIX, POK_FULFILMENT_GAP_CODE_PREFIX,
+  validatePokCheckoutUrl, verifiedPokPayment, type PokOrder } from "./pok";
 
 const orderId = "11111111-1111-4111-8111-111111111111";
 const merchantId = "22222222-2222-4222-8222-222222222222";
@@ -32,14 +34,118 @@ describe("POK isolation and amounts", () => {
 });
 
 describe("POK authenticated payment proof", () => {
-  it("requires actual capture and exact binding", () => expect(verifiedPokPayment(paid, binding)).toEqual({ paymentId, actualMinor: 499, currency: "ALL" }));
+  it("requires actual capture and exact binding", () => expect(verifiedPokPayment(paid, binding)).toEqual({ verified: true, paymentId, actualMinor: 499, currency: "ALL" }));
   it.each([{ id: paymentId }, { merchantCustomReference: "other" }, { merchant: undefined }, { merchant: { id: paymentId } }])
     ("rejects foreign proof %j", (change) => expect(() => verifiedPokPayment({ ...paid, ...change }, binding)).toThrow("BINDING"));
-  it.each([{ isCompleted: false }, { isCanceled: true }, { isCanceled: undefined }, { isRefunded: true },
-    { transactionId: null }, { autoCapture: false }, { capturedAmount: undefined }])
-    ("never fulfills an unproven payment %j", (change) => expect(verifiedPokPayment({ ...paid, ...change }, binding)).toBeNull());
-  it.each([{ capturedAmount: 4.98 }, { finalAmount: 5 }, { currencyCode: "EUR" }, { originalCurrencyCode: "EUR" }, { originalCurrencyCode: undefined }])
-    ("rejects amount/FX mismatch %j", (change) => expect(() => verifiedPokPayment({ ...paid, ...change }, binding)).toThrow());
+
+  // POK-FULFILMENT-1: the SAME shapes are still rejected. What changed is
+  // that each rejection now says which KIND it is, because the two kinds
+  // deserve different HTTP answers -- a field that may arrive on the next
+  // retrieval is worth asking about again; a contradiction never is.
+  //
+  // These two tables together are the whole set that used to return null
+  // or throw. Nothing has moved from either of them into the accept path.
+  it.each([
+    { change: { isCanceled: undefined }, gap: "cancellation_state_absent" },
+    { change: { transactionId: null }, gap: "transaction_id_absent" },
+    { change: { autoCapture: undefined }, gap: "auto_capture_absent" },
+    { change: { capturedAmount: undefined }, gap: "captured_amount_absent" },
+  ] as const)("reports a transient GAP, never entitlement, for $gap", ({ change, gap }) => {
+    expect(verifiedPokPayment({ ...paid, ...change }, binding)).toEqual({ verified: false, kind: "gap", gap });
+  });
+  it.each([
+    { change: { isCompleted: false }, cause: "not_completed" },
+    { change: { isRefunded: true }, cause: "refunded" },
+    { change: { isCanceled: true }, cause: "cancellation_reported" },
+    { change: { autoCapture: false }, cause: "auto_capture_disabled" },
+    // capturedAmount 0 on a COMPLETED order: pokAmountToMinor rejects a
+    // non-positive amount, which used to THROW POK_INVALID_AMOUNT and
+    // become an unbounded 503. A completed order that captured nothing is
+    // a contradiction, not a pending payment.
+    { change: { capturedAmount: 0 }, cause: "captured_amount_unconvertible" },
+    { change: { capturedAmount: 4.98 }, cause: "captured_amount_mismatch" },
+    { change: { finalAmount: 0 }, cause: "final_amount_unconvertible" },
+    // capturedAmount still matches the frozen price; it is finalAmount
+    // that disagrees with it, which is a different fact and a different
+    // cause.
+    { change: { finalAmount: 5 }, cause: "final_amount_mismatch" },
+    { change: { currencyCode: "EUR" }, cause: "currency_mismatch" },
+    { change: { originalCurrencyCode: "EUR" }, cause: "original_currency_mismatch" },
+    { change: { originalCurrencyCode: undefined }, cause: "original_currency_mismatch" },
+  ] as const)("reports a TERMINAL block, never entitlement, for $cause", ({ change, cause }) => {
+    expect(verifiedPokPayment({ ...paid, ...change }, binding)).toEqual({ verified: false, kind: "blocked", cause });
+  });
+
+  // The acceptance conjunction, asserted as a PROPERTY rather than as a
+  // list: for each of the eight facts the accept path depends on,
+  // substituting any value other than the one it requires must leave
+  // `verified` false. This is what "the bar does not move by one field"
+  // means operationally -- a future edit that relaxes any single
+  // condition fails here even if it invents a new verdict shape.
+  const unsafe: Record<string, unknown[]> = {
+    isCompleted: [false, undefined],
+    // NOT undefined. isRefunded is a REQUIRED boolean in pokOrderSchema,
+    // and this conjunction reads it exactly as it always has -- an absent
+    // value is falsy and passes. That is deliberately unchanged: the
+    // acceptance bar does not move by one field in either direction. The
+    // shape is refused before it ever reaches here, by
+    // classifyProviderAttempt's rule 4 (`isRefunded !== false` ->
+    // BLOCKED_RECONCILE), which pok-checkout.test.ts asserts directly.
+    isRefunded: [true],
+    isCanceled: [true, undefined],
+    transactionId: [null, ""],
+    autoCapture: [false, undefined],
+    capturedAmount: [undefined, 0, 4.98, 5, -1],
+    finalAmount: [0, 5, 4.98],
+    currencyCode: ["EUR", "USD", ""],
+    originalCurrencyCode: ["EUR", "USD", undefined],
+  };
+  it("accepts nothing but the exact eight-fact conjunction", () => {
+    for (const [field, values] of Object.entries(unsafe)) {
+      for (const value of values) {
+        const verdict = verifiedPokPayment({ ...paid, [field]: value } as PokOrder, binding);
+        expect({ field, value, verified: verdict.verified }).toEqual({ field, value, verified: false });
+      }
+    }
+    // ...and the untouched fixture still verifies, so the loop above is
+    // not passing because everything is rejected.
+    expect(verifiedPokPayment(paid, binding).verified).toBe(true);
+  });
+
+  // No GAP path may throw. A throw out of this function becomes a 503 in
+  // the webhook route, and a 503 for a transient gap is precisely the
+  // unbounded retry this repair exists to bound. Asserted against the
+  // REAL function, never through a mock.
+  it("never throws on any gap or block path", () => {
+    for (const [field, values] of Object.entries(unsafe)) {
+      for (const value of values) {
+        expect(() => verifiedPokPayment({ ...paid, [field]: value } as PokOrder, binding)).not.toThrow();
+      }
+    }
+  });
+
+  // The two prefixes must stay disjoint: the database trigger keys the
+  // retry marker on the literal `fulfilment_gap_` prefix, so a terminal
+  // code that happened to match it would start a retry clock for a state
+  // no retry resolves.
+  it("keeps the gap and blocked code vocabularies disjoint", () => {
+    const gaps = ["transaction_id_absent", "captured_amount_absent", "auto_capture_absent", "cancellation_state_absent"] as const;
+    const blocked = ["order_binding_mismatch", "final_amount_unconvertible", "final_amount_mismatch",
+      "currency_mismatch", "original_currency_mismatch", "completed_and_reversed", "refunded",
+      "cancellation_contradicted", "payment_evidence_on_open_order", "auto_capture_disabled",
+      "not_completed", "cancellation_reported", "captured_amount_unconvertible",
+      "captured_amount_mismatch", "active_other_session", "book_or_reader_deleted",
+      "disputed_lost", "finalization_without_entitlement"] as const;
+    for (const gap of gaps) expect(pokFulfilmentGapCode(gap).startsWith(POK_FULFILMENT_GAP_CODE_PREFIX)).toBe(true);
+    for (const cause of blocked) {
+      expect(pokFulfilmentBlockedCode(cause).startsWith(POK_FULFILMENT_BLOCKED_CODE_PREFIX)).toBe(true);
+      expect(pokFulfilmentBlockedCode(cause).startsWith(POK_FULFILMENT_GAP_CODE_PREFIX)).toBe(false);
+    }
+    // 'creation_unconfirmed' is the only last_error_code every release
+    // before this one writes. A database carrying the migration while the
+    // old application is still deployed must never stamp the marker.
+    expect("creation_unconfirmed".startsWith(POK_FULFILMENT_GAP_CODE_PREFIX)).toBe(false);
+  });
 });
 
 describe("POK transport", () => {
