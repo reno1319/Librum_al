@@ -98,9 +98,11 @@ $(cleanup_sql)
 insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data) values
   ('$AUTHOR_ID', 'p059-contention-author@test', now(), '{"role":"author","display_name":"Contention Author"}'),
   ('$READER_ID', 'p059-contention-reader@test', now(), '{"role":"reader","display_name":"Contention Reader"}');
-insert into public.books (id, author_id, title, description, preview_text, keywords, price_cents, status) values
-  ('$BOOK_ID', '$AUTHOR_ID', 'Retire Contention Book', '', '', '', 500, 'published'),
-  ('$BOOK2_ID', '$AUTHOR_ID', 'Core Lock Order Book', '', '', '', 500, 'published');
+-- ALL-CHECKOUT-1: price_all is required now -- the RPC prices from it
+-- and refuses a null. Both books freeze 50000 minor units (500 lek).
+insert into public.books (id, author_id, title, description, preview_text, keywords, price_cents, price_all, status) values
+  ('$BOOK_ID', '$AUTHOR_ID', 'Retire Contention Book', '', '', '', 500, 500, 'published'),
+  ('$BOOK2_ID', '$AUTHOR_ID', 'Core Lock Order Book', '', '', '', 500, 500, 'published');
 commit;
 SQL
 
@@ -140,7 +142,7 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '$READER_ID', true);
 select intent_id, price_cents_at_checkout
-  from public.create_book_checkout_intent('$BOOK_ID'::uuid, null, 'librum_ledger_v1', 'ALL', 8000);
+  from public.create_book_checkout_intent('$BOOK_ID'::uuid, null);
 reset role;
 commit;
 SQL
@@ -301,13 +303,22 @@ echo "  deadlock probe: clean -- finalize waited on the advisory lock instead of
 #
 # Both mutants are therefore caught, and by different assertions.
 # ============================================================
+# ALL-CHECKOUT-1: this legacy intent used to be minted through the RPC
+# with p_regime/p_currency. No authenticated caller can do that any
+# more, so the row is inserted directly as the connecting table owner.
+# The probe needs a legacy intent only because the core's lock order is
+# what is under observation here; how the row came to exist is
+# irrelevant to that, and keeping an authenticated route capable of
+# minting one would defeat the change this harness runs against.
 PROBE2_SETUP="$(psql -d "$DB" -v ON_ERROR_STOP=1 -q -t -A <<SQL
 begin;
-set local role authenticated;
 select set_config('request.jwt.claim.sub', '$READER_ID', true);
-select intent_id, price_cents_at_checkout
-  from public.create_book_checkout_intent('$BOOK2_ID'::uuid, null, 'legacy_stripe_connect_v1', 'USD', null);
-reset role;
+insert into public.book_checkout_intents
+  (book_id, reader_id, book_title, price_cents_at_checkout, expires_at,
+   regime, currency, royalty_rate_bps)
+values ('$BOOK2_ID', '$READER_ID', 'Core Lock Order Book', 500,
+        now() + interval '23 hours', 'legacy_stripe_connect_v1', 'USD', null)
+returning id, price_cents_at_checkout;
 commit;
 SQL
 )"
@@ -422,7 +433,7 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '$READER_ID', true);
 select intent_id, price_cents_at_checkout
-  from public.create_book_checkout_intent('$BOOK_ID'::uuid, null, 'librum_ledger_v1', 'ALL', 8000);
+  from public.create_book_checkout_intent('$BOOK_ID'::uuid, null);
 reset role;
 commit;
 SQL

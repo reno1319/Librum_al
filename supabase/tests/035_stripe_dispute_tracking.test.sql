@@ -159,13 +159,18 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('bbbbbbbb-1111-1111-1111-111111111111', 'p035-author@test', '{"role":"author","display_name":"Author"}'),
   ('bbbbbbbb-2222-2222-2222-222222222222', 'p035-reader@test', '{"role":"reader","display_name":"Reader"}');
 
-insert into public.books (id, author_id, title, price_cents, status) values
-  ('cccccccc-1111-1111-1111-111111111111', 'bbbbbbbb-1111-1111-1111-111111111111', 'Lost-Disputed Book', 500, 'published'),
-  ('cccccccc-2222-2222-2222-222222222222', 'bbbbbbbb-1111-1111-1111-111111111111', 'Won-Disputed Book', 500, 'published'),
-  ('cccccccc-3333-3333-3333-333333333333', 'bbbbbbbb-1111-1111-1111-111111111111', 'Free Book', 0, 'published'),
-  ('cccccccc-4444-4444-4444-444444444444', 'bbbbbbbb-1111-1111-1111-111111111111', 'Undisputed Book', 500, 'published'),
-  ('cccccccc-5555-5555-5555-555555555555', 'bbbbbbbb-1111-1111-1111-111111111111', 'Unknown-Status-Disputed Book', 500, 'published'),
-  ('cccccccc-6666-6666-6666-666666666666', 'bbbbbbbb-1111-1111-1111-111111111111', 'No-Prior-Purchase Book', 900, 'published');
+-- ALL-CHECKOUT-1: every book a create_book_checkout_intent call in
+-- this file touches must carry price_all, because the RPC now reads
+-- that column and refuses a null. The free book keeps price_all = 0,
+-- which is the explicit "free" value and is also refused by the RPC --
+-- correctly, since a free book is acquired without a checkout intent.
+insert into public.books (id, author_id, title, price_cents, price_all, status) values
+  ('cccccccc-1111-1111-1111-111111111111', 'bbbbbbbb-1111-1111-1111-111111111111', 'Lost-Disputed Book', 500, 500, 'published'),
+  ('cccccccc-2222-2222-2222-222222222222', 'bbbbbbbb-1111-1111-1111-111111111111', 'Won-Disputed Book', 500, 500, 'published'),
+  ('cccccccc-3333-3333-3333-333333333333', 'bbbbbbbb-1111-1111-1111-111111111111', 'Free Book', 0, 0, 'published'),
+  ('cccccccc-4444-4444-4444-444444444444', 'bbbbbbbb-1111-1111-1111-111111111111', 'Undisputed Book', 500, 500, 'published'),
+  ('cccccccc-5555-5555-5555-555555555555', 'bbbbbbbb-1111-1111-1111-111111111111', 'Unknown-Status-Disputed Book', 500, 500, 'published'),
+  ('cccccccc-6666-6666-6666-666666666666', 'bbbbbbbb-1111-1111-1111-111111111111', 'No-Prior-Purchase Book', 900, 900, 'published');
 
 insert into public.purchases (book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id, amount_cents) values
   ('cccccccc-1111-1111-1111-111111111111', 'bbbbbbbb-2222-2222-2222-222222222222', 'cs_test_lost', 'pi_test_lost', 500),
@@ -327,13 +332,13 @@ end $$;
 -- not merely inside user_owns_book() itself. Fixtures: six books
 -- covering every case point 9 of the correction requires.
 -- ============================================================
-insert into public.books (id, author_id, title, price_cents, status) values
-  ('eeeeeeee-1111-1111-1111-111111111111', 'bbbbbbbb-1111-1111-1111-111111111111', 'Ordinary Active Purchase', 500, 'published'),
-  ('eeeeeeee-2222-2222-2222-222222222222', 'bbbbbbbb-1111-1111-1111-111111111111', 'Refunded Purchase', 500, 'published'),
-  ('eeeeeeee-3333-3333-3333-333333333333', 'bbbbbbbb-1111-1111-1111-111111111111', 'Lost-Dispute Repurchase', 500, 'published'),
-  ('eeeeeeee-4444-4444-4444-444444444444', 'bbbbbbbb-1111-1111-1111-111111111111', 'Under-Review-Dispute Purchase', 500, 'published'),
-  ('eeeeeeee-5555-5555-5555-555555555555', 'bbbbbbbb-1111-1111-1111-111111111111', 'Won-Dispute Purchase', 500, 'published'),
-  ('eeeeeeee-6666-6666-6666-666666666666', 'bbbbbbbb-1111-1111-1111-111111111111', 'Unknown-Status-Dispute Purchase', 500, 'published');
+insert into public.books (id, author_id, title, price_cents, price_all, status) values
+  ('eeeeeeee-1111-1111-1111-111111111111', 'bbbbbbbb-1111-1111-1111-111111111111', 'Ordinary Active Purchase', 500, 500, 'published'),
+  ('eeeeeeee-2222-2222-2222-222222222222', 'bbbbbbbb-1111-1111-1111-111111111111', 'Refunded Purchase', 500, 500, 'published'),
+  ('eeeeeeee-3333-3333-3333-333333333333', 'bbbbbbbb-1111-1111-1111-111111111111', 'Lost-Dispute Repurchase', 500, 500, 'published'),
+  ('eeeeeeee-4444-4444-4444-444444444444', 'bbbbbbbb-1111-1111-1111-111111111111', 'Under-Review-Dispute Purchase', 500, 500, 'published'),
+  ('eeeeeeee-5555-5555-5555-555555555555', 'bbbbbbbb-1111-1111-1111-111111111111', 'Won-Dispute Purchase', 500, 500, 'published'),
+  ('eeeeeeee-6666-6666-6666-666666666666', 'bbbbbbbb-1111-1111-1111-111111111111', 'Unknown-Status-Dispute Purchase', 500, 500, 'published');
 
 insert into public.purchases (book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id, amount_cents, refunded_at) values
   ('eeeeeeee-1111-1111-1111-111111111111', 'bbbbbbbb-2222-2222-2222-222222222222', 'cs_p7_active', 'pi_p7_active', 500, null),
@@ -422,8 +427,8 @@ end $$;
 -- actually verifies: no collision with the OLD, ALREADY-FULFILLED
 -- intent specifically.
 -- ============================================================
-insert into public.books (id, author_id, title, price_cents, status) values
-  ('eeeeeeee-9999-9999-9999-999999999999', 'bbbbbbbb-1111-1111-1111-111111111111', 'Idempotency Check Book', 500, 'published');
+insert into public.books (id, author_id, title, price_cents, price_all, status) values
+  ('eeeeeeee-9999-9999-9999-999999999999', 'bbbbbbbb-1111-1111-1111-111111111111', 'Idempotency Check Book', 500, 500, 'published');
 
 insert into public.purchases (book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id, amount_cents, refunded_at) values
   ('eeeeeeee-9999-9999-9999-999999999999', 'bbbbbbbb-2222-2222-2222-222222222222', 'cs_p8_lost', 'pi_p8_lost', 500, null);

@@ -135,10 +135,10 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('a0000000-0000-0000-0000-000000000003', 'p037-reader@test', '{"role":"reader","display_name":"Reader"}'),
   ('a0000000-0000-0000-0000-000000000004', 'p037-author-c@test', '{"role":"author","display_name":"Author C"}');
 
-insert into public.books (id, author_id, title, price_cents, status) values
-  ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'A''s Lost-Disputed Book', 500, 'published'),
-  ('b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', 'A''s Clean Book', 500, 'published'),
-  ('b0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000002', 'B''s Lost-Disputed Book', 500, 'published');
+insert into public.books (id, author_id, title, price_cents, price_all, status) values
+  ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'A''s Lost-Disputed Book', 500, 500, 'published'),
+  ('b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', 'A''s Clean Book', 500, 500, 'published'),
+  ('b0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000002', 'B''s Lost-Disputed Book', 500, 500, 'published');
 
 insert into public.purchases (book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id, amount_cents) values
   ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000003', 'cs_p037_a_lost', 'pi_p037_a_lost', 500),
@@ -238,14 +238,48 @@ begin
 end $$;
 
 -- ============================================================
--- Part 7: create_book_checkout_intent()/finalize_book_checkout_intent()
--- -- the dispute-before-fulfillment guarantee still functions end to
--- end through the now-internal-only helper, and the ordinary
--- undisputed path is completely unaffected.
--- ============================================================
-insert into public.books (id, author_id, title, price_cents, status) values
-  ('b0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000001', 'A''s Fresh Checkout Book', 700, 'published'),
-  ('b0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000001', 'A''s Fresh Disputed-Intent Book', 700, 'published');
+-- Part 7: finalize_book_checkout_intent() -- the dispute-before-
+-- fulfillment guarantee still functions through the now-internal-only
+-- helper, and the ordinary undisputed path is completely unaffected.
+--
+-- ALL-CHECKOUT-1: these two intents used to be minted through
+-- create_book_checkout_intent. They cannot be any more, and the reason
+-- is the point of the change rather than an inconvenience:
+-- finalize_book_checkout_intent is the LEGACY (legacy_stripe_connect_v1
+-- / USD) finalizer and refuses a librum_ledger_v1 intent outright,
+-- while the RPC can now mint nothing BUT librum_ledger_v1. So the
+-- legacy rows are inserted directly as the table owner -- the only
+-- honest way left to produce one -- and this part now proves the
+-- property that actually matters after the change: an EXISTING legacy
+-- intent is still finalizable, and is still blocked when its payment
+-- intent is already lost-disputed. Nothing here preserves an
+-- authenticated route capable of minting a legacy intent, which is
+-- exactly the capability this change removes.
+--
+-- The amounts stay in USD cents (700), because a legacy row is a USD
+-- row. price_all is added to both books anyway: they are published
+-- catalog rows, and leaving them ALL-less would be a fixture that could
+-- not exist after Patch 2.
+insert into public.books (id, author_id, title, price_cents, price_all, status) values
+  ('b0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000001', 'A''s Fresh Checkout Book', 700, 700, 'published'),
+  ('b0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000001', 'A''s Fresh Disputed-Intent Book', 700, 700, 'published');
+
+-- Helper: a legacy intent, inserted directly as the table owner.
+create function pg_temp.insert_legacy_intent(
+  p_reader uuid, p_book uuid, p_title text, p_price integer)
+returns table (intent_id uuid, price_cents_at_checkout integer)
+language plpgsql as $$
+begin
+  insert into public.book_checkout_intents
+    (book_id, reader_id, book_title, price_cents_at_checkout, expires_at,
+     regime, currency, royalty_rate_bps)
+  values (p_book, p_reader, p_title, p_price, now() + interval '23 hours',
+          'legacy_stripe_connect_v1', 'USD', null)
+  returning id, public.book_checkout_intents.price_cents_at_checkout
+  into intent_id, price_cents_at_checkout;
+  return next;
+end;
+$$;
 
 insert into public.payment_disputes (stripe_dispute_id, stripe_payment_intent_id, status, reason, amount_cents) values
   ('dp_p037_finalize_lost', 'pi_p037_finalize_lost', 'lost', 'fraudulent', 700);
@@ -255,11 +289,9 @@ declare
   v_intent record;
   v_outcome record;
 begin
-  perform set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', true);
-  set local role authenticated;
-  select * into v_intent
-  from public.create_book_checkout_intent('b0000000-0000-0000-0000-000000000005'::uuid, null);
-  reset role;
+  select * into v_intent from pg_temp.insert_legacy_intent(
+    'a0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000005',
+    'A''s Fresh Disputed-Intent Book', 700);
 
   select * into v_outcome
   from public.finalize_book_checkout_intent(
@@ -275,11 +307,9 @@ declare
   v_outcome record;
   v_owns boolean;
 begin
-  perform set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', true);
-  set local role authenticated;
-  select * into v_intent
-  from public.create_book_checkout_intent('b0000000-0000-0000-0000-000000000004'::uuid, null);
-  reset role;
+  select * into v_intent from pg_temp.insert_legacy_intent(
+    'a0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000004',
+    'A''s Fresh Checkout Book', 700);
 
   select * into v_outcome
   from public.finalize_book_checkout_intent(

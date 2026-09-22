@@ -1559,6 +1559,9 @@ create table public.purchases (
   unique (book_id, reader_id)
 );
 
+comment on column public.purchases.amount_cents is
+  'Integer minor units of the currency of this row''s payment (purchases.payment_id -> payments.currency); legacy rows with a null payment_id are legacy_stripe_connect_v1 USD.';
+
 alter table public.purchases enable row level security;
 
 -- Explicit least-privilege table grant (LAUNCH-1 P1-6), same rationale
@@ -2771,6 +2774,9 @@ create table public.book_checkout_intents (
   check (regime <> 'librum_ledger_v1' or royalty_rate_bps is not null)
 );
 
+comment on column public.book_checkout_intents.price_cents_at_checkout is
+  'Integer minor units of this row''s own currency (100 minor units = 1 ALL). Frozen at insert; never derived from books.price_cents.';
+
 alter table public.book_checkout_intents enable row level security;
 
 revoke all on public.book_checkout_intents from public, anon, authenticated;
@@ -2870,9 +2876,17 @@ revoke all on function public.enforce_book_checkout_intents_transition_rules()
 -- also guarantees no duplicate overload survives, so an old five-argument
 -- call can never silently resolve to the old body.
 --
--- Two new trailing, defaulted parameters, exactly the pattern migration
--- 056 used: every existing five-argument named call keeps working
--- unchanged and takes the defaults.
+-- ALL-CHECKOUT-1 (migration 20260922113721) narrowed the surface from
+-- seven arguments to four. p_regime, p_currency and p_royalty_rate_bps
+-- are GONE -- not defaulted away, removed -- because every one of them
+-- let a direct `authenticated` Data API caller choose economics that
+-- belong to the platform: the transaction regime, the settlement
+-- currency, and the author's own royalty rate. The three historical
+-- arities are dropped so no older call can resolve to a body that still
+-- accepts them; a deployed client sending the old named arguments now
+-- fails function resolution outright, which is the intended and safe
+-- failure (paid checkout is closed at canStartPaidCheckout() long
+-- before this RPC is reachable).
 --
 -- WHAT CHANGED, beyond the new columns:
 --
@@ -2904,18 +2918,29 @@ revoke all on function public.enforce_book_checkout_intents_transition_rules()
 -- the id-less, window-elapsed predicate. Direct callers still cannot
 -- INSERT a mapping -- claim_pok_book_checkout_order is service_role only.
 --
--- The pricing arithmetic, including the greatest(..., 50) floor, is
--- copied VERBATIM. This repair does not touch floor policy.
+-- PRICING, as of ALL-CHECKOUT-1. The price is read from
+-- books.price_all -- whole lek -- and converted to integer minor units
+-- exactly once, at the single boundary marked in the body.
+-- books.price_cents is not read here at all. The old
+-- greatest(..., 50) discount floor has been DELETED rather than
+-- retuned: a clamp raises a below-floor discounted price back up, so a
+-- reader with a valid code would be charged MORE than one without.
+-- A discounted result below 9900 minor units is now rejected with a
+-- typed status, before anything is mutated.
 -- ============================================================
 
+-- ALL-CHECKOUT-1: all three historical arities are dropped, not
+-- replaced. `create or replace` cannot narrow a parameter list, and a
+-- surviving overload would let a caller keep choosing the regime,
+-- currency and royalty rate that this change exists to take away from
+-- them.
+drop function if exists public.create_book_checkout_intent(uuid, text);
 drop function if exists public.create_book_checkout_intent(uuid, text, text, text, integer);
+drop function if exists public.create_book_checkout_intent(uuid, text, text, text, integer, boolean, uuid);
 
-create or replace function public.create_book_checkout_intent(
+create function public.create_book_checkout_intent(
   book_id uuid,
   p_discount_code text default null,
-  p_regime text default 'legacy_stripe_connect_v1',
-  p_currency text default 'USD',
-  p_royalty_rate_bps integer default null,
   p_accept_existing_quote boolean default false,
   p_expected_intent_id uuid default null
 )
@@ -2931,10 +2956,30 @@ security definer
 set search_path = ''
 as $$
 declare
+  -- ALL-CHECKOUT-1: the transaction regime, the currency and the
+  -- author's royalty rate are FACTS OF THIS PLATFORM, not arguments.
+  -- They were parameters granted to `authenticated`, which meant a
+  -- direct Data API caller chose them: a legacy/USD intent, or an
+  -- author royalty of 0 bps (the author earns nothing) or 10000 bps
+  -- (Librum earns nothing). The surface is removed rather than
+  -- guarded, so there is no value left to validate and no legacy value
+  -- left to reject.
+  v_regime constant text := 'librum_ledger_v1';
+  v_currency constant text := 'ALL';
+  v_royalty_rate_bps constant integer := 8000;
+  -- The floor is on the amount CHARGED, in minor units: 99,00 ALL.
+  -- It mirrors MINIMUM_PAID_CATALOG_PRICE_ALL (99) in
+  -- src/lib/catalog-price.ts, times the 100 minor units in one lek.
+  -- A discount that lands below it is REJECTED, never clamped -- see
+  -- the discount block below for why clamping is a defect and not a
+  -- policy.
+  v_minimum_paid_minor constant integer := 9900;
   v_reader_id uuid;
   v_book record;
   v_discount record;
-  v_price_cents integer;
+  -- ALL-CHECKOUT-1: renamed from v_price_cents. This holds integer
+  -- MINOR UNITS of ALL (100 per lek); the old name is now a lie.
+  v_price_minor integer;
   v_discount_code_id uuid;
   v_expires_at timestamptz;
   v_intent_id uuid;
@@ -2964,15 +3009,31 @@ begin
   );
 
   -- Checked on EVERY path now, reuse included -- see note 1 above.
-  select b.id, b.title, b.price_cents, b.status, b.author_id
+  --
+  -- ALL-CHECKOUT-1: price_all, never price_cents. books.price_cents is
+  -- the legacy USD catalog column and is no longer read here at all --
+  -- deriving an ALL amount from it would be a silent, unrecorded
+  -- currency conversion at a rate nobody chose.
+  select b.id, b.title, b.price_all, b.status, b.author_id
   into v_book
   from public.books b
   where b.id = create_book_checkout_intent.book_id;
 
+  -- ALL-CHECKOUT-1: two new causes join the existing three under the
+  -- SAME generic message, deliberately. `price_all is null` means the
+  -- book has no ALL price yet, so it is not purchasable -- it is never
+  -- inferred as free and never falls back to price_cents.
+  -- `price_all = 0` means the book IS free, and a free book is
+  -- acquired through getFreeBook, never through a paid checkout
+  -- intent. One message for all five: a distinct message per cause
+  -- would turn this RPC into an enumeration oracle over unpublished
+  -- and unpriced titles, and the existing posture here is already a
+  -- single generic raise.
   if v_book.id is null
      or v_book.status <> 'published'
      or v_book.author_id = v_reader_id
-     or v_book.price_cents <= 0 then
+     or v_book.price_all is null
+     or v_book.price_all = 0 then
     raise exception 'book not available for purchase';
   end if;
 
@@ -2987,11 +3048,18 @@ begin
 
   -- The CURRENT economics for THIS request. Derived server-side, never
   -- from a caller-supplied price.
-  v_price_cents := v_book.price_cents;
+  --
+  -- ALL-CHECKOUT-1: this multiplication is THE ONE conversion boundary
+  -- between the whole-lek catalog and minor-unit transaction
+  -- accounting. books.price_all is a whole number of lek (0, or
+  -- 99..100000, by CHECK); everything downstream of this line is
+  -- integer minor units. There is no other place in the database where
+  -- a catalog price becomes a transaction amount.
+  v_price_minor := v_book.price_all * 100;
   v_discount_code_id := null;
 
   if p_discount_code is not null and pg_catalog.length(pg_catalog.btrim(p_discount_code)) > 0 then
-    select d.id, d.percent_off, d.amount_off_cents
+    select d.id, d.percent_off, d.amount_off_cents, d.amount_off_all
     into v_discount
     from public.discount_codes d
     where d.book_id = create_book_checkout_intent.book_id
@@ -3000,18 +3068,60 @@ begin
       and (d.expires_at is null or d.expires_at > now())
     limit 1;
 
+    -- ALL-CHECKOUT-1: the greatest(..., 50) clamp is DELETED, and
+    -- deliberately not retuned to 9900. A clamp answers "the discounted
+    -- price is below the floor" by raising the reader's price back UP to
+    -- the floor -- so a book priced below the clamp charges MORE with a
+    -- valid code than without one, which is the opposite of what a
+    -- discount code means and what the reader was shown. The arithmetic
+    -- is computed exactly and an out-of-range result is REJECTED with a
+    -- typed status instead.
     if v_discount.id is not null then
-      v_price_cents := greatest(
-        case
-          when v_discount.percent_off is not null
-            then round(v_book.price_cents::numeric * (100 - v_discount.percent_off) / 100)::integer
-          else v_book.price_cents - v_discount.amount_off_cents
-        end,
-        50
-      );
+      if v_discount.percent_off is not null then
+        -- EXACT, with no rounding rule in play: the stored minor-unit
+        -- price is always price_all * 100, so
+        --   price_all * 100 * (100 - p) / 100  ==  price_all * (100 - p)
+        -- identically, for every integer price_all and every integer
+        -- percent_off. percent_off is `integer check (between 1 and 100)`
+        -- and price_all is `integer`, so the product is an integer number
+        -- of minor units by construction. Do NOT reintroduce round() or
+        -- a numeric cast here: they would be no-ops that invite a future
+        -- reader to believe a rounding policy exists.
+        v_price_minor := v_book.price_all * (100 - v_discount.percent_off);
+      elsif v_discount.amount_off_all is not null then
+        -- Also exact: both operands are whole lek, so the result is a
+        -- whole number of lek expressed in minor units. It may be zero
+        -- or negative; the floor check below is what rejects that.
+        v_price_minor := (v_book.price_all - v_discount.amount_off_all) * 100;
+      else
+        -- A legacy amount_off_cents code: USD semantics, created under
+        -- the Stripe Connect regime. It is NEVER applied to an ALL
+        -- checkout -- its number is not an amount of lek -- and it is
+        -- never silently ignored either, because ignoring it would
+        -- charge the reader the FULL price on a call in which they
+        -- supplied a code the database still considers active.
+        return query select null::uuid, null::integer, null::uuid,
+                            null::timestamptz, 'discount_not_applicable'::text;
+        return;
+      end if;
+
+      if v_price_minor < v_minimum_paid_minor then
+        return query select null::uuid, null::integer, null::uuid,
+                            null::timestamptz, 'discount_below_minimum'::text;
+        return;
+      end if;
+
       v_discount_code_id := v_discount.id;
     end if;
   end if;
+
+  -- Both rejections above return BEFORE the first mutation of this
+  -- call -- before the accept path's row locks, before any
+  -- supersession, before the mapping retirement and before the INSERT.
+  -- Nothing is superseded, nothing is minted, no mapping row is
+  -- touched. That is the same placement supersession_rate_limited
+  -- already uses, and both are TYPED statuses rather than exceptions:
+  -- no caller should ever parse exception text.
 
   -- ----------------------------------------------------------
   -- The deliberate accept path.
@@ -3114,12 +3224,17 @@ begin
       v_attempt := 'possibly_live';
     end if;
 
+    -- ALL-CHECKOUT-1: the regime, currency and royalty rate compared
+    -- here are this function's own constants, not caller arguments. A
+    -- legacy/USD predecessor therefore never matches a new ALL quote's
+    -- economics, which is correct: it is a quote in a different
+    -- currency under a different regime.
     v_economics_match :=
-      v_candidate.price_cents_at_checkout = v_price_cents
+      v_candidate.price_cents_at_checkout = v_price_minor
       and v_candidate.discount_code_id is not distinct from v_discount_code_id
-      and v_candidate.regime is not distinct from p_regime
-      and v_candidate.currency is not distinct from p_currency
-      and v_candidate.royalty_rate_bps is not distinct from p_royalty_rate_bps;
+      and v_candidate.regime is not distinct from v_regime
+      and v_candidate.currency is not distinct from v_currency
+      and v_candidate.royalty_rate_bps is not distinct from v_royalty_rate_bps;
 
     if v_candidate.expires_at <= now() then
       -- LOCAL expiry is not PROVIDER expiry. An attempt with a recorded
@@ -3234,20 +3349,26 @@ begin
     book_id, reader_id, book_title, price_cents_at_checkout, discount_code_id, expires_at,
     regime, currency, royalty_rate_bps
   ) values (
-    create_book_checkout_intent.book_id, v_reader_id, v_book.title, v_price_cents, v_discount_code_id, v_expires_at,
-    p_regime, p_currency, p_royalty_rate_bps
+    create_book_checkout_intent.book_id, v_reader_id, v_book.title, v_price_minor, v_discount_code_id, v_expires_at,
+    v_regime, v_currency, v_royalty_rate_bps
   )
   returning id into v_intent_id;
 
   return query
-  select v_intent_id, v_price_cents, v_discount_code_id, v_expires_at, 'minted'::text;
+  select v_intent_id, v_price_minor, v_discount_code_id, v_expires_at, 'minted'::text;
 end;
 $$;
 
-revoke all on function public.create_book_checkout_intent(uuid, text, text, text, integer, boolean, uuid) from public;
-revoke all on function public.create_book_checkout_intent(uuid, text, text, text, integer, boolean, uuid) from anon;
-revoke all on function public.create_book_checkout_intent(uuid, text, text, text, integer, boolean, uuid) from authenticated;
-grant execute on function public.create_book_checkout_intent(uuid, text, text, text, integer, boolean, uuid) to authenticated;
+-- ALL-CHECKOUT-1: a newly created function receives EXECUTE to PUBLIC by
+-- default, so these revokes must follow the create, in the same
+-- transaction. service_role is deliberately neither granted nor revoked
+-- here: this RPC is called as the signed-in reader and auth.uid() is its
+-- ownership source, and a revoke this migration did not need would be a
+-- silent privilege change of its own.
+revoke all on function public.create_book_checkout_intent(uuid, text, boolean, uuid) from public;
+revoke all on function public.create_book_checkout_intent(uuid, text, boolean, uuid) from anon;
+revoke all on function public.create_book_checkout_intent(uuid, text, boolean, uuid) from authenticated;
+grant execute on function public.create_book_checkout_intent(uuid, text, boolean, uuid) to authenticated;
 
 -- STRIPE-CUTOVER-1C (migration 056): the entitlement-creation logic
 -- below (lock intent, classify already-finalized/disputed/deleted/
