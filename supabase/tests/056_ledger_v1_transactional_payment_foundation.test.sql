@@ -44,15 +44,22 @@ insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data) value
   ('c0560000-0000-0000-0000-000000000002', 'p056-reader@test', now(), '{"role":"reader","display_name":"Reader"}'),
   ('c0560000-0000-0000-0000-000000000003', 'p056-reader-two@test', now(), '{"role":"reader","display_name":"Reader Two"}');
 
-insert into public.books (id, author_id, title, description, preview_text, keywords, price_cents, status) values
-  ('d0560000-0000-0000-0000-000000000001', 'c0560000-0000-0000-0000-000000000001', 'P056 Single Book', '', '', '', 1000, 'published'),
-  ('d0560000-0000-0000-0000-000000000002', 'c0560000-0000-0000-0000-000000000001', 'P056 Bundle Book One', '', '', '', 400, 'published'),
-  ('d0560000-0000-0000-0000-000000000003', 'c0560000-0000-0000-0000-000000000001', 'P056 Bundle Book Two', '', '', '', 600, 'published'),
-  ('d0560000-0000-0000-0000-000000000004', 'c0560000-0000-0000-0000-000000000001', 'P056 Legacy Book', '', '', '', 500, 'published'),
-  ('d0560000-0000-0000-0000-000000000005', 'c0560000-0000-0000-0000-000000000001', 'P056 Mismatch Book', '', '', '', 700, 'published'),
-  ('d0560000-0000-0000-0000-000000000006', 'c0560000-0000-0000-0000-000000000001', 'P056 Bundle Mismatch A', '', '', '', 200, 'published'),
-  ('d0560000-0000-0000-0000-000000000007', 'c0560000-0000-0000-0000-000000000001', 'P056 Bundle Mismatch B', '', '', '', 300, 'published'),
-  ('d0560000-0000-0000-0000-000000000008', 'c0560000-0000-0000-0000-000000000001', 'P056 Denial Book', '', '', '', 100, 'published');
+-- ALL-CHECKOUT-1: price_all is set to the SAME NUMBER as price_cents
+-- for every book, so the fixture stays easy to read -- but the units
+-- are different and the minted amounts change accordingly. price_all is
+-- whole lek, so the frozen minor-unit amount is price_all * 100: the
+-- 1000 book now freezes 100000, not 1000. Bundle amounts below are
+-- untouched, because bundles still price from bundles.price_cents until
+-- Patch 5.
+insert into public.books (id, author_id, title, description, preview_text, keywords, price_cents, price_all, status) values
+  ('d0560000-0000-0000-0000-000000000001', 'c0560000-0000-0000-0000-000000000001', 'P056 Single Book', '', '', '', 1000, 1000, 'published'),
+  ('d0560000-0000-0000-0000-000000000002', 'c0560000-0000-0000-0000-000000000001', 'P056 Bundle Book One', '', '', '', 400, 400, 'published'),
+  ('d0560000-0000-0000-0000-000000000003', 'c0560000-0000-0000-0000-000000000001', 'P056 Bundle Book Two', '', '', '', 600, 600, 'published'),
+  ('d0560000-0000-0000-0000-000000000004', 'c0560000-0000-0000-0000-000000000001', 'P056 Legacy Book', '', '', '', 500, 500, 'published'),
+  ('d0560000-0000-0000-0000-000000000005', 'c0560000-0000-0000-0000-000000000001', 'P056 Mismatch Book', '', '', '', 700, 700, 'published'),
+  ('d0560000-0000-0000-0000-000000000006', 'c0560000-0000-0000-0000-000000000001', 'P056 Bundle Mismatch A', '', '', '', 200, 200, 'published'),
+  ('d0560000-0000-0000-0000-000000000007', 'c0560000-0000-0000-0000-000000000001', 'P056 Bundle Mismatch B', '', '', '', 300, 300, 'published'),
+  ('d0560000-0000-0000-0000-000000000008', 'c0560000-0000-0000-0000-000000000001', 'P056 Denial Book', '', '', '', 100, 100, 'published');
 
 insert into public.bundles (id, author_id, title, description, price_cents, status) values
   ('a0560000-0000-0000-0000-000000000001', 'c0560000-0000-0000-0000-000000000001', 'P056 Bundle', '', 1000, 'published'),
@@ -227,12 +234,12 @@ begin
   perform set_config('request.jwt.claim.sub', 'c0560000-0000-0000-0000-000000000002', true);
   set local role authenticated;
   select * into v_intent from public.create_book_checkout_intent(
-    'd0560000-0000-0000-0000-000000000001'::uuid, null, 'librum_ledger_v1', 'ALL', 8000
+    'd0560000-0000-0000-0000-000000000001'::uuid, null
   );
   reset role;
 
   perform pg_temp.assert(v_intent.intent_id is not null, 'part1: create_book_checkout_intent must succeed for a ledger_v1 caller');
-  perform pg_temp.assert(v_intent.price_cents_at_checkout = 1000, 'part1: frozen price must equal the book price');
+  perform pg_temp.assert(v_intent.price_cents_at_checkout = 100000, 'part1: frozen price must equal the book price in minor units (1000 lek = 100000)');
 
   set local role service_role;
   select * into v_event from public.record_payment_event('stripe', 'evt_p056_book1', 'checkout.session.completed', 'pi_p056_book1');
@@ -240,7 +247,7 @@ begin
 
   set local role service_role;
   select * into v_result from public.finalize_ledger_book_payment(
-    v_event.id, v_intent.intent_id, 'stripe', 'pi_p056_book1', 1000::bigint, 'all', v_paid_at
+    v_event.id, v_intent.intent_id, 'stripe', 'pi_p056_book1', 100000::bigint, 'all', v_paid_at
   );
   reset role;
 
@@ -251,7 +258,7 @@ begin
 
   select * into v_purchase from public.purchases where book_id = 'd0560000-0000-0000-0000-000000000001' and reader_id = 'c0560000-0000-0000-0000-000000000002';
   perform pg_temp.assert(v_purchase.regime = 'librum_ledger_v1', 'partN: purchases.regime must be librum_ledger_v1, written on initial creation');
-  perform pg_temp.assert(v_purchase.amount_cents = 1000, 'partN: purchases.amount_cents must equal the actual amount');
+  perform pg_temp.assert(v_purchase.amount_cents = 100000, 'partN: purchases.amount_cents must equal the actual amount');
 
   select * into v_payment from public.payments where provider = 'stripe' and provider_payment_id = 'pi_p056_book1';
   perform pg_temp.assert(v_payment.regime = 'librum_ledger_v1', 'part9/N: payments.regime must be the hardcoded librum_ledger_v1 literal');
@@ -287,7 +294,7 @@ begin
   perform set_config('request.jwt.claim.sub', 'c0560000-0000-0000-0000-000000000002', true);
   set local role authenticated;
   select * into v_intent from public.create_book_checkout_intent(
-    'd0560000-0000-0000-0000-000000000005'::uuid, null, 'librum_ledger_v1', 'ALL', 8000
+    'd0560000-0000-0000-0000-000000000005'::uuid, null
   );
   reset role;
 
@@ -302,7 +309,7 @@ begin
   -- H: amount mismatch.
   begin
     set local role service_role;
-    perform * from public.finalize_ledger_book_payment(v_event.id, v_intent.intent_id, 'stripe', 'pi_p056_mismatch', 699::bigint, 'ALL', now());
+    perform * from public.finalize_ledger_book_payment(v_event.id, v_intent.intent_id, 'stripe', 'pi_p056_mismatch', 69999::bigint, 'ALL', now());
     perform pg_temp.assert(false, 'partH: an amount mismatch must be rejected');
   exception when others then
     perform pg_temp.assert(sqlerrm like '%mismatch%', format('partH: unexpected error: %s', sqlerrm));
@@ -313,7 +320,7 @@ begin
   -- own regime lock is unaffected by the prior rejected attempt).
   begin
     set local role service_role;
-    perform * from public.finalize_ledger_book_payment(v_event.id, v_intent.intent_id, 'stripe', 'pi_p056_mismatch', 700::bigint, 'USD', now());
+    perform * from public.finalize_ledger_book_payment(v_event.id, v_intent.intent_id, 'stripe', 'pi_p056_mismatch', 70000::bigint, 'USD', now());
     perform pg_temp.assert(false, 'partI: a currency mismatch must be rejected');
   exception when others then
     perform pg_temp.assert(sqlerrm like '%mismatch%', format('partI: unexpected error: %s', sqlerrm));
@@ -344,7 +351,7 @@ begin
   perform set_config('request.jwt.claim.sub', 'c0560000-0000-0000-0000-000000000002', true);
   set local role authenticated;
   select * into v_intent from public.create_book_checkout_intent(
-    'd0560000-0000-0000-0000-000000000005'::uuid, null, 'librum_ledger_v1', 'ALL', 8000
+    'd0560000-0000-0000-0000-000000000005'::uuid, null
   );
   reset role;
 
@@ -359,7 +366,7 @@ begin
   -- G: event A cross-wired with payment B's provider_payment_id must be rejected.
   begin
     set local role service_role;
-    perform * from public.finalize_ledger_book_payment(v_event_a.id, v_intent.intent_id, 'stripe', 'pi_p056_crosswire_b', 700::bigint, 'ALL', now());
+    perform * from public.finalize_ledger_book_payment(v_event_a.id, v_intent.intent_id, 'stripe', 'pi_p056_crosswire_b', 70000::bigint, 'ALL', now());
     perform pg_temp.assert(false, 'partG: cross-wiring event A with a different provider_payment_id must be rejected');
   exception when others then
     perform pg_temp.assert(sqlerrm like '%does not match%', format('partG: unexpected error: %s', sqlerrm));
@@ -392,7 +399,7 @@ begin
   perform set_config('request.jwt.claim.sub', 'c0560000-0000-0000-0000-000000000003', true);
   set local role authenticated;
   select * into v_intent from public.create_book_checkout_intent(
-    'd0560000-0000-0000-0000-000000000005'::uuid, null, 'librum_ledger_v1', 'ALL', 8000
+    'd0560000-0000-0000-0000-000000000005'::uuid, null
   );
   reset role;
 
@@ -522,9 +529,9 @@ end $$;
 
 -- ============================================================
 -- Part 7: LATE RETRY AFTER REUSE, THE REQUIRED HARD ACCEPTANCE TEST
--- (Section 21/T/U/V/W/X/Y/Z/AA). PAY1 (1000) -> refund -> PAY2 (same
--- purchase, 1300) -> late PAY1 retry must remain safe/idempotent and
--- must never read the current 1300 as PAY1's own history.
+-- (Section 21/T/U/V/W/X/Y/Z/AA). PAY1 (50000) -> refund -> PAY2 (same
+-- purchase, 130000) -> late PAY1 retry must remain safe/idempotent and
+-- must never read the current 130000 as PAY1's own history.
 -- ============================================================
 do $$
 declare
@@ -545,14 +552,14 @@ begin
   perform set_config('request.jwt.claim.sub', 'c0560000-0000-0000-0000-000000000002', true);
   set local role authenticated;
   select * into v_intent from public.create_book_checkout_intent(
-    'd0560000-0000-0000-0000-000000000004'::uuid, null, 'librum_ledger_v1', 'ALL', 8000
+    'd0560000-0000-0000-0000-000000000004'::uuid, null
   );
   reset role;
 
-  -- PAY1: gross 500 (the book's list price).
+  -- PAY1: gross 50000 minor units (the book's list price, 500 lek).
   set local role service_role;
   select * into v_event_1 from public.record_payment_event('stripe', 'evt_p056_retry_pay1', 'checkout.session.completed', 'pi_p056_retry_pay1');
-  select * into v_result_1 from public.finalize_ledger_book_payment(v_event_1.id, v_intent.intent_id, 'stripe', 'pi_p056_retry_pay1', 500::bigint, 'ALL', v_paid_at_1);
+  select * into v_result_1 from public.finalize_ledger_book_payment(v_event_1.id, v_intent.intent_id, 'stripe', 'pi_p056_retry_pay1', 50000::bigint, 'ALL', v_paid_at_1);
   reset role;
 
   select id into v_purchase_id from public.purchases where book_id = 'd0560000-0000-0000-0000-000000000004' and reader_id = 'c0560000-0000-0000-0000-000000000002';
@@ -564,11 +571,11 @@ begin
   perform public.record_refund('stripe', 'pi_p056_retry_pay1', v_purchase_id, 'refund_p056_retry_pay1');
   reset role;
 
-  -- PAY2: repurchase the same book, but at a different gross (1300) --
+  -- PAY2: repurchase the same book, but at a different gross (130000) --
   -- simulated directly on the reused purchases row, matching exactly
   -- what finalize_book_checkout_intent_entitlement_core's own upsert
   -- does on a legitimate repurchase after refund.
-  update public.purchases set refunded_at = null, amount_cents = 1300 where id = v_purchase_id;
+  update public.purchases set refunded_at = null, amount_cents = 130000 where id = v_purchase_id;
 
   set local role service_role;
   select * into v_event_2 from public.record_payment_event('stripe', 'evt_p056_retry_pay2', 'checkout.session.completed', 'pi_p056_retry_pay2');
@@ -607,14 +614,14 @@ begin
   perform public.record_successful_sale('stripe', 'pi_p056_retry_pay1', 'ALL', array[v_purchase_id], 8000, v_paid_at_1, 'c0560000-0000-0000-0000-000000000002'::uuid);
 
   -- X: PAY1 late retry after PAY2 succeeds (no exception raised above).
-  -- Y: PAY1 retry uses frozen 500 despite current purchase 1300.
+  -- Y: PAY1 retry uses frozen 50000 despite current purchase 130000.
   perform pg_temp.assert(
-    (select amount_minor from public.payments where id = v_payment_1_id) = 500,
-    'partY: PAY1''s own payment row must remain frozen at 500, unaffected by the 1300 reuse'
+    (select amount_minor from public.payments where id = v_payment_1_id) = 50000,
+    'partY: PAY1''s own payment row must remain frozen at 50000, unaffected by the 130000 reuse'
   );
   perform pg_temp.assert(
-    (select gross_amount_minor from public.author_ledger_entries where id = v_entry_1_id) = 500,
-    'partY: PAY1''s own sale ledger row must remain frozen at gross=500'
+    (select gross_amount_minor from public.author_ledger_entries where id = v_entry_1_id) = 50000,
+    'partY: PAY1''s own sale ledger row must remain frozen at gross=50000'
   );
 
   -- Z: PAY1 retry does not reset purchases.payment_id back from PAY2 to PAY1.
@@ -654,14 +661,14 @@ begin
   perform set_config('request.jwt.claim.sub', 'c0560000-0000-0000-0000-000000000003', true);
   set local role authenticated;
   select * into v_intent from public.create_book_checkout_intent(
-    'd0560000-0000-0000-0000-000000000008'::uuid, null, 'librum_ledger_v1', 'ALL', 8000
+    'd0560000-0000-0000-0000-000000000008'::uuid, null
   );
   reset role;
 
   set local role service_role;
   perform public.finalize_ledger_book_payment(
     (public.record_payment_event('stripe', 'evt_p056_ah', 'checkout.session.completed', 'pi_p056_ah')).id,
-    v_intent.intent_id, 'stripe', 'pi_p056_ah', 100::bigint, 'ALL', now()
+    v_intent.intent_id, 'stripe', 'pi_p056_ah', 10000::bigint, 'ALL', now()
   );
   reset role;
 
@@ -763,7 +770,18 @@ begin
   );
 end $$;
 
--- AE: legacy finalize path still works (unchanged behavior).
+-- AE: legacy finalize path still works (unchanged behavior) for an
+-- EXISTING legacy intent.
+--
+-- ALL-CHECKOUT-1 rewrote this part's fixture and, with it, its claim.
+-- It used to assert that "the unmodified 2-arg call site must still
+-- default to legacy_stripe_connect_v1". That default is gone: there is
+-- no regime parameter to default, and every intent the RPC mints is
+-- librum_ledger_v1 / ALL / 8000. The property still worth proving --
+-- and the one decision B3 explicitly preserves -- is that a legacy
+-- intent that ALREADY EXISTS stays finalizable through the legacy
+-- finalizer, unchanged. So the row is inserted directly as the table
+-- owner, in USD cents, which is what a legacy row is.
 do $$
 declare
   v_intent record;
@@ -772,21 +790,22 @@ begin
   -- Uses book 003 / reader 03 -- a combo untouched by any earlier part
   -- (book 003 was only ever purchased via the Part 5 BUNDLE snapshot
   -- path for reader 02, which creates no book_checkout_intents row at
-  -- all), so create_book_checkout_intent's own "reuse an existing open
-  -- intent" logic cannot hand this call a leftover ledger_v1 intent
-  -- from an earlier part.
-  perform set_config('request.jwt.claim.sub', 'c0560000-0000-0000-0000-000000000003', true);
-  set local role authenticated;
-  select * into v_intent from public.create_book_checkout_intent('d0560000-0000-0000-0000-000000000003'::uuid, null);
-  reset role;
+  -- all).
+  insert into public.book_checkout_intents
+    (book_id, reader_id, book_title, price_cents_at_checkout, expires_at,
+     regime, currency, royalty_rate_bps)
+  values ('d0560000-0000-0000-0000-000000000003', 'c0560000-0000-0000-0000-000000000003',
+          'P056 Bundle Book Two', 600, now() + interval '23 hours',
+          'legacy_stripe_connect_v1', 'USD', null)
+  returning id, price_cents_at_checkout into v_intent;
 
   perform pg_temp.assert(
-    (select regime from public.book_checkout_intents where id = v_intent.intent_id) = 'legacy_stripe_connect_v1',
-    'partAE: the unmodified 2-arg call site must still default to legacy_stripe_connect_v1'
+    (select regime from public.book_checkout_intents where id = v_intent.id) = 'legacy_stripe_connect_v1',
+    'partAE: the fixture must be a legacy_stripe_connect_v1 intent'
   );
 
   set local role service_role;
-  select * into v_result from public.finalize_book_checkout_intent(v_intent.intent_id, 'cs_p056_legacy', 'pi_p056_legacy', v_intent.price_cents_at_checkout);
+  select * into v_result from public.finalize_book_checkout_intent(v_intent.id, 'cs_p056_legacy', 'pi_p056_legacy', v_intent.price_cents_at_checkout);
   reset role;
 
   perform pg_temp.assert(v_result.outcome = 'eligible_fulfilled', 'partAE: the legacy finalize path must still succeed unchanged');
@@ -804,7 +823,7 @@ begin
   perform set_config('request.jwt.claim.sub', 'c0560000-0000-0000-0000-000000000002', true);
   set local role authenticated;
   select * into v_intent from public.create_book_checkout_intent(
-    'd0560000-0000-0000-0000-000000000005'::uuid, null, 'librum_ledger_v1', 'ALL', 8000
+    'd0560000-0000-0000-0000-000000000005'::uuid, null
   );
   reset role;
 

@@ -69,16 +69,25 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('22222222-2222-2222-2222-222222222222', 'reader-r1@test', '{"role":"reader","display_name":"Reader R1"}'),
   ('33333333-3333-3333-3333-333333333333', 'reader-r2@test', '{"role":"reader","display_name":"Reader R2"}');
 
-insert into public.books (id, author_id, title, status, price_cents) values
-  ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Book One', 'published', 999),
-  ('b0000000-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111', 'Book Two', 'published', 500);
+-- ALL-CHECKOUT-1: both books gain price_all, since the RPC now prices
+-- from that column and refuses a null one. price_all is whole lek, so
+-- Book One's minted amount is 999 * 100 = 99900 minor units, and
+-- HALFOFF (50%) on it is 999 * 50 = 49950 -- exactly, with no rounding.
+insert into public.books (id, author_id, title, status, price_cents, price_all) values
+  ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Book One', 'published', 999, 999),
+  ('b0000000-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111', 'Book Two', 'published', 500, 500);
 
 insert into public.discount_codes (id, author_id, book_id, code, percent_off, active) values
   ('d0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
    'b0000000-0000-0000-0000-000000000001', 'HALFOFF', 50, true);
 
--- Mint a ledger_v1/ALL quote as a given reader -- the only regime a POK
--- attempt may ever be claimed for.
+-- Mint a quote as a given reader.
+--
+-- ALL-CHECKOUT-1: the regime, currency and royalty arguments are gone.
+-- This helper no longer asks for ledger_v1/ALL; it gets them because
+-- they are the only values the function can produce, which is the
+-- point. The royalty it used to pass (7000) is likewise gone: every
+-- minted intent now carries 8000, set inside the function.
 create function pg_temp.quote_as(
   p_reader uuid, p_book uuid, p_code text default null,
   p_accept boolean default false, p_expected uuid default null)
@@ -89,7 +98,7 @@ begin
   perform set_config('request.jwt.claim.sub', p_reader::text, true);
   set local role authenticated;
   return query select * from public.create_book_checkout_intent(
-    p_book, p_code, 'librum_ledger_v1', 'ALL', 7000, p_accept, p_expected);
+    p_book, p_code, p_accept, p_expected);
   reset role;
 end;
 $$;
@@ -389,13 +398,24 @@ begin
   perform pg_temp.assert(r.outcome = 'intent_not_found', 'part4: an unknown intent is not_found');
 
   -- A legacy/Stripe-bound or non-ledger quote may never carry a POK order.
+  --
+  -- ALL-CHECKOUT-1: this fixture used to be minted through the RPC with
+  -- p_regime = 'legacy_stripe_connect_v1'. No authenticated caller can
+  -- do that any more -- that is the capability the change removes -- so
+  -- the row is inserted directly as the table owner instead. The
+  -- behaviour under test is unchanged and is still worth proving: a
+  -- legacy intent that EXISTS (every one in staging does) must never
+  -- become claimable for a POK order. Deliberately NOT kept mintable
+  -- through the RPC merely to make this fixture convenient.
   declare v_legacy uuid;
   begin
-    perform set_config('request.jwt.claim.sub', '33333333-3333-3333-3333-333333333333', true);
-    set local role authenticated;
-    select i.intent_id into v_legacy from public.create_book_checkout_intent(
-      'b0000000-0000-0000-0000-000000000002', null, 'legacy_stripe_connect_v1', 'USD', null) i;
-    reset role;
+    insert into public.book_checkout_intents
+      (book_id, reader_id, book_title, price_cents_at_checkout, expires_at,
+       regime, currency, royalty_rate_bps)
+    values ('b0000000-0000-0000-0000-000000000002', '33333333-3333-3333-3333-333333333333',
+            'Book Two', 500, now() + interval '23 hours',
+            'legacy_stripe_connect_v1', 'USD', null)
+    returning id into v_legacy;
     select * into r from pg_temp.claim(v_legacy);
     perform pg_temp.assert(r.outcome = 'intent_not_claimable',
       'part4: a legacy/USD quote must never be claimable for a POK order');
@@ -613,7 +633,7 @@ begin
     'part6: a changed quote over a live attempt must not be decided in SQL');
   perform pg_temp.assert(r.intent_id = v_intent,
     'part6: the conflict must name the intent the reader is actually held on');
-  perform pg_temp.assert(r.price_cents_at_checkout = 999,
+  perform pg_temp.assert(r.price_cents_at_checkout = 99900,
     'part6: the conflict must report the FROZEN amount, not today''s');
   perform pg_temp.assert(
     (select superseded_at is null from public.book_checkout_intents where id = v_intent),
@@ -754,7 +774,7 @@ begin
                                         'HALFOFF', true, v_intent);
   perform pg_temp.assert(r.quote_status = 'reused' and r.intent_id = v_intent,
     'part7: a deliberate accept resumes exactly the named intent');
-  perform pg_temp.assert(r.price_cents_at_checkout = 999,
+  perform pg_temp.assert(r.price_cents_at_checkout = 99900,
     'part7: the resumed quote keeps its frozen amount, never today''s discounted one');
 
   -- A different id is never substituted.
@@ -858,7 +878,7 @@ begin
   reset role;
   perform pg_temp.assert(r.quote_state = 'unresolved_conflict',
     'part8: a live attempt on an open intent reads as an unresolved conflict');
-  perform pg_temp.assert(r.price_cents_at_checkout = 999,
+  perform pg_temp.assert(r.price_cents_at_checkout = 99900,
     'part8: the quote read must return the frozen amount');
 
   -- Foreign and mismatched reads return NO information at all -- not a

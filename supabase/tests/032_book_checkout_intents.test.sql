@@ -66,10 +66,17 @@ update public.profiles set stripe_account_id = 'acct_A', stripe_payouts_enabled 
 update public.profiles set stripe_account_id = 'acct_B', stripe_payouts_enabled = true
   where id = '44444444-4444-4444-4444-444444444444';
 
-insert into public.books (id, author_id, title, status, price_cents) values
-  ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Book One', 'published', 999),
-  ('b0000000-0000-0000-0000-000000000002', '44444444-4444-4444-4444-444444444444', 'Book Two (other author)', 'published', 500),
-  ('b0000000-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111111', 'Draft Book', 'draft', 999);
+-- ALL-CHECKOUT-1: every fixture book gains price_all, because
+-- create_book_checkout_intent now reads that column and refuses a book
+-- whose price_all is null. price_cents is kept at its original value
+-- deliberately: it is legacy USD and the RPC must never read it again,
+-- so leaving it in place is itself part of the evidence. The ALL prices
+-- are whole lek, so the minted minor-unit amounts below are price_all
+-- * 100 -- 999 lek is 99900 minor units.
+insert into public.books (id, author_id, title, status, price_cents, price_all) values
+  ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Book One', 'published', 999, 999),
+  ('b0000000-0000-0000-0000-000000000002', '44444444-4444-4444-4444-444444444444', 'Book Two (other author)', 'published', 500, 500),
+  ('b0000000-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111111', 'Draft Book', 'draft', 999, 999);
 
 insert into public.discount_codes (id, author_id, book_id, code, percent_off, active) values
   ('d0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'b0000000-0000-0000-0000-000000000001', 'HALFOFF', 50, true),
@@ -85,6 +92,15 @@ insert into public.discount_codes (id, author_id, book_id, code, amount_off_cent
 -- had to be widened. The two trailing accept-path parameters are
 -- defaulted here exactly as they are in the RPC, so every existing
 -- three-argument call site in this file is unchanged.
+--
+-- ALL-CHECKOUT-1: the regime, currency and royalty arguments are gone
+-- from the RPC, so this helper passes four arguments and no longer
+-- chooses any of them. The companion pg_temp.create_ledger_intent_as
+-- helper, which existed only to pass a DIFFERENT regime/currency/rate,
+-- has been deleted with them: there is now exactly one kind of intent
+-- this RPC can mint, and a helper implying otherwise would be a lie
+-- about the very surface this change removed. (It had no call site in
+-- this file.)
 create function pg_temp.create_intent_as(
   p_reader uuid, p_book uuid, p_code text default null,
   p_accept boolean default false, p_expected uuid default null)
@@ -95,25 +111,41 @@ begin
   perform set_config('request.jwt.claim.sub', p_reader::text, true);
   set local role authenticated;
   return query select * from public.create_book_checkout_intent(
-    p_book, p_code, 'legacy_stripe_connect_v1', 'USD', null, p_accept, p_expected);
+    p_book, p_code, p_accept, p_expected);
   reset role;
 end;
 $$;
 
--- Helper: mint a ledger_v1/ALL quote, the only regime a POK attempt may
--- ever be claimed for.
-create function pg_temp.create_ledger_intent_as(
-  p_reader uuid, p_book uuid, p_code text default null,
-  p_accept boolean default false, p_expected uuid default null)
-returns table (intent_id uuid, price_cents_at_checkout integer, discount_code_id uuid,
-               expires_at timestamptz, quote_status text)
+-- Helper: a LEGACY (legacy_stripe_connect_v1 / USD) intent, inserted
+-- directly as the table owner.
+--
+-- ALL-CHECKOUT-1 made this necessary and it is not a convenience.
+-- finalize_book_checkout_intent -- the function this file's parts 7,
+-- 7b, 7d and 7e exist to test -- refuses a librum_ledger_v1 intent
+-- outright ("ledger_v1 checkouts must be finalized via
+-- finalize_ledger_book_payment"), and the RPC can no longer mint a
+-- legacy intent for anybody. So the legacy fixture is produced the only
+-- way it can honestly be produced now: by direct owner insertion, the
+-- same remedy 059 uses for its own legacy fixture. Deliberately NOT by
+-- keeping an authenticated route capable of minting legacy/USD intents,
+-- which is the exact capability this change removes.
+--
+-- Its amounts stay in USD cents (999 for the 999-cent Book One),
+-- because a legacy row IS a USD row; the ALL minor-unit amounts belong
+-- to the intents the RPC mints.
+create function pg_temp.insert_legacy_intent(
+  p_reader uuid, p_book uuid, p_price integer, p_title text default 'Book One')
+returns table (intent_id uuid, price_cents_at_checkout integer)
 language plpgsql as $$
 begin
-  perform set_config('request.jwt.claim.sub', p_reader::text, true);
-  set local role authenticated;
-  return query select * from public.create_book_checkout_intent(
-    p_book, p_code, 'librum_ledger_v1', 'ALL', 7000, p_accept, p_expected);
-  reset role;
+  insert into public.book_checkout_intents
+    (book_id, reader_id, book_title, price_cents_at_checkout, expires_at,
+     regime, currency, royalty_rate_bps)
+  values (p_book, p_reader, p_title, p_price, now() + interval '23 hours',
+          'legacy_stripe_connect_v1', 'USD', null)
+  returning id, public.book_checkout_intents.price_cents_at_checkout
+  into intent_id, price_cents_at_checkout;
+  return next;
 end;
 $$;
 
@@ -187,105 +219,123 @@ begin
 end $$;
 
 -- ============================================================
--- Part 3: price/discount boundary rounding
+-- Part 3: price/discount arithmetic
 -- ============================================================
--- percent_off cases -- empirically verified against Node's
--- Math.max(Math.round(priceCents * (1 - percentOff/100)), 50) (the real
--- applyDiscount() in src/lib/pricing.ts) before this migration was
--- written -- re-verified here as a committed, re-runnable regression
--- against the RPC's real computation, not just the standalone
--- expression. Chosen deliberately so most cases land comfortably above
--- the 50-cent MIN_CHARGE_CENTS floor -- a tiny discounted value would
--- get floored to 50 regardless of whether the rounding itself were
--- correct, which would silently mask a rounding bug. (101,50) and
--- (103,50) are exact .5-cent ties (50.5 and 51.5) that land just above
--- the floor, so they still genuinely exercise round()'s tie-breaking,
--- not just greatest()'s floor.
+-- ALL-CHECKOUT-1 rewrote both tables below, because the arithmetic they
+-- pinned no longer exists.
+--
+-- What they used to assert was
+--   greatest(round(price_cents * (100 - p) / 100), 50)
+-- and
+--   greatest(price_cents - amount_off_cents, 50)
+-- -- a USD computation with a rounding rule and a CLAMP. All three of
+-- those properties are gone:
+--
+--   * the price is whole lek (books.price_all) and the stored amount is
+--     minor units, so the percentage case is price_all * (100 - p),
+--     exactly, with no round() and no numeric cast anywhere in it. The
+--     old rounding cases (101,50) and (103,50) existed to exercise
+--     round()'s tie-breaking; there are no ties to break now, and
+--     re-adding a round() here to keep them would be inventing a
+--     rounding policy the function deliberately does not have;
+--   * the fixed case is (price_all - amount_off_all) * 100, also exact;
+--   * the clamp is DELETED, not retuned. A clamp raises a below-floor
+--     discounted price back UP to the floor, so a book priced under the
+--     floor would cost MORE with a valid code than without one. The
+--     rule is now a rejection at 9900 minor units, and the third column
+--     below is the amount or the word `reject`.
+--
+-- These remain standalone-expression checks of the rule itself; the
+-- end-to-end proof that the RPC computes and rejects exactly this way
+-- lives in 062_all_checkout_intent_arithmetic.test.sql.
 do $$
 declare
   case_row record;
   computed integer;
   cases text := $c$
-    201,50,101
-    999,50,500
-    1001,50,501
-    150,1,149
-    350,1,347
-    999,1,989
-    101,50,51
-    103,50,52
-    1,1,50
-    1,100,50
-    50,100,50
-    2500,50,1250
+    99,10,reject
+    100,1,9900
+    199,10,17910
+    199,7,18507
+    999,50,49950
+    1001,50,50050
+    150,1,14850
+    2500,50,125000
+    100000,1,9900000
+    199,100,reject
+    100,2,reject
+    99,1,reject
   $c$;
 begin
   for case_row in
     select
-      split_part(trim(line), ',', 1)::integer as price_cents,
+      split_part(trim(line), ',', 1)::integer as price_all,
       split_part(trim(line), ',', 2)::integer as percent_off,
-      split_part(trim(line), ',', 3)::integer as expected
+      split_part(trim(line), ',', 3) as expected
     from unnest(string_to_array(trim(cases), E'\n')) as line
     where trim(line) <> ''
   loop
-    computed := greatest(
-      round(case_row.price_cents::numeric * (100 - case_row.percent_off) / 100)::integer,
-      50
-    );
+    computed := case_row.price_all * (100 - case_row.percent_off);
     perform pg_temp.assert(
-      computed = case_row.expected,
-      format('part3: percent_off price_cents=%s percent_off=%s expected=%s got=%s',
-        case_row.price_cents, case_row.percent_off, case_row.expected, computed)
+      case when case_row.expected = 'reject'
+           then computed < 9900
+           else computed >= 9900 and computed = case_row.expected::integer end,
+      format('part3: percent_off price_all=%s percent_off=%s expected=%s got=%s',
+        case_row.price_all, case_row.percent_off, case_row.expected, computed)
     );
   end loop;
 end $$;
 
--- amount_off_cents cases -- pure integer subtraction, no rounding
--- function involved (exact in both Node and SQL by construction), still
--- verified here for completeness, including the floor engaging when the
--- discount meets or exceeds the price.
+-- amount_off_all cases -- whole lek subtracted from a whole-lek price,
+-- then converted once. Exact by construction; the interesting cases are
+-- the ones at and below the 9900 floor, including a discount equal to
+-- the price (result 0) and one greater than it (result negative), both
+-- of which the old clamp turned into a charge of 50 cents.
 do $$
 declare
   case_row record;
   computed integer;
   cases text := $c$
-    999,100,899
-    999,949,50
-    999,950,50
-    100,49,51
-    100,50,50
-    100,51,50
-    60,100,50
+    199,20,17900
+    100,1,9900
+    199,100,9900
+    999,100,89900
+    100000,1,9999900
+    199,199,reject
+    199,200,reject
+    100,2,reject
   $c$;
 begin
   for case_row in
     select
-      split_part(trim(line), ',', 1)::integer as price_cents,
-      split_part(trim(line), ',', 2)::integer as amount_off_cents,
-      split_part(trim(line), ',', 3)::integer as expected
+      split_part(trim(line), ',', 1)::integer as price_all,
+      split_part(trim(line), ',', 2)::integer as amount_off_all,
+      split_part(trim(line), ',', 3) as expected
     from unnest(string_to_array(trim(cases), E'\n')) as line
     where trim(line) <> ''
   loop
-    computed := greatest(case_row.price_cents - case_row.amount_off_cents, 50);
+    computed := (case_row.price_all - case_row.amount_off_all) * 100;
     perform pg_temp.assert(
-      computed = case_row.expected,
-      format('part3: amount_off_cents price_cents=%s amount_off_cents=%s expected=%s got=%s',
-        case_row.price_cents, case_row.amount_off_cents, case_row.expected, computed)
+      case when case_row.expected = 'reject'
+           then computed < 9900
+           else computed >= 9900 and computed = case_row.expected::integer end,
+      format('part3: amount_off_all price_all=%s amount_off_all=%s expected=%s got=%s',
+        case_row.price_all, case_row.amount_off_all, case_row.expected, computed)
     );
   end loop;
 end $$;
 
 -- End-to-end through the actual RPC (not just the standalone
--- expression): HALFOFF is 50% off a 999-cent book -> round(999*50/100)
--- = round(499.5) = 500 (numeric round, ties away from zero).
+-- expression): HALFOFF is 50% off a 999-lek book -> 999 * 50 = 49950
+-- minor units, i.e. 499,50 ALL. No rounding participates.
 do $$
 declare
   r record;
 begin
   select * into r from pg_temp.create_intent_as(
     '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 'halfoff');
-  perform pg_temp.assert(r.price_cents_at_checkout = 500,
-    format('part3: HALFOFF on a 999-cent book must charge 500, got %s', r.price_cents_at_checkout));
+  perform pg_temp.assert(r.price_cents_at_checkout = 49950,
+    format('part3: HALFOFF on a 999-lek book must charge 49950 minor units, got %s', r.price_cents_at_checkout));
   perform pg_temp.assert(r.discount_code_id = 'd0000000-0000-0000-0000-000000000001',
     'part3: discount_code_id must be resolved and returned');
   -- Lowercase input must resolve identically -- the RPC re-normalizes,
@@ -303,28 +353,34 @@ begin
   -- Inactive code
   select * into r from pg_temp.create_intent_as(
     '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 'INACTIVE');
-  perform pg_temp.assert(r.price_cents_at_checkout = 999 and r.discount_code_id is null,
+  perform pg_temp.assert(r.price_cents_at_checkout = 99900 and r.discount_code_id is null,
     'part4: an inactive code must fall back to full price, not raise');
   delete from public.book_checkout_intents where id = r.intent_id;
 
   -- Expired code
   select * into r from pg_temp.create_intent_as(
     '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 'EXPIRED');
-  perform pg_temp.assert(r.price_cents_at_checkout = 999 and r.discount_code_id is null,
+  -- ALL-CHECKOUT-1: EXPIRED is an amount_off_cents (legacy USD) code,
+  -- which the RPC would now reject outright with
+  -- discount_not_applicable -- but only if it were SELECTED. It is
+  -- expired, so the discount lookup never returns it and the call is
+  -- indistinguishable from one with no code at all. That distinction is
+  -- the point of keeping this case here.
+  perform pg_temp.assert(r.price_cents_at_checkout = 99900 and r.discount_code_id is null,
     'part4: an expired code must fall back to full price, not raise');
   delete from public.book_checkout_intents where id = r.intent_id;
 
   -- Nonexistent code
   select * into r from pg_temp.create_intent_as(
     '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 'NOSUCHCODE');
-  perform pg_temp.assert(r.price_cents_at_checkout = 999 and r.discount_code_id is null,
+  perform pg_temp.assert(r.price_cents_at_checkout = 99900 and r.discount_code_id is null,
     'part4: a nonexistent code must fall back to full price, not raise');
   delete from public.book_checkout_intents where id = r.intent_id;
 
   -- A real code that belongs to a DIFFERENT book must not apply.
   select * into r from pg_temp.create_intent_as(
     '33333333-3333-3333-3333-333333333333', 'b0000000-0000-0000-0000-000000000002', 'HALFOFF');
-  perform pg_temp.assert(r.price_cents_at_checkout = 500 and r.discount_code_id is null,
+  perform pg_temp.assert(r.price_cents_at_checkout = 50000 and r.discount_code_id is null,
     'part4: a code scoped to a different book must not apply');
   delete from public.book_checkout_intents where id = r.intent_id;
 end $$;
@@ -335,7 +391,7 @@ end $$;
 do $$
 begin
   insert into public.purchases (book_id, reader_id, stripe_checkout_session_id, amount_cents)
-  values ('b0000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'cs_owned', 999);
+  values ('b0000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'cs_owned', 99900);
 
   begin
     perform pg_temp.create_intent_as('22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
@@ -376,13 +432,24 @@ begin
   perform pg_temp.assert(first_call.intent_id = second_call.intent_id,
     'part6: a second call before the first intent expires/settles must reuse the same intent_id');
 
-  -- Finalize it (eligible_fulfilled) as service_role, then confirm a
-  -- THIRD call does NOT reuse the now-fulfilled intent -- it must mint
-  -- a fresh one (this would fail today if fulfilled_at were not part of
-  -- the reuse predicate).
-  set local role service_role;
-  perform public.finalize_book_checkout_intent(first_call.intent_id, 'cs_reuse_1', 'pi_reuse_1', first_call.price_cents_at_checkout);
-  reset role;
+  -- Settle it, then confirm a THIRD call does NOT reuse the now-
+  -- fulfilled intent -- it must be refused instead (this would fail
+  -- today if fulfilled_at were not part of the reuse predicate, or if
+  -- ownership were not re-checked on the reuse path).
+  --
+  -- ALL-CHECKOUT-1: settled by direct owner writes rather than by
+  -- finalize_book_checkout_intent, which is the LEGACY finalizer and
+  -- refuses a librum_ledger_v1 intent -- the only kind this RPC can now
+  -- mint. The two writes below are exactly what that finalizer would
+  -- have done to these two rows, and this block is testing the RPC's
+  -- reuse predicate, not the finalizer.
+  insert into public.purchases (book_id, reader_id, stripe_checkout_session_id, amount_cents)
+  values ('b0000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
+          'cs_reuse_1', first_call.price_cents_at_checkout);
+  update public.book_checkout_intents
+     set completed_at = now(), fulfilled_at = now(),
+         stripe_checkout_session_id = 'cs_reuse_1', stripe_payment_intent_id = 'pi_reuse_1'
+   where id = first_call.intent_id;
 
   declare
     third_call record;
@@ -434,15 +501,16 @@ begin
     ('22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333333');
 end $$;
 
--- STALE-CHECKOUT-1: the LEGACY regime's own quote statuses.
+-- Quote statuses on a book with NO POK attempt.
 --
--- 059_stale_checkout_attempt_repair.test.sql covers the decision table
--- for ledger_v1/POK, which is where attempts and retirement exist. This
--- block covers what that file cannot: that adding supersession did not
--- quietly change how a legacy_stripe_connect_v1/USD quote behaves, and
--- that the status column tells the truth on this path too. A legacy
--- quote can never have a POK attempt, so every outcome here is decided
--- entirely by economics.
+-- STALE-CHECKOUT-1 wrote this block to cover the legacy
+-- legacy_stripe_connect_v1/USD path, which had no attempts and so was
+-- decided entirely by economics. ALL-CHECKOUT-1 removed the ability to
+-- mint a legacy intent through this RPC at all, so the block now covers
+-- the same thing for the only regime left: a ledger_v1/ALL quote for a
+-- book that has no pok_book_checkout_orders row. Every outcome here is
+-- still decided entirely by economics, which is why it belongs here and
+-- not in 059, where attempts and retirement live.
 do $$
 declare
   a record;
@@ -452,26 +520,29 @@ begin
   select * into a from pg_temp.create_intent_as(
     '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
   perform pg_temp.assert(a.quote_status = 'minted',
-    'part6c: a first legacy quote reports minted');
+    'part6c: a first quote reports minted');
 
   select * into b from pg_temp.create_intent_as(
     '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
   perform pg_temp.assert(b.quote_status = 'reused' and b.intent_id = a.intent_id,
-    'part6c: an unchanged legacy quote reports reused, not a second mint');
+    'part6c: an unchanged quote reports reused, not a second mint');
 
   -- Changed economics with no attempt: supersede and re-mint, exactly
   -- as before the repair -- only now the superseded row says WHY.
   select * into c from pg_temp.create_intent_as(
     '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 'HALFOFF');
   perform pg_temp.assert(c.quote_status = 'minted' and c.intent_id <> a.intent_id,
-    'part6c: a repriced legacy quote mints a new intent');
+    'part6c: a repriced quote mints a new intent');
   perform pg_temp.assert(
     (select superseded_reason = 'quote_stale' from public.book_checkout_intents where id = a.intent_id),
-    'part6c: the displaced legacy quote must record quote_stale');
+    'part6c: the displaced quote must record quote_stale');
+  -- ALL-CHECKOUT-1: no argument asked for these. They are the
+  -- function's own constants, and every intent it mints now carries
+  -- exactly them.
   perform pg_temp.assert(
-    (select currency = 'USD' and regime = 'legacy_stripe_connect_v1'
+    (select currency = 'ALL' and regime = 'librum_ledger_v1' and royalty_rate_bps = 8000
        from public.book_checkout_intents where id = c.intent_id),
-    'part6c: the replacement must keep the legacy regime and currency it was asked for');
+    'part6c: every minted intent must carry librum_ledger_v1 / ALL / 8000, chosen internally');
 
   -- A legacy quote bound to a Stripe session is never superseded: that
   -- session may still be payable and this code can no longer ask Stripe.
@@ -510,8 +581,8 @@ declare
   purchase_row record;
 begin
   -- eligible_fulfilled
-  select * into intent from pg_temp.create_intent_as(
-    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+  select * into intent from pg_temp.insert_legacy_intent(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 999);
   set local role service_role;
   select f.outcome into outcome
   from public.finalize_book_checkout_intent(intent.intent_id, 'cs_p7_a', 'pi_p7_a', intent.price_cents_at_checkout) f;
@@ -550,8 +621,8 @@ begin
   -- create_book_checkout_intent's own reuse logic would normally hand
   -- back the same intent -- this isolates finalize's own classification
   -- instead of re-testing reuse).
-  select * into intent_a from pg_temp.create_intent_as(
-    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+  select * into intent_a from pg_temp.insert_legacy_intent(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 999);
   insert into public.book_checkout_intents (book_id, reader_id, book_title, price_cents_at_checkout, expires_at)
   values ('b0000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'Book One', 999, now() + interval '1 hour')
   returning id, price_cents_at_checkout into intent_b;
@@ -593,8 +664,8 @@ declare
 begin
   -- blocked_book_or_reader_deleted: book_id/reader_id gone by the time
   -- finalize runs (ON DELETE SET NULL).
-  select * into intent from pg_temp.create_intent_as(
-    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+  select * into intent from pg_temp.insert_legacy_intent(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 999);
 
   delete from public.books where id = 'b0000000-0000-0000-0000-000000000001';
 
@@ -619,8 +690,8 @@ begin
   -- Restore the book fixture for any tests that might run after this
   -- file in a longer-lived session (this file itself rolls back at the
   -- end regardless).
-  insert into public.books (id, author_id, title, status, price_cents) values
-    ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Book One', 'published', 999);
+  insert into public.books (id, author_id, title, status, price_cents, price_all) values
+    ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Book One', 'published', 999, 999);
 end $$;
 
 -- ============================================================
@@ -636,8 +707,8 @@ begin
   -- part7 test already does this implicitly (each passes
   -- intent.price_cents_at_checkout as the amount); asserted explicitly
   -- here as its own case.
-  select * into intent from pg_temp.create_intent_as(
-    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+  select * into intent from pg_temp.insert_legacy_intent(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 999);
   set local role service_role;
   select f.outcome into outcome
   from public.finalize_book_checkout_intent(intent.intent_id, 'cs_p7e_a', 'pi_p7e_a', intent.price_cents_at_checkout) f;
@@ -657,8 +728,8 @@ begin
   -- purchases row, no fulfilled_at, no completed_at, no
   -- reconciliation_reason -- the whole transaction rolls back, not just
   -- the purchases write.
-  select * into intent from pg_temp.create_intent_as(
-    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+  select * into intent from pg_temp.insert_legacy_intent(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 999);
 
   begin
     set local role service_role;
@@ -691,8 +762,8 @@ begin
   -- A null amount must also fail closed, not silently bypass the check
   -- (see this migration's own comment: `<>` against null evaluates to
   -- null, which plpgsql's `if` treats as false).
-  select * into intent from pg_temp.create_intent_as(
-    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+  select * into intent from pg_temp.insert_legacy_intent(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 999);
 
   begin
     set local role service_role;
@@ -728,10 +799,10 @@ begin
   -- practical consequence: finalizing two DIFFERENT intents (different
   -- readers, different books) never cross-contaminates which purchases
   -- row gets which identity.
-  select * into intent_r1 from pg_temp.create_intent_as(
-    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
-  select * into intent_r2 from pg_temp.create_intent_as(
-    '33333333-3333-3333-3333-333333333333', 'b0000000-0000-0000-0000-000000000002');
+  select * into intent_r1 from pg_temp.insert_legacy_intent(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 999);
+  select * into intent_r2 from pg_temp.insert_legacy_intent(
+    '33333333-3333-3333-3333-333333333333', 'b0000000-0000-0000-0000-000000000002', 500, 'Book Two (other author)');
 
   set local role service_role;
   select f.outcome into outcome_r1
@@ -767,8 +838,8 @@ begin
   -- call -- if the already_finalized guard were bypassed, this would
   -- silently corrupt the purchases row's own financial identifiers with
   -- a second, unrelated transaction's values.
-  select * into intent from pg_temp.create_intent_as(
-    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001');
+  select * into intent from pg_temp.insert_legacy_intent(
+    '22222222-2222-2222-2222-222222222222', 'b0000000-0000-0000-0000-000000000001', 999);
 
   set local role service_role;
   select f.outcome into outcome
@@ -939,14 +1010,23 @@ begin
   -- (p_accept_existing_quote, p_expected_intent_id), again via
   -- drop+recreate, so the five-argument signature no longer exists as a
   -- distinct function either. The grant behaviour is still unchanged.
-  perform pg_temp.assert(not has_function_privilege('anon', 'public.create_book_checkout_intent(uuid,text,text,text,integer,boolean,uuid)', 'EXECUTE'), 'part9: anon must not have EXECUTE on create_book_checkout_intent');
-  perform pg_temp.assert(has_function_privilege('authenticated', 'public.create_book_checkout_intent(uuid,text,text,text,integer,boolean,uuid)', 'EXECUTE'), 'part9: authenticated must have EXECUTE on create_book_checkout_intent');
+  --
+  -- ALL-CHECKOUT-1: the signature NARROWED to four arguments --
+  -- p_regime, p_currency and p_royalty_rate_bps are gone. The grant
+  -- behaviour is unchanged again (anon denied, authenticated allowed),
+  -- and PUBLIC is asserted explicitly below rather than assumed from
+  -- anon's denial: they are different grantees and a default EXECUTE to
+  -- PUBLIC on a freshly created function is exactly the mistake worth
+  -- catching.
+  perform pg_temp.assert(not has_function_privilege('anon', 'public.create_book_checkout_intent(uuid,text,boolean,uuid)', 'EXECUTE'), 'part9: anon must not have EXECUTE on create_book_checkout_intent');
+  perform pg_temp.assert(not has_function_privilege('public', 'public.create_book_checkout_intent(uuid,text,boolean,uuid)', 'EXECUTE'), 'part9: PUBLIC must not have EXECUTE on create_book_checkout_intent');
+  perform pg_temp.assert(has_function_privilege('authenticated', 'public.create_book_checkout_intent(uuid,text,boolean,uuid)', 'EXECUTE'), 'part9: authenticated must have EXECUTE on create_book_checkout_intent');
   perform pg_temp.assert(
     not exists (
       select 1 from pg_proc p
       where p.pronamespace = 'public'::regnamespace
         and p.proname = 'create_book_checkout_intent'
-        and p.pronargs <> 7
+        and p.pronargs <> 4
     ),
     'part9: no older create_book_checkout_intent overload may survive the drop+recreate');
 

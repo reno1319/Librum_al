@@ -49,6 +49,8 @@ BOOK_ID="e0560900-0000-0000-0000-000000000003"
 # unlike the rest of this repo's SQL test convention) -- two genuinely
 # separate connections need to see them. Cleans up any leftover rows
 # from a prior failed run first, so this script is safely rerunnable.
+# ALL-CHECKOUT-1: the intent call lost its regime/currency/royalty
+# arguments; those are now the function's own constants.
 # create_book_checkout_intent()/record_payment_event() are run here
 # (as the connecting superuser/table-owner, which retains implicit
 # EXECUTE regardless of any grant) to produce a real, RPC-created
@@ -72,13 +74,17 @@ delete from auth.users where id in ('$AUTHOR_ID', '$READER_ID');
 insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data) values
   ('$AUTHOR_ID', 'p056-contention-author@test', now(), '{"role":"author","display_name":"Contention Author"}'),
   ('$READER_ID', 'p056-contention-reader@test', now(), '{"role":"reader","display_name":"Contention Reader"}');
-insert into public.books (id, author_id, title, description, preview_text, keywords, price_cents, status) values
-  ('$BOOK_ID', '$AUTHOR_ID', 'Contention Book', '', '', '', 500, 'published');
+-- ALL-CHECKOUT-1: price_all is required now -- the RPC prices from it
+-- and refuses a null. The frozen amount below is therefore 50000 minor
+-- units (500 lek), read back from the RPC rather than hardcoded, so
+-- every later assertion follows automatically.
+insert into public.books (id, author_id, title, description, preview_text, keywords, price_cents, price_all, status) values
+  ('$BOOK_ID', '$AUTHOR_ID', 'Contention Book', '', '', '', 500, 500, 'published');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '$READER_ID', true);
 select intent_id, price_cents_at_checkout
-  from public.create_book_checkout_intent('$BOOK_ID'::uuid, null, 'librum_ledger_v1', 'ALL', 8000);
+  from public.create_book_checkout_intent('$BOOK_ID'::uuid, null);
 reset role;
 
 set local role service_role;
