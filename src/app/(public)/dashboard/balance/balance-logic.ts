@@ -11,20 +11,26 @@ import type {
   AuthorFinancialActivityRow,
   AuthorPayoutHistoryRow,
 } from "@/lib/types";
+import { formatTransactionAmount, provenanceFromStoredCurrency } from "@/lib/transaction-money";
 
-// Integer minor units in, formatted string out -- the only place in
-// this page's code that ever divides by 100. Never used for arithmetic;
-// every balance computation happens in the SQL layer (migration 050) on
-// bigint minor units, exactly as LEDGER-1D requires. Intl.NumberFormat
-// is currency-aware (not a hardcoded "$"), so EUR/USD (or any future
-// currency the ledger holds) each render with their own correct symbol
-// and placement -- the two are never combined into one figure.
+// Integer minor units in, formatted string out. Never used for
+// arithmetic; every balance computation happens in the SQL layer
+// (migration 050) on bigint minor units, exactly as LEDGER-1D requires.
+// Every row this page renders carries its own ledger currency
+// (author_ledger_entries/author_payouts are currency-keyed), and each
+// currency is always rendered on its own -- never combined into one
+// figure.
+//
+// ALL-TXN-CURRENCY-4: formerly Intl.NumberFormat(undefined, {style:
+// "currency"}) over amountMinor / 100. That dropped the qindarka for ALL
+// (this runtime's CLDR data gives ALL zero fraction digits, so 17910
+// rendered as "ALL 179"), depended on the server locale, and went
+// through a float. It now delegates to the shared integer-only
+// transaction formatter with the row's own stored currency; a currency
+// that formatter cannot render shows an explicit "unavailable" label
+// instead of a guess.
 export function formatMinorAmount(amountMinor: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    signDisplay: "auto",
-  }).format(amountMinor / 100);
+  return formatTransactionAmount(amountMinor, provenanceFromStoredCurrency(currency));
 }
 
 const ENTRY_TYPE_LABELS: Record<AuthorFinancialActivityRow["entry_type"], string> = {

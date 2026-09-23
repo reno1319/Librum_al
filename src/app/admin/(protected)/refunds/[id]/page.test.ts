@@ -92,3 +92,111 @@ describe("AdminRefundRequestDetailPage: maintenance-mode gate", () => {
     expect(mockRequireStaff).toHaveBeenCalledWith("refunds.view");
   });
 });
+
+// ALL-TXN-CURRENCY-4 (Patch 4): the request total, every one of its
+// items, and the issue-refund confirmation all use the ONE currency the
+// request's own payment reference establishes. An item never gets a
+// currency of its own, so parent and items cannot disagree.
+describe("AdminRefundRequestDetailPage: request and items share the request's currency (Patch 4)", () => {
+  const REFUND_ID = "22222222-2222-4222-8222-222222222222";
+
+  function queryStub(result: unknown) {
+    const chain: Record<string, unknown> = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === "then") return (resolve: (v: unknown) => unknown) => resolve(result);
+          return () => chain;
+        },
+      },
+    );
+    return chain;
+  }
+
+  function setup(currencyRows: unknown[] | null, status = "requested") {
+    const rpc = vi.fn(async () => ({ data: currencyRows, error: currencyRows ? null : { message: "boom" } }));
+    mockRequireStaff.mockImplementation((() => undefined) as never);
+    mockCreateClient.mockImplementation((() =>
+      Promise.resolve({
+        from: (table: string) =>
+          queryStub({
+            data:
+              table === "refund_requests"
+                ? {
+                    id: REFUND_ID,
+                    reader_id: null,
+                    reviewed_by: null,
+                    stripe_payment_intent_id: "pi_detail",
+                    amount_cents: 159840,
+                    reason: null,
+                    status,
+                    requested_at: "2026-09-20T10:00:00Z",
+                    reviewed_at: null,
+                    admin_notes: null,
+                  }
+                : table === "refund_request_items"
+                  ? [
+                      { id: "i1", purchase_id: "p1", book_id: "b1", amount_cents: 79920, books: { title: "Alpha" } },
+                      { id: "i2", purchase_id: "p2", book_id: "b2", amount_cents: 79920, books: { title: "Beta" } },
+                    ]
+                  : [],
+          }),
+        rpc,
+      })) as never);
+    return rpc;
+  }
+
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    mockRequireStaff.mockImplementation((permission: string) => {
+      throw new RedirectSignal(`/?denied=${permission}`);
+    });
+    mockCreateClient.mockImplementation(() => Promise.resolve({ from: mockFrom }));
+  });
+
+  async function render() {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const element = await AdminRefundRequestDetailPage({
+      params: Promise.resolve({ id: REFUND_ID }),
+      searchParams: Promise.resolve({}),
+    });
+    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+
+  it("an ALL request renders its total and every item in ALL", async () => {
+    const rpc = setup([{ refund_request_id: REFUND_ID, currency_state: "resolved", currency: "ALL" }]);
+    const html = await render();
+    expect(rpc).toHaveBeenCalledWith("list_refund_request_currencies", {
+      p_refund_request_ids: [REFUND_ID],
+    });
+    expect(html).toContain("1.598,40 ALL");
+    expect(html.match(/799,20 ALL/g)).toHaveLength(2);
+    expect(html).not.toContain("USD");
+    // React inlines its own form-replay script (which names `$$reactFormReplay`);
+    // only the rendered markup is checked for a dollar sign.
+    expect(html.replace(/<script>[\s\S]*?<\/script>/g, "")).not.toMatch(/\$/);
+  });
+
+  it("a legacy USD request renders its total and every item in USD", async () => {
+    setup([{ refund_request_id: REFUND_ID, currency_state: "resolved", currency: "USD" }]);
+    const html = await render();
+    expect(html).toContain("USD 1,598.40");
+    expect(html.match(/USD 799\.20/g)).toHaveLength(2);
+    expect(html).not.toContain(" ALL");
+  });
+
+  it("an unknown currency is shown as unavailable on the total and on every item, never as USD or ALL", async () => {
+    setup(null);
+    const html = await render();
+    expect(html.match(/Amount unavailable \(currency unknown\)/g)).toHaveLength(3);
+    expect(html).not.toContain("USD");
+    expect(html).not.toContain(" ALL");
+    // React inlines its own form-replay script (which names `$$reactFormReplay`);
+    // only the rendered markup is checked for a dollar sign.
+    expect(html.replace(/<script>[\s\S]*?<\/script>/g, "")).not.toMatch(/\$/);
+  });
+});

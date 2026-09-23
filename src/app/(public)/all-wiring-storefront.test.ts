@@ -219,10 +219,15 @@ describe("bundle pricing is untouched: price_cents remains the bundle authority"
     expect(source).not.toContain("canStartPaidCheckout");
   });
 
-  it("the held-quote notice keeps its legacy formatters until Patch 4 moves it", () => {
+  // ALL-TXN-CURRENCY-4: Patch 4 moved it. The frozen intent amount now
+  // renders in the intent's OWN stored currency through the shared
+  // transaction formatter -- no longer "ALL, else assume dollars".
+  it("the held-quote notice renders the frozen amount in the intent's own currency (Patch 4)", () => {
     const source = code(read("books/[id]/page.tsx"));
-    expect(source).toContain("formatAllPrice(heldQuote.price_cents_at_checkout)");
-    expect(source).toContain("formatPrice(heldQuote.price_cents_at_checkout)");
+    expect(source).toContain("formatTransactionAmount(");
+    expect(source).toContain("provenanceFromStoredCurrency(heldQuote.currency)");
+    expect(source).not.toContain("formatAllPrice(");
+    expect(source).not.toContain("formatPrice(heldQuote");
   });
 });
 

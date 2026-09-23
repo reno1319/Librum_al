@@ -46,25 +46,12 @@ export function formatPrice(priceCents: number): string {
   return priceCents === 0 ? "Free" : `$${(priceCents / 100).toFixed(2)}`;
 }
 
-// STRIPE-CUTOVER-2A Section 9: regime-aware formatter for a ledger_v1
-// TEST-mode price, distinct from formatPrice above (which stays fixed at
-// "$", legacy/USD) so no existing legacy-facing surface is touched by
-// this change. ALL uses two-decimal internal minor units (1 ALL = 100
-// minor units, the same "divide by 100" shape as USD cents) -- per the
-// locked product decision, this is NOT a currency conversion, just this
-// currency's own minor-unit convention, formatted with an explicit "ALL"
-// suffix (rather than a symbol) so it can never be visually mistaken for
-// a dollar amount.
-//
-// ALL-WIRING-2: still here, still used, and deliberately NOT the book
-// catalog formatter. Its one remaining caller is the held-quote notice
-// on Book Detail, which renders a FROZEN legacy intent amount; moving
-// that to formatAllMinorUnits (src/lib/all-money.ts) is Patch 4's work.
-// No active BOOK catalog surface calls this any more -- they all go
-// through formatCatalogPriceLabel (src/lib/catalog-price.ts).
-export function formatAllPrice(priceMinorUnits: number): string {
-  return priceMinorUnits === 0 ? "Free" : `${(priceMinorUnits / 100).toFixed(2)} ALL`;
-}
+// ALL-TXN-CURRENCY-4: formatAllPrice (a "divide by 100, toFixed(2)"
+// ALL formatter that rendered "179.10 ALL" against the rest of the app's
+// "179,10 ALL") is gone. Its one caller, the held-quote notice on Book
+// Detail, now renders the frozen intent amount through
+// formatTransactionAmount (src/lib/transaction-money.ts) in the intent's
+// own stored currency.
 
 // The platform's share of one sale, in the SAME minor units it is given.
 // The name says "cents" for its original legacy USD callers; the

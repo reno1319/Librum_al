@@ -33,6 +33,8 @@
 //   17910    -> "179,10 ALL"
 //   10000000 -> "100.000,00 ALL"
 
+import { formatTransactionMinorUnits } from "@/lib/transaction-money";
+
 /** Reader-facing label for a zero amount -- never "0,00 ALL". */
 export const ALL_FREE_LABEL = "Free";
 
@@ -57,14 +59,11 @@ export function formatAllMinorUnits(minor: number): string {
 
   if (minor === 0) return ALL_FREE_LABEL;
 
-  // String slicing, never arithmetic: `String(minor)` on a non-negative
-  // safe integer is its exact decimal expansion, so padding it to at
-  // least three digits makes the last two the minor part and everything
-  // before them the whole part, for every value in the domain.
-  const digits = String(minor).padStart(3, "0");
-  const wholeDigits = digits.slice(0, -2);
-  const minorDigits = digits.slice(-2);
-  const grouped = wholeDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-
-  return `${grouped},${minorDigits} ALL`;
+  // ALL-TXN-CURRENCY-4: the digit slicing now lives in exactly one place,
+  // the transaction formatter, so a price estimate and a transaction
+  // amount of the same money can never be rendered two different ways.
+  // Same string-slicing technique, byte-identical output for every value
+  // this function accepts; this function keeps its own stricter domain
+  // (non-negative, zero reads "Free").
+  return formatTransactionMinorUnits(minor, "ALL");
 }

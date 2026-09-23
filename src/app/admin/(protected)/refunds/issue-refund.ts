@@ -404,9 +404,21 @@ export async function executeApprovedRefund(
   // the Connect-only legacy world) would apply the WRONG refund
   // semantics if it ever reached one.
   //
-  // Queries the IMMUTABLE `payments` table, keyed by
-  // (provider, provider_payment_id) -- migration 056's own locked
-  // authority for a transaction's regime -- never `purchases.regime`.
+  // Queries the IMMUTABLE `payments` table by provider_payment_id and
+  // regime -- migration 056's own locked authority for a transaction's
+  // regime -- never `purchases.regime`.
+  //
+  // ALL-TXN-CURRENCY-4 correction: deliberately NOT filtered by
+  // provider. A librum_ledger_v1 payment of ANY provider -- POK
+  // included, whose provider reference is stored in the same
+  // refund_requests.stripe_payment_intent_id column -- must stop here,
+  // before every Stripe call. Filtering on provider = 'stripe' let a POK
+  // ledger payment fall through to refunds.list()/refunds.create() with
+  // a POK reference, safe only because Stripe happened to reject an
+  // unknown id; this guard no longer relies on that. The check is
+  // conservative on purpose: ANY ledger_v1 payment whose provider
+  // reference equals this request's reference blocks it, whichever
+  // provider issued it.
   // purchases is a REUSABLE current-entitlement row (STRIPE-CUTOVER-1B.4):
   // the same purchases row can be refunded under a legacy PAY1 and later
   // repurchased under a ledger_v1 PAY2 (or vice versa), at which point
@@ -426,7 +438,6 @@ export async function executeApprovedRefund(
   const { data: ledgerPaymentRows, error: regimeCheckError } = await supabase
     .from("payments")
     .select("id")
-    .eq("provider", "stripe")
     .eq("provider_payment_id", request.stripe_payment_intent_id)
     .eq("regime", "librum_ledger_v1")
     .limit(1);

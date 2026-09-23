@@ -65,24 +65,38 @@ function makePayoutHistoryRow(overrides: Partial<AuthorPayoutHistoryRow> = {}): 
 }
 
 describe("formatMinorAmount", () => {
-  it("formats positive USD minor units as dollars, display-only", () => {
-    expect(formatMinorAmount(640, "USD")).toBe("$6.40");
+  // ALL-TXN-CURRENCY-4: explicit currency code, integer-only, locale-free.
+  it("formats USD minor units with an explicit USD code, never a bare $", () => {
+    expect(formatMinorAmount(640, "USD")).toBe("USD 6.40");
+    expect(formatMinorAmount(640, "USD")).not.toContain("$");
   });
 
-  it("formats EUR with its own currency symbol, never mixed with USD", () => {
+  it("formats ALL minor units WITH the qindarka (the old Intl path dropped them)", () => {
+    expect(formatMinorAmount(17910, "ALL")).toBe("179,10 ALL");
+    expect(formatMinorAmount(123456, "ALL")).toBe("1.234,56 ALL");
+  });
+
+  it("never renders an unsupported currency as if it were a supported one", () => {
     const formatted = formatMinorAmount(500, "EUR");
-    expect(formatted).toContain("5.00");
+    expect(formatted).toBe("Amount unavailable (unsupported currency EUR)");
     expect(formatted).not.toContain("$");
+    expect(formatted).not.toContain("ALL");
+    expect(formatted).not.toContain("USD");
   });
 
   it("never clamps a negative balance to zero -- renders the negative sign", () => {
-    const formatted = formatMinorAmount(-800, "USD");
-    expect(formatted).toMatch(/-/);
-    expect(formatted).toContain("8.00");
+    expect(formatMinorAmount(-800, "USD")).toBe("-USD 8.00");
+    expect(formatMinorAmount(-800, "ALL")).toBe("-8,00 ALL");
   });
 
   it("formats zero without throwing", () => {
-    expect(formatMinorAmount(0, "USD")).toBe("$0.00");
+    expect(formatMinorAmount(0, "USD")).toBe("USD 0.00");
+    expect(formatMinorAmount(0, "ALL")).toBe("0,00 ALL");
+  });
+
+  it("a malformed ledger currency is never guessed", () => {
+    expect(formatMinorAmount(500, "")).toBe("Amount unavailable (currency unknown)");
+    expect(formatMinorAmount(500, "usd")).toBe("Amount unavailable (currency unknown)");
   });
 });
 

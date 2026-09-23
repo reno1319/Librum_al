@@ -33,6 +33,7 @@ import {
 } from "./finance-query";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import { formatTransactionAmount, parseCurrencyProvenance } from "@/lib/transaction-money";
 import type {
   FinanceRefundReconciliationRow,
   FinanceDisputeRow,
@@ -60,8 +61,16 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-function formatAmount(amountCents: number): string {
-  return `$${(amountCents / 100).toFixed(2)}`;
+// ALL-TXN-CURRENCY-4: every finance row now carries its own
+// currency_state/currency straight from its RPC (migration
+// 20260923160231), and the amount is rendered in THAT currency -- never a
+// hard-coded "$", never a guessed default. A row whose currency the
+// database could not establish shows an explicit "unavailable" label.
+function formatAmount(row: { amount_cents: number; currency_state: string; currency: string | null }): string {
+  return formatTransactionAmount(
+    row.amount_cents,
+    parseCurrencyProvenance(row.currency_state, row.currency),
+  );
 }
 
 function resolveReaderDisplay(readerId: string | null, displayName: string | null): string {
@@ -400,7 +409,7 @@ function RefundDesktopTable({ rows }: { rows: FinanceRefundReconciliationRow[] }
                   {resolveReaderDisplay(row.reader_id, row.reader_display_name)}
                 </Link>
               </td>
-              <td className="py-3 pr-4 whitespace-nowrap">{formatAmount(row.amount_cents)}</td>
+              <td className="py-3 pr-4 whitespace-nowrap">{formatAmount(row)}</td>
               <td className="py-3 pr-4 whitespace-nowrap text-muted">{formatTimestamp(row.requested_at)}</td>
               <td className="py-3 pr-4">{describeRefundOperationalState(row.operational_state)}</td>
               <td className="py-3 pr-4">
@@ -422,7 +431,7 @@ function RefundMobileList({ rows }: { rows: FinanceRefundReconciliationRow[] }) 
           <Link href={`/admin/refunds/${row.refund_request_id}`} className="font-medium text-primary hover:underline">
             {resolveReaderDisplay(row.reader_id, row.reader_display_name)}
           </Link>
-          <p className="mt-0.5 text-xs text-muted">{formatTimestamp(row.requested_at)} &middot; {formatAmount(row.amount_cents)}</p>
+          <p className="mt-0.5 text-xs text-muted">{formatTimestamp(row.requested_at)} &middot; {formatAmount(row)}</p>
           <p className="mt-2 text-sm">{describeRefundOperationalState(row.operational_state)}</p>
           <div className="mt-1">
             <AttentionBadge needsAttention={row.needs_attention} />
@@ -545,7 +554,7 @@ function DisputeDesktopTable({ rows }: { rows: FinanceDisputeRow[] }) {
           {rows.map((row) => (
             <tr key={row.id} className="border-b border-border align-top">
               <td className="py-3 pr-4">{resolveReaderDisplay(row.reader_id, row.reader_display_name)}</td>
-              <td className="py-3 pr-4 whitespace-nowrap">{formatAmount(row.amount_cents)}</td>
+              <td className="py-3 pr-4 whitespace-nowrap">{formatAmount(row)}</td>
               <td className="py-3 pr-4 whitespace-nowrap text-muted">{formatTimestamp(row.created_at)}</td>
               <td className="py-3 pr-4">
                 {describeDisputeStatus(row.status)}
@@ -574,7 +583,7 @@ function DisputeMobileList({ rows }: { rows: FinanceDisputeRow[] }) {
       {rows.map((row) => (
         <li key={row.id} className="rounded-lg border border-border bg-surface p-4 shadow-sm">
           <p className="font-medium text-foreground">{resolveReaderDisplay(row.reader_id, row.reader_display_name)}</p>
-          <p className="mt-0.5 text-xs text-muted">{formatTimestamp(row.created_at)} &middot; {formatAmount(row.amount_cents)}</p>
+          <p className="mt-0.5 text-xs text-muted">{formatTimestamp(row.created_at)} &middot; {formatAmount(row)}</p>
           <p className="mt-2 text-sm">
             {describeDisputeStatus(row.status)} <span className="text-muted">({row.reason.replace(/_/g, " ")})</span>
           </p>
@@ -728,7 +737,7 @@ function MismatchSection({
               <p className="text-sm font-medium text-foreground">Potential consistency issue</p>
               <p className="mt-1 text-sm text-muted">{describeRefundEntitlementMismatch(row.mismatch_type)}</p>
               <p className="mt-1 text-xs text-muted">
-                {resolveReaderDisplay(row.reader_id, row.reader_display_name)} &middot; {formatAmount(row.amount_cents)}
+                {resolveReaderDisplay(row.reader_id, row.reader_display_name)} &middot; {formatAmount(row)}
               </p>
               {row.refund_request_id && (
                 <Link href={`/admin/refunds/${row.refund_request_id}`} className="mt-2 inline-block text-sm text-primary hover:underline">

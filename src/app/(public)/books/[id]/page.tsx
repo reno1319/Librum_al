@@ -17,7 +17,7 @@ import { BookSampleReader } from "@/components/book-sample-reader";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
 import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
-import { formatPrice, formatAllPrice } from "@/lib/pricing";
+import { formatTransactionAmount, provenanceFromStoredCurrency } from "@/lib/transaction-money";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import { resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
 import {
@@ -698,9 +698,13 @@ export default async function BookDetailPage({
               <p className="mt-1">
                 It is held at{" "}
                 <strong>
-                  {heldQuote.currency === "ALL"
-                    ? formatAllPrice(heldQuote.price_cents_at_checkout)
-                    : formatPrice(heldQuote.price_cents_at_checkout)}
+                  {/* ALL-TXN-CURRENCY-4: a FROZEN checkout amount, in the
+                      intent's own frozen currency -- never "any non-ALL
+                      currency is dollars". */}
+                  {formatTransactionAmount(
+                    heldQuote.price_cents_at_checkout,
+                    provenanceFromStoredCurrency(heldQuote.currency),
+                  )}
                 </strong>
                 . That is the amount you would pay. Today&apos;s price and any
                 promo code you just entered are <strong>not</strong> applied to

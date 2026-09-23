@@ -756,12 +756,19 @@ export async function fulfillBundleSnapshot(
     }
   }
 
+  // ALL-TXN-CURRENCY-4: this finalizer only ever runs for a
+  // legacy_stripe_connect_v1 snapshot (fulfillBundleCheckoutByRegime
+  // routes librum_ledger_v1 to finalize_ledger_bundle_payment instead),
+  // and that regime is USD-only: its frozen checkout rows default to
+  // 'USD' and nothing ever wrote another currency for it. Stated
+  // explicitly here -- the email no longer assumes a currency of its own.
   await sendSnapshotBundlePurchaseEmails(supabase, {
     bundleId: snapshot.bundle_id,
     bundleTitle: snapshot.bundle_title,
     authorId: snapshot.author_id,
     readerId: snapshot.reader_id,
     amountCents,
+    currency: "USD",
   });
 
   return null;
@@ -1291,7 +1298,10 @@ export async function fulfillLegacyBundle(
   // email when this delivery actually wrote at least one newly-eligible
   // purchase.
   if (eligibleItems.length > 0) {
-    await sendBundlePurchaseEmails(supabase, { bundleId, readerId, amountCents });
+    // ALL-TXN-CURRENCY-4: the pre-snapshot legacy bundle path is
+    // legacy_stripe_connect_v1 by construction, and that regime is
+    // USD-only -- stated explicitly rather than assumed by the template.
+    await sendBundlePurchaseEmails(supabase, { bundleId, readerId, amountCents, currency: "USD" });
   }
   return null;
 }
@@ -1369,7 +1379,10 @@ export async function fulfillSingleBookPurchase(
   const { outcome, out_book_id: bookId, out_reader_id: readerId } = result;
 
   if (outcome === "eligible_fulfilled" && bookId && readerId) {
-    await sendPurchaseEmails(supabase, { bookId, readerId, amountCents });
+    // ALL-TXN-CURRENCY-4: finalize_book_checkout_intent() refuses any
+    // intent that is not legacy_stripe_connect_v1, and that regime is
+    // USD-only -- stated explicitly rather than assumed by the template.
+    await sendPurchaseEmails(supabase, { bookId, readerId, amountCents, currency: "USD" });
     return null;
   }
 
@@ -1619,9 +1632,8 @@ export async function fulfillLedgerBookPayment(
   if (result.outcome === "eligible_fulfilled" || result.outcome === "already_finalized") {
     // TEST-mode development scope: no purchase email is sent for a
     // ledger_v1 test transaction (Section 39's own scope note) --
-    // sendPurchaseEmails' template is USD-formatted and would misrepresent
-    // an ALL amount; regime-aware email templates are deferred to a later
-    // stage. Idempotent no-op on 'already_finalized', matching the
+    // the purchase emails are only wired into the legacy finalizers;
+    // regime-aware email sending is deferred to a later stage. Idempotent no-op on 'already_finalized', matching the
     // legacy path's own posture (no duplicate email on a retried event).
     return null;
   }

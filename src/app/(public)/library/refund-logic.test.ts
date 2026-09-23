@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  calculateTotalSpentCents,
+  calculateTotalSpentByCurrency,
   deriveTransactionRefundState,
   groupPurchasesByTransaction,
   isWithinRefundEligibilityWindow,
@@ -20,6 +20,7 @@ function purchase(overrides: Partial<PurchaseForGrouping> = {}): PurchaseForGrou
     created_at: "2026-01-01T00:00:00.000Z",
     refunded_at: null,
     stripe_payment_intent_id: "pi_default",
+    currency: { state: "resolved", currency: "USD" },
     ...overrides,
   };
 }
@@ -37,6 +38,7 @@ function snapshot(
       { book_id: "book-1", title: "Book One", price_cents_at_checkout: 500, position: 0 },
       { book_id: "book-2", title: "Book Two", price_cents_at_checkout: 700, position: 1 },
     ],
+    currency: "USD",
     ...overrides,
   };
 }
@@ -277,13 +279,23 @@ describe("groupPurchasesByTransaction", () => {
   });
 });
 
-describe("calculateTotalSpentCents", () => {
+// Pre-existing total-spent semantics, now asserted through the
+// per-currency total: every fixture here is a single-currency (USD)
+// history, so the one USD figure must equal the old single number.
+function spentUsd(groups: Parameters<typeof calculateTotalSpentByCurrency>[0]): number {
+  const result = calculateTotalSpentByCurrency(groups);
+  expect(result.unresolvedCount).toBe(0);
+  expect(result.totals.every((total) => total.currency === "USD")).toBe(true);
+  return result.totals[0]?.amountMinor ?? 0;
+}
+
+describe("calculateTotalSpentByCurrency (single-currency semantics)", () => {
   it("counts an ordinary single-book purchase with no snapshot", () => {
     const groups = groupPurchasesByTransaction(
       [purchase({ book_id: "book-1", amount_cents: 999, stripe_payment_intent_id: "pi_single" })],
       [],
     );
-    expect(calculateTotalSpentCents(groups)).toBe(999);
+    expect(spentUsd(groups)).toBe(999);
   });
 
   it("counts a normal bundle (purchases + snapshot) exactly once, at the snapshot total", () => {
@@ -296,7 +308,7 @@ describe("calculateTotalSpentCents", () => {
     );
     // If this summed purchases AND snapshots independently, it would be
     // 1200 (purchases) + 1200 (snapshot) = 2400 -- double-counted.
-    expect(calculateTotalSpentCents(groups)).toBe(1200);
+    expect(spentUsd(groups)).toBe(1200);
   });
 
   it("uses the snapshot total (not the partial purchases sum) for a partial-eligibility bundle", () => {
@@ -313,7 +325,7 @@ describe("calculateTotalSpentCents", () => {
         }),
       ],
     );
-    expect(calculateTotalSpentCents(groups)).toBe(1500);
+    expect(spentUsd(groups)).toBe(1500);
   });
 
   it("includes a zero-purchase paid bundle transaction", () => {
@@ -321,7 +333,7 @@ describe("calculateTotalSpentCents", () => {
       [],
       [snapshot({ stripe_payment_intent_id: "pi_zero", total_amount_cents: 899 })],
     );
-    expect(calculateTotalSpentCents(groups)).toBe(899);
+    expect(spentUsd(groups)).toBe(899);
   });
 
   it("excludes a free acquisition (null payment intent)", () => {
@@ -329,7 +341,7 @@ describe("calculateTotalSpentCents", () => {
       [purchase({ book_id: "book-1", amount_cents: 0, stripe_payment_intent_id: null })],
       [],
     );
-    expect(calculateTotalSpentCents(groups)).toBe(0);
+    expect(spentUsd(groups)).toBe(0);
   });
 
   it("excludes a transaction refunded via purchases.refunded_at", () => {
@@ -344,7 +356,7 @@ describe("calculateTotalSpentCents", () => {
       ],
       [],
     );
-    expect(calculateTotalSpentCents(groups)).toBe(0);
+    expect(spentUsd(groups)).toBe(0);
   });
 
   it("excludes a zero-purchase snapshot transaction refunded via bundle_checkout_snapshots.refunded_at", () => {
@@ -358,7 +370,7 @@ describe("calculateTotalSpentCents", () => {
         }),
       ],
     );
-    expect(calculateTotalSpentCents(groups)).toBe(0);
+    expect(spentUsd(groups)).toBe(0);
   });
 
   it("sums multiple distinct transactions correctly", () => {
@@ -376,7 +388,7 @@ describe("calculateTotalSpentCents", () => {
       [snapshot({ stripe_payment_intent_id: "pi_zero", total_amount_cents: 899 })],
     );
     // pi_a (999) + pi_b (300) + pi_zero (899); pi_c excluded (refunded).
-    expect(calculateTotalSpentCents(groups)).toBe(999 + 300 + 899);
+    expect(spentUsd(groups)).toBe(999 + 300 + 899);
   });
 });
 
@@ -559,5 +571,94 @@ describe("free acquisitions remain non-refundable", () => {
       [],
     );
     expect(groups[0].stripePaymentIntentId).toBeNull();
+  });
+});
+
+// ALL-TXN-CURRENCY-4 (Patch 4): currency is part of the transaction model.
+describe("transaction currency (Patch 4)", () => {
+  const ALL = { state: "resolved", currency: "ALL" } as const;
+  const USD = { state: "resolved", currency: "USD" } as const;
+
+  it("a mixed USD + ALL history yields two separate totals, never one sum", () => {
+    const groups = groupPurchasesByTransaction(
+      [
+        purchase({ book_id: "b1", amount_cents: 999, stripe_payment_intent_id: "pi_usd", currency: USD }),
+        purchase({ book_id: "b2", amount_cents: 17910, stripe_payment_intent_id: "pok_all", currency: ALL }),
+      ],
+      [],
+    );
+    const result = calculateTotalSpentByCurrency(groups);
+    expect(result.totals).toEqual([
+      { currency: "ALL", amountMinor: 17910 },
+      { currency: "USD", amountMinor: 999 },
+    ]);
+    expect(result.unresolvedCount).toBe(0);
+    // Negative control: the pre-Patch-4 single number would have been
+    // 18909 -- a figure that is neither lek nor dollars.
+    expect(result.totals.some((total) => total.amountMinor === 999 + 17910)).toBe(false);
+  });
+
+  it("each group carries its own currency", () => {
+    const groups = groupPurchasesByTransaction(
+      [
+        purchase({ book_id: "b1", amount_cents: 999, stripe_payment_intent_id: "pi_usd", currency: USD, created_at: "2026-01-01T00:00:00.000Z" }),
+        purchase({ book_id: "b2", amount_cents: 9900, stripe_payment_intent_id: "pok_all", currency: ALL, created_at: "2026-01-02T00:00:00.000Z" }),
+      ],
+      [],
+    );
+    expect(groups.map((g) => [g.stripePaymentIntentId, g.currency])).toEqual([
+      ["pok_all", ALL],
+      ["pi_usd", USD],
+    ]);
+  });
+
+  it("a bundle's currency comes from its snapshot and purchases together", () => {
+    const groups = groupPurchasesByTransaction(
+      [purchase({ book_id: "book-1", amount_cents: 500, stripe_payment_intent_id: "pi_b", currency: ALL })],
+      [snapshot({ stripe_payment_intent_id: "pi_b", total_amount_cents: 1200, currency: "ALL" })],
+    );
+    expect(groups[0].currency).toEqual(ALL);
+  });
+
+  it("a snapshot currency that disagrees with its purchases makes the transaction a conflict", () => {
+    const groups = groupPurchasesByTransaction(
+      [purchase({ book_id: "book-1", amount_cents: 500, stripe_payment_intent_id: "pi_b", currency: USD })],
+      [snapshot({ stripe_payment_intent_id: "pi_b", total_amount_cents: 1200, currency: "ALL" })],
+    );
+    expect(groups[0].currency).toEqual({ state: "conflict" });
+    const result = calculateTotalSpentByCurrency(groups);
+    expect(result.totals).toEqual([]);
+    expect(result.unresolvedCount).toBe(1);
+  });
+
+  it("an unknown-currency purchase is excluded from every total and counted, never defaulted", () => {
+    const groups = groupPurchasesByTransaction(
+      [
+        purchase({ book_id: "b1", amount_cents: 999, stripe_payment_intent_id: "pi_known", currency: USD }),
+        purchase({ book_id: "b2", amount_cents: 500, stripe_payment_intent_id: "pi_mystery", currency: { state: "unknown" } }),
+      ],
+      [],
+    );
+    const result = calculateTotalSpentByCurrency(groups);
+    expect(result.totals).toEqual([{ currency: "USD", amountMinor: 999 }]);
+    expect(result.unresolvedCount).toBe(1);
+  });
+
+  it("a zero-purchase snapshot transaction uses the snapshot's own frozen currency", () => {
+    const groups = groupPurchasesByTransaction(
+      [],
+      [snapshot({ stripe_payment_intent_id: "pi_zero", total_amount_cents: 899, currency: "ALL" })],
+    );
+    expect(groups[0].currency).toEqual(ALL);
+    expect(calculateTotalSpentByCurrency(groups).totals).toEqual([{ currency: "ALL", amountMinor: 899 }]);
+  });
+
+  it("a free acquisition carries no currency and adds nothing", () => {
+    const groups = groupPurchasesByTransaction(
+      [purchase({ book_id: "b1", amount_cents: 0, stripe_payment_intent_id: null, currency: { state: "free" } })],
+      [],
+    );
+    expect(groups[0].currency).toEqual({ state: "free" });
+    expect(calculateTotalSpentByCurrency(groups)).toEqual({ totals: [], unresolvedCount: 0 });
   });
 });
