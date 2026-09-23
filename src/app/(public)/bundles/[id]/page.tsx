@@ -5,6 +5,12 @@ import { BookCard } from "@/components/book-card";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import { formatCatalogPriceLabel } from "@/lib/catalog-price";
+import {
+  bundleCheckoutNotice,
+  formatBundleSavingsAll,
+  resolveBundleSavingsAll,
+} from "@/lib/bundle-catalog";
 import type { Book, Bundle, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -27,7 +33,14 @@ export const dynamic = "force-dynamic";
 // AUTHOR-1C moved this join onto the safe public_author_profiles VIEW
 // (migration 045, aliased back to `profiles`), which physically has no
 // display_name column.
-type BundleWithAuthor = Bundle & {
+//
+// ALL-WIRING-5: the bundle's own columns are selected by name, and the
+// legacy `price_cents` is not among them -- this page's price, its
+// savings line and its checkout notice all come from `price_all`.
+type BundleWithAuthor = Pick<
+  Bundle,
+  "id" | "author_id" | "title" | "description" | "status" | "price_all"
+> & {
   profiles: Pick<Profile, "public_author_name"> | null;
 };
 type BundleBookRow = { book_id: string; books: Book | null };
@@ -55,10 +68,16 @@ export default async function BundleDetailPage({
 
   const { data: bundle } = await supabase
     .from("bundles")
-    .select("*, profiles:public_author_profiles(public_author_name)")
+    .select(
+      "id, author_id, title, description, status, price_all, profiles:public_author_profiles(public_author_name)",
+    )
     .eq("id", id)
     .single<BundleWithAuthor>();
 
+  // ALL-WIRING-5: visibility is UNCHANGED and deliberately not keyed on
+  // price. A published bundle with no ALL price stays reachable at its
+  // own address -- it says "Price unavailable" and offers nothing -- and
+  // is only dropped from the discovery rails (bookstore, author page).
   if (!bundle || (bundle.status !== "published" && bundle.author_id !== user?.id)) {
     notFound();
   }
@@ -81,8 +100,17 @@ export default async function BundleDetailPage({
     .filter((b): b is Book => !!b);
 
   const isAuthor = user?.id === bundle.author_id;
-  const originalTotalCents = books.reduce((sum, b) => sum + b.price_cents, 0);
-  const savingsCents = Math.max(0, originalTotalCents - bundle.price_cents);
+  // ALL-WIRING-5: "bought separately" in whole lek, from `price_all`
+  // only -- the bundle's and every member's. It is fed the UNFILTERED
+  // membership rows, so a member this viewer cannot resolve counts as
+  // an unknown price and withholds the comparison, rather than quietly
+  // shrinking the total the bundle is compared against.
+  const savings = formatBundleSavingsAll(
+    resolveBundleSavingsAll(
+      bundle.price_all,
+      (bundleBookRows ?? []).map((row) => row.books),
+    ),
+  );
 
   // LAUNCH-1 P1-7A: per-book, via user_owns_book() (also excludes a
   // purchase whose payment intent has a dispute at status 'lost')
@@ -131,14 +159,12 @@ export default async function BundleDetailPage({
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <span className="text-xl font-semibold text-primary">
-          ${(bundle.price_cents / 100).toFixed(2)}
+          {formatCatalogPriceLabel(bundle.price_all)}
         </span>
-        {savingsCents > 0 && (
+        {savings && (
           <span className="text-sm text-muted">
-            <span className="line-through">
-              ${(originalTotalCents / 100).toFixed(2)}
-            </span>{" "}
-            — you save ${(savingsCents / 100).toFixed(2)}
+            <span className="line-through">{savings.originalTotal}</span>{" "}
+            — you save {savings.savings}
           </span>
         )}
 
@@ -149,17 +175,21 @@ export default async function BundleDetailPage({
             You own every book in this bundle
           </span>
         ) : (
-          // STRIPE-DISABLE-1: paid bundle checkout is temporarily
-          // unavailable under every configuration (locked product
-          // decision) -- a non-clickable notice rather than a login link
-          // or a working buy form, since purchasing isn't possible for
-          // anyone right now regardless of auth state. buyBundle itself
-          // also independently fails closed for a direct/stale POST.
+          // STRIPE-DISABLE-1: bundle checkout is unavailable under every
+          // configuration (locked product decision) -- a non-clickable
+          // notice rather than a login link or a working buy form, since
+          // acquiring a bundle isn't possible for anyone right now
+          // regardless of auth state. buyBundle itself also
+          // independently fails closed for a direct/stale POST.
+          // ALL-WIRING-5: the wording follows the bundle's price_all --
+          // "Not available right now" with no ALL price, otherwise a
+          // neutral "coming soon" that is true of a free bundle too.
+          // Neither branch renders a control.
           <span
             className="cursor-not-allowed rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium text-muted"
             aria-disabled="true"
           >
-            Paid bundle checkout coming soon
+            {bundleCheckoutNotice(bundle.price_all)}
           </span>
         )}
       </div>

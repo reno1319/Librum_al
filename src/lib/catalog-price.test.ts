@@ -7,6 +7,7 @@ import {
   parseCatalogPriceAll,
   classifyCatalogPrice,
   formatCatalogPriceAll,
+  formatCatalogAmountAll,
   resolveCatalogPriceState,
   formatCatalogPriceLabel,
   CATALOG_PRICE_UNAVAILABLE_LABEL,
@@ -485,6 +486,32 @@ describe("formatCatalogPriceLabel", () => {
       if (state === "unavailable") expect(label).toBe(CATALOG_PRICE_UNAVAILABLE_LABEL);
       else if (state === "free") expect(label).toBe(CATALOG_PRICE_FREE_LABEL);
       else expect(label).toBe(formatCatalogPriceAll(probe as number));
+    }
+  });
+});
+
+// ALL-WIRING-5: whole-lek amounts DERIVED from catalog prices (a bundle's
+// "bought separately" total and saving). Same unit, same shape, a wider
+// domain than a single catalog price -- and still no fractions, no
+// negatives, and nothing that is not a safe integer.
+describe("formatCatalogAmountAll", () => {
+  it("formats in-domain values exactly like formatCatalogPriceAll", () => {
+    for (const v of [0, 99, 199, 1000, 100_000]) {
+      expect(formatCatalogAmountAll(v)).toBe(formatCatalogPriceAll(v));
+    }
+  });
+
+  it("formats sums and differences outside the single-price domain", () => {
+    expect(formatCatalogAmountAll(1)).toBe("1,00 ALL");
+    expect(formatCatalogAmountAll(71)).toBe("71,00 ALL");
+    expect(formatCatalogAmountAll(100_001)).toBe("100.001,00 ALL");
+    expect(formatCatalogAmountAll(250_000)).toBe("250.000,00 ALL");
+    expect(formatCatalogAmountAll(100_000_000)).toBe("100.000.000,00 ALL");
+  });
+
+  it("rejects anything that is not a non-negative safe integer", () => {
+    for (const v of [-1, -0, 1.5, 0.1, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 2]) {
+      expect(() => formatCatalogAmountAll(v)).toThrow();
     }
   });
 });

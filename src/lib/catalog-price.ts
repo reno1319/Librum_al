@@ -19,6 +19,12 @@
 // so it still performs no network, database, Storage, provider, ledger,
 // or environment-variable access.
 //
+// ALL-WIRING-5 update: bundles now use it too. createBundle/updateBundle
+// parse through parseCatalogPriceAll, performBundlePublish classifies
+// through resolveCatalogPriceState, and every bundle catalog surface
+// labels through formatCatalogPriceLabel -- the same three-way state,
+// read from `bundles.price_all`, with no bundle-specific variant.
+//
 // Deliberately separate from src/lib/pricing.ts: that module's
 // `price_cents`/`formatPrice`/`formatAllPrice` are minor-unit (÷100)
 // helpers that exist for the CURRENT repository's legacy USD/Stripe code
@@ -198,8 +204,41 @@ export function classifyCatalogPrice(priceAll: number): "free" | "paid" {
  */
 export function formatCatalogPriceAll(priceAll: number): string {
   assertValidCatalogPriceAll(priceAll);
-  const grouped = String(priceAll).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return groupWholeAll(priceAll);
+}
+
+// The one digit-grouping step behind both formatters in this module, so
+// a catalog price and a whole-lek sum of catalog prices can never be
+// displayed in two different shapes.
+function groupWholeAll(amountAll: number): string {
+  const grouped = String(amountAll).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   return `${grouped},00 ALL`;
+}
+
+// Fixed, non-sensitive message, same posture as INVALID_DOMAIN_MESSAGE.
+const INVALID_WHOLE_AMOUNT_MESSAGE =
+  "catalog-price: amount is not a non-negative whole number of ALL";
+
+/**
+ * ALL-WIRING-5: display for a whole-lek amount DERIVED from catalog
+ * prices -- a bundle's "bought separately" total, or the difference
+ * between that total and the bundle's own price -- which is not itself
+ * a catalog price and so may legitimately fall outside 0/99..100000
+ * (a saving of 50 lek, or a total of 250.000 lek across many books).
+ * `formatCatalogPriceAll` would throw on exactly those values, which is
+ * correct for a price and wrong for a sum.
+ *
+ * Same unit as every catalog price (WHOLE lek, never minor units), same
+ * output shape, same grouping code. Accepts any non-negative safe
+ * integer and throws for anything else, `-0` included -- a caller that
+ * computed a fraction, a negative, or NaN has a bug, and must not get a
+ * plausible string back.
+ */
+export function formatCatalogAmountAll(amountAll: number): string {
+  if (!Number.isSafeInteger(amountAll) || amountAll < 0 || Object.is(amountAll, -0)) {
+    throw new Error(INVALID_WHOLE_AMOUNT_MESSAGE);
+  }
+  return groupWholeAll(amountAll);
 }
 
 // ALL-WIRING-2: the EXPLICIT three-way catalog state. `books.price_all`

@@ -27,24 +27,12 @@ export const PLATFORM_FEE_PERCENT = 20;
 // already-created, not-yet-finalized ledger_v1 checkout.
 export const AUTHOR_ROYALTY_RATE_BPS = (100 - PLATFORM_FEE_PERCENT) * 100;
 
-// LIBRUM 2.0 UI-4: the single shared formatter for a bundle price as
-// shown to readers -- was previously duplicated independently in
-// BookCard, the bookstore hero, the bundle list, and the book detail
-// page.
-//
-// Currency is fixed at USD to match every other legacy price-facing
-// surface in the app -- not a currency-selection feature. This remains
-// the production default for every legacy_stripe_connect_v1 surface
-// (Section 9) -- unchanged by STRIPE-CUTOVER-2A.
-//
-// ALL-WIRING-2: BOOK surfaces no longer call this at all. Bundle
-// pricing is still legacy `price_cents` and still USD-shaped, so this
-// stays exactly as it is until Patch 5 moves bundles; a book price now
-// goes through formatCatalogPriceLabel (src/lib/catalog-price.ts),
-// which never emits a `$`.
-export function formatPrice(priceCents: number): string {
-  return priceCents === 0 ? "Free" : `$${(priceCents / 100).toFixed(2)}`;
-}
+// ALL-WIRING-5: formatPrice (`0 -> "Free"`, otherwise `$` + cents/100)
+// is gone. Its last callers were the bookstore and author-page bundle
+// rails, which now label bundles.price_all through
+// formatCatalogPriceLabel (src/lib/catalog-price.ts) like every book
+// surface. It was the catalog's USD formatter; with no USD catalog left
+// to format, keeping it would only invite the next `$` back in.
 
 // ALL-TXN-CURRENCY-4: formatAllPrice (a "divide by 100, toFixed(2)"
 // ALL formatter that rendered "179.10 ALL" against the rest of the app's

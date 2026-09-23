@@ -8,6 +8,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import { MAXIMUM_CATALOG_PRICE_ALL, MINIMUM_PAID_CATALOG_PRICE_ALL } from "@/lib/catalog-price";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -20,7 +21,7 @@ export const metadata: Metadata = {
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see the exhaustive
-// route audit (bundles.price_cents is rendered for editing below).
+// route audit (bundles.price_all is rendered for editing below).
 export const dynamic = "force-dynamic";
 
 export default async function EditBundlePage({
@@ -31,7 +32,7 @@ export default async function EditBundlePage({
   searchParams: Promise<{ error?: string }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive page -- renders
-  // bundles.price_cents for editing (exhaustive route audit) -- checked
+  // bundles.price_all for editing (exhaustive route audit) -- checked
   // as the first statement, before any Supabase call.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
     return <MaintenanceNotice />;
@@ -49,11 +50,14 @@ export default async function EditBundlePage({
     redirect("/login");
   }
 
+  // ALL-WIRING-5: only the columns this form uses. The legacy
+  // `price_cents` is not fetched, so it cannot be prefilled into the
+  // price field and saved back as if it were lek.
   const { data: bundle } = await supabase
     .from("bundles")
-    .select("*")
+    .select("id, author_id, title, description, price_all")
     .eq("id", id)
-    .single<Bundle>();
+    .single<Pick<Bundle, "id" | "author_id" | "title" | "description" | "price_all">>();
 
   if (!bundle || bundle.author_id !== user.id) {
     notFound();
@@ -115,17 +119,24 @@ export default async function EditBundlePage({
           />
         </label>
 
+        {/* ALL-WIRING-5: whole lek. A bundle with no ALL price opens
+            with an EMPTY field -- never a value derived from the legacy
+            USD column -- so saving the form requires the author to
+            supply one. */}
         <label className="flex flex-col gap-1 text-sm">
-          Bundle price (USD)
+          Bundle price (ALL)
           <input
             name="price"
-            type="number"
-            min="0"
-            step="0.01"
+            type="text"
+            inputMode="decimal"
             required
-            defaultValue={(bundle.price_cents / 100).toFixed(2)}
+            defaultValue={bundle.price_all == null ? "" : String(bundle.price_all)}
             className={`w-40 ${formControlClasses}`}
           />
+          <span className="text-xs text-muted">
+            Whole lek: 0 for a free bundle, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
+            {MAXIMUM_CATALOG_PRICE_ALL}.
+          </span>
         </label>
 
         <fieldset>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { GENRES } from "@/lib/genres";
-import { formatPrice } from "@/lib/pricing";
+import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import {
   parseBookstoreQuery,
   buildBookstoreHref,
@@ -56,7 +56,7 @@ export const dynamic = "force-dynamic";
 type BookWithAuthor = Book & {
   profiles: Pick<Profile, "public_author_name"> | null;
 };
-type BundleWithAuthor = Pick<Bundle, "id" | "title" | "price_cents"> & {
+type BundleWithAuthor = Pick<Bundle, "id" | "title" | "price_all"> & {
   profiles: Pick<Profile, "public_author_name"> | null;
 };
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -262,13 +262,21 @@ async function fetchSearchResults(
 // asks for status = 'published' rather than relying on RLS alone to
 // hide drafts. Only the fields this section actually displays are
 // selected -- no description, no author_id-only internals.
+//
+// ALL-WIRING-5: this rail is a discovery surface, so a bundle with no
+// authored ALL price is excluded here exactly as an unpriced book is
+// excluded from the grid above. It stays published and stays reachable
+// at its own address, which says "Price unavailable"; its author still
+// sees it on their dashboard, which is where the price gets set. The
+// legacy `price_cents` is neither selected nor filtered on.
 async function fetchPublishedBundles(
   supabase: SupabaseClient,
 ): Promise<BundleWithAuthor[]> {
   const { data, error } = await supabase
     .from("bundles")
-    .select("id, title, price_cents, profiles:public_author_profiles(public_author_name)")
+    .select("id, title, price_all, profiles:public_author_profiles(public_author_name)")
     .eq("status", "published")
+    .not("price_all", "is", null)
     .order("created_at", { ascending: false })
     .limit(BUNDLE_LIMIT)
     .returns<BundleWithAuthor[]>();
@@ -614,7 +622,7 @@ function BundlesSection({ bundles }: { bundles: BundleWithAuthor[] }) {
                 </span>
               )}
               <span className="ml-auto font-semibold text-primary">
-                {formatPrice(bundle.price_cents)}
+                {formatCatalogPriceLabel(bundle.price_all)}
               </span>
             </Link>
           </li>
