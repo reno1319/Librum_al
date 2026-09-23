@@ -7,6 +7,28 @@ import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
+import {
+  MAXIMUM_CATALOG_PRICE_ALL,
+  MINIMUM_PAID_CATALOG_PRICE_ALL,
+  parseCatalogPriceAll,
+  resolveCatalogPriceState,
+} from "@/lib/catalog-price";
+
+// ALL-WIRING-5: one message for every rejected bundle price, built from
+// the catalog module's own constants so it cannot drift from the rule
+// it states -- the same shape createBook/updateBook use. It never
+// repeats what the author typed.
+const BUNDLE_PRICE_ERROR_MESSAGE =
+  `Enter the bundle price in lek: 0 for a free bundle, or a whole number from ` +
+  `${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}`;
+
+const MISSING_BUNDLE_PRICE_MESSAGE = "Set a valid ALL price before publishing this bundle.";
+
+// Fixed messages for a failed bundle write. The database's own error
+// text used to be redirected into the page verbatim; it is logged
+// server-side instead and never shown.
+const BUNDLE_CREATE_FAILED_MESSAGE = "Could not create the bundle. Please try again.";
+const BUNDLE_SAVE_FAILED_MESSAGE = "Could not save the bundle. Please try again.";
 
 // PHASE-2C bundle-membership-integrity: an explicit `.returns<T[]>()`
 // shape for performBundlePublish()'s own bundle_books->books membership
@@ -63,10 +85,21 @@ export async function createBundle(formData: FormData) {
 
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
+  // ALL-WIRING-5: the ONLY accepted parse of a bundle's catalog price,
+  // exactly as createBook's. `Math.round(Number(raw) * 100)` is gone: it
+  // treated a missing price as 0 (free), accepted "1e3" and 0.5, ran the
+  // author's string through binary floating point, and wrote the result
+  // into the legacy USD column.
+  const parsedPrice = parseCatalogPriceAll(formData.get("price"));
 
-  if (!title || !Number.isFinite(priceCents) || priceCents < 0) {
+  if (!title) {
     redirect("/dashboard/bundles?error=Please+fill+in+every+field");
+  }
+
+  // A rejected price performs NO insert: this redirect precedes every
+  // write in this function, bundle and membership alike.
+  if (!parsedPrice.ok) {
+    redirect(`/dashboard/bundles?error=${encodeURIComponent(BUNDLE_PRICE_ERROR_MESSAGE)}`);
   }
 
   const { bookIds, error: selectionError } = await resolveBookSelection(
@@ -84,15 +117,17 @@ export async function createBundle(formData: FormData) {
       author_id: user.id,
       title,
       description,
-      price_cents: priceCents,
+      // ALL-WIRING-5: `price_all` ONLY. `price_cents` is deliberately
+      // absent -- not written as 0, not derived -- so a new row takes the
+      // column's own legacy default and nothing here speaks for it.
+      price_all: parsedPrice.priceAll,
     })
     .select("id")
     .single();
 
   if (insertError || !bundle) {
-    redirect(
-      `/dashboard/bundles?error=${encodeURIComponent(insertError?.message ?? "Could not create bundle")}`,
-    );
+    console.error("createBundle: bundle insert failed", { error: insertError });
+    redirect(`/dashboard/bundles?error=${encodeURIComponent(BUNDLE_CREATE_FAILED_MESSAGE)}`);
   }
 
   await supabase
@@ -132,10 +167,19 @@ export async function updateBundle(bundleId: string, formData: FormData) {
 
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
+  // ALL-WIRING-5: see createBundle -- the same single parser.
+  const parsedPrice = parseCatalogPriceAll(formData.get("price"));
 
-  if (!title || !Number.isFinite(priceCents) || priceCents < 0) {
+  if (!title) {
     redirect(`/dashboard/bundles/${bundleId}/edit?error=Please+fill+in+every+field`);
+  }
+
+  // Precedes the bundle update AND the membership delete/re-insert
+  // below, so a rejected price leaves both exactly as they were.
+  if (!parsedPrice.ok) {
+    redirect(
+      `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(BUNDLE_PRICE_ERROR_MESSAGE)}`,
+    );
   }
 
   const { bookIds, error: selectionError } = await resolveBookSelection(
@@ -149,13 +193,16 @@ export async function updateBundle(bundleId: string, formData: FormData) {
 
   const { error: updateError } = await supabase
     .from("bundles")
-    .update({ title, description, price_cents: priceCents })
+    // ALL-WIRING-5: `price_all` ONLY. Omitting `price_cents` is what
+    // leaves an existing bundle's legacy value exactly as it was.
+    .update({ title, description, price_all: parsedPrice.priceAll })
     .eq("id", bundleId)
     .eq("author_id", user.id);
 
   if (updateError) {
+    console.error("updateBundle: bundle update failed", { bundleId, error: updateError });
     redirect(
-      `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(updateError.message)}`,
+      `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(BUNDLE_SAVE_FAILED_MESSAGE)}`,
     );
   }
 
@@ -178,6 +225,7 @@ type PerformBundlePublishResult =
       reason:
         | "not_found"
         | "read_failed"
+        | "missing_all_price"
         | "paid_mode_required"
         | "insufficient_members"
         | "update_failed";
@@ -211,7 +259,7 @@ async function performBundlePublish(
 ): Promise<PerformBundlePublishResult> {
   const { data: bundle, error: bundleReadError } = await supabase
     .from("bundles")
-    .select("price_cents")
+    .select("price_all")
     .eq("id", bundleId)
     .eq("author_id", userId)
     .maybeSingle();
@@ -224,10 +272,26 @@ async function performBundlePublish(
     return { ok: false, reason: "not_found" };
   }
 
+  // ALL-WIRING-5: the price is `price_all`, read fresh from the bundle's
+  // own row -- never trusted from the client -- and classified three
+  // ways, exactly as performPublish() classifies a book. `price_cents`
+  // is not read at all: it is legacy USD, and its `0` default is not a
+  // price, so it can decide nothing here.
+  const catalogPriceState = resolveCatalogPriceState(bundle.price_all);
+
+  // No authored ALL price (null, missing, or anything outside the
+  // catalog domain): not publishable at any permission level, and never
+  // treated as free. Refused before the membership read and before any
+  // write. This refuses a PUBLISH only -- an already-published bundle
+  // with a null price is not unpublished by this or anything else here.
+  if (catalogPriceState === "unavailable") {
+    return { ok: false, reason: "missing_all_price" };
+  }
+
   // Only a bundle that will actually be sold needs paid-publishing
-  // authorization at all. price_cents is read fresh from the bundle's own
-  // row here -- never trusted from the client.
-  if (bundle.price_cents > 0) {
+  // authorization at all -- price_all = 0 is explicitly free and
+  // publishes with no paid-mode permission involved.
+  if (catalogPriceState === "paid") {
     // PAID-MODE-1 / PR-G: identical placement and rationale to
     // performPublish() (dashboard/books/actions.ts) -- after the bundle's
     // own server-read price proves it is paid, and since PR G the sole
@@ -329,6 +393,14 @@ export async function publishBundle(bundleId: string) {
   const result = await performBundlePublish(supabase, bundleId, user.id);
 
   if (!result.ok) {
+    // ALL-WIRING-5: like publishBook()'s missing-price refusal, this one
+    // is specific because it describes the author's OWN row back to them
+    // and sends them to the one page that fixes it.
+    if (result.reason === "missing_all_price") {
+      redirect(
+        `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(MISSING_BUNDLE_PRICE_MESSAGE)}`,
+      );
+    }
     // PAID-MODE-1: same generic message publishBook() uses for the
     // identical situation -- it names no variable, environment or payout
     // state.

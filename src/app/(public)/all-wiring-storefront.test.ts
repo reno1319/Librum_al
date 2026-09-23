@@ -169,9 +169,9 @@ describe("no active book surface renders a dollar sign or a legacy USD formatter
   it("no BOOK price anywhere goes through the legacy USD formatters", () => {
     for (const file of BOOK_SURFACES) {
       const source = code(read(file));
-      // formatPrice survives ONLY for bundles and for the legacy held
-      // quote; both are asserted by name in the next describe block.
-      const bookPriceThroughLegacy = source.match(/format(?:All)?Price\((?!bundle\.|heldQuote\.)/g);
+      // ALL-WIRING-5: formatPrice no longer exists at all (its last
+      // callers were the bundle rails), so there is no exemption left.
+      const bookPriceThroughLegacy = source.match(/format(?:All)?Price\(/g);
       expect(bookPriceThroughLegacy).toBeNull();
     }
   });
@@ -193,23 +193,25 @@ describe("no active book surface renders a dollar sign or a legacy USD formatter
   });
 });
 
-describe("bundle pricing is untouched: price_cents remains the bundle authority", () => {
-  // Patch 2's scope stops at books. A bundle's price is still legacy
-  // USD minor units and still renders through formatPrice, and Patch 5
-  // is where that moves. These assertions exist so a well-meaning
-  // sweep of "remove formatPrice" cannot quietly take bundles with it.
+describe("bundle pricing moved to price_all in Patch 5 (ALL-WIRING-5)", () => {
+  // Patch 2's scope stopped at books and this block used to pin bundles
+  // to `formatPrice(bundle.price_cents)` so a "remove formatPrice"
+  // sweep could not take them along by accident. Patch 5 is that move,
+  // done deliberately; these assertions now pin the NEW state, and
+  // ./all-wiring-bundles.test.ts carries the full bundle guard.
   it.each([
     ["the bookstore's bundle rail", "bookstore/page.tsx"],
     ["an author's bundle rail", "authors/[id]/page.tsx"],
-  ])("%s still prices bundles from bundle.price_cents via formatPrice", (_label, file) => {
+  ])("%s prices bundles from bundle.price_all via the catalog label", (_label, file) => {
     const source = code(read(file));
-    expect(source).toContain("formatPrice(bundle.price_cents)");
+    expect(source).toContain("formatCatalogPriceLabel(bundle.price_all)");
+    expect(source).not.toContain("formatPrice(bundle.price_cents)");
   });
 
-  it("bundle detail neither filters on price_all nor reads it for the bundle's own price", () => {
+  it("bundle detail reads the bundle's own price from price_all, without filtering its members on it", () => {
     const source = code(read("bundles/[id]/page.tsx"));
     expect(source).not.toContain('.not("price_all", "is", null)');
-    expect(source).not.toMatch(/bundle\.price_all/);
+    expect(source).toContain("formatCatalogPriceLabel(bundle.price_all)");
   });
 
   it("buyBundle is still unconditionally closed, and is not given a price_all path", () => {

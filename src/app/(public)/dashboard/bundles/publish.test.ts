@@ -37,6 +37,10 @@ const mockProfileSelectResult = vi.fn();
 const mockMemberSelectResult = vi.fn();
 const mockBundleUpdatePayload = vi.fn();
 const mockBundleUpdateResult = vi.fn();
+// ALL-WIRING-5: the exact column list performBundlePublish() asks the
+// bundle read for, so a test can prove `price_cents` is not even
+// fetched -- not merely that it happened to be ignored.
+const mockBundleQueryColumns = vi.fn();
 
 // Records the EXACT arguments performBundlePublish()'s membership read
 // passes to `.select()`/`.eq()` on "bundle_books" -- proves the real
@@ -103,7 +107,10 @@ const mockCreateClient = vi.fn(() =>
     from: (table: string) => {
       if (table === "bundles") {
         return {
-          select: () => makeReadChain(() => mockBundleSelectResult()),
+          select: (columns: string) => {
+            mockBundleQueryColumns(columns);
+            return makeReadChain(() => mockBundleSelectResult());
+          },
           update: (payload: unknown) => {
             mockBundleUpdatePayload(payload);
             return makeWriteChain(() => mockBundleUpdateResult());
@@ -132,8 +139,15 @@ const { publishBundle } = await import("./actions");
 const USER_ID = "author-1";
 const BUNDLE_ID = "bundle-1";
 
-function bundleRow(overrides: Partial<{ price_cents: number }> = {}) {
-  return { data: { price_cents: 0, ...overrides }, error: null };
+// ALL-WIRING-5: the bundle row carries `price_all`, the only column the
+// publish decision reads. A legacy `price_cents` is present on purpose
+// and deliberately DISAGREES with it by default (legacy 2500 against an
+// explicit free 0), so any test that passes because the wrong column was
+// consulted would pass for the wrong reason visibly.
+function bundleRow(
+  overrides: Partial<{ price_all: number | null; price_cents: number }> = {},
+) {
+  return { data: { price_all: 0, price_cents: 2500, ...overrides }, error: null };
 }
 
 // PHASE-2C: a single bundle_books row shape, joined to its book's
@@ -185,6 +199,7 @@ function resetMocks() {
   mockMemberQueryColumns.mockClear();
   mockMemberQueryFilters.mockClear();
   mockBundleUpdatePayload.mockClear();
+  mockBundleQueryColumns.mockClear();
   mockBundleUpdateResult.mockReset().mockReturnValue({ data: [{ id: BUNDLE_ID }], error: null });
   mockCookieStore.get.mockReset().mockImplementation(() => undefined);
   mockRevalidatePath.mockReset();
@@ -198,7 +213,7 @@ describe("publishBundle: paid-publishing readiness gate", () => {
   // payouts disabled (see resetMocks), so publication succeeding IS the
   // proof the Stripe prerequisite is gone.
   it("paid bundle publishes with the capability allowed, reading no profile", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 999 }));
 
     await publishBundle(BUNDLE_ID); // no redirect on success -- must not throw
 
@@ -215,7 +230,7 @@ describe("publishBundle: paid-publishing readiness gate", () => {
     ]) {
       resetMocks();
       mockProfileSelectResult.mockReturnValue(profileResult);
-      mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
+      mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 999 }));
 
       await publishBundle(BUNDLE_ID);
 
@@ -225,7 +240,7 @@ describe("publishBundle: paid-publishing readiness gate", () => {
   });
 
   it("free bundle: published, profiles table never queried", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 0 }));
 
     await publishBundle(BUNDLE_ID);
 
@@ -250,7 +265,7 @@ describe("publishBundle: paid-publishing readiness gate", () => {
   // bundle read above and the membership read below both still produce
   // it, and both keep their own coverage.
   it("a profile read failure is impossible now: a paid bundle publishes however profiles would have answered", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 999 }));
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 999 }));
     mockProfileSelectResult.mockReturnValue({ data: null, error: { message: "connection reset" } });
 
     await publishBundle(BUNDLE_ID);
@@ -272,7 +287,7 @@ describe("publishBundle: paid-publishing readiness gate", () => {
   });
 
   it("final update error: failure reported, no successful outcome", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 0 }));
     mockBundleUpdateResult.mockReturnValue({ data: null, error: { message: "db exploded" } });
 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
@@ -290,7 +305,7 @@ describe("publishBundle: paid-publishing readiness gate", () => {
     // Proves the .select("id") row-count check itself: a well-formed,
     // error-free response that matched zero rows must still be treated
     // as a failure, never coerced into ok:true.
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 0 }));
     mockBundleUpdateResult.mockReturnValue({ data: [], error: null });
 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
@@ -299,8 +314,8 @@ describe("publishBundle: paid-publishing readiness gate", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/bundles");
   });
 
-  it("price_cents === 0 boundary: skips the capability check exactly at zero", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
+  it("price_all === 0 boundary: skips the capability check exactly at zero", async () => {
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 0 }));
     vi.stubEnv("PAID_PUBLISHING_MODE", "");
 
     await publishBundle(BUNDLE_ID);
@@ -310,8 +325,8 @@ describe("publishBundle: paid-publishing readiness gate", () => {
     expect(mockRedirect).not.toHaveBeenCalled();
   });
 
-  it("price_cents === 1 boundary: requires the capability at the smallest positive price", async () => {
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 1 }));
+  it("price_all === 99 boundary: requires the capability at the smallest paid price", async () => {
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 99 }));
     vi.stubEnv("PAID_PUBLISHING_MODE", "");
 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
@@ -495,7 +510,7 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
     vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1");
     vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
     vi.stubEnv("POK_ENVIRONMENT", "staging");
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: PAID_PRICE }));
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: PAID_PRICE }));
     // Left at the value the REMOVED gate would have rejected, on purpose.
     mockProfileSelectResult.mockReturnValue({ data: { stripe_payouts_enabled: false }, error: null });
     mockMemberSelectResult.mockReturnValue(validMemberRows(2));
@@ -589,7 +604,7 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
 
   it("a free bundle publishes with the mode variable unset, and reads no profile", async () => {
     vi.stubEnv("PAID_PUBLISHING_MODE", "");
-    mockBundleSelectResult.mockReturnValue(bundleRow({ price_cents: 0 }));
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 0 }));
 
     await publishBundle(BUNDLE_ID);
 
@@ -597,5 +612,146 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
     expect(mockBundleUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
     );
+  });
+});
+
+// ALL-WIRING-5: the publish decision reads `bundles.price_all` and only
+// `price_all`. Every fixture below that matters carries a legacy
+// `price_cents` that would give the OPPOSITE answer if it were read.
+describe("performBundlePublish: price_all three-way state (ALL-WIRING-5)", () => {
+  const MISSING_PRICE_REDIRECT =
+    `/dashboard/bundles/${BUNDLE_ID}/edit?error=` +
+    encodeURIComponent("Set a valid ALL price before publishing this bundle.");
+  const PAID_MODE_REDIRECT = "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now";
+
+  beforeEach(resetMocks);
+
+  it("reads exactly price_all from the owned bundle row -- price_cents is not even fetched", async () => {
+    await publishBundle(BUNDLE_ID);
+
+    expect(mockBundleQueryColumns).toHaveBeenCalledTimes(1);
+    expect(mockBundleQueryColumns).toHaveBeenCalledWith("price_all");
+  });
+
+  it("null price_all is refused before the membership read and before any update, even with paid mode allowed", async () => {
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: null, price_cents: 0 }));
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(MISSING_PRICE_REDIRECT);
+    expect(mockMemberSelectResult).not.toHaveBeenCalled();
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("null price_all with a legacy price_cents of 2500 does not use the legacy value", async () => {
+    // If price_cents were consulted this would be "paid", and with paid
+    // mode allowed it would PUBLISH. It must instead be unavailable.
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: null, price_cents: 2500 }));
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(MISSING_PRICE_REDIRECT);
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("a MISSING price_all key is unavailable, never free -- even when price_cents is 0", async () => {
+    // A projection that omitted the column must not read as free, which
+    // is what `price_cents === 0` (or `!price_all`) would have said.
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
+    mockBundleSelectResult.mockReturnValue({ data: { price_cents: 0 }, error: null });
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(MISSING_PRICE_REDIRECT);
+    expect(mockMemberSelectResult).not.toHaveBeenCalled();
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["1 (below the paid floor)", 1],
+    ["98 (below the paid floor)", 98],
+    ["100001 (above the ceiling)", 100_001],
+    ["a fraction", 199.5],
+    ["a negative", -199],
+    ["negative zero", -0],
+    ["a numeric string", "199"],
+  ])("an out-of-domain price_all of %s is unavailable, never paid or free", async (_label, value) => {
+    mockBundleSelectResult.mockReturnValue({ data: { price_all: value, price_cents: 0 }, error: null });
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(MISSING_PRICE_REDIRECT);
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("price_all 0 publishes with PAID_PUBLISHING_MODE entirely absent (legacy price_cents 2500 ignored)", async () => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("PAID_PUBLISHING_MODE", undefined as unknown as string);
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 0, price_cents: 2500 }));
+
+    await publishBundle(BUNDLE_ID);
+
+    expect(mockBundleUpdatePayload).toHaveBeenCalledWith({ status: "published" });
+    expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  it("price_all 199 with price_cents 0 is PAID: denied while PAID_PUBLISHING_MODE is absent", async () => {
+    // The mirror image: price_cents === 0 would have called this free
+    // and published it with no permission at all.
+    vi.unstubAllEnvs();
+    vi.stubEnv("PAID_PUBLISHING_MODE", undefined as unknown as string);
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 199, price_cents: 0 }));
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(PAID_MODE_REDIRECT);
+    expect(mockMemberSelectResult).not.toHaveBeenCalled();
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("price_all 199 with price_cents 0 publishes only once the paid-publishing capability allows it", async () => {
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 199, price_cents: 0 }));
+
+    await publishBundle(BUNDLE_ID);
+
+    expect(mockBundleUpdatePayload).toHaveBeenCalledWith({ status: "published" });
+  });
+
+  it.each([
+    ["the minimum", 99],
+    ["the maximum", 100_000],
+  ])("a paid price at %s is still denied with the paid mode absent", async (_label, priceAll) => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("PAID_PUBLISHING_MODE", undefined as unknown as string);
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: priceAll, price_cents: 0 }));
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(PAID_MODE_REDIRECT);
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("a valid price does not bypass membership integrity: 3 members with 1 invalid is still refused", async () => {
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 0 }));
+    mockMemberSelectResult.mockReturnValue({
+      data: [memberRow("book-0"), memberRow("book-1"), { book_id: "book-2", books: null }],
+      error: null,
+    });
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+    );
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("the missing-price message names no environment variable and echoes no value", async () => {
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: null, price_cents: 2500 }));
+
+    await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const target = decodeURIComponent(mockRedirect.mock.calls[0][0]);
+    expect(target).not.toMatch(/PAID_|VERCEL|2500|\$|USD/);
   });
 });

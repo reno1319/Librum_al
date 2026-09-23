@@ -14,6 +14,11 @@ import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import {
+  MAXIMUM_CATALOG_PRICE_ALL,
+  MINIMUM_PAID_CATALOG_PRICE_ALL,
+  formatCatalogPriceLabel,
+} from "@/lib/catalog-price";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -23,7 +28,7 @@ export const metadata: Metadata = {
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see the exhaustive
-// route audit (bundles.price_cents is rendered in the bundle list below).
+// route audit (bundles.price_all is rendered in the bundle list below).
 export const dynamic = "force-dynamic";
 
 export default async function BundlesPage({
@@ -31,7 +36,7 @@ export default async function BundlesPage({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  // ALL-CUTOVER APP-A: schema-sensitive page -- renders bundles.price_cents
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders bundles.price_all
   // in the bundle list (exhaustive route audit) -- checked as the first
   // statement, before any Supabase call.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
@@ -56,12 +61,17 @@ export default async function BundlesPage({
     .order("title")
     .returns<Pick<Book, "id" | "title">[]>();
 
+  // ALL-WIRING-5: every one of the author's bundles, priced or not, and
+  // deliberately NOT filtered on price_all -- this list is where an
+  // author finds a bundle with no ALL price and repairs it. Only the
+  // columns rendered are selected, so the legacy `price_cents` is not
+  // fetched at all.
   const { data: bundles } = await supabase
     .from("bundles")
-    .select("*")
+    .select("id, title, status, price_all")
     .eq("author_id", user.id)
     .order("created_at", { ascending: false })
-    .returns<Bundle[]>();
+    .returns<Pick<Bundle, "id" | "title" | "status" | "price_all">[]>();
 
   const bundleIds = (bundles ?? []).map((b) => b.id);
   const { data: bundleBookRows } =
@@ -127,16 +137,23 @@ export default async function BundlesPage({
             <textarea name="description" rows={3} className={formControlClasses} />
           </label>
 
+          {/* ALL-WIRING-5: whole lek, parsed server-side by
+              parseCatalogPriceAll. A text input with a decimal keyboard,
+              as on the book forms: `type="number"` cannot submit the
+              accepted "99,00" form at all. */}
           <label className="flex flex-col gap-1 text-sm">
-            Bundle price (USD)
+            Bundle price (ALL)
             <input
               name="price"
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               required
               className={`w-40 ${formControlClasses}`}
             />
+            <span className="text-xs text-muted">
+              Whole lek: 0 for a free bundle, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
+              {MAXIMUM_CATALOG_PRICE_ALL}.
+            </span>
           </label>
 
           <fieldset>
@@ -168,7 +185,7 @@ export default async function BundlesPage({
               <p className="font-medium">
                 {bundle.title}{" "}
                 <span className="text-muted">
-                  · ${(bundle.price_cents / 100).toFixed(2)}
+                  · {formatCatalogPriceLabel(bundle.price_all)}
                 </span>
               </p>
               <p className="text-xs text-muted capitalize">

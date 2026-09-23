@@ -7,13 +7,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { BookCard } from "@/components/book-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
-import { formatPrice } from "@/lib/pricing";
 import { followAuthor, unfollowAuthor } from "./actions";
 import { groupPublishedBooksBySeries } from "@/lib/author-series";
 import { getAuthorInitials } from "@/lib/author-initials";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import type { Book, Bundle, Profile, Series } from "@/lib/types";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
@@ -151,13 +151,19 @@ export default async function AuthorProfilePage({
         .not("price_all", "is", null)
         .order("created_at", { ascending: false })
         .returns<Book[]>(),
+      // ALL-WIRING-5: the bundle rail is a discovery surface too, so a
+      // bundle with no authored ALL price is excluded on the same terms
+      // as a book -- still published, still reachable at its own
+      // address, still on its author's dashboard. Only the rendered
+      // columns are selected; the legacy `price_cents` is not.
       supabase
         .from("bundles")
-        .select("*")
+        .select("id, title, price_all")
         .eq("author_id", id)
         .eq("status", "published")
+        .not("price_all", "is", null)
         .order("created_at", { ascending: false })
-        .returns<Bundle[]>(),
+        .returns<Pick<Bundle, "id" | "title" | "price_all">[]>(),
       admin.from("author_follows").select("id", { count: "exact", head: true }).eq("author_id", id),
       user && !isSelf
         ? supabase
@@ -392,8 +398,10 @@ export default async function AuthorProfilePage({
       )}
 
       {/* ============================================================
-          Bundles -- unchanged query/behavior, restyled only to match
-          this page's section rhythm (border-t + consistent spacing).
+          Bundles -- restyled to match this page's section rhythm
+          (border-t + consistent spacing). ALL-WIRING-5: priced from
+          price_all; unpriced bundles never reach this list (see the
+          query above).
           ============================================================ */}
       {bundles && bundles.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
@@ -407,7 +415,7 @@ export default async function AuthorProfilePage({
                 >
                   <span className="font-serif font-medium">{bundle.title}</span>
                   <span className="text-sm font-semibold text-primary">
-                    {formatPrice(bundle.price_cents)}
+                    {formatCatalogPriceLabel(bundle.price_all)}
                   </span>
                 </Link>
               </li>

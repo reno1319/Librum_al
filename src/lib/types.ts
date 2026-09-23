@@ -142,12 +142,17 @@ export type Bundle = {
   author_id: string;
   title: string;
   description: string;
+  // ALL-WIRING-5: LEGACY USD minor units. Typed because the column
+  // still exists and still holds historical values, but no bundle
+  // catalog surface, author form or publish decision reads it any
+  // more -- not as a price, not as a fallback, not as a free/paid
+  // signal. The one remaining reader is the dormant
+  // create_bundle_checkout_snapshot RPC, which buyBundle never reaches.
   price_cents: number;
-  // ALL-WIRING-2: the column exists (migration 20260921153012) and is
-  // typed here so a reader of this type is not misled about the table's
-  // shape. Bundle BEHAVIOR is deliberately unchanged by this patch:
-  // every bundle price decision, display and checkout path still reads
-  // `price_cents`, and moving them is Patch 5's work, not this one's.
+  // ALL-WIRING-5: the bundle's catalog price in WHOLE lek, with the same
+  // three-way meaning as books.price_all (null = no authored ALL price,
+  // 0 = explicitly free, 99..100000 = paid). Classify it only through
+  // resolveCatalogPriceState (src/lib/catalog-price.ts).
   price_all: number | null;
   status: BookStatus;
   created_at: string;

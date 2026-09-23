@@ -12,7 +12,9 @@ import path from "path";
 // bringing the old formatting back on a surface without one.
 //
 // Bundle CATALOG prices (bundle pages, bookstore and author rails) are
-// deliberately not listed: they are Patch 5's scope.
+// deliberately not listed: they are whole-ALL catalog values, not
+// transaction amounts, and Patch 5 guards them separately in
+// src/app/(public)/all-wiring-bundles.test.ts.
 const ROOT = path.resolve(__dirname, "..", "..");
 
 const TRANSACTION_SURFACES = [
