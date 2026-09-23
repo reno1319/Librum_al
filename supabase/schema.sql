@@ -1438,9 +1438,20 @@ create index discount_codes_book_id_idx on public.discount_codes(book_id);
 -- own codes), INSERT (create), UPDATE (active only -- toggleDiscountCode's
 -- payload is a plain, single-key `{ active }` object, not an upsert, so
 -- narrowing the grantable column set is safe), DELETE (remove).
-revoke all on public.discount_codes from anon, authenticated;
+--
+-- ALL-DISCOUNT-3 (migration 20260923112502): INSERT is COLUMN-level, on
+-- exactly the columns createDiscountCode names. The legacy USD column
+-- `amount_off_cents` is deliberately absent, so authenticated can
+-- neither insert nor update it; new fixed discounts are whole ALL in
+-- `amount_off_all`. `active` and `created_at` take their defaults.
+-- Existing amount_off_cents rows stay readable (SELECT is unchanged).
+revoke all on public.discount_codes from public, anon, authenticated;
 
-grant select, insert, delete
+grant select, delete
+  on public.discount_codes
+  to authenticated;
+
+grant insert (id, author_id, book_id, code, percent_off, amount_off_all, expires_at)
   on public.discount_codes
   to authenticated;
 

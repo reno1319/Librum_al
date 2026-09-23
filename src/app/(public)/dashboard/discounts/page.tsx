@@ -8,6 +8,12 @@ import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import {
+  FIXED_ALL_DISCOUNT_FORM_TYPE,
+  MAXIMUM_FIXED_DISCOUNT_ALL,
+  MINIMUM_FIXED_DISCOUNT_ALL,
+  describeDiscountCode,
+} from "@/lib/discount-amount";
 import type { Book, DiscountCode } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -17,7 +23,7 @@ export const metadata: Metadata = {
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see the exhaustive
-// route audit (discount_codes.amount_off_cents is rendered below).
+// route audit (discount_codes' discount columns are rendered below).
 export const dynamic = "force-dynamic";
 
 type DiscountCodeWithBook = DiscountCode & { books: Pick<Book, "title"> | null };
@@ -28,7 +34,7 @@ export default async function DiscountsPage({
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive page -- renders
-  // discount_codes.amount_off_cents (exhaustive route audit) -- checked
+  // discount_codes' discount columns (exhaustive route audit) -- checked
   // as the first statement, before any Supabase call.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
     return <MaintenanceNotice />;
@@ -63,7 +69,7 @@ export default async function DiscountsPage({
       <div className="mt-2">
         <PageHeader
           title="Discount codes"
-          description="Create a promo code for one of your books — readers enter it at checkout for a percentage or fixed amount off."
+          description="Create a promo code for one of your books — readers enter it at checkout for a percentage or a fixed amount in lek (ALL) off."
         />
       </div>
 
@@ -118,23 +124,33 @@ export default async function DiscountsPage({
               Discount type
               <select name="type" required defaultValue="percent" className={formControlClasses}>
                 <option value="percent">Percentage off</option>
-                <option value="amount">Fixed amount off (USD)</option>
+                {/* ALL-DISCOUNT-3: a fixed discount is whole lek, written
+                    to amount_off_all. The old "amount" (USD) option is
+                    gone, and its value is not reused. */}
+                <option value={FIXED_ALL_DISCOUNT_FORM_TYPE}>Fixed amount off (ALL, lek)</option>
               </select>
             </label>
 
             <label className="flex flex-1 flex-col gap-1 text-sm">
               Value
+              {/* Text, not type="number": the whole-lek convention accepts
+                  "250,00", which a number input refuses, and the server
+                  parses the string without a float step either way. */}
               <input
                 name="value"
-                type="number"
-                min="0"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 required
                 placeholder="e.g. 20"
                 className={formControlClasses}
               />
             </label>
           </div>
+          <p className="-mt-2 text-xs text-muted">
+            Percentage: a whole number from 1 to 100. Fixed amount: whole lek, from{" "}
+            {MINIMUM_FIXED_DISCOUNT_ALL} to {MAXIMUM_FIXED_DISCOUNT_ALL} ALL. A code that would take a
+            book below its minimum price is refused at checkout.
+          </p>
 
           <label className="flex flex-col gap-1 text-sm">
             Expires (optional)
@@ -151,10 +167,10 @@ export default async function DiscountsPage({
         {(codes ?? []).map((code) => {
           const expired =
             !!code.expires_at && new Date(code.expires_at) < new Date();
-          const value =
-            code.percent_off != null
-              ? `${code.percent_off}% off`
-              : `$${((code.amount_off_cents ?? 0) / 100).toFixed(2)} off`;
+          // ALL-DISCOUNT-3: one display for every stored shape. A legacy
+          // amount_off_cents code is shown in USD with a notice, never
+          // as lek; checkout refuses it (discount_not_applicable).
+          const discount = describeDiscountCode(code);
 
           return (
             <li
@@ -163,8 +179,11 @@ export default async function DiscountsPage({
             >
               <div>
                 <p className="font-medium">
-                  {code.code} <span className="text-muted">· {value}</span>
+                  {code.code} <span className="text-muted">· {discount.label}</span>
                 </p>
+                {discount.kind === "legacy_usd" && (
+                  <p className="text-xs font-medium text-amber-700">{discount.notice}</p>
+                )}
                 <p className="text-xs text-muted">
                   {code.books?.title}
                   {code.expires_at &&

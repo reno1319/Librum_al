@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
+import { FIXED_ALL_DISCOUNT_FORM_TYPE, parseFixedDiscountAll } from "@/lib/discount-amount";
 
 export async function createDiscountCode(formData: FormData) {
   // ALL-CUTOVER APP-A: discount amount is written by this action --
@@ -26,7 +27,7 @@ export async function createDiscountCode(formData: FormData) {
   const bookId = String(formData.get("bookId") ?? "");
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
   const type = String(formData.get("type") ?? "");
-  const value = Number(formData.get("value") ?? 0);
+  const rawValue = formData.get("value");
   const expiresAt = String(formData.get("expiresAt") ?? "").trim();
 
   if (!bookId || !code) {
@@ -44,14 +45,29 @@ export async function createDiscountCode(formData: FormData) {
     redirect("/dashboard/discounts?error=Choose+one+of+your+own+books");
   }
 
+  // ALL-DISCOUNT-3: exactly ONE discount column is named in the insert,
+  // and it is never `amount_off_cents`. The legacy USD column is absent
+  // from the payload altogether, not sent as null: PostgREST names every
+  // key it receives in the INSERT's column list, and authenticated holds
+  // no INSERT privilege on that column, so even a null would be refused.
+  let discount: { percent_off: number } | { amount_off_all: number };
   if (type === "percent") {
+    // Unchanged percentage parsing and bounds.
+    const value = Number(rawValue ?? 0);
     if (!Number.isInteger(value) || value < 1 || value > 100) {
       redirect("/dashboard/discounts?error=Percent+off+must+be+between+1+and+100");
     }
-  } else if (type === "amount") {
-    if (!Number.isFinite(value) || value <= 0) {
-      redirect("/dashboard/discounts?error=Amount+off+must+be+greater+than+0");
+    discount = { percent_off: value };
+  } else if (type === FIXED_ALL_DISCOUNT_FORM_TYPE) {
+    // Whole lek, 1..100000, parsed from the string without a float step.
+    // No catalog minimum and no check against the book's current price:
+    // whether a code leaves a legal price is decided, and rejected, at
+    // checkout.
+    const parsed = parseFixedDiscountAll(rawValue);
+    if (!parsed.ok) {
+      redirect("/dashboard/discounts?error=Fixed+amount+off+must+be+a+whole+number+of+lek+from+1+to+100000");
     }
+    discount = { amount_off_all: parsed.amountOffAll };
   } else {
     redirect("/dashboard/discounts?error=Choose+a+discount+type");
   }
@@ -61,8 +77,7 @@ export async function createDiscountCode(formData: FormData) {
     author_id: user.id,
     book_id: bookId,
     code,
-    percent_off: type === "percent" ? value : null,
-    amount_off_cents: type === "amount" ? Math.round(value * 100) : null,
+    ...discount,
     expires_at: expiresAt || null,
   });
 
