@@ -136,14 +136,33 @@ describe("resolveSuccessBannerMessage", () => {
 });
 
 describe("getIssueRefundConfirmationMessage", () => {
-  it("formats the amount as dollars and cents and states the consequence is irreversible", () => {
-    expect(getIssueRefundConfirmationMessage(699)).toBe(
-      "Issue the $6.99 refund through Stripe? This will return the payment to the reader. This action cannot be undone.",
+  // ALL-TXN-CURRENCY-4: the request's own currency, never a bare "$".
+  it("formats a legacy USD amount with an explicit USD code and states the consequence is irreversible", () => {
+    expect(getIssueRefundConfirmationMessage(699, { state: "resolved", currency: "USD" })).toBe(
+      "Issue the USD 6.99 refund through Stripe? This will return the payment to the reader. This action cannot be undone.",
     );
   });
 
-  it("formats a whole-dollar amount with two decimal places", () => {
-    expect(getIssueRefundConfirmationMessage(500)).toContain("$5.00");
+  it("formats an ALL amount in lek with the qindarka", () => {
+    expect(getIssueRefundConfirmationMessage(17910, { state: "resolved", currency: "ALL" })).toContain(
+      "Issue the 179,10 ALL refund",
+    );
+  });
+
+  it("formats a whole amount with two decimal places", () => {
+    expect(getIssueRefundConfirmationMessage(500, { state: "resolved", currency: "USD" })).toContain("USD 5.00");
+  });
+
+  it("shows NO amount -- never a guessed currency -- when the currency is not established", () => {
+    for (const currency of [{ state: "unknown" }, { state: "conflict" }, { state: "free" }] as const) {
+      const message = getIssueRefundConfirmationMessage(699, currency);
+      expect(message).toContain("Issue the full refund through Stripe?");
+      expect(message).toContain("currency could not be determined");
+      expect(message).not.toMatch(/6[.,]99/);
+      expect(message).not.toContain("$");
+      expect(message).not.toContain("USD");
+      expect(message).toContain("This action cannot be undone.");
+    }
   });
 });
 

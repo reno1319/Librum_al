@@ -204,7 +204,13 @@ describe("all-money module: integer-only by construction, not by convention", ()
   });
 
   it("has no imports and no side effects: it cannot reach env, network, or a database", () => {
-    expect(code).not.toMatch(/^import /m);
+    // ALL-TXN-CURRENCY-4: exactly one import, the pure shared transaction
+    // formatter the digit slicing now lives in -- itself import-free
+    // (asserted in transaction-money.test.ts).
+    const imports = code.match(/^import .*$/gm) ?? [];
+    expect(imports).toEqual([
+      'import { formatTransactionMinorUnits } from "@/lib/transaction-money";',
+    ]);
     expect(code).not.toMatch(/process\.env/);
     expect(code).not.toMatch(/\bfetch\(/);
     expect(code).not.toMatch(/supabase/i);

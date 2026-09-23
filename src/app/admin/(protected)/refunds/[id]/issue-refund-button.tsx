@@ -2,6 +2,7 @@
 
 import { useFormStatus } from "react-dom";
 import { getIssueRefundConfirmationMessage } from "../refund-review-logic";
+import type { CurrencyProvenance } from "@/lib/transaction-money";
 
 // Same confirm-then-submit pattern as ReviewButtons/CancelRefundButton
 // in this app (window.confirm guard on the submit, no modal/dialog
@@ -14,7 +15,15 @@ import { getIssueRefundConfirmationMessage } from "../refund-review-logic";
 // issue-refund.ts's buildRefundIdempotencyKey), which holds even if
 // this client-side guard is bypassed entirely (e.g. two separate
 // browser tabs).
-export function IssueRefundButton({ amountCents }: { amountCents: number }) {
+export function IssueRefundButton({
+  amountCents,
+  currency,
+}: {
+  amountCents: number;
+  // ALL-TXN-CURRENCY-4: the request's own currency, so the confirmation
+  // never presents the amount under a guessed one.
+  currency: CurrencyProvenance;
+}) {
   const { pending } = useFormStatus();
 
   return (
@@ -22,7 +31,7 @@ export function IssueRefundButton({ amountCents }: { amountCents: number }) {
       type="submit"
       disabled={pending}
       onClick={(e) => {
-        if (!window.confirm(getIssueRefundConfirmationMessage(amountCents))) {
+        if (!window.confirm(getIssueRefundConfirmationMessage(amountCents, currency))) {
           e.preventDefault();
         }
       }}

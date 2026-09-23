@@ -130,6 +130,8 @@ function makeRefundRow(overrides: Partial<FinanceRefundReconciliationRow> = {}):
     stripe_status: null,
     operational_state: "approved_unattempted",
     needs_attention: true,
+    currency_state: "resolved",
+    currency: "USD",
     ...overrides,
   };
 }
@@ -153,6 +155,8 @@ function makeDisputeRow(overrides: Partial<FinanceDisputeRow> = {}): FinanceDisp
     transfer_reversal_succeeded_at: null,
     transfer_reversal_failure_code: null,
     needs_attention: true,
+    currency_state: "resolved",
+    currency: "USD",
     ...overrides,
   };
 }
@@ -170,6 +174,8 @@ function makeCheckoutRow(overrides: Partial<FinanceCheckoutExceptionRow> = {}): 
     completed_at: "2026-01-01T00:00:00.000Z",
     reconciliation_reason: "active_other_session",
     created_at: "2026-01-01T00:00:00.000Z",
+    currency_state: "resolved",
+    currency: "USD",
     ...overrides,
   };
 }
@@ -184,6 +190,8 @@ function makeMismatchRow(overrides: Partial<FinanceRefundEntitlementMismatchRow>
     reader_display_name: "Reader One",
     stripe_payment_intent_id: "pi_abc123",
     amount_cents: 1999,
+    currency_state: "resolved",
+    currency: "USD",
     ...overrides,
   };
 }
@@ -873,5 +881,97 @@ describe("AdminFinancePage: maintenance-mode gate", () => {
       AdminFinancePage({ searchParams: Promise.resolve({}) }),
     ).rejects.toBeInstanceOf(RedirectSignal);
     expect(mockRequireStaff).toHaveBeenCalledWith("finance.view");
+  });
+});
+
+// ALL-TXN-CURRENCY-4 (Patch 4): every finance amount is rendered in the
+// currency its RPC row supplies -- desktop table and mobile card alike --
+// and a row without a resolved currency is never given one.
+describe("AdminFinancePage: transaction currency (Patch 4)", () => {
+  beforeEach(() => {
+    mockRequireStaff.mockReset();
+    mockGetFinanceSummaryCounts.mockReset();
+    mockListRefundReconciliationStates.mockReset();
+    mockListFinanceDisputes.mockReset();
+    mockListFinanceCheckoutExceptions.mockReset();
+    mockListFinanceRefundEntitlementMismatches.mockReset();
+    mockRequireStaff.mockResolvedValue({ userId: "u1", role: "owner" });
+    setDefaultOkMocks();
+  });
+
+  async function renderHtml(): Promise<string> {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const page = await AdminFinancePage({
+      searchParams: Promise.resolve({ refund_attention: "all", dispute_attention: "all" }),
+    });
+    return renderToStaticMarkup(page as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+
+  function occurrences(html: string, needle: string): number {
+    return html.split(needle).length - 1;
+  }
+
+  it("renders a legacy USD refund row as USD and a new ALL refund row as ALL, in both layouts", async () => {
+    mockListRefundReconciliationStates.mockResolvedValue({
+      ok: true,
+      data: [
+        makeRefundRow({ refund_request_id: "a0000000-0000-0000-0000-00000000000a", amount_cents: 1999, currency: "USD" }),
+        makeRefundRow({ refund_request_id: "a0000000-0000-0000-0000-00000000000b", amount_cents: 17910, currency: "ALL" }),
+      ],
+    });
+    const html = await renderHtml();
+    // Desktop table + mobile card list: each amount appears exactly twice.
+    expect(occurrences(html, "USD 19.99")).toBe(2);
+    expect(occurrences(html, "179,10 ALL")).toBe(2);
+    expect(html).not.toMatch(/\$\d/);
+    // Negative controls: neither amount is relabelled.
+    expect(html).not.toContain("19,99 ALL");
+    expect(html).not.toContain("USD 179.10");
+  });
+
+  it("renders dispute and mismatch amounts in their supplied currency", async () => {
+    mockListFinanceDisputes.mockResolvedValue({
+      ok: true,
+      data: [makeDisputeRow({ amount_cents: 9900, currency: "ALL" })],
+    });
+    mockListFinanceRefundEntitlementMismatches.mockResolvedValue({
+      ok: true,
+      data: [makeMismatchRow({ amount_cents: 500, currency: "USD" })],
+    });
+    const html = await renderHtml();
+    expect(occurrences(html, "99,00 ALL")).toBe(2);
+    expect(html).toContain("USD 5.00");
+    expect(html).not.toMatch(/\$\d/);
+  });
+
+  it("an unknown or conflicting currency is shown as unavailable, never as USD or ALL", async () => {
+    mockListRefundReconciliationStates.mockResolvedValue({
+      ok: true,
+      data: [
+        makeRefundRow({ refund_request_id: "a0000000-0000-0000-0000-00000000000c", amount_cents: 4242, currency_state: "unknown", currency: null }),
+        makeRefundRow({ refund_request_id: "a0000000-0000-0000-0000-00000000000d", amount_cents: 4343, currency_state: "conflict", currency: null }),
+      ],
+    });
+    const html = await renderHtml();
+    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).toContain("Amount unavailable (conflicting currency records)");
+    expect(html).not.toContain("42.42");
+    expect(html).not.toContain("42,42");
+    expect(html).not.toContain("43.43");
+    expect(html).not.toContain("43,43");
+  });
+
+  it("a row from an RPC that returned no currency columns at all (pre-migration database) is unknown, not USD", async () => {
+    const legacyShaped = makeRefundRow({ amount_cents: 1999 }) as Partial<FinanceRefundReconciliationRow>;
+    delete legacyShaped.currency_state;
+    delete legacyShaped.currency;
+    mockListRefundReconciliationStates.mockResolvedValue({
+      ok: true,
+      data: [legacyShaped as FinanceRefundReconciliationRow],
+    });
+    const html = await renderHtml();
+    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).not.toContain("USD 19.99");
+    expect(html).not.toMatch(/\$\d/);
   });
 });

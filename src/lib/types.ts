@@ -328,6 +328,10 @@ export type RefundOperationalState =
   | "approved_attempt_failed"
   | "approved_attempt_submitted";
 
+// ALL-TXN-CURRENCY-4: the currency_state values every provenance-bearing
+// RPC returns. 'free' only ever appears for a purchases row.
+export type TransactionCurrencyState = "resolved" | "unknown" | "conflict" | "free";
+
 // Mirrors list_refund_reconciliation_states()'s exact return shape.
 // reader_id/reader_display_name and latest_attempt_* are all nullable --
 // reader_id is ON DELETE SET NULL (migration 038), and a request with
@@ -352,6 +356,13 @@ export type FinanceRefundReconciliationRow = {
   stripe_status: string | null;
   operational_state: RefundOperationalState;
   needs_attention: boolean;
+  // ALL-TXN-CURRENCY-4 (migration 20260923160231): the currency the
+  // amount above is counted in, from transaction_currency_provenance().
+  // currency is non-null exactly when currency_state is 'resolved';
+  // 'unknown'/'conflict' rows must be displayed as unavailable, never
+  // under a guessed currency.
+  currency_state: TransactionCurrencyState;
+  currency: string | null;
 };
 
 // Mirrors list_finance_disputes()'s exact return shape.
@@ -385,6 +396,13 @@ export type FinanceDisputeRow = {
   transfer_reversal_succeeded_at: string | null;
   transfer_reversal_failure_code: string | null;
   needs_attention: boolean;
+  // ALL-TXN-CURRENCY-4 (migration 20260923160231): the currency the
+  // amount above is counted in, from transaction_currency_provenance().
+  // currency is non-null exactly when currency_state is 'resolved';
+  // 'unknown'/'conflict' rows must be displayed as unavailable, never
+  // under a guessed currency.
+  currency_state: TransactionCurrencyState;
+  currency: string | null;
 };
 
 // Mirrors list_finance_checkout_exceptions()'s exact return shape --
@@ -412,6 +430,10 @@ export type FinanceCheckoutExceptionRow = {
   completed_at: string;
   reconciliation_reason: string;
   created_at: string;
+  // ALL-TXN-CURRENCY-4: book_checkout_intents.currency, the intent's own
+  // frozen currency -- always 'resolved'.
+  currency_state: TransactionCurrencyState;
+  currency: string | null;
 };
 
 // Mirrors list_finance_refund_entitlement_mismatches()'s exact return
@@ -436,6 +458,13 @@ export type FinanceRefundEntitlementMismatchRow = {
   reader_display_name: string | null;
   stripe_payment_intent_id: string;
   amount_cents: number;
+  // ALL-TXN-CURRENCY-4 (migration 20260923160231): the currency the
+  // amount above is counted in, from transaction_currency_provenance().
+  // currency is non-null exactly when currency_state is 'resolved';
+  // 'unknown'/'conflict' rows must be displayed as unavailable, never
+  // under a guessed currency.
+  currency_state: TransactionCurrencyState;
+  currency: string | null;
 };
 
 // Mirrors get_finance_summary_counts()'s exact return shape -- counts

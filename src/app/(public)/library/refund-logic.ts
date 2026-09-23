@@ -1,4 +1,11 @@
 import type { RefundRequestStatus } from "@/lib/types";
+import {
+  mergeCurrencyProvenances,
+  provenanceFromStoredCurrency,
+  sumMinorUnitsByCurrency,
+  type CurrencyProvenance,
+  type CurrencyTotals,
+} from "@/lib/transaction-money";
 
 export const REFUND_REASON_MAX_LENGTH = 2000;
 export const REFUND_ELIGIBILITY_WINDOW_DAYS = 14;
@@ -78,6 +85,10 @@ export type PurchaseForGrouping = {
   created_at: string;
   refunded_at: string | null;
   stripe_payment_intent_id: string | null;
+  // ALL-TXN-CURRENCY-4: what is known about THIS row's currency, from
+  // list_purchase_currencies() -- purchases has no currency column, and
+  // amount_cents alone never says which currency it counts.
+  currency: CurrencyProvenance;
 };
 
 // The frozen per-item shape create_bundle_checkout_snapshot() writes
@@ -105,6 +116,9 @@ export type BundleSnapshotForGrouping = {
   fulfilled_at: string | null;
   refunded_at: string | null;
   items: unknown;
+  // ALL-TXN-CURRENCY-4: the snapshot's own frozen, immutable currency
+  // (migration 056) -- the currency total_amount_cents is counted in.
+  currency: string;
 };
 
 export function parseBundleSnapshotItems(raw: unknown): BundleSnapshotItem[] {
@@ -162,6 +176,11 @@ export type TransactionGroup<T extends PurchaseForGrouping> = {
   // summing this group's own non-refunded purchases rows only when there
   // is no snapshot at all.
   totalAmountCents: number;
+  // ALL-TXN-CURRENCY-4: the currency totalAmountCents is counted in --
+  // every purchases row's provenance and the snapshot's frozen currency,
+  // merged. Rows that disagree make the whole transaction 'conflict';
+  // nothing is picked or defaulted.
+  currency: CurrencyProvenance;
   // Mirrors deriveTransactionRefundState's own priority for "was this
   // transaction actually refunded": purchases.refunded_at when purchases
   // rows exist, OR bundle_checkout_snapshots.refunded_at -- both are set
@@ -200,6 +219,10 @@ function finalizeTransactionGroup<T extends PurchaseForGrouping>(
     .filter((p) => !p.refunded_at)
     .reduce((sum, p) => sum + p.amount_cents, 0);
   const totalAmountCents = group.snapshot?.total_amount_cents ?? nonRefundedPurchasesTotal;
+  const currency = mergeCurrencyProvenances([
+    ...group.purchases.map((p) => p.currency),
+    ...(group.snapshot ? [provenanceFromStoredCurrency(group.snapshot.currency)] : []),
+  ]);
 
   const transactionRefunded =
     group.purchases.some((p) => Boolean(p.refunded_at)) || Boolean(group.snapshot?.refunded_at);
@@ -223,6 +246,7 @@ function finalizeTransactionGroup<T extends PurchaseForGrouping>(
       snapshotItems.length > 0 ? snapshotItems.length : group.purchases.length,
     unpurchasedSnapshotItems,
     totalAmountCents,
+    currency,
     transactionRefunded,
     eligibilityBasisDate,
     mostRecentDate,
@@ -330,12 +354,21 @@ export function groupPurchasesByTransaction<T extends PurchaseForGrouping>(
 //   together in the same event), so "refunded" is always all-or-nothing
 //   per transaction -- there is no partial-refund case to invent
 //   semantics for here.
-export function calculateTotalSpentCents<T extends PurchaseForGrouping>(
+//
+// ALL-TXN-CURRENCY-4: the total is kept PER CURRENCY. A reader with a
+// legacy USD purchase and a new ALL purchase has spent two different
+// amounts in two different currencies, not one number: nothing is added
+// across currencies or converted, and a transaction whose currency is
+// not resolved is counted in unresolvedCount rather than folded into any
+// total.
+export function calculateTotalSpentByCurrency<T extends PurchaseForGrouping>(
   groups: TransactionGroup<T>[],
-): number {
-  return groups
-    .filter((group) => group.stripePaymentIntentId !== null && !group.transactionRefunded)
-    .reduce((sum, group) => sum + group.totalAmountCents, 0);
+): CurrencyTotals {
+  return sumMinorUnitsByCurrency(
+    groups
+      .filter((group) => group.stripePaymentIntentId !== null && !group.transactionRefunded)
+      .map((group) => ({ amountMinor: group.totalAmountCents, provenance: group.currency })),
+  );
 }
 
 export type TransactionRefundUiState = {

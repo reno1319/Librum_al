@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Book, RefundRequest } from "@/lib/types";
 import {
-  calculateTotalSpentCents,
+  calculateTotalSpentByCurrency,
   deriveTransactionRefundState,
   groupPurchasesByTransaction,
   isWithinRefundEligibilityWindow,
@@ -16,6 +16,12 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import {
+  formatTransactionAmount,
+  formatTransactionMinorUnits,
+  parseCurrencyProvenance,
+  type CurrencyProvenance,
+} from "@/lib/transaction-money";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -38,13 +44,22 @@ export const dynamic = "force-dynamic";
 // as-is, not duplicated), same eligibility/status semantics. Only the
 // route, its own auth-redirect target, and the surrounding page chrome
 // are new.
-type PurchaseWithBook = {
+type PurchaseRow = {
+  id: string;
   book_id: string;
   amount_cents: number;
   created_at: string;
   refunded_at: string | null;
   stripe_payment_intent_id: string | null;
   books: Book | null;
+};
+
+type PurchaseWithBook = PurchaseRow & { currency: CurrencyProvenance };
+
+type PurchaseCurrencyRow = {
+  purchase_id: string;
+  currency_state: string;
+  currency: string | null;
 };
 
 const REFUND_STATUS_LABELS: Record<string, string> = {
@@ -80,10 +95,10 @@ export default async function AccountPurchasesPage({
 
   const { data: purchases } = await supabase
     .from("purchases")
-    .select("book_id, amount_cents, created_at, refunded_at, stripe_payment_intent_id, books(*)")
+    .select("id, book_id, amount_cents, created_at, refunded_at, stripe_payment_intent_id, books(*)")
     .eq("reader_id", user.id)
     .order("created_at", { ascending: false })
-    .returns<PurchaseWithBook[]>();
+    .returns<PurchaseRow[]>();
 
   // RLS ("Readers can view their own fulfilled bundle snapshot
   // transactions" -- migration 030) already scopes this to the caller's
@@ -97,7 +112,7 @@ export default async function AccountPurchasesPage({
   // it here.
   const { data: bundleSnapshots } = await supabase
     .from("bundle_checkout_snapshots")
-    .select("id, stripe_payment_intent_id, total_amount_cents, fulfilled_at, refunded_at, items")
+    .select("id, stripe_payment_intent_id, total_amount_cents, fulfilled_at, refunded_at, items, currency")
     .eq("reader_id", user.id)
     .not("fulfilled_at", "is", null)
     .not("stripe_payment_intent_id", "is", null)
@@ -122,7 +137,36 @@ export default async function AccountPurchasesPage({
     latestRequestByPaymentIntent.set(request.stripe_payment_intent_id, request);
   }
 
-  const allPurchases = purchases ?? [];
+  // ALL-TXN-CURRENCY-4: purchases has no currency column, and the
+  // table that states it (payments) is finance-staff-only, so each row's
+  // currency comes from list_purchase_currencies() -- a SECURITY DEFINER
+  // read scoped to the caller's own rows, returning currency facts only.
+  // A failed or partial read degrades every affected row to 'unknown'
+  // ("Amount unavailable"), never to a guessed currency: the rest of the
+  // page (downloads, refund requests) must stay usable either way.
+  const rawPurchases = purchases ?? [];
+  const currencyByPurchaseId = new Map<string, CurrencyProvenance>();
+  if (rawPurchases.length > 0) {
+    const { data: currencyRows, error: currencyError } = await supabase.rpc(
+      "list_purchase_currencies",
+      { p_purchase_ids: rawPurchases.map((purchase) => purchase.id) },
+    );
+    if (currencyError) {
+      console.error("AccountPurchasesPage: list_purchase_currencies RPC failed", {
+        error: currencyError,
+      });
+    }
+    for (const row of (currencyRows ?? []) as PurchaseCurrencyRow[]) {
+      currencyByPurchaseId.set(
+        row.purchase_id,
+        parseCurrencyProvenance(row.currency_state, row.currency),
+      );
+    }
+  }
+  const allPurchases: PurchaseWithBook[] = rawPurchases.map((purchase) => ({
+    ...purchase,
+    currency: currencyByPurchaseId.get(purchase.id) ?? { state: "unknown" },
+  }));
 
   // LAUNCH-1 P1-7B: refunded_at alone is no longer sufficient to decide
   // whether a listed purchase is still actively downloadable -- a
@@ -156,12 +200,12 @@ export default async function AccountPurchasesPage({
   const transactionGroups = groupPurchasesByTransaction(allPurchases, bundleSnapshots ?? []);
 
   // Derived from the same deduplicated transaction model above, not
-  // re-summed from raw purchases rows -- see calculateTotalSpentCents's
+  // re-summed from raw purchases rows -- see calculateTotalSpentByCurrency's
   // own documentation for why (avoids double-counting a normal bundle's
   // purchases rows against its snapshot, and now correctly includes a
   // zero-purchase-rows paid bundle transaction, which the original
   // purchases-only sum silently omitted).
-  const totalSpentCents = calculateTotalSpentCents(transactionGroups);
+  const totalSpent = calculateTotalSpentByCurrency(transactionGroups);
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
@@ -187,12 +231,32 @@ export default async function AccountPurchasesPage({
         </p>
       ) : (
         <>
-          <p className="mt-6 text-sm text-muted">
-            Total spent:{" "}
-            <span className="font-semibold text-primary">
-              ${(totalSpentCents / 100).toFixed(2)}
-            </span>
-          </p>
+          {/* One figure per currency, never a converted or combined
+              total -- see calculateTotalSpentByCurrency. */}
+          <div className="mt-6 text-sm text-muted">
+            {totalSpent.totals.length === 0 ? (
+              <p>Total spent: nothing yet</p>
+            ) : (
+              <p>
+                Total spent:{" "}
+                {totalSpent.totals.map((total, index) => (
+                  <span key={total.currency}>
+                    {index > 0 && " · "}
+                    <span className="font-semibold text-primary">
+                      {formatTransactionMinorUnits(total.amountMinor, total.currency)}
+                    </span>
+                  </span>
+                ))}
+              </p>
+            )}
+            {totalSpent.unresolvedCount > 0 && (
+              <p className="mt-1 text-xs">
+                {totalSpent.unresolvedCount === 1
+                  ? "1 purchase is not included because its currency could not be determined."
+                  : `${totalSpent.unresolvedCount} purchases are not included because their currency could not be determined.`}
+              </p>
+            )}
+          </div>
 
           <ul className="mt-4 flex flex-col gap-4">
             {transactionGroups.map((group) => {
@@ -231,8 +295,8 @@ export default async function AccountPurchasesPage({
                 >
                   {isBundle && (
                     <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted">
-                      One purchase · {group.bookCount} books · $
-                      {(group.totalAmountCents / 100).toFixed(2)}
+                      One purchase · {group.bookCount} books ·{" "}
+                      {formatTransactionAmount(group.totalAmountCents, group.currency)}
                     </p>
                   )}
 
@@ -258,7 +322,7 @@ export default async function AccountPurchasesPage({
                                   month: "short",
                                   day: "numeric",
                                 })}{" "}
-                                · ${(purchase.amount_cents / 100).toFixed(2)}
+                                · {formatTransactionAmount(purchase.amount_cents, purchase.currency)}
                                 {purchase.refunded_at && (
                                   <span className="ml-2 text-red-600">Refunded</span>
                                 )}

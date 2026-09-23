@@ -1,4 +1,5 @@
 import type { RefundRequestStatus } from "@/lib/types";
+import { formatTransactionMinorUnits, type CurrencyProvenance } from "@/lib/transaction-money";
 
 // Matches refund_requests.admin_notes's own cap, enforced by
 // review_refund_request() itself (migration 029:
@@ -93,9 +94,23 @@ export function resolveSuccessBannerMessage(
 // an amount to Stripe at all (see its own documentation for why),
 // so this confirmation text can never be more (or less) authoritative
 // than what actually happens next.
-export function getIssueRefundConfirmationMessage(amountCents: number): string {
-  const amount = (amountCents / 100).toFixed(2);
-  return `Issue the $${amount} refund through Stripe? This will return the payment to the reader. This action cannot be undone.`;
+//
+// ALL-TXN-CURRENCY-4: the amount is shown in the refund request's own
+// currency (list_refund_request_currencies(), derived from the request's
+// frozen payment reference), never as a bare "$". When that currency
+// cannot be established the confirmation shows NO amount at all rather
+// than a guessed one -- which is safe precisely because, as above, no
+// amount is ever sent to Stripe: it refunds the full remaining charge in
+// the charge's own currency either way.
+export function getIssueRefundConfirmationMessage(
+  amountCents: number,
+  currency: CurrencyProvenance,
+): string {
+  if (currency.state === "resolved" && Number.isSafeInteger(amountCents)) {
+    const amount = formatTransactionMinorUnits(amountCents, currency.currency);
+    return `Issue the ${amount} refund through Stripe? This will return the payment to the reader. This action cannot be undone.`;
+  }
+  return "Issue the full refund through Stripe? The amount cannot be shown because its currency could not be determined. This will return the payment to the reader. This action cannot be undone.";
 }
 
 // Sorts requested (actionable) items first, then by most recently

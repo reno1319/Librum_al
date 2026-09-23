@@ -171,7 +171,8 @@ describe("BookDetailPage: stale-checkout conflict notice", () => {
     expect(rpc).toHaveBeenCalledWith("get_book_checkout_quote", { p_intent_id: INTENT_ID, p_book_id: BOOK_ID });
     expect(html).toContain("already have a checkout in progress");
     // The FROZEN 4.99, not the book's current 7.99.
-    expect(html).toContain("4.99 ALL");
+    expect(html).toContain("4,99 ALL");
+    expect(html).not.toContain("4.99 ALL");
     expect(html).toContain("not");
     expect(html).toContain("Continue that checkout");
   });
@@ -191,8 +192,10 @@ describe("BookDetailPage: stale-checkout conflict notice", () => {
       { checkout_conflict: INTENT_ID, price_cents_at_checkout: "1", amount: "1" },
       { quoteRows: heldQuote },
     );
-    expect(html).toContain("4.99 ALL");
+    expect(html).toContain("4,99 ALL");
+    expect(html).not.toContain("4.99 ALL");
     expect(html).not.toContain("0.01");
+    expect(html).not.toContain("0,01");
   });
 
   it("renders nothing and makes no quote call for a non-UUID conflict parameter", async () => {
@@ -381,7 +384,8 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     expect(html).toContain("already have a checkout in progress");
     // The server-read FROZEN amount (4.99 ALL), not the book's own
     // current catalog price (250 lek).
-    expect(html).toContain("4.99 ALL");
+    expect(html).toContain("4,99 ALL");
+    expect(html).not.toContain("4.99 ALL");
     expect(html).not.toContain("250,00 ALL</strong>. That is the amount");
     expect(html).toContain('name="resume_existing"');
     expect(html).toContain('name="expected_intent_id"');

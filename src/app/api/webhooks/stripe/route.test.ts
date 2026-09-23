@@ -971,7 +971,7 @@ describe("fulfillLegacyBundle: email idempotency (LAUNCH-1 P2-4)", () => {
     expect(sendBundlePurchaseEmails).toHaveBeenCalledTimes(1);
     expect(sendBundlePurchaseEmails).toHaveBeenCalledWith(
       supabase,
-      { bundleId: BUNDLE_ID_LEGACY, readerId: READER_ID_LEGACY, amountCents: 599 },
+      { bundleId: BUNDLE_ID_LEGACY, readerId: READER_ID_LEGACY, amountCents: 599, currency: "USD" },
     );
   });
 
@@ -1231,7 +1231,7 @@ describe("fulfillSingleBookPurchase: finalize_book_checkout_intent wrapper", () 
     const { sendPurchaseEmails } = await import("@/lib/email");
     expect(sendPurchaseEmails).toHaveBeenCalledWith(
       supabase,
-      expect.objectContaining({ bookId: SB_BOOK_ID, readerId: SB_READER_ID, amountCents: 500 }),
+      expect.objectContaining({ bookId: SB_BOOK_ID, readerId: SB_READER_ID, amountCents: 500, currency: "USD" }),
     );
   });
 

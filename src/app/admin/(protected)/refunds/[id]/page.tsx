@@ -16,6 +16,8 @@ import { ReviewButtons } from "./review-buttons";
 import { IssueRefundButton } from "./issue-refund-button";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import { formatTransactionAmount } from "@/lib/transaction-money";
+import { loadRefundRequestCurrencies, refundRequestCurrency } from "../refund-currency";
 import type { Metadata } from "next";
 
 // LIBRUM 2.0 SEO-1: static title, not a dynamic one built from the
@@ -147,6 +149,16 @@ export default async function AdminRefundRequestDetailPage({
     .returns<AdminRefundRequestItem[]>();
 
   const allItems = items ?? [];
+
+  // ALL-TXN-CURRENCY-4: one currency for the whole request. Its items
+  // were copied by request_refund() from the SAME payment reference's
+  // purchases rows, so every item is rendered in the parent's currency --
+  // never in a currency of its own, which could let a parent and its
+  // items disagree.
+  const requestCurrency = refundRequestCurrency(
+    await loadRefundRequestCurrencies(supabase, [request.id]),
+    request.id,
+  );
   const reviewable = canReview(request.status);
   // Fixes the observed stale-banner defect: issueStripeRefund()'s
   // redirect always carries the "waiting for confirmation" message, but
@@ -183,7 +195,7 @@ export default async function AdminRefundRequestDetailPage({
 
         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
           <dt className="text-muted">Requested amount</dt>
-          <dd className="font-medium">${(request.amount_cents / 100).toFixed(2)}</dd>
+          <dd className="font-medium">{formatTransactionAmount(request.amount_cents, requestCurrency)}</dd>
 
           <dt className="text-muted">Requested</dt>
           <dd>
@@ -249,7 +261,7 @@ export default async function AdminRefundRequestDetailPage({
                 className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-2 text-sm"
               >
                 <span>{item.books?.title ?? "Book unavailable"}</span>
-                <span className="text-muted">${(item.amount_cents / 100).toFixed(2)}</span>
+                <span className="text-muted">{formatTransactionAmount(item.amount_cents, requestCurrency)}</span>
               </li>
             ))}
           </ul>
@@ -285,7 +297,7 @@ export default async function AdminRefundRequestDetailPage({
             immediately on submission.
           </p>
           <div className="mt-3">
-            <IssueRefundButton amountCents={request.amount_cents} />
+            <IssueRefundButton amountCents={request.amount_cents} currency={requestCurrency} />
           </div>
         </form>
       )}

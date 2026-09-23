@@ -324,3 +324,94 @@ describe("BalancePage: maintenance-mode gate", () => {
     expect(mockCreateClient).toHaveBeenCalledOnce();
   });
 });
+
+// ALL-TXN-CURRENCY-4 (Patch 4): rendered proof that ledger balances,
+// activity and payout history stay separated by the currency each row
+// was booked in -- never combined, never a bare `$`, and a malformed
+// currency is shown as unavailable rather than guessed. Payout logic is
+// untouched; this only checks what the page displays.
+describe("BalancePage: amounts are separated by currency (Patch 4)", () => {
+  function summaryRow(currency: string, base: number) {
+    return {
+      currency,
+      available_minor: base,
+      pending_minor: base + 1,
+      net_earnings_minor: base + 2,
+      paid_out_minor: base + 3,
+      lifetime_sale_minor: base + 4,
+      lifetime_refund_minor: -(base + 5),
+      lifetime_adjustment_minor: 0,
+    };
+  }
+
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    mockCreateClient.mockReset();
+    mockCreateClient.mockImplementation((() => ({
+      auth: { getUser: async () => ({ data: { user: { id: "author-1" } } }) },
+    })) as never);
+    mockGetAuthorFinancialSummary.mockResolvedValue({
+      ok: true,
+      data: [summaryRow("USD", 1000), summaryRow("ALL", 123400)],
+    });
+    mockListAuthorFinancialActivity.mockResolvedValue({
+      ok: true,
+      data: [
+        { id: "e1", entry_type: "sale", book_title: "Alpha", created_at: "2026-09-20T10:00:00Z", amount_minor: 699, currency: "USD" },
+        { id: "e2", entry_type: "sale", book_title: "Beta", created_at: "2026-09-21T10:00:00Z", amount_minor: 79920, currency: "ALL" },
+        { id: "e3", entry_type: "refund", book_title: "Beta", created_at: "2026-09-22T10:00:00Z", amount_minor: -800, currency: "ALL" },
+        { id: "e4", entry_type: "adjustment", book_title: null, created_at: "2026-09-22T11:00:00Z", amount_minor: 500, currency: "usd" },
+      ],
+    });
+    mockGetAuthorPayoutOverview.mockResolvedValue({ ok: true, data: [] });
+    mockListAuthorPayoutHistory.mockResolvedValue({
+      ok: true,
+      data: [
+        { id: "po1", status: "paid", created_at: "2026-09-01T10:00:00Z", amount_minor: 2500, currency: "USD" },
+        { id: "po2", status: "paid", created_at: "2026-09-02T10:00:00Z", amount_minor: 1000000, currency: "ALL" },
+      ],
+    });
+    mockGetAuthorPayoutDestination.mockResolvedValue({ ok: true, data: null });
+  });
+
+  async function renderBalance() {
+    const { default: BalancePage } = await import("./page");
+    const element = await BalancePage({ searchParams: Promise.resolve({}) });
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+
+  it("each currency gets its own section with its own amounts", async () => {
+    const html = await renderBalance();
+    expect(html).toContain(">USD</h2>");
+    expect(html).toContain(">ALL</h2>");
+    expect(html).toContain("USD 10.00"); // USD available
+    expect(html).toContain("1.234,00 ALL"); // ALL available
+    expect(html).toContain("-USD 10.05"); // USD lifetime refunds
+    expect(html).toContain("-1.234,05 ALL"); // ALL lifetime refunds
+    // A cross-currency sum of the two available balances appears nowhere.
+    expect(html).not.toContain("1.244,00");
+    expect(html).not.toContain("USD 1,244.00");
+  });
+
+  it("activity and payout rows each keep their own currency, qindarka included", async () => {
+    const html = await renderBalance();
+    expect(html).toContain("USD 6.99");
+    expect(html).toContain("799,20 ALL");
+    expect(html).toContain("-8,00 ALL");
+    expect(html).toContain("USD 25.00");
+    expect(html).toContain("10.000,00 ALL");
+  });
+
+  it("a malformed currency is shown as unavailable, never guessed as USD or ALL", async () => {
+    const html = await renderBalance();
+    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).not.toContain("USD 5.00");
+    expect(html).not.toContain("5,00 ALL");
+  });
+
+  it("no bare dollar sign appears anywhere on the page", async () => {
+    const html = await renderBalance();
+    expect(html).not.toMatch(/\$/);
+  });
+});

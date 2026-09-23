@@ -10,6 +10,8 @@ import {
 } from "./refund-review-logic";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import { formatTransactionAmount } from "@/lib/transaction-money";
+import { loadRefundRequestCurrencies, refundRequestCurrency } from "./refund-currency";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -99,6 +101,12 @@ export default async function AdminRefundsPage() {
 
   const sortedRequests = [...allRequests].sort(compareForTriage);
 
+  // ALL-TXN-CURRENCY-4: each request's amount in its own currency.
+  const currencyByRequestId = await loadRefundRequestCurrencies(
+    supabase,
+    allRequests.map((r) => r.id),
+  );
+
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
       <Link href="/admin" className="text-sm text-muted hover:underline">
@@ -140,7 +148,10 @@ export default async function AdminRefundsPage() {
                       month: "short",
                       day: "numeric",
                     })}{" "}
-                    · ${(request.amount_cents / 100).toFixed(2)}
+                    · {formatTransactionAmount(
+                      request.amount_cents,
+                      refundRequestCurrency(currencyByRequestId, request.id),
+                    )}
                     {request.reason && ` · "${request.reason}"`}
                   </p>
                 </div>
