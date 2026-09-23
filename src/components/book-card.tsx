@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatPrice } from "@/lib/pricing";
+import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import type { Book } from "@/lib/types";
 
 // LIBRUM 2.0 UI-4: the shared reader-commerce card, used by the
@@ -8,12 +8,21 @@ import type { Book } from "@/lib/types";
 // cover, title, author, price -- no description, rating, wishlist
 // control, owned badge, or Buy button: the whole card links to book
 // detail, which owns the actual purchase decision (UI-5).
+//
+// ALL-WIRING-2: the price is the book's own `price_all`, rendered
+// through the one catalog label function -- lek, never a `$`, and never
+// `price_cents`. A row with no authored ALL price reads "Price
+// unavailable" rather than borrowing either the free or the paid
+// wording; discovery surfaces exclude such rows from their queries
+// entirely, so this label is what remains for the surfaces that keep
+// showing a specific, already-chosen book (a bundle's contents, an
+// author's own dashboard).
 export function BookCard({
   book,
   coverUrl,
   authorName,
 }: {
-  book: Pick<Book, "id" | "title" | "genre" | "price_cents" | "author_id">;
+  book: Pick<Book, "id" | "title" | "genre" | "price_all" | "author_id">;
   coverUrl: string | null;
   authorName?: string | null;
 }) {
@@ -55,7 +64,7 @@ export function BookCard({
       )}
 
       <span className="text-sm font-medium text-primary/80">
-        {formatPrice(book.price_cents)}
+        {formatCatalogPriceLabel(book.price_all)}
       </span>
     </div>
   );

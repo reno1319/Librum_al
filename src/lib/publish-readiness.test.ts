@@ -4,7 +4,7 @@ import { resolvePublishReadiness } from "./publish-readiness";
 const book = (overrides: Partial<Parameters<typeof resolvePublishReadiness>[0]["book"]> = {}) => ({
   description: "",
   keywords: "",
-  price_cents: 0,
+  price_all: 0,
   cover_path: "some/path.jpg",
   ...overrides,
 });
@@ -12,7 +12,7 @@ const book = (overrides: Partial<Parameters<typeof resolvePublishReadiness>[0]["
 describe("resolvePublishReadiness", () => {
   it("free book, paid publishing unavailable: not blocked", () => {
     const result = resolvePublishReadiness({
-      book: book({ price_cents: 0 }),
+      book: book({ price_all: 0 }),
       paidPublishingAvailable: false,
     });
     expect(result.paidPublishingBlocked).toBe(false);
@@ -20,7 +20,7 @@ describe("resolvePublishReadiness", () => {
 
   it("paid book, paid publishing unavailable: blocked", () => {
     const result = resolvePublishReadiness({
-      book: book({ price_cents: 999 }),
+      book: book({ price_all: 199 }),
       paidPublishingAvailable: false,
     });
     expect(result.paidPublishingBlocked).toBe(true);
@@ -28,7 +28,7 @@ describe("resolvePublishReadiness", () => {
 
   it("paid book, paid publishing available: not blocked", () => {
     const result = resolvePublishReadiness({
-      book: book({ price_cents: 999 }),
+      book: book({ price_all: 199 }),
       paidPublishingAvailable: true,
     });
     expect(result.paidPublishingBlocked).toBe(false);
@@ -39,9 +39,13 @@ describe("resolvePublishReadiness", () => {
   // asserts the field is actually gone from the returned object, not
   // merely unused, so a later edit cannot quietly reintroduce a second
   // source of truth for the same question.
-  it("returns exactly paidPublishingBlocked and recommended -- no requiredMet", () => {
+  it("returns exactly missingAllPrice, paidPublishingBlocked and recommended -- no requiredMet", () => {
     const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true });
-    expect(Object.keys(result).sort()).toEqual(["paidPublishingBlocked", "recommended"]);
+    expect(Object.keys(result).sort()).toEqual([
+      "missingAllPrice",
+      "paidPublishingBlocked",
+      "recommended",
+    ]);
     expect("requiredMet" in result).toBe(false);
   });
 
@@ -78,12 +82,12 @@ describe("resolvePublishReadiness", () => {
 
   it("advisory items never affect paidPublishingBlocked, whether complete or not", () => {
     const incomplete = resolvePublishReadiness({
-      book: book({ price_cents: 0 }),
+      book: book({ price_all: 0 }),
       paidPublishingAvailable: false,
     });
     const complete = resolvePublishReadiness({
       book: book({
-        price_cents: 0,
+        price_all: 0,
         description: "a".repeat(60),
         keywords: "x",
       }),
@@ -98,5 +102,42 @@ describe("resolvePublishReadiness", () => {
     const labels = result.recommended.map((item) => item.label.toLowerCase());
     expect(labels.some((label) => label.includes("cover"))).toBe(false);
     expect(labels.some((label) => label.includes("price"))).toBe(false);
+  });
+});
+
+// ALL-WIRING-2: the missing-ALL-price blocker. It is reported on its
+// own, never together with paidPublishingBlocked, because an author
+// cannot be simultaneously blocked by something they can fix in one
+// edit and by something only Librum can change.
+describe("resolvePublishReadiness: the missing-ALL-price blocker", () => {
+  it("null price_all is blocked, whether or not paid publishing is available", () => {
+    for (const paidPublishingAvailable of [true, false]) {
+      const result = resolvePublishReadiness({
+        book: book({ price_all: null }),
+        paidPublishingAvailable,
+      });
+      expect(result.missingAllPrice).toBe(true);
+      // Never BOTH: naming two obstacles for one refusal is the failure
+      // mode this separation exists to prevent.
+      expect(result.paidPublishingBlocked).toBe(false);
+    }
+  });
+
+  it("a free book is never reported as missing a price", () => {
+    const result = resolvePublishReadiness({
+      book: book({ price_all: 0 }),
+      paidPublishingAvailable: false,
+    });
+    expect(result.missingAllPrice).toBe(false);
+    expect(result.paidPublishingBlocked).toBe(false);
+  });
+
+  it("a paid book is never reported as missing a price", () => {
+    const result = resolvePublishReadiness({
+      book: book({ price_all: 199 }),
+      paidPublishingAvailable: false,
+    });
+    expect(result.missingAllPrice).toBe(false);
+    expect(result.paidPublishingBlocked).toBe(true);
   });
 });

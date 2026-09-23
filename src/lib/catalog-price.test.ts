@@ -7,6 +7,10 @@ import {
   parseCatalogPriceAll,
   classifyCatalogPrice,
   formatCatalogPriceAll,
+  resolveCatalogPriceState,
+  formatCatalogPriceLabel,
+  CATALOG_PRICE_UNAVAILABLE_LABEL,
+  CATALOG_PRICE_FREE_LABEL,
 } from "./catalog-price";
 
 describe("MINIMUM_PAID_CATALOG_PRICE_ALL / MAXIMUM_CATALOG_PRICE_ALL", () => {
@@ -362,5 +366,125 @@ describe("catalog-price module: performs no side effects", () => {
     expect(source).not.toMatch(/\bawait\b/);
     expect(source).not.toMatch(/node:fs|node:path|node:url/);
     expect(source).not.toMatch(/^import /m);
+  });
+});
+
+// ============================================================
+// ALL-WIRING-2: the three-way classification the whole of Patch 2
+// turns on.
+//
+// The decision that used to be made everywhere was
+// `price_cents === 0 ? free : paid` -- a TWO-way fork over a column
+// that is never null. `price_all` IS nullable, so the same two-way
+// shape applied to it classifies null as PAID (null === 0 is false),
+// which offers a purchase for a book that has no price. That single
+// mis-classification is what these tests exist to make impossible, and
+// it is why resolveCatalogPriceState is TOTAL where
+// classifyCatalogPrice throws: a storefront cannot render an exception.
+// ============================================================
+describe("resolveCatalogPriceState", () => {
+  it("null is unavailable -- never free, never paid", () => {
+    expect(resolveCatalogPriceState(null)).toBe("unavailable");
+  });
+
+  it("undefined and a missing field are unavailable too", () => {
+    expect(resolveCatalogPriceState(undefined)).toBe("unavailable");
+    expect(resolveCatalogPriceState(({} as { price_all?: number }).price_all)).toBe(
+      "unavailable",
+    );
+  });
+
+  it("0 is free", () => {
+    expect(resolveCatalogPriceState(0)).toBe("free");
+  });
+
+  it("the paid floor (99) and the ceiling (100000) are paid", () => {
+    expect(resolveCatalogPriceState(MINIMUM_PAID_CATALOG_PRICE_ALL)).toBe("paid");
+    expect(resolveCatalogPriceState(MAXIMUM_CATALOG_PRICE_ALL)).toBe("paid");
+  });
+
+  it("199 is paid -- the legacy default row shape, whose price_cents is 0", () => {
+    // The row that motivated the atomic-cutover requirement: a real ALL
+    // price of 199 lek sitting beside a legacy price_cents of 0. Under
+    // the OLD decision it is free; under this one it is paid, and
+    // nothing here can even see price_cents.
+    expect(resolveCatalogPriceState(199)).toBe("paid");
+  });
+
+  // Total, not throwing: every one of these is unavailable rather than
+  // an exception, because the caller is a Server Component rendering a
+  // page and the fail-safe direction is "no acquisition control".
+  it.each([
+    ["below the paid floor", 50],
+    ["one below the floor", 98],
+    ["above the ceiling", 100001],
+    ["negative", -1],
+    ["negative zero", -0],
+    ["fractional", 99.5],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["an unsafe integer", Number.MAX_SAFE_INTEGER + 2],
+  ])("treats an out-of-domain value (%s) as unavailable rather than throwing", (_label, value) => {
+    expect(() => resolveCatalogPriceState(value)).not.toThrow();
+    expect(resolveCatalogPriceState(value)).toBe("unavailable");
+  });
+
+  it("treats non-number runtime values as unavailable, never coercing them", () => {
+    // "0" must NOT become free and "199" must NOT become paid: a string
+    // arriving here means the row shape is wrong, not that the book is
+    // free.
+    for (const value of ["0", "199", "", true, false, {}, [], BigInt(199)]) {
+      expect(resolveCatalogPriceState(value)).toBe("unavailable");
+    }
+  });
+});
+
+describe("formatCatalogPriceLabel", () => {
+  it("null reads Price unavailable -- it borrows neither the free nor the paid wording", () => {
+    expect(formatCatalogPriceLabel(null)).toBe("Price unavailable");
+    expect(formatCatalogPriceLabel(null)).toBe(CATALOG_PRICE_UNAVAILABLE_LABEL);
+    expect(formatCatalogPriceLabel(null)).not.toBe(CATALOG_PRICE_FREE_LABEL);
+  });
+
+  it("0 reads Free, not 0,00 ALL", () => {
+    expect(formatCatalogPriceLabel(0)).toBe("Free");
+    expect(formatCatalogPriceLabel(0)).toBe(CATALOG_PRICE_FREE_LABEL);
+  });
+
+  it("a paid price reads as lek, in the Albanian convention", () => {
+    expect(formatCatalogPriceLabel(99)).toBe("99,00 ALL");
+    expect(formatCatalogPriceLabel(199)).toBe("199,00 ALL");
+    expect(formatCatalogPriceLabel(1000)).toBe("1.000,00 ALL");
+    expect(formatCatalogPriceLabel(100000)).toBe("100.000,00 ALL");
+  });
+
+  it("never renders a dollar sign, for any input in or out of the domain", () => {
+    const probes: unknown[] = [
+      null, undefined, 0, 99, 199, 1000, 100000,
+      50, 100001, -1, 99.5, Number.NaN, "199", {},
+    ];
+    for (const probe of probes) {
+      expect(formatCatalogPriceLabel(probe)).not.toContain("$");
+    }
+  });
+
+  it("is total: an out-of-domain value falls back to unavailable rather than throwing", () => {
+    // formatCatalogPriceAll would throw for each of these. The label
+    // function is what storefront surfaces call, so it must not.
+    for (const probe of [50, 100001, -1, 99.5, Number.NaN]) {
+      expect(() => formatCatalogPriceLabel(probe)).not.toThrow();
+      expect(formatCatalogPriceLabel(probe)).toBe(CATALOG_PRICE_UNAVAILABLE_LABEL);
+    }
+  });
+
+  it("agrees with resolveCatalogPriceState on every input", () => {
+    const probes: unknown[] = [null, undefined, 0, 99, 199, 100000, 50, 100001, "0", {}];
+    for (const probe of probes) {
+      const state = resolveCatalogPriceState(probe);
+      const label = formatCatalogPriceLabel(probe);
+      if (state === "unavailable") expect(label).toBe(CATALOG_PRICE_UNAVAILABLE_LABEL);
+      else if (state === "free") expect(label).toBe(CATALOG_PRICE_FREE_LABEL);
+      else expect(label).toBe(formatCatalogPriceAll(probe as number));
+    }
   });
 });

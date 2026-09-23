@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { AUTHOR_ROYALTY_RATE_BPS } from "@/lib/pricing";
+import { resolveCatalogPriceState } from "@/lib/catalog-price";
 import { REPORT_REASONS } from "@/lib/report-reasons";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
@@ -30,7 +30,11 @@ import type { DiscountCode } from "@/lib/types";
 type BookForCheckout = {
   id: string;
   title: string;
-  price_cents: number;
+  // ALL-WIRING-2: the catalog price this checkout is about, in WHOLE
+  // ALL. `price_cents` is not selected here at all any more -- not
+  // read, not compared, not converted. It is legacy USD minor units and
+  // its `0` default is not a price.
+  price_all: number | null;
   status: string;
   author_id: string;
 };
@@ -65,7 +69,21 @@ type CheckoutQuoteStatus =
   // longer the eligible candidate. Never resumes something else.
   | "expected_intent_changed"
   // The temporary per-reader, per-book supersession guard.
-  | "supersession_rate_limited";
+  | "supersession_rate_limited"
+  // ALL-WIRING-2: the reader supplied a code the database still
+  // considers active, but it is a LEGACY USD `amount_off_cents` code.
+  // Its number is not an amount of lek, so it is never applied to an
+  // ALL checkout -- and never silently ignored either, because
+  // ignoring it would charge the full price on a request in which the
+  // reader did supply a valid-looking code. Nothing was mutated.
+  | "discount_not_applicable"
+  // ALL-WIRING-2: the discount resolved to less than Librum's 99 ALL
+  // paid floor. The old behaviour CLAMPED such a result back up to a
+  // floor, which charged MORE with a code than without one; that clamp
+  // is deleted, and this status is the rejection that replaced it. The
+  // reader is never quietly charged the full price, and never charged
+  // an amount raised above what the code implied. Nothing was mutated.
+  | "discount_below_minimum";
 
 type CheckoutIntentResult = {
   intent_id: string | null;
@@ -73,6 +91,33 @@ type CheckoutIntentResult = {
   discount_code_id: string | null;
   expires_at: string | null;
   quote_status: CheckoutQuoteStatus;
+};
+
+// ALL-WIRING-2 CORRECTION (Codex finding 2): the two discount
+// rejections are classified in ONE place -- inside createQuote, before
+// it returns -- rather than at each call site.
+//
+// Why a TYPE and not just a shared helper. buyBook calls createQuote
+// from four places: the initial quote, the expected_intent_changed
+// re-evaluation, the replacement minted after a provider probe proves
+// the old attempt retired, and the replacement minted after
+// POK_CHECKOUT_ATTEMPT_RETIRED. The last two accepted only `minted` or
+// `reused` and folded everything else into the generic ambiguous
+// message -- so a discount rejection arriving on a REPLACEMENT (which
+// is a real possibility: eligibility can change between the first RPC
+// and the replacement) told the reader to try again in a few minutes
+// instead of telling them their code was not applied.
+//
+// Screening inside createQuote and REMOVING the two statuses from the
+// returned type makes that class of omission unrepresentable: a future
+// call site cannot forget the check, because the value it receives can
+// no longer carry either status, and a leftover comparison against one
+// of them becomes a compile error rather than dead code that reads as
+// coverage.
+type DiscountRejectionStatus = "discount_not_applicable" | "discount_below_minimum";
+
+type ScreenedQuote = Omit<CheckoutIntentResult, "quote_status"> & {
+  quote_status: Exclude<CheckoutQuoteStatus, DiscountRejectionStatus>;
 };
 
 // STALE-CHECKOUT-1: reader-facing copy, kept in one place so the same
@@ -90,6 +135,14 @@ const CHECKOUT_LEGACY_BLOCKED_MESSAGE =
   "An earlier checkout for this book must finish or expire before you can start a new one.";
 const CHECKOUT_RATE_LIMITED_MESSAGE =
   "Too many checkout attempts for this book. Please try again later.";
+// ALL-WIRING-2: both of these say plainly that the code was NOT
+// applied and that nothing was charged. Neither implies the purchase
+// went through at full price, and neither invites the reader to retry
+// the same code expecting a different answer.
+const CHECKOUT_DISCOUNT_NOT_APPLICABLE_MESSAGE =
+  "That promo code can't be used for this book, so nothing was charged. Remove the code to buy at the current price.";
+const CHECKOUT_DISCOUNT_BELOW_MINIMUM_MESSAGE =
+  "That promo code would bring this book below Librum's minimum price, so it can't be used and nothing was charged.";
 // A payment was found but not yet PROVEN (POK reported the order
 // completed without capture evidence we can verify). The reader must not
 // be invited to pay again -- that is the one outcome with no remedy,
@@ -124,7 +177,7 @@ export async function buyBook(bookId: string, formData: FormData) {
 
   const { data: book } = await supabase
     .from("books")
-    .select("id, title, price_cents, status, author_id")
+    .select("id, title, price_all, status, author_id")
     .eq("id", bookId)
     .single<BookForCheckout>();
 
@@ -132,11 +185,28 @@ export async function buyBook(bookId: string, formData: FormData) {
     redirect(`/books/${bookId}`);
   }
 
-  // Free books must go through getFreeBook, never Stripe -- this is a
-  // server-side invariant, not just a UI convenience: the price is
-  // re-read from the database here, so this holds even if buyBook were
-  // ever invoked directly for a book priced at 0.
-  if (book.price_cents <= 0) {
+  // ALL-WIRING-2: the catalog price is classified THREE ways, from the
+  // book's own freshly re-read `price_all`. This is a server-side
+  // invariant, not a UI convenience -- it holds even if buyBook were
+  // invoked directly by a crafted POST.
+  //
+  //   unavailable -- no authored ALL price. Not free, not paid, not
+  //                  purchasable. Never inferred as free, and never
+  //                  fallen back to `price_cents`.
+  //   free        -- must go through getFreeBook, never a paid provider.
+  //   paid        -- the only case that continues below.
+  //
+  // create_book_checkout_intent independently refuses the first two
+  // (see its own ALL-CHECKOUT-1 comment); this fork exists so a reader
+  // gets an honest message instead of a generic RPC failure, not as the
+  // authoritative check.
+  const catalogPriceState = resolveCatalogPriceState(book.price_all);
+
+  if (catalogPriceState === "unavailable") {
+    redirect(`/books/${bookId}?error=This+book+isn%27t+available+to+buy+right+now`);
+  }
+
+  if (catalogPriceState === "free") {
     redirect(`/books/${bookId}?error=This+book+is+free+-+use+the+free+download+option+instead`);
   }
 
@@ -257,31 +327,29 @@ export async function buyBook(bookId: string, formData: FormData) {
   // point forward -- price, the resolved discount, and this attempt's
   // own durable identity are all frozen atomically by this one call
   // (migration 032's create_book_checkout_intent, evolved by migrations
-  // 056 and STALE-CHECKOUT-1). Never trusts book.price_cents or the
-  // discount lookup above for the actual charge -- both are re-derived
+  // 056 and STALE-CHECKOUT-1). Never trusts the book row read above or
+  // the discount lookup above for the actual charge -- both are re-derived
   // server-side inside the RPC, which is directly callable by any
   // authenticated client and so can never trust a caller-supplied price.
   //
-  // STRIPE-DISABLE-1: `activeProvider === "pok"` above already proves the
-  // regime is exactly librum_ledger_v1 (see resolveActiveCheckoutProvider) --
-  // the legacy-regime branch that used to omit these trailing params is
-  // unreachable here now, since a legacy-regime checkout can never reach
-  // this line any more. Currency and royalty_rate_bps are frozen HERE, on
-  // this exact call -- ALL (no FX) and AUTHOR_ROYALTY_RATE_BPS (the
-  // current platform rate snapshotted ONCE, never recomputed later at
-  // webhook/finalization time).
+  // ALL-WIRING-2: FOUR arguments, matching the only signature that now
+  // exists (migration 20260922113721). `p_regime`, `p_currency` and
+  // `p_royalty_rate_bps` are GONE -- removed from the surface, not
+  // merely stopped being sent. The regime (librum_ledger_v1), the
+  // currency (ALL) and the 8000 bps author royalty are now internal
+  // constants of the function itself, because this RPC is directly
+  // callable by any authenticated client: while they were parameters, a
+  // direct caller could mint an intent that froze a royalty rate of its
+  // own choosing onto the author's sale.
   const createQuote = async (
     accept: boolean,
     expected: string | null,
-  ): Promise<CheckoutIntentResult> => {
+  ): Promise<ScreenedQuote> => {
     const { data: intentRows, error: intentError } = await supabase.rpc(
       "create_book_checkout_intent",
       {
         book_id: bookId,
         p_discount_code: rawCode || null,
-        p_regime: "librum_ledger_v1",
-        p_currency: "ALL",
-        p_royalty_rate_bps: AUTHOR_ROYALTY_RATE_BPS,
         p_accept_existing_quote: accept,
         p_expected_intent_id: expected,
       },
@@ -297,7 +365,29 @@ export async function buyBook(bookId: string, formData: FormData) {
       });
       redirect(`/books/${bookId}?error=Could+not+start+checkout`);
     }
-    return row;
+
+    // ALL-WIRING-2 CORRECTION: both discount rejections, classified
+    // here so EVERY createQuote result passes through the same
+    // handling -- initial call, expected_intent_changed re-evaluation,
+    // provider-probe replacement and POK_CHECKOUT_ATTEMPT_RETIRED
+    // replacement alike.
+    //
+    // The RPC returns both of these BEFORE its first mutation, so on
+    // every one of those paths there is no new intent, no provider
+    // order and no charge to unwind -- failing closed here IS the whole
+    // handling, and it happens before any POK call and before any
+    // further quote could be minted. The reader is told the code was
+    // not applied and that nothing was charged; they are never sent
+    // onward to pay the undiscounted price as if the code had been
+    // accepted, and the code is never silently dropped and retried.
+    if (row.quote_status === "discount_not_applicable") {
+      failClosed(CHECKOUT_DISCOUNT_NOT_APPLICABLE_MESSAGE);
+    }
+    if (row.quote_status === "discount_below_minimum") {
+      failClosed(CHECKOUT_DISCOUNT_BELOW_MINIMUM_MESSAGE);
+    }
+
+    return row as ScreenedQuote;
   };
 
   // A function DECLARATION, not a const arrow: TypeScript only treats a
@@ -328,6 +418,12 @@ export async function buyBook(bookId: string, formData: FormData) {
   if (quote.quote_status === "supersession_rate_limited") {
     failClosed(CHECKOUT_RATE_LIMITED_MESSAGE);
   }
+  // ALL-WIRING-2 CORRECTION: the two discount rejections used to be
+  // handled HERE, which covered the initial quote and nothing else.
+  // They are now screened inside createQuote itself (see ScreenedQuote),
+  // so `quote` cannot carry either status at this point -- on any of the
+  // four paths that produce one. This is not an omission: re-adding the
+  // comparisons here would not compile.
 
   // At most ONE replacement quote is ever minted per reader action --
   // shared by the probe path below and the claim-race path further down,
@@ -506,7 +602,7 @@ export async function buyBook(bookId: string, formData: FormData) {
 
 type BookForFreeAcquisition = {
   id: string;
-  price_cents: number;
+  price_all: number | null;
   status: string;
   author_id: string;
 };
@@ -531,14 +627,27 @@ export async function getFreeBook(bookId: string) {
 
   const { data: book } = await supabase
     .from("books")
-    .select("id, price_cents, status, author_id")
+    .select("id, price_all, status, author_id")
     .eq("id", bookId)
     .single<BookForFreeAcquisition>();
 
+  // ALL-WIRING-2: `price_all === 0` EXACTLY, from this server-side
+  // reread -- the sole condition under which a book may be claimed free.
+  // Both other catalog states are refused: a paid book obviously, and a
+  // book with NO authored ALL price too, because null is not free. That
+  // second refusal is the whole point of the strict equality: an
+  // `<= 0`, a falsy test, or a `price_cents` fallback would each hand a
+  // free entitlement to an unpriced row.
+  //
+  // Free acquisition deliberately remains independent of paid-checkout
+  // readiness: no canStartPaidCheckout() gate, no provider resolution,
+  // no POK call, no payment row and no author-ledger sale entry exist on
+  // this path at all, so there is nothing here for a paid-mode
+  // permission to govern.
   if (
     !book ||
     book.status !== "published" ||
-    book.price_cents !== 0 ||
+    book.price_all !== 0 ||
     book.author_id === user.id
   ) {
     redirect(`/books/${bookId}`);

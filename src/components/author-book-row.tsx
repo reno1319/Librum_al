@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatPrice } from "@/lib/pricing";
+import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import { deleteBook } from "@/app/(public)/dashboard/books/actions";
 import { DeleteBookButton } from "@/app/(public)/dashboard/delete-book-button";
 import { buttonClasses } from "@/components/ui/button";
@@ -22,11 +22,17 @@ import type { Book } from "@/lib/types";
 // duplicate draft) that shouldn't require a trip into Edit's own
 // Danger zone. Edit and View (published only) stay directly visible,
 // same as before.
+//
+// ALL-WIRING-2: the price column shows the book's own `price_all` in
+// lek. "Price unavailable" here is the author's own signal that this
+// title has no ALL price yet -- which is why the dashboard keeps
+// listing such rows rather than hiding them the way reader-facing
+// discovery surfaces do: this is where the author goes to fix it.
 export function AuthorBookRow({
   book,
   coverUrl,
 }: {
-  book: Pick<Book, "id" | "title" | "status" | "price_cents">;
+  book: Pick<Book, "id" | "title" | "status" | "price_all">;
   coverUrl: string | null;
 }) {
   return (
@@ -43,7 +49,9 @@ export function AuthorBookRow({
         <p className="text-sm text-muted">{book.status === "draft" ? "Draft" : "Published"}</p>
       </div>
 
-      <span className="text-sm font-semibold text-primary">{formatPrice(book.price_cents)}</span>
+      <span className="text-sm font-semibold text-primary">
+        {formatCatalogPriceLabel(book.price_all)}
+      </span>
 
       <div className="flex flex-wrap items-center gap-2">
         <Link href={`/dashboard/books/${book.id}/edit`} className={buttonClasses("outline", "sm")}>

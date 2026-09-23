@@ -12,6 +12,10 @@ import {
 import { GENRES } from "@/lib/genres";
 import { LANGUAGES, isSupportedLanguage } from "@/lib/languages";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import {
+  MAXIMUM_CATALOG_PRICE_ALL,
+  MINIMUM_PAID_CATALOG_PRICE_ALL,
+} from "@/lib/catalog-price";
 import { resolvePublishReadiness } from "@/lib/publish-readiness";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
@@ -41,7 +45,7 @@ export const metadata: Metadata = {
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see the exhaustive
-// route audit (books.price_cents is rendered for editing below).
+// route audit (books.price_all is rendered for editing below).
 export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART D: client-side-only bounds, purely a
@@ -84,7 +88,7 @@ export default async function EditBookPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_cents
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_all
   // for editing (exhaustive route audit) -- checked as the first
   // statement, before any Supabase call.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
@@ -451,19 +455,35 @@ export default async function EditBookPage({
             <section>
               <h2 className="font-serif text-xl font-semibold">Pricing</h2>
               <div className="mt-4">
+                {/* ALL-WIRING-2: an ALL text field, not a USD number
+                    field. `type="number"` is wrong for this input in two
+                    separate ways: its value property silently discards
+                    what the browser considers invalid, which made the
+                    Albanian comma form ("990,00") literally unreachable,
+                    and `step="0.01"` advertised a fractional lek price
+                    that the catalog cannot store. inputMode="decimal"
+                    keeps the numeric keypad on a phone.
+
+                    A legacy row with no authored ALL price renders
+                    BLANK, never a converted `price_cents`. Blank is the
+                    honest state -- this book has no ALL price -- and the
+                    field is required, so saving any other edit to the
+                    book forces the author to supply one. That single
+                    save is also what returns the book to listings and
+                    search. */}
                 <label className="flex flex-col gap-1 text-sm">
-                  Price (USD)
+                  Price (ALL)
                   <input
                     name="price"
-                    type="number"
-                    min="0"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     required
-                    defaultValue={(book.price_cents / 100).toFixed(2)}
+                    defaultValue={book.price_all == null ? "" : String(book.price_all)}
                     className={formControlClasses}
                   />
                   <span className="text-xs text-muted">
-                    Set to $0 for a free ebook. Librum takes a{" "}
+                    Whole lek: 0 for a free ebook, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
+                    {MAXIMUM_CATALOG_PRICE_ALL}. Librum takes a{" "}
                     {PLATFORM_FEE_PERCENT}% platform fee — you keep the rest of
                     every sale.
                   </span>
@@ -569,7 +589,25 @@ export default async function EditBookPage({
                     never become a hardcoded banner: with
                     PAID_PUBLISHING_MODE set on the protected staging
                     deployment this branch correctly disappears. */}
-                {readiness.paidPublishingBlocked ? (
+                {/* ALL-WIRING-2: the missing-price blocker is checked
+                    FIRST and is a separate notice, because it is the one
+                    blocker the author can clear themselves. Telling them
+                    "paid publishing hasn't launched" for a book with no
+                    price at all would name the wrong obstacle; the two
+                    are mutually exclusive by construction in
+                    resolvePublishReadiness. */}
+                {readiness.missingAllPrice ? (
+                  <Alert
+                    variant="warning"
+                    title="This book needs a price before you can publish it."
+                    className="mt-4"
+                  >
+                    <p>
+                      Set a price in lek above — 0 for a free ebook — and save
+                      your changes.
+                    </p>
+                  </Alert>
+                ) : readiness.paidPublishingBlocked ? (
                   <Alert
                     variant="warning"
                     title="Paid publishing hasn't launched yet."
@@ -602,7 +640,7 @@ export default async function EditBookPage({
                 <form action={publishBook.bind(null, book.id)} className="mt-4">
                   <button
                     type="submit"
-                    disabled={readiness.paidPublishingBlocked}
+                    disabled={readiness.missingAllPrice || readiness.paidPublishingBlocked}
                     className={buttonClasses(
                       "primary",
                       "md",

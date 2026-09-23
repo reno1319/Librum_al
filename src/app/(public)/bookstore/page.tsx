@@ -95,24 +95,33 @@ async function fetchSearchResults(
     q,
     genre,
     sort,
-    minPriceCents,
-    maxPriceCents,
+    minPriceAll,
+    maxPriceAll,
   }: {
     q?: string;
     genre?: string;
     sort?: string;
-    minPriceCents?: number;
-    maxPriceCents?: number;
+    minPriceAll?: number;
+    maxPriceAll?: number;
   },
 ): Promise<{ books: BookWithAuthor[]; error: boolean; totalMatched: number }> {
+  // ALL-WIRING-2: every price predicate on this page reads
+  // `books.price_all`, in WHOLE LEK, and a row with no authored ALL
+  // price is excluded unconditionally -- not only when a price filter
+  // is active. That exclusion is the storefront half of the null rule:
+  // such a book is neither free nor purchasable, so it does not belong
+  // in a grid whose whole purpose is choosing something to buy. The
+  // same two changes are made inside search_books() so the searched and
+  // unsearched paths can never disagree about which books exist.
   const baseQuery = () => {
     let query = supabase
       .from("books")
       .select("*, profiles:public_author_profiles(public_author_name)")
-      .eq("status", "published");
+      .eq("status", "published")
+      .not("price_all", "is", null);
     if (genre) query = query.eq("genre", genre);
-    if (minPriceCents != null) query = query.gte("price_cents", minPriceCents);
-    if (maxPriceCents != null) query = query.lte("price_cents", maxPriceCents);
+    if (minPriceAll != null) query = query.gte("price_all", minPriceAll);
+    if (maxPriceAll != null) query = query.lte("price_all", maxPriceAll);
     return query;
   };
 
@@ -138,13 +147,21 @@ async function fetchSearchResults(
     // matched book ids. This still fully respects the same genre/price/
     // published-only scoping baseQuery() applies elsewhere on this page
     // -- those filters are passed into the RPC and enforced inside it.
+    // ALL-WIRING-2: the RPC's parameter NAMES still read
+    // `min_price_cents`/`max_price_cents` and are deliberately not
+    // renamed in this patch -- renaming a function's parameters changes
+    // its call signature for every caller at once, and this patch is
+    // already the atomic free/paid cutover. The VALUES they carry are
+    // whole lek, matching `books.price_all`, which is what the function
+    // body now compares them against. The rename is a later, separate
+    // change; until then this comment is the contract.
     const { data: matches, error: searchError } = await supabase.rpc(
       "search_books",
       {
         search_term: term,
         genre_filter: genre ?? null,
-        min_price_cents: minPriceCents ?? null,
-        max_price_cents: maxPriceCents ?? null,
+        min_price_cents: minPriceAll ?? null,
+        max_price_cents: maxPriceAll ?? null,
         result_limit: SEARCH_CANDIDATE_LIMIT,
       },
     );
@@ -167,6 +184,7 @@ async function fetchSearchResults(
           .from("books")
           .select("*, profiles:public_author_profiles(public_author_name)")
           .eq("status", "published")
+          .not("price_all", "is", null)
           .in("id", matchedIds)
           .returns<BookWithAuthor[]>();
 
@@ -192,10 +210,15 @@ async function fetchSearchResults(
     }
   }
 
+  // ALL-WIRING-2: price sorting reads `price_all`. Both queries above
+  // exclude `price_all is null`, so `?? 0` here is unreachable in
+  // practice -- it exists only so the comparator is total for the
+  // TypeScript type (which is `number | null`) rather than producing
+  // NaN, and never as a null-means-free fallback.
   if (sort === "price_asc") {
-    results = [...results].sort((a, b) => a.price_cents - b.price_cents);
+    results = [...results].sort((a, b) => (a.price_all ?? 0) - (b.price_all ?? 0));
   } else if (sort === "price_desc") {
-    results = [...results].sort((a, b) => b.price_cents - a.price_cents);
+    results = [...results].sort((a, b) => (b.price_all ?? 0) - (a.price_all ?? 0));
   } else if (sort === "bestselling" && results.length > 0) {
     // Real non-refunded purchase counts for exactly the books already in
     // this result set, aggregated server-side (see bestselling_books in
@@ -281,7 +304,7 @@ export default async function BookstorePage({
 
   const rawQuery = await searchParams;
   const supabase = await createClient();
-  const { q, genre, sort, minPriceCents, maxPriceCents, isFiltered } =
+  const { q, genre, sort, minPriceAll, maxPriceAll, isFiltered } =
     parseBookstoreQuery(rawQuery);
 
   // Bundles are a secondary discovery feature, not part of the book
@@ -292,7 +315,7 @@ export default async function BookstorePage({
   // render site below for where this is enforced a second time,
   // defensively, rather than relying solely on the empty array here.
   const [{ books, error, totalMatched }, bundles] = await Promise.all([
-    fetchSearchResults(supabase, { q, genre, sort, minPriceCents, maxPriceCents }),
+    fetchSearchResults(supabase, { q, genre, sort, minPriceAll, maxPriceAll }),
     isFiltered ? Promise.resolve([]) : fetchPublishedBundles(supabase),
   ]);
 
@@ -399,7 +422,7 @@ function BookstoreToolbar({
 
         <details className="rounded-md border border-border bg-surface text-sm">
           <summary className="focus-ring cursor-pointer select-none rounded-md px-3 py-1.5">
-            Price range
+            Price range (ALL)
           </summary>
           <form
             action="/bookstore"
@@ -419,9 +442,9 @@ function BookstoreToolbar({
                 type="number"
                 name="minPrice"
                 defaultValue={minPrice ?? ""}
-                placeholder="$0"
+                placeholder="0"
                 min="0"
-                step="0.01"
+                step="1"
                 className="focus-ring w-20 rounded-md border border-border bg-surface px-2 py-1 text-sm"
               />
             </div>
@@ -436,7 +459,7 @@ function BookstoreToolbar({
                 defaultValue={maxPrice ?? ""}
                 placeholder="Any"
                 min="0"
-                step="0.01"
+                step="1"
                 className="focus-ring w-20 rounded-md border border-border bg-surface px-2 py-1 text-sm"
               />
             </div>

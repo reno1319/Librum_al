@@ -1,3 +1,4 @@
+import { resolveCatalogPriceState } from "@/lib/catalog-price";
 import type { Book } from "@/lib/types";
 
 // LIBRUM 2.0 UI-6: the Dashboard's single prioritized "what should I do
@@ -35,7 +36,7 @@ export type DashboardAttentionState =
   | { kind: "paid-publishing-unavailable" }
   | { kind: "none" };
 
-type AttentionBook = Pick<Book, "id" | "title" | "status" | "price_cents" | "created_at">;
+type AttentionBook = Pick<Book, "id" | "title" | "status" | "price_all" | "created_at">;
 
 export function resolveDashboardAttention(params: {
   books: AttentionBook[];
@@ -63,9 +64,16 @@ export function resolveDashboardAttention(params: {
   }
 
   // Mirrors performPublish()'s own real gate exactly (books/actions.ts):
-  // paid publishing only blocks a book priced above 0 -- a free-book-only
-  // author never sees this, since it wouldn't actually be true for them.
-  if (!paidPublishingAvailable && books.some((book) => book.price_cents > 0)) {
+  // paid publishing only blocks a book that is genuinely PAID -- a
+  // free-book-only author never sees this, since it wouldn't actually be
+  // true for them. ALL-WIRING-2: "paid" is now the explicit three-way
+  // classification of `price_all`, so a book with NO authored ALL price
+  // no longer counts as paid here. It isn't: nothing about paid
+  // publishing is what stands between that row and going live.
+  if (
+    !paidPublishingAvailable &&
+    books.some((book) => resolveCatalogPriceState(book.price_all) === "paid")
+  ) {
     return { kind: "paid-publishing-unavailable" };
   }
 

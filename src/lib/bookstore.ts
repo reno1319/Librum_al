@@ -32,39 +32,60 @@ export type BookstoreQuery = {
   maxPrice?: string;
 };
 
+// ALL-WIRING-2: the bounds are WHOLE LEK, matching books.price_all --
+// not cents, and not dollars. The field names say so; the `search_books`
+// RPC's own parameter names still read `min_price_cents`/
+// `max_price_cents` and are deliberately NOT renamed in this patch (see
+// the call site in page.tsx), so this is the one place the app-side
+// name and the SQL-side name differ, on purpose and in writing.
 export type ParsedBookstoreQuery = {
   q?: string;
   genre?: string;
   sort?: string;
-  minPriceCents?: number;
-  maxPriceCents?: number;
+  minPriceAll?: number;
+  maxPriceAll?: number;
   isFiltered: boolean;
 };
 
-// Dollar-string price params -> integer cents, the same rounding
-// Stripe-facing code elsewhere in this codebase already uses. A
-// non-numeric or empty value simply yields "no filter" rather than an
-// error -- these are optional GET params a reader could hand-edit in
-// the URL.
-function parsePriceCents(value: string | undefined): number | undefined {
+// A FILTER BOUND, not a catalog price: `parseCatalogPriceAll` is
+// deliberately not reused here. A reader typing 50 into "min price" is
+// asking a perfectly sensible question even though 50 is not a value
+// any book may be priced at, and rejecting it would silently drop the
+// filter instead of applying it. So the rule is only "a whole,
+// non-negative number of lek", bounded defensively.
+//
+// Anything else -- a decimal, a sign, an exponent, grouping
+// separators, a huge payload -- yields "no filter" rather than an
+// error, exactly as before: these are optional GET params a reader can
+// hand-edit in the URL. What changed is that a value is no longer
+// multiplied by 100 on its way to the query.
+const MAX_PRICE_FILTER_INPUT_LENGTH = 16;
+const WHOLE_LEK_FILTER = /^\d+$/;
+
+function parsePriceAllFilter(value: string | undefined): number | undefined {
   if (!value) return undefined;
-  const dollars = Number(value);
-  return Number.isFinite(dollars) ? Math.round(dollars * 100) : undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_PRICE_FILTER_INPUT_LENGTH) {
+    return undefined;
+  }
+  if (!WHOLE_LEK_FILTER.test(trimmed)) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 export function parseBookstoreQuery(params: BookstoreQuery): ParsedBookstoreQuery {
   const { q, genre, sort, minPrice, maxPrice } = params;
-  const minPriceCents = parsePriceCents(minPrice);
-  const maxPriceCents = parsePriceCents(maxPrice);
+  const minPriceAll = parsePriceAllFilter(minPrice);
+  const maxPriceAll = parsePriceAllFilter(maxPrice);
 
   return {
     q,
     genre,
     sort,
-    minPriceCents,
-    maxPriceCents,
+    minPriceAll,
+    maxPriceAll,
     isFiltered: Boolean(
-      q?.trim() || genre || sort || minPriceCents != null || maxPriceCents != null,
+      q?.trim() || genre || sort || minPriceAll != null || maxPriceAll != null,
     ),
   };
 }

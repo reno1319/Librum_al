@@ -93,11 +93,19 @@ update public.profiles set public_author_name = 'Search Pen Name'
 insert into public.staff_members (user_id, role) values
   ('77777777-7777-7777-7777-777777777777', 'moderator');
 
-insert into public.books (id, author_id, title, description, keywords, genre, status, price_cents) values
-  ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Under a Pen Name', 'A pseudonymous novel.', 'fiction, drama', 'Fiction', 'published', 999),
-  ('b0000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', 'Same Name Book', 'No pen name here.', 'nonfiction', 'Non-Fiction', 'published', 500),
-  ('b0000000-0000-0000-0000-000000000004', '11111111-1111-1111-1111-111111111111', 'Zgjuar mendjen', 'Një libër shqip.', 'edukim', 'Non-Fiction', 'published', 300),
-  ('b0000000-0000-0000-0000-000000000005', '55555555-5555-5555-5555-555555555555', 'Search Fixture Book', 'desc', 'kw', 'Fiction', 'published', 100);
+-- ALL-SEARCH-1: every fixture below now carries a `price_all` as well.
+-- This suite is about PEN-NAME matching, not about pricing, but since
+-- ALL-SEARCH-1 public.search_books() excludes rows with no authored ALL
+-- price, a fixture left unpriced would be filtered out before the pen
+-- name was ever compared -- and this suite would fail for a reason that
+-- has nothing to do with its subject. The values are arbitrary valid
+-- whole-lek prices; the null-price exclusion itself is the subject of
+-- supabase/tests/063_all_search_books_price_all.test.sql.
+insert into public.books (id, author_id, title, description, keywords, genre, status, price_cents, price_all) values
+  ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Under a Pen Name', 'A pseudonymous novel.', 'fiction, drama', 'Fiction', 'published', 999, 999),
+  ('b0000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', 'Same Name Book', 'No pen name here.', 'nonfiction', 'Non-Fiction', 'published', 500, 500),
+  ('b0000000-0000-0000-0000-000000000004', '11111111-1111-1111-1111-111111111111', 'Zgjuar mendjen', 'Një libër shqip.', 'edukim', 'Non-Fiction', 'published', 300, 300),
+  ('b0000000-0000-0000-0000-000000000005', '55555555-5555-5555-5555-555555555555', 'Search Fixture Book', 'desc', 'kw', 'Fiction', 'published', 100, 100);
 
 -- ============================================================
 -- Part 1: schema contract -- additive, length-checked, no uniqueness,

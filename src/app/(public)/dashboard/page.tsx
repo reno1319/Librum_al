@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see the exhaustive
-// route audit (books.price_cents is rendered via AuthorBookRow below,
+// route audit (books.price_all is rendered via AuthorBookRow below,
 // on the main post-login author hub).
 export const dynamic = "force-dynamic";
 
@@ -52,7 +52,7 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_cents
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_all
   // via AuthorBookRow (exhaustive route audit) -- checked as the first
   // statement, before any Supabase call.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
