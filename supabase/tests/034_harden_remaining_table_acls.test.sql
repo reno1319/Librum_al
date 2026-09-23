@@ -126,8 +126,15 @@ begin
 
   perform pg_temp.assert(has_table_privilege('authenticated', 'public.discount_codes', 'SELECT'),
     'part3: authenticated must have SELECT on discount_codes');
-  perform pg_temp.assert(has_table_privilege('authenticated', 'public.discount_codes', 'INSERT'),
-    'part3: authenticated must have INSERT on discount_codes');
+  -- ALL-DISCOUNT-3 (migration 20260923112502) narrowed INSERT from
+  -- table-level to column-level, dropping the legacy amount_off_cents
+  -- column; 064_all_discount_codes_acl.test.sql pins the exact set.
+  perform pg_temp.assert(not has_table_privilege('authenticated', 'public.discount_codes', 'INSERT'),
+    'part3: authenticated must NOT have table-level INSERT on discount_codes (it is column-level)');
+  perform pg_temp.assert(has_column_privilege('authenticated', 'public.discount_codes', 'percent_off', 'INSERT'),
+    'part3: authenticated must have INSERT on percent_off');
+  perform pg_temp.assert(not has_column_privilege('authenticated', 'public.discount_codes', 'amount_off_cents', 'INSERT'),
+    'part3: authenticated must NOT have INSERT on amount_off_cents');
   perform pg_temp.assert(has_table_privilege('authenticated', 'public.discount_codes', 'DELETE'),
     'part3: authenticated must have DELETE on discount_codes');
 

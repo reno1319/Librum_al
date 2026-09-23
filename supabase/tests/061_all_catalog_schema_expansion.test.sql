@@ -507,10 +507,14 @@ begin
 
     -- No ACL was attached to the new column itself. A column-level grant
     -- here would be a privilege this change never asked for.
+    -- ALL-DISCOUNT-3 (migration 20260923112502) later granted
+    -- authenticated a column-level INSERT on discount_codes.amount_off_all
+    -- on purpose; 064_all_discount_codes_acl.test.sql pins that exact
+    -- column ACL, so this check now covers price_all only.
     perform pg_temp.assert(
       not exists (select 1 from pg_catalog.pg_attribute a
                    where a.attrelid = ('public.' || v_table)::regclass
-                     and a.attname in ('price_all', 'amount_off_all')
+                     and a.attname = 'price_all'
                      and a.attacl is not null),
       format('part8: the new column on public.%I must carry no column-level ACL', v_table));
   end loop;
@@ -565,8 +569,10 @@ begin
          and grantee in ('anon', 'authenticated', 'service_role')
        group by grantee
     ) s;
+  -- ALL-DISCOUNT-3: authenticated's INSERT is column-level since
+  -- migration 20260923112502, so it no longer appears at table level.
   perform pg_temp.assert(v_actual =
-    'authenticated:DELETE,INSERT,SELECT'
+    'authenticated:DELETE,SELECT'
     || ' | service_role:DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part8: public.discount_codes table privileges changed -- anon must have NONE and authenticated no UPDATE -- found %s', v_actual));
 end $$;
