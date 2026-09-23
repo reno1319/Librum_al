@@ -87,7 +87,19 @@ export type Book = {
   genre: string | null;
   series_id: string | null;
   series_position: number | null;
+  // LEGACY. USD minor units, from the retired Stripe Connect regime.
+  // Never a lek amount, never the source of a free/paid decision, and
+  // never the source of `price_all` -- see that field below.
   price_cents: number;
+  // ALL-WIRING-2 (migration 20260921153012): the catalog price in WHOLE
+  // ALL. `null` means this row has no authored ALL price and is not
+  // purchasable at all -- it is neither free nor paid, and it is never
+  // derived from or fallen back to `price_cents`. `0` is explicitly
+  // free; every other valid value is 99..100000 (enforced by
+  // books_price_all_range_check). Classify it with
+  // resolveCatalogPriceState (src/lib/catalog-price.ts), never with a
+  // bare `> 0` or `=== 0` comparison.
+  price_all: number | null;
   cover_path: string | null;
   file_path: string | null;
   status: BookStatus;
@@ -131,6 +143,12 @@ export type Bundle = {
   title: string;
   description: string;
   price_cents: number;
+  // ALL-WIRING-2: the column exists (migration 20260921153012) and is
+  // typed here so a reader of this type is not misled about the table's
+  // shape. Bundle BEHAVIOR is deliberately unchanged by this patch:
+  // every bundle price decision, display and checkout path still reads
+  // `price_cents`, and moving them is Patch 5's work, not this one's.
+  price_all: number | null;
   status: BookStatus;
   created_at: string;
   updated_at: string;
@@ -149,7 +167,15 @@ export type DiscountCode = {
   book_id: string;
   code: string;
   percent_off: number | null;
+  // LEGACY USD minor units. `create_book_checkout_intent` refuses an
+  // ALL checkout that resolves one of these, returning the
+  // `discount_not_applicable` quote status rather than applying a
+  // dollar number as if it were lek.
   amount_off_cents: number | null;
+  // ALL-WIRING-2: the fixed discount in WHOLE ALL (migration
+  // 20260921153012). Typed here because the checkout RPC already reads
+  // it; CREATING such a code from the author UI is Patch 3's work.
+  amount_off_all: number | null;
   active: boolean;
   expires_at: string | null;
   created_at: string;

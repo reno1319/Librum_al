@@ -52,11 +52,19 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 // query, extended by one scalar column, not a new query.
 const MAX_HOMEPAGE_COVERS = 8;
 
+// ALL-WIRING-2: `.not("price_all", "is", null)` joins the two filters
+// already here. This section links each cover to its book's detail
+// page, so it is a public listing of the storefront's catalog even
+// though it renders no price -- and a book with no authored ALL price
+// is not part of that catalog until its author sets one. Consequence
+// worth stating plainly rather than discovering later: while every
+// published book is unpriced, this section renders nothing at all.
 async function fetchPublishedCovers(supabase: SupabaseClient) {
   const { data } = await supabase
     .from("books")
     .select("id, title, cover_path")
     .eq("status", "published")
+    .not("price_all", "is", null)
     .not("cover_path", "is", null)
     .order("created_at", { ascending: false })
     .limit(MAX_HOMEPAGE_COVERS)
@@ -387,7 +395,13 @@ function StepMockup({ step, authorShare }: { step: number; authorShare: number }
       <div className={cardClasses} aria-hidden="true">
         <div className="flex items-center justify-between">
           <span className="text-muted">Price</span>
-          <span className="font-medium text-foreground">$—</span>
+          {/* ALL-WIRING-2: this decorative wizard mock used to show a
+              dollar sign, which is now a false depiction of the control
+              it illustrates -- the wizard's price step takes whole lek.
+              Placeholder only: no book and no real amount is involved,
+              so it borrows the ALL suffix convention rather than going
+              through any formatter. */}
+          <span className="font-medium text-foreground">— ALL</span>
         </div>
         <div className="mt-1.5 flex items-center justify-between">
           <span className="text-muted">Author share</span>

@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see the exhaustive
-// route audit (books.price_cents is rendered via AuthorBookRow below).
+// route audit (books.price_all is rendered via AuthorBookRow below).
 export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 UI-6: the full author book list -- what the Dashboard
@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
 // no Sales/Payouts/Tools here -- this route is management-only, one
 // job: see and act on every book you have.
 export default async function AllBooksPage() {
-  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_cents
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_all
   // via AuthorBookRow (exhaustive route audit) -- checked as the first
   // statement, before any Supabase call.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {

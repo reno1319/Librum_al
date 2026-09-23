@@ -1,3 +1,19 @@
+// ALL-WIRING-2 rounding note, recorded because it is true TODAY and may
+// stop being true later. The author royalty rate this constant implies
+// is 8000 basis points (see AUTHOR_ROYALTY_RATE_BPS below), and at
+// exactly 8000 bps an exact half-minor-unit tie is arithmetically
+// UNREACHABLE for every catalog price in Librum's domain: every stored
+// ALL amount is a whole number of lek converted at 100 minor units per
+// lek, so a 20% share of it is always a whole number of minor units.
+// Nothing in this codebase therefore depends on which way a tie would
+// break. That is a property of the RATE, not a property of the formula:
+// change PLATFORM_FEE_PERCENT to a value whose basis-point share is an
+// even divisor of the minor-unit grid (7.5% / 7500 bps is one) and real
+// ties appear, at which point PostgreSQL's numeric round() -- which is
+// half-away-from-zero, unlike IEEE-754 half-to-even -- becomes an
+// economically visible decision about who keeps the half minor unit.
+// Revisit the ledger's rounding policy BEFORE changing this number; do
+// not change the rate or the allocation formula here to "fix" it.
 export const PLATFORM_FEE_PERCENT = 20;
 
 // STRIPE-CUTOVER-2A Section 22: the author's royalty share, expressed in
@@ -11,14 +27,21 @@ export const PLATFORM_FEE_PERCENT = 20;
 // already-created, not-yet-finalized ledger_v1 checkout.
 export const AUTHOR_ROYALTY_RATE_BPS = (100 - PLATFORM_FEE_PERCENT) * 100;
 
-// LIBRUM 2.0 UI-4: the single shared formatter for a book/bundle price
-// as shown to readers -- was previously duplicated independently in
+// LIBRUM 2.0 UI-4: the single shared formatter for a bundle price as
+// shown to readers -- was previously duplicated independently in
 // BookCard, the bookstore hero, the bundle list, and the book detail
-// page. Currency is fixed at USD to match every other price-facing
-// surface in the app (Stripe Checkout, book detail, dashboard sales) --
-// not a currency-selection feature. This remains the production default
-// for every legacy_stripe_connect_v1 surface (Section 9) -- unchanged by
-// STRIPE-CUTOVER-2A.
+// page.
+//
+// Currency is fixed at USD to match every other legacy price-facing
+// surface in the app -- not a currency-selection feature. This remains
+// the production default for every legacy_stripe_connect_v1 surface
+// (Section 9) -- unchanged by STRIPE-CUTOVER-2A.
+//
+// ALL-WIRING-2: BOOK surfaces no longer call this at all. Bundle
+// pricing is still legacy `price_cents` and still USD-shaped, so this
+// stays exactly as it is until Patch 5 moves bundles; a book price now
+// goes through formatCatalogPriceLabel (src/lib/catalog-price.ts),
+// which never emits a `$`.
 export function formatPrice(priceCents: number): string {
   return priceCents === 0 ? "Free" : `$${(priceCents / 100).toFixed(2)}`;
 }
@@ -32,10 +55,24 @@ export function formatPrice(priceCents: number): string {
 // currency's own minor-unit convention, formatted with an explicit "ALL"
 // suffix (rather than a symbol) so it can never be visually mistaken for
 // a dollar amount.
+//
+// ALL-WIRING-2: still here, still used, and deliberately NOT the book
+// catalog formatter. Its one remaining caller is the held-quote notice
+// on Book Detail, which renders a FROZEN legacy intent amount; moving
+// that to formatAllMinorUnits (src/lib/all-money.ts) is Patch 4's work.
+// No active BOOK catalog surface calls this any more -- they all go
+// through formatCatalogPriceLabel (src/lib/catalog-price.ts).
 export function formatAllPrice(priceMinorUnits: number): string {
   return priceMinorUnits === 0 ? "Free" : `${(priceMinorUnits / 100).toFixed(2)} ALL`;
 }
 
+// The platform's share of one sale, in the SAME minor units it is given.
+// The name says "cents" for its original legacy USD callers; the
+// arithmetic is unit-agnostic, which is why the ALL earnings estimate
+// (src/lib/earnings-calculator.ts) feeds it ALL minor units rather than
+// reimplementing the split. The author's share is the REMAINDER, never
+// a second independent rounding -- that is what makes the two shares
+// sum to the gross exactly, for every input.
 export function platformFeeCents(priceCents: number) {
   return Math.round((priceCents * PLATFORM_FEE_PERCENT) / 100);
 }

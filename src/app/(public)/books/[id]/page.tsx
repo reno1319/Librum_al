@@ -18,6 +18,7 @@ import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
 import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { formatPrice, formatAllPrice } from "@/lib/pricing";
+import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import { resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
 import {
   resolveBookPurchaseState,
@@ -355,12 +356,19 @@ export default async function BookDetailPage({
     book.series_id
       ? supabase.from("series").select("*").eq("id", book.series_id).maybeSingle<Series>()
       : Promise.resolve({ data: null }),
+    // ALL-WIRING-2: all three of these lists are navigation/discovery --
+    // "the rest of this series", "more by this author", "you might
+    // like" -- so each excludes a book with no authored ALL price. Such
+    // a row is not ALL-ready: it is neither free nor purchasable, so
+    // offering it as a next thing to read would be an invitation the
+    // storefront cannot honour. Its own detail page stays reachable.
     book.series_id
       ? supabase
           .from("books")
           .select("id, title, series_position, created_at")
           .eq("series_id", book.series_id)
           .eq("status", "published")
+          .not("price_all", "is", null)
           .order("series_position", { ascending: true, nullsFirst: false })
           .returns<SeriesEntry[]>()
       : Promise.resolve({ data: null }),
@@ -368,6 +376,7 @@ export default async function BookDetailPage({
       .from("books")
       .select("*, profiles:public_author_profiles(public_author_name)")
       .eq("status", "published")
+      .not("price_all", "is", null)
       .eq("author_id", book.author_id)
       .neq("id", id)
       .order("created_at", { ascending: false })
@@ -378,6 +387,7 @@ export default async function BookDetailPage({
           .from("books")
           .select("*, profiles:public_author_profiles(public_author_name)")
           .eq("status", "published")
+          .not("price_all", "is", null)
           .eq("genre", book.genre)
           .neq("id", id)
           .neq("author_id", book.author_id)
@@ -425,23 +435,25 @@ export default async function BookDetailPage({
     user: user ? { id: user.id } : null,
     isAuthor,
     owned,
-    priceCents: book.price_cents,
+    priceAll: book.price_all,
   });
   const usePok = resolveActiveCheckoutProvider({
     newCheckoutRegime: process.env.NEW_CHECKOUT_REGIME,
     ledgerPaymentProvider: process.env.LEDGER_PAYMENT_PROVIDER,
   }) === "pok";
-  // Was `new Intl.NumberFormat("en", {style:"currency",currency:"ALL"})`,
-  // which rounds off the minor units under this runtime's default CLDR
-  // data for ALL (7.99 -> "ALL 8") -- confirmed reproducible. Reuses the
-  // existing, already-tested formatAllPrice helper (pricing.ts) that the
-  // ledger_v1 bundle-checkout price display already relies on, instead of
-  // a second, ad-hoc ALL formatter. The frozen checkout amount itself was
-  // never affected either way -- this is display-only, computed
-  // independently in pok-checkout.ts.
-  const formattedPrice = usePok && book.price_cents > 0
-    ? formatAllPrice(book.price_cents)
-    : formatPrice(book.price_cents);
+  // ALL-WIRING-2: the displayed price is a pure function of this book's
+  // own `price_all` and nothing else. The environment-variable branch
+  // that used to choose the currency here is GONE: which payment
+  // provider a deployment has configured was never a fact about what
+  // this book costs, and reading `usePok` to pick between a "$" and an
+  // "ALL" rendering of the SAME legacy `price_cents` number meant the
+  // very same row displayed as two different amounts depending on a
+  // deployment setting. `usePok` survives below, where it belongs --
+  // describing the checkout, not the price.
+  //
+  // Three outcomes, never two: "Price unavailable" for a row with no
+  // authored ALL price, "Free" for 0, and the lek amount otherwise.
+  const formattedPrice = formatCatalogPriceLabel(book.price_all);
 
   // STALE-CHECKOUT-1: the held-quote notice. buyBook redirects here with
   // ?checkout_conflict=<intent id> when the reader has an unresolved
@@ -456,12 +468,35 @@ export default async function BookDetailPage({
   // string, and the id is validated as a UUID before it is used, so a
   // crafted link can neither display a false price nor point the resume
   // form at someone else's intent.
+  //
+  // ALL-WIRING-2 CORRECTION (Codex finding 1): every checkout-resume
+  // surface on this page is gated on THIS one named condition, computed
+  // once and used at all three sites below.
+  //
+  // PurchasePanel already refused to render an acquisition control for a
+  // book with no authored ALL price -- but the held-quote notice and the
+  // lapsed-checkout notice are rendered OUTSIDE that panel, so an
+  // authenticated non-owner could open a null-priced book with a valid
+  // ?checkout_conflict=<uuid> and still be shown a frozen amount, a
+  // resume form and a "Continue that checkout" button. That is an
+  // acquisition surface on a book the storefront has declared
+  // unavailable, which is exactly what the null-price rule forbids.
+  //
+  // `paid-unowned` is the ONLY state in which resuming a paid checkout
+  // is a coherent offer: an author, an owner, an anonymous visitor, a
+  // free book and an unpriced book each have no paid checkout of their
+  // own to continue.
+  const canResumePaidCheckout = purchaseState === "paid-unowned";
+
   const conflictIntentId =
     typeof checkoutConflict === "string" && UUID_PATTERN.test(checkoutConflict)
       ? checkoutConflict
       : null;
   let heldQuote: HeldQuote | null = null;
-  if (conflictIntentId && user) {
+  // The gate is on the LOOKUP, not only on the rendering: an unavailable
+  // book must not even call get_book_checkout_quote. The rendering is
+  // gated again below as defence in depth.
+  if (conflictIntentId && user && canResumePaidCheckout) {
     const { data: quoteRows } = await supabase.rpc("get_book_checkout_quote", {
       p_intent_id: conflictIntentId,
       p_book_id: book.id,
@@ -582,13 +617,22 @@ export default async function BookDetailPage({
 
           {(purchaseState === "anonymous-paid" ||
             purchaseState === "anonymous-free" ||
+            purchaseState === "anonymous-unavailable" ||
             purchaseState === "paid-unowned" ||
-            purchaseState === "free-unowned") && (
+            purchaseState === "free-unowned" ||
+            purchaseState === "unavailable-unowned") && (
             <p className="mt-2 text-xs text-muted">
-              {book.price_cents === 0
-                ? "Free — no payment required. You'll get a DRM-free EPUB you can download anytime from your Librum Library."
-                : "DRM-free EPUB. Download it anytime from your Librum Library."}
-              {resolveCheckoutSecurityNote({ priceCents: book.price_cents, usePok })}
+              {/* ALL-WIRING-2: three-way, same classification the
+                  purchase state above used. The unavailable copy makes
+                  no promise about acquiring the book, because there is
+                  no acquisition form on the page in that state. */}
+              {purchaseState === "anonymous-unavailable" ||
+              purchaseState === "unavailable-unowned"
+                ? "This book doesn't have a price yet, so it can't be bought or downloaded right now."
+                : book.price_all === 0
+                  ? "Free — no payment required. You'll get a DRM-free EPUB you can download anytime from your Librum Library."
+                  : "DRM-free EPUB. Download it anytime from your Librum Library."}
+              {resolveCheckoutSecurityNote({ priceAll: book.price_all, usePok })}
             </p>
           )}
 
@@ -646,7 +690,7 @@ export default async function BookDetailPage({
               silent continuation of the buy button, which is how a
               reader would otherwise be charged an amount they never
               agreed to. */}
-          {heldQuote && (
+          {heldQuote && canResumePaidCheckout && (
             <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
               <p className="font-medium">
                 You already have a checkout in progress for this book.
@@ -686,7 +730,13 @@ export default async function BookDetailPage({
               and the reader pressing Continue. Deliberately NOT
               auto-minted into a fresh one: that would silently move the
               reader onto a different price they never saw. */}
-          {checkoutExpired === "1" && (
+          {/* ALL-WIRING-2 CORRECTION: gated on the same condition. This
+              notice ends with "You can start a new one at the current
+              price", which is simply false on a book that has no current
+              purchasable price -- and on an unavailable book it would also
+              be an invitation to start a checkout the page refuses to
+              offer. */}
+          {checkoutExpired === "1" && canResumePaidCheckout && (
             <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
               That checkout lapsed before it could be resumed, so nothing was
               charged. You can start a new one at the current price.
@@ -1120,6 +1170,43 @@ function PurchasePanel({
         >
           Download EPUB
         </a>
+      </div>
+    );
+  }
+
+  // ALL-WIRING-2: a book with no authored ALL price renders NEITHER
+  // acquisition form -- no buy form, no free-acquisition form, and not
+  // the logged-out "Log in to buy" / "Log in to get this book" links
+  // either, since both are promises the page cannot keep. Placed before
+  // every other unowned branch so no later ternary can fall through to
+  // a purchase control. Read Sample still shows, and so does the
+  // wishlist action for a signed-in reader: saving a book for later is
+  // exactly the right thing to offer when it is not yet obtainable.
+  if (state === "anonymous-unavailable") {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium text-muted">
+          Not available right now
+        </span>
+        {showSample && <BookSampleReader bookId={bookId} bookTitle={bookTitle} />}
+      </div>
+    );
+  }
+
+  if (state === "unavailable-unowned") {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium text-muted">
+          Not available right now
+        </span>
+
+        <form action={(wishlisted ? removeFromWishlist : addToWishlist).bind(null, bookId)}>
+          <button type="submit" className={buttonClasses("outline", "sm")}>
+            {wishlisted ? "Remove from wishlist" : "Save for later"}
+          </button>
+        </form>
+
+        {showSample && <BookSampleReader bookId={bookId} bookTitle={bookTitle} />}
       </div>
     );
   }

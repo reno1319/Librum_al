@@ -5,6 +5,11 @@ import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { createBook } from "../actions";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { formatAllMinorUnits } from "@/lib/all-money";
+import {
+  MAXIMUM_CATALOG_PRICE_ALL,
+  MINIMUM_PAID_CATALOG_PRICE_ALL,
+} from "@/lib/catalog-price";
 import { GENRES } from "@/lib/genres";
 import { LANGUAGES, getLanguageLabel } from "@/lib/languages";
 import { resolvePublishReadiness } from "@/lib/publish-readiness";
@@ -152,7 +157,9 @@ export function UploadWizard({
       return;
     }
     if (step === 3 && !canAdvanceFromPrice({ price })) {
-      setStepError("Enter a valid price to continue.");
+      setStepError(
+        `Enter a price in lek: 0 for a free ebook, or a whole number from ${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}.`,
+      );
       return;
     }
     setStepError("");
@@ -164,14 +171,19 @@ export function UploadWizard({
     setStep((s) => Math.max(s - 1, 1));
   }
 
-  const { priceValid, isFreeBook, priceCents, feeCents, earningsCents } =
+  const { priceValid, isFreeBook, priceAll, grossMinor, feeMinor, earningsMinor } =
     resolveWizardPriceSummary(price);
 
+  // ALL-WIRING-2: readiness is previewed against the price the author
+  // has typed SO FAR, so an unparsed/empty field is genuinely "no ALL
+  // price yet" and reports missingAllPrice -- the same answer
+  // performPublish would give for such a row. `null`, never 0: passing
+  // 0 would preview a free book and hide the blocker.
   const readiness = resolvePublishReadiness({
     book: {
       description,
       keywords,
-      price_cents: priceCents,
+      price_all: priceValid ? priceAll : null,
       cover_path: cover ? "pending" : null,
     },
     paidPublishingAvailable,
@@ -417,27 +429,35 @@ export function UploadWizard({
 
       {/* Step 3: Price & Earnings */}
       <div className={step === 3 ? "flex flex-col gap-4" : "hidden"}>
+        {/* ALL-WIRING-2: an ALL text field with a decimal keyboard, not
+            a USD number field -- see the Publishing Studio's own copy of
+            this comment for why `type="number"` made the comma decimal
+            form unreachable and advertised a fractional lek price the
+            catalog cannot store. */}
         <label className="flex flex-col gap-1 text-sm">
-          Price (USD)
+          Price (ALL)
           <input
             name="price"
-            type="number"
-            min="0"
-            step="0.01"
+            type="text"
+            inputMode="decimal"
             required
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             className={formControlClasses}
           />
           <span className="text-xs text-muted">
-            Set to $0 for a free ebook. Librum takes a {PLATFORM_FEE_PERCENT}%
+            Whole lek: 0 for a free ebook, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
+            {MAXIMUM_CATALOG_PRICE_ALL}. Librum takes a {PLATFORM_FEE_PERCENT}%
             platform fee — you keep the rest of every sale.
           </span>
         </label>
 
         <div className="rounded-lg border border-border bg-surface p-4 text-sm">
           {!priceValid ? (
-            <p className="text-muted">Enter a valid price to see your estimated earnings.</p>
+            <p className="text-muted">
+              Enter a price in lek (0, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
+              {MAXIMUM_CATALOG_PRICE_ALL}) to see your estimated earnings.
+            </p>
           ) : isFreeBook ? (
             <p className="font-medium text-foreground">
               Free book — no author earnings from sales.
@@ -446,16 +466,16 @@ export function UploadWizard({
             <div className="flex flex-col gap-2">
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-muted">Sale price</span>
-                <span>${(priceCents / 100).toFixed(2)}</span>
+                <span>{formatAllMinorUnits(grossMinor)}</span>
               </div>
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-muted">Librum platform fee ({PLATFORM_FEE_PERCENT}%)</span>
-                <span>-${(feeCents / 100).toFixed(2)}</span>
+                <span>-{formatAllMinorUnits(feeMinor)}</span>
               </div>
               <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
                 <span className="font-medium text-foreground">You earn per sale</span>
                 <span className="font-serif text-lg font-semibold text-primary">
-                  ${(earningsCents / 100).toFixed(2)}
+                  {formatAllMinorUnits(earningsMinor)}
                 </span>
               </div>
             </div>
@@ -530,7 +550,7 @@ export function UploadWizard({
             {isFreeBook
               ? "Free"
               : priceValid
-                ? `$${(priceCents / 100).toFixed(2)} · you earn $${(earningsCents / 100).toFixed(2)} per sale`
+                ? `${formatAllMinorUnits(grossMinor)} · you earn ${formatAllMinorUnits(earningsMinor)} per sale`
                 : "—"}
           </p>
         </div>
@@ -542,6 +562,17 @@ export function UploadWizard({
               can do here changes this. Stays CONDITIONAL, never a
               hardcoded line: with PAID_PUBLISHING_MODE set on the
               protected staging deployment it correctly disappears. */}
+          {/* ALL-WIRING-2: the missing-price blocker, shown here for the
+              same reason the Publishing Studio shows it -- the wizard's
+              Publish button submits the same createBook action, whose
+              publish branch refuses an unpriced row. The two blockers
+              are mutually exclusive in resolvePublishReadiness. */}
+          {readiness.missingAllPrice && (
+            <p className="mt-2 text-red-800">
+              Set a price in lek on the previous step before publishing.
+              Your book will still be saved as a draft.
+            </p>
+          )}
           {readiness.paidPublishingBlocked && (
             <p className="mt-2 text-red-800">
               Paid publishing hasn&apos;t launched yet. Your book will still
@@ -557,7 +588,9 @@ export function UploadWizard({
                 ))}
             </ul>
           )}
-          {!readiness.paidPublishingBlocked && readiness.recommended.every((item) => item.done) && (
+          {!readiness.missingAllPrice &&
+            !readiness.paidPublishingBlocked &&
+            readiness.recommended.every((item) => item.done) && (
             <p className="mt-2 text-muted">Looks good — ready to publish.</p>
           )}
         </div>

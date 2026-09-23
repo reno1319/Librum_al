@@ -1,4 +1,5 @@
-import { platformFeeCents } from "@/lib/pricing";
+import { classifyCatalogPrice, parseCatalogPriceAll } from "@/lib/catalog-price";
+import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART C: pure step-gating decisions for the
 // New Book wizard, extracted so upload-wizard.tsx's own "can I go to
@@ -33,18 +34,26 @@ export function canAdvanceFromFiles(params: {
   return params.coverReady && params.manuscriptReady;
 }
 
+// ALL-WIRING-2: the step gate is now exactly the server's own parser.
+// `Number(price) >= 0` accepted 1, 98, 0.5, 1e3 and "  7 " -- every one
+// of which createBook/updateBook now REJECT outright, so the wizard
+// would have advanced an author to Review & Publish and then refused
+// the save. One parser, one answer.
 export function canAdvanceFromPrice(params: { price: string }): boolean {
-  if (params.price.trim().length === 0) return false;
-  const value = Number(params.price);
-  return Number.isFinite(value) && value >= 0;
+  return parseCatalogPriceAll(params.price).ok;
 }
 
+// ALL-WIRING-2: every money figure here is ALL MINOR UNITS, and
+// `priceAll` is the whole-lek catalog integer the author actually
+// typed. `priceValid` means "parseCatalogPriceAll accepted it", not
+// "Number() produced something non-negative".
 export type WizardPriceSummary = {
   priceValid: boolean;
   isFreeBook: boolean;
-  priceCents: number;
-  feeCents: number;
-  earningsCents: number;
+  priceAll: number;
+  grossMinor: number;
+  feeMinor: number;
+  earningsMinor: number;
 };
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART C: the Price & Earnings step's and
@@ -55,13 +64,37 @@ export type WizardPriceSummary = {
 // shown on Dashboard Sales (see src/lib/pricing.ts and
 // src/lib/earnings-calculator.ts's own comment for why reusing it,
 // rather than reimplementing the 20% split here, is load-bearing).
+//
+// ALL-WIRING-2: it now delegates to calculateAuthorEarnings() outright
+// rather than calling platformFeeCents() beside it, so the wizard, the
+// public /pricing calculator and the ledger cannot disagree even by a
+// rounding step.
 export function resolveWizardPriceSummary(price: string): WizardPriceSummary {
-  const priceNum = Number(price);
-  const priceValid = Number.isFinite(priceNum) && priceNum >= 0;
-  const priceCents = priceValid ? Math.round(priceNum * 100) : 0;
-  const isFreeBook = priceValid && priceCents === 0;
-  const feeCents = isFreeBook ? 0 : platformFeeCents(priceCents);
-  const earningsCents = isFreeBook ? 0 : priceCents - feeCents;
+  const parsed = parseCatalogPriceAll(price);
 
-  return { priceValid, isFreeBook, priceCents, feeCents, earningsCents };
+  if (!parsed.ok) {
+    return {
+      priceValid: false,
+      isFreeBook: false,
+      priceAll: 0,
+      grossMinor: 0,
+      feeMinor: 0,
+      earningsMinor: 0,
+    };
+  }
+
+  const priceAll = parsed.priceAll;
+  const isFreeBook = classifyCatalogPrice(priceAll) === "free";
+  // Delegated, never reimplemented -- calculateAuthorEarnings owns the
+  // single whole-ALL -> minor-unit conversion and the single rounding.
+  const estimate = calculateAuthorEarnings(priceAll, 1);
+
+  return {
+    priceValid: true,
+    isFreeBook,
+    priceAll,
+    grossMinor: estimate.grossMinor,
+    feeMinor: estimate.platformFeeMinor,
+    earningsMinor: estimate.authorEarningsMinor,
+  };
 }

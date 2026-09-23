@@ -8,11 +8,16 @@
 // future: this module has no USD-shaped input, output, or code path of
 // any kind.
 //
-// This module is deliberately NOT wired into any form, action, RPC,
-// provider adapter, or database code yet -- see the ALL-CATALOG-1 design
-// report for the phased rollout that eventually connects it. It exists
-// today only so the parsing/validation/formatting rules can be agreed and
-// tested in isolation, ahead of any schema or UI change.
+// ALL-WIRING-2 update: this module IS now wired. It is the sole parser
+// for an author's catalog-price input (createBook/updateBook and the
+// New Book wizard), the sole classifier behind every free/paid decision
+// in the application, and the sole reader-facing book price formatter.
+// The paragraph this replaces said the opposite, and said it correctly
+// at the time -- see ALL-CATALOG-1's own design report for the phased
+// rollout that ended here. What has NOT changed is the constraint that
+// made the phasing safe: this module still has no import list at all,
+// so it still performs no network, database, Storage, provider, ledger,
+// or environment-variable access.
 //
 // Deliberately separate from src/lib/pricing.ts: that module's
 // `price_cents`/`formatPrice`/`formatAllPrice` are minor-unit (÷100)
@@ -195,4 +200,62 @@ export function formatCatalogPriceAll(priceAll: number): string {
   assertValidCatalogPriceAll(priceAll);
   const grouped = String(priceAll).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   return `${grouped},00 ALL`;
+}
+
+// ALL-WIRING-2: the EXPLICIT three-way catalog state. `books.price_all`
+// is nullable, and its three cases are three different product facts,
+// not two plus a default:
+//
+//   null  -- this row has no authored ALL price. It is NOT ALL-ready:
+//            not free, not paid, not purchasable, and never inferred
+//            from `price_cents` (a legacy USD minor-unit column whose
+//            values are not lek and whose `0` default is not a price).
+//   0     -- explicitly free.
+//   99..100000 -- paid.
+//
+// Every free/paid decision in the application routes through this one
+// function, so "null" can never quietly collapse into either branch of
+// an `x > 0` / `x === 0` test the way a single numeric comparison
+// invites.
+export type CatalogPriceState = "unavailable" | "free" | "paid";
+
+/**
+ * Classifies a value READ BACK from the database (or from a select that
+ * may not have included the column at all).
+ *
+ * Deliberately TOTAL where `classifyCatalogPrice` throws. The two serve
+ * different callers: `classifyCatalogPrice` validates an author's
+ * freshly parsed input, where an out-of-domain value means the parser
+ * is broken and must be loud. This one classifies whatever a row (or a
+ * partial projection of one) actually holds, on paths that render
+ * public pages -- and there the only safe answer for anything that is
+ * not exactly a valid catalog price is "unavailable". `undefined` (a
+ * `select` that omitted the column) and `null` (a genuinely unpriced
+ * row) both land there, so a forgotten column can never present as
+ * free.
+ */
+export function resolveCatalogPriceState(priceAll: unknown): CatalogPriceState {
+  if (typeof priceAll !== "number") return "unavailable";
+  if (!isValidCatalogPriceAll(priceAll)) return "unavailable";
+  return priceAll === 0 ? "free" : "paid";
+}
+
+/** Reader-facing label for a row with no authored ALL price. */
+export const CATALOG_PRICE_UNAVAILABLE_LABEL = "Price unavailable";
+
+/** Reader-facing label for an explicitly free book. */
+export const CATALOG_PRICE_FREE_LABEL = "Free";
+
+/**
+ * The one reader-facing price label for a book, for every active book
+ * surface (detail, cards, author rows, listings, dashboard). Never
+ * emits a `$`, never consults an environment variable, and never falls
+ * back to `price_cents`: the label is a pure function of the book's own
+ * `price_all` and nothing else.
+ */
+export function formatCatalogPriceLabel(priceAll: unknown): string {
+  const state = resolveCatalogPriceState(priceAll);
+  if (state === "unavailable") return CATALOG_PRICE_UNAVAILABLE_LABEL;
+  if (state === "free") return CATALOG_PRICE_FREE_LABEL;
+  return formatCatalogPriceAll(priceAll as number);
 }

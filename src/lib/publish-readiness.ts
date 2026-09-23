@@ -1,3 +1,4 @@
+import { resolveCatalogPriceState } from "@/lib/catalog-price";
 import { getPublishChecklist, type ChecklistItem } from "@/lib/publish-checklist";
 import type { Book } from "@/lib/types";
 
@@ -26,7 +27,16 @@ import type { Book } from "@/lib/types";
 //
 // `requiredMet` was removed here, not renamed: it had no production
 // consumer and was exactly `!payoutBlocked`.
+//
+// ALL-WIRING-2: `missingAllPrice` is a SECOND, distinct hard blocker,
+// not a rewording of the first. `price_all is null` and "a paid title
+// while paid publishing is closed" fail publishing for unrelated
+// reasons and have opposite remedies: the author can fix the first
+// themselves in one edit, and can do nothing at all about the second.
+// Collapsing them into one flag would tell an author with an unpriced
+// draft that Librum is the obstacle, which is false.
 export type PublishReadiness = {
+  missingAllPrice: boolean;
   paidPublishingBlocked: boolean;
   recommended: ChecklistItem[];
 };
@@ -40,7 +50,7 @@ const RECOMMENDED_LABELS = new Set([
   "Add keywords so readers can find it by search",
 ]);
 
-type ReadinessBook = Pick<Book, "description" | "keywords" | "price_cents" | "cover_path">;
+type ReadinessBook = Pick<Book, "description" | "keywords" | "price_all" | "cover_path">;
 
 export function resolvePublishReadiness(params: {
   book: ReadinessBook;
@@ -48,17 +58,24 @@ export function resolvePublishReadiness(params: {
 }): PublishReadiness {
   const { book, paidPublishingAvailable } = params;
 
-  // Mirrors performPublish()'s own real gate exactly (books/actions.ts):
-  // a free book, or a paid book while paid publishing is available, has
-  // no required blocker at all. The caller supplies the value -- this
-  // module stays pure and is never allowed to read the environment.
-  const paidPublishingBlocked = book.price_cents > 0 && !paidPublishingAvailable;
+  // Mirrors performPublish()'s own real gate exactly (books/actions.ts),
+  // including its ORDER: the missing-price refusal is decided first and
+  // independently, and only a title that is actually PAID is ever
+  // measured against paid-publishing availability. A book with no ALL
+  // price is not "a paid book", so it never reports paidPublishingBlocked
+  // -- reporting both at once would offer two explanations for one
+  // refusal. The caller supplies paidPublishingAvailable -- this module
+  // stays pure and is never allowed to read the environment.
+  const priceState = resolveCatalogPriceState(book.price_all);
+  const missingAllPrice = priceState === "unavailable";
+  const paidPublishingBlocked = priceState === "paid" && !paidPublishingAvailable;
 
   const recommended = getPublishChecklist(book).filter((item) =>
     RECOMMENDED_LABELS.has(item.label),
   );
 
   return {
+    missingAllPrice,
     paidPublishingBlocked,
     recommended,
   };

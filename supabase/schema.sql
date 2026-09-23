@@ -513,6 +513,15 @@ create extension if not exists unaccent with schema extensions;
 -- This still guards against an unbounded scan/result set -- 500 is a
 -- hard cap, not "no limit" -- mirroring the same defensive
 -- least/greatest/coalesce pattern already used by bestselling_books.
+--
+-- ALL-SEARCH-1 (migration 20260922162155): the price predicates read
+-- `books.price_all` -- the ALL catalog column, in WHOLE LEK -- and a
+-- row with no authored ALL price is excluded outright. The parameters
+-- are still NAMED `min_price_cents`/`max_price_cents`, deliberately and
+-- temporarily: renaming a function's parameters changes its call
+-- signature for every PostgREST caller at once, so that is a separate
+-- change from the one that performed the free/paid cutover. See the
+-- migration's own header for the full rationale and rollout note.
 create or replace function public.search_books(
   search_term text default null,
   genre_filter text default null,
@@ -530,8 +539,17 @@ as $$
   from public.books
   where books.status = 'published'
     and (genre_filter is null or books.genre = genre_filter)
-    and (min_price_cents is null or books.price_cents >= min_price_cents)
-    and (max_price_cents is null or books.price_cents <= max_price_cents)
+    -- ALL-SEARCH-1: a row with no authored ALL price is not ALL-ready.
+    -- Unconditional, never folded into the two bound checks below: a
+    -- reader who applies no price filter at all must not be shown an
+    -- unpriced book either.
+    and books.price_all is not null
+    -- ALL-SEARCH-1: whole-ALL catalog bounds. The parameter names still
+    -- read "cents" and are deliberately not renamed here -- see the
+    -- header. `price_cents` is never consulted: it is legacy USD minor
+    -- units and its values are not lek.
+    and (min_price_cents is null or books.price_all >= min_price_cents)
+    and (max_price_cents is null or books.price_all <= max_price_cents)
     and (
       search_term is null
       or extensions.unaccent(books.title) ilike extensions.unaccent('%' || search_term || '%')

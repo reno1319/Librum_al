@@ -11,24 +11,47 @@ describe("parseBookstoreQuery", () => {
   it("no params: unfiltered, no price bounds", () => {
     const result = parseBookstoreQuery({});
     expect(result.isFiltered).toBe(false);
-    expect(result.minPriceCents).toBeUndefined();
-    expect(result.maxPriceCents).toBeUndefined();
+    expect(result.minPriceAll).toBeUndefined();
+    expect(result.maxPriceAll).toBeUndefined();
   });
 
-  it("parses dollar strings into integer cents", () => {
-    const result = parseBookstoreQuery({ minPrice: "4.5", maxPrice: "12" });
-    expect(result.minPriceCents).toBe(450);
-    expect(result.maxPriceCents).toBe(1200);
+  // ALL-WIRING-2: whole lek, passed through unchanged. The old parser
+  // multiplied by 100 because the column was USD cents; `books.price_all`
+  // is whole lek, so a bound of 12 means twelve lek, not twelve hundred
+  // of anything. A `* 100` reintroduced here would make every max-price
+  // filter match effectively nothing.
+  it("parses whole-lek bounds without scaling them", () => {
+    const result = parseBookstoreQuery({ minPrice: "99", maxPrice: "1200" });
+    expect(result.minPriceAll).toBe(99);
+    expect(result.maxPriceAll).toBe(1200);
   });
 
   it("a non-numeric price string yields no filter rather than an error", () => {
     const result = parseBookstoreQuery({ minPrice: "not-a-number" });
-    expect(result.minPriceCents).toBeUndefined();
+    expect(result.minPriceAll).toBeUndefined();
   });
 
   it("an empty price string yields no filter", () => {
     const result = parseBookstoreQuery({ minPrice: "" });
-    expect(result.minPriceCents).toBeUndefined();
+    expect(result.minPriceAll).toBeUndefined();
+  });
+
+  // A filter bound is not a catalog price: 50 is not a value any book
+  // may be priced at, but it is a perfectly sensible thing for a reader
+  // to ask for, so it is accepted rather than silently dropped.
+  it("accepts a bound outside the catalog price domain", () => {
+    expect(parseBookstoreQuery({ minPrice: "50" }).minPriceAll).toBe(50);
+    expect(parseBookstoreQuery({ maxPrice: "0" }).maxPriceAll).toBe(0);
+  });
+
+  it("rejects fractional, signed, exponent and grouped forms rather than coercing them", () => {
+    for (const bad of ["4.5", "4,5", "-1", "+1", "1e3", "1 000", "1.000", " ", "9".repeat(20)]) {
+      expect(parseBookstoreQuery({ minPrice: bad }).minPriceAll).toBeUndefined();
+    }
+  });
+
+  it("tolerates surrounding whitespace on an otherwise valid bound", () => {
+    expect(parseBookstoreQuery({ minPrice: " 250 " }).minPriceAll).toBe(250);
   });
 
   it("a whitespace-only q does not count as filtered", () => {

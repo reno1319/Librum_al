@@ -1,12 +1,13 @@
+import { resolveCatalogPriceState } from "@/lib/catalog-price";
 import type { Book } from "@/lib/types";
 
 export type ChecklistItem = { label: string; done: boolean };
 
-type ChecklistBook = Pick<Book, "description" | "keywords" | "price_cents" | "cover_path">;
+type ChecklistBook = Pick<Book, "description" | "keywords" | "price_all" | "cover_path">;
 
-// Purely informational, never blocks publishing — a $0 price or a short
-// description can be entirely intentional (a free book, a short story).
-// This just nudges authors toward a more complete listing.
+// Purely informational, never blocks publishing — a free price or a
+// short description can be entirely intentional (a free book, a short
+// story). This just nudges authors toward a more complete listing.
 //
 // LIBRUM 2.0 PRODUCT-1 PRE-COMMIT CORRECTION: the former "Add a 'Look
 // inside' preview excerpt" item is removed, not relabeled. Its only
@@ -33,9 +34,19 @@ export function getPublishChecklist(book: ChecklistBook): ChecklistItem[] {
       label: "Add keywords so readers can find it by search",
       done: book.keywords.trim().length > 0,
     },
+    // ALL-WIRING-2: the item is now "has this book an ALL price at all",
+    // which is a genuinely three-way question, not the old
+    // `price_cents > 0`. Two things change, both deliberately. The unit
+    // is lek, not dollars. And a FREE book now counts as done: 0 is an
+    // authored, deliberate ALL price, and the old rule marked every
+    // intentionally free book permanently incomplete while this very
+    // file's own docstring said a free price was legitimate. The only
+    // undone case left is the one that genuinely is incomplete -- a row
+    // with no authored ALL price at all, which is exactly the row that
+    // cannot be published and does not appear in listings.
     {
-      label: "Set a price (or keep $0 if this book is meant to be free)",
-      done: book.price_cents > 0,
+      label: "Set your price in lek (0 for a free ebook)",
+      done: resolveCatalogPriceState(book.price_all) !== "unavailable",
     },
   ];
 }

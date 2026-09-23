@@ -138,11 +138,17 @@ export default async function AuthorProfilePage({
   // PERF-1 batch uses.
   const [{ data: books }, { data: bundles }, followerCountResult, followResult] =
     await Promise.all([
+      // ALL-WIRING-2: an author's public shelf is a discovery surface,
+      // so a book with no authored ALL price is excluded here the same
+      // way it is from the bookstore. The author still sees every one of
+      // their books, priced or not, on their own dashboard -- which is
+      // where the missing price gets fixed.
       supabase
         .from("books")
         .select("*")
         .eq("author_id", id)
         .eq("status", "published")
+        .not("price_all", "is", null)
         .order("created_at", { ascending: false })
         .returns<Book[]>(),
       supabase

@@ -38,7 +38,7 @@ type PublicSeriesPageData = {
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see the exhaustive
 // route audit (getPublicSeriesPageData selects books.* below, including
-// price_cents, even though BookCard is the only render site that
+// price_all, even though BookCard is the only render site that
 // actually displays it).
 export const dynamic = "force-dynamic";
 
@@ -82,11 +82,20 @@ const getPublicSeriesPageData = cache(
     // The only other query a valid request needs -- one round trip,
     // regardless of how many books the series has. Published only, same
     // rule every other public book-listing surface in this app applies.
+    // ALL-WIRING-2: `.not("price_all", "is", null)` joins the
+    // published-only rule for the same reason it exists -- a series page
+    // is a discovery surface (this file's own comment below says so),
+    // and a book with no authored ALL price is not ALL-ready: neither
+    // free nor purchasable. Consequence worth stating: a series whose
+    // books are ALL unpriced now has no public content and renders as
+    // not-found, exactly as a series with zero published books already
+    // did.
     const { data: booksRaw } = await supabase
       .from("books")
       .select("*")
       .eq("series_id", id)
       .eq("status", "published")
+      .not("price_all", "is", null)
       .returns<Book[]>();
 
     const books = orderSeriesBooks(booksRaw ?? []);
@@ -111,7 +120,7 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   // ALL-CUTOVER APP-A: no series-specific metadata (and no Supabase call
-  // via getPublicSeriesPageData, which selects books.price_cents) while
+  // via getPublicSeriesPageData, which selects books.price_all) while
   // maintenance is active -- the same {} fallback this function already
   // uses for a missing/not-public series.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
@@ -143,7 +152,7 @@ export default async function SeriesPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_cents
+  // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_all
   // via BookCard (exhaustive route audit) -- checked as the first
   // statement, before any Supabase call.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {

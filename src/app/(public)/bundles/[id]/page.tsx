@@ -65,6 +65,13 @@ export default async function BundleDetailPage({
 
   const { data: bundleBookRows } = await supabase
     .from("bundle_books")
+    // ALL-WIRING-2: a bundle's contents are DELIBERATELY unfiltered on
+    // price_all. This list describes what a buyer would receive, so
+    // dropping a member because its author has not set an ALL price
+    // would misrepresent the bundle itself -- a correctness problem,
+    // not a presentation one. Each card renders "Price unavailable" for
+    // such a member, and bundle checkout is unconditionally closed
+    // anyway, so nothing here offers an unpriced book for sale.
     .select("book_id, books(*)")
     .eq("bundle_id", id)
     .returns<BundleBookRow[]>();

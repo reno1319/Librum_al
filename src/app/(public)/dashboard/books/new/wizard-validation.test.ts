@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { platformFeeCents } from "@/lib/pricing";
+import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
 import {
   canAdvanceFromBookDetails,
   canAdvanceFromFiles,
@@ -51,69 +52,99 @@ describe("canAdvanceFromFiles", () => {
   });
 });
 
+// ALL-WIRING-2: the step gate IS parseCatalogPriceAll, so this suite
+// asserts the wizard cannot advance an author past a price the server
+// will then refuse. "9.99" used to pass here and fail on save.
 describe("canAdvanceFromPrice", () => {
-  it("accepts zero as a valid free price", () => {
-    expect(canAdvanceFromPrice({ price: "0" })).toBe(true);
+  it("accepts zero as a valid free price, in every binding form", () => {
+    for (const free of ["0", "0.00", "0,00", "00"]) {
+      expect(canAdvanceFromPrice({ price: free })).toBe(true);
+    }
   });
 
-  it("accepts a positive price", () => {
-    expect(canAdvanceFromPrice({ price: "9.99" })).toBe(true);
+  it("accepts a paid whole-lek price, in every binding form", () => {
+    for (const paid of ["99", "99.00", "99,00", "099", "100000", " 250 "]) {
+      expect(canAdvanceFromPrice({ price: paid })).toBe(true);
+    }
   });
 
-  it("rejects a negative price", () => {
-    expect(canAdvanceFromPrice({ price: "-1" })).toBe(false);
+  it("rejects a fractional lek price -- the catalog cannot store one", () => {
+    for (const bad of ["9.99", "99,50", "0.01", "98,99"]) {
+      expect(canAdvanceFromPrice({ price: bad })).toBe(false);
+    }
   });
 
-  it("rejects a non-numeric price", () => {
-    expect(canAdvanceFromPrice({ price: "abc" })).toBe(false);
+  it("rejects the unsellable 1..98 band and anything above the ceiling", () => {
+    for (const bad of ["1", "50", "98", "100001", "999999"]) {
+      expect(canAdvanceFromPrice({ price: bad })).toBe(false);
+    }
   });
 
-  it("rejects a blank price", () => {
-    expect(canAdvanceFromPrice({ price: "" })).toBe(false);
+  it("rejects signed, exponent, grouped, blank and non-numeric input", () => {
+    for (const bad of ["-1", "+99", "1e3", "1.234,56", "1,234", "abc", "", "   "]) {
+      expect(canAdvanceFromPrice({ price: bad })).toBe(false);
+    }
   });
 });
 
 describe("resolveWizardPriceSummary", () => {
-  it("treats $0 as a distinct free-book state with no fee/earnings", () => {
+  it("treats 0 ALL as a distinct free-book state with no fee/earnings", () => {
     const result = resolveWizardPriceSummary("0");
     expect(result).toEqual({
       priceValid: true,
       isFreeBook: true,
-      priceCents: 0,
-      feeCents: 0,
-      earningsCents: 0,
+      priceAll: 0,
+      grossMinor: 0,
+      feeMinor: 0,
+      earningsMinor: 0,
     });
   });
 
-  it("never disagrees with platformFeeCents() -- the exact function real checkout/Sales already use", () => {
-    for (const dollars of ["9.99", "4.99", "19.99", "1", "0.50"]) {
-      const priceCents = Math.round(Number(dollars) * 100);
-      const result = resolveWizardPriceSummary(dollars);
-      expect(result.priceCents).toBe(priceCents);
-      expect(result.feeCents).toBe(platformFeeCents(priceCents));
-      expect(result.earningsCents).toBe(priceCents - platformFeeCents(priceCents));
+  it("accepts the comma decimal binding form the ALL input now allows", () => {
+    expect(resolveWizardPriceSummary("990,00")).toEqual(
+      resolveWizardPriceSummary("990"),
+    );
+  });
+
+  it("never disagrees with calculateAuthorEarnings, which owns the split", () => {
+    for (const price of ["99", "499", "999", "1999", "100000"]) {
+      const priceAll = Number(price);
+      const expected = calculateAuthorEarnings(priceAll, 1);
+      const result = resolveWizardPriceSummary(price);
+      expect(result.priceAll).toBe(priceAll);
+      expect(result.grossMinor).toBe(priceAll * 100);
+      expect(result.feeMinor).toBe(expected.platformFeeMinor);
+      expect(result.earningsMinor).toBe(expected.authorEarningsMinor);
+      // And, transitively, with platformFeeCents itself.
+      expect(result.feeMinor).toBe(platformFeeCents(priceAll * 100));
     }
   });
 
-  it("fee + earnings always sum back to the exact price, never dropping or inventing a cent", () => {
-    const result = resolveWizardPriceSummary("9.99");
-    expect(result.feeCents + result.earningsCents).toBe(result.priceCents);
+  it("fee + earnings always sum back to the exact gross, never dropping or inventing a minor unit", () => {
+    const result = resolveWizardPriceSummary("999");
+    expect(result.feeMinor + result.earningsMinor).toBe(result.grossMinor);
   });
 
-  it("reports priceValid: false for a negative or non-numeric price, with a zeroed summary", () => {
-    expect(resolveWizardPriceSummary("-5")).toEqual({
+  it("reports priceValid: false with a zeroed summary for every rejected form", () => {
+    const zeroed = {
       priceValid: false,
       isFreeBook: false,
-      priceCents: 0,
-      feeCents: 0,
-      earningsCents: 0,
-    });
-    expect(resolveWizardPriceSummary("abc")).toEqual({
-      priceValid: false,
-      isFreeBook: false,
-      priceCents: 0,
-      feeCents: 0,
-      earningsCents: 0,
-    });
+      priceAll: 0,
+      grossMinor: 0,
+      feeMinor: 0,
+      earningsMinor: 0,
+    };
+    for (const bad of ["-5", "abc", "9.99", "50", "100001", ""]) {
+      expect(resolveWizardPriceSummary(bad)).toEqual(zeroed);
+    }
+  });
+
+  // The summary must never present a rejected price as a FREE book --
+  // that is how an author would be shown "Free book" for a typo and
+  // then be refused at save time, or worse, save a free book by
+  // accident.
+  it("a rejected price is never reported as free", () => {
+    expect(resolveWizardPriceSummary("abc").isFreeBook).toBe(false);
+    expect(resolveWizardPriceSummary("9.99").isFreeBook).toBe(false);
   });
 });

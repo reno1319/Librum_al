@@ -15,6 +15,25 @@ import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
+import {
+  MAXIMUM_CATALOG_PRICE_ALL,
+  MINIMUM_PAID_CATALOG_PRICE_ALL,
+  parseCatalogPriceAll,
+  resolveCatalogPriceState,
+} from "@/lib/catalog-price";
+
+// ALL-WIRING-2: one message for every rejected catalog price, built
+// from the module's own constants so it can never drift from the rule
+// it describes. Deliberately states the whole accepted domain rather
+// than diagnosing which part of the input failed -- an author who typed
+// "9.99" needs to learn the shape of a Librum price, not that character
+// four was unexpected.
+const MISSING_ALL_PRICE_MESSAGE =
+  "Set this book's price in lek before publishing it.";
+
+const CATALOG_PRICE_ERROR_MESSAGE =
+  `Enter your price in lek: 0 for a free ebook, or a whole number from ` +
+  `${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}`;
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -450,7 +469,15 @@ export async function createBook(formData: FormData) {
   const keywords = normalizeKeywords(formData.get("keywords"));
   const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
-  const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
+  // ALL-WIRING-2: the ONLY accepted parse of an author's catalog price.
+  // `Math.round(Number(raw) * 100)` is gone -- it silently accepted
+  // "1e3", " 7 ", 0.5 and every value in the unsellable 1..98 band, ran
+  // the author's typed string through binary floating point, and wrote
+  // the result into the legacy USD column. parseCatalogPriceAll is
+  // string-based, admits exactly the binding forms ("99", "99.00",
+  // "99,00", leading zeros, and the free forms "0"/"0.00"/"0,00"), and
+  // rejects everything else with no partial value at all.
+  const parsedPrice = parseCatalogPriceAll(formData.get("price"));
   const coverStoragePath = String(formData.get("coverStoragePath") ?? "").trim();
   const cover = formData.get("cover") as File | null;
   const coverProvided = coverStoragePath !== "" || (!!cover && cover.size > 0);
@@ -458,14 +485,16 @@ export async function createBook(formData: FormData) {
   const manuscript = formData.get("manuscript") as File | null;
   const manuscriptProvided = manuscriptStoragePath !== "" || (!!manuscript && manuscript.size > 0);
 
-  if (
-    !title ||
-    !coverProvided ||
-    !manuscriptProvided ||
-    !Number.isFinite(priceCents) ||
-    priceCents < 0
-  ) {
+  if (!title || !coverProvided || !manuscriptProvided) {
     redirect("/dashboard/books/new?error=Please+fill+in+every+field");
+  }
+
+  // A parse failure performs NO insert and NO update. This redirect is
+  // above every Supabase mutation in this function, and the maintenance
+  // gate is above it in turn, so a rejected price costs no row and no
+  // storage object.
+  if (!parsedPrice.ok) {
+    redirect(`/dashboard/books/new?error=${encodeURIComponent(CATALOG_PRICE_ERROR_MESSAGE)}`);
   }
 
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
@@ -580,7 +609,14 @@ export async function createBook(formData: FormData) {
     genre,
     series_id: seriesId,
     series_position: seriesPosition,
-    price_cents: priceCents,
+    // ALL-WIRING-2: `price_all` ONLY. `price_cents` is deliberately
+    // absent from this payload -- not written, not scaled, not copied,
+    // not calculated. It keeps its column default of 0, which is a
+    // legacy USD artefact and is never read as a price again; a new
+    // book priced at 199 ALL is therefore a paid book whose
+    // `price_cents` is 0, and every decision site classifies it as
+    // paid because none of them looks at that column.
+    price_all: parsedPrice.priceAll,
     cover_path: coverPath,
     file_path: manuscriptPath,
     // Always inserted as a draft, regardless of the submitted intent
@@ -687,6 +723,11 @@ export async function createBook(formData: FormData) {
   // in practice (this is the row this same request just inserted) but
   // still falls safely into the same generic branch rather than being
   // treated as exhaustive.
+  if (publishResult.reason === "missing_all_price") {
+    redirect(
+      `/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
+    );
+  }
   if (publishResult.reason === "paid_mode_required") {
     redirect(
       "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
@@ -734,10 +775,21 @@ export async function updateBook(bookId: string, formData: FormData) {
   const keywords = normalizeKeywords(formData.get("keywords"));
   const isbn = String(formData.get("isbn") ?? "").trim() || null;
   const genre = String(formData.get("genre") ?? "");
-  const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
+  // ALL-WIRING-2: same single parser as createBook -- see its comment.
+  const parsedPrice = parseCatalogPriceAll(formData.get("price"));
 
-  if (!title || !Number.isFinite(priceCents) || priceCents < 0) {
+  if (!title) {
     redirect(`/dashboard/books/${bookId}/edit?error=Please+fill+in+every+field`);
+  }
+
+  // A parse failure performs no update. Above every Supabase mutation
+  // in this function, and below the ownership check already made above,
+  // so a rejected price can neither write a row nor probe someone
+  // else's.
+  if (!parsedPrice.ok) {
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(CATALOG_PRICE_ERROR_MESSAGE)}`,
+    );
   }
 
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
@@ -926,7 +978,10 @@ export async function updateBook(bookId: string, formData: FormData) {
       genre,
       series_id: seriesId,
       series_position: seriesPosition,
-      price_cents: priceCents,
+      // ALL-WIRING-2: `price_all` ONLY -- see createBook's own comment.
+      // Saving a valid ALL price is also the single act that brings a
+      // previously unpriced legacy row back into listings and search.
+      price_all: parsedPrice.priceAll,
       cover_path: coverPath,
       file_path: filePath,
       ...(subtitleResolved.present ? { subtitle: subtitleResolved.value } : {}),
@@ -1031,7 +1086,19 @@ export async function updateBook(bookId: string, formData: FormData) {
 // payload object it's given.
 type PerformPublishResult =
   | { ok: true; wasNewlyPublished: boolean }
-  | { ok: false; reason: "not_found" | "paid_mode_required" | "update_failed" };
+  // ALL-WIRING-2: `missing_all_price` is a DISTINCT reason, never folded
+  // into paid_mode_required. The two refusals have opposite remedies --
+  // the author fixes the first themselves in one edit and can do nothing
+  // about the second -- so telling an author with an unpriced draft that
+  // "paid publishing isn't available" would be a false explanation.
+  | {
+      ok: false;
+      reason:
+        | "not_found"
+        | "missing_all_price"
+        | "paid_mode_required"
+        | "update_failed";
+    };
 
 async function performPublish(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -1049,7 +1116,7 @@ async function performPublish(
 
   const { data: book } = await supabase
     .from("books")
-    .select("status, price_cents, published_at")
+    .select("status, price_all, published_at")
     .eq("id", bookId)
     .eq("author_id", userId)
     .single();
@@ -1058,15 +1125,30 @@ async function performPublish(
     return { ok: false, reason: "not_found" };
   }
 
+  // ALL-WIRING-2: the catalog price is read fresh from the book's own
+  // row -- never trusted from the client -- and classified three ways.
+  const catalogPriceState = resolveCatalogPriceState(book.price_all);
+
+  // A book with no authored ALL price cannot be published at any
+  // permission level: there is no price for a reader to be shown and
+  // none for a checkout to freeze. This is a refusal to publish, NOT an
+  // unpublish -- an already-published legacy row with a null price stays
+  // published and stays reachable; nothing in this function or anywhere
+  // else in this patch moves a row back to draft.
+  if (catalogPriceState === "unavailable") {
+    return { ok: false, reason: "missing_all_price" };
+  }
+
   // Only a book that will actually be sold needs paid-publishing
-  // authorization at all. price_cents is read fresh from the book's own
-  // row here -- never trusted from the client -- so this can't be
-  // spoofed by submitting some other "free" signal.
-  if (book.price_cents > 0) {
+  // authorization at all -- so a FREE (price_all = 0) title publishes
+  // here exactly as it always has, with no paid-mode permission
+  // involved.
+  if (catalogPriceState === "paid") {
     // PAID-MODE-1 / PR-G: whether Librum may publish a PAID title at all
     // is a product permission, decided HERE -- after the book's own
-    // server-read price proves this title is paid. Since PR G this is the
-    // SOLE authorization for paid publishing.
+    // server-read `price_all` proves this title is paid. Since PR G this
+    // is the SOLE authorization for paid publishing, and while
+    // PAID_PUBLISHING_MODE is absent it denies everywhere.
     //
     // The legacy profiles.stripe_payouts_enabled prerequisite that used
     // to sit below it is gone. Stated precisely, because the looser
@@ -1148,6 +1230,15 @@ export async function publishBook(bookId: string) {
     // PAID-MODE-1: deliberately generic -- it names no environment
     // variable, no deployment and no payout state. An author learns that
     // paid publishing is closed, and nothing about why.
+    // ALL-WIRING-2: the missing-price refusal names the real obstacle
+    // and points at the one action that clears it. Unlike the paid-mode
+    // denial below, it is safe to be specific: it describes the author's
+    // OWN row back to them and leaks nothing about this deployment.
+    if (result.reason === "missing_all_price") {
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
+      );
+    }
     if (result.reason === "paid_mode_required") {
       redirect("/dashboard?error=Paid+publishing+isn%27t+available+right+now");
     }
