@@ -27,6 +27,16 @@ vi.mock("./actions", () => ({
 const { default: BookDetailPage, generateMetadata } = await import("./page");
 
 const BOOK_ID = "11111111-1111-4111-8111-111111111111";
+
+// PAID-CHECKOUT-SURFACE-1: the exact protected-staging deployment plus the
+// exact checkout mode -- the only configuration in which
+// canStartPaidCheckout() is true.
+function openPaidCheckout() {
+  vi.stubEnv("VERCEL_ENV", "preview");
+  vi.stubEnv("VERCEL_GIT_COMMIT_REF", "staging");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://erhzpapqwyfjotliqdjo.supabase.co");
+  vi.stubEnv("PAID_CHECKOUT_MODE", "controlled_staging_checkout_test");
+}
 function pageArgs(searchParams: Record<string, string> = {}) {
   return { params: Promise.resolve({ id: BOOK_ID }), searchParams: Promise.resolve(searchParams) };
 }
@@ -147,6 +157,10 @@ function stubSupabase(
 describe("BookDetailPage: stale-checkout conflict notice", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    // PAID-CHECKOUT-SURFACE-1: these blocks are about what an OPEN paid
+    // checkout offers, so they run under the exact controlled-staging
+    // checkout configuration. The closed case has its own file.
+    openPaidCheckout();
     mockCreateClient.mockReset();
     mockCreateAdminClient.mockReset();
   });
@@ -251,6 +265,10 @@ describe("BookDetailPage: stale-checkout conflict notice", () => {
 describe("BookDetailPage: an unavailable book exposes no checkout-resume surface", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    // PAID-CHECKOUT-SURFACE-1: these blocks are about what an OPEN paid
+    // checkout offers, so they run under the exact controlled-staging
+    // checkout configuration. The closed case has its own file.
+    openPaidCheckout();
     mockCreateClient.mockReset();
     mockCreateAdminClient.mockReset();
   });

@@ -67,9 +67,17 @@ const mockCreateClient = vi.fn(() =>
             single: () => mockExistingSingle(),
           }),
         }),
+        // PAID-REPRICING-1: updateBook's write is now guarded and proved
+        // by its returned rows, so the double supports `.is()` and ends
+        // in `.select()`, reporting the one row it changed.
         update: (payload: unknown) => {
           mockUpdate(payload);
-          return { eq: () => ({ eq: () => Promise.resolve({ error: null }) }) };
+          const chain = {
+            eq: () => chain,
+            is: () => chain,
+            select: () => Promise.resolve({ data: [{ id: BOOK_ID }], error: null }),
+          };
+          return chain;
         },
       };
     },
@@ -219,6 +227,8 @@ function resetMocks() {
       file_path: "author-1/book-1.epub",
       author_id: USER_ID,
       language: null,
+      status: "published",
+      price_all: 0,
     },
   });
   mockUploadCover.mockReset().mockResolvedValue({ error: null });
@@ -718,6 +728,8 @@ describe("updateBook: unchanged-language preservation (PUBLISHING-UX-1 Part D FI
         file_path: "author-1/book-1.epub",
         author_id: USER_ID,
         language,
+        status: "published",
+        price_all: 0,
       },
     });
   }

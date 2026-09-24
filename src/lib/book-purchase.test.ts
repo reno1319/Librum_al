@@ -13,13 +13,13 @@ describe("resolveBookPurchaseState", () => {
   // the auth distinction.
   it("anonymous + paid resolves to anonymous-paid, not the free variant", () => {
     expect(
-      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: 199 }),
+      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: 199, paidCheckoutAvailable: true }),
     ).toBe("anonymous-paid");
   });
 
   it("anonymous + free resolves to anonymous-free, not the paid variant", () => {
     expect(
-      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: 0 }),
+      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: 0, paidCheckoutAvailable: true }),
     ).toBe("anonymous-free");
   });
 
@@ -30,6 +30,7 @@ describe("resolveBookPurchaseState", () => {
         isAuthor: false,
         owned: false,
         priceAll: 199,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("paid-unowned");
   });
@@ -41,6 +42,7 @@ describe("resolveBookPurchaseState", () => {
         isAuthor: false,
         owned: false,
         priceAll: 0,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("free-unowned");
   });
@@ -52,6 +54,7 @@ describe("resolveBookPurchaseState", () => {
         isAuthor: false,
         owned: true,
         priceAll: 199,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("owned");
   });
@@ -63,6 +66,7 @@ describe("resolveBookPurchaseState", () => {
         isAuthor: true,
         owned: true,
         priceAll: 199,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("author");
   });
@@ -74,6 +78,7 @@ describe("resolveBookPurchaseState", () => {
         isAuthor: true,
         owned: false,
         priceAll: 0,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("author");
   });
@@ -122,18 +127,18 @@ describe("resolveShowSample", () => {
 // never reach Stripe. The POK-specific wording is unaffected.
 describe("resolveCheckoutSecurityNote", () => {
   it("free book: no note at all, regardless of provider", () => {
-    expect(resolveCheckoutSecurityNote({ priceAll: 0, usePok: true })).toBeNull();
-    expect(resolveCheckoutSecurityNote({ priceAll: 0, usePok: false })).toBeNull();
+    expect(resolveCheckoutSecurityNote({ priceAll: 0, usePok: true, paidCheckoutAvailable: true })).toBeNull();
+    expect(resolveCheckoutSecurityNote({ priceAll: 0, usePok: false, paidCheckoutAvailable: true })).toBeNull();
   });
 
   it("paid book, POK enabled: names POK", () => {
-    expect(resolveCheckoutSecurityNote({ priceAll: 199, usePok: true })).toBe(
+    expect(resolveCheckoutSecurityNote({ priceAll: 199, usePok: true, paidCheckoutAvailable: true })).toBe(
       " Secure checkout with POK.",
     );
   });
 
   it("paid book, POK not enabled (checkout disabled): neutral wording, never names Stripe", () => {
-    const note = resolveCheckoutSecurityNote({ priceAll: 199, usePok: false });
+    const note = resolveCheckoutSecurityNote({ priceAll: 199, usePok: false, paidCheckoutAvailable: true });
     expect(note).toBe(" Secure checkout.");
     expect(note).not.toContain("Stripe");
   });
@@ -149,7 +154,7 @@ describe("resolveCheckoutSecurityNote", () => {
 describe("resolveBookPurchaseState: null price_all is never free and never paid", () => {
   it("anonymous + null resolves to anonymous-unavailable", () => {
     expect(
-      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: null }),
+      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: null, paidCheckoutAvailable: true }),
     ).toBe("anonymous-unavailable");
   });
 
@@ -160,6 +165,7 @@ describe("resolveBookPurchaseState: null price_all is never free and never paid"
         isAuthor: false,
         owned: false,
         priceAll: null,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("unavailable-unowned");
   });
@@ -171,6 +177,7 @@ describe("resolveBookPurchaseState: null price_all is never free and never paid"
         isAuthor: false,
         owned: true,
         priceAll: null,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("owned");
   });
@@ -182,6 +189,7 @@ describe("resolveBookPurchaseState: null price_all is never free and never paid"
         isAuthor: true,
         owned: false,
         priceAll: null,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("author");
   });
@@ -192,7 +200,7 @@ describe("resolveBookPurchaseState: null price_all is never free and never paid"
   // come back "free" is if someone reintroduced one.
   it("price_all 199 with a legacy price_cents 0 is PAID for every reader state", () => {
     expect(
-      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: 199 }),
+      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: 199, paidCheckoutAvailable: true }),
     ).toBe("anonymous-paid");
     expect(
       resolveBookPurchaseState({
@@ -200,6 +208,7 @@ describe("resolveBookPurchaseState: null price_all is never free and never paid"
         isAuthor: false,
         owned: false,
         priceAll: 199,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("paid-unowned");
   });
@@ -209,7 +218,7 @@ describe("resolveBookPurchaseState: null price_all is never free and never paid"
     // this asserts the fail-safe direction of the classification, not a
     // reachable row.
     expect(
-      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: 50 }),
+      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll: 50, paidCheckoutAvailable: true }),
     ).toBe("anonymous-unavailable");
   });
 });
@@ -220,7 +229,41 @@ describe("resolveBookPurchaseState: null price_all is never free and never paid"
 // classification.
 describe("resolveCheckoutSecurityNote: unpriced books", () => {
   it("null price: no note, regardless of provider", () => {
-    expect(resolveCheckoutSecurityNote({ priceAll: null, usePok: true })).toBeNull();
-    expect(resolveCheckoutSecurityNote({ priceAll: null, usePok: false })).toBeNull();
+    expect(resolveCheckoutSecurityNote({ priceAll: null, usePok: true, paidCheckoutAvailable: true })).toBeNull();
+    expect(resolveCheckoutSecurityNote({ priceAll: null, usePok: false, paidCheckoutAvailable: true })).toBeNull();
+  });
+});
+
+// PAID-CHECKOUT-SURFACE-1: the paid-checkout capability is an input to the
+// purchase state, so no paid-unowned or anonymous-paid state (the only two
+// that offer a paid checkout) can exist while it is denied.
+describe("resolveBookPurchaseState: paid checkout closed", () => {
+  const closed = (user: { id: string } | null, priceAll: number | null, extra = {}) =>
+    resolveBookPurchaseState({
+      user, isAuthor: false, owned: false, priceAll, paidCheckoutAvailable: false, ...extra,
+    });
+
+  it("a paid book resolves to the checkout-closed states, never to a checkout-offering one", () => {
+    expect(closed(null, 199)).toBe("anonymous-paid-checkout-closed");
+    expect(closed({ id: "r" }, 199)).toBe("paid-unowned-checkout-closed");
+  });
+
+  it("free, unpriced, author and owner states do not depend on the capability", () => {
+    expect(closed(null, 0)).toBe("anonymous-free");
+    expect(closed({ id: "r" }, 0)).toBe("free-unowned");
+    expect(closed(null, null)).toBe("anonymous-unavailable");
+    expect(closed({ id: "r" }, null)).toBe("unavailable-unowned");
+    expect(closed({ id: "a" }, 199, { isAuthor: true })).toBe("author");
+    expect(closed({ id: "r" }, 199, { owned: true })).toBe("owned");
+  });
+
+  it("the sample is still offered in both closed states", () => {
+    expect(resolveShowSample("anonymous-paid-checkout-closed")).toBe(true);
+    expect(resolveShowSample("paid-unowned-checkout-closed")).toBe(true);
+  });
+
+  it("no checkout note is claimed while paid checkout is closed, POK or not", () => {
+    expect(resolveCheckoutSecurityNote({ priceAll: 199, usePok: true, paidCheckoutAvailable: false })).toBeNull();
+    expect(resolveCheckoutSecurityNote({ priceAll: 199, usePok: false, paidCheckoutAvailable: false })).toBeNull();
   });
 });

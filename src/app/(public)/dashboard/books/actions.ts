@@ -14,6 +14,14 @@ import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-val
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import {
+  CATALOG_ROW_CHANGED_MESSAGE,
+  PAID_REPRICING_UNAVAILABLE_MESSAGE,
+  applyCatalogRowGuard,
+  catalogRowGuard,
+  isExactlyOneRowWritten,
+  resolvePriceUpdateAuthorization,
+} from "@/lib/paid-repricing";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
@@ -760,9 +768,13 @@ export async function updateBook(bookId: string, formData: FormData) {
   // so resolveLanguageForUpdate() below has an authoritative source for
   // "what does this row already have" that a client can never spoof
   // (unlike a hidden form field or query parameter).
+  //
+  // PAID-REPRICING-1: `status` and `price_all` join the same read, so
+  // the paid-repricing decision below is made from the server's own row,
+  // never from anything the form submits.
   const { data: existing } = await supabase
     .from("books")
-    .select("cover_path, file_path, author_id, language")
+    .select("cover_path, file_path, author_id, language, status, price_all")
     .eq("id", bookId)
     .single();
 
@@ -795,6 +807,34 @@ export async function updateBook(bookId: string, formData: FormData) {
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
     redirect(`/dashboard/books/${bookId}/edit?error=Please+choose+a+genre`);
   }
+
+  // PAID-REPRICING-1: an edit that would make a PUBLISHED book paid, or
+  // change its paid price, is a paid publication and needs the same
+  // permission performPublish() requires. Decided by the one shared rule
+  // (src/lib/paid-repricing.ts), from the row read above, and refused
+  // HERE -- before any storage upload and before any database write.
+  // Keeping the current paid price, making the book free, and saving a
+  // paid price on a draft all stay open.
+  const priceAuthorization = resolvePriceUpdateAuthorization({
+    currentStatus: existing.status,
+    currentPriceAll: existing.price_all,
+    submittedPriceAll: parsedPrice.priceAll,
+  });
+  if (
+    priceAuthorization.kind === "paid_publishing_permission_required" &&
+    !canPublishPaidTitle()
+  ) {
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`,
+    );
+  }
+  // The row state the write below must still find. A read-then-check
+  // alone would let a concurrent publish slip between the two: see
+  // catalogRowGuard's own comment.
+  const priceGuard = catalogRowGuard(priceAuthorization, {
+    status: existing.status,
+    priceAll: existing.price_all,
+  });
 
   // LIBRUM 2.0 PUBLISHING-UX-1 PART B FINAL PRE-COMMIT ROLLOUT-
   // COMPATIBILITY CORRECTION: same five author-editable fields as
@@ -968,7 +1008,12 @@ export async function updateBook(bookId: string, formData: FormData) {
   // -- survives untouched. A field the form DOES submit, even as an
   // empty string, IS included, as `null` -- an intentional clear, not
   // an accidental one.
-  const { error: updateError } = await supabase
+  //
+  // PAID-REPRICING-1: guarded by `priceGuard` (see above) and followed by
+  // `.select("id")`, because an update that matched no row is not an
+  // error to PostgREST -- only the returned rows prove this write landed
+  // on the row that was authorized.
+  const updateQuery = supabase
     .from("books")
     .update({
       title,
@@ -1002,11 +1047,24 @@ export async function updateBook(bookId: string, formData: FormData) {
     })
     .eq("id", bookId)
     .eq("author_id", user.id);
+  const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
+    updateQuery,
+    priceGuard,
+  ).select("id");
 
   if (updateError) {
     console.error("updateBook: book update failed:", updateError);
     redirect(
       `/dashboard/books/${bookId}/edit?error=Something+went+wrong+saving+your+changes.+Please+try+again`,
+    );
+  }
+  if (!isExactlyOneRowWritten(updatedRows)) {
+    console.error("updateBook: guarded update did not change exactly one row", {
+      bookId,
+      rowCount: Array.isArray(updatedRows) ? updatedRows.length : null,
+    });
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`,
     );
   }
 
@@ -1191,13 +1249,23 @@ async function performPublish(
     updatePayload.published_at = new Date().toISOString();
   }
 
-  const { error } = await supabase
-    .from("books")
-    .update(updatePayload)
-    .eq("id", bookId)
-    .eq("author_id", userId);
+  // PAID-REPRICING-1: compare-and-set. Every decision above was made
+  // from the status and `price_all` read at the top of this function, so
+  // the write lands only if the row is STILL in exactly that state. A
+  // concurrent updateBook that made a free draft paid in between leaves
+  // this publish matching no row, instead of publishing a paid title the
+  // paid-mode check above never saw. `.select("id")` is what proves one
+  // row changed; zero rows is a failure, never a publish.
+  const { data: publishedRows, error } = await applyCatalogRowGuard(
+    supabase.from("books").update(updatePayload).eq("id", bookId).eq("author_id", userId),
+    { status: book.status, priceAll: book.price_all },
+  ).select("id");
 
   if (error) {
+    return { ok: false, reason: "update_failed" };
+  }
+  if (!isExactlyOneRowWritten(publishedRows)) {
+    console.error("performPublish: guarded publish did not change exactly one row", { bookId });
     return { ok: false, reason: "update_failed" };
   }
 

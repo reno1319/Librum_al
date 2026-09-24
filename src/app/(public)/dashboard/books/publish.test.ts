@@ -67,12 +67,27 @@ const mockUploadManuscript = vi.fn();
 function makeChain(resolve: () => unknown) {
   const chain = {
     eq: () => chain,
+    // PAID-REPRICING-1: performPublish's write is now a compare-and-set
+    // (`.is()` for a null price) proved by its returned rows (`.select()`).
+    is: () => chain,
+    select: () => chain,
     single: () => Promise.resolve(resolve()),
     maybeSingle: () => Promise.resolve(resolve()),
     then: (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
       Promise.resolve(resolve()).then(onFulfilled, onRejected),
   };
   return chain;
+}
+
+// PAID-REPRICING-1: an error-free update result that does not say which
+// rows it changed is read as "changed the one row", which is what every
+// pre-existing success case in this file meant. A test that means "zero
+// rows" says so with an explicit `data: []`.
+function withWrittenRow(result: unknown) {
+  if (result && typeof result === "object" && !("data" in result) && !(result as { error?: unknown }).error) {
+    return { ...result, data: [{ id: "written-row" }] };
+  }
+  return result;
 }
 
 const mockCreateClient = vi.fn(() =>
@@ -84,7 +99,7 @@ const mockCreateClient = vi.fn(() =>
           select: () => makeChain(() => mockBookSelectResult()),
           update: (payload: unknown) => {
             mockBookUpdatePayload(payload);
-            return makeChain(() => mockBookUpdateResult());
+            return makeChain(() => withWrittenRow(mockBookUpdateResult()));
           },
           insert: (payload: unknown) => {
             mockBookInsert(payload);
