@@ -21,14 +21,30 @@ import { resolveCatalogPriceState } from "@/lib/catalog-price";
 // decision) with no acquisition form of either kind, rather than
 // picking whichever of the paid/free branches a bare numeric comparison
 // happened to fall into.
+//
+// PAID-CHECKOUT-SURFACE-1: two more states, for a PAID book while paid
+// checkout is closed (canStartPaidCheckout() false, which is every
+// deployment without the exact controlled-staging checkout mode). Before
+// them, "anonymous-paid" and "paid-unowned" were chosen from the price
+// alone, so the page offered "Log in to buy", a promo field, a Buy
+// button and a checkout-resume form that buyBook was always going to
+// refuse. A control the server will refuse is a false statement in its
+// own right, whatever the server does afterwards. The closed states keep
+// the price visible and offer no checkout initiation or resume surface.
+//
+// The capability is an INPUT, never read here: this module stays pure,
+// and the one server-only interpretation of PAID_CHECKOUT_MODE remains
+// canStartPaidCheckout() (src/lib/paid-readiness.ts).
 export type BookPurchaseState =
   | "anonymous-paid"
+  | "anonymous-paid-checkout-closed"
   | "anonymous-free"
   | "anonymous-unavailable"
   | "author"
   | "owned"
   | "free-unowned"
   | "paid-unowned"
+  | "paid-unowned-checkout-closed"
   | "unavailable-unowned";
 
 export function resolveBookPurchaseState(params: {
@@ -36,13 +52,17 @@ export function resolveBookPurchaseState(params: {
   isAuthor: boolean;
   owned: boolean;
   priceAll: number | null;
+  // Required, not optional: every caller must say whether paid checkout
+  // is open, so no call site can default into offering one.
+  paidCheckoutAvailable: boolean;
 }): BookPurchaseState {
-  const { user, isAuthor, owned, priceAll } = params;
+  const { user, isAuthor, owned, priceAll, paidCheckoutAvailable } = params;
   const priceState = resolveCatalogPriceState(priceAll);
 
   if (!user) {
     if (priceState === "unavailable") return "anonymous-unavailable";
-    return priceState === "free" ? "anonymous-free" : "anonymous-paid";
+    if (priceState === "free") return "anonymous-free";
+    return paidCheckoutAvailable ? "anonymous-paid" : "anonymous-paid-checkout-closed";
   }
   // An author viewing their own book takes precedence over owned/free --
   // an author's own book was never actually purchased or claimed free,
@@ -55,7 +75,8 @@ export function resolveBookPurchaseState(params: {
   if (isAuthor) return "author";
   if (owned) return "owned";
   if (priceState === "unavailable") return "unavailable-unowned";
-  return priceState === "free" ? "free-unowned" : "paid-unowned";
+  if (priceState === "free") return "free-unowned";
+  return paidCheckoutAvailable ? "paid-unowned" : "paid-unowned-checkout-closed";
 }
 
 // LIBRUM 2.0 PRODUCT-1: Read Sample is independent of the purchase
@@ -81,13 +102,18 @@ export function resolveBookPurchaseState(params: {
 // nothing about that. A sample is not an acquisition: it starts no
 // checkout, creates no entitlement, and reading one is the only useful
 // thing left on a page whose book cannot currently be obtained.
+//
+// PAID-CHECKOUT-SURFACE-1: the two checkout-closed states are included
+// for the same reason -- the reader still lacks full access.
 export function resolveShowSample(state: BookPurchaseState): boolean {
   return (
     state === "anonymous-paid" ||
+    state === "anonymous-paid-checkout-closed" ||
     state === "anonymous-free" ||
     state === "anonymous-unavailable" ||
     state === "free-unowned" ||
     state === "paid-unowned" ||
+    state === "paid-unowned-checkout-closed" ||
     state === "unavailable-unowned"
   );
 }
@@ -110,10 +136,16 @@ export function resolveShowSample(state: BookPurchaseState): boolean {
 // unpriced book has no checkout to describe, and claiming a secure one
 // exists would be the same kind of false statement this function was
 // extracted to stop.
+//
+// PAID-CHECKOUT-SURFACE-1: and no note at all while paid checkout is
+// closed -- describing a secure checkout, POK or otherwise, that the
+// page does not offer is the same false statement.
 export function resolveCheckoutSecurityNote(params: {
   priceAll: number | null;
   usePok: boolean;
+  paidCheckoutAvailable: boolean;
 }): string | null {
+  if (!params.paidCheckoutAvailable) return null;
   if (resolveCatalogPriceState(params.priceAll) !== "paid") return null;
   return params.usePok ? " Secure checkout with POK." : " Secure checkout.";
 }

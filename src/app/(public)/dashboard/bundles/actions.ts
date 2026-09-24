@@ -6,6 +6,14 @@ import { createClient } from "@/lib/supabase/server";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import {
+  CATALOG_ROW_CHANGED_MESSAGE,
+  PAID_REPRICING_UNAVAILABLE_MESSAGE,
+  applyCatalogRowGuard,
+  catalogRowGuard,
+  isExactlyOneRowWritten,
+  resolvePriceUpdateAuthorization,
+} from "@/lib/paid-repricing";
 import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
@@ -154,9 +162,11 @@ export async function updateBundle(bundleId: string, formData: FormData) {
     redirect("/login");
   }
 
+  // PAID-REPRICING-1: `status` and `price_all` are read here so the
+  // paid-repricing decision below comes from the server's own row.
   const { data: existing } = await supabase
     .from("bundles")
-    .select("id")
+    .select("id, status, price_all")
     .eq("id", bundleId)
     .eq("author_id", user.id)
     .maybeSingle();
@@ -182,6 +192,28 @@ export async function updateBundle(bundleId: string, formData: FormData) {
     );
   }
 
+  // PAID-REPRICING-1: the same shared rule updateBook() applies, so a
+  // published bundle cannot become paid, or change its paid price, while
+  // paid publishing is closed. Refused before the book-selection read,
+  // the bundle update and the membership delete/re-insert.
+  const priceAuthorization = resolvePriceUpdateAuthorization({
+    currentStatus: existing.status,
+    currentPriceAll: existing.price_all,
+    submittedPriceAll: parsedPrice.priceAll,
+  });
+  if (
+    priceAuthorization.kind === "paid_publishing_permission_required" &&
+    !canPublishPaidTitle()
+  ) {
+    redirect(
+      `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`,
+    );
+  }
+  const priceGuard = catalogRowGuard(priceAuthorization, {
+    status: existing.status,
+    priceAll: existing.price_all,
+  });
+
   const { bookIds, error: selectionError } = await resolveBookSelection(
     supabase,
     user.id,
@@ -191,18 +223,34 @@ export async function updateBundle(bundleId: string, formData: FormData) {
     redirect(`/dashboard/bundles/${bundleId}/edit?error=${selectionError}`);
   }
 
-  const { error: updateError } = await supabase
-    .from("bundles")
-    // ALL-WIRING-5: `price_all` ONLY. Omitting `price_cents` is what
-    // leaves an existing bundle's legacy value exactly as it was.
-    .update({ title, description, price_all: parsedPrice.priceAll })
-    .eq("id", bundleId)
-    .eq("author_id", user.id);
+  // PAID-REPRICING-1: guarded like updateBook()'s write, and proved by
+  // the returned rows. A write that matched no row stops HERE, before the
+  // membership delete/re-insert below, so a stale edit can change neither
+  // the bundle nor what it contains.
+  const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
+    supabase
+      .from("bundles")
+      // ALL-WIRING-5: `price_all` ONLY. Omitting `price_cents` is what
+      // leaves an existing bundle's legacy value exactly as it was.
+      .update({ title, description, price_all: parsedPrice.priceAll })
+      .eq("id", bundleId)
+      .eq("author_id", user.id),
+    priceGuard,
+  ).select("id");
 
   if (updateError) {
     console.error("updateBundle: bundle update failed", { bundleId, error: updateError });
     redirect(
       `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(BUNDLE_SAVE_FAILED_MESSAGE)}`,
+    );
+  }
+  if (!isExactlyOneRowWritten(updatedRows)) {
+    console.error("updateBundle: guarded update did not change exactly one row", {
+      bundleId,
+      rowCount: Array.isArray(updatedRows) ? updatedRows.length : null,
+    });
+    redirect(
+      `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`,
     );
   }
 
@@ -259,7 +307,7 @@ async function performBundlePublish(
 ): Promise<PerformBundlePublishResult> {
   const { data: bundle, error: bundleReadError } = await supabase
     .from("bundles")
-    .select("price_all")
+    .select("status, price_all")
     .eq("id", bundleId)
     .eq("author_id", userId)
     .maybeSingle();
@@ -348,18 +396,26 @@ async function performBundlePublish(
   // mutation affected the row this function verified ownership of --
   // mirroring the same pattern already used for the link-back update in
   // buyBundle() (bundles/[id]/actions.ts).
-  const { data: updatedRows, error: updateError } = await supabase
-    .from("bundles")
-    .update({ status: "published" })
-    .eq("id", bundleId)
-    .eq("author_id", userId)
-    .select("id");
+  //
+  // PAID-REPRICING-1: also a compare-and-set on the status and price read
+  // at the top of this function, exactly as performPublish() does for a
+  // book. A concurrent updateBundle() that made a free draft paid after
+  // that read leaves this publish matching no row, which the zero-row
+  // check below already reports as a failure.
+  const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
+    supabase
+      .from("bundles")
+      .update({ status: "published" })
+      .eq("id", bundleId)
+      .eq("author_id", userId),
+    { status: bundle.status, priceAll: bundle.price_all },
+  ).select("id");
 
   if (updateError) {
     console.error("performBundlePublish: update failed", { bundleId, error: updateError });
     return { ok: false, reason: "update_failed" };
   }
-  if (!updatedRows || updatedRows.length === 0) {
+  if (!isExactlyOneRowWritten(updatedRows)) {
     console.error("performBundlePublish: update affected zero rows", { bundleId, userId });
     return { ok: false, reason: "update_failed" };
   }

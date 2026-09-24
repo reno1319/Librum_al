@@ -20,6 +20,7 @@ import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { formatTransactionAmount, provenanceFromStoredCurrency } from "@/lib/transaction-money";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import { resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
+import { canStartPaidCheckout } from "@/lib/paid-readiness";
 import {
   resolveBookPurchaseState,
   resolveShowSample,
@@ -431,11 +432,16 @@ export default async function BookDetailPage({
     : { previous: null, next: null };
   const youMightLike: BookWithAuthor[] = youMightLikeData ?? [];
 
+  // PAID-CHECKOUT-SURFACE-1: read once, from the one server-only
+  // interpretation of PAID_CHECKOUT_MODE buyBook itself uses. Nothing
+  // about it reaches the browser except which controls are rendered.
+  const paidCheckoutAvailable = canStartPaidCheckout();
   const purchaseState = resolveBookPurchaseState({
     user: user ? { id: user.id } : null,
     isAuthor,
     owned,
     priceAll: book.price_all,
+    paidCheckoutAvailable,
   });
   const usePok = resolveActiveCheckoutProvider({
     newCheckoutRegime: process.env.NEW_CHECKOUT_REGIME,
@@ -486,6 +492,12 @@ export default async function BookDetailPage({
   // is a coherent offer: an author, an owner, an anonymous visitor, a
   // free book and an unpriced book each have no paid checkout of their
   // own to continue.
+  //
+  // PAID-CHECKOUT-SURFACE-1: and because resolveBookPurchaseState() only
+  // returns `paid-unowned` while paid checkout is OPEN, this same one
+  // condition also closes the quote lookup, the resume form and the
+  // lapsed-checkout notice whenever canStartPaidCheckout() is false. No
+  // second condition is added at any of the three sites.
   const canResumePaidCheckout = purchaseState === "paid-unowned";
 
   const conflictIntentId =
@@ -632,7 +644,11 @@ export default async function BookDetailPage({
                 : book.price_all === 0
                   ? "Free — no payment required. You'll get a DRM-free EPUB you can download anytime from your Librum Library."
                   : "DRM-free EPUB. Download it anytime from your Librum Library."}
-              {resolveCheckoutSecurityNote({ priceAll: book.price_all, usePok })}
+              {resolveCheckoutSecurityNote({
+                priceAll: book.price_all,
+                usePok,
+                paidCheckoutAvailable,
+              })}
             </p>
           )}
 
@@ -1118,6 +1134,10 @@ export default async function BookDetailPage({
   );
 }
 
+// PAID-CHECKOUT-SURFACE-1: the one reader-facing sentence for a paid book
+// while paid checkout is closed. Deliberately says nothing about why.
+const PAID_CHECKOUT_UNAVAILABLE_NOTICE = "Buying this book isn't available yet.";
+
 // ============================================================
 // Purchase / ownership action, by state -- see resolveBookPurchaseState
 // (src/lib/book-purchase.ts) for the pure classification this switches
@@ -1209,6 +1229,35 @@ function PurchasePanel({
             {wishlisted ? "Remove from wishlist" : "Save for later"}
           </button>
         </form>
+
+        {showSample && <BookSampleReader bookId={bookId} bookTitle={bookTitle} />}
+      </div>
+    );
+  }
+
+  // PAID-CHECKOUT-SURFACE-1: a paid book while paid checkout is closed.
+  // The price stays visible above; here there is one neutral notice that
+  // is not a control and names no provider, variable or reason, and none
+  // of "Log in to buy", the promo field, the Buy form or any resume
+  // surface. Save-for-later (signed-in only, as before) and the sample
+  // remain.
+  if (state === "anonymous-paid-checkout-closed" || state === "paid-unowned-checkout-closed") {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <p
+          data-checkout-unavailable-notice=""
+          className="rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium text-muted"
+        >
+          {PAID_CHECKOUT_UNAVAILABLE_NOTICE}
+        </p>
+
+        {state === "paid-unowned-checkout-closed" && (
+          <form action={(wishlisted ? removeFromWishlist : addToWishlist).bind(null, bookId)}>
+            <button type="submit" className={buttonClasses("outline", "sm")}>
+              {wishlisted ? "Remove from wishlist" : "Save for later"}
+            </button>
+          </form>
+        )}
 
         {showSample && <BookSampleReader bookId={bookId} bookTitle={bookTitle} />}
       </div>

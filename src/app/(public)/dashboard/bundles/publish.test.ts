@@ -626,11 +626,15 @@ describe("performBundlePublish: price_all three-way state (ALL-WIRING-5)", () =>
 
   beforeEach(resetMocks);
 
-  it("reads exactly price_all from the owned bundle row -- price_cents is not even fetched", async () => {
+  // PAID-REPRICING-1: `status` joins the read, because the publish write
+  // is now a compare-and-set on the status and price it read. Still no
+  // price_cents.
+  it("reads exactly status and price_all from the owned bundle row -- price_cents is not even fetched", async () => {
     await publishBundle(BUNDLE_ID);
 
     expect(mockBundleQueryColumns).toHaveBeenCalledTimes(1);
-    expect(mockBundleQueryColumns).toHaveBeenCalledWith("price_all");
+    expect(mockBundleQueryColumns).toHaveBeenCalledWith("status, price_all");
+    expect(String(mockBundleQueryColumns.mock.calls[0][0])).not.toContain("price_cents");
   });
 
   it("null price_all is refused before the membership read and before any update, even with paid mode allowed", async () => {

@@ -25,15 +25,22 @@ const BOOK_IDS = ["book-a", "book-b"];
 // Every write this file can observe, in order, tagged by table and verb.
 type Write = { table: string; op: "insert" | "update" | "delete"; payload?: unknown };
 let writes: Write[] = [];
-let existingBundle: { id: string } | null = { id: BUNDLE_ID };
+// PAID-REPRICING-1: updateBundle now reads `status` and `price_all` to
+// decide whether the price change needs paid-publishing permission. The
+// default is a draft, so every accepted price below may be saved; the
+// published cases live in paid-repricing-guards.test.ts.
+type ExistingBundle = { id: string; status: string; price_all: number | null };
+const DRAFT_BUNDLE: ExistingBundle = { id: BUNDLE_ID, status: "draft", price_all: null };
+let existingBundle: ExistingBundle | null = DRAFT_BUNDLE;
 let bundleInsertResult: { data: unknown; error: unknown } = { data: { id: BUNDLE_ID }, error: null };
-let bundleUpdateResult: { error: unknown } = { error: null };
+// The guarded write reports the rows it changed; one row is success.
+let bundleUpdateResult: { data?: unknown; error: unknown } = { data: [{ id: BUNDLE_ID }], error: null };
 
 // A thenable builder: every filter returns itself; awaiting it resolves
 // to `result`.
 function thenable(result: unknown) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["eq", "in", "select", "order"]) chain[method] = () => chain;
+  for (const method of ["eq", "is", "in", "select", "order"]) chain[method] = () => chain;
   chain.then = (onFulfilled: (v: unknown) => unknown) => Promise.resolve(result).then(onFulfilled);
   return chain;
 }
@@ -143,9 +150,9 @@ const REJECTED: Array<[string, unknown]> = [
 
 beforeEach(() => {
   writes = [];
-  existingBundle = { id: BUNDLE_ID };
+  existingBundle = DRAFT_BUNDLE;
   bundleInsertResult = { data: { id: BUNDLE_ID }, error: null };
-  bundleUpdateResult = { error: null };
+  bundleUpdateResult = { data: [{ id: BUNDLE_ID }], error: null };
   mockRedirect.mockClear();
   mockCreateClient.mockClear();
   vi.spyOn(console, "error").mockImplementation(() => {});

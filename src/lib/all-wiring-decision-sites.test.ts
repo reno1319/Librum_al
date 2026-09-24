@@ -96,7 +96,7 @@ describe("decision site 1 of 13: the shared catalog classification", () => {
 describe("decision sites 2-3 of 13: resolveBookPurchaseState, anonymous and authenticated", () => {
   it("anonymous: paid, unavailable, free -- three distinct states", () => {
     const anon = (priceAll: number | null) =>
-      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll });
+      resolveBookPurchaseState({ user: null, isAuthor: false, owned: false, priceAll, paidCheckoutAvailable: true });
     expect(anon(LEGACY_PAID.price_all)).toBe("anonymous-paid");
     expect(anon(UNPRICED.price_all)).toBe("anonymous-unavailable");
     expect(anon(FREE.price_all)).toBe("anonymous-free");
@@ -109,6 +109,7 @@ describe("decision sites 2-3 of 13: resolveBookPurchaseState, anonymous and auth
         isAuthor: false,
         owned: false,
         priceAll,
+        paidCheckoutAvailable: true,
       });
     expect(reader(LEGACY_PAID.price_all)).toBe("paid-unowned");
     expect(reader(UNPRICED.price_all)).toBe("unavailable-unowned");
@@ -120,11 +121,13 @@ describe("decision sites 2-3 of 13: resolveBookPurchaseState, anonymous and auth
       expect(
         resolveBookPurchaseState({
           user: { id: "r" }, isAuthor: false, owned: true, priceAll: row.price_all,
+          paidCheckoutAvailable: true,
         }),
       ).toBe("owned");
       expect(
         resolveBookPurchaseState({
           user: { id: "a" }, isAuthor: true, owned: false, priceAll: row.price_all,
+          paidCheckoutAvailable: true,
         }),
       ).toBe("author");
     }
@@ -138,11 +141,11 @@ describe("decision sites 2-3 of 13: resolveBookPurchaseState, anonymous and auth
 
 describe("decision site 4 of 13: resolveCheckoutSecurityNote", () => {
   it("only the paid row gets a checkout note", () => {
-    expect(resolveCheckoutSecurityNote({ priceAll: LEGACY_PAID.price_all, usePok: true })).toBe(
+    expect(resolveCheckoutSecurityNote({ priceAll: LEGACY_PAID.price_all, usePok: true, paidCheckoutAvailable: true })).toBe(
       " Secure checkout with POK.",
     );
-    expect(resolveCheckoutSecurityNote({ priceAll: UNPRICED.price_all, usePok: true })).toBeNull();
-    expect(resolveCheckoutSecurityNote({ priceAll: FREE.price_all, usePok: true })).toBeNull();
+    expect(resolveCheckoutSecurityNote({ priceAll: UNPRICED.price_all, usePok: true, paidCheckoutAvailable: true })).toBeNull();
+    expect(resolveCheckoutSecurityNote({ priceAll: FREE.price_all, usePok: true, paidCheckoutAvailable: true })).toBeNull();
   });
 });
 
@@ -347,10 +350,11 @@ describe("no pure decision site reads price_cents at all", () => {
     expect(
       resolveBookPurchaseState({
         user: null, isAuthor: false, owned: false, priceAll: legacyOnly.price_all,
+        paidCheckoutAvailable: true,
       }),
     ).toBe("anonymous-unavailable");
     expect(
-      resolveCheckoutSecurityNote({ priceAll: legacyOnly.price_all, usePok: true }),
+      resolveCheckoutSecurityNote({ priceAll: legacyOnly.price_all, usePok: true, paidCheckoutAvailable: true }),
     ).toBeNull();
     expect(
       resolvePublishReadiness({ book: legacyOnly, paidPublishingAvailable: true }).missingAllPrice,

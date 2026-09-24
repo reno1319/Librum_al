@@ -58,6 +58,10 @@ const mockCreateClientCalls = vi.fn();
 function makeChain(resolve: () => unknown) {
   const chain = {
     eq: () => chain,
+    // PAID-REPRICING-1: updateBook's write is guarded (`.is()` for a null
+    // price) and proved by its returned rows (`.select()`).
+    is: () => chain,
+    select: () => chain,
     single: () => Promise.resolve(resolve()),
     maybeSingle: () => Promise.resolve(resolve()),
     then: (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
@@ -80,7 +84,7 @@ const mockCreateClient = vi.fn(() => {
           },
           update: (payload: unknown) => {
             mockBookUpdatePayload(payload);
-            return makeChain(() => ({ error: null }));
+            return makeChain(() => ({ data: [{ id: BOOK_ID }], error: null }));
           },
         };
       }
@@ -159,7 +163,12 @@ function resetMocks() {
   mockCreateClientCalls.mockClear();
   mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID } } });
   mockBookSelectResult.mockReset().mockReturnValue({
-    data: { cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq" },
+    // PAID-REPRICING-1: a draft, so a paid price may be saved without
+    // paid-publishing permission; the published cases set their own row.
+    data: {
+      cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
+      status: "draft", price_all: null,
+    },
     error: null,
   });
   mockBookInsert.mockClear();
@@ -252,6 +261,13 @@ describe("updateBook: the accepted price is written to price_all and nothing els
   });
 
   it("saving 0 makes a paid book free, and saving a price brings an unpriced one back", async () => {
+    mockBookSelectResult.mockReturnValue({
+      data: {
+        cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
+        status: "published", price_all: 1200,
+      },
+      error: null,
+    });
     await expect(updateBook(BOOK_ID, await buildFormData("0"))).rejects.toBeInstanceOf(
       RedirectSignal,
     );
@@ -262,6 +278,22 @@ describe("updateBook: the accepted price is written to price_all and nothing els
     resetMocks();
     // The single act that returns a legacy null-priced row to listings
     // and to search_books: the author saving a valid ALL price.
+    //
+    // PAID-REPRICING-1: for a PUBLISHED unpriced row, a PAID price is a
+    // paid publication, so it needs paid-publishing permission (granted
+    // here; the refusal without it is covered in paid-repricing-guards
+    // tests). A free price needs none.
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_GIT_COMMIT_REF", "staging");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://erhzpapqwyfjotliqdjo.supabase.co");
+    vi.stubEnv("PAID_PUBLISHING_MODE", "controlled_staging_publishing_test");
+    mockBookSelectResult.mockReturnValue({
+      data: {
+        cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
+        status: "published", price_all: null,
+      },
+      error: null,
+    });
     await expect(updateBook(BOOK_ID, await buildFormData("1200"))).rejects.toBeInstanceOf(
       RedirectSignal,
     );
