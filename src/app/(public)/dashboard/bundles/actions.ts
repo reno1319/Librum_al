@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createCatalogWriteClient } from "@/lib/catalog-write-client";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
@@ -37,6 +38,7 @@ const MISSING_BUNDLE_PRICE_MESSAGE = "Set a valid ALL price before publishing th
 // server-side instead and never shown.
 const BUNDLE_CREATE_FAILED_MESSAGE = "Could not create the bundle. Please try again.";
 const BUNDLE_SAVE_FAILED_MESSAGE = "Could not save the bundle. Please try again.";
+const BUNDLE_UNPUBLISH_FAILED_MESSAGE = "Could not unpublish the bundle. Please try again.";
 
 // PHASE-2C bundle-membership-integrity: an explicit `.returns<T[]>()`
 // shape for performBundlePublish()'s own bundle_books->books membership
@@ -129,6 +131,11 @@ export async function createBundle(formData: FormData) {
       // absent -- not written as 0, not derived -- so a new row takes the
       // column's own legacy default and nothing here speaks for it.
       price_all: parsedPrice.priceAll,
+      // CATALOG-WRITE-AUTH-1: `status` is deliberately absent too. The
+      // row takes the column default, exactly 'draft', and since
+      // migration 20260924101853 `authenticated` cannot insert `status`
+      // at all. A paid draft is still created on the author's session:
+      // `price_all` is insertable, publishing is the protected step.
     })
     .select("id")
     .single();
@@ -227,8 +234,18 @@ export async function updateBundle(bundleId: string, formData: FormData) {
   // the returned rows. A write that matched no row stops HERE, before the
   // membership delete/re-insert below, so a stale edit can change neither
   // the bundle nor what it contains.
+  //
+  // CATALOG-WRITE-AUTH-1: one atomic row update of metadata AND
+  // `price_all`, which `authenticated` can no longer write directly, so
+  // it runs through the trusted catalog-write client -- created only now,
+  // after authentication, the ownership read, price validation, the
+  // repricing gate and the book-selection check. The `id` and `author_id`
+  // filters are the ownership boundary. The membership rewrite below
+  // stays on the author's session and is still unreachable unless this
+  // write proved exactly one row.
+  const catalogWriter = createCatalogWriteClient();
   const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
-    supabase
+    catalogWriter
       .from("bundles")
       // ALL-WIRING-5: `price_all` ONLY. Omitting `price_cents` is what
       // leaves an existing bundle's legacy value exactly as it was.
@@ -402,8 +419,14 @@ async function performBundlePublish(
   // book. A concurrent updateBundle() that made a free draft paid after
   // that read leaves this publish matching no row, which the zero-row
   // check below already reports as a failure.
+  //
+  // CATALOG-WRITE-AUTH-1: `status` is protected, so this write goes
+  // through the trusted catalog-write client, created only after the
+  // ownership read, the price classification, the paid-publishing
+  // permission and the membership integrity check above all passed.
+  const catalogWriter = createCatalogWriteClient();
   const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
-    supabase
+    catalogWriter
       .from("bundles")
       .update({ status: "published" })
       .eq("id", bundleId)
@@ -495,11 +518,27 @@ export async function unpublishBundle(bundleId: string) {
     redirect("/login");
   }
 
-  await supabase
+  // CATALOG-WRITE-AUTH-1: `status` is protected, so the write goes
+  // through the trusted catalog-write client, created only after
+  // authentication. The `id` and `author_id` filters are the ownership
+  // boundary; this action used to ignore its result entirely, and now
+  // fails closed unless exactly one owned row changed.
+  const catalogWriter = createCatalogWriteClient();
+  const { data: updatedRows, error: updateError } = await catalogWriter
     .from("bundles")
     .update({ status: "draft" })
     .eq("id", bundleId)
-    .eq("author_id", user.id);
+    .eq("author_id", user.id)
+    .select("id");
+
+  if (updateError || !isExactlyOneRowWritten(updatedRows)) {
+    console.error("unpublishBundle: update did not change exactly one row", {
+      bundleId,
+      userId: user.id,
+      error: updateError,
+    });
+    redirect(`/dashboard/bundles?error=${encodeURIComponent(BUNDLE_UNPUBLISH_FAILED_MESSAGE)}`);
+  }
 
   revalidatePath("/dashboard/bundles");
 }

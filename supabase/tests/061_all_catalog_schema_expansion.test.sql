@@ -511,12 +511,21 @@ begin
     -- authenticated a column-level INSERT on discount_codes.amount_off_all
     -- on purpose; 064_all_discount_codes_acl.test.sql pins that exact
     -- column ACL, so this check now covers price_all only.
+    -- CATALOG-WRITE-AUTH-1 (migration 20260924101853) then granted
+    -- authenticated a column-level INSERT on books.price_all and
+    -- bundles.price_all on purpose, so a paid DRAFT stays creatable once
+    -- the table-level INSERT is gone; 066_catalog_write_authorization.test.sql
+    -- pins both tables' exact column ACLs. What this check still
+    -- guarantees: that INSERT is the ONLY column privilege price_all
+    -- carries, and authenticated the only grantee -- never an UPDATE.
     perform pg_temp.assert(
       not exists (select 1 from pg_catalog.pg_attribute a
+                   cross join lateral aclexplode(a.attacl) x
+                   left join pg_catalog.pg_roles r on r.oid = x.grantee
                    where a.attrelid = ('public.' || v_table)::regclass
                      and a.attname = 'price_all'
-                     and a.attacl is not null),
-      format('part8: the new column on public.%I must carry no column-level ACL', v_table));
+                     and (x.privilege_type <> 'INSERT' or coalesce(r.rolname, 'PUBLIC') <> 'authenticated')),
+      format('part8: the new column on public.%I must carry no column-level ACL beyond authenticated INSERT', v_table));
   end loop;
 end $$;
 
@@ -524,8 +533,9 @@ do $$
 declare
   v_actual text;
 begin
-  -- Table privileges, per grantee, exactly. books and bundles carry the
-  -- ambient Supabase grants; discount_codes is deliberately NARROWER --
+  -- Table privileges, per grantee, exactly. books and bundles carried the
+  -- ambient Supabase grants until CATALOG-WRITE-AUTH-1 narrowed them (see
+  -- below); discount_codes is deliberately NARROWER --
   -- anon has nothing at all, and authenticated has no UPDATE. That
   -- asymmetry is the invariant worth pinning: it is the kind of thing a
   -- careless `grant all on all tables` in a later migration erases
@@ -539,9 +549,15 @@ begin
          and grantee in ('anon', 'authenticated', 'service_role')
        group by grantee
     ) s;
+  -- CATALOG-WRITE-AUTH-1: since migration 20260924101853 anon holds
+  -- SELECT only and authenticated SELECT and DELETE only at table level
+  -- (no INSERT, UPDATE, TRUNCATE, REFERENCES or TRIGGER; MAINTAIN, which
+  -- this view omits, is pinned by 066); authenticated's INSERT and series
+  -- UPDATE are column-level and pinned by
+  -- 066_catalog_write_authorization.test.sql.
   perform pg_temp.assert(v_actual =
-    'anon:DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'
-    || ' | authenticated:DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'
+    'anon:SELECT'
+    || ' | authenticated:DELETE,SELECT'
     || ' | service_role:DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part8: public.books table privileges changed -- found %s', v_actual));
 
@@ -554,9 +570,10 @@ begin
          and grantee in ('anon', 'authenticated', 'service_role')
        group by grantee
     ) s;
+  -- CATALOG-WRITE-AUTH-1: the same narrowing as public.books.
   perform pg_temp.assert(v_actual =
-    'anon:DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'
-    || ' | authenticated:DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'
+    'anon:SELECT'
+    || ' | authenticated:DELETE,SELECT'
     || ' | service_role:DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part8: public.bundles table privileges changed -- found %s', v_actual));
 

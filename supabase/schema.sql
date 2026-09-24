@@ -460,6 +460,35 @@ create policy "Authors can delete their own books"
   on public.books for delete
   using (auth.uid() = author_id);
 
+-- CATALOG-WRITE-AUTH-1 (migration 20260924101853): authors cannot write
+-- the protected catalog columns (`status`, `price_all`, `published_at`)
+-- directly. INSERT is granted only on the columns createBook names, so a
+-- new row always takes the `status` default of 'draft' (a paid draft
+-- stays creatable: `price_all` is insertable); UPDATE only on the series
+-- link deleteSeries clears. Publish, unpublish and every edit, which
+-- carries its price, are written by the Server Actions through the
+-- server-only service-role client after their own gates. The ACL of
+-- PUBLIC, anon and authenticated is reset first and only what the
+-- application uses is re-granted, so neither role holds TRUNCATE,
+-- REFERENCES, TRIGGER or MAINTAIN; anon keeps SELECT only.
+-- See the migration's own comment for the rollout order and the full
+-- rationale.
+revoke all on public.books from public, anon, authenticated;
+grant select on public.books to anon;
+grant select, delete on public.books to authenticated;
+
+grant insert (
+    id, author_id, title, subtitle, description, keywords, isbn, language,
+    publisher, edition, original_publication_date, genre, series_id,
+    series_position, price_all, cover_path, file_path
+  )
+  on public.books
+  to authenticated;
+
+grant update (series_id, series_position)
+  on public.books
+  to authenticated;
+
 create index books_author_id_idx on public.books(author_id);
 create index books_status_idx on public.books(status);
 create index books_genre_idx on public.books(genre);
@@ -719,6 +748,21 @@ create policy "Authors can update their own bundles"
 create policy "Authors can delete their own bundles"
   on public.bundles for delete
   using (auth.uid() = author_id);
+
+-- CATALOG-WRITE-AUTH-1 (migration 20260924101853): same boundary as
+-- public.books. INSERT only on the columns createBundle names, so a new
+-- bundle is always a draft; no authenticated UPDATE at all, because
+-- updateBundle carries `price_all` and is written through the trusted
+-- server path, as are publishBundle and unpublishBundle. anon keeps
+-- SELECT only; authenticated keeps SELECT and DELETE (deleteBundle);
+-- neither holds TRUNCATE, REFERENCES, TRIGGER or MAINTAIN.
+revoke all on public.bundles from public, anon, authenticated;
+grant select on public.bundles to anon;
+grant select, delete on public.bundles to authenticated;
+
+grant insert (author_id, title, description, price_all)
+  on public.bundles
+  to authenticated;
 
 create index bundles_author_id_idx on public.bundles(author_id);
 create index bundles_status_idx on public.bundles(status);

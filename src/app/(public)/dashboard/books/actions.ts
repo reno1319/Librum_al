@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createCatalogWriteClient } from "@/lib/catalog-write-client";
 import { GENRES } from "@/lib/genres";
 import { isSupportedLanguage } from "@/lib/languages";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
@@ -632,7 +633,14 @@ export async function createBook(formData: FormData) {
     // (PUBLISHING-UX-1 Part B's own brief): a book is never inserted
     // directly as status='published', so a subsequent publish failure
     // always has an already-safely-saved draft to fall back to.
-    status: "draft",
+    //
+    // CATALOG-WRITE-AUTH-1: `status` is deliberately ABSENT from this
+    // payload. The row takes the column default, which is exactly
+    // 'draft', and since migration 20260924101853 `authenticated` holds
+    // no INSERT privilege on `status` at all -- naming it, even as
+    // "draft", is refused by the database. This insert stays on the
+    // author's session: every column it names is one a draft may carry,
+    // `price_all` included, because pricing a draft is not publishing it.
   });
 
   if (insertError) {
@@ -1013,7 +1021,18 @@ export async function updateBook(bookId: string, formData: FormData) {
   // `.select("id")`, because an update that matched no row is not an
   // error to PostgREST -- only the returned rows prove this write landed
   // on the row that was authorized.
-  const updateQuery = supabase
+  //
+  // CATALOG-WRITE-AUTH-1: this ONE row update carries `price_all`
+  // alongside the metadata, and `authenticated` may no longer write
+  // `price_all` directly, so it runs through the trusted catalog-write
+  // client -- created only here, after authentication, the ownership
+  // read, price validation, the repricing gate and every upload above.
+  // Metadata and price are never split into two writes: a failure or a
+  // stale guard changes neither. The `id` and `author_id` filters are the
+  // ownership boundary (that client bypasses RLS), and exactly one
+  // returned row is still the only proof of success.
+  const catalogWriter = createCatalogWriteClient();
+  const updateQuery = catalogWriter
     .from("books")
     .update({
       title,
@@ -1256,8 +1275,15 @@ async function performPublish(
   // this publish matching no row, instead of publishing a paid title the
   // paid-mode check above never saw. `.select("id")` is what proves one
   // row changed; zero rows is a failure, never a publish.
+  //
+  // CATALOG-WRITE-AUTH-1: `status` and `published_at` are protected
+  // columns, so this write goes through the trusted catalog-write client,
+  // created only now -- after the recovery check, the ownership-scoped
+  // read, the price classification and the paid-publishing permission
+  // above have all passed. The read stays on the author's session.
+  const catalogWriter = createCatalogWriteClient();
   const { data: publishedRows, error } = await applyCatalogRowGuard(
-    supabase.from("books").update(updatePayload).eq("id", bookId).eq("author_id", userId),
+    catalogWriter.from("books").update(updatePayload).eq("id", bookId).eq("author_id", userId),
     { status: book.status, priceAll: book.price_all },
   ).select("id");
 
@@ -1474,7 +1500,12 @@ export async function unpublishBook(bookId: string) {
   // the row this function just verified ownership of. Mirrors the same
   // pattern already used in performBundlePublish() (dashboard/bundles/
   // actions.ts) and buyBundle()'s own link-back update.
-  const { data: updatedRows, error: updateError } = await supabase
+  //
+  // CATALOG-WRITE-AUTH-1: `status` is a protected column, so the write
+  // goes through the trusted catalog-write client, created only after the
+  // ownership read and the published-bundle membership check above.
+  const catalogWriter = createCatalogWriteClient();
+  const { data: updatedRows, error: updateError } = await catalogWriter
     .from("books")
     .update({ status: "draft" })
     .eq("id", bookId)
@@ -1485,8 +1516,8 @@ export async function unpublishBook(bookId: string) {
     console.error("unpublishBook: update failed", { bookId, error: updateError });
     redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
   }
-  if (!updatedRows || updatedRows.length === 0) {
-    console.error("unpublishBook: update affected zero rows", { bookId, userId: user.id });
+  if (!isExactlyOneRowWritten(updatedRows)) {
+    console.error("unpublishBook: update did not change exactly one row", { bookId, userId: user.id });
     redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
   }
 

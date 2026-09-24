@@ -101,6 +101,15 @@ const mockCreateClient = vi.fn(() => {
   });
 });
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+// CATALOG-WRITE-AUTH-1: the protected catalog writes go through
+// createCatalogWriteClient(). This focused suite routes that client onto
+// the same session double so its payload and filter assertions still see
+// every write; WHICH client performs which write is pinned separately in
+// dashboard/catalog-write-authorization.test.ts.
+vi.mock("@/lib/catalog-write-client", async () => {
+  const { catalogWriterReplayingOnto } = await import("@/lib/catalog-write-test-double");
+  return { createCatalogWriteClient: () => catalogWriterReplayingOnto(() => mockCreateClient()) };
+});
 
 const mockCreateAdminClient = vi.fn(() => ({ __isAdminClient: true }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));

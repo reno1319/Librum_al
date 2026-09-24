@@ -31,7 +31,17 @@ type Filter =
   | { kind: "eq"; column: string; value: unknown }
   | { kind: "is"; column: string; value: null }
   | { kind: "in"; column: string; value: unknown[] };
-type Write = { table: string; op: "insert" | "update" | "delete"; payload?: unknown; filters: Filter[] };
+// CATALOG-WRITE-AUTH-1: `via` records which client issued the write --
+// the author's session, or the trusted catalog writer. Both operate on
+// the same in-memory tables, so the race tests keep their meaning.
+type Via = "session" | "catalog-writer";
+type Write = {
+  table: string;
+  op: "insert" | "update" | "delete";
+  payload?: unknown;
+  filters: Filter[];
+  via: Via;
+};
 type Interceptor = { table: string; op: "update"; run: () => Promise<void> };
 
 const USER_ID = "author-1";
@@ -51,7 +61,7 @@ function matches(row: Row, filters: Filter[]): boolean {
   });
 }
 
-function builder(table: string) {
+function builder(table: string, via: Via = "session") {
   let op: "select" | "insert" | "update" | "delete" = "select";
   let payload: unknown;
   let columns = "*";
@@ -76,13 +86,13 @@ function builder(table: string) {
       return { data, error: null };
     }
     if (op === "insert") {
-      writes.push({ table, op, payload, filters: [] });
+      writes.push({ table, op, payload, filters: [], via });
       const list = Array.isArray(payload) ? payload : [payload];
       rows.push(...(list as Row[]).map((r) => ({ ...r })));
       return { data: null, error: null };
     }
     if (op === "delete") {
-      writes.push({ table, op, filters: [...filters] });
+      writes.push({ table, op, filters: [...filters], via });
       tables[table] = rows.filter((r) => !matches(r, filters));
       return { data: null, error: null };
     }
@@ -93,7 +103,7 @@ function builder(table: string) {
       interceptor = null;
       await pending.run();
     }
-    writes.push({ table, op, payload, filters: [...filters] });
+    writes.push({ table, op, payload, filters: [...filters], via });
     const changed = rows.filter((r) => matches(r, filters));
     for (const r of changed) Object.assign(r, payload as Row);
     return { data: returning ? changed.map((r) => ({ id: r.id })) : null, error: null };
@@ -136,6 +146,8 @@ const client = {
   },
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => client }));
+const catalogWriter = { from: (table: string) => builder(table, "catalog-writer") };
+vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => catalogWriter }));
 
 const { updateBook, publishBook } = await import("./books/actions");
 const { updateBundle, publishBundle } = await import("./bundles/actions");
