@@ -6,6 +6,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { AVATARS_BUCKET, isOwnCanonicalAvatarPath } from "@/lib/avatar-path";
+import {
+  BOOK_COVERS_BUCKET,
+  BOOK_MANUSCRIPTS_BUCKET,
+  isOwnCanonicalBookCoverPath,
+  isOwnCanonicalBookManuscriptPath,
+} from "@/lib/book-storage-path";
 
 export async function deleteAccount(formData: FormData) {
   // AUTH-1C: defense-in-depth -- Proxy already blocks /account itself
@@ -108,13 +114,24 @@ export async function deleteAccount(formData: FormData) {
     );
   }
 
-  const { data: books } = await supabase
+  // ACCOUNT-DELETION-BOOK-STORAGE-AUTH-1: this read decides which
+  // objects the service-role client removes below, so a failure stops
+  // here, before anything irreversible, exactly like the profile read
+  // above. An error is never trusted, even when rows came back with it,
+  // and a result that is not a list is not "no books" either: only a
+  // genuine, successful (possibly empty) list lets deletion go ahead.
+  const { data: books, error: booksReadError } = await supabase
     .from("books")
     .select("id, cover_path, file_path")
     .eq("author_id", user.id)
     .returns<{ id: string; cover_path: string | null; file_path: string | null }[]>();
 
-  const authoredBooks = books ?? [];
+  if (booksReadError || !Array.isArray(books)) {
+    console.error("deleteAccount: authored books read failed; nothing was deleted");
+    redirect("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+  }
+
+  const authoredBooks = books;
   const bookIds = authoredBooks.map((b) => b.id);
 
   // A book with ANY acquisition history -- paid, free, or refunded --
@@ -139,14 +156,52 @@ export async function deleteAccount(formData: FormData) {
     }
   }
 
-  const admin = createAdminClient();
+  // Stored cover_path/file_path values are DATA, never authority: they
+  // are removed below with the service-role client, which Storage RLS
+  // does not constrain, and a forged or legacy value could name another
+  // author's cover or manuscript. Each one is therefore checked on its
+  // own against the exact canonical keys built from the authenticated
+  // user's id and THAT row's book id (src/lib/book-storage-path.ts).
+  // Only an exact match is ever handed to the privileged remove; any
+  // other non-null value is skipped (left as a possible orphan) without
+  // being logged, and never stops the account deletion or the cleanup of
+  // any other object. A null path has nothing to clean up.
+  const coverPaths = new Set<string>();
+  const manuscriptPaths = new Set<string>();
+  let skippedCoverCount = 0;
+  let skippedManuscriptCount = 0;
+  for (const book of authoredBooks) {
+    const storedCoverPath: unknown = book.cover_path;
+    if (storedCoverPath !== null) {
+      if (isOwnCanonicalBookCoverPath(storedCoverPath, user.id, book.id)) {
+        coverPaths.add(storedCoverPath);
+      } else {
+        skippedCoverCount += 1;
+      }
+    }
+    const storedManuscriptPath: unknown = book.file_path;
+    if (storedManuscriptPath !== null) {
+      if (isOwnCanonicalBookManuscriptPath(storedManuscriptPath, user.id, book.id)) {
+        manuscriptPaths.add(storedManuscriptPath);
+      } else {
+        skippedManuscriptCount += 1;
+      }
+    }
+  }
+  if (skippedCoverCount > 0) {
+    console.warn(
+      "deleteAccount: stored book cover_path values that are not this user's canonical keys were skipped; count:",
+      skippedCoverCount,
+    );
+  }
+  if (skippedManuscriptCount > 0) {
+    console.warn(
+      "deleteAccount: stored book file_path values that are not this user's canonical keys were skipped; count:",
+      skippedManuscriptCount,
+    );
+  }
 
-  const coverPaths = authoredBooks
-    .map((b) => b.cover_path)
-    .filter((p): p is string => !!p);
-  const manuscriptPaths = authoredBooks
-    .map((b) => b.file_path)
-    .filter((p): p is string => !!p);
+  const admin = createAdminClient();
 
   // The account/database row is authoritative -- storage cleanup is
   // secondary. deleteUser runs (and its result is checked) BEFORE any
@@ -169,16 +224,18 @@ export async function deleteAccount(formData: FormData) {
   // it's logged rather than surfaced as an error, and nothing is
   // recreated to "undo" a partially-completed cleanup -- same
   // philosophy as deleteBook's storage cleanup in Phase 8A.
-  if (coverPaths.length > 0) {
-    const { error: coverError } = await admin.storage.from("covers").remove(coverPaths);
+  if (coverPaths.size > 0) {
+    const { error: coverError } = await admin.storage
+      .from(BOOK_COVERS_BUCKET)
+      .remove([...coverPaths]);
     if (coverError) {
       console.error("deleteAccount: failed to remove orphaned cover files:", coverError);
     }
   }
-  if (manuscriptPaths.length > 0) {
+  if (manuscriptPaths.size > 0) {
     const { error: manuscriptError } = await admin.storage
-      .from("manuscripts")
-      .remove(manuscriptPaths);
+      .from(BOOK_MANUSCRIPTS_BUCKET)
+      .remove([...manuscriptPaths]);
     if (manuscriptError) {
       console.error(
         "deleteAccount: failed to remove orphaned manuscript files:",
