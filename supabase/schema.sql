@@ -114,7 +114,8 @@ create policy "Users can update their own profile"
 -- legitimately needs -- confirmed by tracing every authenticated-client
 -- write against profiles in this codebase
 -- (src/app/dashboard/profile/actions.ts's updateProfile()): only
--- display_name, bio, and avatar_path. role, stripe_account_id, and
+-- display_name, bio, and avatar_path (avatar_path since removed by
+-- AVATAR-STORAGE-PATH-AUTH-1 -- see the grant below). role, stripe_account_id, and
 -- stripe_payouts_enabled are written exclusively via the admin/
 -- service-role client (src/app/dashboard/payouts/actions.ts,
 -- src/app/dashboard/payouts/page.tsx) -- service_role is a separate
@@ -152,7 +153,18 @@ grant select
 -- by tracing every authenticated-client write against profiles
 -- (src/app/dashboard/profile/actions.ts's updateProfile()), which is
 -- also the only place that ever writes this new column.
-grant update (display_name, bio, avatar_path, public_author_name)
+--
+-- AVATAR-STORAGE-PATH-AUTH-1 (migration 20260924160846, Patch 9):
+-- avatar_path is no longer in this grant. RLS checks only which ROW a
+-- caller updates, never what a stored path points at, so a direct write
+-- let a user point avatar_path at another user's object in the avatars
+-- bucket -- which deleteAccount then removed with the service-role
+-- client. updateProfile now writes avatar_path, derived by the server as
+-- "<auth user id>/avatar.<jpg|png>", only through the trusted server-only
+-- writer (src/lib/profile-write-client.ts), and deleteAccount removes
+-- only a stored value that is exactly that canonical path for the
+-- deleting user (src/lib/avatar-path.ts).
+grant update (display_name, bio, public_author_name)
   on public.profiles
   to authenticated;
 

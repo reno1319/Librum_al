@@ -66,13 +66,30 @@ const mockCreateClient = vi.fn(() =>
           eq: () => ({ single: () => mockCurrentProfileSingle() }),
         }),
         update: (payload: unknown) => ({
-          eq: () => mockUpdateProfile(payload),
+          eq: () => ({ select: () => mockUpdateProfile(payload) }),
         }),
       };
     },
   }),
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+
+// AVATAR-STORAGE-PATH-AUTH-1: avatar_path is written through the trusted
+// profile writer, not the session. Its full contract is pinned by
+// avatar-storage-path-authorization.test.ts; here it only answers the one
+// update with the caller's own row.
+const mockTrustedAvatarUpdate = vi.fn((payload: { avatar_path: string }) =>
+  Promise.resolve({ data: [{ id: USER_ID, avatar_path: payload.avatar_path }], error: null }),
+);
+vi.mock("@/lib/profile-write-client", () => ({
+  createProfileWriteClient: () => ({
+    from: () => ({
+      update: (payload: { avatar_path: string }) => ({
+        eq: () => ({ select: () => mockTrustedAvatarUpdate(payload) }),
+      }),
+    }),
+  }),
+}));
 
 const { updateProfile } = await import("./actions");
 
@@ -89,7 +106,7 @@ describe("updateProfile / resolveAvatarInput: AVATAR-1 direct-Storage transport"
     mockDownload.mockReset();
     mockRemove.mockReset().mockResolvedValue({ error: null });
     mockUploadAvatar.mockReset().mockResolvedValue({ error: null });
-    mockUpdateProfile.mockReset().mockResolvedValue({ error: null });
+    mockUpdateProfile.mockReset().mockResolvedValue({ data: [{ id: USER_ID }], error: null });
     mockCurrentProfileSingle.mockReset().mockResolvedValue({ data: { role: "author" }, error: null });
   });
 
@@ -111,9 +128,8 @@ describe("updateProfile / resolveAvatarInput: AVATAR-1 direct-Storage transport"
       expect.any(Buffer),
       expect.objectContaining({ contentType: "image/png", upsert: true }),
     );
-    expect(mockUpdateProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ avatar_path: `${USER_ID}/avatar.png` }),
-    );
+    expect(mockTrustedAvatarUpdate).toHaveBeenCalledWith({ avatar_path: `${USER_ID}/avatar.png` });
+    expect(mockUpdateProfile).toHaveBeenCalledWith({ display_name: "Jane Author", bio: "Writes things." });
     // Cleanup only after the canonical write is confirmed -- same
     // ordering as createBook/updateBook's own temp cleanup.
     expect(mockRemove).toHaveBeenCalledWith([tempPath]);
@@ -196,7 +212,7 @@ describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
     mockDownload.mockReset();
     mockRemove.mockReset().mockResolvedValue({ error: null });
     mockUploadAvatar.mockReset().mockResolvedValue({ error: null });
-    mockUpdateProfile.mockReset().mockResolvedValue({ error: null });
+    mockUpdateProfile.mockReset().mockResolvedValue({ data: [{ id: USER_ID }], error: null });
     mockCurrentProfileSingle.mockReset().mockResolvedValue({ data: { role: "author" }, error: null });
   });
 
