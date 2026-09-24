@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
+import { AVATARS_BUCKET, canonicalAvatarPath } from "@/lib/avatar-path";
+import { createProfileWriteClient } from "@/lib/profile-write-client";
 
 // LIBRUM 2.0 AUTHOR-1A: mirrors migration 045's own CHECK constraint
 // exactly (see that migration's comment) -- a value that passes this can
@@ -15,7 +17,6 @@ import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/
 const PUBLIC_AUTHOR_NAME_MAX_LENGTH = 120;
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
-const AVATARS_BUCKET = "avatars";
 // Private staging area for an unvalidated, not-yet-saved avatar -- the
 // SAME bucket resolveCoverInput() (src/app/dashboard/books/actions.ts)
 // already reuses for covers, not something avatar-specific. See
@@ -153,6 +154,60 @@ function resolvePublicAuthorNameSubmission(
   return { action: "set", value };
 }
 
+// AVATAR-STORAGE-PATH-AUTH-1: every profiles write in this action -- the
+// trusted avatar_path write and both session metadata writes -- must prove
+// it changed exactly the caller's own row (and, for the avatar write, that
+// it stored exactly the path the server derived). Anything else -- no
+// rows, several rows, another or a missing id, another path, a non-array
+// or null response -- is treated as a failed save. One classifier, so the
+// branches cannot drift apart.
+function isExactlyOwnProfileRowWritten(
+  rows: unknown,
+  userId: string,
+  expectedAvatarPath?: string,
+): boolean {
+  if (!Array.isArray(rows) || rows.length !== 1) {
+    return false;
+  }
+  const row = rows[0] as { id?: unknown; avatar_path?: unknown } | null;
+  if (row === null || typeof row !== "object" || row.id !== userId) {
+    return false;
+  }
+  return expectedAvatarPath === undefined || row.avatar_path === expectedAvatarPath;
+}
+
+const PROFILE_SAVE_ERROR = `/dashboard/profile?error=${encodeURIComponent(
+  "We couldn't save your profile. Please try again.",
+)}`;
+
+// AVATAR-STORAGE-PATH-AUTH-1: the ordinary profile fields (display_name,
+// bio, public_author_name) stay on the least-privileged SESSION client and
+// are checked the same way as the trusted write. RLS lets the caller read
+// back only their own row, so `.select("id")` returns it under both the
+// pre- and post-migration ACL. Returns false on any failure; the caller
+// then reports an error and does nothing further. The diagnostic carries
+// only the error code and the returned row count -- never a profile value.
+async function writeOwnProfileMetadata(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  payload: { display_name: string; bio: string; public_author_name?: string },
+): Promise<boolean> {
+  const { data: writtenRows, error } = await supabase
+    .from("profiles")
+    .update(payload)
+    .eq("id", userId)
+    .select("id");
+
+  if (error || !isExactlyOwnProfileRowWritten(writtenRows, userId)) {
+    console.error("updateProfile: profile details update failed", {
+      code: (error as { code?: unknown } | null)?.code ?? null,
+      rows: Array.isArray(writtenRows) ? writtenRows.length : null,
+    });
+    return false;
+  }
+  return true;
+}
+
 export async function updateProfile(formData: FormData) {
   const supabase = await createClient();
   const {
@@ -201,8 +256,10 @@ export async function updateProfile(formData: FormData) {
     // code always used -- unchanged so every already-stored
     // profiles.avatar_path value stays valid, no backfill needed.
     // extension now comes from the verified byte signature, never the
-    // client-reported filename.
-    const avatarPath = `${user.id}/avatar.${avatarResult.extension}`;
+    // client-reported filename. AVATAR-STORAGE-PATH-AUTH-1: built by the
+    // one shared definition deleteAccount also checks against, from the
+    // session-verified user id only.
+    const avatarPath = canonicalAvatarPath(user.id, avatarResult.extension);
 
     const { error: uploadError } = await supabase.storage
       .from(AVATARS_BUCKET)
@@ -220,10 +277,48 @@ export async function updateProfile(formData: FormData) {
       );
     }
 
-    await supabase
+    // AVATAR-STORAGE-PATH-AUTH-1: authenticated may no longer write
+    // avatar_path (migration 20260924160846), so it is written -- alone --
+    // through the trusted server-only writer, created only now that the
+    // caller is authenticated, the bytes are validated and the canonical
+    // object is uploaded. It is written FIRST: if it fails, nothing else
+    // on the profile is changed, no Storage object is removed (the
+    // canonical key may be the photo the profile already shows), and the
+    // temp object is kept, exactly as after a failed upload.
+    const profileWriter = createProfileWriteClient();
+    const { data: writtenRows, error: avatarWriteError } = await profileWriter
       .from("profiles")
-      .update({ display_name: displayName, bio, avatar_path: avatarPath, ...publicAuthorNameUpdate })
-      .eq("id", user.id);
+      .update({ avatar_path: avatarPath })
+      .eq("id", user.id)
+      .select("id, avatar_path");
+
+    if (avatarWriteError || !isExactlyOwnProfileRowWritten(writtenRows, user.id, avatarPath)) {
+      console.error(
+        "updateProfile: trusted avatar_path write failed:",
+        avatarWriteError ?? `expected exactly one own row, got ${Array.isArray(writtenRows) ? writtenRows.length : "none"}`,
+      );
+      redirect(
+        `/dashboard/profile?error=${encodeURIComponent(
+          "We couldn't save your profile photo. Please try again.",
+        )}`,
+      );
+    }
+
+    // The metadata write is separate from the trusted avatar write, so a
+    // failure here can leave the new avatar_path and canonical object in
+    // place: that is NOT rolled back (a service-role compensation could
+    // race another save). The action reports failure, keeps the temp
+    // object, skips revalidation and never reports success; retrying is
+    // safe.
+    if (
+      !(await writeOwnProfileMetadata(supabase, user.id, {
+        display_name: displayName,
+        bio,
+        ...publicAuthorNameUpdate,
+      }))
+    ) {
+      redirect(PROFILE_SAVE_ERROR);
+    }
 
     // Only now that the canonical avatar object is written is it safe
     // to remove the temp staging object -- same ordering discipline as
@@ -239,11 +334,14 @@ export async function updateProfile(formData: FormData) {
         console.error("updateProfile: failed to remove temporary avatar object:", cleanupError);
       }
     }
-  } else {
-    await supabase
-      .from("profiles")
-      .update({ display_name: displayName, bio, ...publicAuthorNameUpdate })
-      .eq("id", user.id);
+  } else if (
+    !(await writeOwnProfileMetadata(supabase, user.id, {
+      display_name: displayName,
+      bio,
+      ...publicAuthorNameUpdate,
+    }))
+  ) {
+    redirect(PROFILE_SAVE_ERROR);
   }
 
   revalidatePath("/", "layout");

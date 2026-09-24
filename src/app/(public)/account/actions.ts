@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
+import { AVATARS_BUCKET, isOwnCanonicalAvatarPath } from "@/lib/avatar-path";
 
 export async function deleteAccount(formData: FormData) {
   // AUTH-1C: defense-in-depth -- Proxy already blocks /account itself
@@ -72,11 +73,40 @@ export async function deleteAccount(formData: FormData) {
     redirect("/account?error=Type+DELETE+to+confirm");
   }
 
-  const { data: profile } = await supabase
+  // AVATAR-STORAGE-PATH-AUTH-1: the stored avatar_path is removed below
+  // with the service-role client, which Storage RLS does not constrain,
+  // and until migration 20260924160846 any signed-in user could write it
+  // directly -- so it is DATA, never authority. A read failure stops here,
+  // before anything irreversible, rather than guessing. A missing row
+  // (maybeSingle: no error, no data) simply means there is no avatar to
+  // clean up.
+  const { data: profile, error: profileReadError } = await supabase
     .from("profiles")
     .select("avatar_path")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
+
+  if (profileReadError) {
+    console.error("deleteAccount: profile read failed:", profileReadError);
+    redirect("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+  }
+
+  // Only a value that is EXACTLY this user's own canonical avatar key
+  // (src/lib/avatar-path.ts) is ever handed to the privileged remove.
+  // Anything else -- empty, malformed, another user's key, a wrong bucket
+  // or depth, traversal, encoding -- is skipped: the account is still
+  // deleted, that one avatar cleanup is not attempted, and nothing
+  // outside this user's own canonical key can be touched. The value
+  // itself is not logged.
+  const storedAvatarPath: unknown = profile?.avatar_path ?? null;
+  const avatarPathToRemove = isOwnCanonicalAvatarPath(storedAvatarPath, user.id)
+    ? storedAvatarPath
+    : null;
+  if (storedAvatarPath !== null && avatarPathToRemove === null) {
+    console.warn(
+      "deleteAccount: stored avatar_path is not this user's canonical avatar key; avatar cleanup skipped",
+    );
+  }
 
   const { data: books } = await supabase
     .from("books")
@@ -156,10 +186,10 @@ export async function deleteAccount(formData: FormData) {
       );
     }
   }
-  if (profile?.avatar_path) {
+  if (avatarPathToRemove !== null) {
     const { error: avatarError } = await admin.storage
-      .from("avatars")
-      .remove([profile.avatar_path]);
+      .from(AVATARS_BUCKET)
+      .remove([avatarPathToRemove]);
     if (avatarError) {
       console.error("deleteAccount: failed to remove orphaned avatar file:", avatarError);
     }

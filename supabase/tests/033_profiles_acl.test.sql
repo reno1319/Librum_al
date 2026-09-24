@@ -78,14 +78,14 @@ begin
   perform pg_temp.assert(not has_table_privilege('authenticated', 'public.profiles', 'TRIGGER'),
     'part1: authenticated must not have TRIGGER on profiles');
 
-  -- authenticated's UPDATE, column by column: exactly display_name,
-  -- bio, avatar_path -- everything else, explicitly false.
+  -- authenticated's UPDATE, column by column: display_name, bio -- NOT avatar_path
+  -- since AVATAR-STORAGE-PATH-AUTH-1 (see 068) -- everything else, explicitly false.
   perform pg_temp.assert(has_column_privilege('authenticated', 'public.profiles', 'display_name', 'UPDATE'),
     'part1: authenticated must have UPDATE on display_name');
   perform pg_temp.assert(has_column_privilege('authenticated', 'public.profiles', 'bio', 'UPDATE'),
     'part1: authenticated must have UPDATE on bio');
-  perform pg_temp.assert(has_column_privilege('authenticated', 'public.profiles', 'avatar_path', 'UPDATE'),
-    'part1: authenticated must have UPDATE on avatar_path');
+  perform pg_temp.assert(not has_column_privilege('authenticated', 'public.profiles', 'avatar_path', 'UPDATE'),
+    'part1: authenticated must NOT have UPDATE on avatar_path');
   perform pg_temp.assert(not has_column_privilege('authenticated', 'public.profiles', 'role', 'UPDATE'),
     'part1: authenticated must NOT have UPDATE on role');
   perform pg_temp.assert(not has_column_privilege('authenticated', 'public.profiles', 'id', 'UPDATE'),
@@ -152,11 +152,12 @@ insert into auth.users (id, email, raw_user_meta_data) values
 do $$
 begin
   -- authenticated, acting as the row's own owner: the exact
-  -- updateProfile() payload shape must succeed.
+  -- updateProfile() session payload shape must succeed (avatar_path is
+  -- written by the trusted server writer since AVATAR-STORAGE-PATH-AUTH-1).
   perform set_config('request.jwt.claim.sub', '55555555-5555-5555-5555-555555555555', true);
   set local role authenticated;
   update public.profiles
-  set display_name = 'Updated Name', bio = 'Updated bio', avatar_path = '55555555-5555-5555-5555-555555555555/avatar.jpg'
+  set display_name = 'Updated Name', bio = 'Updated bio'
   where id = '55555555-5555-5555-5555-555555555555';
   reset role;
 
