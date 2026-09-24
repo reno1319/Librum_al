@@ -99,6 +99,15 @@ const mockCreateClient = vi.fn(() =>
   }),
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+// CATALOG-WRITE-AUTH-1: the protected catalog writes go through
+// createCatalogWriteClient(). This focused suite routes that client onto
+// the same session double so its payload and filter assertions still see
+// every write; WHICH client performs which write is pinned separately in
+// dashboard/catalog-write-authorization.test.ts.
+vi.mock("@/lib/catalog-write-client", async () => {
+  const { catalogWriterReplayingOnto } = await import("@/lib/catalog-write-test-double");
+  return { createCatalogWriteClient: () => catalogWriterReplayingOnto(() => mockCreateClient()) };
+});
 
 const { createBook, updateBook, publishBook, unpublishBook, deleteBook } = await import("./actions");
 
@@ -261,7 +270,9 @@ describe("createBook: preview_text is no longer collected", () => {
     expect(payload).not.toHaveProperty("preview_text");
     // Sanity: this is still a real, correctly-shaped insert, not an
     // accidentally-empty payload.
-    expect(payload).toMatchObject({ title: "My Book", author_id: USER_ID, status: "draft" });
+    expect(payload).toMatchObject({ title: "My Book", author_id: USER_ID });
+    // CATALOG-WRITE-AUTH-1: `status` comes from the column default.
+    expect(payload).not.toHaveProperty("status");
   });
 });
 

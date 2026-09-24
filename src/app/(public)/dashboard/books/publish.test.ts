@@ -122,6 +122,15 @@ const mockCreateClient = vi.fn(() =>
   }),
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+// CATALOG-WRITE-AUTH-1: the protected catalog writes go through
+// createCatalogWriteClient(). This focused suite routes that client onto
+// the same session double so its payload and filter assertions still see
+// every write; WHICH client performs which write is pinned separately in
+// dashboard/catalog-write-authorization.test.ts.
+vi.mock("@/lib/catalog-write-client", async () => {
+  const { catalogWriterReplayingOnto } = await import("@/lib/catalog-write-test-double");
+  return { createCatalogWriteClient: () => catalogWriterReplayingOnto(() => mockCreateClient()) };
+});
 
 const mockCreateAdminClient = vi.fn(() => ({ __isAdminClient: true }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));
@@ -437,7 +446,9 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
     expect(mockBookInsert).toHaveBeenCalledOnce();
-    expect(mockBookInsert.mock.calls[0][0]).toMatchObject({ status: "draft" });
+    // CATALOG-WRITE-AUTH-1: a draft by the column default -- the insert
+    // never names `status`, which authenticated cannot insert.
+    expect(mockBookInsert.mock.calls[0][0]).not.toHaveProperty("status");
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
   });
 
@@ -458,7 +469,9 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
 
     // The row is always inserted as a draft first (never status=
     // 'published' directly)...
-    expect(mockBookInsert.mock.calls[0][0]).toMatchObject({ status: "draft" });
+    // CATALOG-WRITE-AUTH-1: a draft by the column default -- the insert
+    // never names `status`, which authenticated cannot insert.
+    expect(mockBookInsert.mock.calls[0][0]).not.toHaveProperty("status");
     // ...then advanced by the same authoritative helper publishBook()
     // uses.
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
@@ -493,7 +506,9 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockBookInsert).toHaveBeenCalledOnce();
-    expect(mockBookInsert.mock.calls[0][0]).toMatchObject({ status: "draft" });
+    // CATALOG-WRITE-AUTH-1: a draft by the column default -- the insert
+    // never names `status`, which authenticated cannot insert.
+    expect(mockBookInsert.mock.calls[0][0]).not.toHaveProperty("status");
     const target = mockRedirect.mock.calls[0][0];
     expect(target).toContain("success=Saved+as+draft");
     expect(target).not.toContain("db exploded");
@@ -568,7 +583,7 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
     // The ONLY insert call, and it is always a draft -- publishing (if
     // it happens at all) is always a separate, subsequent UPDATE.
     expect(mockBookInsert).toHaveBeenCalledOnce();
-    expect(mockBookInsert.mock.calls[0][0].status).toBe("draft");
+    expect(mockBookInsert.mock.calls[0][0]).not.toHaveProperty("status");
   });
 });
 
@@ -611,7 +626,9 @@ describe("performPublish: recovery-session defense-in-depth (AUTH-1C)", () => {
     // step is blocked, so the book is still safely saved as a draft
     // rather than the whole create failing.
     expect(mockBookInsert).toHaveBeenCalledOnce();
-    expect(mockBookInsert.mock.calls[0][0]).toMatchObject({ status: "draft" });
+    // CATALOG-WRITE-AUTH-1: a draft by the column default -- the insert
+    // never names `status`, which authenticated cannot insert.
+    expect(mockBookInsert.mock.calls[0][0]).not.toHaveProperty("status");
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
   });
