@@ -58,9 +58,15 @@ const mockCreateClient = vi.fn(() =>
         throw new Error(`unexpected table in this focused test: ${table}`);
       }
       return {
+        // CATALOG-STORAGE-PATH-AUTH-1: createBook's insert now runs through
+        // the trusted writer and proves its one new row with `.select("id")`,
+        // so the double returns the inserted id.
         insert: (payload: unknown) => {
           mockInsert(payload);
-          return Promise.resolve({ error: null });
+          return {
+            select: () =>
+              Promise.resolve({ data: [{ id: (payload as { id: string }).id }], error: null }),
+          };
         },
         select: () => ({
           eq: () => ({

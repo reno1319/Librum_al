@@ -101,9 +101,15 @@ const mockCreateClient = vi.fn(() =>
             mockBookUpdatePayload(payload);
             return makeChain(() => withWrittenRow(mockBookUpdateResult()));
           },
+          // CATALOG-STORAGE-PATH-AUTH-1: createBook's insert now runs through
+          // the trusted writer and proves its one new row with `.select("id")`,
+          // so the double returns the inserted id.
           insert: (payload: unknown) => {
             mockBookInsert(payload);
-            return Promise.resolve({ error: null });
+            return {
+              select: () =>
+                Promise.resolve({ data: [{ id: (payload as { id: string }).id }], error: null }),
+            };
           },
         };
       }

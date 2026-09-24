@@ -603,7 +603,23 @@ export async function createBook(formData: FormData) {
   // Sample is generated automatically, no author input required), so
   // this simply lets the column's own `not null default ''` apply, the
   // same as any other new-row default this insert doesn't override.
-  const { error: insertError } = await supabase.from("books").insert({
+  //
+  // CATALOG-STORAGE-PATH-AUTH-1: this insert names `cover_path` and
+  // `file_path`, and since migration 20260924141734 `authenticated` may
+  // not insert either one -- a storage path names an object the
+  // service-role download and account-deletion paths later act on, so an
+  // author must never be able to choose it. The row is therefore written
+  // through the trusted catalog-write client, created only HERE: after
+  // authentication, every input gate, the series ownership read, both
+  // upload validations and both permanent uploads above. Every value that
+  // identifies the row or a stored object is the server's own: `id` is
+  // the randomUUID() above, `author_id` is the authenticated `user.id`,
+  // and both paths were built above from those two and the verified cover
+  // extension. No FormData id, author or path is ever read for them.
+  // `.select("id")` must prove exactly this one new row, or the request
+  // fails closed with the same author-facing error as an insert error.
+  const catalogWriter = createCatalogWriteClient();
+  const { data: insertedRows, error: insertError } = await catalogWriter.from("books").insert({
     id: bookId,
     author_id: user.id,
     title,
@@ -638,13 +654,24 @@ export async function createBook(formData: FormData) {
     // payload. The row takes the column default, which is exactly
     // 'draft', and since migration 20260924101853 `authenticated` holds
     // no INSERT privilege on `status` at all -- naming it, even as
-    // "draft", is refused by the database. This insert stays on the
-    // author's session: every column it names is one a draft may carry,
-    // `price_all` included, because pricing a draft is not publishing it.
-  });
+    // "draft", is refused by the database. The trusted writer could name
+    // it, and deliberately does not: the default is the only way a new
+    // row gets its status. Every column named here is one a draft may
+    // carry, `price_all` included, because pricing a draft is not
+    // publishing it.
+  }).select("id");
 
   if (insertError) {
     console.error("createBook: book insert failed:", insertError);
+    redirect(
+      "/dashboard/books/new?error=Something+went+wrong+saving+your+book.+Please+try+again",
+    );
+  }
+  if (!isExactlyOneRowWritten(insertedRows) || insertedRows?.[0]?.id !== bookId) {
+    console.error("createBook: trusted insert did not create exactly this one row", {
+      bookId,
+      rowCount: Array.isArray(insertedRows) ? insertedRows.length : null,
+    });
     redirect(
       "/dashboard/books/new?error=Something+went+wrong+saving+your+book.+Please+try+again",
     );
