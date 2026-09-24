@@ -199,9 +199,16 @@ begin
 
   -- Exact column-level ACLs: authenticated only, INSERT on the create
   -- columns, UPDATE on the series link (books) and nothing (bundles).
+  --
+  -- CATALOG-STORAGE-PATH-AUTH-1 (migration 20260924141734): this suite
+  -- runs against the CURRENT schema.sql, and Patch 8 removed cover_path
+  -- and file_path from the books INSERT list after this suite was
+  -- written. The pin follows the current state, as 061 part 8 did for
+  -- Patch 7; 067_catalog_storage_path_authorization.test.sql pins Patch 8
+  -- itself. Every other assertion here is unchanged.
   perform pg_temp.assert(
     pg_temp.column_acl('public.books') =
-      'authenticated:INSERT:author_id,cover_path,description,edition,file_path,genre,id,isbn,'
+      'authenticated:INSERT:author_id,description,edition,genre,id,isbn,'
       || 'keywords,language,original_publication_date,price_all,publisher,series_id,'
       || 'series_position,subtitle,title'
       || '|authenticated:UPDATE:series_id,series_position',
@@ -334,16 +341,16 @@ select pg_temp.expect_error('authenticated', 'e0660000-0000-0000-0000-0000000000
      values ('e0661000-0000-0000-0000-0000000000c5', 'e0660000-0000-0000-0000-00000000000a', 'direct', now())$q$,
   '42501', 'permission denied for table books', 'part2: INSERT naming created_at is denied');
 
--- The exact column list createBook sends, with a paid price: succeeds.
+-- Every column a draft may still carry, with a paid price: succeeds.
+-- (Patch 8: the storage paths are no longer among them -- createBook now
+-- inserts through the trusted writer, pinned by suite 067.)
 select pg_temp.expect_ok('authenticated', 'e0660000-0000-0000-0000-00000000000a',
   $q$insert into public.books (id, author_id, title, subtitle, description, keywords, isbn, language,
-       publisher, edition, original_publication_date, genre, series_id, series_position, price_all,
-       cover_path, file_path)
+       publisher, edition, original_publication_date, genre, series_id, series_position, price_all)
      values ('e0661000-0000-0000-0000-0000000000c6', 'e0660000-0000-0000-0000-00000000000a', 'createBook paid draft',
        null, 'desc', '', null, 'sq', null, null, null, 'Fiction',
-       'e0663000-0000-0000-0000-00000000000a', 3, 199,
-       'e0660000-0000-0000-0000-00000000000a/c6-cover.png', 'e0660000-0000-0000-0000-00000000000a/c6.epub')$q$,
-  1, 'part2: createBook''s paid draft insert, omitting status, succeeds');
+       'e0663000-0000-0000-0000-00000000000a', 3, 199)$q$,
+  1, 'part2: a direct paid draft insert, omitting status, succeeds');
 
 do $$
 begin

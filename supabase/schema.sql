@@ -473,6 +473,14 @@ create policy "Authors can delete their own books"
 -- REFERENCES, TRIGGER or MAINTAIN; anon keeps SELECT only.
 -- See the migration's own comment for the rollout order and the full
 -- rationale.
+--
+-- CATALOG-STORAGE-PATH-AUTH-1 (migration 20260924141734): `file_path`
+-- and `cover_path` are NOT insertable by authenticated either. A storage
+-- path names an object the service-role download and account-deletion
+-- paths later act on, and RLS checks only the row's author_id, so an
+-- author must not be able to name one. createBook inserts the row, with
+-- server-derived paths, through the server-only writer; a direct insert
+-- naming either path column, even as null, is refused.
 revoke all on public.books from public, anon, authenticated;
 grant select on public.books to anon;
 grant select, delete on public.books to authenticated;
@@ -480,7 +488,7 @@ grant select, delete on public.books to authenticated;
 grant insert (
     id, author_id, title, subtitle, description, keywords, isbn, language,
     publisher, edition, original_publication_date, genre, series_id,
-    series_position, price_all, cover_path, file_path
+    series_position, price_all
   )
   on public.books
   to authenticated;
