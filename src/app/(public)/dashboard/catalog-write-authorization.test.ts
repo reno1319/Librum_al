@@ -149,9 +149,9 @@ type Write = {
 };
 type AclMode = "pre-migration" | "migrated" | "storage-path-migrated";
 
-const USER_ID = "author-1";
-const OTHER_AUTHOR = "author-2";
-const BOOK_ID = "book-1";
+const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
+const OTHER_AUTHOR = "b2c3d4e5-9999-4999-8999-abcdef999999";
+const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
 const BUNDLE_ID = "bundle-1";
 const SERIES_ID = "series-1";
 
@@ -1120,8 +1120,8 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated"])(
       const fd = await createBookForm("199");
       fd.delete("cover");
       fd.delete("manuscript");
-      const tempCover = `${USER_ID}/tmp/cover/abc.png`;
-      const tempEpub = `${USER_ID}/tmp/epub/abc.epub`;
+      const tempCover = `${USER_ID}/tmp/cover/fc21be84-593b-4bde-847a-ebb3601147c5.png`;
+      const tempEpub = `${USER_ID}/tmp/epub/b7ea3001-9efd-477b-8cac-a70a2d106e8f.epub`;
       storedObjects[`manuscripts:${tempCover}`] = PNG_SIGNATURE;
       storedObjects[`manuscripts:${tempEpub}`] = await validEpub();
       fd.set("coverStoragePath", tempCover);
@@ -1163,13 +1163,13 @@ describe("Patch 8: createBook never creates the trusted writer for a refused req
     ["temp manuscript under another author", () => undefined, async () => {
       const f = await createBookForm("199");
       f.delete("manuscript");
-      f.set("manuscriptStoragePath", `${OTHER_AUTHOR}/tmp/epub/x.epub`);
+      f.set("manuscriptStoragePath", `${OTHER_AUTHOR}/tmp/epub/299a499f-4d15-4ba5-8023-f97ee03fb5c3.epub`);
       return f;
     }],
     ["temp cover under another author", () => undefined, async () => {
       const f = await createBookForm("199");
       f.delete("cover");
-      f.set("coverStoragePath", `${OTHER_AUTHOR}/tmp/cover/x.png`);
+      f.set("coverStoragePath", `${OTHER_AUTHOR}/tmp/cover/6320f67a-2588-445d-85fc-a7a51fb20540.png`);
       return f;
     }],
     ["temp manuscript outside the tmp area", () => undefined, async () => {
@@ -1230,7 +1230,7 @@ describe("Patch 8: the trusted insert must prove exactly this one new row", () =
     arrange();
     const fd = await createBookForm("0", "publish");
     fd.delete("manuscript");
-    const tempEpub = `${USER_ID}/tmp/epub/keep.epub`;
+    const tempEpub = `${USER_ID}/tmp/epub/1afda46e-1b71-4192-8ce6-58232e8c184e.epub`;
     storedObjects[`manuscripts:${tempEpub}`] = await validEpub();
     fd.set("manuscriptStoragePath", tempEpub);
     const removed: string[] = [];
@@ -1293,7 +1293,10 @@ describe("Patch 8: book edits and replacement uploads stay protected", () => {
     expect(await redirectOf(updateBook(BOOK_ID, withHostileIdentity(editBookForm("0"))))).toBe(
       "/dashboard?success=Book+updated",
     );
-    expect(catalogWrites()[0].payload).toMatchObject({ cover_path: "c.png", file_path: "f.epub" });
+    // BOOK-STORAGE-MUTATION-AUTH-1: kept by omission -- neither path key
+    // is re-written from the stored row.
+    expect(catalogWrites()[0].payload).not.toHaveProperty("cover_path");
+    expect(catalogWrites()[0].payload).not.toHaveProperty("file_path");
     expect(bookRow()).toMatchObject({ cover_path: "c.png", file_path: "f.epub", author_id: USER_ID });
   });
 
@@ -1332,7 +1335,8 @@ describe("Patch 8: the trusted insert is the only one, and stays in createBook",
     expect(createBookBody).toMatch(/\bcover_path: coverPath,/);
     expect(createBookBody).toMatch(/\bfile_path: manuscriptPath,/);
     expect(createBookBody).toMatch(/const bookId = randomUUID\(\);/);
-    expect(createBookBody).toMatch(/const coverPath = `\$\{user\.id\}\/\$\{bookId\}-cover\.\$\{coverResult\.extension\}`;/);
-    expect(createBookBody).toMatch(/const manuscriptPath = `\$\{user\.id\}\/\$\{bookId\}\.epub`;/);
+    // BOOK-STORAGE-MUTATION-AUTH-1: through the shared constructors.
+    expect(createBookBody).toMatch(/const coverPath = canonicalBookCoverPath\(user\.id, bookId, coverResult\.extension\);/);
+    expect(createBookBody).toMatch(/const manuscriptPath = canonicalBookManuscriptPath\(user\.id, bookId\);/);
   });
 });

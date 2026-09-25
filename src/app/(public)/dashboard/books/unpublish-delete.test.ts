@@ -121,8 +121,8 @@ vi.mock("@/lib/catalog-write-client", async () => {
 
 const { unpublishBook, deleteBook } = await import("./actions");
 
-const USER_ID = "author-1";
-const BOOK_ID = "book-1";
+const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
+const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
 
 function notInAnyPublishedBundle() {
   return { data: [], error: null };
@@ -135,14 +135,18 @@ function inAPublishedBundle() {
 function resetMocks() {
   mockRedirect.mockClear();
   mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID } } });
-  mockBookSelectResult.mockReset().mockReturnValue({ data: { id: BOOK_ID, cover_path: null, file_path: null }, error: null });
+  mockBookSelectResult.mockReset().mockReturnValue({
+    data: { id: BOOK_ID, author_id: USER_ID, cover_path: null, file_path: null },
+    error: null,
+  });
   mockMemberSelectResult.mockReset().mockReturnValue(notInAnyPublishedBundle());
   mockMemberQueryColumns.mockClear();
   mockMemberQueryFilters.mockClear();
   mockBookUpdatePayload.mockClear();
   mockBookUpdateResult.mockReset().mockReturnValue({ data: [{ id: BOOK_ID }], error: null });
   mockPurchaseCountResult.mockReset().mockReturnValue({ count: 0, error: null });
-  mockBookDeleteResult.mockReset().mockReturnValue({ error: null });
+  // BOOK-STORAGE-MUTATION-AUTH-1: the delete now proves its one row.
+  mockBookDeleteResult.mockReset().mockReturnValue({ data: [{ id: BOOK_ID }], error: null });
   mockRemove.mockReset().mockResolvedValue({ error: null });
   mockCookieStore.get.mockReset().mockImplementation(() => undefined);
   mockRevalidatePath.mockReset();

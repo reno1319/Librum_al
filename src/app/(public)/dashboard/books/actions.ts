@@ -25,6 +25,18 @@ import {
 } from "@/lib/paid-repricing";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
 import {
+  BOOK_COVERS_BUCKET,
+  BOOK_MANUSCRIPTS_BUCKET,
+  canonicalBookCoverPath,
+  canonicalBookManuscriptPath,
+  classifyBookCoverPath,
+  groupBookStorageRemovals,
+  isOwnCanonicalBookManuscriptPath,
+  isOwnTemporaryCoverUploadPath,
+  isOwnTemporaryManuscriptUploadPath,
+  type BookStorageRemoval,
+} from "@/lib/book-storage-path";
+import {
   MAXIMUM_CATALOG_PRICE_ALL,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
   parseCatalogPriceAll,
@@ -281,7 +293,10 @@ async function resolveManuscriptInput(
   let tempPathToCleanup: string | null = null;
 
   if (tempPath) {
-    if (!tempPath.startsWith(`${userId}/tmp/epub/`) || !tempPath.toLowerCase().endsWith(".epub")) {
+    // BOOK-STORAGE-MUTATION-AUTH-1: the exact temporary-key shape under
+    // the caller's own id (src/lib/book-storage-path.ts), not a prefix --
+    // this same value is later handed to remove().
+    if (!isOwnTemporaryManuscriptUploadPath(tempPath, userId)) {
       redirect(
         `${errorPath}?error=That+manuscript+reference+is+no+longer+valid.+Please+choose+your+file+again`,
       );
@@ -377,7 +392,9 @@ async function resolveCoverInput(
   let tempPathToCleanup: string | null = null;
 
   if (tempPath) {
-    if (!tempPath.startsWith(`${userId}/tmp/cover/`) || !/\.(jpe?g|png)$/i.test(tempPath)) {
+    // BOOK-STORAGE-MUTATION-AUTH-1: exact temporary-key shape, as for
+    // the manuscript above.
+    if (!isOwnTemporaryCoverUploadPath(tempPath, userId)) {
       redirect(`${errorPath}?error=That+cover+reference+is+no+longer+valid.+Please+choose+your+file+again`);
     }
 
@@ -455,6 +472,52 @@ async function resolveSeriesSelection(
   }
 
   return { seriesId, seriesPosition };
+}
+
+// BOOK-STORAGE-MUTATION-AUTH-1: the one place createBook, updateBook
+// and deleteBook hand stored or temporary keys to Storage for removal.
+// Every candidate must already be proven by src/lib/book-storage-path.ts
+// for the signed-in author (and, for a permanent key, the exact book);
+// the candidates are de-duplicated and removed with at most one call per
+// bucket, on the author's own session. A failure is an orphaned object,
+// never a failed save or deletion, so it is logged -- caller, bucket and
+// object count only, never a key or the Storage error -- and never
+// surfaced.
+async function removeProvenBookStorageObjects(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  removals: readonly BookStorageRemoval[],
+  caller: string,
+): Promise<void> {
+  for (const [bucket, paths] of groupBookStorageRemovals(removals)) {
+    const { error } = await supabase.storage.from(bucket).remove(paths);
+    if (error) {
+      // Deliberately NOT the Storage error object, nor its message,
+      // details, cause or response: any of them may echo a key.
+      console.error(`${caller}: failed to remove superseded storage objects`, {
+        bucket,
+        objectCount: paths.length,
+      });
+    }
+  }
+}
+
+// BOOK-STORAGE-MUTATION-AUTH-1: a temporary upload key is removed only
+// when it still has the exact temporary shape under the caller's own id
+// (resolveCoverInput/resolveManuscriptInput already refused anything
+// else before downloading it; this re-proves it at the removal site).
+function temporaryUploadRemovals(
+  userId: string,
+  tempManuscriptPath: string | null,
+  tempCoverPath: string | null,
+): BookStorageRemoval[] {
+  const removals: BookStorageRemoval[] = [];
+  if (tempManuscriptPath && isOwnTemporaryManuscriptUploadPath(tempManuscriptPath, userId)) {
+    removals.push({ bucket: BOOK_MANUSCRIPTS_BUCKET, path: tempManuscriptPath });
+  }
+  if (tempCoverPath && isOwnTemporaryCoverUploadPath(tempCoverPath, userId)) {
+    removals.push({ bucket: BOOK_MANUSCRIPTS_BUCKET, path: tempCoverPath });
+  }
+  return removals;
 }
 
 export async function createBook(formData: FormData) {
@@ -573,11 +636,14 @@ export async function createBook(formData: FormData) {
   const bookId = randomUUID();
   // LAUNCH-1 P3-1: coverExtension is derived exclusively from the
   // verified byte signature above -- cover.name never reaches this key.
-  const coverPath = `${user.id}/${bookId}-cover.${coverResult.extension}`;
-  const manuscriptPath = `${user.id}/${bookId}.epub`;
+  // BOOK-STORAGE-MUTATION-AUTH-1: both keys come from the shared
+  // constructors (src/lib/book-storage-path.ts), from the verified
+  // session user id and this server-generated book id only.
+  const coverPath = canonicalBookCoverPath(user.id, bookId, coverResult.extension);
+  const manuscriptPath = canonicalBookManuscriptPath(user.id, bookId);
 
   const { error: coverError } = await supabase.storage
-    .from("covers")
+    .from(BOOK_COVERS_BUCKET)
     .upload(coverPath, coverResult.bytes, { contentType: coverResult.contentType });
 
   if (coverError) {
@@ -588,7 +654,7 @@ export async function createBook(formData: FormData) {
   }
 
   const { error: manuscriptError } = await supabase.storage
-    .from("manuscripts")
+    .from(BOOK_MANUSCRIPTS_BUCKET)
     .upload(manuscriptPath, manuscriptResult.bytes, { contentType: "application/epub+zip" });
 
   if (manuscriptError) {
@@ -684,28 +750,15 @@ export async function createBook(formData: FormData) {
   // removed on any earlier failure path above: keeping it lets a retry
   // reuse the same already-uploaded/already-converted temp EPUB
   // instead of forcing the author to re-upload or re-convert from
-  // scratch after e.g. a transient insert failure.
-  if (manuscriptResult.tempPathToCleanup) {
-    const { error: cleanupError } = await supabase.storage
-      .from("manuscripts")
-      .remove([manuscriptResult.tempPathToCleanup]);
-    if (cleanupError) {
-      console.error("createBook: failed to remove temporary manuscript object:", cleanupError);
-    }
-  }
-
-  // Same reasoning as the manuscript temp cleanup above -- the temp
-  // cover lives in the "manuscripts" bucket's private staging area
-  // (see resolveCoverInput's own comment), removed only now that the
-  // book row is confirmed pointing at the permanent coverPath.
-  if (coverResult.tempPathToCleanup) {
-    const { error: cleanupError } = await supabase.storage
-      .from("manuscripts")
-      .remove([coverResult.tempPathToCleanup]);
-    if (cleanupError) {
-      console.error("createBook: failed to remove temporary cover object:", cleanupError);
-    }
-  }
+  // scratch after e.g. a transient insert failure. The temp cover lives
+  // in the "manuscripts" bucket's private staging area too (see
+  // resolveCoverInput's own comment), so both go in one de-duplicated
+  // removal from that bucket.
+  await removeProvenBookStorageObjects(
+    supabase,
+    temporaryUploadRemovals(user.id, manuscriptResult.tempPathToCleanup, coverResult.tempPathToCleanup),
+    "createBook",
+  );
 
   revalidatePath("/dashboard");
 
@@ -807,13 +860,19 @@ export async function updateBook(bookId: string, formData: FormData) {
   // PAID-REPRICING-1: `status` and `price_all` join the same read, so
   // the paid-repricing decision below is made from the server's own row,
   // never from anything the form submits.
-  const { data: existing } = await supabase
+  //
+  // BOOK-STORAGE-MUTATION-AUTH-1: `id` joins the read so every key this
+  // action builds, keeps or removes is bound to the row's own id, which
+  // must be exactly the id the caller named (the uuid column compares
+  // case-insensitively; a key never does). A read error, no row, another
+  // author's row or any id mismatch stops here, before any upload.
+  const { data: existing, error: existingError } = await supabase
     .from("books")
-    .select("cover_path, file_path, author_id, language, status, price_all")
+    .select("id, cover_path, file_path, author_id, language, status, price_all")
     .eq("id", bookId)
     .single();
 
-  if (!existing || existing.author_id !== user.id) {
+  if (existingError || !existing || existing.id !== bookId || existing.author_id !== user.id) {
     redirect("/dashboard");
   }
 
@@ -934,11 +993,20 @@ export async function updateBook(bookId: string, formData: FormData) {
   // comment near the top of this file. `present: false` is a
   // legitimate, ordinary outcome here: no replacement chosen, keep
   // the existing cover untouched.
-  let coverPath = existing.cover_path;
-  // Only set once a replacement cover has actually been uploaded
-  // successfully -- the old file is removed AFTER the DB update below
-  // succeeds, never before, so a failed update never leaves
-  // books.cover_path pointing at a file that's already gone.
+  //
+  // BOOK-STORAGE-MUTATION-AUTH-1: a stored path is never re-persisted.
+  // Without a replacement, `cover_path`/`file_path` are simply absent
+  // from the update payload below (the column keeps its value, whatever
+  // it is) and no Storage call names them. With a replacement, the new
+  // key is built ONLY from the verified session user id, this row's own
+  // id and the verified bytes -- never from form data or the stored row.
+  let newCoverPath: string | null = null;
+  // The superseded cover, removed only AFTER the guarded update below
+  // proves it landed -- never before, so a failed update never leaves
+  // books.cover_path pointing at a file that's already gone. Set only
+  // when the stored value is this author's own canonical or documented
+  // legacy key for THIS book (src/lib/book-storage-path.ts); any other
+  // stored value is left untouched in Storage and only counted.
   let coverPathToRemove: string | null = null;
   let tempCoverToCleanup: string | null = null;
   const coverResult = await resolveCoverInput(
@@ -952,13 +1020,16 @@ export async function updateBook(bookId: string, formData: FormData) {
     // LAUNCH-1 P3-1: coverExtension is derived exclusively from the
     // verified byte signature above -- cover.name never reaches this
     // key. An existing.cover_path from before this hardening (e.g.
-    // "...-cover.JPG" or "...-cover.jpeg") is unaffected: it's read
-    // from the DB, not reconstructed here, so it remains removable via
-    // coverPathToRemove below exactly as before.
-    const newCoverPath = `${user.id}/${bookId}-cover.${coverResult.extension}`;
+    // "...-cover.JPG" or "...-cover.jpeg") is never reconstructed here:
+    // it is classified against this author and book below, and only the
+    // documented "jpeg" form (any ASCII case of those four letters, exact
+    // author/book stem) is recognised as removable -- and then removed
+    // exactly as stored.
+    newCoverPath = canonicalBookCoverPath(user.id, existing.id, coverResult.extension);
+    const storedCoverClass = classifyBookCoverPath(existing.cover_path, user.id, existing.id);
 
     const { error: coverError } = await supabase.storage
-      .from("covers")
+      .from(BOOK_COVERS_BUCKET)
       .upload(newCoverPath, coverResult.bytes, { contentType: coverResult.contentType, upsert: true });
 
     if (coverError) {
@@ -968,11 +1039,15 @@ export async function updateBook(bookId: string, formData: FormData) {
       );
     }
 
-    if (existing.cover_path && existing.cover_path !== newCoverPath) {
+    if (storedCoverClass !== "unsafe" && existing.cover_path !== newCoverPath) {
       coverPathToRemove = existing.cover_path;
+    } else if (storedCoverClass === "unsafe" && existing.cover_path !== null) {
+      console.warn("updateBook: stored cover path is not this book's own key; left untouched", {
+        bookId: existing.id,
+        coverPathClass: storedCoverClass,
+      });
     }
 
-    coverPath = newCoverPath;
     tempCoverToCleanup = coverResult.tempPathToCleanup;
   }
 
@@ -983,7 +1058,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   // createBook()): it just means "no replacement chosen, keep the
   // existing manuscript untouched," exactly as an absent/empty
   // `manuscript` File already meant before this correction.
-  let filePath = existing.file_path;
+  let newManuscriptPath: string | null = null;
   let tempManuscriptToCleanup: string | null = null;
   const manuscriptResult = await resolveManuscriptInput(
     supabase,
@@ -998,12 +1073,23 @@ export async function updateBook(bookId: string, formData: FormData) {
     // so this simply overwrites the old file in place. Any validation
     // failure inside resolveManuscriptInput above already redirected
     // before reaching here, so the existing manuscript is never
-    // partially replaced -- upload success is the only way filePath
-    // (and, further below, books.file_path) ever changes.
-    const newManuscriptPath = `${user.id}/${bookId}.epub`;
+    // partially replaced -- upload success is the only way
+    // books.file_path ever changes. A stored file_path that is not this
+    // key is never removed or otherwise passed to Storage (this action
+    // has never removed a superseded manuscript); it is only counted.
+    newManuscriptPath = canonicalBookManuscriptPath(user.id, existing.id);
+    if (
+      existing.file_path !== null &&
+      !isOwnCanonicalBookManuscriptPath(existing.file_path, user.id, existing.id)
+    ) {
+      console.warn("updateBook: stored manuscript path is not this book's own key; left untouched", {
+        bookId: existing.id,
+        manuscriptPathClass: "unsafe",
+      });
+    }
 
     const { error: manuscriptError } = await supabase.storage
-      .from("manuscripts")
+      .from(BOOK_MANUSCRIPTS_BUCKET)
       .upload(newManuscriptPath, manuscriptResult.bytes, {
         contentType: "application/epub+zip",
         upsert: true,
@@ -1016,7 +1102,6 @@ export async function updateBook(bookId: string, formData: FormData) {
       );
     }
 
-    filePath = newManuscriptPath;
     tempManuscriptToCleanup = manuscriptResult.tempPathToCleanup;
   }
 
@@ -1073,8 +1158,11 @@ export async function updateBook(bookId: string, formData: FormData) {
       // Saving a valid ALL price is also the single act that brings a
       // previously unpriced legacy row back into listings and search.
       price_all: parsedPrice.priceAll,
-      cover_path: coverPath,
-      file_path: filePath,
+      // BOOK-STORAGE-MUTATION-AUTH-1: a path key is present ONLY when
+      // this request uploaded its replacement; otherwise it is absent
+      // and the stored value is not re-written.
+      ...(newCoverPath !== null ? { cover_path: newCoverPath } : {}),
+      ...(newManuscriptPath !== null ? { file_path: newManuscriptPath } : {}),
       ...(subtitleResolved.present ? { subtitle: subtitleResolved.value } : {}),
       // "omit" (absent) and "preserve" (unchanged unsupported value)
       // both spread in nothing -- see resolveLanguageForUpdate()'s own
@@ -1091,10 +1179,21 @@ export async function updateBook(bookId: string, formData: FormData) {
         ? { original_publication_date: originalPublicationDateResolved.value }
         : {}),
     })
-    .eq("id", bookId)
+    .eq("id", existing.id)
     .eq("author_id", user.id);
+  // BOOK-STORAGE-MUTATION-AUTH-1: a cover replacement also compares-and-
+  // sets the cover_path this request read. The superseded object removed
+  // below is then provably the value this write replaced: a concurrent
+  // edit that changed the cover in between makes this write match no
+  // row, so nothing is removed and the author is asked to retry.
+  const coverGuardedQuery =
+    newCoverPath === null
+      ? updateQuery
+      : existing.cover_path === null
+        ? updateQuery.is("cover_path", null)
+        : updateQuery.eq("cover_path", existing.cover_path);
   const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
-    updateQuery,
+    coverGuardedQuery,
     priceGuard,
   ).select("id");
 
@@ -1104,7 +1203,7 @@ export async function updateBook(bookId: string, formData: FormData) {
       `/dashboard/books/${bookId}/edit?error=Something+went+wrong+saving+your+changes.+Please+try+again`,
     );
   }
-  if (!isExactlyOneRowWritten(updatedRows)) {
+  if (!isExactlyOneRowWritten(updatedRows) || updatedRows?.[0]?.id !== existing.id) {
     console.error("updateBook: guarded update did not change exactly one row", {
       bookId,
       rowCount: Array.isArray(updatedRows) ? updatedRows.length : null,
@@ -1119,38 +1218,14 @@ export async function updateBook(bookId: string, formData: FormData) {
   // orphaned-file problem, not a failed update -- same philosophy as
   // deleteBook's storage cleanup in Phase 8A: log it, don't tell the
   // author their update failed, don't undo the already-successful save.
-  if (coverPathToRemove) {
-    const { error: cleanupError } = await supabase.storage
-      .from("covers")
-      .remove([coverPathToRemove]);
-    if (cleanupError) {
-      console.error("updateBook: failed to remove superseded cover file:", cleanupError);
-    }
+  // The temporary uploads (both staged in the private manuscripts
+  // bucket, see resolveCoverInput's own comment) are removed only now
+  // too, once the row is confirmed pointing at the permanent keys.
+  const removals = temporaryUploadRemovals(user.id, tempManuscriptToCleanup, tempCoverToCleanup);
+  if (coverPathToRemove !== null) {
+    removals.unshift({ bucket: BOOK_COVERS_BUCKET, path: coverPathToRemove });
   }
-
-  // Same reasoning as coverPathToRemove above -- only removed once the
-  // DB row is confirmed pointing at the new permanent manuscript path.
-  if (tempManuscriptToCleanup) {
-    const { error: cleanupError } = await supabase.storage
-      .from("manuscripts")
-      .remove([tempManuscriptToCleanup]);
-    if (cleanupError) {
-      console.error("updateBook: failed to remove temporary manuscript object:", cleanupError);
-    }
-  }
-
-  // The temp cover lives in the "manuscripts" bucket's private
-  // staging area (see resolveCoverInput's own comment) -- same
-  // reasoning as above, removed only once the DB row is confirmed
-  // pointing at the new permanent cover path.
-  if (tempCoverToCleanup) {
-    const { error: cleanupError } = await supabase.storage
-      .from("manuscripts")
-      .remove([tempCoverToCleanup]);
-    if (cleanupError) {
-      console.error("updateBook: failed to remove temporary cover object:", cleanupError);
-    }
-  }
+  await removeProvenBookStorageObjects(supabase, removals, "updateBook");
 
   revalidatePath("/dashboard");
   revalidatePath(`/books/${bookId}`);
@@ -1577,14 +1652,18 @@ export async function deleteBook(bookId: string) {
     redirect("/login");
   }
 
-  const { data: book } = await supabase
+  // BOOK-STORAGE-MUTATION-AUTH-1: `id` and `author_id` join the read so
+  // the keys removed below are classified against this exact row, which
+  // must be exactly the id the caller named. A read error, no row or any
+  // mismatch stops here, before any write.
+  const { data: book, error: bookError } = await supabase
     .from("books")
-    .select("cover_path, file_path")
+    .select("id, author_id, cover_path, file_path")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .single();
 
-  if (!book) {
+  if (bookError || !book || book.id !== bookId || book.author_id !== user.id) {
     redirect("/dashboard");
   }
 
@@ -1642,11 +1721,17 @@ export async function deleteBook(bookId: string) {
   // been touched yet if that happens. Deleting storage first would risk
   // destroying a legitimate new buyer's manuscript even though their
   // purchase record (and the book row) end up surviving.
-  const { error: deleteError } = await supabase
+  //
+  // BOOK-STORAGE-MUTATION-AUTH-1: `.select("id")` because a delete that
+  // matched no row is not an error to PostgREST. Only exactly this one
+  // returned row proves the book is gone; anything else touches no
+  // Storage object.
+  const { data: deletedRows, error: deleteError } = await supabase
     .from("books")
     .delete()
-    .eq("id", bookId)
-    .eq("author_id", user.id);
+    .eq("id", book.id)
+    .eq("author_id", user.id)
+    .select("id");
 
   if (deleteError) {
     // 23503 is Postgres's foreign_key_violation code -- once migration
@@ -1665,31 +1750,49 @@ export async function deleteBook(bookId: string) {
     redirect("/dashboard?error=Could+not+delete+that+book+right+now");
   }
 
+  if (!isExactlyOneRowWritten(deletedRows) || deletedRows?.[0]?.id !== book.id) {
+    console.error("deleteBook: delete did not remove exactly this one row", {
+      bookId: book.id,
+      rowCount: Array.isArray(deletedRows) ? deletedRows.length : null,
+    });
+    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+  }
+
   // The book row is gone at this point -- from the author's perspective
   // the deletion already succeeded. Any failure past here is an orphan
   // storage file to clean up later, not a failed book deletion, so it's
   // logged rather than surfaced as an error, and the row is never
   // recreated to "undo" a partially-completed cleanup.
-  if (book.cover_path) {
-    const { error: coverError } = await supabase.storage
-      .from("covers")
-      .remove([book.cover_path]);
-    if (coverError) {
-      console.error("deleteBook: failed to remove orphaned cover file:", coverError);
+  //
+  // BOOK-STORAGE-MUTATION-AUTH-1: only this author's own canonical (or
+  // documented legacy) cover key and own canonical manuscript key for
+  // THIS book are removed -- never merely something under the author's
+  // folder. Any other stored value is left in place and only counted: an
+  // orphaned object is always preferable to deleting another book's or
+  // another author's file.
+  const removals: BookStorageRemoval[] = [];
+  let unsafeStoredPathCount = 0;
+  if (book.cover_path !== null) {
+    if (classifyBookCoverPath(book.cover_path, user.id, book.id) !== "unsafe") {
+      removals.push({ bucket: BOOK_COVERS_BUCKET, path: book.cover_path });
+    } else {
+      unsafeStoredPathCount += 1;
     }
   }
-
-  if (book.file_path) {
-    const { error: manuscriptError } = await supabase.storage
-      .from("manuscripts")
-      .remove([book.file_path]);
-    if (manuscriptError) {
-      console.error(
-        "deleteBook: failed to remove orphaned manuscript file:",
-        manuscriptError,
-      );
+  if (book.file_path !== null) {
+    if (isOwnCanonicalBookManuscriptPath(book.file_path, user.id, book.id)) {
+      removals.push({ bucket: BOOK_MANUSCRIPTS_BUCKET, path: book.file_path });
+    } else {
+      unsafeStoredPathCount += 1;
     }
   }
+  if (unsafeStoredPathCount > 0) {
+    console.warn("deleteBook: stored paths that are not this book's own keys were left untouched", {
+      bookId: book.id,
+      unsafeStoredPathCount,
+    });
+  }
+  await removeProvenBookStorageObjects(supabase, removals, "deleteBook");
 
   revalidatePath("/dashboard");
   revalidatePath("/");
