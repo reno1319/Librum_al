@@ -4,6 +4,41 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { watermarkEpub } from "@/lib/watermark";
 import { isRecoverySessionActive } from "@/lib/recovery-session";
+import {
+  BOOK_MANUSCRIPTS_BUCKET,
+  isOwnCanonicalBookManuscriptPath,
+} from "@/lib/book-storage-path";
+
+// MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the exact row this route may act
+// on. `id` and `author_id` come back from the database with the path so
+// the manuscript key is checked against the row's own identity, never
+// against the URL parameter alone and never against anything parsed out
+// of the stored path. `file_path` stays `unknown` here on purpose: it is
+// data, not authority, until isOwnCanonicalBookManuscriptPath() accepts it.
+type DownloadBookRow = {
+  id: string;
+  author_id: string;
+  title: string;
+  file_path: unknown;
+};
+
+// Anything but one plain row object whose id is exactly the requested id
+// and whose author_id/title are strings is treated as no row at all.
+function toDownloadBookRow(data: unknown, requestedId: string): DownloadBookRow | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return null;
+  }
+  const row = data as Record<string, unknown>;
+  if (
+    typeof row.id !== "string" ||
+    row.id !== requestedId ||
+    typeof row.author_id !== "string" ||
+    typeof row.title !== "string"
+  ) {
+    return null;
+  }
+  return { id: row.id, author_id: row.author_id, title: row.title, file_path: row.file_path };
+}
 
 // Manuscripts live in a private storage bucket. Nobody gets a permanent
 // link to them — this route checks ownership on every request, then
@@ -38,16 +73,23 @@ export async function GET(
     return NextResponse.redirect(new URL(`/login?next=/books/${id}`, request.url));
   }
 
-  const { data: book } = await supabase
+  const fileUnavailable = () =>
+    NextResponse.redirect(new URL(`/books/${id}?error=That+file+isn%27t+available`, request.url));
+
+  // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: a query error fails closed even
+  // when plausible row data rides along with it. The stored path is NOT
+  // inspected here -- that happens only after the entitlement decision
+  // below, so a caller who may not download this book learns nothing
+  // about whether its manuscript path is valid, present or absent.
+  const { data: bookData, error: bookError } = await supabase
     .from("books")
-    .select("file_path, title, author_id")
+    .select("id, author_id, file_path, title")
     .eq("id", id)
     .single();
 
-  if (!book || !book.file_path) {
-    return NextResponse.redirect(
-      new URL(`/books/${id}?error=That+file+isn%27t+available`, request.url),
-    );
+  const book = bookError ? null : toDownloadBookRow(bookData, id);
+  if (!book) {
+    return fileUnavailable();
   }
 
   // LAUNCH-1 P1-7A: user_owns_book() now also excludes a purchase whose
@@ -58,10 +100,10 @@ export async function GET(
   // complete, correct ownership predicate.
   let owned = book.author_id === user.id;
   if (!owned) {
-    const { data: ownsBook } = await supabase.rpc("user_owns_book", {
-      target_book_id: id,
+    const { data: ownsBook, error: ownsBookError } = await supabase.rpc("user_owns_book", {
+      target_book_id: book.id,
     });
-    owned = !!ownsBook;
+    owned = !ownsBookError && ownsBook === true;
   }
 
   if (!owned) {
@@ -70,10 +112,21 @@ export async function GET(
     );
   }
 
+  // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the service-role client bypasses
+  // Storage RLS, and storage-js interpolates the key into the request URL
+  // unencoded (a "../" segment would leave the bucket). So nothing reaches
+  // it unless the stored value is exactly `<row author_id>/<row id>.epub`.
+  // A missing, legacy or forged value gets the same file-unavailable
+  // answer as a missing row, with nothing logged or echoed.
+  const filePath = book.file_path;
+  if (!isOwnCanonicalBookManuscriptPath(filePath, book.author_id, book.id)) {
+    return fileUnavailable();
+  }
+
   const admin = createAdminClient();
   const { data: fileBlob, error: downloadError } = await admin.storage
-    .from("manuscripts")
-    .download(book.file_path);
+    .from(BOOK_MANUSCRIPTS_BUCKET)
+    .download(filePath);
 
   if (downloadError || !fileBlob) {
     return NextResponse.redirect(
