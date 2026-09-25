@@ -117,8 +117,8 @@ vi.mock("@/lib/catalog-write-client", async () => {
 
 const { createBook, updateBook, publishBook, unpublishBook, deleteBook } = await import("./actions");
 
-const USER_ID = "author-1";
-const BOOK_ID = "book-1";
+const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
+const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
 
@@ -238,8 +238,9 @@ function resetMocks() {
   mockUpdate.mockClear();
   mockExistingSingle.mockReset().mockResolvedValue({
     data: {
-      cover_path: "author-1/book-1-cover.png",
-      file_path: "author-1/book-1.epub",
+      id: BOOK_ID,
+      cover_path: `${USER_ID}/${BOOK_ID}-cover.png`,
+      file_path: `${USER_ID}/${BOOK_ID}.epub`,
       author_id: USER_ID,
       language: null,
       status: "published",
@@ -741,8 +742,9 @@ describe("updateBook: unchanged-language preservation (PUBLISHING-UX-1 Part D FI
   function withExistingLanguage(language: string | null) {
     mockExistingSingle.mockReset().mockResolvedValue({
       data: {
-        cover_path: "author-1/book-1-cover.png",
-        file_path: "author-1/book-1.epub",
+        id: BOOK_ID,
+        cover_path: `${USER_ID}/${BOOK_ID}-cover.png`,
+        file_path: `${USER_ID}/${BOOK_ID}.epub`,
         author_id: USER_ID,
         language,
         status: "published",
@@ -940,7 +942,7 @@ describe("createBook: manuscriptStoragePath reference (CB-1)", () => {
 
   it("accepts a small EPUB via a temp reference -- the same new path a directly-uploaded EPUB now always takes, regression-tested", async () => {
     const bytes = await buildValidEpubBytes();
-    const tempPath = `${USER_ID}/tmp/epub/small.epub`;
+    const tempPath = `${USER_ID}/tmp/epub/39096173-6674-43a9-8e2b-fc1e50769065.epub`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithManuscriptPath(tempPath);
@@ -958,7 +960,7 @@ describe("createBook: manuscriptStoragePath reference (CB-1)", () => {
 
   it("accepts a real EPUB well over Vercel's confirmed ~4.5MB payload limit via a temp reference -- no browser binary round-trip involved", async () => {
     const bytes = await buildOversizedValidEpubBytes();
-    const tempPath = `${USER_ID}/tmp/epub/big.epub`;
+    const tempPath = `${USER_ID}/tmp/epub/c040b7a1-7e45-427f-8fb3-aef25c8e095e.epub`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithManuscriptPath(tempPath);
@@ -977,7 +979,7 @@ describe("createBook: manuscriptStoragePath reference (CB-1)", () => {
     // perspective there is no difference at all, which is exactly the
     // point (see docx-actions.ts's own repackageWithTitle()).
     const bytes = await buildOversizedValidEpubBytes();
-    const tempPath = `${USER_ID}/tmp/epub/from-docx.epub`;
+    const tempPath = `${USER_ID}/tmp/epub/a5ae6f68-3031-46fe-8ee2-d9e970cfbb0f.epub`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithManuscriptPath(tempPath);
@@ -988,7 +990,7 @@ describe("createBook: manuscriptStoragePath reference (CB-1)", () => {
   });
 
   it("still runs validateEpubStructure() on the downloaded bytes -- an invalid EPUB at a validly-shaped temp path is rejected", async () => {
-    const tempPath = `${USER_ID}/tmp/epub/bad.epub`;
+    const tempPath = `${USER_ID}/tmp/epub/ec8e1e1f-d42d-42c4-87db-8f22dea9150f.epub`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(Buffer.from("not a zip at all")));
 
     const formData = await buildFormDataWithManuscriptPath(tempPath);
@@ -1017,7 +1019,7 @@ describe("createBook: manuscriptStoragePath reference (CB-1)", () => {
       `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata><manifest></manifest><spine></spine></package>`,
     );
     const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
-    const tempPath = `${USER_ID}/tmp/epub/drm.epub`;
+    const tempPath = `${USER_ID}/tmp/epub/51b6e251-7664-48d7-8334-ec6e2e81750c.epub`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithManuscriptPath(tempPath);
@@ -1035,7 +1037,7 @@ describe("createBook: create atomicity when the final manuscript write fails (CB
 
   it("never inserts a book row referencing a manuscript that failed to reach its permanent path", async () => {
     const bytes = await buildValidEpubBytes();
-    const tempPath = `${USER_ID}/tmp/epub/x.epub`;
+    const tempPath = `${USER_ID}/tmp/epub/299a499f-4d15-4ba5-8023-f97ee03fb5c3.epub`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
     mockUploadManuscript.mockResolvedValueOnce({ error: { message: "storage write failed" } });
 
@@ -1058,7 +1060,7 @@ describe("updateBook: manuscriptStoragePath reference (CB-1)", () => {
 
   it("replaces the manuscript via a temp reference and cleans it up only after the update succeeds", async () => {
     const bytes = await buildValidEpubBytes();
-    const tempPath = `${USER_ID}/tmp/epub/replacement.epub`;
+    const tempPath = `${USER_ID}/tmp/epub/9cfe3451-0286-474f-8640-104a6e9eaa65.epub`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithManuscriptPath(tempPath);
@@ -1074,7 +1076,7 @@ describe("updateBook: manuscriptStoragePath reference (CB-1)", () => {
 
   it("accepts a real EPUB well over 4.5MB via a temp reference", async () => {
     const bytes = await buildOversizedValidEpubBytes();
-    const tempPath = `${USER_ID}/tmp/epub/big-replacement.epub`;
+    const tempPath = `${USER_ID}/tmp/epub/4103df63-cfbc-4616-835d-0519798fa523.epub`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithManuscriptPath(tempPath);
@@ -1098,9 +1100,9 @@ describe("updateBook: manuscriptStoragePath reference (CB-1)", () => {
 
     expect(mockUploadManuscript).not.toHaveBeenCalled();
     expect(mockRemoveManuscript).not.toHaveBeenCalled();
-    expect(mockUpdate.mock.calls[0][0]).toMatchObject({
-      file_path: "author-1/book-1.epub",
-    });
+    // BOOK-STORAGE-MUTATION-AUTH-1: untouched by omission -- the stored
+    // file_path is never copied back into the payload.
+    expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty("file_path");
   });
 });
 
@@ -1109,7 +1111,7 @@ describe("updateBook: update atomicity when the final manuscript write fails (CB
 
   it("leaves the old manuscript authoritative -- no broken replacement -- when the final storage write fails", async () => {
     const bytes = await buildValidEpubBytes();
-    const tempPath = `${USER_ID}/tmp/epub/x.epub`;
+    const tempPath = `${USER_ID}/tmp/epub/299a499f-4d15-4ba5-8023-f97ee03fb5c3.epub`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
     mockUploadManuscript.mockResolvedValueOnce({ error: { message: "storage write failed" } });
 
@@ -1170,7 +1172,7 @@ describe("resolveManuscriptInput: temp-path authorization (CB-1)", () => {
   });
 
   it("fails with a controlled message when the referenced temp object is missing", async () => {
-    const formData = await buildFormDataWithManuscriptPath(`${USER_ID}/tmp/epub/gone.epub`);
+    const formData = await buildFormDataWithManuscriptPath(`${USER_ID}/tmp/epub/6f35def5-030a-4a3f-8b77-9101ea52ba2e.epub`);
     // resetMocks already defaults mockDownloadManuscript to "not found".
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
@@ -1183,7 +1185,7 @@ describe("resolveManuscriptInput: temp-path authorization (CB-1)", () => {
 
   it("rejects an unauthenticated caller before ever touching the manuscript reference", async () => {
     mockGetUser.mockReset().mockResolvedValue({ data: { user: null } });
-    const formData = await buildFormDataWithManuscriptPath(`${USER_ID}/tmp/epub/x.epub`);
+    const formData = await buildFormDataWithManuscriptPath(`${USER_ID}/tmp/epub/299a499f-4d15-4ba5-8023-f97ee03fb5c3.epub`);
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
@@ -1205,7 +1207,7 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
 
   it("accepts a small cover via a temp reference -- the same new path a directly-uploaded cover now always takes, regression-tested", async () => {
     const bytes = buildPngBytesOfSize(1024);
-    const tempPath = `${USER_ID}/tmp/cover/small.png`;
+    const tempPath = `${USER_ID}/tmp/cover/c5912368-317d-4623-8074-3ae0d44884dd.png`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithCoverPath(tempPath);
@@ -1227,7 +1229,7 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
     const bytes = buildPngBytesOfSize(4.8 * 1024 * 1024);
     expect(bytes.length).toBeGreaterThan(4.5 * 1024 * 1024);
     expect(bytes.length).toBeLessThanOrEqual(5 * 1024 * 1024);
-    const tempPath = `${USER_ID}/tmp/cover/big.png`;
+    const tempPath = `${USER_ID}/tmp/cover/c82ea789-656b-4402-8809-d1fa5b3cfc59.png`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithCoverPath(tempPath);
@@ -1242,7 +1244,7 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
 
   it("rejects a cover over the 5MB limit even via a temp reference -- never trusts client-side File.size alone", async () => {
     const bytes = buildPngBytesOfSize(5.1 * 1024 * 1024);
-    const tempPath = `${USER_ID}/tmp/cover/toobig.png`;
+    const tempPath = `${USER_ID}/tmp/cover/a60dcb3e-cfd9-420a-85eb-d0dcfdd11c01.png`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithCoverPath(tempPath);
@@ -1254,7 +1256,7 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
   });
 
   it("still runs the authoritative byte-signature check -- an invalid image at a validly-shaped temp path is rejected", async () => {
-    const tempPath = `${USER_ID}/tmp/cover/bad.png`;
+    const tempPath = `${USER_ID}/tmp/cover/4136eb8b-4420-4c52-84b9-380ce54a3a38.png`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(Buffer.from("not an image at all")));
 
     const formData = await buildFormDataWithCoverPath(tempPath);
@@ -1272,7 +1274,7 @@ describe("createBook: create atomicity when the final cover write fails (COVER-1
 
   it("never inserts a book row referencing a cover that failed to reach its permanent path", async () => {
     const bytes = buildPngBytesOfSize(1024);
-    const tempPath = `${USER_ID}/tmp/cover/x.png`;
+    const tempPath = `${USER_ID}/tmp/cover/6320f67a-2588-445d-85fc-a7a51fb20540.png`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
     mockUploadCover.mockResolvedValueOnce({ error: { message: "storage write failed" } });
 
@@ -1294,7 +1296,7 @@ describe("updateBook: coverStoragePath reference (COVER-1)", () => {
 
   it("replaces the cover via a temp reference and cleans it up only after the update succeeds", async () => {
     const bytes = buildPngBytesOfSize(1024);
-    const tempPath = `${USER_ID}/tmp/cover/replacement.png`;
+    const tempPath = `${USER_ID}/tmp/cover/be029b4a-fcd9-4c0a-809a-ba81598e2172.png`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
 
     const formData = await buildFormDataWithCoverPath(tempPath);
@@ -1316,9 +1318,9 @@ describe("updateBook: coverStoragePath reference (COVER-1)", () => {
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockUploadCover).not.toHaveBeenCalled();
-    expect(mockUpdate.mock.calls[0][0]).toMatchObject({
-      cover_path: "author-1/book-1-cover.png",
-    });
+    // BOOK-STORAGE-MUTATION-AUTH-1: untouched by omission -- the stored
+    // cover_path is never copied back into the payload.
+    expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty("cover_path");
   });
 });
 
@@ -1327,7 +1329,7 @@ describe("updateBook: update atomicity when the final cover write fails (COVER-1
 
   it("leaves the old cover authoritative -- no broken replacement -- when the final storage write fails", async () => {
     const bytes = buildPngBytesOfSize(1024);
-    const tempPath = `${USER_ID}/tmp/cover/x.png`;
+    const tempPath = `${USER_ID}/tmp/cover/6320f67a-2588-445d-85fc-a7a51fb20540.png`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
     mockUploadCover.mockResolvedValueOnce({ error: { message: "storage write failed" } });
 
@@ -1367,7 +1369,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
   });
 
   it("rejects a path in the wrong temp namespace (e.g. the manuscript's own tmp/epub namespace)", async () => {
-    const formData = await buildFormDataWithCoverPath(`${USER_ID}/tmp/epub/x.png`);
+    const formData = await buildFormDataWithCoverPath(`${USER_ID}/tmp/epub/299a499f-4d15-4ba5-8023-f97ee03fb5c3.png`);
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
@@ -1385,7 +1387,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
   });
 
   it("fails with a controlled message when the referenced temp object is missing", async () => {
-    const formData = await buildFormDataWithCoverPath(`${USER_ID}/tmp/cover/gone.png`);
+    const formData = await buildFormDataWithCoverPath(`${USER_ID}/tmp/cover/a55ec2e3-db5e-438e-8c96-7d3ec5997794.png`);
     // resetMocks already defaults mockDownloadManuscript to "not found".
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);

@@ -133,8 +133,8 @@ vi.mock("@/lib/email", () => ({
 const { MAINTENANCE_MESSAGE } = await import("@/lib/maintenance-response");
 const { createBook, updateBook } = await import("./actions");
 
-const USER_ID = "author-1";
-const BOOK_ID = "book-1";
+const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
+const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
 
 async function buildValidEpubBytes(): Promise<Buffer> {
@@ -181,7 +181,7 @@ function resetMocks() {
     // PAID-REPRICING-1: a draft, so a paid price may be saved without
     // paid-publishing permission; the published cases set their own row.
     data: {
-      cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
+      id: BOOK_ID, cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
       status: "draft", price_all: null,
     },
     error: null,
@@ -278,7 +278,7 @@ describe("updateBook: the accepted price is written to price_all and nothing els
   it("saving 0 makes a paid book free, and saving a price brings an unpriced one back", async () => {
     mockBookSelectResult.mockReturnValue({
       data: {
-        cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
+        id: BOOK_ID, cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
         status: "published", price_all: 1200,
       },
       error: null,
@@ -304,7 +304,7 @@ describe("updateBook: the accepted price is written to price_all and nothing els
     vi.stubEnv("PAID_PUBLISHING_MODE", "controlled_staging_publishing_test");
     mockBookSelectResult.mockReturnValue({
       data: {
-        cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
+        id: BOOK_ID, cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
         status: "published", price_all: null,
       },
       error: null,

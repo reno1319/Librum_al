@@ -51,7 +51,7 @@ describe("publishBook/unpublishBook/deleteBook: recovery-session defense-in-dept
     mockRedirect.mockClear();
     mockCreateClient.mockClear();
     mockCreateAdminClient.mockClear();
-    mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: "author-1" } } });
+    mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: "a1b2c3d4-1111-4111-8111-abcdef111111" } } });
     mockFrom.mockReset();
     mockCookieStore.get.mockImplementation((name: string) =>
       name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
@@ -59,21 +59,21 @@ describe("publishBook/unpublishBook/deleteBook: recovery-session defense-in-dept
   });
 
   it("publishBook: redirects to /reset-password and never mutates the books table when a recovery session is active", async () => {
-    await expect(publishBook("book-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(publishBook("c3d4e5f6-2222-4222-8222-abcdef222222")).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/reset-password"));
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
   it("unpublishBook: redirects to /reset-password and never touches Supabase when a recovery session is active", async () => {
-    await expect(unpublishBook("book-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(unpublishBook("c3d4e5f6-2222-4222-8222-abcdef222222")).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/reset-password"));
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 
   it("deleteBook: redirects to /reset-password and never touches Supabase when a recovery session is active", async () => {
-    await expect(deleteBook("book-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(deleteBook("c3d4e5f6-2222-4222-8222-abcdef222222")).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/reset-password"));
     expect(mockCreateClient).not.toHaveBeenCalled();
@@ -91,7 +91,7 @@ describe("publishBook/unpublishBook/deleteBook: recovery-session defense-in-dept
     // performPublish() -- proving the guard did NOT fire (it would have
     // redirected to "/reset-password" instead) and that the books table
     // was genuinely queried.
-    await expect(publishBook("book-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(publishBook("c3d4e5f6-2222-4222-8222-abcdef222222")).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
     expect(mockFrom).toHaveBeenCalledWith("books");

@@ -150,8 +150,8 @@ vi.mock("@/lib/email", () => ({
 
 const { createBook, publishBook } = await import("./actions");
 
-const USER_ID = "author-1";
-const BOOK_ID = "book-1";
+const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
+const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
 
 async function buildValidEpubBytes(): Promise<Buffer> {

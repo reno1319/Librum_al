@@ -44,8 +44,8 @@ type Write = {
 };
 type Interceptor = { table: string; op: "update"; run: () => Promise<void> };
 
-const USER_ID = "author-1";
-const BOOK_ID = "book-1";
+const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
+const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
 const BUNDLE_ID = "bundle-1";
 
 let tables: Record<string, Row[]> = {};
