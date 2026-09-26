@@ -5,8 +5,8 @@ import {
   createBundle,
   publishBundle,
   unpublishBundle,
-  deleteBundle,
 } from "./actions";
+import { DeleteBundleButton } from "./delete-bundle-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
@@ -208,14 +208,9 @@ export default async function BundlesPage({
                 </button>
               </form>
             )}
-            <form action={deleteBundle.bind(null, bundle.id)}>
-              <button
-                type="submit"
-                className="focus-ring rounded-lg border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
-              >
-                Delete
-              </button>
-            </form>
+            {/* BUNDLE-DELETE-SAFETY-1: asks for confirmation naming this
+                row's exact title before deleteBundle runs for this row's id. */}
+            <DeleteBundleButton bundleId={bundle.id} title={bundle.title} status={bundle.status} />
           </li>
         ))}
         {(bundles ?? []).length === 0 && (
