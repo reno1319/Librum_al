@@ -22,6 +22,7 @@ import {
   isExactBundleMembership,
   isExactBundleState,
 } from "@/lib/bundle-membership";
+import { isBundleId, isConfirmedBundleDeletion } from "@/lib/bundle-delete";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
@@ -53,6 +54,11 @@ const BUNDLE_SAVE_UNCONFIRMED_MESSAGE =
   "We could not confirm whether your changes were saved. Reload this bundle to check before trying again.";
 const BUNDLE_CREATE_UNCONFIRMED_MESSAGE =
   "We could not confirm whether the bundle was created. Check your bundles before trying again.";
+// BUNDLE-DELETE-SAFETY-1: shown for every delete that did not prove it
+// removed exactly the requested bundle. It never says the bundle is
+// gone, and never repeats what the database said.
+const BUNDLE_DELETE_UNCONFIRMED_MESSAGE =
+  "We could not confirm that the bundle was deleted. Reload this page to check before trying again.";
 
 // PHASE-2C bundle-membership-integrity: an explicit `.returns<T[]>()`
 // shape for performBundlePublish()'s own bundle_books->books membership
@@ -619,7 +625,33 @@ export async function deleteBundle(bundleId: string) {
     redirect("/login");
   }
 
-  await supabase.from("bundles").delete().eq("id", bundleId).eq("author_id", user.id);
+  // BUNDLE-DELETE-SAFETY-1: the bundle id arrives from the browser, so
+  // it is checked before the database is asked. The author comes only
+  // from the verified session; nothing the browser sends can name it.
+  if (!isBundleId(bundleId)) {
+    console.error("deleteBundle: deletion not confirmed", { outcome: "invalid_request" });
+    redirect(`/dashboard/bundles?error=${encodeURIComponent(BUNDLE_DELETE_UNCONFIRMED_MESSAGE)}`);
+  }
+
+  // The session client, not the trusted writer: authenticated holds
+  // DELETE on bundles and the owner policy allows only the author's own
+  // row, while the bundle_books cascade runs as the table owner. The
+  // deleted row's id is the proof; this action used to ignore its
+  // result entirely. One attempt only, never retried.
+  const { data: deletedRows, error: deleteError } = await supabase
+    .from("bundles")
+    .delete()
+    .eq("id", bundleId)
+    .eq("author_id", user.id)
+    .select("id");
+
+  if (deleteError || !isConfirmedBundleDeletion(deletedRows, bundleId)) {
+    console.error("deleteBundle: deletion not confirmed", {
+      outcome: deleteError ? "database_error" : "unconfirmed_result",
+    });
+    redirect(`/dashboard/bundles?error=${encodeURIComponent(BUNDLE_DELETE_UNCONFIRMED_MESSAGE)}`);
+  }
 
   revalidatePath("/dashboard/bundles");
+  redirect("/dashboard/bundles?success=Bundle+deleted");
 }
