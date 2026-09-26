@@ -1,0 +1,52 @@
+-- BUNDLE-MEMBERSHIP-AUTH-1 (Patch 13), migration 2 of 2: remove every
+-- direct client write to public.bundle_books.
+--
+-- ROLLOUT ORDER -- BINDING. Apply this migration ONLY AFTER
+-- 20260926061034_bundle_membership_trusted_writer is applied AND the
+-- Patch 13 application is READY on the target environment. The
+-- application deployed before Patch 13 inserts and deletes membership
+-- with the author's own session; once this migration is applied those
+-- writes fail and bundle creation/editing breaks until the Patch 13
+-- application is live. The Patch 13 application writes membership only
+-- through public.replace_bundle_membership / create_bundle_with_membership
+-- as service_role, which works identically before and after this
+-- migration. To roll the application back below Patch 13, revert THIS
+-- migration first.
+--
+-- WHY. anon and authenticated held every table privilege on
+-- public.bundle_books (arwdDxtm) from the platform's default grants. RLS
+-- limited INSERT and DELETE to an author's own bundle and books, but
+-- that was the ONLY check: an author could, straight through the Data
+-- API and around every Server Action gate, add an unpublished or
+-- just-unpublished book to a published bundle, remove members until a
+-- published bundle held fewer than two, or empty it -- changing what a
+-- buyer is sold without passing publish-time validation, the maintenance
+-- gate, the recovery gate or the paid-repricing rules. TRUNCATE (held by
+-- anon too) ignores RLS entirely; REFERENCES, TRIGGER and MAINTAIN are
+-- capabilities no Librum client path uses.
+--
+-- WHAT CHANGES, and nothing else:
+--   1. Every table and column privilege of PUBLIC, anon, authenticated
+--      and service_role on public.bundle_books is reset (`revoke all`).
+--   2. SELECT is granted back to anon and authenticated: the public
+--      bundle page reads published membership as anon, the dashboard
+--      and publishBundle read the author's own as authenticated. Which
+--      rows each sees is still decided by the unchanged RLS policy
+--      "Bundle contents are viewable wherever the bundle is".
+--   3. Every privilege is granted back to service_role, exactly what it
+--      held before: the trusted writer functions, the staging-fixture
+--      seed (upsert) and reset/teardown tooling run as service_role.
+--
+-- UNCHANGED: the table owner's privileges; RLS stays enabled; all three
+-- policies (the INSERT and DELETE policies become unreachable for anon
+-- and authenticated but are left byte-identical); constraints, indexes
+-- and foreign keys, including both ON DELETE CASCADE keys -- a cascade
+-- runs as the table owner, so deleteBundle and deleteBook still remove
+-- membership without the deleting role holding DELETE here; every
+-- function, including create_bundle_checkout_snapshot (SECURITY DEFINER,
+-- owner-privileged reads); every existing row. This migration issues no
+-- DML.
+
+revoke all on public.bundle_books from public, anon, authenticated, service_role;
+grant select on public.bundle_books to anon, authenticated;
+grant all on public.bundle_books to service_role;

@@ -842,6 +842,304 @@ create policy "Authors can remove books from their own bundles"
 create index bundle_books_bundle_id_idx on public.bundle_books(bundle_id);
 create index bundle_books_book_id_idx on public.bundle_books(book_id);
 
+-- BUNDLE-MEMBERSHIP-AUTH-1 (migrations 20260926061034 and
+-- 20260926061037): no client role writes membership directly. anon and
+-- authenticated keep SELECT only -- which rows they see is still decided
+-- by the "viewable wherever the bundle is" policy above -- and lose
+-- INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN.
+-- The INSERT and DELETE policies above are kept byte-identical but are
+-- no longer reachable by either role. Both ON DELETE CASCADE keys run as
+-- the table owner, so deleteBundle and deleteBook still remove
+-- membership. service_role keeps every privilege: the writer functions
+-- below and the staging-fixture tooling use it.
+revoke all on public.bundle_books from public, anon, authenticated, service_role;
+grant select on public.bundle_books to anon, authenticated;
+grant all on public.bundle_books to service_role;
+
+-- The only bundle writers. Each writes in ONE transaction after locking
+-- the bundle (FOR UPDATE, bound to p_author_id) and every selected book
+-- (FOR SHARE), and requires at least two distinct books, each still
+-- existing, owned by p_author_id and published. After inserting the new
+-- membership each raises (23000, rolling everything back) unless the
+-- stored rows equal the requested distinct set exactly.
+-- create_bundle_with_membership inserts the draft bundle row in that
+-- same transaction; update_bundle_with_membership re-checks the
+-- PAID-REPRICING-1 compare-and-set on the locked row (LB409), writes
+-- title, description and price_all, replaces the membership, verifies
+-- the persisted details and returns the complete resulting state.
+-- replace_bundle_membership is their shared membership step. SECURITY
+-- INVOKER, empty search_path, EXECUTE for service_role only: createBundle
+-- and updateBundle call them through the server-only service-role
+-- client after every gate, and no Data API caller holding the anon key
+-- or a user session can.
+create function public.replace_bundle_membership(
+  p_bundle_id uuid,
+  p_author_id uuid,
+  p_book_ids uuid[]
+)
+returns table (member_bundle_id uuid, member_book_id uuid)
+language plpgsql
+volatile
+security invoker
+set search_path = ''
+as $$
+declare
+  v_requested integer;
+  v_valid integer;
+  v_inserted integer;
+  v_inserted_exact integer;
+  v_stored integer;
+  v_stored_exact integer;
+begin
+  if p_bundle_id is null or p_author_id is null or p_book_ids is null then
+    raise exception 'bundle membership: bundle, author and books are required'
+      using errcode = '22023';
+  end if;
+
+  if pg_catalog.array_ndims(p_book_ids) is distinct from 1
+    or pg_catalog.array_position(p_book_ids, null) is not null
+  then
+    raise exception 'bundle membership: book ids must be a flat list without nulls'
+      using errcode = '22023';
+  end if;
+
+  v_requested := pg_catalog.cardinality(p_book_ids);
+
+  if v_requested < 2 then
+    raise exception 'bundle membership: at least two books are required'
+      using errcode = '22023';
+  end if;
+
+  if (select pg_catalog.count(distinct u.id) from pg_catalog.unnest(p_book_ids) as u(id)) <> v_requested then
+    raise exception 'bundle membership: duplicate book ids'
+      using errcode = '22023';
+  end if;
+
+  perform 1
+    from public.bundles b
+   where b.id = p_bundle_id
+     and b.author_id = p_author_id
+     for update of b;
+
+  if not found then
+    raise exception 'bundle membership: bundle not found for this author'
+      using errcode = '42501';
+  end if;
+
+  select pg_catalog.count(*)
+    into v_valid
+    from (
+      select bo.id
+        from public.books bo
+       where bo.id = any (p_book_ids)
+         and bo.author_id = p_author_id
+         and bo.status = 'published'
+         for share of bo
+    ) as locked;
+
+  if v_valid <> v_requested then
+    raise exception 'bundle membership: every book must be the author''s own published book'
+      using errcode = '42501';
+  end if;
+
+  delete from public.bundle_books bb
+   where bb.bundle_id = p_bundle_id;
+
+  -- What the INSERT actually stored, as RETURNING reports it after every
+  -- BEFORE trigger: a suppressed row is missing here, an altered one
+  -- carries its altered bundle or book.
+  with inserted as (
+    insert into public.bundle_books (bundle_id, book_id)
+    select p_bundle_id, u.id
+      from pg_catalog.unnest(p_book_ids) as u(id)
+    returning bundle_id, book_id
+  )
+  select pg_catalog.count(*),
+         pg_catalog.count(distinct i.book_id) filter (where i.bundle_id = p_bundle_id and i.book_id = any (p_book_ids))
+    into v_inserted, v_inserted_exact
+    from inserted i;
+
+  -- The membership as it now stands in the table.
+  select pg_catalog.count(*),
+         pg_catalog.count(distinct bb.book_id) filter (where bb.book_id = any (p_book_ids))
+    into v_stored, v_stored_exact
+    from public.bundle_books bb
+   where bb.bundle_id = p_bundle_id;
+
+  -- THE INVARIANT, enforced inside this transaction: exactly the
+  -- requested distinct set was inserted, every inserted row belongs to
+  -- this bundle, and the bundle now holds exactly that set -- nothing
+  -- missing, extra, duplicated, substituted or written to another
+  -- bundle. Anything else raises, and the whole transaction (the delete
+  -- above, and for create/update the bundle row as well) rolls back.
+  if v_inserted <> v_requested or v_inserted_exact <> v_requested
+    or v_stored <> v_requested or v_stored_exact <> v_requested
+  then
+    raise exception 'bundle membership: stored membership does not equal the requested set'
+      using errcode = '23000';
+  end if;
+
+  return query
+    select bb.bundle_id, bb.book_id
+      from public.bundle_books bb
+     where bb.bundle_id = p_bundle_id
+     order by bb.book_id;
+end;
+$$;
+
+create function public.create_bundle_with_membership(
+  p_bundle_id uuid,
+  p_author_id uuid,
+  p_title text,
+  p_description text,
+  p_price_all integer,
+  p_book_ids uuid[]
+)
+returns table (member_bundle_id uuid, member_book_id uuid)
+language plpgsql
+volatile
+security invoker
+set search_path = ''
+as $$
+begin
+  if p_bundle_id is null or p_author_id is null then
+    raise exception 'bundle membership: bundle and author are required'
+      using errcode = '22023';
+  end if;
+
+  insert into public.bundles (id, author_id, title, description, price_all)
+  values (p_bundle_id, p_author_id, p_title, p_description, p_price_all);
+
+  return query
+    select r.member_bundle_id, r.member_book_id
+      from public.replace_bundle_membership(p_bundle_id, p_author_id, p_book_ids) as r;
+end;
+$$;
+
+create function public.update_bundle_with_membership(
+  p_bundle_id uuid,
+  p_author_id uuid,
+  p_expected_status text,
+  p_check_expected_price_all boolean,
+  p_expected_price_all integer,
+  p_title text,
+  p_description text,
+  p_price_all integer,
+  p_book_ids uuid[]
+)
+returns table (
+  member_bundle_id uuid,
+  member_book_id uuid,
+  bundle_title text,
+  bundle_description text,
+  bundle_price_all integer,
+  bundle_status text
+)
+language plpgsql
+volatile
+security invoker
+set search_path = ''
+as $$
+declare
+  v_status text;
+  v_price_all integer;
+  v_updated integer;
+  v_title text;
+  v_description text;
+  v_new_price_all integer;
+begin
+  if p_bundle_id is null or p_author_id is null or p_check_expected_price_all is null then
+    raise exception 'bundle update: bundle, author and guard are required'
+      using errcode = '22023';
+  end if;
+
+  -- 1. Lock the bundle, bound to this author. Two complete edits of the
+  --    same bundle serialize here for their WHOLE transaction.
+  select b.status, b.price_all
+    into v_status, v_price_all
+    from public.bundles b
+   where b.id = p_bundle_id
+     and b.author_id = p_author_id
+     for update of b;
+
+  if not found then
+    raise exception 'bundle update: bundle not found for this author'
+      using errcode = '42501';
+  end if;
+
+  -- 2. PAID-REPRICING-1 compare-and-set, evaluated on the LOCKED row.
+  --    p_expected_status null means "no status condition";
+  --    p_check_expected_price_all false means "no price condition", and
+  --    when true a null p_expected_price_all means "still unpriced".
+  if (p_expected_status is not null and v_status is distinct from p_expected_status)
+    or (p_check_expected_price_all and v_price_all is distinct from p_expected_price_all)
+  then
+    raise exception 'bundle update: the bundle changed since it was read'
+      using errcode = 'LB409';
+  end if;
+
+  -- 3. The details. price_cents and status are never named.
+  update public.bundles b
+     set title = p_title,
+         description = p_description,
+         price_all = p_price_all
+   where b.id = p_bundle_id
+     and b.author_id = p_author_id;
+
+  get diagnostics v_updated = row_count;
+  if v_updated <> 1 then
+    raise exception 'bundle update: expected to update exactly one bundle, updated %', v_updated
+      using errcode = '23000';
+  end if;
+
+  -- 4. The membership, in this same transaction: validates and locks
+  --    every book (distinct, published, this author's own), replaces the
+  --    membership and raises unless the stored set is exactly the
+  --    requested one. A refusal here rolls the details back too.
+  perform 1 from public.replace_bundle_membership(p_bundle_id, p_author_id, p_book_ids);
+
+  -- 5. The details as persisted must be exactly what was submitted.
+  select b.title, b.description, b.price_all
+    into v_title, v_description, v_new_price_all
+    from public.bundles b
+   where b.id = p_bundle_id
+     and b.author_id = p_author_id;
+
+  if v_title is distinct from p_title
+    or v_description is distinct from p_description
+    or v_new_price_all is distinct from p_price_all
+  then
+    raise exception 'bundle update: stored details do not equal the submitted details'
+      using errcode = '23000';
+  end if;
+
+  -- 6. Proof of the complete resulting state: one row per member, each
+  --    carrying the bundle's persisted details.
+  return query
+    select bb.bundle_id, bb.book_id, b.title, b.description, b.price_all, b.status
+      from public.bundle_books bb
+      join public.bundles b on b.id = bb.bundle_id
+     where bb.bundle_id = p_bundle_id
+     order by bb.book_id;
+end;
+$$;
+
+-- Reset from a known state: the platform's default privileges grant
+-- EXECUTE on every new public function to anon, authenticated and
+-- service_role, and PostgreSQL grants it to PUBLIC.
+revoke all on function public.replace_bundle_membership(uuid, uuid, uuid[])
+  from public, anon, authenticated, service_role;
+revoke all on function public.create_bundle_with_membership(uuid, uuid, text, text, integer, uuid[])
+  from public, anon, authenticated, service_role;
+revoke all on function public.update_bundle_with_membership(uuid, uuid, text, boolean, integer, text, text, integer, uuid[])
+  from public, anon, authenticated, service_role;
+grant execute on function public.replace_bundle_membership(uuid, uuid, uuid[])
+  to service_role;
+grant execute on function public.create_bundle_with_membership(uuid, uuid, text, text, integer, uuid[])
+  to service_role;
+grant execute on function public.update_bundle_with_membership(uuid, uuid, text, boolean, integer, text, text, integer, uuid[])
+  to service_role;
+
 -- ============================================================
 -- bundle_checkout_snapshots: one durable row per bundle checkout
 -- attempt. Freezes the exact books, titles, and prices a reader agreed
