@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -16,6 +17,11 @@ import {
   resolvePriceUpdateAuthorization,
 } from "@/lib/paid-repricing";
 import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
+import {
+  classifyBundleWriteFailure,
+  isExactBundleMembership,
+  isExactBundleState,
+} from "@/lib/bundle-membership";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
@@ -37,8 +43,16 @@ const MISSING_BUNDLE_PRICE_MESSAGE = "Set a valid ALL price before publishing th
 // text used to be redirected into the page verbatim; it is logged
 // server-side instead and never shown.
 const BUNDLE_CREATE_FAILED_MESSAGE = "Could not create the bundle. Please try again.";
-const BUNDLE_SAVE_FAILED_MESSAGE = "Could not save the bundle. Please try again.";
 const BUNDLE_UNPUBLISH_FAILED_MESSAGE = "Could not unpublish the bundle. Please try again.";
+// BUNDLE-MEMBERSHIP-AUTH-1: a trusted bundle write either failed in the
+// database -- whose transaction then rolled back, so nothing changed --
+// or ended in a way the action cannot confirm (a lost or malformed
+// response). The messages say exactly which, and nothing more.
+const BUNDLE_SAVE_ROLLED_BACK_MESSAGE = "Could not save the bundle, so nothing was changed. Please try again.";
+const BUNDLE_SAVE_UNCONFIRMED_MESSAGE =
+  "We could not confirm whether your changes were saved. Reload this bundle to check before trying again.";
+const BUNDLE_CREATE_UNCONFIRMED_MESSAGE =
+  "We could not confirm whether the bundle was created. Check your bundles before trying again.";
 
 // PHASE-2C bundle-membership-integrity: an explicit `.returns<T[]>()`
 // shape for performBundlePublish()'s own bundle_books->books membership
@@ -63,6 +77,14 @@ async function resolveBookSelection(
     return { bookIds: null, error: "Choose+at+least+2+books" };
   }
 
+  // BUNDLE-MEMBERSHIP-AUTH-1: a repeated id is refused outright rather
+  // than left to the length comparison below to catch indirectly. The
+  // trusted writer refuses duplicates too; this keeps the request from
+  // ever reaching it.
+  if (new Set(bookIds).size !== bookIds.length) {
+    return { bookIds: null, error: "Choose+only+your+own+published+books" };
+  }
+
   const { data: books } = await supabase
     .from("books")
     .select("id")
@@ -83,6 +105,11 @@ export async function createBundle(formData: FormData) {
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
     redirectForMaintenance("/dashboard/bundles");
   }
+
+  // BUNDLE-MEMBERSHIP-AUTH-1: this action now obtains service-role
+  // authority, so the recovery gate runs before it, exactly as in
+  // publishBundle() -- before any Supabase call.
+  await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();
   const {
@@ -121,33 +148,50 @@ export async function createBundle(formData: FormData) {
     redirect(`/dashboard/bundles?error=${selectionError}`);
   }
 
-  const { data: bundle, error: insertError } = await supabase
-    .from("bundles")
-    .insert({
-      author_id: user.id,
-      title,
-      description,
-      // ALL-WIRING-5: `price_all` ONLY. `price_cents` is deliberately
-      // absent -- not written as 0, not derived -- so a new row takes the
-      // column's own legacy default and nothing here speaks for it.
-      price_all: parsedPrice.priceAll,
-      // CATALOG-WRITE-AUTH-1: `status` is deliberately absent too. The
-      // row takes the column default, exactly 'draft', and since
-      // migration 20260924101853 `authenticated` cannot insert `status`
-      // at all. A paid draft is still created on the author's session:
-      // `price_all` is insertable, publishing is the protected step.
-    })
-    .select("id")
-    .single();
+  // BUNDLE-MEMBERSHIP-AUTH-1: the bundle row and its membership are
+  // written together, in ONE database transaction, by
+  // public.create_bundle_with_membership -- through the trusted
+  // catalog-write client, which is created only now, after the
+  // maintenance and recovery gates, authentication, price validation and
+  // the book-selection check. The function re-validates the selection
+  // under row locks (at least two distinct books, each still existing,
+  // owned by this author and published) and inserts nothing unless all
+  // of it holds; after inserting it raises unless the stored membership
+  // is exactly the selection. A refused or failed create therefore
+  // leaves neither the bundle nor any membership behind.
+  //
+  // The payload is bound to the server, never to the client: the id is
+  // generated here, `p_author_id` is the id auth.getUser() returned, and
+  // the books are the ones resolveBookSelection() just proved are this
+  // author's own published books. ALL-WIRING-5: `price_all` only --
+  // `price_cents` takes its legacy column default. CATALOG-WRITE-AUTH-1:
+  // `status` is never named, so the bundle is always a draft.
+  const bundleId = randomUUID();
+  const catalogWriter = createCatalogWriteClient();
+  const { data: members, error: createError } = await catalogWriter.rpc("create_bundle_with_membership", {
+    p_bundle_id: bundleId,
+    p_author_id: user.id,
+    p_title: title,
+    p_description: description,
+    p_price_all: parsedPrice.priceAll,
+    p_book_ids: bookIds,
+  });
 
-  if (insertError || !bundle) {
-    console.error("createBundle: bundle insert failed", { error: insertError });
-    redirect(`/dashboard/bundles?error=${encodeURIComponent(BUNDLE_CREATE_FAILED_MESSAGE)}`);
+  // Success only with proof: the returned rows must be exactly the
+  // selected books, bound to exactly this new bundle. A database error
+  // means the create rolled back; anything else (no SQLSTATE, or rows
+  // that fail the proof) cannot be confirmed either way.
+  if (createError || !isExactBundleMembership(members, bundleId, bookIds)) {
+    const outcome = createError ? classifyBundleWriteFailure(createError) : "unconfirmed";
+    console.error("createBundle: bundle and membership create failed", {
+      bundleId,
+      outcome,
+      error: createError,
+      rowCount: Array.isArray(members) ? members.length : null,
+    });
+    const message = outcome === "unconfirmed" ? BUNDLE_CREATE_UNCONFIRMED_MESSAGE : BUNDLE_CREATE_FAILED_MESSAGE;
+    redirect(`/dashboard/bundles?error=${encodeURIComponent(message)}`);
   }
-
-  await supabase
-    .from("bundle_books")
-    .insert(bookIds.map((bookId) => ({ bundle_id: bundle.id, book_id: bookId })));
 
   revalidatePath("/dashboard/bundles");
   redirect("/dashboard/bundles?success=Bundle+created+as+a+draft");
@@ -159,6 +203,10 @@ export async function updateBundle(bundleId: string, formData: FormData) {
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
     redirectForMaintenance(`/dashboard/bundles/${bundleId}/edit`);
   }
+
+  // BUNDLE-MEMBERSHIP-AUTH-1: see createBundle -- service-role authority
+  // is created below, so the recovery gate runs first.
+  await redirectIfRecoverySessionActive();
 
   const supabase = await createClient();
   const {
@@ -191,7 +239,7 @@ export async function updateBundle(bundleId: string, formData: FormData) {
     redirect(`/dashboard/bundles/${bundleId}/edit?error=Please+fill+in+every+field`);
   }
 
-  // Precedes the bundle update AND the membership delete/re-insert
+  // Precedes the single trusted save (details AND membership)
   // below, so a rejected price leaves both exactly as they were.
   if (!parsedPrice.ok) {
     redirect(
@@ -202,7 +250,7 @@ export async function updateBundle(bundleId: string, formData: FormData) {
   // PAID-REPRICING-1: the same shared rule updateBook() applies, so a
   // published bundle cannot become paid, or change its paid price, while
   // paid publishing is closed. Refused before the book-selection read,
-  // the bundle update and the membership delete/re-insert.
+  // the trusted save of details and membership.
   const priceAuthorization = resolvePriceUpdateAuthorization({
     currentStatus: existing.status,
     currentPriceAll: existing.price_all,
@@ -230,53 +278,60 @@ export async function updateBundle(bundleId: string, formData: FormData) {
     redirect(`/dashboard/bundles/${bundleId}/edit?error=${selectionError}`);
   }
 
-  // PAID-REPRICING-1: guarded like updateBook()'s write, and proved by
-  // the returned rows. A write that matched no row stops HERE, before the
-  // membership delete/re-insert below, so a stale edit can change neither
-  // the bundle nor what it contains.
-  //
-  // CATALOG-WRITE-AUTH-1: one atomic row update of metadata AND
-  // `price_all`, which `authenticated` can no longer write directly, so
-  // it runs through the trusted catalog-write client -- created only now,
-  // after authentication, the ownership read, price validation, the
-  // repricing gate and the book-selection check. The `id` and `author_id`
-  // filters are the ownership boundary. The membership rewrite below
-  // stays on the author's session and is still unreachable unless this
-  // write proved exactly one row.
+  // BUNDLE-MEMBERSHIP-AUTH-1: the COMPLETE edit -- details and books --
+  // is ONE database transaction, public.update_bundle_with_membership,
+  // called through the trusted catalog-write client, which is created
+  // only now: after the maintenance and recovery gates, authentication,
+  // the ownership read, input and price validation, the paid-repricing
+  // decision and the book-selection check. The function
+  //   * locks this bundle row, bound to this id AND the authenticated
+  //     author, so concurrent complete edits serialize and the result is
+  //     always exactly one of them -- never one edit's details with the
+  //     other's books;
+  //   * re-checks PAID-REPRICING-1's compare-and-set (the guard below) on
+  //     that locked row, and refuses with LB409 if it changed;
+  //   * writes title, description and `price_all` (ALL-WIRING-5: never
+  //     `price_cents`, never `status`);
+  //   * validates and locks every book, replaces the membership, and
+  //     raises unless the stored membership and details are exactly what
+  //     was submitted -- any failure rolls BOTH back;
+  //   * returns the complete resulting state, proved below.
   const catalogWriter = createCatalogWriteClient();
-  const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
-    catalogWriter
-      .from("bundles")
-      // ALL-WIRING-5: `price_all` ONLY. Omitting `price_cents` is what
-      // leaves an existing bundle's legacy value exactly as it was.
-      .update({ title, description, price_all: parsedPrice.priceAll })
-      .eq("id", bundleId)
-      .eq("author_id", user.id),
-    priceGuard,
-  ).select("id");
+  const { data: state, error: saveError } = await catalogWriter.rpc("update_bundle_with_membership", {
+    p_bundle_id: bundleId,
+    p_author_id: user.id,
+    p_expected_status: priceGuard?.status ?? null,
+    p_check_expected_price_all: priceGuard?.priceAll !== undefined,
+    p_expected_price_all: priceGuard?.priceAll ?? null,
+    p_title: title,
+    p_description: description,
+    p_price_all: parsedPrice.priceAll,
+    p_book_ids: bookIds,
+  });
 
-  if (updateError) {
-    console.error("updateBundle: bundle update failed", { bundleId, error: updateError });
-    redirect(
-      `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(BUNDLE_SAVE_FAILED_MESSAGE)}`,
-    );
-  }
-  if (!isExactlyOneRowWritten(updatedRows)) {
-    console.error("updateBundle: guarded update did not change exactly one row", {
+  if (
+    saveError ||
+    !isExactBundleState(state, bundleId, bookIds, { title, description, priceAll: parsedPrice.priceAll })
+  ) {
+    const outcome = saveError ? classifyBundleWriteFailure(saveError) : "unconfirmed";
+    console.error("updateBundle: bundle save failed", {
       bundleId,
-      rowCount: Array.isArray(updatedRows) ? updatedRows.length : null,
+      outcome,
+      error: saveError,
+      rowCount: Array.isArray(state) ? state.length : null,
     });
-    redirect(
-      `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`,
-    );
+    if (outcome === "unconfirmed") {
+      revalidatePath("/dashboard/bundles");
+      revalidatePath(`/bundles/${bundleId}`);
+    }
+    const message =
+      outcome === "changed"
+        ? CATALOG_ROW_CHANGED_MESSAGE
+        : outcome === "rolled_back"
+          ? BUNDLE_SAVE_ROLLED_BACK_MESSAGE
+          : BUNDLE_SAVE_UNCONFIRMED_MESSAGE;
+    redirect(`/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(message)}`);
   }
-
-  // Simplest way to reconcile the book list: clear it and re-insert the
-  // current selection, rather than diffing old vs new.
-  await supabase.from("bundle_books").delete().eq("bundle_id", bundleId);
-  await supabase
-    .from("bundle_books")
-    .insert(bookIds.map((bookId) => ({ bundle_id: bundleId, book_id: bookId })));
 
   revalidatePath("/dashboard/bundles");
   revalidatePath(`/bundles/${bundleId}`);

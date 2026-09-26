@@ -37,7 +37,7 @@ type Filter =
 type Via = "session" | "catalog-writer";
 type Write = {
   table: string;
-  op: "insert" | "update" | "delete";
+  op: "insert" | "update" | "delete" | "rpc";
   payload?: unknown;
   filters: Filter[];
   via: Via;
@@ -146,7 +146,72 @@ const client = {
   },
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => client }));
-const catalogWriter = { from: (table: string) => builder(table, "catalog-writer") };
+// BUNDLE-MEMBERSHIP-AUTH-1: updateBundle saves details AND membership
+// through ONE service-role function, update_bundle_with_membership. This
+// double applies it to the same in-memory tables with the function's
+// semantics: a pending concurrent action lands first (the function would
+// wait for its lock), then the compare-and-set is evaluated on the row it
+// finds, then books are validated, and only then is anything written --
+// all or nothing, as one transaction.
+const catalogWriter = {
+  from: (table: string) => builder(table, "catalog-writer"),
+  rpc: async (fn: string, args: Record<string, unknown>) => {
+    if (fn !== "update_bundle_with_membership") {
+      return { data: null, error: { code: "42883", message: `unexpected function ${fn}` } };
+    }
+    if (interceptor && interceptor.table === "bundles") {
+      const pending = interceptor;
+      interceptor = null;
+      await pending.run();
+    }
+    const bundleId = args.p_bundle_id as string;
+    const authorId = args.p_author_id as string;
+    const bookIds = args.p_book_ids as string[];
+    writes.push({
+      table: "bundles",
+      op: "rpc",
+      payload: { fn, args },
+      filters: [
+        { kind: "eq", column: "id", value: bundleId },
+        { kind: "eq", column: "author_id", value: authorId },
+      ],
+      via: "catalog-writer",
+    });
+    const row = (tables.bundles ?? []).find((r) => r.id === bundleId && r.author_id === authorId);
+    if (!row) return { data: null, error: { code: "42501", message: "bundle not found for this author" } };
+    if (
+      (args.p_expected_status !== null && row.status !== args.p_expected_status) ||
+      (args.p_check_expected_price_all === true && row.price_all !== args.p_expected_price_all)
+    ) {
+      return { data: null, error: { code: "LB409", message: "the bundle changed since it was read" } };
+    }
+    const valid = new Set(
+      (tables.books ?? [])
+        .filter((b) => bookIds.includes(b.id as string) && b.author_id === authorId && b.status === "published")
+        .map((b) => b.id),
+    );
+    if (new Set(bookIds).size !== bookIds.length || bookIds.length < 2 || valid.size !== bookIds.length) {
+      return { data: null, error: { code: "42501", message: "every book must be the author's own published book" } };
+    }
+    Object.assign(row, { title: args.p_title, description: args.p_description, price_all: args.p_price_all });
+    writes.push({ table: "bundle_books", op: "rpc", payload: { fn, args }, filters: [], via: "catalog-writer" });
+    tables.bundle_books = [
+      ...(tables.bundle_books ?? []).filter((r) => r.bundle_id !== bundleId),
+      ...bookIds.map((id) => ({ bundle_id: bundleId, book_id: id })),
+    ];
+    return {
+      data: bookIds.map((id) => ({
+        member_bundle_id: bundleId,
+        member_book_id: id,
+        bundle_title: row.title,
+        bundle_description: row.description,
+        bundle_price_all: row.price_all,
+        bundle_status: row.status,
+      })),
+      error: null,
+    };
+  },
+};
 vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => catalogWriter }));
 
 const { updateBook, publishBook } = await import("./books/actions");
@@ -459,12 +524,14 @@ describe("guarded writes report zero rows honestly", () => {
     expect(book()).toMatchObject({ status: "published", price_all: 0 });
   });
 
-  it("updateBundle: a zero-row guarded update leaves membership untouched", async () => {
+  it("updateBundle: a refused compare-and-set leaves details and membership untouched", async () => {
     seedBundle({ status: "draft", price_all: 0 });
+    const membersBefore = tables.bundle_books.map((r) => ({ ...r }));
     interceptor = { table: "bundles", op: "update", run: async () => void (bundle().status = "published") };
 
     expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("199")))).toBe(BUNDLE_CHANGED);
-    expect(bundle()).toMatchObject({ status: "published", price_all: 0 });
+    expect(bundle()).toMatchObject({ status: "published", price_all: 0, title: "Bundle" });
+    expect(tables.bundle_books).toEqual(membersBefore);
     expect(writes.filter((w) => w.table === "bundle_books")).toEqual([]);
   });
 
@@ -575,7 +642,7 @@ describe("the publish/update race, bundles", () => {
     const target = await redirectOf(updateBundle(BUNDLE_ID, bundleForm("199")));
 
     expect(target).toBe(BUNDLE_CHANGED);
-    expect(bundle()).toMatchObject({ status: "published", price_all: 0 });
+    expect(bundle()).toMatchObject({ status: "published", price_all: 0, title: "Bundle" });
     expect(writes.filter((w) => w.table === "bundle_books")).toEqual([]);
   });
 });
@@ -589,7 +656,9 @@ describe("the writes keep their ownership filters", () => {
     await redirectOf(updateBundle(BUNDLE_ID, bundleForm("0")));
     await redirectOf(publishBundle(BUNDLE_ID));
 
-    const updates = writes.filter((w) => w.op === "update");
+    // updateBundle's write is the update_bundle_with_membership RPC,
+    // bound to the bundle id and the authenticated author.
+    const updates = writes.filter((w) => w.op === "update" || (w.op === "rpc" && w.table === "bundles"));
     expect(updates).toHaveLength(4);
     for (const u of updates) {
       expect(u.filters).toContainEqual({ kind: "eq", column: "author_id", value: USER_ID });

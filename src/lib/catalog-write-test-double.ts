@@ -17,13 +17,30 @@
 // concern: that boundary is pinned against two distinct doubles in
 // src/app/(public)/dashboard/catalog-write-authorization.test.ts.
 
-type Queryable = { from(table: string): unknown };
+type Queryable = { from(table: string): unknown; rpc?(fn: string, args?: unknown): unknown };
 type Recorded = { method: string | symbol; args: unknown[] };
 
 export function catalogWriterReplayingOnto(
   resolveClient: () => Queryable | Promise<Queryable>,
-): Queryable {
+): Required<Queryable> {
   return {
+    // BUNDLE-MEMBERSHIP-AUTH-1: the trusted membership writers are RPCs
+    // (create_bundle_with_membership / update_bundle_with_membership). The
+    // call is forwarded to the same double only when awaited, like `from`.
+    rpc(fn: string, args?: unknown) {
+      return {
+        then(onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+          return Promise.resolve(resolveClient())
+            .then((client) => {
+              if (typeof client.rpc !== "function") {
+                throw new Error("catalog writer double: rpc is not supported by this client double");
+              }
+              return client.rpc(fn, args);
+            })
+            .then(onFulfilled, onRejected);
+        },
+      };
+    },
     from(table: string) {
       const calls: Recorded[] = [];
       const proxy: object = new Proxy(

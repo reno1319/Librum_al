@@ -23,7 +23,9 @@ const BUNDLE_ID = "bundle-1";
 const BOOK_IDS = ["book-a", "book-b"];
 
 // Every write this file can observe, in order, tagged by table and verb.
-type Write = { table: string; op: "insert" | "update" | "delete"; payload?: unknown };
+// BUNDLE-MEMBERSHIP-AUTH-1: the trusted membership writers are RPCs and
+// are recorded with table = "rpc:<function>".
+type Write = { table: string; op: "insert" | "update" | "delete" | "rpc"; payload?: unknown };
 let writes: Write[] = [];
 // PAID-REPRICING-1: updateBundle now reads `status` and `price_all` to
 // decide whether the price change needs paid-publishing permission. The
@@ -32,9 +34,12 @@ let writes: Write[] = [];
 type ExistingBundle = { id: string; status: string; price_all: number | null };
 const DRAFT_BUNDLE: ExistingBundle = { id: BUNDLE_ID, status: "draft", price_all: null };
 let existingBundle: ExistingBundle | null = DRAFT_BUNDLE;
-let bundleInsertResult: { data: unknown; error: unknown } = { data: { id: BUNDLE_ID }, error: null };
-// The guarded write reports the rows it changed; one row is success.
-let bundleUpdateResult: { data?: unknown; error: unknown } = { data: [{ id: BUNDLE_ID }], error: null };
+// null = echo the exact state the call asked for (the real writer's
+// success shape); anything else is returned verbatim.
+let rpcResult: { data: unknown; error: unknown } | null = null;
+// Any session/catalog-writer `bundles` update is a regression since
+// BUNDLE-MEMBERSHIP-AUTH-1: updateBundle saves through one RPC.
+const bundleUpdateResult = { data: null, error: { message: "direct bundles update is not a Patch 13 path" } };
 
 // A thenable builder: every filter returns itself; awaiting it resolves
 // to `result`.
@@ -59,8 +64,14 @@ const client = {
           return chain;
         },
         insert: (payload: unknown) => {
+          // createBundle no longer inserts bundles on the session; any
+          // regression is recorded here and refused.
           writes.push({ table, op: "insert", payload });
-          return { select: () => ({ single: async () => bundleInsertResult }) };
+          return {
+            select: () => ({
+              single: async () => ({ data: null, error: { message: "session bundle insert is not a Patch 13 path" } }),
+            }),
+          };
         },
         update: (payload: unknown) => {
           writes.push({ table, op: "update", payload });
@@ -69,6 +80,7 @@ const client = {
       };
     }
     if (table === "bundle_books") {
+      // No action may write membership directly any more.
       return {
         insert: (payload: unknown) => {
           writes.push({ table, op: "insert", payload });
@@ -81,6 +93,26 @@ const client = {
       };
     }
     throw new Error(`unexpected table: ${table}`);
+  },
+  rpc: async (fn: string, args: Record<string, unknown>) => {
+    writes.push({ table: `rpc:${fn}`, op: "rpc", payload: args });
+    if (rpcResult) return rpcResult;
+    const ids = args.p_book_ids as string[];
+    return {
+      data: ids.map((id) => ({
+        member_bundle_id: args.p_bundle_id,
+        member_book_id: id,
+        ...(fn === "update_bundle_with_membership"
+          ? {
+              bundle_title: args.p_title,
+              bundle_description: args.p_description,
+              bundle_price_all: args.p_price_all,
+              bundle_status: existingBundle?.status ?? "draft",
+            }
+          : {}),
+      })),
+      error: null,
+    };
   },
 };
 const mockCreateClient = vi.fn(async () => client);
@@ -160,8 +192,7 @@ const REJECTED: Array<[string, unknown]> = [
 beforeEach(() => {
   writes = [];
   existingBundle = DRAFT_BUNDLE;
-  bundleInsertResult = { data: { id: BUNDLE_ID }, error: null };
-  bundleUpdateResult = { data: [{ id: BUNDLE_ID }], error: null };
+  rpcResult = null;
   mockRedirect.mockClear();
   mockCreateClient.mockClear();
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -177,25 +208,36 @@ describe("createBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
       target: "/dashboard/bundles?success=Bundle+created+as+a+draft",
     });
 
-    const bundleInsert = writes.find((w) => w.table === "bundles" && w.op === "insert");
-    expect(bundleInsert?.payload).toEqual({
-      author_id: USER_ID,
-      title: "The Collection",
-      description: "Two books",
-      price_all: expected,
+    // BUNDLE-MEMBERSHIP-AUTH-1: the bundle row is inserted by
+    // create_bundle_with_membership, together with its membership.
+    expect(writes.map((w) => w.table)).toEqual(["rpc:create_bundle_with_membership"]);
+    expect(writes[0].payload).toEqual({
+      p_bundle_id: expect.any(String),
+      p_author_id: USER_ID,
+      p_title: "The Collection",
+      p_description: "Two books",
+      p_price_all: expected,
+      p_book_ids: BOOK_IDS,
     });
   });
 
-  it("the insert payload never names price_cents -- not even as 0", async () => {
+  it("the insert payload never names price_cents or status -- not even as 0 or 'draft'", async () => {
     await expect(createBundle(form("199"))).rejects.toBeInstanceOf(RedirectSignal);
 
-    const payload = writes.find((w) => w.table === "bundles" && w.op === "insert")?.payload as Record<
+    const payload = writes.find((w) => w.table === "rpc:create_bundle_with_membership")?.payload as Record<
       string,
       unknown
     >;
-    expect(Object.keys(payload)).not.toContain("price_cents");
-    expect(payload.price_all).toBe(199);
-    expect(Number.isInteger(payload.price_all)).toBe(true);
+    expect(Object.keys(payload).sort()).toEqual([
+      "p_author_id",
+      "p_book_ids",
+      "p_bundle_id",
+      "p_description",
+      "p_price_all",
+      "p_title",
+    ]);
+    expect(payload.p_price_all).toBe(199);
+    expect(Number.isInteger(payload.p_price_all)).toBe(true);
   });
 
   it.each(REJECTED)("rejects %s with the fixed message and performs no write at all", async (_label, raw) => {
@@ -237,13 +279,27 @@ describe("createBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
   });
 
   it("a database insert error is logged, not shown: the redirect carries a fixed message", async () => {
-    bundleInsertResult = { data: null, error: { message: 'violates check constraint "bundles_price_all_range_check"' } };
+    rpcResult = {
+      data: null,
+      error: { code: "23514", message: 'violates check constraint "bundles_price_all_range_check"' },
+    };
 
     await expect(createBundle(form("199"))).rejects.toBeInstanceOf(RedirectSignal);
 
     const target = decodeURIComponent(mockRedirect.mock.calls[0][0]);
     expect(target).toBe("/dashboard/bundles?error=Could not create the bundle. Please try again.");
     expect(writes.some((w) => w.table === "bundle_books")).toBe(false);
+  });
+
+  it("an error without a SQLSTATE is reported as unconfirmed, never as a clean failure", async () => {
+    rpcResult = { data: null, error: { message: "TypeError: fetch failed", code: "" } };
+
+    await expect(createBundle(form("199"))).rejects.toBeInstanceOf(RedirectSignal);
+
+    const target = decodeURIComponent(mockRedirect.mock.calls[0][0]);
+    expect(target).toBe(
+      "/dashboard/bundles?error=We could not confirm whether the bundle was created. Check your bundles before trying again.",
+    );
   });
 });
 
@@ -255,24 +311,43 @@ describe("updateBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
       target: "/dashboard/bundles?success=Bundle+updated",
     });
 
-    const bundleUpdate = writes.find((w) => w.table === "bundles" && w.op === "update");
-    expect(bundleUpdate?.payload).toEqual({
-      title: "The Collection",
-      description: "Two books",
-      price_all: expected,
+    // BUNDLE-MEMBERSHIP-AUTH-1: details and membership are one RPC.
+    expect(writes.map((w) => w.table)).toEqual(["rpc:update_bundle_with_membership"]);
+    expect(writes[0].payload).toEqual({
+      p_bundle_id: BUNDLE_ID,
+      p_author_id: USER_ID,
+      // PAID-REPRICING-1: a paid price on a draft is conditioned on the
+      // row still being a draft; a free price has no condition.
+      p_expected_status: expected === 0 ? null : "draft",
+      p_check_expected_price_all: false,
+      p_expected_price_all: null,
+      p_title: "The Collection",
+      p_description: "Two books",
+      p_price_all: expected,
+      p_book_ids: BOOK_IDS,
     });
   });
 
   it("the update payload never names price_cents, so an existing legacy value is left exactly as stored", async () => {
     await expect(updateBundle(BUNDLE_ID, form("199"))).rejects.toBeInstanceOf(RedirectSignal);
 
-    const payload = writes.find((w) => w.table === "bundles" && w.op === "update")?.payload as Record<
+    const payload = writes.find((w) => w.table === "rpc:update_bundle_with_membership")?.payload as Record<
       string,
       unknown
     >;
-    // A PostgREST PATCH only touches the keys it is given, so absence
-    // here IS the guarantee that price_cents is not overwritten.
-    expect(Object.keys(payload).sort()).toEqual(["description", "price_all", "title"]);
+    // The function writes exactly title, description and price_all; the
+    // payload offers nothing else to write -- no price_cents, no status.
+    expect(Object.keys(payload).sort()).toEqual([
+      "p_author_id",
+      "p_book_ids",
+      "p_bundle_id",
+      "p_check_expected_price_all",
+      "p_description",
+      "p_expected_price_all",
+      "p_expected_status",
+      "p_price_all",
+      "p_title",
+    ]);
   });
 
   it.each(REJECTED)(
@@ -300,24 +375,20 @@ describe("updateBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
     expect(writes).toEqual([]);
   });
 
-  it("a database update error is logged, not shown, and leaves membership untouched", async () => {
-    bundleUpdateResult = { error: { message: "permission denied for table bundles" } };
+  it("a database error is logged, not shown, and reported as rolled back", async () => {
+    rpcResult = { data: null, error: { code: "42501", message: "permission denied for table bundles" } };
 
     await expect(updateBundle(BUNDLE_ID, form("199"))).rejects.toBeInstanceOf(RedirectSignal);
 
     const target = decodeURIComponent(mockRedirect.mock.calls[0][0]);
-    expect(target).toBe(`${EDIT}?error=Could not save the bundle. Please try again.`);
-    expect(writes.some((w) => w.table === "bundle_books")).toBe(false);
+    expect(target).toBe(`${EDIT}?error=Could not save the bundle, so nothing was changed. Please try again.`);
+    expect(writes.map((w) => w.table)).toEqual(["rpc:update_bundle_with_membership"]);
   });
 
-  it("a valid save still reconciles membership after the bundle update", async () => {
+  it("a valid save is exactly one trusted RPC -- no separate bundles update, no direct membership write", async () => {
     await expect(updateBundle(BUNDLE_ID, form("0"))).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(writes.map((w) => `${w.table}:${w.op}`)).toEqual([
-      "bundles:update",
-      "bundle_books:delete",
-      "bundle_books:insert",
-    ]);
+    expect(writes.map((w) => `${w.table}:${w.op}`)).toEqual(["rpc:update_bundle_with_membership:rpc"]);
   });
 });
 

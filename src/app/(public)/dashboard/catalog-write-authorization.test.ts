@@ -27,6 +27,15 @@ import JSZip from "jszip";
 // "storage-path-migrated": the Patch 7 ACL with books INSERT narrowed by
 // migration 20260924141734, again PARSED FROM that migration. Every
 // legitimate path must work under all three. Section 7 pins Patch 8 itself.
+//
+// BUNDLE-MEMBERSHIP-AUTH-1 (Patch 13) adds a fourth mode,
+// "membership-migrated": the Patch 8 ACL plus migration 20260926061037,
+// under which the session may no longer insert or delete bundle_books
+// rows at all. The catalog writer additionally models the two service-role
+// membership functions (create_bundle_with_membership /
+// replace_bundle_membership) of migration 20260926061034, and the session
+// cannot call them (their EXECUTE is service_role only). Every legitimate
+// path must work under all four.
 
 class RedirectSignal extends Error {
   constructor(public target: string) {
@@ -141,13 +150,13 @@ type Via = "session" | "catalog-writer";
 type Write = {
   via: Via;
   table: string;
-  op: "insert" | "update" | "delete";
+  op: "insert" | "update" | "delete" | "rpc";
   payload: unknown;
   filters: Filter[];
   rowsChanged: number;
   denied: boolean;
 };
-type AclMode = "pre-migration" | "migrated" | "storage-path-migrated";
+type AclMode = "pre-migration" | "migrated" | "storage-path-migrated" | "membership-migrated";
 
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
 const OTHER_AUTHOR = "b2c3d4e5-9999-4999-8999-abcdef999999";
@@ -167,6 +176,8 @@ let forcedCatalogWriterRowCount: number | null = null;
 let forcedCatalogWriterInsertResult:
   | { data: Row[] | null; error: { code: string; message: string } | null }
   | null = null;
+// Forces the NEXT membership RPC's result, without writing anything.
+let forcedRpcResult: { data: unknown; error: { code: string; message: string } | null } | null = null;
 // Objects the session's storage double can download (temporary uploads).
 let storedObjects: Record<string, Buffer> = {};
 
@@ -184,9 +195,14 @@ function matches(row: Row, filters: Filter[]): boolean {
   });
 }
 
+function sessionMayWriteMembership(): boolean {
+  return aclMode !== "membership-migrated";
+}
+
 function sessionMayWrite(table: string, op: "insert" | "update", keys: string[]): boolean {
+  if (table === "bundle_books") return sessionMayWriteMembership();
   if (aclMode === "pre-migration" || !OWNED_TABLES.has(table)) return true;
-  const grants = aclMode === "storage-path-migrated" ? STORAGE_PATH_GRANTS : MIGRATED_GRANTS;
+  const grants = aclMode === "migrated" ? MIGRATED_GRANTS : STORAGE_PATH_GRANTS;
   const granted = grants[table as "books" | "bundles"][op];
   return keys.every((k) => granted.includes(k));
 }
@@ -264,6 +280,10 @@ function builder(table: string, via: Via) {
     }
 
     if (op === "delete") {
+      if (via === "session" && table === "bundle_books" && !sessionMayWriteMembership()) {
+        writes.push({ via, table, op, payload: undefined, filters: [...filters], rowsChanged: 0, denied: true });
+        return { data: null, error: { code: "42501", message: "permission denied" } };
+      }
       const doomed = rows.filter((r) => rlsScoped(r) && matches(r, filters));
       tables[table] = rows.filter((r) => !doomed.includes(r));
       writes.push({ via, table, op, payload: undefined, filters: [...filters], rowsChanged: doomed.length, denied: false });
@@ -337,7 +357,95 @@ const sessionClient = {
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
 
-const catalogWriter = { from: (table: string) => builder(table, "catalog-writer") };
+// The two bundle writers the application calls, as the catalog writer
+// (service_role) sees them: one transaction each, re-validating the
+// selection (and, for an update, the compare-and-set) and returning the
+// resulting state. Nothing is written unless everything holds.
+type MembershipArgs = {
+  p_bundle_id: string;
+  p_author_id: string;
+  p_book_ids: string[];
+  p_title?: string;
+  p_description?: string;
+  p_price_all?: number;
+  p_expected_status?: string | null;
+  p_check_expected_price_all?: boolean;
+  p_expected_price_all?: number | null;
+};
+function membershipRpc(fn: string, args: MembershipArgs) {
+  const refuse = (message: string) => ({ data: null, error: { code: "P0001", message } });
+  if (forcedRpcResult !== null) {
+    const forced = forcedRpcResult;
+    forcedRpcResult = null;
+    writes.push({ via: "catalog-writer", table: "bundle_books", op: "rpc", payload: { fn, args }, filters: [], rowsChanged: 0, denied: false });
+    return forced;
+  }
+  const ids = args.p_book_ids ?? [];
+  const valid =
+    ids.length >= 2 &&
+    new Set(ids).size === ids.length &&
+    ids.every((id) => (tables.books ?? []).some((b) => b.id === id && b.author_id === args.p_author_id && b.status === "published"));
+  const record = (rowsChanged: number) =>
+    writes.push({ via: "catalog-writer", table: "bundle_books", op: "rpc", payload: { fn, args }, filters: [], rowsChanged, denied: false });
+  if (fn === "create_bundle_with_membership") {
+    if (!valid) return record(0), refuse("bundle membership: invalid selection");
+    (tables.bundles ??= []).push({
+      ...INSERT_DEFAULTS.bundles,
+      id: args.p_bundle_id,
+      author_id: args.p_author_id,
+      title: args.p_title,
+      description: args.p_description,
+      price_all: args.p_price_all,
+    });
+  } else if (fn === "update_bundle_with_membership") {
+    const row = (tables.bundles ?? []).find((b) => b.id === args.p_bundle_id && b.author_id === args.p_author_id);
+    if (!row) return record(0), refuse("bundle update: bundle not found for this author");
+    if (
+      (args.p_expected_status != null && row.status !== args.p_expected_status) ||
+      (args.p_check_expected_price_all === true && row.price_all !== args.p_expected_price_all)
+    ) {
+      record(0);
+      return { data: null, error: { code: "LB409", message: "bundle update: the bundle changed since it was read" } };
+    }
+    if (!valid) return record(0), refuse("bundle membership: refused");
+    Object.assign(row, { title: args.p_title, description: args.p_description, price_all: args.p_price_all });
+  } else {
+    throw new Error(`unexpected rpc: ${fn}`);
+  }
+  tables.bundle_books = [
+    ...(tables.bundle_books ?? []).filter((r) => r.bundle_id !== args.p_bundle_id),
+    ...ids.map((id) => ({ bundle_id: args.p_bundle_id, book_id: id })),
+  ];
+  record(ids.length);
+  const bundleRow = (tables.bundles ?? []).find((b) => b.id === args.p_bundle_id)!;
+  return {
+    data: ids.map((id) => ({
+      member_bundle_id: args.p_bundle_id,
+      member_book_id: id,
+      ...(fn === "update_bundle_with_membership"
+        ? {
+            bundle_title: bundleRow.title,
+            bundle_description: bundleRow.description,
+            bundle_price_all: bundleRow.price_all,
+            bundle_status: bundleRow.status,
+          }
+        : {}),
+    })),
+    error: null,
+  };
+}
+
+// The session may not execute either function (EXECUTE is service_role
+// only), in every ACL mode: migration 20260926061034 creates them that way.
+(sessionClient as Record<string, unknown>).rpc = async (fn: string, args: unknown) => {
+  writes.push({ via: "session", table: "bundle_books", op: "rpc", payload: { fn, args }, filters: [], rowsChanged: 0, denied: true });
+  return { data: null, error: { code: "42501", message: `permission denied for function ${fn}` } };
+};
+
+const catalogWriter = {
+  from: (table: string) => builder(table, "catalog-writer"),
+  rpc: async (fn: string, args: MembershipArgs) => membershipRpc(fn, args),
+};
 const mockCreateCatalogWriteClient = vi.fn(() => {
   events.push("createCatalogWriteClient");
   return catalogWriter;
@@ -411,6 +519,22 @@ function bundleForm(price: string, title = "Bundle, edited"): FormData {
   return fd;
 }
 
+function dupBundleForm(): FormData {
+  const fd = bundleForm("299", "Dup");
+  fd.append("bookIds", "book-a");
+  return fd;
+}
+
+function otherBookBundleForm(): FormData {
+  const fd = new FormData();
+  fd.set("title", "Cross");
+  fd.set("description", "");
+  fd.set("price", "0");
+  fd.append("bookIds", "book-a");
+  fd.append("bookIds", "book-b2");
+  return fd;
+}
+
 function seed(overrides: { book?: Row; bundle?: Row } = {}) {
   tables.books = [
     {
@@ -469,6 +593,7 @@ beforeEach(() => {
   recoveryActive = false;
   forcedCatalogWriterRowCount = null;
   forcedCatalogWriterInsertResult = null;
+  forcedRpcResult = null;
   storedObjects = {};
   mockRedirect.mockClear();
   mockCreateCatalogWriteClient.mockClear();
@@ -585,7 +710,7 @@ describe("the migration's grants are exactly the inventoried columns", () => {
 // 2. Every legitimate path works under BOTH ACLs, and never writes a
 //    protected column through the session client.
 // ============================================================
-describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated"])("rollout compatibility: %s ACL", (mode) => {
+describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "membership-migrated"])("rollout compatibility: %s ACL", (mode) => {
   beforeEach(() => {
     aclMode = mode;
   });
@@ -606,16 +731,30 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated"])("
     expect(mockCreateCatalogWriteClient).toHaveBeenCalledOnce();
   });
 
-  it("createBundle: a PAID draft bundle is created on the session", async () => {
+  it("createBundle: a PAID draft bundle and its membership are created by ONE trusted call", async () => {
+    // BUNDLE-MEMBERSHIP-AUTH-1: create_bundle_with_membership writes the
+    // bundle row and its membership in one transaction; the session
+    // writes neither.
     tables.bundles = [];
+    tables.bundle_books = [];
     expect(await redirectOf(createBundle(bundleForm("299", "New bundle")))).toBe(
       "/dashboard/bundles?success=Bundle+created+as+a+draft",
     );
-    const [insert] = sessionWritesTo("bundles");
-    expect(insert).toMatchObject({ op: "insert", denied: false, rowsChanged: 1 });
-    expect(insert.payload).not.toHaveProperty("status");
-    expect(tables.bundles[0]).toMatchObject({ status: "draft", price_all: 299 });
-    expect(mockCreateCatalogWriteClient).not.toHaveBeenCalled();
+    expect(writes.filter((w) => w.via === "session")).toEqual([]);
+    expect(catalogWrites()).toHaveLength(1);
+    const [call] = catalogWrites();
+    expect(call).toMatchObject({ op: "rpc", denied: false, rowsChanged: 2 });
+    const { fn, args } = call.payload as { fn: string; args: Record<string, unknown> };
+    expect(fn).toBe("create_bundle_with_membership");
+    expect(args).not.toHaveProperty("p_status");
+    expect(args).toMatchObject({ p_author_id: USER_ID, p_price_all: 299, p_book_ids: ["book-a", "book-b"] });
+    expect(tables.bundles).toHaveLength(1);
+    expect(tables.bundles[0]).toMatchObject({ id: args.p_bundle_id, status: "draft", price_all: 299, author_id: USER_ID });
+    expect(tables.bundle_books).toEqual([
+      { bundle_id: args.p_bundle_id, book_id: "book-a" },
+      { bundle_id: args.p_bundle_id, book_id: "book-b" },
+    ]);
+    expect(mockCreateCatalogWriteClient).toHaveBeenCalledOnce();
   });
 
   it("createBook intent=publish (free): inserted by the trusted writer as a draft, then published by it", async () => {
@@ -675,19 +814,34 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated"])("
     expect(catalogWrites()).toHaveLength(1);
   });
 
-  it("updateBundle: one atomic catalog-writer update, then membership on the session", async () => {
+  it("updateBundle: details AND membership in ONE trusted update_bundle_with_membership call", async () => {
     expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")))).toBe(
       "/dashboard/bundles?success=Bundle+updated",
     );
     expect(bundleRow()).toMatchObject({ title: "Bundle, edited", price_all: 299, status: "draft" });
-    const bundleUpdates = writes.filter((w) => w.table === "bundles" && w.op === "update");
-    expect(bundleUpdates).toHaveLength(1);
-    expect(bundleUpdates[0].via).toBe("catalog-writer");
-    expect(bundleUpdates[0].payload).toEqual({ title: "Bundle, edited", description: "Two books", price_all: 299 });
+    // No separate bundles update exists any more, on either client.
+    expect(writes.filter((w) => w.table === "bundles")).toEqual([]);
     const membershipWrites = writes.filter((w) => w.table === "bundle_books");
-    expect(membershipWrites.map((w) => [w.via, w.op])).toEqual([
-      ["session", "delete"],
-      ["session", "insert"],
+    expect(membershipWrites.map((w) => [w.via, w.op])).toEqual([["catalog-writer", "rpc"]]);
+    expect(membershipWrites[0].payload).toEqual({
+      fn: "update_bundle_with_membership",
+      args: {
+        p_bundle_id: BUNDLE_ID,
+        p_author_id: USER_ID,
+        // A paid price on a draft: PAID-REPRICING-1 conditions the save on
+        // the row still being a draft.
+        p_expected_status: "draft",
+        p_check_expected_price_all: false,
+        p_expected_price_all: null,
+        p_title: "Bundle, edited",
+        p_description: "Two books",
+        p_price_all: 299,
+        p_book_ids: ["book-a", "book-b"],
+      },
+    });
+    expect(tables.bundle_books).toEqual([
+      { bundle_id: BUNDLE_ID, book_id: "book-a" },
+      { bundle_id: BUNDLE_ID, book_id: "book-b" },
     ]);
   });
 
@@ -721,8 +875,11 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated"])("
     await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")));
     await redirectOf(publishBundle(BUNDLE_ID));
     await unpublishBundle(BUNDLE_ID);
+    await redirectOf(createBundle(bundleForm("0", "Another bundle")));
     await deleteSeries(SERIES_ID);
 
+    // BUNDLE-MEMBERSHIP-AUTH-1: and never writes membership through it.
+    expect(sessionWritesTo("bundle_books")).toEqual([]);
     for (const w of writes) {
       expect(w.denied).toBe(false);
       if (w.via !== "session" || !OWNED_TABLES.has(w.table)) continue;
@@ -783,6 +940,18 @@ describe("the catalog writer is never created on a refused request", () => {
     ["publishBook: maintenance", maintenance, () => publishBook(BOOK_ID)],
     ["unpublishBook: maintenance", maintenance, () => unpublishBook(BOOK_ID)],
     ["updateBundle: maintenance", maintenance, () => updateBundle(BUNDLE_ID, bundleForm("299"))],
+    ["updateBundle: recovery session", () => (recoveryActive = true), () => updateBundle(BUNDLE_ID, bundleForm("299"))],
+    ["updateBundle: invalid price", () => undefined, () => updateBundle(BUNDLE_ID, bundleForm("5"))],
+    ["updateBundle: duplicate books", () => undefined, () => updateBundle(BUNDLE_ID, dupBundleForm())],
+    ["createBundle: maintenance", maintenance, () => createBundle(bundleForm("299", "New"))],
+    ["createBundle: recovery session", () => (recoveryActive = true), () => createBundle(bundleForm("299", "New"))],
+    ["createBundle: signed out", () => (signedIn = false), () => createBundle(bundleForm("299", "New"))],
+    ["createBundle: invalid price", () => undefined, () => createBundle(bundleForm("5", "New"))],
+    ["createBundle: missing title", () => undefined, () => createBundle(bundleForm("299", "  "))],
+    ["createBundle: invalid selection", () => (tables.books = tables.books.filter((b) => b.id !== "book-b")), () => createBundle(bundleForm("299", "New"))],
+    ["createBundle: another author's book", () => tables.books.push({ id: "book-b2", author_id: OTHER_AUTHOR, status: "published" }), () => createBundle(otherBookBundleForm())],
+    ["createBundle: unpublished book", () => (bookRow("book-b").status = "draft"), () => createBundle(bundleForm("299", "New"))],
+    ["createBundle: duplicate books", () => undefined, () => createBundle(dupBundleForm())],
     ["publishBundle: maintenance", maintenance, () => publishBundle(BUNDLE_ID)],
     ["unpublishBundle: maintenance", maintenance, () => unpublishBundle(BUNDLE_ID)],
     ["updateBook: another author's book", () => undefined, () => updateBook("book-other", editBookForm("199"))],
@@ -820,6 +989,7 @@ describe("the catalog writer is never created on a refused request", () => {
     ["publishBook", () => publishBook(BOOK_ID)],
     ["unpublishBook", () => unpublishBook(BOOK_ID)],
     ["updateBundle", () => updateBundle(BUNDLE_ID, bundleForm("299"))],
+    ["createBundle", () => createBundle(bundleForm("299", "New"))],
     ["publishBundle", () => publishBundle(BUNDLE_ID)],
     ["unpublishBundle", () => unpublishBundle(BUNDLE_ID)],
   ])("%s authenticates on the session before creating the catalog writer, and writes once", async (_label, act) => {
@@ -848,8 +1018,20 @@ describe("privileged writes stay narrow", () => {
     await redirectOf(publishBundle(BUNDLE_ID));
     await unpublishBundle(BUNDLE_ID);
 
-    expect(catalogWrites()).toHaveLength(6);
+    await redirectOf(createBundle(bundleForm("0", "New")));
+
+    expect(catalogWrites()).toHaveLength(7);
     for (const w of catalogWrites()) {
+      if (w.op === "rpc") {
+        // BUNDLE-MEMBERSHIP-AUTH-1: the membership writers are bound to
+        // the authenticated author and to the exact bundle -- the owned
+        // bundle for an edit, a server-generated id for a create.
+        const { fn, args } = w.payload as { fn: string; args: MembershipArgs };
+        expect(args.p_author_id).toBe(USER_ID);
+        if (fn === "update_bundle_with_membership") expect(args.p_bundle_id).toBe(BUNDLE_ID);
+        else expect(args.p_bundle_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+        continue;
+      }
       const id = w.table === "books" ? BOOK_ID : BUNDLE_ID;
       expect(w.filters).toContainEqual({ kind: "eq", column: "id", value: id });
       expect(w.filters).toContainEqual({ kind: "eq", column: "author_id", value: USER_ID });
@@ -871,10 +1053,20 @@ describe("privileged writes stay narrow", () => {
     seed({ book: { status: "published", price_all: 199 }, bundle: { status: "published", price_all: 299 } });
     await redirectOf(updateBook(BOOK_ID, editBookForm("199")));
     await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")));
-    for (const w of catalogWrites()) {
+    const updates = catalogWrites().filter((x) => x.op === "update");
+    expect(updates.map((w) => w.table)).toEqual(["books"]);
+    for (const w of updates) {
       expect(w.filters).toContainEqual({ kind: "eq", column: "status", value: "published" });
-      expect(w.filters).toContainEqual({ kind: "eq", column: "price_all", value: w.table === "books" ? 199 : 299 });
+      expect(w.filters).toContainEqual({ kind: "eq", column: "price_all", value: 199 });
     }
+    // The bundle's compare-and-set travels into the one transaction.
+    const [save] = catalogWrites().filter((x) => x.op === "rpc");
+    expect((save.payload as { args: MembershipArgs }).args).toMatchObject({
+      p_expected_status: "published",
+      p_check_expected_price_all: true,
+      p_expected_price_all: 299,
+    });
+    expect(bundleRow()).toMatchObject({ status: "published", price_all: 299, title: "Bundle, edited" });
   });
 
   it("the privileged write cannot touch another author's row even though it bypasses RLS", async () => {
@@ -905,14 +1097,17 @@ describe("privileged writes stay narrow", () => {
     expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("/dashboard?error=Could+not+unpublish+that+book+right+now");
   });
 
-  it.each([0, 2])("updateBundle: a %i-row result fails closed and leaves membership untouched", async (count) => {
+  it("updateBundle: a refused compare-and-set (LB409) fails closed with the changed message", async () => {
     const membersBefore = tables.bundle_books.map((r) => ({ ...r }));
-    forcedCatalogWriterRowCount = count;
-    expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")))).toMatch(
-      new RegExp(`^/dashboard/bundles/${BUNDLE_ID}/edit\\?error=`),
+    const rowBefore = { ...bundleRow() };
+    forcedRpcResult = { data: null, error: { code: "LB409", message: "bundle update: the bundle changed since it was read" } };
+    expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")))).toBe(
+      `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent(
+        "This title changed while you were editing it, so nothing was saved. Reload the page and try again.",
+      )}`,
     );
     expect(tables.bundle_books).toEqual(membersBefore);
-    expect(writes.filter((w) => w.table === "bundle_books")).toEqual([]);
+    expect(bundleRow()).toEqual(rowBefore);
   });
 
   it.each([0, 2])("publishBundle: a %i-row result is not reported as published", async (count) => {
@@ -1068,7 +1263,7 @@ describe("Patch 8: the migration narrows books INSERT by exactly the two path co
   });
 });
 
-describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated"])(
+describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "membership-migrated"])(
   "Patch 8: createBook's trusted insert under the %s ACL",
   (mode) => {
     beforeEach(() => {
