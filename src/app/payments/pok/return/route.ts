@@ -24,7 +24,12 @@ export async function GET(request: Request) {
   if (!intent.success || !token.success) redirect("/library?error=Invalid+payment+return");
   const db = await createClient();
   const { data: { user } } = await db.auth.getUser();
-  if (!user) redirect(`/login?next=${encodeURIComponent(`/payments/pok/return?${query}`)}`);
+  // R3-ADDR: the login target is the resume page, not this route; see
+  // ../resume/page.tsx for why. Only the two validated values are carried.
+  if (!user) {
+    const resume = new URLSearchParams({ intent: intent.data, token: token.data });
+    redirect(`/login?next=${encodeURIComponent(`/payments/pok/resume?${resume}`)}`);
+  }
   let destination = "/library?error=Payment+verification+pending";
   try {
     const config = getPokConfig();

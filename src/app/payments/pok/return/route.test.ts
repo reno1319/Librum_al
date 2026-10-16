@@ -30,6 +30,13 @@ describe("POK browser return", () => {
     await expect(GET(request())).rejects.toMatchObject({ target: expect.stringContaining("/login?next=") });
     expect(mocks.fulfill).not.toHaveBeenCalled();
   });
+  // R3-ADDR: login's Server Action redirect must land on a page, never on
+  // this route handler, or the token stays in the address bar after sign-in.
+  it("unauthenticated return sends login to the resume page with only the validated values", async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: null } });
+    const next = `/payments/pok/resume?intent=${id}&token=${token}`;
+    await expect(GET(request())).rejects.toMatchObject({ target: `/login?next=${encodeURIComponent(next)}` });
+  });
   it("binds original reader and only reports verified fulfillment", async () => {
     mocks.fulfill.mockResolvedValue({ status: "fulfilled", bookId: "book" });
     await expect(GET(request())).rejects.toMatchObject({ target: "/books/book?purchase=success" });
