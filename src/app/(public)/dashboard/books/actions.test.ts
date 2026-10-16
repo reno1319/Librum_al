@@ -1120,13 +1120,21 @@ describe("updateBook: update atomicity when the final manuscript write fails (CB
 
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
+    // QA-FIX-3: an in-place replacement is uploaded only after the row
+    // update, so a failed upload leaves the old, still-valid manuscript
+    // in place under the unchanged file_path, the other details saved,
+    // and the author told exactly that -- never a success message.
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Could+not+upload+your+manuscript.+Please+try+again`,
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(
+        "Your changes were saved, but the new manuscript could not be uploaded. The previous file is still in place. Please choose the file again.",
+      )}`,
     );
-    // The DB row is never touched -- existing.file_path (the old,
-    // still-valid manuscript) remains authoritative.
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockRemoveManuscript).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledOnce();
+    expect(mockUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+      mockUploadManuscript.mock.invocationCallOrder[0],
+    );
+    // Only the temporary upload is removed; the live key never is.
+    expect(mockRemoveManuscript).toHaveBeenCalledWith([tempPath]);
   });
 });
 
@@ -1338,11 +1346,17 @@ describe("updateBook: update atomicity when the final cover write fails (COVER-1
 
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
+    // QA-FIX-3: same in-place contract as the manuscript case above.
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`,
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(
+        "Your changes were saved, but the new cover could not be uploaded. The previous file is still in place. Please choose the file again.",
+      )}`,
     );
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockRemoveManuscript).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledOnce();
+    expect(mockUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+      mockUploadCover.mock.invocationCallOrder[0],
+    );
+    expect(mockRemoveManuscript).toHaveBeenCalledWith([tempPath]);
   });
 });
 

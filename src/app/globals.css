@@ -13,7 +13,11 @@
   --color-foreground: #201c1a;
   --color-muted: #706a64;
   --color-border: #ded9d1;
-  --color-primary: #6a5cf0;
+  /* QA-FIX-5: darkened from #6a5cf0 (4.42:1 on the page background,
+     below the WCAG AA 4.5:1 minimum for text) to #5f50e4, which clears
+     4.5:1 on background, surface, surface-hover and violet-tint, and
+     gives white button text 5.6:1. Hover stays the darker #5849dc. */
+  --color-primary: #5f50e4;
   --color-primary-hover: #5849dc;
   --color-primary-foreground: #ffffff;
 

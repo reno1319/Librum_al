@@ -63,7 +63,7 @@ export function BookCard({
         </Link>
       )}
 
-      <span className="text-sm font-medium text-primary/80">
+      <span className="text-sm font-medium text-primary">
         {formatCatalogPriceLabel(book.price_all)}
       </span>
     </div>

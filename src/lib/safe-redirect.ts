@@ -54,3 +54,14 @@ export function resolveSafeInternalPath(
 
   return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
+
+// QA-FIX-1: a failed login must keep the reader's return destination
+// (e.g. the POK payment resume link), or one mistyped password sends them
+// to "/" and the purchase return is lost. Only a value that passes the
+// same safe-redirect policy as the success path is carried; anything else
+// is dropped, so this can never forward an external URL.
+export function loginErrorPath(message: string, next: string): string {
+  const path = `/login?error=${encodeURIComponent(message)}`;
+  const safeNext = resolveSafeInternalPath(next);
+  return safeNext ? `${path}&next=${encodeURIComponent(safeNext)}` : path;
+}
