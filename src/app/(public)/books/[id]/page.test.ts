@@ -133,10 +133,11 @@ function stubSupabase(
     user?: { id: string } | null;
     quoteRows?: unknown[] | null;
     book?: Record<string, unknown>;
+    owns?: boolean;
   } = {},
 ) {
   const rpc = vi.fn(async (name: string) => {
-    if (name === "user_owns_book") return { data: false };
+    if (name === "user_owns_book") return { data: options.owns ?? false };
     if (name === "get_book_checkout_quote") return { data: options.quoteRows ?? null };
     return { data: null };
   });
@@ -418,5 +419,39 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     expect(html).toContain("lapsed before it could be resumed");
     expect(html).toContain("nothing was charged");
     expect(html).not.toContain("Continue that checkout");
+  });
+});
+
+// QA-FIX-2: POK's failRedirectUrl lands here with ?canceled=true.
+describe("BookDetailPage: cancelled POK payment notice", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    openPaidCheckout();
+    mockCreateClient.mockReset();
+    mockCreateAdminClient.mockReset();
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  async function render(searchParams: Record<string, string>, options?: Parameters<typeof stubSupabase>[0]) {
+    const { client } = stubSupabase(options);
+    mockCreateClient.mockImplementation(() => client);
+    mockCreateAdminClient.mockImplementation(() => ({ from: () => queryStub({ data: null }) }));
+    const element = await BookDetailPage(pageArgs(searchParams));
+    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+
+  const NOTICE = "Payment was cancelled or did not go through.";
+
+  it("shows the notice on an unowned book", async () => {
+    expect(await render({ canceled: "true" })).toContain(NOTICE);
+  });
+
+  it("shows nothing without the parameter or with another value", async () => {
+    expect(await render({})).not.toContain(NOTICE);
+    expect(await render({ canceled: "1" })).not.toContain(NOTICE);
+  });
+
+  it("shows nothing once the reader owns the book", async () => {
+    expect(await render({ canceled: "true" }, { owns: true })).not.toContain(NOTICE);
   });
 });

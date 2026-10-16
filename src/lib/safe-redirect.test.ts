@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveSafeInternalPath } from "./safe-redirect";
+import { loginErrorPath, resolveSafeInternalPath } from "./safe-redirect";
 
 // LAUNCH-1 P1: the only thing under test here is resolveSafeInternalPath's
 // own accept/reject boundary -- pure function, no Next.js/Supabase mocking
@@ -115,4 +115,36 @@ describe("resolveSafeInternalPath: rejects everything that could leave the site"
   it("mixed backslash/slash network-path form", () => {
     expect(resolveSafeInternalPath("\\/evil.com")).toBeNull();
   });
+});
+
+// QA-FIX-1: failed-login redirects keep a safe `next` and drop anything else.
+describe("loginErrorPath", () => {
+  function parse(path: string) {
+    const url = new URL(path, "https://librum.invalid");
+    return { pathname: url.pathname, error: url.searchParams.get("error"), next: url.searchParams.get("next") };
+  }
+
+  it("carries a safe next, including the POK resume link with its query", () => {
+    const resume = "/payments/pok/resume?intent=abc&token=t0k";
+    expect(parse(loginErrorPath("Invalid login credentials", resume))).toEqual({
+      pathname: "/login",
+      error: "Invalid login credentials",
+      next: resume,
+    });
+  });
+
+  it("omits next when it is empty", () => {
+    expect(parse(loginErrorPath("Invalid login credentials", ""))).toEqual({
+      pathname: "/login",
+      error: "Invalid login credentials",
+      next: null,
+    });
+  });
+
+  it.each(["//evil.com/phish", "/\\evil.com/phish", "https://evil.com", "javascript:alert(1)"])(
+    "drops an unsafe next (%s)",
+    (candidate) => {
+      expect(parse(loginErrorPath("Invalid login credentials", candidate)).next).toBeNull();
+    },
+  );
 });

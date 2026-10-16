@@ -119,8 +119,11 @@ export default async function DiscountsPage({
             />
           </label>
 
-          <div className="flex gap-3">
-            <label className="flex flex-1 flex-col gap-1 text-sm">
+          {/* QA-FIX-4: stacked on phones. Side by side, the select's
+              longest option plus the input's default width ran past a
+              375px screen. min-w-0 lets each half shrink on wider ones. */}
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
               Discount type
               <select name="type" required defaultValue="percent" className={formControlClasses}>
                 <option value="percent">Percentage off</option>
@@ -131,7 +134,7 @@ export default async function DiscountsPage({
               </select>
             </label>
 
-            <label className="flex flex-1 flex-col gap-1 text-sm">
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
               Value
               {/* Text, not type="number": the whole-lek convention accepts
                   "250,00", which a number input refuses, and the server

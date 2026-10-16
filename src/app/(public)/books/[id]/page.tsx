@@ -229,6 +229,9 @@ export default async function BookDetailPage({
     // a resume submits can be steered from the query string.
     checkout_conflict?: string;
     checkout_expired?: string;
+    // QA-FIX-2: set by POK's failRedirectUrl (src/lib/pok-checkout.ts)
+    // when the reader cancels or the payment fails on POK's page.
+    canceled?: string;
   }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive public book detail page (V3 §3)
@@ -246,6 +249,7 @@ export default async function BookDetailPage({
     error,
     checkout_conflict: checkoutConflict,
     checkout_expired: checkoutExpired,
+    canceled,
   } = await searchParams;
 
   const supabase = await createClient();
@@ -760,6 +764,19 @@ export default async function BookDetailPage({
             <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
               That checkout lapsed before it could be resumed, so nothing was
               charged. You can start a new one at the current price.
+            </p>
+          )}
+          {/* QA-FIX-2: POK sends both a cancel and a failed payment here,
+              so the text claims neither a charge nor its absence. Hidden
+              once the book is owned (e.g. a later retry succeeded), where
+              it would contradict the page. */}
+          {canceled === "true" && !owned && (
+            <p
+              role="status"
+              className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              Payment was cancelled or did not go through. You can try again
+              whenever you&apos;re ready.
             </p>
           )}
           {error && (

@@ -324,6 +324,24 @@ describe("login: never marked as a recovery session", () => {
     expect(mockCookieStore.delete).not.toHaveBeenCalled();
   });
 
+  // QA-FIX-1: a mistyped password must not lose the POK resume link.
+  it("invalid credentials keep a safe next and drop an unsafe one", async () => {
+    mockSupabaseAuth.signInWithPassword.mockResolvedValue({
+      error: { message: "Invalid login credentials" },
+    });
+    const resume = "/payments/pok/resume?intent=abc&token=t0k";
+    await expectRedirectTo(
+      login(formData({ email: "reader@example.com", password: "wrong", next: resume })),
+      `/login?error=Invalid%20login%20credentials&next=${encodeURIComponent(resume)}`,
+    );
+    mockRedirect.mockClear();
+    await expectRedirectTo(
+      login(formData({ email: "reader@example.com", password: "wrong", next: "//evil.com/phish" })),
+      "/login?error=Invalid%20login%20credentials",
+    );
+    expect(mockRedirect.mock.calls[0][0]).not.toContain("next=");
+  });
+
   // LAUNCH-1 P1: login()'s `next` handling is routed through
   // resolveSafeInternalPath (src/lib/safe-redirect.ts) rather than a local
   // `next.startsWith("/")` check -- these regression tests prove the

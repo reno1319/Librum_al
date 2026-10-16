@@ -1000,6 +1000,50 @@ export async function updateBook(bookId: string, formData: FormData) {
   // it is) and no Storage call names them. With a replacement, the new
   // key is built ONLY from the verified session user id, this row's own
   // id and the verified bytes -- never from form data or the stored row.
+  //
+  // QA-FIX-3: BOTH inputs are resolved (and so fully validated) before
+  // any upload. The cover used to be uploaded before the manuscript was
+  // validated, so a rejected EPUB could leave a changed live cover behind
+  // an error message.
+  const coverResult = await resolveCoverInput(
+    supabase,
+    user.id,
+    formData,
+    `/dashboard/books/${bookId}/edit`,
+  );
+  // Normalizes EITHER a direct File OR a manuscriptStoragePath
+  // reference into the same validated bytes -- see
+  // resolveManuscriptInput's own comment near the top of this file.
+  // `present: false` is a legitimate, ordinary outcome here (unlike
+  // createBook()): it just means "no replacement chosen, keep the
+  // existing manuscript untouched."
+  const manuscriptResult = await resolveManuscriptInput(
+    supabase,
+    user.id,
+    formData,
+    `/dashboard/books/${bookId}/edit`,
+    bookId,
+  );
+
+  // QA-FIX-3: the live files are never overwritten before the row update
+  // below has succeeded. A replacement whose key differs from the stored
+  // one (first cover, jpg<->png, or a non-canonical stored manuscript)
+  // touches no live object, so it is uploaded BEFORE the write, as the
+  // row must never point at a missing object. A replacement at the SAME
+  // key as the stored one would overwrite the live file in place, so it
+  // is uploaded only AFTER the write has been proven; if that upload
+  // then fails, the old file is still intact and the author is told
+  // exactly that.
+  type PendingUpload = {
+    bucket: typeof BOOK_COVERS_BUCKET | typeof BOOK_MANUSCRIPTS_BUCKET;
+    path: string;
+    bytes: Buffer;
+    contentType: string;
+    kind: "cover" | "manuscript";
+  };
+  const uploadsBeforeWrite: PendingUpload[] = [];
+  const uploadsAfterWrite: PendingUpload[] = [];
+
   let newCoverPath: string | null = null;
   // The superseded cover, removed only AFTER the guarded update below
   // proves it landed -- never before, so a failed update never leaves
@@ -1009,12 +1053,6 @@ export async function updateBook(bookId: string, formData: FormData) {
   // stored value is left untouched in Storage and only counted.
   let coverPathToRemove: string | null = null;
   let tempCoverToCleanup: string | null = null;
-  const coverResult = await resolveCoverInput(
-    supabase,
-    user.id,
-    formData,
-    `/dashboard/books/${bookId}/edit`,
-  );
 
   if (coverResult.present) {
     // LAUNCH-1 P3-1: coverExtension is derived exclusively from the
@@ -1028,16 +1066,13 @@ export async function updateBook(bookId: string, formData: FormData) {
     newCoverPath = canonicalBookCoverPath(user.id, existing.id, coverResult.extension);
     const storedCoverClass = classifyBookCoverPath(existing.cover_path, user.id, existing.id);
 
-    const { error: coverError } = await supabase.storage
-      .from(BOOK_COVERS_BUCKET)
-      .upload(newCoverPath, coverResult.bytes, { contentType: coverResult.contentType, upsert: true });
-
-    if (coverError) {
-      console.error("updateBook: cover upload failed:", coverError);
-      redirect(
-        `/dashboard/books/${bookId}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`,
-      );
-    }
+    (existing.cover_path === newCoverPath ? uploadsAfterWrite : uploadsBeforeWrite).push({
+      bucket: BOOK_COVERS_BUCKET,
+      path: newCoverPath,
+      bytes: coverResult.bytes,
+      contentType: coverResult.contentType,
+      kind: "cover",
+    });
 
     if (storedCoverClass !== "unsafe" && existing.cover_path !== newCoverPath) {
       coverPathToRemove = existing.cover_path;
@@ -1051,32 +1086,14 @@ export async function updateBook(bookId: string, formData: FormData) {
     tempCoverToCleanup = coverResult.tempPathToCleanup;
   }
 
-  // Normalizes EITHER a direct File OR a manuscriptStoragePath
-  // reference into the same validated bytes -- see
-  // resolveManuscriptInput's own comment near the top of this file.
-  // `present: false` is a legitimate, ordinary outcome here (unlike
-  // createBook()): it just means "no replacement chosen, keep the
-  // existing manuscript untouched," exactly as an absent/empty
-  // `manuscript` File already meant before this correction.
   let newManuscriptPath: string | null = null;
   let tempManuscriptToCleanup: string | null = null;
-  const manuscriptResult = await resolveManuscriptInput(
-    supabase,
-    user.id,
-    formData,
-    `/dashboard/books/${bookId}/edit`,
-    bookId,
-  );
 
   if (manuscriptResult.present) {
-    // Manuscripts always live at the same "<author>/<bookId>.epub" path,
-    // so this simply overwrites the old file in place. Any validation
-    // failure inside resolveManuscriptInput above already redirected
-    // before reaching here, so the existing manuscript is never
-    // partially replaced -- upload success is the only way
-    // books.file_path ever changes. A stored file_path that is not this
-    // key is never removed or otherwise passed to Storage (this action
-    // has never removed a superseded manuscript); it is only counted.
+    // Manuscripts always live at the same "<author>/<bookId>.epub" path.
+    // A stored file_path that is not this key is never removed or
+    // otherwise passed to Storage (this action has never removed a
+    // superseded manuscript); it is only counted.
     newManuscriptPath = canonicalBookManuscriptPath(user.id, existing.id);
     if (
       existing.file_path !== null &&
@@ -1088,21 +1105,30 @@ export async function updateBook(bookId: string, formData: FormData) {
       });
     }
 
-    const { error: manuscriptError } = await supabase.storage
-      .from(BOOK_MANUSCRIPTS_BUCKET)
-      .upload(newManuscriptPath, manuscriptResult.bytes, {
-        contentType: "application/epub+zip",
-        upsert: true,
-      });
-
-    if (manuscriptError) {
-      console.error("updateBook: manuscript upload failed:", manuscriptError);
-      redirect(
-        `/dashboard/books/${bookId}/edit?error=Could+not+upload+your+manuscript.+Please+try+again`,
-      );
-    }
+    (existing.file_path === newManuscriptPath ? uploadsAfterWrite : uploadsBeforeWrite).push({
+      bucket: BOOK_MANUSCRIPTS_BUCKET,
+      path: newManuscriptPath,
+      bytes: manuscriptResult.bytes,
+      contentType: "application/epub+zip",
+      kind: "manuscript",
+    });
 
     tempManuscriptToCleanup = manuscriptResult.tempPathToCleanup;
+  }
+
+  for (const upload of uploadsBeforeWrite) {
+    const { error: uploadError } = await supabase.storage
+      .from(upload.bucket)
+      .upload(upload.path, upload.bytes, { contentType: upload.contentType, upsert: true });
+
+    if (uploadError) {
+      console.error(`updateBook: ${upload.kind} upload failed:`, uploadError);
+      redirect(
+        upload.kind === "cover"
+          ? `/dashboard/books/${bookId}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`
+          : `/dashboard/books/${bookId}/edit?error=Could+not+upload+your+manuscript.+Please+try+again`,
+      );
+    }
   }
 
   // LIBRUM 2.0 PRODUCT-1 PRE-COMMIT LEGACY RETIREMENT: preview_text is
@@ -1213,6 +1239,20 @@ export async function updateBook(bookId: string, formData: FormData) {
     );
   }
 
+  // QA-FIX-3: the row update is proven, so an in-place replacement may
+  // now overwrite the live file. A failure here leaves the old file in
+  // place and the saved details standing; it is reported, not undone.
+  const failedAfterWrite: PendingUpload["kind"][] = [];
+  for (const upload of uploadsAfterWrite) {
+    const { error: uploadError } = await supabase.storage
+      .from(upload.bucket)
+      .upload(upload.path, upload.bytes, { contentType: upload.contentType, upsert: true });
+    if (uploadError) {
+      console.error(`updateBook: in-place ${upload.kind} upload failed after the save:`, uploadError);
+      failedAfterWrite.push(upload.kind);
+    }
+  }
+
   // Only now that the DB row correctly points at the new cover is it
   // safe to remove the file it superseded. A cleanup failure here is an
   // orphaned-file problem, not a failed update -- same philosophy as
@@ -1230,6 +1270,14 @@ export async function updateBook(bookId: string, formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath(`/books/${bookId}`);
   revalidatePath("/");
+  if (failedAfterWrite.length > 0) {
+    const files = failedAfterWrite.length === 2 ? "cover and manuscript" : failedAfterWrite[0];
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
+        `Your changes were saved, but the new ${files} could not be uploaded. The previous file is still in place. Please choose the file again.`,
+      )}`,
+    );
+  }
   redirect("/dashboard?success=Book+updated");
 }
 
