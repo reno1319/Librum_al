@@ -11733,3 +11733,38 @@ revoke all on function public.list_refund_request_currencies(uuid[]) from public
 revoke all on function public.list_refund_request_currencies(uuid[]) from anon;
 revoke all on function public.list_refund_request_currencies(uuid[]) from authenticated;
 grant execute on function public.list_refund_request_currencies(uuid[]) to authenticated;
+
+-- ============================================================
+-- STORAGE-BUCKET-LIMITS-1: per-file size limit and content-type
+-- allow-list on every bucket. Same statements and reasoning as
+-- migrations/20261016171500_storage_bucket_limits.sql.
+-- ============================================================
+do $$
+declare
+  updated integer := 0;
+  n integer;
+begin
+  update storage.buckets
+     set file_size_limit = 5242880,
+         allowed_mime_types = array['image/jpeg', 'image/png']
+   where id in ('covers', 'avatars', 'blog');
+  get diagnostics n = row_count;
+  updated := updated + n;
+
+  update storage.buckets
+     set file_size_limit = 52428800,
+         allowed_mime_types = array[
+           'application/epub+zip',
+           'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+           'image/jpeg',
+           'image/png'
+         ]
+   where id = 'manuscripts';
+  get diagnostics n = row_count;
+  updated := updated + n;
+
+  if updated <> 4 then
+    raise exception 'storage bucket limits: expected 4 buckets, updated %', updated;
+  end if;
+end;
+$$;
