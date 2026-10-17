@@ -121,7 +121,7 @@ export default async function AdminLoginPage({
       </form>
 
       <p className="mt-4 text-sm text-muted">
-        <Link href="/forgot-password" className="focus-ring rounded-sm hover:underline">
+        <Link href="/forgot-password" className="focus-ring rounded-sm underline underline-offset-2 hover:decoration-2">
           Forgot your password?
         </Link>
       </p>

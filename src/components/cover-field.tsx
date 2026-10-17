@@ -289,7 +289,7 @@ export function CoverField({
           className={PICKER_INPUT_CLASSES}
           onChange={(e) => handleCoverChange(e.target.files?.[0] ?? null)}
         />
-        <span className="text-xs text-muted">
+        <span className="text-sm text-muted">
           JPEG or PNG · up to 5 MB.
           {isReplaceMode ? " Leave blank to keep the current cover." : ""}
         </span>
@@ -325,7 +325,7 @@ export function CoverField({
       {status === "error" && (
         <p
           role="alert"
-          className="rounded-lg border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
+          className="rounded-card border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
         >
           {errorMessage}
         </p>

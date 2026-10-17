@@ -76,7 +76,7 @@ export default async function AdminBookReportsPage({
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/admin" className="text-sm text-muted hover:underline">
+      <Link href="/admin" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to admin
       </Link>
       <div className="mt-2">
@@ -95,7 +95,7 @@ export default async function AdminBookReportsPage({
               key={filter.value}
               href={href}
               aria-current={isActive ? "true" : undefined}
-              className={`rounded-full border px-3 py-1 text-sm ${
+              className={`rounded-control border px-3 py-1 text-sm ${
                 isActive
                   ? "border-primary bg-primary text-primary-foreground"
                   : "border-border bg-surface text-foreground hover:bg-surface-hover"
@@ -119,7 +119,7 @@ export default async function AdminBookReportsPage({
             <li key={report.id}>
               <Link
                 href={`/admin/reports/${report.id}`}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
               >
                 <div>
                   <p className="font-medium">{report.books?.title ?? "Book unavailable"}</p>

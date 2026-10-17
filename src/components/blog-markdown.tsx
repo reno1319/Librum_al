@@ -35,7 +35,7 @@ const COMPONENTS: Components = {
   hr: (props) => <hr className="my-8 border-border" {...props} />,
   strong: (props) => <strong className="font-semibold" {...props} />,
   // eslint-disable-next-line @next/next/no-img-element -- Markdown source URLs are arbitrary strings, not statically known at build time, so next/image's own required width/height/loader contract doesn't apply here.
-  img: (props) => <img className="mt-4 aspect-[3/2] w-full rounded-lg object-cover" {...props} alt={props.alt ?? ""} />,
+  img: (props) => <img className="mt-4 aspect-[3/2] w-full rounded-card object-cover" {...props} alt={props.alt ?? ""} />,
 };
 
 export function BlogMarkdown({ markdown }: { markdown: string }) {

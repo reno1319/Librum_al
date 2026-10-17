@@ -19,7 +19,7 @@ export default async function ForgotPasswordPage({
   const { error, success } = await searchParams;
 
   return (
-    <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
+    <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
       <h1 className="font-serif text-3xl font-normal">Reset your password</h1>
 
       {error && (

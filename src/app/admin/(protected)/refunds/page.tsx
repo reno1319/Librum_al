@@ -109,7 +109,7 @@ export default async function AdminRefundsPage() {
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/admin" className="text-sm text-muted hover:underline">
+      <Link href="/admin" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to admin
       </Link>
       <h1 className="mt-2 font-serif text-3xl font-semibold">Refund requests</h1>
@@ -118,7 +118,7 @@ export default async function AdminRefundsPage() {
       </p>
 
       {sortedRequests.length === 0 ? (
-        <p className="mt-8 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
+        <p className="mt-8 rounded-card border border-dashed border-border px-6 py-16 text-center text-muted">
           No refund requests yet.
         </p>
       ) : (
@@ -127,7 +127,7 @@ export default async function AdminRefundsPage() {
             <li key={request.id}>
               <Link
                 href={`/admin/refunds/${request.id}`}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
               >
                 <div>
                   <p className="font-medium">

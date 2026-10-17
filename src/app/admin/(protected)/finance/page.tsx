@@ -78,7 +78,7 @@ function resolveReaderDisplay(readerId: string | null, displayName: string | nul
   return displayName ?? "Unknown reader";
 }
 
-const controlClass = "focus-ring rounded-md border border-border bg-surface px-3 py-1.5 text-sm";
+const controlClass = "focus-ring rounded-control border border-control bg-surface px-3 py-1.5 text-sm";
 
 // A small text badge, never color-only (ADMIN-1D Part C's own explicit
 // accessibility requirement) -- "Needs attention" vs "OK" are distinct
@@ -181,7 +181,7 @@ export default async function AdminFinancePage({
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/admin" className="text-sm text-muted hover:underline">
+      <Link href="/admin" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to admin
       </Link>
       <div className="mt-2">
@@ -252,7 +252,7 @@ function SummaryCards({
         <Link
           key={card.label}
           href={card.href}
-          className="focus-ring rounded-lg border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
+          className="focus-ring rounded-card border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
         >
           <p className="font-serif text-2xl font-semibold text-foreground">{card.count}</p>
           <p className="mt-1 text-xs text-muted">{card.label}</p>
@@ -304,7 +304,7 @@ function RefundSection({
       <form
         action="/admin/finance"
         method="get"
-        className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4"
+        className="mt-4 flex flex-wrap items-end gap-3 rounded-card border border-border bg-surface p-4"
       >
         <div>
           <label htmlFor="refund-state" className="block text-xs text-muted">
@@ -427,7 +427,7 @@ function RefundMobileList({ rows }: { rows: FinanceRefundReconciliationRow[] }) 
   return (
     <ul className="mt-4 flex flex-col gap-3 md:hidden">
       {rows.map((row) => (
-        <li key={row.refund_request_id} className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <li key={row.refund_request_id} className="rounded-card border border-border bg-surface p-4 shadow-sm">
           <Link href={`/admin/refunds/${row.refund_request_id}`} className="font-medium text-primary underline underline-offset-2 hover:decoration-2">
             {resolveReaderDisplay(row.reader_id, row.reader_display_name)}
           </Link>
@@ -470,7 +470,7 @@ function DisputeSection({
       <form
         action="/admin/finance"
         method="get"
-        className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4"
+        className="mt-4 flex flex-wrap items-end gap-3 rounded-card border border-border bg-surface p-4"
       >
         <div>
           <label htmlFor="dispute-attention" className="block text-xs text-muted">
@@ -581,7 +581,7 @@ function DisputeMobileList({ rows }: { rows: FinanceDisputeRow[] }) {
   return (
     <ul className="mt-4 flex flex-col gap-3 md:hidden">
       {rows.map((row) => (
-        <li key={row.id} className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <li key={row.id} className="rounded-card border border-border bg-surface p-4 shadow-sm">
           <p className="font-medium text-foreground">{resolveReaderDisplay(row.reader_id, row.reader_display_name)}</p>
           <p className="mt-0.5 text-xs text-muted">{formatTimestamp(row.created_at)} &middot; {formatAmount(row)}</p>
           <p className="mt-2 text-sm">
@@ -685,7 +685,7 @@ function CheckoutMobileList({ rows }: { rows: FinanceCheckoutExceptionRow[] }) {
   return (
     <ul className="mt-4 flex flex-col gap-3 md:hidden">
       {rows.map((row) => (
-        <li key={row.intent_id} className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <li key={row.intent_id} className="rounded-card border border-border bg-surface p-4 shadow-sm">
           <p className="font-medium text-foreground">{row.book_title}</p>
           <p className="mt-0.5 text-xs text-muted">
             {resolveReaderDisplay(row.reader_id, row.reader_display_name)} &middot; {formatTimestamp(row.completed_at)}
@@ -732,7 +732,7 @@ function MismatchSection({
           {rows.map((row, index) => (
             <li
               key={`${row.mismatch_type}-${row.refund_request_id ?? row.purchase_id ?? index}`}
-              className="rounded-lg border border-border bg-surface p-4 shadow-sm"
+              className="rounded-card border border-border bg-surface p-4 shadow-sm"
             >
               <p className="text-sm font-medium text-foreground">Potential consistency issue</p>
               <p className="mt-1 text-sm text-muted">{describeRefundEntitlementMismatch(row.mismatch_type)}</p>

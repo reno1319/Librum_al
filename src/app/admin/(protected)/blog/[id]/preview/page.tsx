@@ -54,11 +54,11 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <Link href={`/admin/blog/${post.id}/edit`} className="text-sm text-muted hover:underline">
+      <Link href={`/admin/blog/${post.id}/edit`} className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to editor
       </Link>
 
-      <p className="mt-4 rounded-md bg-primary/10 px-3 py-2 text-xs text-primary">
+      <p className="mt-4 rounded-card bg-primary/10 px-3 py-2 text-xs text-primary">
         Staff preview -- {post.status === "published" ? "this article is live" : "this is a draft, not visible to the public"}
         . Approximates the future public article layout (BLOG-1D).
       </p>
@@ -91,7 +91,7 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
           <img
             src={coverImageUrl}
             alt=""
-            className="mt-6 aspect-[3/2] w-full rounded-lg object-cover"
+            className="mt-6 aspect-[3/2] w-full rounded-card object-cover"
           />
         )}
 

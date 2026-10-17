@@ -45,8 +45,8 @@ export default async function EditProfilePage({
     : null;
 
   return (
-    <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
@@ -92,7 +92,7 @@ export default async function EditProfilePage({
               as a reader itself -- e.g. next to a book review this same
               account posts -- which is a separate identity concept the
               caption must not imply is covered. */}
-          <span className="text-xs text-muted">
+          <span className="text-sm text-muted">
             Your account name. Not shown to readers as your author name once you set a public author name below.
           </span>
         </label>
@@ -113,10 +113,10 @@ export default async function EditProfilePage({
               defaultValue={resolvePublicAuthorName(profile) ?? ""}
               className={formControlClasses}
             />
-            <span className="text-xs text-muted">
+            <span className="text-sm text-muted">
               This is the name readers will see on your books and author page.
             </span>
-            <span className="text-xs text-muted">
+            <span className="text-sm text-muted">
               If you publish under a pen name, set it before publishing. The author name may be
               embedded in your EPUB file.
             </span>

@@ -18,7 +18,7 @@ export default async function ResetPasswordPage({
   const { error } = await searchParams;
 
   return (
-    <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
+    <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
       <h1 className="font-serif text-3xl font-normal">Set a new password</h1>
       <p className="mt-1 text-sm text-muted">
         You&apos;re completing a password reset. Set a new password to continue.

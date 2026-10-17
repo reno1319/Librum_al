@@ -168,21 +168,21 @@ export default async function AdminRefundRequestDetailPage({
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/admin/refunds" className="text-sm text-muted hover:underline">
+      <Link href="/admin/refunds" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to refund requests
       </Link>
       <h1 className="mt-2 font-serif text-3xl font-semibold">Refund request</h1>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+        <p className="mt-4 rounded-card bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       )}
       {successMessage && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+        <p className="mt-4 rounded-card bg-green-50 px-3 py-2 text-sm text-green-700">
           {successMessage}
         </p>
       )}
 
-      <div className="mt-6 rounded-lg border border-border bg-surface p-4 shadow-sm">
+      <div className="mt-6 rounded-card border border-border bg-surface p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="font-medium">{readerDisplayName}</p>
@@ -258,7 +258,7 @@ export default async function AdminRefundRequestDetailPage({
             {allItems.map((item) => (
               <li
                 key={item.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-2 text-sm"
+                className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface px-4 py-2 text-sm"
               >
                 <span>{item.books?.title ?? "Book unavailable"}</span>
                 <span className="text-muted">{formatTransactionAmount(item.amount_cents, requestCurrency)}</span>
@@ -269,14 +269,14 @@ export default async function AdminRefundRequestDetailPage({
       </div>
 
       {reviewable && (
-        <form className="mt-6 rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <form className="mt-6 rounded-card border border-border bg-surface p-4 shadow-sm">
           <label className="flex flex-col gap-1 text-sm">
             Admin notes (optional)
             <textarea
               name="adminNotes"
               rows={3}
               maxLength={2000}
-              className="rounded-lg border border-border bg-surface px-3 py-2"
+              className="rounded-control border border-control bg-surface px-3 py-2"
             />
           </label>
           <ReviewButtons
@@ -289,7 +289,7 @@ export default async function AdminRefundRequestDetailPage({
       {canIssueRefund(request.status) && (
         <form
           action={issueStripeRefund.bind(null, request.id)}
-          className="mt-6 rounded-lg border border-border bg-surface p-4 shadow-sm"
+          className="mt-6 rounded-card border border-border bg-surface p-4 shadow-sm"
         >
           <p className="text-sm text-muted">
             This request has been approved. Issuing the refund submits it to Stripe --

@@ -44,7 +44,7 @@ export default async function AdminStaffPage({
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/admin" className="text-sm text-muted hover:underline">
+      <Link href="/admin" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to admin
       </Link>
       <h1 className="mt-2 font-serif text-3xl font-semibold">Staff</h1>
@@ -82,7 +82,7 @@ export default async function AdminStaffPage({
         // recovery action here that would bypass RBAC (e.g. no
         // "re-bootstrap an owner" button) -- an empty roster this page
         // can't explain is a database-level problem, not a UI one.
-        <p className="mt-8 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
+        <p className="mt-8 rounded-card border border-dashed border-border px-6 py-16 text-center text-muted">
           No staff members found.
         </p>
       ) : (
@@ -170,7 +170,7 @@ export default async function AdminStaffPage({
               return (
                 <li
                   key={member.user_id}
-                  className="rounded-lg border border-border bg-surface p-4 shadow-sm"
+                  className="rounded-card border border-border bg-surface p-4 shadow-sm"
                 >
                   <p className="font-medium text-foreground">
                     {member.display_name}

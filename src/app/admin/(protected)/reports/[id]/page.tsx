@@ -147,19 +147,19 @@ export default async function AdminBookReportDetailPage({
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/admin/reports" className="text-sm text-muted hover:underline">
+      <Link href="/admin/reports" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to book reports
       </Link>
       <h1 className="mt-2 font-serif text-3xl font-semibold">Book report</h1>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+        <p className="mt-4 rounded-card bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       )}
       {success && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{success}</p>
+        <p className="mt-4 rounded-card bg-green-50 px-3 py-2 text-sm text-green-700">{success}</p>
       )}
 
-      <div className="mt-6 rounded-lg border border-border bg-surface p-4 shadow-sm">
+      <div className="mt-6 rounded-card border border-border bg-surface p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="font-medium">{report.books?.title ?? "Book unavailable"}</p>
@@ -249,14 +249,14 @@ export default async function AdminBookReportDetailPage({
       </div>
 
       {reviewable && (
-        <form className="mt-6 rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <form className="mt-6 rounded-card border border-border bg-surface p-4 shadow-sm">
           <label className="flex flex-col gap-1 text-sm">
             Admin notes (optional)
             <textarea
               name="adminNotes"
               rows={3}
               maxLength={ADMIN_NOTES_MAX_LENGTH}
-              className="rounded-lg border border-border bg-surface px-3 py-2"
+              className="rounded-control border border-control bg-surface px-3 py-2"
             />
           </label>
           <ReportReviewButtons

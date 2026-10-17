@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createSeries, deleteSeries } from "./actions";
 import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
@@ -47,8 +48,8 @@ export default async function SeriesPage({
   }
 
   return (
-    <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
@@ -72,7 +73,7 @@ export default async function SeriesPage({
 
       <form
         action={createSeries}
-        className="mt-6 flex flex-col gap-4 rounded-lg border border-border bg-surface p-4 shadow-sm sm:flex-row sm:items-end"
+        className="mt-6 flex flex-col gap-4 rounded-card border border-border bg-surface p-4 shadow-sm sm:flex-row sm:items-end"
       >
         <label className="flex flex-1 flex-col gap-1 text-sm">
           Series title
@@ -93,7 +94,7 @@ export default async function SeriesPage({
         {(series ?? []).map((s) => (
           <li
             key={s.id}
-            className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4 shadow-sm"
+            className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 shadow-sm"
           >
             <div>
               <p className="font-medium">{s.title}</p>
@@ -105,7 +106,7 @@ export default async function SeriesPage({
             <form action={deleteSeries.bind(null, s.id)}>
               <button
                 type="submit"
-                className="focus-ring rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
               >
                 Delete
               </button>
@@ -113,7 +114,9 @@ export default async function SeriesPage({
           </li>
         ))}
         {(series ?? []).length === 0 && (
-          <p className="text-sm text-muted">No series yet.</p>
+          <li>
+            <EmptyState description="No series yet." />
+          </li>
         )}
       </ul>
     </main>

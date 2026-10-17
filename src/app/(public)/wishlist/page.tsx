@@ -70,7 +70,7 @@ export default async function WishlistPage() {
   );
 
   return (
-    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
       <PageHeader title="Your wishlist" />
 
       {validItems.length === 0 ? (
@@ -102,7 +102,7 @@ export default async function WishlistPage() {
                 <form action={removeFromWishlist.bind(null, book.id)}>
                   <button
                     type="submit"
-                    className="focus-ring w-fit rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                    className="focus-ring w-fit rounded-control border border-border px-3 py-1.5 text-xs hover:bg-surface-hover"
                   >
                     Remove
                   </button>

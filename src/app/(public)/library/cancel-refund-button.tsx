@@ -11,7 +11,7 @@ export function CancelRefundButton() {
     <button
       type="submit"
       disabled={pending}
-      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-surface-hover disabled:opacity-60"
+      className="rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-surface-hover disabled:opacity-60"
       onClick={(e) => {
         const confirmed = window.confirm(
           "Cancel this refund request? You can submit a new one later if you change your mind.",

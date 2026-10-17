@@ -58,7 +58,7 @@ const TEXT_LINK_CLASSES =
 // generous vertical rhythm and left-aligned regular-weight serif
 // headings in green. Every section between the hero and the closing band
 // uses these, alternating cream and white backgrounds.
-const SECTION_CONTAINER = "mx-auto w-full max-w-wide px-4 py-12 sm:px-6 md:py-16";
+const SECTION_CONTAINER = "page-container py-12 md:py-16";
 const SECTION_HEADING = "font-serif text-3xl font-normal text-primary sm:text-4xl lg:text-[2.625rem]";
 // Italic dark-brass numerals, as in the mockup (4.43:1 on cream and
 // white; large text, so 3:1 applies).
@@ -176,7 +176,7 @@ export default async function Home({
   return (
     <main className="flex-1">
       {account === "deleted" && (
-        <div className="mx-auto w-full max-w-wide px-4 pt-10 sm:px-6">
+        <div className="page-container pt-10">
           <Alert variant="success">Your account has been deleted.</Alert>
         </div>
       )}
@@ -216,7 +216,7 @@ function HeroSection({ cta, covers }: { cta: HomepageCta | null; covers: Cover[]
   return (
     <section className="bg-primary text-primary-foreground">
       <div
-        className={`mx-auto w-full max-w-wide px-4 py-10 sm:px-6 ${showShelf ? "lg:pt-14 lg:pb-0" : "lg:py-14"}`}
+        className={`page-container py-10 ${showShelf ? "lg:pt-14 lg:pb-0" : "lg:py-14"}`}
       >
         <div
           className={`grid gap-10 lg:grid-cols-[55fr_45fr] lg:gap-12 ${showShelf ? "lg:items-end" : "lg:items-center"}`}
@@ -386,9 +386,9 @@ function HeroMedia() {
       <div className="relative pr-3 pb-3">
         <div
           aria-hidden="true"
-          className="absolute top-3 right-0 bottom-0 left-3 rounded-lg border border-accent/70"
+          className="absolute top-3 right-0 bottom-0 left-3 rounded-card border border-accent/70"
         />
-        <div className="relative aspect-video overflow-hidden rounded-lg shadow-md lg:aspect-[4/5]">
+        <div className="relative aspect-video overflow-hidden rounded-card shadow-md lg:aspect-[4/5]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={HERO_IMAGE_SRC}

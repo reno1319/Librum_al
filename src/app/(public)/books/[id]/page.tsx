@@ -570,7 +570,7 @@ export default async function BookDetailPage({
   const authorName = resolvePublicAuthorName(book.profiles);
 
   return (
-    <main className="mx-auto w-full max-w-wide flex-1 px-4 pt-6 pb-16 sm:px-6">
+    <main className="page-container flex-1 pt-5 pb-16 sm:pt-6">
       {/* REDESIGN STEP 3 (P1): Bookstore › Genre › Title. */}
       <nav aria-label="Breadcrumb" className="text-sm text-muted">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -1221,7 +1221,7 @@ export default async function BookDetailPage({
         <p className="mt-10 text-xs text-muted">
           <Link
             href={`/books/${book.id}/report`}
-            className="focus-ring rounded-sm hover:underline"
+            className="focus-ring rounded-sm underline underline-offset-2 hover:decoration-2"
           >
             Report this book
           </Link>

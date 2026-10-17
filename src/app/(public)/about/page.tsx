@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 
 export default function AboutPage() {
   return (
-    <main className="mx-auto w-full max-w-content flex-1 px-4 py-10 sm:px-6">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
       <PageHeader title="About Librum" />
 
       <div className="mt-8 flex flex-col gap-4 text-foreground/90">

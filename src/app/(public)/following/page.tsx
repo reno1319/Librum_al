@@ -60,7 +60,7 @@ export default async function FollowingPage() {
     .filter((a): a is FollowedAuthor => !!a);
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
       <PageHeader
         title="Authors you follow"
         description="You'll get an email whenever one of them publishes a new book."
@@ -82,17 +82,17 @@ export default async function FollowingPage() {
             return (
               <li
                 key={author.id}
-                className="flex flex-wrap items-center gap-4 rounded-lg border border-border bg-surface p-4 shadow-sm"
+                className="flex flex-wrap items-center gap-4 rounded-card border border-border bg-surface p-4 shadow-sm"
               >
                 {avatarUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={avatarUrl}
                     alt=""
-                    className="h-12 w-12 rounded-full object-cover"
+                    className="size-12 shrink-0 rounded-full object-cover"
                   />
                 ) : (
-                  <div className="h-12 w-12 rounded-full bg-border" />
+                  <div className="size-12 shrink-0 rounded-full bg-border" />
                 )}
                 <Link
                   href={`/authors/${author.id}`}

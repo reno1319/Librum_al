@@ -15,6 +15,14 @@
   --color-foreground: #1c2420;
   --color-muted: #4c5751;
   --color-border: #e2daca;
+  /* V1 (visual consistency): form controls -- inputs, selects,
+     textareas, file buttons and the price box -- get the mockup's
+     darker control border (3.71:1 on white, 3.35:1 on cream, above the
+     3:1 a control's edge needs). --color-border stays for cards and
+     dividers, which are not controls. Placeholder text 5.6:1 on white,
+     5.0:1 on cream. */
+  --color-control: #8c8472;
+  --color-placeholder: #6e675b;
   --color-primary: #1e3a32;
   --color-primary-hover: #122520;
   --color-primary-foreground: #f7f3ea;
@@ -49,6 +57,12 @@
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-full: 999px;
+  /* V1: the mockup's two corners. 3px on buttons, fields, chips/filter
+     controls and status tags (rounded-control); 4px on cards, panels,
+     bands, alerts, empty states and dialogs (rounded-card). These
+     replace the pre-redesign 8/12px corners (rounded-md/-lg). */
+  --radius-control: 3px;
+  --radius-card: 4px;
 
   --shadow-sm: 0 1px 2px rgb(28 36 32 / 0.06);
   --shadow-md: 0 6px 18px rgb(28 36 32 / 0.08);
@@ -58,7 +72,7 @@
   --container-form: 24rem;
   --container-content: 42rem;
   --container-app: 64rem;
-  --container-wide: 72rem;
+  --container-wide: 75rem;
 
   --font-sans: var(--font-libre-franklin);
   --font-serif: var(--font-libre-caslon);
@@ -99,6 +113,36 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* V1: the one page container shared by the header, every wide page
+   and the footer -- 1200px wide INCLUDING its side gutter (Tailwind's
+   border-box), so at a 1280px window the content's left edge sits at
+   64px everywhere. Gutter 24px, 16px on phone. */
+@utility page-container {
+  margin-inline: auto;
+  width: 100%;
+  max-width: var(--container-wide);
+  padding-inline: 1rem;
+  @media (width >= 40rem) {
+    padding-inline: 1.5rem;
+  }
+}
+
+@layer base {
+  /* V1: one placeholder colour for every field (5.6:1 on white, 5.0:1
+     on cream); opacity 1 because Firefox dims placeholders by default. */
+  ::placeholder {
+    color: var(--color-placeholder);
+    opacity: 1;
+  }
+
+  /* V1: every native radio and checkbox in the library green, as Add a
+     book's own radios already were, instead of the browser's blue. */
+  input[type="radio"],
+  input[type="checkbox"] {
+    accent-color: var(--color-primary);
   }
 }
 

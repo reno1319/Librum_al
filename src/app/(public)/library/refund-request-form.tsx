@@ -10,7 +10,7 @@ function SubmitButton() {
     <button
       type="submit"
       disabled={pending}
-      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+      className="rounded-control bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
     >
       {pending ? "Submitting…" : "Submit refund request"}
     </button>
@@ -38,7 +38,7 @@ export function RefundRequestForm({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+        className="rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
       >
         Request refund
       </button>
@@ -48,7 +48,7 @@ export function RefundRequestForm({
   return (
     <form
       action={action}
-      className="mt-3 w-full rounded-lg border border-border bg-surface p-4"
+      className="mt-3 w-full rounded-card border border-border bg-surface p-4"
     >
       <p className="text-sm font-medium">
         Request a refund for this {bookCount > 1 ? "transaction" : "purchase"}?
@@ -66,7 +66,7 @@ export function RefundRequestForm({
           name="reason"
           rows={3}
           maxLength={REFUND_REASON_MAX_LENGTH}
-          className="rounded-lg border border-border bg-surface px-3 py-2"
+          className="rounded-control border border-control bg-surface px-3 py-2"
         />
       </label>
       <div className="mt-3 flex gap-2">
@@ -74,7 +74,7 @@ export function RefundRequestForm({
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+          className="rounded-control border border-border px-3 py-2 text-sm hover:bg-surface-hover"
         >
           Never mind
         </button>

@@ -157,8 +157,8 @@ export default async function BalancePage({
   const isEditingBank = editBank === "1";
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
@@ -372,7 +372,7 @@ export default async function BalancePage({
       <section className="mt-10 border-t border-border pt-8">
         <h2 className="font-serif text-xl font-normal">Payout setup</h2>
 
-        <div className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="mt-4 rounded-card border border-border bg-surface p-4 shadow-sm">
           <h3 className="font-serif text-base font-normal">Bank account</h3>
 
           {destination && !isEditingBank ? (
@@ -430,7 +430,7 @@ export default async function BalancePage({
                     placeholder="AL47 2121 1009 0000 0002 3569 8741"
                     className={formControlClasses}
                   />
-                  <span className="text-xs text-muted">
+                  <span className="text-sm text-muted">
                     We check that this is a validly formatted IBAN — this confirms the format
                     only, not that the account belongs to you.
                   </span>
@@ -456,7 +456,7 @@ export default async function BalancePage({
           )}
         </div>
 
-        <div className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="mt-4 rounded-card border border-border bg-surface p-4 shadow-sm">
           <h3 className="font-serif text-base font-normal">Payout threshold</h3>
           <p className="mt-2 text-sm text-muted">
             {minimumPolicyConfigured
@@ -490,7 +490,7 @@ function BalanceCard({
   emphasize?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+    <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
       <p className="text-sm text-muted">{label}</p>
       <p
         className={

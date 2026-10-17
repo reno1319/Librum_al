@@ -49,7 +49,7 @@ export default async function AccountPage({
   const roleLabel = isAuthor ? "Author" : profile?.role === "reader" ? "Reader" : null;
 
   return (
-    <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
       <PageHeader
         title="Account"
         description="Manage your Librum account and access your account history."
@@ -138,7 +138,7 @@ export default async function AccountPage({
         </button>
       </form>
 
-      <section className="mt-10 rounded-lg border-l-4 border-red-600 bg-surface p-6">
+      <section className="mt-10 rounded-card border-l-4 border-red-600 bg-surface p-6">
         <h2 className="font-serif text-lg font-normal text-red-800">Danger zone</h2>
         <p className="mt-2 text-sm text-foreground/90">
           Delete account. This permanently deletes your account

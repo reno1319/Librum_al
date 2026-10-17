@@ -186,10 +186,10 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-12 sm:px-6">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-12 sm:px-6 sm:pt-10">
       <ArticleJsonLd post={post} url={url} coverUrl={coverUrl} />
 
-      <Link href="/blog" className="text-sm text-muted hover:underline">
+      <Link href="/blog" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Blog
       </Link>
 
@@ -216,7 +216,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
 
         {coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={coverUrl} alt="" className="mt-6 aspect-[3/2] w-full rounded-lg object-cover" />
+          <img src={coverUrl} alt="" className="mt-6 aspect-[3/2] w-full rounded-card object-cover" />
         ) : null}
 
         <div className="mt-8">
@@ -239,7 +239,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
         <p className="text-muted">Gati të botosh librin tënd?</p>
         <Link
           href="/signup?role=author"
-          className="mt-3 inline-block rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+          className="mt-3 inline-block rounded-control bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
         >
           Boto librin tënd
         </Link>

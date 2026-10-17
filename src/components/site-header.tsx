@@ -142,7 +142,7 @@ export async function SiteHeader() {
     <header className="relative bg-primary text-primary-foreground">
       {/* FIX1 (X12): one row from 1024px up -- no wrapping at lg, and
           tighter gaps there; the roomier gaps return at xl. */}
-      <div className="mx-auto flex w-full max-w-wide flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3 sm:px-6 lg:flex-nowrap lg:gap-x-6 xl:gap-x-8">
+      <div className="page-container flex flex-wrap items-center justify-between gap-x-8 gap-y-3 py-3 lg:flex-nowrap lg:gap-x-6 xl:gap-x-8">
         <div className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-2 lg:flex-nowrap lg:gap-x-6 xl:gap-x-8">
           <Link
             href="/"

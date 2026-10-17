@@ -20,7 +20,7 @@ export default async function SignupPage({
   const authorPreselected = role === "author";
 
   return (
-    <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
+    <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
       <h1 className="font-serif text-3xl font-normal">Sign up</h1>
 
       {error && (
@@ -62,7 +62,7 @@ export default async function SignupPage({
             minLength={6}
             className={formControlClasses}
           />
-          <span className="text-xs text-muted">At least 6 characters.</span>
+          <span className="text-sm text-muted">At least 6 characters.</span>
         </label>
 
         <fieldset className="flex flex-col gap-2 text-sm">

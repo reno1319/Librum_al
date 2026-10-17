@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { fileInputClasses } from "@/lib/form-styles";
+import { plainFileInputClasses } from "@/lib/form-styles";
 
 // LIBRUM 2.0 BLOG-1C: adapted from src/components/cover-field.tsx (see
 // that file's own header for the full "why direct browser->Storage,
@@ -197,9 +197,9 @@ export function BlogCoverField({
           <p className="text-sm font-medium">Current cover</p>
           {displayedPreview ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={displayedPreview} alt="" className="aspect-[3/2] w-40 rounded-md object-cover" />
+            <img src={displayedPreview} alt="" className="aspect-[3/2] w-40 rounded-card object-cover" />
           ) : (
-            <div className="aspect-[3/2] w-40 rounded-md bg-border" />
+            <div className="aspect-[3/2] w-40 rounded-card bg-border" />
           )}
         </>
       )}
@@ -209,10 +209,10 @@ export function BlogCoverField({
         <input
           type="file"
           accept="image/png,image/jpeg"
-          className={fileInputClasses}
+          className={plainFileInputClasses}
           onChange={(e) => handleCoverChange(e.target.files?.[0] ?? null)}
         />
-        <span className="text-xs text-muted">
+        <span className="text-sm text-muted">
           JPEG or PNG · up to 5 MB · roughly 3:2 works best.
           {isReplaceMode ? " Leave blank to keep the current cover." : " Optional."}
         </span>
@@ -220,7 +220,7 @@ export function BlogCoverField({
 
       {!isReplaceMode && previewUrl && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={previewUrl} alt="" className="aspect-[3/2] w-40 rounded-md object-cover shadow-sm" />
+        <img src={previewUrl} alt="" className="aspect-[3/2] w-40 rounded-card object-cover shadow-sm" />
       )}
 
       {status === "uploading" && (
@@ -238,7 +238,7 @@ export function BlogCoverField({
       {status === "error" && (
         <p
           role="alert"
-          className="rounded-lg border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
+          className="rounded-card border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
         >
           {errorMessage}
         </p>

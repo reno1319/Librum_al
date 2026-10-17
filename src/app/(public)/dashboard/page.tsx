@@ -159,7 +159,7 @@ export default async function DashboardPage({
 
   if (attention.kind === "zero-books") {
     return (
-      <main className="mx-auto w-full max-w-wide flex-1 px-4 pt-4 pb-16 sm:px-6 sm:pt-6">
+      <main className="page-container flex-1 pt-5 pb-16 sm:pt-10">
         <DashboardMenu />
         {heading}
         {messages}
@@ -223,7 +223,7 @@ export default async function DashboardPage({
         : "Legacy payout account on file";
 
   return (
-    <main className="mx-auto w-full max-w-wide flex-1 px-4 pt-4 pb-16 sm:px-6 sm:pt-6">
+    <main className="page-container flex-1 pt-5 pb-16 sm:pt-10">
       <DashboardMenu />
       {heading}
       {messages}
