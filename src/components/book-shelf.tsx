@@ -26,11 +26,13 @@ export function BookShelf({
   if (books.length === 0) return null;
 
   return (
-    <section style={{ marginTop: "3rem" }}>
-      <h2 className="font-serif text-xl font-semibold">{title}</h2>
+    // REDESIGN STEP 3: A2 heading (thin green serif) and the restyled
+    // BookCard, in the same sideways-scrolling row.
+    <section style={{ marginTop: "3.5rem" }}>
+      <h2 className="font-serif text-[1.75rem] font-normal leading-tight text-primary">{title}</h2>
       <div
         className="overflow-x-auto pb-2"
-        style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}
+        style={{ display: "flex", gap: "1.5rem", marginTop: "1.25rem" }}
       >
         {books.map((book) => {
           const coverUrl = book.cover_path
