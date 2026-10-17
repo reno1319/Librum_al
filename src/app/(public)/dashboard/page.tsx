@@ -159,8 +159,7 @@ export default async function DashboardPage({
 
   if (attention.kind === "zero-books") {
     return (
-      <main className="page-container flex-1 pt-5 pb-16 sm:pt-10">
-        <DashboardMenu />
+      <main className="page-container flex-1 pb-16">
         {heading}
         {messages}
 
@@ -223,8 +222,7 @@ export default async function DashboardPage({
         : "Legacy payout account on file";
 
   return (
-    <main className="page-container flex-1 pt-5 pb-16 sm:pt-10">
-      <DashboardMenu />
+    <main className="page-container flex-1 pb-16">
       {heading}
       {messages}
 
@@ -391,38 +389,6 @@ export default async function DashboardPage({
   );
 }
 
-// D5: the existing dashboard pages, by their existing names. Dashboard
-// is this page and is marked (bold, brass bar, aria-current); the row
-// scrolls sideways on a phone instead of wrapping, so it stays one line
-// above the heading. Menu items are navigation, which the C1 underline
-// rule excludes; the current item has non-colour cues.
-function DashboardMenu() {
-  return (
-    <nav aria-label="Dashboard" className="-mx-4 overflow-x-auto border-b border-border px-4 sm:mx-0 sm:px-0">
-      <ul className="flex min-w-max gap-1">
-        {DASHBOARD_MENU.map((item) => {
-          const current = item.href === "/dashboard";
-          return (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                aria-current={current ? "page" : undefined}
-                className={`focus-ring -mb-px flex min-h-11 items-center whitespace-nowrap border-b-[3px] px-3 text-[0.9375rem] transition-colors ${
-                  current
-                    ? "border-accent font-bold text-primary"
-                    : "border-transparent font-medium text-foreground hover:text-primary"
-                }`}
-              >
-                {item.label}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
-  );
-}
-
 function BookTabLink({
   label,
   href,
@@ -556,18 +522,6 @@ function MoneySummary({
     </section>
   );
 }
-
-const DASHBOARD_MENU: { href: string; label: string }[] = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/dashboard/books", label: "Books" },
-  { href: "/dashboard/sales", label: "Sales" },
-  { href: "/dashboard/balance", label: "Financial balance" },
-  { href: "/dashboard/payouts", label: "Payouts" },
-  { href: "/dashboard/bundles", label: "Bundles" },
-  { href: "/dashboard/series", label: "Series" },
-  { href: "/dashboard/discounts", label: "Discounts" },
-  { href: "/dashboard/profile", label: "Profile" },
-];
 
 const DASHBOARD_TOOLS: { href: string; label: string; description: string }[] = [
   {

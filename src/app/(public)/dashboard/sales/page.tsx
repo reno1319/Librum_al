@@ -255,7 +255,7 @@ export default async function SalesPage() {
   }
 
   return (
-    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>

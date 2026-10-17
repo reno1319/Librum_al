@@ -56,7 +56,7 @@ export default async function NewBookPage({
     // REDESIGN STEP 5 (A2): a wider page so the Price step's side panel
     // fits beside the form; the title row keeps its existing words in the
     // dashboard's heading style, and its text link is underlined at rest.
-    <main className="page-container flex-1 pt-5 pb-16 sm:pt-10">
+    <main className="page-container flex-1 pt-5 pb-16 sm:pt-8">
       <Link
         href="/dashboard"
         className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"

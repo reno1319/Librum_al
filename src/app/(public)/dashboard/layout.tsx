@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { INTERNAL_PATHNAME_HEADER } from "@/lib/internal-headers";
 import { resolveSafeInternalPath } from "@/lib/safe-redirect";
+import { DashboardMenu } from "./dashboard-menu";
 
 // LIBRUM 2.0 AUTH-2: this layout is the single dashboard auth boundary
 // (see the AUTH-2 audit) -- every /dashboard/* page, static or dynamic,
@@ -50,5 +51,16 @@ export default async function DashboardLayout({
     redirect("/");
   }
 
-  return <>{children}</>;
+  // FIX STEP F2: the dashboard menu, above every /dashboard/* page, in
+  // the wide page container (also on the narrow 672px pages, whose
+  // content stays centred below it). Header -> menu keeps V1's 40px
+  // (20px on phone); each page's own top padding sets menu -> content.
+  return (
+    <>
+      <div className="page-container pt-5 sm:pt-10">
+        <DashboardMenu />
+      </div>
+      {children}
+    </>
+  );
 }

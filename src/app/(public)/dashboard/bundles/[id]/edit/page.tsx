@@ -79,7 +79,7 @@ export default async function EditBundlePage({
   const currentBookIds = new Set((currentBookRows ?? []).map((r) => r.book_id));
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
       <Link href="/dashboard/bundles" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to bundles
       </Link>
