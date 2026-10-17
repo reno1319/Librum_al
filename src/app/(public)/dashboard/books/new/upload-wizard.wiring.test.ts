@@ -29,7 +29,8 @@ describe("UploadWizard: actual step order and indicator wiring", () => {
     const match = source.match(/const STEPS = \[([^\]]+)\];/);
     expect(match).not.toBeNull();
     const steps = match![1].split(",").map((s) => s.trim().replace(/^"|"$/g, "")).filter(Boolean);
-    expect(steps).toEqual(["Book Details", "Cover & Manuscript", "Price & Earnings", "Review & Publish"]);
+    // REDESIGN STEP 5: Renato's three steps, in his own words.
+    expect(steps).toEqual(["Details", "Manuscript & cover", "Price"]);
   });
 
   it("the rendered step indicator (<ol>...STEPS.map...) consumes that same STEPS array -- not a parallel unused constant", () => {
@@ -48,15 +49,23 @@ describe("UploadWizard: aria-current on the active step", () => {
     expect(olBlock).toContain('aria-current={step === i + 1 ? "step" : undefined}');
   });
 
-  it("the active state is not color-only -- a font-weight change accompanies the color change", () => {
+  it("the active state is not color-only -- it reads \"Step n of 3\" and its name is bold", () => {
     const olBlock = source.match(/<ol[\s\S]*?<\/ol>/)![0];
-    const classNameMatch = olBlock.match(/className=\{step === i \+ 1 \? "([^"]+)" : undefined\}/);
-    expect(classNameMatch).not.toBeNull();
-    // font-semibold (a weight change) alongside text-primary (a color
-    // change) -- removing color alone would still leave a visible
-    // difference for a non-color-perception reader.
-    expect(classNameMatch![1]).toContain("font-semibold");
-    expect(classNameMatch![1]).toContain("text-primary");
+    expect(olBlock).toContain("Step {i + 1} of {STEPS.length}");
+    expect(olBlock).toContain('<span className="text-sm font-bold text-primary">{label}</span>');
+  });
+
+  it("done steps read \"✓ Step n\" and are type=\"button\" controls back to that step; later steps are not clickable", () => {
+    const olBlock = source.match(/<ol[\s\S]*?<\/ol>/)![0];
+    expect(olBlock).toContain("✓ Step {i + 1}");
+    const buttons = olBlock.match(/<button[\s\S]*?<\/button>/g) ?? [];
+    expect(buttons.length).toBe(1);
+    expect(buttons[0]).toMatch(/type="button"/);
+    expect(buttons[0]).toContain("onClick={() => goToDoneStep(i + 1)}");
+    // The button is only rendered in the step > i + 1 (done) branch.
+    expect(olBlock.indexOf("step > i + 1 ? (")).toBeLessThan(olBlock.indexOf("<button"));
+    // goToDoneStep only ever moves backwards.
+    expect(source).toContain("if (target >= step) return;");
   });
 });
 
@@ -201,7 +210,7 @@ describe("UploadWizard: shared pending state", () => {
 
 describe("UploadWizard: Language control", () => {
   it("imports and renders from the shared LANGUAGES vocabulary, not a duplicate hardcoded list", () => {
-    expect(source).toContain('import { LANGUAGES, getLanguageLabel } from "@/lib/languages";');
+    expect(source).toContain('import { LANGUAGES } from "@/lib/languages";');
     const languageSelect = source.match(/<select\s+name="language"[\s\S]*?<\/select>/);
     expect(languageSelect).not.toBeNull();
     expect(languageSelect![0]).toContain("{LANGUAGES.map(");
@@ -220,7 +229,7 @@ describe("UploadWizard: Language control", () => {
   });
 
   it("submits name=\"language\"", () => {
-    expect(source).toContain('<select\n            name="language"');
+    expect(source).toMatch(/<select\n\s+name="language"/);
   });
 });
 
@@ -272,8 +281,8 @@ describe("UploadWizard: Step 2 (Cover & Manuscript) gate and ready-state copy", 
 });
 
 describe("UploadWizard: steps remain mounted (hidden via class, never conditionally unmounted)", () => {
-  it("all four step wrappers toggle a \"hidden\" class rather than unmounting", () => {
-    for (let n = 1; n <= 4; n++) {
+  it("all three step wrappers toggle a \"hidden\" class rather than unmounting", () => {
+    for (let n = 1; n <= 3; n++) {
       const re = new RegExp(`className=\\{step === ${n} \\? "[^"]+" : "hidden"\\}`);
       expect(source).toMatch(re);
     }
@@ -281,8 +290,10 @@ describe("UploadWizard: steps remain mounted (hidden via class, never conditiona
 });
 
 describe("UploadWizard: price/earnings state comes from one shared helper", () => {
-  it("resolveWizardPriceSummary() is called exactly once, and its destructured values drive both Step 3 and Review", () => {
-    expect(source.match(/resolveWizardPriceSummary\(/g)?.length).toBe(1);
+  it("resolveWizardPricing() is called exactly once, and its destructured values drive the whole Price step", () => {
+    expect(source.match(/resolveWizardPricing\(/g)?.length).toBe(1);
+    expect(source).toContain("resolveWizardPricing({ mode: priceMode, paidPrice })");
+    expect(source).not.toContain("resolveWizardPriceSummary(");
     expect(source).not.toContain("platformFeeCents(");
     expect(source).not.toMatch(/Math\.round\(Number\(price\)/);
   });
@@ -293,21 +304,86 @@ describe("UploadWizard: price/earnings state comes from one shared helper", () =
   });
 });
 
-describe("UploadWizard: Review renders live state, no server/other-surface scope creep", () => {
-  it("Review shows the real title/language-label/genre/cover/manuscript/readiness state", () => {
-    const start = source.indexOf("{/* Step 4: Review & Publish */}");
-    const end = source.indexOf('<div className="flex justify-between gap-3">');
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const reviewBlock = source.slice(start, end);
-    expect(reviewBlock).toContain("{title ||");
-    expect(reviewBlock).toContain("getLanguageLabel(language)");
-    expect(reviewBlock).toContain("{genre ||");
-    expect(reviewBlock).toContain("cover.previewUrl");
-    expect(reviewBlock).toContain("manuscript?.name");
-    expect(reviewBlock).toContain("readiness.");
+describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
+  const start = source.indexOf("{/* Step 3: Price */}");
+  const end = source.indexOf("</form>");
+  const priceBlock = source.slice(start, end);
+
+  it("opens on Paid with an empty price box (no hidden 0 default)", () => {
+    expect(source).toContain('useState<WizardPriceMode>("paid")');
+    expect(source).toMatch(/const \[paidPrice, setPaidPrice\] = useState\(""\);/);
+    expect(source).not.toContain('useState("0")');
   });
 
+  it("offers exactly two radios, Paid and Free, in one fieldset", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(priceBlock).toContain('["paid", "Paid"]');
+    expect(priceBlock).toContain('["free", "Free"]');
+    expect(priceBlock.match(/type="radio"/g)?.length).toBe(1);
+    expect(priceBlock).toContain("<fieldset");
+  });
+
+  it("submits name=\"price\" from the box under Paid and a fixed 0 under Free -- never both", () => {
+    expect(priceBlock.match(/name="price"/g)?.length).toBe(2);
+    expect(priceBlock).toContain('<input type="hidden" name="price" value="0" />');
+    const paidBranch = priceBlock.slice(
+      priceBlock.indexOf('{priceMode === "paid" ? ('),
+      priceBlock.indexOf('<input type="hidden" name="price" value="0" />'),
+    );
+    expect(paidBranch).toContain('name="price"');
+    expect(paidBranch).toContain("value={paidPrice}");
+  });
+
+  it("Enter on the Paid/Free radios or in the price box never submits the form", () => {
+    const radio = priceBlock.match(/<input\s+type="radio"[\s\S]*?\/>/)![0];
+    const priceBox = priceBlock.match(/<input\s+ref=\{priceInputRef\}[\s\S]*?\/>/)![0];
+    for (const input of [radio, priceBox]) {
+      expect(input).toContain('if (e.key === "Enter") e.preventDefault();');
+    }
+  });
+
+  it("keeps the existing \"Price (ALL)\" label; the ALL suffix is decoration only", () => {
+    expect(priceBlock).toContain("Price (ALL)");
+    expect(priceBlock).toMatch(/aria-hidden="true"[\s\S]{0,120}>\s*ALL\s*</);
+  });
+
+  it("an invalid paid price blocks both final buttons in the submit handler, with Q7's wording", () => {
+    expect(source).toContain("<form action={createBook} onSubmit={handleSubmit}");
+    const handler = source.match(/function handleSubmit\([\s\S]*?\n  }/)![0];
+    expect(handler).toContain("if (!pricing.canSubmit) {");
+    expect(handler).toContain("event.preventDefault();");
+    expect(handler).toContain("setStepError(PAID_PRICE_ERROR);");
+    expect(source).toContain(
+      "const PAID_PRICE_ERROR = `Enter a price in lek: a whole number from ${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}.`;",
+    );
+  });
+
+  it("no sentence still offers \"0 for a free ebook\" or \"(0, or\"", () => {
+    expect(source).not.toContain("0 for a free ebook");
+    expect(source).not.toContain("(0, or");
+  });
+
+  it("renders the readiness block, without the unreachable missing-price line, and no Review summary", () => {
+    expect(priceBlock).toContain("Readiness");
+    expect(priceBlock).toContain("readiness.paidPublishingBlocked");
+    expect(priceBlock).toContain("Looks good — ready to publish.");
+    expect(source).not.toContain("Set a price in lek on the previous step");
+    expect(source).not.toContain("Double check the basics below");
+    expect(source).not.toContain("Review & Publish");
+  });
+
+  it("the preview card uses the book card's own price label and the real cover/title/author", () => {
+    expect(priceBlock).toContain("How readers will see it");
+    expect(priceBlock).toContain("formatCatalogPriceLabel(priceAll)");
+    expect(priceBlock).toContain("cover.previewUrl");
+    expect(priceBlock).toContain("{authorName}");
+    expect(priceBlock).toContain("{title.trim() && (");
+    // No price line at all while the price is not valid.
+    expect(priceBlock).toContain("{priceValid && (");
+  });
+});
+
+describe("UploadWizard: no server/other-surface scope creep", () => {
   it("this pass never imports from or references the server actions file's internals beyond the existing createBook() import", () => {
     const importLines = source.split("\n").filter((l) => l.startsWith("import"));
     const actionsImport = importLines.find((l) => l.includes('"../actions"'));

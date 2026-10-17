@@ -53,12 +53,20 @@ export default async function NewBookPage({
   ]);
 
   return (
-    <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    // REDESIGN STEP 5 (A2): a wider page so the Price step's side panel
+    // fits beside the form; the title row keeps its existing words in the
+    // dashboard's heading style, and its text link is underlined at rest.
+    <main className="mx-auto w-full max-w-wide flex-1 px-4 pt-6 pb-16 sm:px-6 sm:pt-8">
+      <Link
+        href="/dashboard"
+        className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
+      >
         &larr; Back to dashboard
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">Add a book</h1>
-      <p className="mt-1 text-sm text-muted">
+      <h1 className="mt-4 font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
+        Add a book
+      </h1>
+      <p className="mt-2 text-muted">
         It&apos;s saved as a draft first — you can publish it from your
         dashboard once you&apos;re happy with it.
       </p>
@@ -69,7 +77,7 @@ export default async function NewBookPage({
         </Alert>
       )}
 
-      {/* paidPublishingAvailable is display-only context for the Review
+      {/* paidPublishingAvailable is display-only context for the Price
           step's readiness section, never a pre-submit gate: Publish book
           can still be pressed regardless, since performPublish()
           (actions.ts) remains the one real server-side enforcement point.
