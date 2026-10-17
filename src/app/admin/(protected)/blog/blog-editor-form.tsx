@@ -165,21 +165,11 @@ export function BlogEditorForm({
           </button>
         </div>
 
-        {showPreview ? (
-          <div className="rounded-lg border border-border bg-surface px-4 py-3">
-            <BlogMarkdown markdown={contentMarkdown} />
-          </div>
-        ) : (
-          <textarea
-            name="contentMarkdown"
-            required
-            rows={16}
-            maxLength={CONTENT_MARKDOWN_MAX_LENGTH}
-            value={contentMarkdown}
-            onChange={(e) => setContentMarkdown(e.target.value)}
-            className="rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm"
-          />
-        )}
+        <ContentMarkdownInput
+          showPreview={showPreview}
+          contentMarkdown={contentMarkdown}
+          onChange={setContentMarkdown}
+        />
         <span className="text-xs text-muted">
           {contentMarkdown.length.toLocaleString()}/{CONTENT_MARKDOWN_MAX_LENGTH.toLocaleString()} characters
           {" · "}
@@ -224,6 +214,46 @@ export function BlogEditorForm({
 
       <SubmitButton label={submitLabel} />
     </form>
+  );
+}
+
+// QA H4: the textarea unmounts while Preview is shown, and an unmounted
+// field is not in FormData -- so saving from Preview used to submit no
+// content at all and fail "Content is required". In Preview the same
+// value now travels in a hidden input. A hidden input (not a hidden
+// `required` textarea) because browsers block a submit on an invalid
+// field they can't focus, with no message the editor can see; the
+// server's own validateBlogPostFields still rejects empty content.
+export function ContentMarkdownInput({
+  showPreview,
+  contentMarkdown,
+  onChange,
+}: {
+  showPreview: boolean;
+  contentMarkdown: string;
+  onChange: (value: string) => void;
+}) {
+  if (showPreview) {
+    return (
+      <>
+        <input type="hidden" name="contentMarkdown" value={contentMarkdown} />
+        <div className="rounded-lg border border-border bg-surface px-4 py-3">
+          <BlogMarkdown markdown={contentMarkdown} />
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <textarea
+      name="contentMarkdown"
+      required
+      rows={16}
+      maxLength={CONTENT_MARKDOWN_MAX_LENGTH}
+      value={contentMarkdown}
+      onChange={(e) => onChange(e.target.value)}
+      className="rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm"
+    />
   );
 }
 

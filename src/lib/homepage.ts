@@ -37,9 +37,9 @@ export function resolveHomepageCta(params: {
   }
 
   // A reader (or any non-author authenticated role) gets no publishing
-  // CTA at all -- there is no reader -> author role-conversion feature
-  // anywhere in this app, so offering one here would promise something
-  // the product can't deliver. See the UI-3 audit's own reasoning.
+  // CTA here. BECOME-AUTHOR-1 added a reader -> author switch on
+  // /account; pointing the homepage at it is a separate product choice
+  // that has not been made.
   return { hero: null, final: null };
 }
 

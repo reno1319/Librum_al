@@ -42,6 +42,7 @@ let bookReadResult: Result;
 let updateResult: Result | null;
 let deleteResult: Result | null;
 let removeError: unknown = null;
+let failUploadsTo: Set<string> = new Set();
 let storedObjects: Record<string, Buffer> = {};
 
 function query(table: string) {
@@ -117,7 +118,9 @@ function storageBucket(bucket: string) {
   return {
     upload: async (path: unknown) => {
       record("upload", [path]);
-      return { error: null };
+      return failUploadsTo.has(`${bucket}:${String(path)}`)
+        ? { error: { message: "upload failed" } }
+        : { error: null };
     },
     download: async (path: unknown) => {
       record("download", [path]);
@@ -244,6 +247,7 @@ beforeEach(() => {
   updateResult = null;
   deleteResult = null;
   removeError = null;
+  failUploadsTo = new Set();
   storedObjects = {};
   consoleOutput = [];
   for (const level of ["log", "info", "warn", "error"] as const) {
@@ -782,5 +786,66 @@ describe("no book action ever moves, copies, signs or downloads a stored key", (
     await run(updateBook(BOOK_ID, await withManuscript(editForm())));
     await run(deleteBook(BOOK_ID));
     expect(storageCalls.map((c) => c.op).filter((op) => !["upload", "remove"].includes(op))).toEqual([]);
+  });
+});
+
+// ============================================================
+// QA-FIX-3: a failed save never changes the live cover or manuscript.
+describe("updateBook never overwrites a live file before the save is proven", () => {
+  it("a rejected manuscript uploads nothing, not even a valid new cover", async () => {
+    const f = withCover(editForm(), JPG);
+    f.set("manuscript", new File([new Uint8Array(Buffer.from("not a zip"))], "book.epub"));
+    const target = await run(updateBook(BOOK_ID, f));
+    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    expect(storageCalls).toEqual([]);
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("same-key cover and manuscript are uploaded only after the row update", async () => {
+    const f = await withManuscript(withCover(editForm(), PNG));
+    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Book+updated");
+    expect(events).toEqual(["db:update:books", "storage:upload:covers", "storage:upload:manuscripts"]);
+  });
+
+  it("a new-key cover is still uploaded before the row update, so the row never points at a missing file", async () => {
+    bookReadResult = { data: row({ cover_path: OWN_PNG, file_path: null }), error: null };
+    const f = await withManuscript(withCover(editForm(), JPG));
+    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Book+updated");
+    expect(events).toEqual([
+      "storage:upload:covers",
+      "storage:upload:manuscripts",
+      "db:update:books",
+      "storage:remove:covers",
+    ]);
+  });
+
+  it.each([
+    ["a write error", { data: null, error: { message: "db exploded" } }],
+    ["zero rows", { data: [], error: null }],
+  ])("%s: the live same-key files are never touched", async (_label, result) => {
+    updateResult = result as Result;
+    const f = await withManuscript(withCover(editForm(), PNG));
+    const target = await run(updateBook(BOOK_ID, f));
+    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    expect(storageCalls.filter((c) => c.op === "upload")).toEqual([]);
+  });
+
+  it("an in-place upload that fails after the save keeps the save and says the old file is still in place", async () => {
+    failUploadsTo = new Set([`manuscripts:${OWN_EPUB}`]);
+    const target = await run(updateBook(BOOK_ID, await withManuscript(editForm())));
+    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    const message = new URL(target, "https://x.invalid").searchParams.get("error");
+    expect(message).toContain("Your changes were saved");
+    expect(message).toContain("manuscript");
+    expect(message).toContain("previous file is still in place");
+    expect(bookUpdates()).toHaveLength(1);
+  });
+
+  it("a new-key upload that fails stops before the row update", async () => {
+    failUploadsTo = new Set([`covers:${OWN_JPG}`]);
+    const target = await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
+    expect(target).toBe(`/dashboard/books/${BOOK_ID}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`);
+    expect(dbWrites).toEqual([]);
+    expect(removals()).toEqual([]);
   });
 });

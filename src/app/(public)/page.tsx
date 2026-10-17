@@ -265,7 +265,7 @@ function WhyLibrumSection() {
         <div className="mt-10 grid gap-10 sm:grid-cols-3">
           {WHY_LIBRUM_PILLARS.map((pillar, i) => (
             <div key={pillar.heading} className="group">
-              <span className="block font-serif text-[2.75rem] font-bold leading-none text-primary/25 transition-colors duration-150 group-hover:text-primary/45 sm:text-5xl">
+              <span className="block font-serif text-[2.75rem] font-bold leading-none text-primary/80 transition-colors duration-150 group-hover:text-primary sm:text-5xl">
                 {String(i + 1).padStart(2, "0")}
               </span>
               <h3 className="mt-3 font-serif text-lg font-bold">{pillar.heading}</h3>
@@ -321,8 +321,8 @@ function PublishInFourStepsSection() {
               <span
                 className={
                   i > 0
-                    ? "relative inline-block font-serif text-3xl font-bold text-primary/70 md:before:absolute md:before:right-full md:before:top-1/2 md:before:h-px md:before:w-6 md:before:-translate-y-1/2 md:before:bg-border md:before:content-['']"
-                    : "relative inline-block font-serif text-3xl font-bold text-primary/70"
+                    ? "relative inline-block font-serif text-3xl font-bold text-primary/80 md:before:absolute md:before:right-full md:before:top-1/2 md:before:h-px md:before:w-6 md:before:-translate-y-1/2 md:before:bg-border md:before:content-['']"
+                    : "relative inline-block font-serif text-3xl font-bold text-primary/80"
                 }
               >
                 {String(i + 1).padStart(2, "0")}

@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { clearRecoverySession } from "@/lib/recovery-session";
-import { resolveSafeInternalPath } from "@/lib/safe-redirect";
+import { loginErrorPath, resolveSafeInternalPath } from "@/lib/safe-redirect";
 import type { SignupRole } from "@/lib/types";
 
 // Never widen this beyond "author"/"reader" -- signup must never be
@@ -114,7 +114,7 @@ export async function login(formData: FormData) {
     // recovery marker exactly as it was -- a failed login attempt is
     // not evidence that recovery is actually over, and must never
     // downgrade that restriction.
-    redirect(`/login?error=${encodeURIComponent(error.message)}`);
+    redirect(loginErrorPath(error.message, next));
   }
 
   // AUTH-1E FOLLOW-UP: signInWithPassword() has already authenticated
@@ -128,9 +128,7 @@ export async function login(formData: FormData) {
   // asserting it away.
   const signedInUser = data.user;
   if (!signedInUser) {
-    redirect(
-      `/login?error=${encodeURIComponent("Unable to complete login. Please try again.")}`,
-    );
+    redirect(loginErrorPath("Unable to complete login. Please try again.", next));
   }
 
   // LAUNCH-1 P1-11 STALE-MARKER CORRECTION: signInWithPassword resolving
