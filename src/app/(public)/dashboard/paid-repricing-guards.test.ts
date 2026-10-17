@@ -234,6 +234,7 @@ function seedBook(overrides: Row) {
       // A legacy value that would say "paid" if anything read it.
       price_cents: 799,
       published_at: "2026-09-01T00:00:00Z", cover_path: "c.png", file_path: "f.epub", language: "sq",
+      description: "A real description.",
       ...overrides,
     },
     // Two published books of the same author, for bundle membership.

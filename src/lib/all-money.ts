@@ -25,13 +25,14 @@
 //
 // Albanian convention, the same one `formatCatalogPriceAll` already
 // uses: comma as the decimal separator, dot as the thousands separator,
-// always exactly two displayed decimals, an explicit `ALL` suffix rather
+// two displayed decimals only when the amount has qindarka (FIX1 X5: a
+// whole-lek amount shows no ",00"), an explicit `ALL` suffix rather
 // than a symbol so it can never be read as a dollar amount.
 //
 //   0        -> "Free"
-//   9900     -> "99,00 ALL"
+//   9900     -> "99 ALL"
 //   17910    -> "179,10 ALL"
-//   10000000 -> "100.000,00 ALL"
+//   10000000 -> "100.000 ALL"
 
 import { formatTransactionMinorUnits } from "@/lib/transaction-money";
 

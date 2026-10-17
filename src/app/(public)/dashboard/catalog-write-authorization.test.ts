@@ -540,7 +540,7 @@ function seed(overrides: { book?: Row; bundle?: Row } = {}) {
     {
       id: BOOK_ID, author_id: USER_ID, title: "Book", status: "draft", price_all: 0, price_cents: 0,
       published_at: null, cover_path: "c.png", file_path: "f.epub", language: "sq",
-      series_id: SERIES_ID, series_position: 2, ...overrides.book,
+      description: "A real description.", series_id: SERIES_ID, series_position: 2, ...overrides.book,
     },
     { id: "book-a", author_id: USER_ID, status: "published", price_all: 0, price_cents: 0, series_id: SERIES_ID, series_position: 1 },
     { id: "book-b", author_id: USER_ID, status: "published", price_all: 0, price_cents: 0, series_id: null, series_position: null },

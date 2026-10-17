@@ -139,7 +139,7 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
       ],
     });
     expect(rpc).toHaveBeenCalledWith("list_purchase_currencies", { p_purchase_ids: ["p1", "p2"] });
-    expect(html).toContain("1.200,00 ALL");
+    expect(html).toContain("1.200 ALL");
     expect(html).toContain("USD 8.00");
     // A cross-currency sum (800 + 120000 minor units) appears nowhere.
     expect(html).not.toContain("1.208,00");
@@ -161,7 +161,7 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
     });
     expect(html).toContain("USD 8.00");
     expect(html).not.toContain("USD 48.00");
-    expect(html).not.toContain("40,00 ALL");
+    expect(html).not.toContain("40 ALL");
     expect(html).toContain("1 sale is not included: its currency could not be determined.");
     expect(html).toContain("+ 1 with unknown currency");
     // Units still count both books acquired.
@@ -231,7 +231,7 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
     });
     expect(html).toContain("USD 8.00");
     expect(html).not.toContain("USD 16.00");
-    expect(html).toContain("400,00 ALL");
+    expect(html).toContain("400 ALL");
   });
 
   it("an author with no sales sees the empty state and one empty chart", async () => {

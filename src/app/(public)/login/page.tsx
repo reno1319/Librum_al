@@ -20,7 +20,7 @@ export default async function LoginPage({
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
-      <h1 className="font-serif text-3xl font-semibold">Log in</h1>
+      <h1 className="font-serif text-3xl font-normal">Log in</h1>
       <p className="mt-1 text-sm text-muted">Welcome back to Librum.</p>
 
       {error && (

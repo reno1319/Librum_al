@@ -24,7 +24,7 @@
 // One visible convention, locale-independent and always naming the
 // currency (never a bare `$`):
 //
-//   ALL  ->  "1.234,56 ALL"   "-1.234,56 ALL"   "0,00 ALL"
+//   ALL  ->  "1.234,56 ALL"   "-1.234,56 ALL"   "1.234 ALL"   "0 ALL"
 //   USD  ->  "USD 1,234.56"   "-USD 1,234.56"   "USD 0.00"
 
 export const SUPPORTED_TRANSACTION_CURRENCIES = ["ALL", "USD"] as const;
@@ -84,7 +84,11 @@ export function formatTransactionMinorUnits(
   const sign = negative ? "-" : "";
 
   if (currency === "ALL") {
-    return `${sign}${groupThousands(whole, ".")},${minor} ALL`;
+    // FIX1 (X5): a whole-lek amount drops the ",00" ("199 ALL",
+    // "1.500 ALL"); an amount with qindarka keeps both decimals
+    // ("179,10 ALL"). Still a slice of the digit string, never a division.
+    const fraction = minor === "00" ? "" : `,${minor}`;
+    return `${sign}${groupThousands(whole, ".")}${fraction} ALL`;
   }
   return `${sign}USD ${groupThousands(whole, ",")}.${minor}`;
 }

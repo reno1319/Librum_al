@@ -15,6 +15,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import type { Book, Bundle, Profile, Series } from "@/lib/types";
+import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
 // dashboard or a social profile -- see the PRODUCT-2 audit. It shows
@@ -242,7 +243,7 @@ export default async function AuthorProfilePage({
           </div>
         )}
         <div className="min-w-0">
-          <h1 className="font-serif text-2xl font-semibold text-foreground sm:text-3xl">
+          <h1 className="font-serif text-2xl font-normal text-foreground sm:text-3xl">
             {authorPublicName}
           </h1>
           {/* Quiet by design -- a small text line, not a stat card:
@@ -287,7 +288,7 @@ export default async function AuthorProfilePage({
           Books by this author -- the page's primary content.
           ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
-        <h2 className="font-serif text-xl font-semibold">Books by {authorPublicName}</h2>
+        <h2 className="font-serif text-xl font-normal">Books by {authorPublicName}</h2>
 
         {publishedBooks.length === 0 ? (
           // LIBRUM 2.0 PRODUCT-2 PRE-COMMIT CORRECTION: EmptyState
@@ -342,7 +343,7 @@ export default async function AuthorProfilePage({
           ============================================================ */}
       {seriesGroups.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
-          <h2 className="font-serif text-xl font-semibold">Series</h2>
+          <h2 className="font-serif text-xl font-normal">Series</h2>
           <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             {seriesGroups.map((group) => (
               <li
@@ -379,7 +380,11 @@ export default async function AuthorProfilePage({
                             className="aspect-[2/3] w-full rounded-sm object-cover shadow-sm"
                           />
                         ) : (
-                          <div className="aspect-[2/3] w-full rounded-sm bg-border" />
+                          <CoverPlaceholder
+                            title={book.title}
+                            authorName={authorPublicName}
+                            className="aspect-[2/3] w-full rounded-sm"
+                          />
                         )}
                       </Link>
                     );
@@ -405,7 +410,7 @@ export default async function AuthorProfilePage({
           ============================================================ */}
       {bundles && bundles.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
-          <h2 className="font-serif text-xl font-semibold">Bundles</h2>
+          <h2 className="font-serif text-xl font-normal">Bundles</h2>
           <ul className="mt-6 flex flex-col gap-3">
             {bundles.map((bundle) => (
               <li key={bundle.id}>

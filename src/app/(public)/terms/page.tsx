@@ -12,12 +12,12 @@ const AUTHOR_SHARE_PERCENT = 100 - PLATFORM_FEE_PERCENT;
 export default function TermsPage() {
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-4xl font-semibold">Terms of Service</h1>
+      <h1 className="font-serif text-4xl font-normal">Terms of Service</h1>
       <p className="mt-2 text-sm text-muted">Last updated: August 2026</p>
 
       <div className="mt-8 flex flex-col gap-6 text-foreground/90">
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             1. Acceptance of Terms
           </h2>
           <p className="mt-2">
@@ -27,7 +27,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">2. Accounts</h2>
+          <h2 className="font-serif text-lg font-normal">2. Accounts</h2>
           <p className="mt-2">
             You&apos;re responsible for keeping your account credentials
             secure and for all activity under your account.
@@ -35,7 +35,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             3. Librum&apos;s role
           </h2>
           <p className="mt-2">
@@ -49,7 +49,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             4. Author content and license
           </h2>
           <p className="mt-2">
@@ -82,7 +82,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             5. Content standards and infringement
           </h2>
           <p className="mt-2">
@@ -102,7 +102,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             6. Marketplace purchases
           </h2>
           <p className="mt-2">
@@ -112,7 +112,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             7. Payments and platform fee
           </h2>
           <p className="mt-2">
@@ -129,7 +129,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">8. Refunds</h2>
+          <h2 className="font-serif text-lg font-normal">8. Refunds</h2>
           <p className="mt-2">
             When Librum approves a refund for a purchase, the reader&apos;s
             access to the refunded title or bundle may be removed, the
@@ -141,7 +141,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             9. Payment disputes and chargebacks
           </h2>
           <p className="mt-2">
@@ -164,7 +164,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             10. Author payouts
           </h2>
           <p className="mt-2">
@@ -176,7 +176,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             11. Unpublishing and withdrawal
           </h2>
           <p className="mt-2">
@@ -191,7 +191,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             12. Account termination
           </h2>
           <p className="mt-2">
@@ -215,7 +215,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             13. Availability and platform changes
           </h2>
           <p className="mt-2">
@@ -227,7 +227,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             14. Disclaimers
           </h2>
           <p className="mt-2">
@@ -237,7 +237,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             15. Changes to these Terms
           </h2>
           <p className="mt-2">
@@ -247,7 +247,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             16. Contact
           </h2>
           <p className="mt-2">

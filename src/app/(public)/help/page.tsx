@@ -53,7 +53,7 @@ const faqs = [
 export default function HelpPage() {
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-4xl font-semibold">Help &amp; FAQ</h1>
+      <h1 className="font-serif text-4xl font-normal">Help &amp; FAQ</h1>
 
       <dl className="mt-8 flex flex-col gap-6">
         {faqs.map((faq) => (

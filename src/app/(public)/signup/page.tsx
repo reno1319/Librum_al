@@ -21,7 +21,7 @@ export default async function SignupPage({
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
-      <h1 className="font-serif text-3xl font-semibold">Sign up</h1>
+      <h1 className="font-serif text-3xl font-normal">Sign up</h1>
 
       {error && (
         <Alert variant="error" className="mt-4">

@@ -15,6 +15,7 @@ import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-val
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import { INVALID_ISBN_MESSAGE, isValidIsbn } from "@/lib/book-identifiers";
 import {
   CATALOG_ROW_CHANGED_MESSAGE,
   PAID_REPRICING_UNAVAILABLE_MESSAGE,
@@ -51,6 +52,14 @@ import {
 // four was unexpected.
 const MISSING_ALL_PRICE_MESSAGE =
   "Set this book's price in lek before publishing it.";
+
+// FIX1 (X16): Renato's W-B wording. True on the one path that shows it
+// (createBook's intent=publish), because that path inserts the draft
+// before performPublish refuses; publishBook's own refusal names only
+// the first sentence, since there the book already is a draft.
+const MISSING_DESCRIPTION_MESSAGE =
+  "Add a description before publishing. Your book will still be saved as a draft.";
+const MISSING_DESCRIPTION_SHORT_MESSAGE = "Add a description before publishing.";
 
 const CATALOG_PRICE_ERROR_MESSAGE =
   `Enter your price in lek: 0 for a free ebook, or a whole number from ` +
@@ -573,6 +582,11 @@ export async function createBook(formData: FormData) {
     redirect("/dashboard/books/new?error=Please+choose+a+genre");
   }
 
+  // FIX1 (X9): empty stays allowed; a filled ISBN must be a real one.
+  if (isbn !== null && !isValidIsbn(isbn)) {
+    redirect(`/dashboard/books/new?error=${encodeURIComponent(INVALID_ISBN_MESSAGE)}`);
+  }
+
   // LIBRUM 2.0 PUBLISHING-UX-1 PART B: every one of these five is
   // optional and absent entirely from the current (pre-Part-C) wizard's
   // own FormData -- formData.get() simply returns null for a field the
@@ -824,6 +838,11 @@ export async function createBook(formData: FormData) {
       `/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
     );
   }
+  if (publishResult.reason === "missing_description") {
+    redirect(
+      `/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_DESCRIPTION_MESSAGE)}`,
+    );
+  }
   if (publishResult.reason === "paid_mode_required") {
     redirect(
       "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
@@ -868,7 +887,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   // author's row or any id mismatch stops here, before any upload.
   const { data: existing, error: existingError } = await supabase
     .from("books")
-    .select("id, cover_path, file_path, author_id, language, status, price_all")
+    .select("id, cover_path, file_path, author_id, language, status, price_all, isbn")
     .eq("id", bookId)
     .single();
 
@@ -900,6 +919,16 @@ export async function updateBook(bookId: string, formData: FormData) {
 
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
     redirect(`/dashboard/books/${bookId}/edit?error=Please+choose+a+genre`);
+  }
+
+  // FIX1 (X9): same rule as createBook. An ISBN resubmitted exactly as
+  // the row already holds it is kept, so a book saved before this check
+  // existed can still have an unrelated field edited (the same
+  // preserve-unchanged rule as resolveLanguageForUpdate).
+  if (isbn !== null && isbn !== existing.isbn && !isValidIsbn(isbn)) {
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(INVALID_ISBN_MESSAGE)}`,
+    );
   }
 
   // PAID-REPRICING-1: an edit that would make a PUBLISHED book paid, or
@@ -1323,6 +1352,10 @@ type PerformPublishResult =
       reason:
         | "not_found"
         | "missing_all_price"
+        // FIX1 (X16): an empty (after trimming) description. Checked
+        // after the price and before paid permission: the author can fix
+        // it themselves, so it is named before a refusal they can't.
+        | "missing_description"
         | "paid_mode_required"
         | "update_failed";
     };
@@ -1343,7 +1376,7 @@ async function performPublish(
 
   const { data: book } = await supabase
     .from("books")
-    .select("status, price_all, published_at")
+    .select("status, price_all, published_at, description")
     .eq("id", bookId)
     .eq("author_id", userId)
     .single();
@@ -1364,6 +1397,14 @@ async function performPublish(
   // else in this patch moves a row back to draft.
   if (catalogPriceState === "unavailable") {
     return { ok: false, reason: "missing_all_price" };
+  }
+
+  // FIX1 (X16): Renato's rule, a description before Publish. A refusal
+  // only: an already-published book without one is never moved back to
+  // draft, and saving a draft without one is untouched (createBook
+  // inserts the draft before calling this).
+  if (typeof book.description !== "string" || book.description.trim().length === 0) {
+    return { ok: false, reason: "missing_description" };
   }
 
   // Only a book that will actually be sold needs paid-publishing
@@ -1481,6 +1522,11 @@ export async function publishBook(bookId: string) {
     if (result.reason === "missing_all_price") {
       redirect(
         `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
+      );
+    }
+    if (result.reason === "missing_description") {
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_DESCRIPTION_SHORT_MESSAGE)}`,
       );
     }
     if (result.reason === "paid_mode_required") {

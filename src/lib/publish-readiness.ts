@@ -35,8 +35,15 @@ import type { Book } from "@/lib/types";
 // themselves in one edit, and can do nothing at all about the second.
 // Collapsing them into one flag would tell an author with an unpriced
 // draft that Librum is the obstacle, which is false.
+//
+// FIX1 (X16): `missingDescription` is the third hard blocker, Renato's
+// rule that a book needs a description (non-empty after trimming)
+// before it can be published -- the same check performPublish() makes.
+// While it is set, the "Write a description" recommendation is left out
+// of `recommended`, so one missing field is never listed twice.
 export type PublishReadiness = {
   missingAllPrice: boolean;
+  missingDescription: boolean;
   paidPublishingBlocked: boolean;
   recommended: ChecklistItem[];
 };
@@ -45,8 +52,9 @@ export type PublishReadiness = {
 // preview-excerpt label is gone from this set, not merely renamed --
 // see getPublishChecklist()'s own comment for why that item was removed
 // entirely rather than relabeled.
+const DESCRIPTION_LABEL = "Write a description (a couple of sentences or more)";
 const RECOMMENDED_LABELS = new Set([
-  "Write a description (a couple of sentences or more)",
+  DESCRIPTION_LABEL,
   "Add keywords so readers can find it by search",
 ]);
 
@@ -69,13 +77,17 @@ export function resolvePublishReadiness(params: {
   const priceState = resolveCatalogPriceState(book.price_all);
   const missingAllPrice = priceState === "unavailable";
   const paidPublishingBlocked = priceState === "paid" && !paidPublishingAvailable;
+  const missingDescription = (book.description ?? "").trim().length === 0;
 
-  const recommended = getPublishChecklist(book).filter((item) =>
-    RECOMMENDED_LABELS.has(item.label),
+  const recommended = getPublishChecklist(book).filter(
+    (item) =>
+      RECOMMENDED_LABELS.has(item.label) &&
+      !(missingDescription && item.label === DESCRIPTION_LABEL),
   );
 
   return {
     missingAllPrice,
+    missingDescription,
     paidPublishingBlocked,
     recommended,
   };

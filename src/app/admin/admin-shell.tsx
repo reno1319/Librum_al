@@ -96,7 +96,7 @@ export async function AdminShell({
               type="submit"
               className="focus-ring rounded-sm text-sm font-medium text-foreground transition-colors hover:underline"
             >
-              Sign out
+              Log out
             </button>
           </form>
 

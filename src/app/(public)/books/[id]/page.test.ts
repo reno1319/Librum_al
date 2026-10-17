@@ -405,7 +405,7 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     // current catalog price (250 lek).
     expect(html).toContain("4,99 ALL");
     expect(html).not.toContain("4.99 ALL");
-    expect(html).not.toContain("250,00 ALL</strong>. That is the amount");
+    expect(html).not.toContain("250 ALL</strong>. That is the amount");
     expect(html).toContain('name="resume_existing"');
     expect(html).toContain('name="expected_intent_id"');
     expect(html).toContain(`value="${INTENT_ID}"`);
@@ -491,7 +491,7 @@ describe("BookDetailPage: redesign step 3", () => {
 
   it("a paid book's price card carries the mockup's three lines and the existing security note", async () => {
     const html = await render({ user: { id: "reader" } });
-    expect(html).toContain("Buy ebook — 250,00 ALL");
+    expect(html).toContain("Buy ebook — 250 ALL");
     expect(html).toContain("EPUB, no DRM. Read on your phone, tablet or e-reader.");
     expect(html).toContain("Download anytime from your Librum library.");
     expect(html).toContain("Pay by card or with the POK app.");
@@ -510,6 +510,21 @@ describe("BookDetailPage: redesign step 3", () => {
     const html = await render({ user: null, book: { ...BOOK_ROW, genre: "Poetry" } });
     expect(html).toContain('aria-label="Breadcrumb"');
     expect(html).toContain('href="/bookstore?genre=Poetry"');
+  });
+
+  // FIX1 (X4): no star row until the first review.
+  it("shows no stars and no '0 out of 5 stars' before the first review, and keeps the words", async () => {
+    const html = await render({ user: null });
+    expect(html).toContain("No reviews yet");
+    expect(html).not.toContain("out of 5 stars");
+    expect(html).not.toContain("★");
+  });
+
+  // FIX1 (X14): a book with no cover gets the green placeholder with its
+  // title and author, not a blank block.
+  it("draws the cover placeholder with the title and author when there is no cover", async () => {
+    const html = await render({ user: null });
+    expect(html).toMatch(/aria-hidden="true" class="[^"]*bg-primary[^"]*"><div class="@container[^"]*"><div[^>]*><span[^>]*>Test Book<\/span><span[^>]*>An Author<\/span>/);
   });
 
   it("About the Author offers Follow to a signed-in reader, Following once followed", async () => {

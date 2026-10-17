@@ -112,7 +112,8 @@ export function MobileNav({
                     <Link href="/login" className={linkClassName}>
                       Log in
                     </Link>
-                    <Link href="/signup" className={linkClassName}>
+                    {/* FIX1 (X2): Author chosen, as on Earnings. */}
+                    <Link href="/signup?role=author" className={linkClassName}>
                       Sign up
                     </Link>
                   </>

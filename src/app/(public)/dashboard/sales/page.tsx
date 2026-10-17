@@ -20,6 +20,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
+import { chartDayLabels } from "@/lib/chart-day-labels";
 
 export const metadata: Metadata = {
   title: "Sales",
@@ -267,7 +268,7 @@ export default async function SalesPage() {
         This is an estimate from your order history. For your official ledger
         balance, pending settlement, and payout history, see{" "}
         <Link href="/dashboard/balance" className="font-medium text-primary underline underline-offset-2 hover:decoration-2">
-          Financial Balance
+          Financial balance
         </Link>
         .
       </p>
@@ -306,18 +307,18 @@ export default async function SalesPage() {
         </div>
       </div>
 
-      <h2 className="mt-10 font-serif text-xl font-semibold">
+      <h2 className="mt-10 font-serif text-xl font-normal">
         Net revenue, last {CHART_DAYS} days
       </h2>
       {summary.dailySeries.length === 0 ? (
         <div className="mt-4 flex h-32 items-end gap-1.5 rounded-lg border border-border bg-surface p-4 shadow-sm">
-          {summary.chartDates.map((date) => (
+          {summary.chartDates.map((date, i) => (
             <div
               key={date.toISOString()}
               className="flex h-full flex-1 flex-col items-center justify-end gap-1"
             >
               <div className="w-full rounded-t bg-primary" style={{ height: "2%" }} />
-              <span className="text-[10px] text-muted">{date.getDate()}</span>
+              <DayLabel label={chartDayLabels(summary.chartDates)[i]} />
             </div>
           ))}
         </div>
@@ -330,7 +331,7 @@ export default async function SalesPage() {
             <section key={series.currency} className="mt-4">
               <h3 className="text-sm font-medium text-muted">{series.currency}</h3>
               <div className="mt-2 flex h-32 items-end gap-1.5 rounded-lg border border-border bg-surface p-4 shadow-sm">
-                {series.days.map((day) => (
+                {series.days.map((day, i) => (
                   <div
                     key={day.date.toISOString()}
                     className="flex h-full flex-1 flex-col items-center justify-end gap-1"
@@ -345,9 +346,7 @@ export default async function SalesPage() {
                         height: `${Math.max(2, (day.netMinor / maxMinor) * 100)}%`,
                       }}
                     />
-                    <span className="text-[10px] text-muted">
-                      {day.date.getDate()}
-                    </span>
+                    <DayLabel label={chartDayLabels(series.days.map((d) => d.date))[i]} />
                   </div>
                 ))}
               </div>
@@ -356,7 +355,7 @@ export default async function SalesPage() {
         })
       )}
 
-      <h2 className="mt-10 font-serif text-xl font-semibold">
+      <h2 className="mt-10 font-serif text-xl font-normal">
         By book
       </h2>
       {summary.perBook.length === 0 ? (
@@ -391,5 +390,17 @@ export default async function SalesPage() {
         </ul>
       )}
     </main>
+  );
+}
+
+// FIX1 (X13): the day number, with the month's short name under it on
+// the first bar and where the month changes ("12" over "Oct"). Every
+// bar keeps the same two-line height so the bars stay level.
+function DayLabel({ label }: { label: { day: string; month: string | null } }) {
+  return (
+    <span className="flex flex-col items-center text-[10px] leading-tight text-muted">
+      <span>{label.day}</span>
+      <span aria-hidden={label.month ? undefined : true}>{label.month ?? "\u00a0"}</span>
+    </span>
   );
 }

@@ -164,7 +164,7 @@ describe.each(CLOSED)("paid checkout closed: %s", (_label, configure) => {
 
   it("anonymous: the valid ALL price shows, 'Log in to buy' does not, and one neutral notice does", async () => {
     const { html, rpc } = await render({ user: null });
-    expect(html).toContain("199,00 ALL");
+    expect(html).toContain("199 ALL");
     expectNoPaidCheckoutSurface(html);
     expect(countOf(html, NOTICE)).toBe(1);
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
@@ -172,7 +172,7 @@ describe.each(CLOSED)("paid checkout closed: %s", (_label, configure) => {
 
   it("signed-in reader: no promo, Buy, resume or expired-checkout surface, and no quote lookup", async () => {
     const { html, rpc } = await render({ user: { id: READER_ID } });
-    expect(html).toContain("199,00 ALL");
+    expect(html).toContain("199 ALL");
     expectNoPaidCheckoutSurface(html);
     expect(countOf(html, NOTICE)).toBe(1);
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
@@ -196,7 +196,7 @@ describe("paid checkout open: exact controlled-staging mode on protected staging
     const { html, rpc } = await render({ user: { id: READER_ID } });
     expect(rpc).toHaveBeenCalledWith("get_book_checkout_quote", { p_intent_id: INTENT_ID, p_book_id: BOOK_U_ID });
     expect(html).toContain('name="code"');
-    expect(html).toContain("Buy ebook — 199,00 ALL");
+    expect(html).toContain("Buy ebook — 199 ALL");
     expect(html).toContain("Continue that checkout");
     expect(html).toContain(`value="${INTENT_ID}"`);
     expect(html).toContain("179,10 ALL");
@@ -234,7 +234,7 @@ describe("states that never had a paid checkout are unchanged, open or closed", 
       configure();
       const { html, rpc } = await render({ user: { id: AUTHOR_ID } });
       expect(html).toContain("Manage book");
-      expect(html).toContain("199,00 ALL");
+      expect(html).toContain("199 ALL");
       expect(html).not.toContain(NOTICE);
       expect(html).not.toContain("Buy ebook");
       expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
@@ -258,18 +258,18 @@ describe("states that never had a paid checkout are unchanged, open or closed", 
 describe("Fixture Book U on staging with PAID_CHECKOUT_MODE absent", () => {
   beforeEach(protectedStaging);
 
-  it("stays visible in discovery at 199,00 ALL", () => {
+  it("stays visible in discovery at 199 ALL", () => {
     const html = renderToStaticMarkup(
       createElement(BookCard, { book: BOOK_U, coverUrl: null, authorName: "Fixture Author" }),
     );
-    expect(html).toContain("199,00 ALL");
+    expect(html).toContain("199 ALL");
     expect(html).toContain(`/books/${BOOK_U_ID}`);
     expect(html).not.toContain("Buy");
   });
 
-  it("its author sees 199,00 ALL and Manage book", async () => {
+  it("its author sees 199 ALL and Manage book", async () => {
     const { html } = await render({ user: { id: AUTHOR_ID }, searchParams: {} });
-    expect(html).toContain("199,00 ALL");
+    expect(html).toContain("199 ALL");
     expect(html).toContain("Manage book");
   });
 
@@ -280,7 +280,7 @@ describe("Fixture Book U on staging with PAID_CHECKOUT_MODE absent", () => {
       expect(countOf(html, NOTICE)).toBe(1);
       expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
       // Still 199 ALL: nothing in rendering moves U back to free.
-      expect(html).toContain("199,00 ALL");
+      expect(html).toContain("199 ALL");
       expect(html).not.toContain("Get ebook — Free");
     }
   });

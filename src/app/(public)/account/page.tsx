@@ -56,7 +56,7 @@ export default async function AccountPage({
       />
 
       <SurfaceCard className="mt-8">
-        <h2 className="font-serif text-lg font-semibold">Identity</h2>
+        <h2 className="font-serif text-lg font-normal">Identity</h2>
         <dl className="mt-3 flex flex-col gap-2 text-sm">
           {profile?.display_name && (
             <div className="flex justify-between gap-4">
@@ -78,7 +78,7 @@ export default async function AccountPage({
       </SurfaceCard>
 
       <SurfaceCard className="mt-4">
-        <h2 className="font-serif text-lg font-semibold">Purchases & refunds</h2>
+        <h2 className="font-serif text-lg font-normal">Purchases & refunds</h2>
         <p className="mt-1 text-sm text-muted">
           View your purchase history and manage eligible refund requests.
         </p>
@@ -115,7 +115,7 @@ export default async function AccountPage({
       {profile?.role === "reader" && (
         <div id="become-author">
           <SurfaceCard className="mt-4">
-            <h2 className="font-serif text-lg font-semibold">Publish your own books</h2>
+            <h2 className="font-serif text-lg font-normal">Publish your own books</h2>
             <p className="mt-1 text-sm text-muted">
               Switch to an author account to publish and sell ebooks. You keep
               your library and purchases. Your public author name will start
@@ -134,12 +134,12 @@ export default async function AccountPage({
 
       <form action={logout} className="mt-6">
         <button type="submit" className="focus-ring rounded-sm text-sm text-muted hover:underline">
-          Sign out
+          Log out
         </button>
       </form>
 
       <section className="mt-10 rounded-lg border-l-4 border-red-600 bg-surface p-6">
-        <h2 className="font-serif text-lg font-semibold text-red-800">Danger zone</h2>
+        <h2 className="font-serif text-lg font-normal text-red-800">Danger zone</h2>
         <p className="mt-2 text-sm text-foreground/90">
           Delete account. This permanently deletes your account
           {isAuthor

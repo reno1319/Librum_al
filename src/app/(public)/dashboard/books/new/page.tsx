@@ -66,9 +66,11 @@ export default async function NewBookPage({
       <h1 className="mt-4 font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
         Add a book
       </h1>
+      {/* FIX1 (X7): Renato's W-A wording. The sentence it replaces said
+          a draft was kept from the start; nothing is saved until a
+          final button is pressed (no autosave, his D2). */}
       <p className="mt-2 text-muted">
-        It&apos;s saved as a draft first — you can publish it from your
-        dashboard once you&apos;re happy with it.
+        Nothing is saved until you press Save as draft or Publish book.
       </p>
 
       {error && (

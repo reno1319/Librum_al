@@ -98,12 +98,12 @@ describe("resolveBundleSavingsAll", () => {
 describe("formatBundleSavingsAll", () => {
   it("formats both figures with the canonical whole-ALL shape", () => {
     expect(formatBundleSavingsAll({ show: true, originalTotalAll: 270, savingsAll: 71 })).toEqual({
-      originalTotal: "270,00 ALL",
-      savings: "71,00 ALL",
+      originalTotal: "270 ALL",
+      savings: "71 ALL",
     });
     expect(formatBundleSavingsAll({ show: true, originalTotalAll: 250_000, savingsAll: 150_001 })).toEqual({
-      originalTotal: "250.000,00 ALL",
-      savings: "150.001,00 ALL",
+      originalTotal: "250.000 ALL",
+      savings: "150.001 ALL",
     });
   });
 

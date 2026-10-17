@@ -246,7 +246,7 @@ describe("bookstore bundle rail (rendered)", () => {
     const html = await render(BookstorePage({ searchParams: Promise.resolve({}) }));
 
     expect(html).toContain("Paid Collection");
-    expect(html).toContain("199,00 ALL");
+    expect(html).toContain("199 ALL");
     expect(html).toContain("Free Collection");
     expect(html).not.toContain("Unpriced Collection");
     expect(html).not.toContain("Draft Collection");
@@ -257,7 +257,7 @@ describe("bookstore bundle rail (rendered)", () => {
     const html = await render(BookstorePage({ searchParams: Promise.resolve({}) }));
 
     const rail = html.slice(html.indexOf("Paid Collection"));
-    expect(rail).toContain("199,00 ALL");
+    expect(rail).toContain("199 ALL");
     expect(rail).not.toContain(">Free<");
     expect(html).not.toContain("$0.00");
   });
@@ -312,7 +312,7 @@ describe("author public bundle rail (rendered)", () => {
     const html = await render(AuthorProfilePage({ params: Promise.resolve({ id: AUTHOR }) }));
 
     expect(html).toContain("Paid Collection");
-    expect(html).toContain("199,00 ALL");
+    expect(html).toContain("199 ALL");
     expect(html).toContain("Free Collection");
     expect(html).toContain(">Free<");
     expect(html).not.toContain("Unpriced Collection");
@@ -385,9 +385,9 @@ describe("bundle detail page (rendered)", () => {
     noDollarOrUsd(html);
   });
 
-  it("199 / price_cents 0 renders 199,00 ALL, never Free or $0.00", async () => {
+  it("199 / price_cents 0 renders 199 ALL, never Free or $0.00", async () => {
     const html = await detail(PAID, [A, B]);
-    expect(priceLine(html)).toContain("199,00 ALL");
+    expect(priceLine(html)).toContain("199 ALL");
     expect(priceLine(html)).not.toContain("Free");
     expect(html).not.toContain("$0.00");
     noDollarOrUsd(html);
@@ -398,8 +398,8 @@ describe("bundle detail page (rendered)", () => {
     // 0 for the bundle) would have produced a four-digit dollar saving.
     const html = await detail(PAID, [A, B]);
     const line = priceLine(html);
-    expect(line).toContain('<span class="line-through">270,00 ALL</span>');
-    expect(line).toContain("you save 71,00 ALL");
+    expect(line).toContain('<span class="line-through">270 ALL</span>');
+    expect(line).toContain("you save 71 ALL");
     expect(html).not.toContain("999");
   });
 
@@ -408,8 +408,8 @@ describe("bundle detail page (rendered)", () => {
     const pricey = book("book-c", "Libri C", 300, 1);
     const html = await detail(PAID, [freeMember, pricey]);
     // 0 + 300 = 300; 300 - 199 = 101.
-    expect(priceLine(html)).toContain("300,00 ALL");
-    expect(priceLine(html)).toContain("you save 101,00 ALL");
+    expect(priceLine(html)).toContain("300 ALL");
+    expect(priceLine(html)).toContain("you save 101 ALL");
   });
 
   it("one unpriced member withholds the comparison entirely -- it is never counted as zero", async () => {
@@ -422,7 +422,7 @@ describe("bundle detail page (rendered)", () => {
     // The member is still listed, with its own honest state.
     expect(html).toContain("Libri Pa Çmim");
     expect(html).toContain("Price unavailable");
-    expect(html).toContain("150,00 ALL");
+    expect(html).toContain("150 ALL");
   });
 
   it("a member this viewer cannot resolve also withholds the comparison", async () => {
@@ -441,7 +441,7 @@ describe("bundle detail page (rendered)", () => {
   it("a free bundle reads Free, may state its saving, and is not called paid bundle checkout", async () => {
     const html = await detail(FREE, [A, B]);
     expect(priceLine(html)).toContain(">Free<");
-    expect(priceLine(html)).toContain("you save 270,00 ALL");
+    expect(priceLine(html)).toContain("you save 270 ALL");
     expect(html).toContain("Bundle checkout coming soon");
     expect(html).not.toMatch(/paid bundle checkout/i);
     expect(html).not.toContain("15.00");
@@ -462,7 +462,7 @@ describe("bundle detail page (rendered)", () => {
     const unpricedMember = book("book-null", "Libri Pa Çmim", null, 900);
     const html = await detail(PAID, [A, unpricedMember]);
     expect(html).toContain("Libri A");
-    expect(html).toContain("150,00 ALL");
+    expect(html).toContain("150 ALL");
     expect(html).toContain("Libri Pa Çmim");
     expect(html).toContain("Price unavailable");
     expect(html).not.toContain("9.00");
@@ -503,10 +503,10 @@ describe("author bundle dashboard and edit form (rendered)", () => {
     expect(html).toContain("Unpriced Collection");
     expect(html).toContain("Price unavailable");
     expect(html).toContain("Paid Collection");
-    expect(html).toContain("199,00 ALL");
+    expect(html).toContain("199 ALL");
     expect(html).toContain("Free Collection");
     expect(html).toContain("Draft Collection");
-    expect(html).toContain("299,00 ALL");
+    expect(html).toContain("299 ALL");
     noDollarOrUsd(html);
     expect(html).not.toContain("25.00");
   });

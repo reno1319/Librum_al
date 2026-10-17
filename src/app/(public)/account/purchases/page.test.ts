@@ -236,9 +236,9 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
         { purchase_id: "p7", currency_state: "resolved", currency: "ALL" },
       ],
     });
-    expect(html).toContain("One purchase · 2 books · 12,00 ALL");
-    // Counted once, at the snapshot total -- not 24,00 ALL.
-    expect(html).not.toContain("24,00 ALL");
+    expect(html).toContain("One purchase · 2 books · 12 ALL");
+    // Counted once, at the snapshot total -- not 24 ALL.
+    expect(html).not.toContain("24 ALL");
     expect(html).not.toMatch(/\$\d/);
   });
 });

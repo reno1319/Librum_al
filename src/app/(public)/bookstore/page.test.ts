@@ -86,11 +86,15 @@ function book(n: number, priceAll: number): Row {
 // Ten books, newest = book-10; books 3 and 8 are free.
 const BOOKS = Array.from({ length: 10 }, (_, i) => book(i + 1, i + 1 === 3 || i + 1 === 8 ? 0 : 199));
 
+let signedInUser: { id: string } | null = null;
+
 describe("BookstorePage: redesign step 3 layout", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    signedInUser = null;
     mockCreateClient.mockReset();
     mockCreateClient.mockImplementation(() => ({
+      auth: { getUser: () => Promise.resolve({ data: { user: signedInUser } }) },
       from: (table: string) => tableStub(table === "books" ? BOOKS : []),
       storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/c.png" } }) }) },
     }));
@@ -112,19 +116,18 @@ describe("BookstorePage: redesign step 3 layout", () => {
     const feature = html.slice(html.indexOf("featured-book-title") - 200, html.indexOf("</section>"));
     expect(feature).toContain("New on Librum");
     expect(feature).toContain("Book 10");
-    expect(feature).toContain("199,00 ALL");
+    expect(feature).toContain("199 ALL");
     expect(feature).toContain("Read sample");
-    expect(feature).toContain(`Buy · 199,00 ALL`);
+    expect(feature).toContain(`Buy · 199 ALL`);
     expect(feature).toContain('href="/books/book-10"');
   });
 
-  it("starts the New on Librum shelf after the featured book (Q7 a)", async () => {
-    const shelf = section(await render(), "New on Librum");
-    expect(shelf).not.toContain("Book 10");
-    expect(shelf).toContain("Book 09");
-    expect(shelf).toContain("Book 04");
-    expect(shelf).not.toContain("Book 03");
-    expect(shelf).toContain('href="#all-books"');
+  // FIX1 (X6): Renato 17:11Z "5a" -- the second "New on Librum" shelf
+  // after the featured book is removed; the featured block keeps the label.
+  it("has no second New on Librum shelf after the featured book", async () => {
+    const html = await render();
+    expect(html).not.toContain(">New on Librum</h2>");
+    expect(html.match(/New on Librum/g)?.length).toBe(1);
   });
 
   it("shows free books under Free to start reading, linking to the free filter", async () => {
@@ -141,7 +144,20 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(grid).toContain("10 books");
     expect(grid).toContain("Book 01");
     expect(html).toContain("Are you an author?");
-    expect(html).toContain('href="/dashboard/books/new"');
+  });
+
+  // FIX1 (X1): signed out -> sign up with Author chosen; signed in -> the
+  // existing author entry route.
+  it("Start publishing sends a signed-out visitor to sign up as an author", async () => {
+    const html = await render();
+    expect(html).toMatch(/href="\/signup\?role=author"[^>]*>Start publishing</);
+    expect(html).not.toContain('href="/dashboard/books/new"');
+  });
+
+  it("Start publishing keeps the dashboard route for someone signed in", async () => {
+    signedInUser = { id: "author" };
+    const html = await render();
+    expect(html).toMatch(/href="\/dashboard\/books\/new"[^>]*>Start publishing</);
   });
 
   it("a filtered view is the result grid alone: no feature, shelves, All books heading or band", async () => {

@@ -939,7 +939,7 @@ describe("AdminFinancePage: transaction currency (Patch 4)", () => {
       data: [makeMismatchRow({ amount_cents: 500, currency: "USD" })],
     });
     const html = await renderHtml();
-    expect(occurrences(html, "99,00 ALL")).toBe(2);
+    expect(occurrences(html, "99 ALL")).toBe(2);
     expect(html).toContain("USD 5.00");
     expect(html).not.toMatch(/\$\d/);
   });

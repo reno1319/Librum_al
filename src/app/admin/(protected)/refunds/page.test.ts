@@ -154,9 +154,9 @@ describe("AdminRefundsPage: request amounts carry their own currency (Patch 4)",
     expect(html).toContain("Amount unavailable (conflicting currency records)");
     expect(html).toContain("Amount unavailable (currency unknown)");
     expect(html).not.toContain("USD 42.00");
-    expect(html).not.toContain("42,00 ALL");
+    expect(html).not.toContain("42 ALL");
     expect(html).not.toContain("USD 51.00");
-    expect(html).not.toContain("51,00 ALL");
+    expect(html).not.toContain("51 ALL");
     expect(html).not.toMatch(/\$/);
   });
 

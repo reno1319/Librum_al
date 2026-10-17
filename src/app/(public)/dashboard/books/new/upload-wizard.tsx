@@ -20,7 +20,14 @@ import {
   resolveWizardPricing,
   type WizardPriceMode,
 } from "./wizard-validation";
-import { formControlClasses } from "@/lib/form-styles";
+import { fieldErrorClasses, formControlClassesFor } from "@/lib/form-styles";
+import {
+  FUTURE_DATE_MESSAGE,
+  INVALID_ISBN_MESSAGE,
+  isFutureDateString,
+  isValidIsbn,
+} from "@/lib/book-identifiers";
+import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CoverField } from "@/components/cover-field";
@@ -69,6 +76,26 @@ const EDITION_MAX_LENGTH = 100;
 // from the paid price's error, hint and earnings sentences, because Free
 // is now its own choice and 0 is not accepted under Paid.
 const PAID_PRICE_ERROR = `Enter a price in lek: a whole number from ${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}.`;
+
+// FIX1 (X8): Renato's W-B wording, one message beside each field.
+const TITLE_ERROR = "Add a title.";
+const LANGUAGE_ERROR = "Choose a language.";
+const GENRE_ERROR = "Choose a genre.";
+const FILES_ERROR = "Add both a cover image and a manuscript file to continue.";
+// FIX1 (X16): shown in Readiness while the description is empty. True
+// here: Publish book always saves the draft before the publish check.
+const MISSING_DESCRIPTION_LINE =
+  "Add a description before publishing. Your book will still be saved as a draft.";
+
+// FIX1 (X8): a field's own message, tied to the field by id.
+function FieldError({ id, message }: { id: string; message: string }) {
+  if (!message) return null;
+  return (
+    <span id={id} className={fieldErrorClasses}>
+      {message}
+    </span>
+  );
+}
 
 // The same A2 classes the dashboard (step 4) uses for its boxes and
 // text links, kept local as the dashboard keeps its own.
@@ -131,7 +158,14 @@ export function UploadWizard({
   paidPublishingAvailable: boolean;
 }) {
   const [step, setStep] = useState(1);
-  const [stepError, setStepError] = useState("");
+  // FIX1 (X8): no single sentence at the top any more. Each step shows
+  // its messages beside the fields they belong to, once the author has
+  // pressed Next (or a final button) on that step; a required field's
+  // message clears as soon as it is filled, because it is derived from
+  // the live value, not stored.
+  const [showDetailErrors, setShowDetailErrors] = useState(false);
+  const [showFilesError, setShowFilesError] = useState(false);
+  const [priceError, setPriceError] = useState("");
 
   // LIBRUM 2.0 PRODUCT-5 COVER-1: no longer a File -- CoverField now
   // uploads directly to Storage and maintains its own small path
@@ -163,6 +197,13 @@ export function UploadWizard({
   // real live values instead of reimplementing its logic.
   const [description, setDescription] = useState("");
   const [keywords, setKeywords] = useState("");
+  // FIX1 (X9): promoted to controlled for the same reason -- the ISBN
+  // and date checks read the live value. Each field's message also
+  // shows once the author leaves that field.
+  const [isbn, setIsbn] = useState("");
+  const [originalPublicationDate, setOriginalPublicationDate] = useState("");
+  const [isbnTouched, setIsbnTouched] = useState(false);
+  const [dateTouched, setDateTouched] = useState(false);
   // REDESIGN STEP 5 (D3): Paid is chosen when the page opens, with an
   // empty box -- the old hidden default of "0" (= free) is gone. The
   // paid box keeps its own value, so switching Free -> Paid shows what
@@ -174,6 +215,12 @@ export function UploadWizard({
   // hidden) heading on every step change, but not on first render.
   const stepHeadingRef = useRef<HTMLHeadingElement>(null);
   const priceInputRef = useRef<HTMLInputElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const languageSelectRef = useRef<HTMLSelectElement>(null);
+  const genreSelectRef = useRef<HTMLSelectElement>(null);
+  const isbnInputRef = useRef<HTMLInputElement>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
+  const moreDetailsRef = useRef<HTMLDetailsElement>(null);
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) {
@@ -183,21 +230,47 @@ export function UploadWizard({
     stepHeadingRef.current?.focus();
   }, [step]);
 
+  const titleError = title.trim() ? "" : TITLE_ERROR;
+  const languageError = language.trim() ? "" : LANGUAGE_ERROR;
+  const genreError = genre.trim() ? "" : GENRE_ERROR;
+  const isbnError = isbn.trim() && !isValidIsbn(isbn) ? INVALID_ISBN_MESSAGE : "";
+  const dateError = isFutureDateString(originalPublicationDate) ? FUTURE_DATE_MESSAGE : "";
+  const shownTitleError = showDetailErrors ? titleError : "";
+  const shownLanguageError = showDetailErrors ? languageError : "";
+  const shownGenreError = showDetailErrors ? genreError : "";
+  const shownIsbnError = showDetailErrors || isbnTouched ? isbnError : "";
+  const shownDateError = showDetailErrors || dateTouched ? dateError : "";
+  const filesReady = canAdvanceFromFiles({ coverReady: !!cover, manuscriptReady: !!manuscript });
+  const shownFilesError = showFilesError && !filesReady ? FILES_ERROR : "";
+
+  // Step 1 passes only when every field on it is valid. On a failure
+  // every message shows at once and focus goes to the first field with
+  // one, opening "Additional book details" when that field is inside.
+  function detailsAreValid(): boolean {
+    const valid =
+      canAdvanceFromBookDetails({ title, language, genre }) && !isbnError && !dateError;
+    if (valid) return true;
+    setShowDetailErrors(true);
+    if (titleError) titleInputRef.current?.focus();
+    else if (languageError) languageSelectRef.current?.focus();
+    else if (genreError) genreSelectRef.current?.focus();
+    else {
+      if (moreDetailsRef.current) moreDetailsRef.current.open = true;
+      (isbnError ? isbnInputRef : dateInputRef).current?.focus();
+    }
+    return false;
+  }
+
   function goNext() {
-    if (step === 1 && !canAdvanceFromBookDetails({ title, language, genre })) {
-      setStepError("Add a title, language, and genre to continue.");
+    if (step === 1 && !detailsAreValid()) return;
+    if (step === 2 && !filesReady) {
+      setShowFilesError(true);
       return;
     }
-    if (step === 2 && !canAdvanceFromFiles({ coverReady: !!cover, manuscriptReady: !!manuscript })) {
-      setStepError("Add both a cover image and a manuscript file to continue.");
-      return;
-    }
-    setStepError("");
     setStep((s) => Math.min(s + 1, STEPS.length));
   }
 
   function goBack() {
-    setStepError("");
     setStep((s) => Math.max(s - 1, 1));
   }
 
@@ -205,7 +278,6 @@ export function UploadWizard({
   // validation is needed to go back (W1). Later steps are not links.
   function goToDoneStep(target: number) {
     if (target >= step) return;
-    setStepError("");
     setStep(target);
   }
 
@@ -216,10 +288,21 @@ export function UploadWizard({
   // is sent. This is a submit handler, not a disabled= on the buttons:
   // SaveButtons stays disabled by `pending` only. The server-side price
   // checks in actions.ts are unchanged and still decide on their own.
+  //
+  // FIX1 (X8/X9): the message now sits under the price box. The step-1
+  // checks are re-run too, as a guard only: step 1 cannot be left with
+  // an invalid field, so this sends the author back to it only if that
+  // ever changed.
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    if (!canAdvanceFromBookDetails({ title, language, genre }) || isbnError || dateError) {
+      event.preventDefault();
+      setStep(1);
+      setShowDetailErrors(true);
+      return;
+    }
     if (!pricing.canSubmit) {
       event.preventDefault();
-      setStepError(PAID_PRICE_ERROR);
+      setPriceError(PAID_PRICE_ERROR);
       priceInputRef.current?.focus();
     }
   }
@@ -280,12 +363,6 @@ export function UploadWizard({
         ))}
       </ol>
 
-      {stepError && (
-        <p role="status" className="rounded-lg border-l-4 border-red-600 bg-surface px-4 py-3 text-sm text-red-800">
-          {stepError}
-        </p>
-      )}
-
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22.5rem] lg:items-start lg:gap-8">
         <section
           aria-labelledby="wizard-step-heading"
@@ -305,23 +382,30 @@ export function UploadWizard({
             <label className="flex flex-col gap-1 text-sm">
               Title
               <input
+                ref={titleInputRef}
                 name="title"
                 type="text"
                 required
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className={formControlClasses}
+                aria-invalid={shownTitleError ? true : undefined}
+                aria-describedby={shownTitleError ? "wizard-title-error" : undefined}
+                className={formControlClassesFor(!!shownTitleError)}
               />
+              <FieldError id="wizard-title-error" message={shownTitleError} />
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
               Language
               <select
                 name="language"
+                ref={languageSelectRef}
                 required
                 value={language}
                 onChange={(e) => setLanguage(e.target.value)}
-                className={formControlClasses}
+                aria-invalid={shownLanguageError ? true : undefined}
+                aria-describedby={shownLanguageError ? "wizard-language-error" : undefined}
+                className={formControlClassesFor(!!shownLanguageError)}
               >
                 <option value="" disabled>
                   Choose a language
@@ -332,16 +416,20 @@ export function UploadWizard({
                   </option>
                 ))}
               </select>
+              <FieldError id="wizard-language-error" message={shownLanguageError} />
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
               Genre
               <select
                 name="genre"
+                ref={genreSelectRef}
                 required
                 value={genre}
                 onChange={(e) => setGenre(e.target.value)}
-                className={formControlClasses}
+                aria-invalid={shownGenreError ? true : undefined}
+                aria-describedby={shownGenreError ? "wizard-genre-error" : undefined}
+                className={formControlClassesFor(!!shownGenreError)}
               >
                 <option value="" disabled>
                   Choose a genre
@@ -352,6 +440,7 @@ export function UploadWizard({
                   </option>
                 ))}
               </select>
+              <FieldError id="wizard-genre-error" message={shownGenreError} />
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
@@ -360,25 +449,25 @@ export function UploadWizard({
                 name="subtitle"
                 type="text"
                 maxLength={SUBTITLE_MAX_LENGTH}
-                className={formControlClasses}
+                className={formControlClassesFor(false)}
               />
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              Description (optional)
+              Description
               <textarea
                 name="description"
                 rows={4}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className={formControlClasses}
+                className={formControlClassesFor(false)}
               />
               <span className="text-xs text-muted">
                 A couple of sentences or more helps readers decide.
               </span>
             </label>
 
-            <details className="rounded-lg border border-border px-4 py-3">
+            <details ref={moreDetailsRef} className="rounded-lg border border-border px-4 py-3">
               <summary className="cursor-pointer text-sm font-medium text-foreground">
                 Additional book details
               </summary>
@@ -386,11 +475,18 @@ export function UploadWizard({
                 <label className="flex flex-col gap-1 text-sm">
                   ISBN (optional)
                   <input
+                    ref={isbnInputRef}
                     name="isbn"
                     type="text"
                     placeholder="e.g. 978-3-16-148410-0"
-                    className={formControlClasses}
+                    value={isbn}
+                    onChange={(e) => setIsbn(e.target.value)}
+                    onBlur={() => setIsbnTouched(true)}
+                    aria-invalid={shownIsbnError ? true : undefined}
+                    aria-describedby={shownIsbnError ? "wizard-isbn-error" : undefined}
+                    className={formControlClassesFor(!!shownIsbnError)}
                   />
+                  <FieldError id="wizard-isbn-error" message={shownIsbnError} />
                   <span className="text-xs text-muted">
                     Only if you already own one — Librum doesn&apos;t issue or
                     register ISBNs. Leave blank to skip.
@@ -403,7 +499,7 @@ export function UploadWizard({
                     name="publisher"
                     type="text"
                     maxLength={PUBLISHER_MAX_LENGTH}
-                    className={formControlClasses}
+                    className={formControlClassesFor(false)}
                   />
                 </label>
 
@@ -414,13 +510,24 @@ export function UploadWizard({
                     type="text"
                     placeholder="e.g. 2nd edition"
                     maxLength={EDITION_MAX_LENGTH}
-                    className={formControlClasses}
+                    className={formControlClassesFor(false)}
                   />
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
                   Originally published (optional)
-                  <input name="originalPublicationDate" type="date" className={formControlClasses} />
+                  <input
+                    ref={dateInputRef}
+                    name="originalPublicationDate"
+                    type="date"
+                    value={originalPublicationDate}
+                    onChange={(e) => setOriginalPublicationDate(e.target.value)}
+                    onBlur={() => setDateTouched(true)}
+                    aria-invalid={shownDateError ? true : undefined}
+                    aria-describedby={shownDateError ? "wizard-date-error" : undefined}
+                    className={formControlClassesFor(!!shownDateError)}
+                  />
+                  <FieldError id="wizard-date-error" message={shownDateError} />
                   <span className="text-xs text-muted">
                     Only if this edition was first published elsewhere before
                     arriving on Librum.
@@ -435,7 +542,7 @@ export function UploadWizard({
                     value={keywords}
                     onChange={(e) => setKeywords(e.target.value)}
                     placeholder="e.g. space opera, first contact, hard sci-fi"
-                    className={formControlClasses}
+                    className={formControlClassesFor(false)}
                   />
                   <span className="text-xs text-muted">
                     Comma-separated. Helps readers find your book by terms beyond
@@ -446,8 +553,15 @@ export function UploadWizard({
                 {series.length === 0 && (
                   <p className="text-xs text-muted">
                     Want to group this with other books as a series?{" "}
-                    <Link href="/dashboard/series" className="focus-ring rounded-sm underline">
+                    {/* FIX1 (X11): a new tab, so nothing typed here is lost. */}
+                    <Link
+                      href="/dashboard/series"
+                      target="_blank"
+                      rel="noopener"
+                      className="focus-ring rounded-sm underline"
+                    >
                       Create a series first
+                      <span className="sr-only"> (opens in a new tab)</span>
                     </Link>
                     , then come back here.
                   </p>
@@ -457,7 +571,7 @@ export function UploadWizard({
                   <div className="flex gap-3">
                     <label className="flex flex-1 flex-col gap-1 text-sm">
                       Series (optional)
-                      <select name="seriesId" defaultValue="" className={formControlClasses}>
+                      <select name="seriesId" defaultValue="" className={formControlClassesFor(false)}>
                         <option value="">None</option>
                         {series.map((s) => (
                           <option key={s.id} value={s.id}>
@@ -474,7 +588,7 @@ export function UploadWizard({
                         min="1"
                         step="1"
                         placeholder="1"
-                        className={`w-24 ${formControlClasses}`}
+                        className={`w-24 ${formControlClassesFor(false)}`}
                       />
                     </label>
                   </div>
@@ -486,7 +600,13 @@ export function UploadWizard({
           {/* Step 2: Manuscript & cover */}
           <div className={step === 2 ? "flex flex-col gap-6" : "hidden"}>
             <div className="flex flex-col gap-4">
-              <CoverField authorId={authorId} onCoverChange={setCover} />
+              <div className="flex flex-col gap-2">
+                <CoverField authorId={authorId} onCoverChange={setCover} />
+                {/* FIX1 (X10): the tip moved here from the Tips box. */}
+                <p className="text-xs text-muted">
+                  Covers work best as a portrait image, at least 1000px tall.
+                </p>
+              </div>
 
               <ManuscriptField
                 bookTitle={title}
@@ -500,6 +620,13 @@ export function UploadWizard({
                 {[cover, manuscript].filter(Boolean).length} of 2 files ready.
               </p>
 
+              {/* FIX1 (X8): the existing sentence, under the file fields. */}
+              {shownFilesError && (
+                <p role="alert" className={fieldErrorClasses}>
+                  {shownFilesError}
+                </p>
+              )}
+
               <p className="text-xs text-muted">
                 Readers can preview approximately the first 10% of your ebook —
                 generated automatically, no extra steps needed.
@@ -509,7 +636,6 @@ export function UploadWizard({
             <aside className="rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted">
               <p className="font-medium text-foreground">Tips</p>
               <ul className="mt-1 flex flex-col gap-1 pl-4 list-disc">
-                <li>Covers work best as a portrait image, at least 1000px tall.</li>
                 <li>
                   You can replace either file later from your dashboard before —
                   or after — publishing.
@@ -548,7 +674,7 @@ export function UploadWizard({
                     checked={priceMode === mode}
                     onChange={() => {
                       setPriceMode(mode);
-                      setStepError("");
+                      setPriceError("");
                     }}
                     onKeyDown={(e) => {
                       // Enter on a radio must not submit the form as
@@ -570,7 +696,11 @@ export function UploadWizard({
               // catalog cannot store.
               <label className="flex flex-col gap-1 text-sm">
                 Price (ALL)
-                <span className="flex w-full max-w-[17.5rem] items-stretch overflow-hidden rounded-[4px] border border-[#8c8472] bg-surface focus-within:shadow-[var(--focus-ring)]">
+                <span
+                  className={`flex w-full max-w-[17.5rem] items-stretch overflow-hidden rounded-[4px] border bg-surface focus-within:shadow-[var(--focus-ring)] ${
+                    priceError ? "border-red-700" : "border-[#8c8472]"
+                  }`}
+                >
                   <input
                     ref={priceInputRef}
                     name="price"
@@ -580,13 +710,15 @@ export function UploadWizard({
                     onChange={(e) => {
                       setPaidPrice(e.target.value);
                       // The price error belongs to the old value.
-                      setStepError("");
+                      setPriceError("");
                     }}
                     onKeyDown={(e) => {
                       // Enter in the price box must not submit the form as
                       // "Save as draft" (the first submit button).
                       if (e.key === "Enter") e.preventDefault();
                     }}
+                    aria-invalid={priceError ? true : undefined}
+                    aria-describedby={priceError ? "wizard-price-error" : undefined}
                     className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-lg outline-none"
                   />
                   <span
@@ -596,6 +728,8 @@ export function UploadWizard({
                     ALL
                   </span>
                 </span>
+                {/* FIX1 (X8): the price message, under the price box. */}
+                <FieldError id="wizard-price-error" message={priceError} />
                 <span className="text-xs text-muted">
                   Whole lek: {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
                   {MAXIMUM_CATALOG_PRICE_ALL}. Librum takes a {PLATFORM_FEE_PERCENT}%
@@ -617,6 +751,9 @@ export function UploadWizard({
                   can do here changes this. Stays CONDITIONAL, never a
                   hardcoded line: with PAID_PUBLISHING_MODE set on the
                   protected staging deployment it correctly disappears. */}
+              {readiness.missingDescription && (
+                <p className="mt-2 text-red-800">{MISSING_DESCRIPTION_LINE}</p>
+              )}
               {readiness.paidPublishingBlocked && (
                 <p className="mt-2 text-red-800">
                   Paid publishing hasn&apos;t launched yet. Your book will still
@@ -633,6 +770,7 @@ export function UploadWizard({
                 </ul>
               )}
               {!readiness.missingAllPrice &&
+                !readiness.missingDescription &&
                 !readiness.paidPublishingBlocked &&
                 readiness.recommended.every((item) => item.done) && (
                 <p className="mt-2 text-muted">Looks good — ready to publish.</p>
@@ -713,7 +851,11 @@ export function UploadWizard({
                 className="h-[6.75rem] w-[4.5rem] shrink-0 rounded-[2px] object-cover shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
               />
             ) : (
-              <div className="h-[6.75rem] w-[4.5rem] shrink-0 rounded-[2px] bg-border shadow-[0_6px_14px_rgba(30,58,50,0.18)]" />
+              <CoverPlaceholder
+                title={title}
+                authorName={authorName}
+                className="h-[6.75rem] w-[4.5rem] shrink-0 rounded-[2px] shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
+              />
             )}
             <div className="flex min-w-0 flex-col gap-1">
               <p className={BOX_LABEL_CLASSES}>How readers will see it</p>

@@ -42,7 +42,7 @@ export default function AboutPage() {
       </div>
 
       <section className="mt-12">
-        <h2 className="font-serif text-xl font-semibold">How the money works</h2>
+        <h2 className="font-serif text-xl font-normal">How the money works</h2>
         <p className="mt-3 text-foreground/90">
           Librum takes a {PLATFORM_FEE_PERCENT}% platform fee on every sale,
           once paid publishing launches. Paid publishing and author payout
@@ -59,7 +59,7 @@ export default function AboutPage() {
       <section className="mt-12">
         <SurfaceCard className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-serif text-lg font-semibold">Questions?</h2>
+            <h2 className="font-serif text-lg font-normal">Questions?</h2>
             <p className="mt-1 text-sm text-foreground/90">
               Check the{" "}
               <Link href="/help" className="text-primary underline">
