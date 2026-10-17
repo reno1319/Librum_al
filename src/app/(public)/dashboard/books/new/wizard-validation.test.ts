@@ -6,6 +6,7 @@ import {
   canAdvanceFromFiles,
   canAdvanceFromPrice,
   resolveWizardPriceSummary,
+  resolveWizardPricing,
 } from "./wizard-validation";
 
 describe("canAdvanceFromBookDetails", () => {
@@ -146,5 +147,47 @@ describe("resolveWizardPriceSummary", () => {
   it("a rejected price is never reported as free", () => {
     expect(resolveWizardPriceSummary("abc").isFreeBook).toBe(false);
     expect(resolveWizardPriceSummary("9.99").isFreeBook).toBe(false);
+  });
+});
+
+// REDESIGN STEP 5 (D3, W6): Paid / Free.
+describe("resolveWizardPricing", () => {
+  it("Free always submits 0 and is a free book, whatever the paid box holds", () => {
+    for (const paidPrice of ["", "499", "abc"]) {
+      const result = resolveWizardPricing({ mode: "free", paidPrice });
+      expect(result.submittedPrice).toBe("0");
+      expect(result.canSubmit).toBe(true);
+      expect(result.priceValid).toBe(true);
+      expect(result.isFreeBook).toBe(true);
+      expect(result.priceAll).toBe(0);
+    }
+  });
+
+  it("Paid accepts a whole lek price from 99 to 100000 and submits exactly what was typed", () => {
+    for (const paidPrice of ["99", "499", "100000", "990,00"]) {
+      const result = resolveWizardPricing({ mode: "paid", paidPrice });
+      expect(result.canSubmit).toBe(true);
+      expect(result.submittedPrice).toBe(paidPrice);
+      expect(result).toMatchObject(resolveWizardPriceSummary(paidPrice));
+      expect(result.isFreeBook).toBe(false);
+    }
+  });
+
+  it("Paid never accepts 0 -- it is not reported as a free book either", () => {
+    for (const paidPrice of ["0", "0,00", "00"]) {
+      const result = resolveWizardPricing({ mode: "paid", paidPrice });
+      expect(result.canSubmit).toBe(false);
+      expect(result.priceValid).toBe(false);
+      expect(result.isFreeBook).toBe(false);
+    }
+  });
+
+  it("Paid rejects an empty box and every form the catalog refuses", () => {
+    for (const paidPrice of ["", "   ", "98", "100001", "9.99", "-1", "abc"]) {
+      const result = resolveWizardPricing({ mode: "paid", paidPrice });
+      expect(result.canSubmit).toBe(false);
+      expect(result.priceValid).toBe(false);
+      expect(result.earningsMinor).toBe(0);
+    }
   });
 });
