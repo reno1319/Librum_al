@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
-import { Inter, Geist_Mono, Playfair_Display } from "next/font/google";
+import { Libre_Franklin, Geist_Mono, Libre_Caslon_Text } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter-sans",
-  subsets: ["latin"],
+// REDESIGN STEP 1: Libre Franklin (body, variable font, so every
+// weight 400-700 comes from one file) and Libre Caslon Text (headings).
+// latin-ext is required for Albanian (ë, ç).
+const libreFranklin = Libre_Franklin({
+  variable: "--font-libre-franklin",
+  subsets: ["latin", "latin-ext"],
 });
 
 const geistMono = Geist_Mono({
@@ -12,9 +15,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const playfairDisplay = Playfair_Display({
-  variable: "--font-playfair",
-  subsets: ["latin"],
+const libreCaslonText = Libre_Caslon_Text({
+  variable: "--font-libre-caslon",
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "700"],
+  style: ["normal", "italic"],
 });
 
 // LIBRUM 2.0 SEO-1: a title TEMPLATE, not a fixed string -- every route's
@@ -54,7 +59,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${geistMono.variable} ${playfairDisplay.variable} h-full antialiased`}
+      className={`${libreFranklin.variable} ${geistMono.variable} ${libreCaslonText.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">{children}</body>
     </html>
