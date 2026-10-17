@@ -27,15 +27,20 @@ describe("Book Detail: Subtitle near the Title", () => {
     expect(heroBlock).not.toContain("${book.subtitle}");
   });
 
-  it("is visually secondary (not the h1's own bold/serif treatment)", () => {
+  // REDESIGN STEP 3 (brief P2): the subtitle is now a muted italic
+  // serif line, as in the A2 mockup -- still visually secondary: muted,
+  // italic and smaller, never the h1's own green upright display size.
+  it("is visually secondary (muted italic, not the h1's own treatment)", () => {
     const subtitleLine = source.match(/\{book\.subtitle && \([\s\S]*?\)\)?\}/)![0];
     expect(subtitleLine).toContain("text-muted");
-    expect(subtitleLine).not.toContain("font-serif");
+    expect(subtitleLine).toContain("italic");
+    expect(subtitleLine).not.toContain("text-primary");
+    expect(subtitleLine).not.toMatch(/text-(4xl|5xl)|font-(semibold|bold)/);
   });
 });
 
 describe("Book Detail: metadata dl row order and conditional rendering", () => {
-  const dlBlock = block('<dl className="mt-4 flex flex-wrap', "</dl>");
+  const dlBlock = block('<dl className="mt-4 grid', "</dl>");
 
   it("Format remains always visible, unconditional", () => {
     expect(dlBlock).toContain("Ebook · EPUB");
@@ -107,7 +112,7 @@ describe("Book Detail: metadata dl row order and conditional rendering", () => {
 
 describe("Book Detail: no exposure of internal/private fields", () => {
   it("never renders a storage path, only public-URL-derived image src or plain text metadata", () => {
-    const dlBlock2 = block('<dl className="mt-4 flex flex-wrap', "</dl>");
+    const dlBlock2 = block('<dl className="mt-4 grid', "</dl>");
     expect(dlBlock2).not.toContain("file_path");
     expect(dlBlock2).not.toContain("cover_path");
   });
