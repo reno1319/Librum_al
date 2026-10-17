@@ -19,6 +19,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Bundle, Profile } from "@/lib/types";
 import type { Metadata } from "next";
+import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 export const metadata: Metadata = {
   title: "Bookstore",
@@ -375,19 +376,24 @@ export default async function BookstorePage({
   // render site below for where this is enforced a second time,
   // defensively, rather than relying solely on the empty array here.
   // REDESIGN STEP 3: the free shelf follows the same rule.
-  const [{ books, error, totalMatched }, bundles, freeBooks] = await Promise.all([
+  // FIX1 (X1): the author band's button depends on whether anyone is
+  // signed in, so the unfiltered view (the only one with the band) asks.
+  const [{ books, error, totalMatched }, bundles, freeBooks, signedIn] = await Promise.all([
     fetchSearchResults(supabase, { q, genre, sort, minPriceAll, maxPriceAll }),
     isFiltered ? Promise.resolve([]) : fetchPublishedBundles(supabase),
     isFiltered ? Promise.resolve([]) : fetchFreeBooks(supabase),
+    isFiltered
+      ? Promise.resolve(false)
+      : supabase.auth.getUser().then(({ data }) => !!data.user),
   ]);
 
   // REDESIGN STEP 3: the unfiltered view leads with the newest book
-  // (D1), then the next newest as "New on Librum" (Q7 a: the shelf
-  // starts after the featured book), then free books, then the full
-  // grid. A filtered view is the grid alone (B4).
+  // (D1), then free books, then the full grid. A filtered view is the
+  // grid alone (B4). FIX1 (X6): the second "New on Librum" shelf that
+  // followed the featured book is gone (Renato 17:11Z, 5a); the
+  // featured block keeps its label.
   const showShelves = !isFiltered && !error && books.length > 0;
   const featured = showShelves ? books[0] : null;
-  const newShelf = showShelves ? books.slice(1, 1 + SHELF_SIZE) : [];
 
   return (
     <main className="flex-1 bg-background">
@@ -396,15 +402,6 @@ export default async function BookstorePage({
 
         {featured && (
           <FeaturedBook book={featured} coverUrl={coverUrlFor(supabase, featured.cover_path)} />
-        )}
-
-        {newShelf.length > 0 && (
-          <CoverShelf
-            heading="New on Librum"
-            seeAllHref="#all-books"
-            books={newShelf}
-            supabase={supabase}
-          />
         )}
 
         {freeBooks.length > 0 && (
@@ -426,7 +423,7 @@ export default async function BookstorePage({
 
         {!isFiltered && bundles.length > 0 && <BundlesSection bundles={bundles} supabase={supabase} />}
 
-        {!isFiltered && <AuthorBand />}
+        {!isFiltered && <AuthorBand signedIn={signedIn} />}
       </div>
     </main>
   );
@@ -732,7 +729,13 @@ function FeaturedBook({
               className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_16px_32px_rgba(0,0,0,0.4)]"
             />
           ) : (
-            <div className="aspect-[2/3] w-full rounded-[3px] bg-border shadow-[0_16px_32px_rgba(0,0,0,0.4)]" />
+            // On the green panel, a thin cream edge keeps the green
+            // placeholder from disappearing into it.
+            <CoverPlaceholder
+              title={book.title}
+              authorName={authorName}
+              className="aspect-[2/3] w-full rounded-[3px] shadow-[0_16px_32px_rgba(0,0,0,0.4)] ring-1 ring-primary-foreground/40"
+            />
           )}
         </Link>
       </div>
@@ -930,11 +933,14 @@ function BundlesSection({
   );
 }
 
-// REDESIGN STEP 3 (B3): the mockup's closing band. /dashboard/books/new
-// is the existing author entry route: a visitor is sent to log in
-// first, a reader to the become-an-author step, an author straight to
-// adding a book (see dashboard/layout.tsx and books/new/page.tsx).
-function AuthorBand() {
+// REDESIGN STEP 3 (B3): the mockup's closing band. FIX1 (X1): a
+// signed-out visitor goes to sign up with Author chosen (the same
+// target as Earnings, /signup?role=author), not to log in. Anyone
+// signed in keeps /dashboard/books/new, the existing author entry
+// route: a reader is sent to the become-an-author step, an author
+// straight to adding a book (see dashboard/layout.tsx and
+// books/new/page.tsx).
+function AuthorBand({ signedIn }: { signedIn: boolean }) {
   return (
     <section className="mt-16 flex flex-wrap items-center justify-between gap-5 rounded-[4px] bg-primary p-6 text-primary-foreground sm:p-8">
       <div className="flex flex-col gap-1.5">
@@ -944,7 +950,7 @@ function AuthorBand() {
         </p>
       </div>
       <Link
-        href="/dashboard/books/new"
+        href={signedIn ? "/dashboard/books/new" : "/signup?role=author"}
         className="focus-ring inline-flex items-center justify-center rounded-[3px] bg-accent px-6 py-3.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground"
       >
         Start publishing

@@ -120,10 +120,10 @@ describe("DiscountsPage: ALL discount creation and display", () => {
       codeRow("c2", "BIG2500", { amount_off_all: 2500 }),
     ]);
     const small = rowFor(html, "SMALL1");
-    expect(small).toContain("1,00 ALL off");
+    expect(small).toContain("1 ALL off");
     expect(small).not.toContain("99,00");
     expect(small).not.toMatch(/legacy/i);
-    expect(rowFor(html, "BIG2500")).toContain("2.500,00 ALL off");
+    expect(rowFor(html, "BIG2500")).toContain("2.500 ALL off");
     // The bug this replaces: an amount_off_all row used to render "$0.00 off".
     expect(html).not.toContain("$0.00");
   });
@@ -141,8 +141,8 @@ describe("DiscountsPage: ALL discount creation and display", () => {
     expect(row).toContain("USD 5.00 off");
     expect(row).toContain("Legacy USD discount: not applicable to ALL checkout");
     expect(row).not.toMatch(/\d[\d.,]*\s*ALL off/);
-    expect(row).not.toContain("5,00 ALL");
-    expect(row).not.toContain("500,00 ALL");
+    expect(row).not.toContain("5 ALL");
+    expect(row).not.toContain("500 ALL");
     // Existing enable/disable and delete controls are unchanged for it.
     expect(row).toContain("Disable");
     expect(row).toContain("Delete");
@@ -155,7 +155,7 @@ describe("DiscountsPage: ALL discount creation and display", () => {
       codeRow("c3", "USDTHREE", { amount_off_cents: 300 }),
     ]);
     expect(rowFor(html, "PCTTEN")).toContain("10% off");
-    expect(rowFor(html, "ALLTWO")).toContain("200,00 ALL off");
+    expect(rowFor(html, "ALLTWO")).toContain("200 ALL off");
     expect(rowFor(html, "USDTHREE")).toContain("USD 3.00 off");
     expect(html.match(/not applicable to ALL checkout/g)).toHaveLength(1);
   });

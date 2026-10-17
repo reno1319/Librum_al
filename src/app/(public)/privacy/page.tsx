@@ -8,12 +8,12 @@ export const metadata: Metadata = {
 export default function PrivacyPage() {
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-4xl font-semibold">Privacy Policy</h1>
+      <h1 className="font-serif text-4xl font-normal">Privacy Policy</h1>
       <p className="mt-2 text-sm text-muted">Last updated: August 2026</p>
 
       <div className="mt-8 flex flex-col gap-6 text-foreground/90">
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             What we collect
           </h2>
           <p className="mt-2">
@@ -55,7 +55,7 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             EPUB watermarking
           </h2>
           <p className="mt-2">
@@ -71,7 +71,7 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             How we use it
           </h2>
           <p className="mt-2">
@@ -81,7 +81,7 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             Who we share it with
           </h2>
           <p className="mt-2">We work with a small set of providers to run Librum:</p>
@@ -111,7 +111,7 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">Cookies</h2>
+          <h2 className="font-serif text-lg font-normal">Cookies</h2>
           <p className="mt-2">
             Librum uses cookies that are necessary to run the platform:
             one to keep you signed in, and one to hold your account in a
@@ -122,7 +122,7 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">
+          <h2 className="font-serif text-lg font-normal">
             Account deletion
           </h2>
           <p className="mt-2">
@@ -141,7 +141,7 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">Your rights</h2>
+          <h2 className="font-serif text-lg font-normal">Your rights</h2>
           <p className="mt-2">
             Contact Librum if you have questions about, or wish to
             request access to or correction of, personal information
@@ -150,7 +150,7 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="font-serif text-lg font-semibold">Contact</h2>
+          <h2 className="font-serif text-lg font-normal">Contact</h2>
           <p className="mt-2">
             For privacy questions or requests concerning personal
             information associated with your account, contact Librum at{" "}

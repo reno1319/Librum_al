@@ -95,7 +95,7 @@ export default async function BlogIndexPage() {
     <main className="mx-auto w-full max-w-wide flex-1 px-4 py-12 sm:px-6">
       <div className="max-w-2xl">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">Blog</p>
-        <h1 className="mt-1 font-serif text-3xl font-semibold text-foreground md:text-4xl">
+        <h1 className="mt-1 font-serif text-3xl font-normal text-foreground md:text-4xl">
           Blogu i Librum
         </h1>
         <p className="mt-3 text-muted">

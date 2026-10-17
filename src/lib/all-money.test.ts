@@ -19,21 +19,21 @@ import { ALL_FREE_LABEL, formatAllMinorUnits } from "./all-money";
 // loose matcher waves through.
 
 describe("formatAllMinorUnits: the four contract examples, exactly", () => {
-  it("0 is the free label, not 0,00 ALL", () => {
+  it("0 is the free label, not 0 ALL", () => {
     expect(formatAllMinorUnits(0)).toBe("Free");
     expect(formatAllMinorUnits(0)).toBe(ALL_FREE_LABEL);
   });
 
-  it("9900 is 99,00 ALL", () => {
-    expect(formatAllMinorUnits(9900)).toBe("99,00 ALL");
+  it("9900 is 99 ALL", () => {
+    expect(formatAllMinorUnits(9900)).toBe("99 ALL");
   });
 
   it("17910 is 179,10 ALL -- the qindarka Intl would have dropped", () => {
     expect(formatAllMinorUnits(17910)).toBe("179,10 ALL");
   });
 
-  it("10000000 is 100.000,00 ALL -- dot groups thousands, comma separates decimals", () => {
-    expect(formatAllMinorUnits(10000000)).toBe("100.000,00 ALL");
+  it("10000000 is 100.000 ALL -- dot groups thousands, comma separates decimals", () => {
+    expect(formatAllMinorUnits(10000000)).toBe("100.000 ALL");
   });
 });
 
@@ -46,19 +46,19 @@ describe("formatAllMinorUnits: separators are never swapped", () => {
     [9, "0,09 ALL"],
     [10, "0,10 ALL"],
     [99, "0,99 ALL"],
-    [100, "1,00 ALL"],
+    [100, "1 ALL"],
     [101, "1,01 ALL"],
     [999, "9,99 ALL"],
-    [1000, "10,00 ALL"],
+    [1000, "10 ALL"],
     [99999, "999,99 ALL"],
-    [100000, "1.000,00 ALL"],
+    [100000, "1.000 ALL"],
     [100001, "1.000,01 ALL"],
     [999999, "9.999,99 ALL"],
-    [1000000, "10.000,00 ALL"],
+    [1000000, "10.000 ALL"],
     [99999999, "999.999,99 ALL"],
-    [100000000, "1.000.000,00 ALL"],
+    [100000000, "1.000.000 ALL"],
     [123456789, "1.234.567,89 ALL"],
-    [1000000000, "10.000.000,00 ALL"],
+    [1000000000, "10.000.000 ALL"],
   ];
 
   it.each(cases)("%i formats as %s", (minor, expected) => {
@@ -80,14 +80,19 @@ describe("formatAllMinorUnits: separators are never swapped", () => {
     }
   });
 
-  it("always shows exactly two decimal digits", () => {
-    for (const [, expected] of cases) {
-      expect(expected).toMatch(/,\d{2} ALL$/);
-    }
-    // And the same property computed rather than read off the table.
+  // FIX1 (X5): two decimal digits exactly when there are qindarka, none
+  // for a whole-lek amount.
+  it("shows two decimal digits for qindarka and none for whole lek", () => {
     for (let minor = 1; minor <= 2000; minor += 1) {
-      expect(formatAllMinorUnits(minor)).toMatch(/^\d{1,3}(\.\d{3})*,\d{2} ALL$/);
+      const formatted = formatAllMinorUnits(minor);
+      if (minor % 100 === 0) {
+        expect(formatted).toMatch(/^\d{1,3}(\.\d{3})* ALL$/);
+      } else {
+        expect(formatted).toMatch(/^\d{1,3}(\.\d{3})*,\d{2} ALL$/);
+      }
     }
+    expect(formatAllMinorUnits(17910)).toBe("179,10 ALL");
+    expect(formatAllMinorUnits(19900)).toBe("199 ALL");
   });
 });
 
@@ -99,7 +104,7 @@ describe("formatAllMinorUnits: integer-only, with no rounding to lose", () => {
     expect(formatAllMinorUnits(20)).toBe("0,20 ALL");
     expect(formatAllMinorUnits(30)).toBe("0,30 ALL");
     expect(formatAllMinorUnits(70)).toBe("0,70 ALL");
-    expect(formatAllMinorUnits(8100)).toBe("81,00 ALL");
+    expect(formatAllMinorUnits(8100)).toBe("81 ALL");
   });
 
   it("is exact at the very top of the safe-integer range", () => {
@@ -123,10 +128,10 @@ describe("formatAllMinorUnits: integer-only, with no rounding to lose", () => {
   it("every whole-lek catalog price in the 99..100000 domain converts exactly", () => {
     for (let priceAll = 99; priceAll <= 100000; priceAll += 1) {
       const formatted = formatAllMinorUnits(priceAll * 100);
-      // The minor part of a whole-lek amount is always ",00".
-      expect(formatted.endsWith(",00 ALL")).toBe(true);
+      // A whole-lek amount has no decimal part at all (FIX1 X5).
+      expect(formatted).not.toContain(",");
       // ...and the whole part, with grouping removed, is the price back.
-      const whole = formatted.slice(0, -",00 ALL".length).replace(/\./g, "");
+      const whole = formatted.slice(0, -" ALL".length).replace(/\./g, "");
       expect(whole).toBe(String(priceAll));
     }
   });

@@ -20,7 +20,7 @@ export default async function ForgotPasswordPage({
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
-      <h1 className="font-serif text-3xl font-semibold">Reset your password</h1>
+      <h1 className="font-serif text-3xl font-normal">Reset your password</h1>
 
       {error && (
         <Alert variant="error" className="mt-4">

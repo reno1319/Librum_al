@@ -36,6 +36,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
+import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
 // -- Bookstore (UI-4) owns discovery/browsing, this page owns "should I
@@ -613,7 +614,11 @@ export default async function BookDetailPage({
               className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
             />
           ) : (
-            <div className="aspect-[2/3] w-full rounded-[3px] bg-border shadow-[0_18px_36px_rgba(30,58,50,0.25)]" />
+            <CoverPlaceholder
+              title={book.title}
+              authorName={authorName}
+              className="aspect-[2/3] w-full rounded-[3px] shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
+            />
           )}
           {/* See resolveShowSample's own comment (src/lib/book-purchase.ts):
               omitted for "owned"/"author", who already have Download EPUB. */}
@@ -674,7 +679,9 @@ export default async function BookDetailPage({
           )}
 
           <div className="mt-3 flex items-center gap-2.5 text-[0.9375rem]">
-            <StarRating rating={averageRating} />
+            {/* FIX1 (X4): no star row (and no "0 out of 5 stars" for
+                screen readers) until the first review; the words stay. */}
+            {reviewCount > 0 && <StarRating rating={averageRating} />}
             <span className="text-muted">
               {reviewCount > 0
                 ? `${averageRating.toFixed(1)} · ${reviewCount} review${reviewCount === 1 ? "" : "s"}`
@@ -885,7 +892,7 @@ export default async function BookDetailPage({
               Book Details
               ============================================================ */}
           <section className="mt-10">
-            <h2 className={SECTION_HEADING}>Book Details</h2>
+            <h2 className={SECTION_HEADING}>Book details</h2>
             {/* REDESIGN STEP 3 (P3/D5): a light grid card, as in the
                 mockup. Every row is unchanged: Format and Genre remain
                 always/near-always present (genre is required at
@@ -980,7 +987,7 @@ export default async function BookDetailPage({
           own page.
           ============================================================ */}
       <section className="mt-14">
-        <h2 className={SECTION_HEADING}>About the Author</h2>
+        <h2 className={SECTION_HEADING}>About the author</h2>
         <div className="mt-4 flex flex-wrap items-center gap-6 rounded-[4px] border border-border bg-surface p-6 sm:p-7">
           {authorAvatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element

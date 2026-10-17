@@ -43,7 +43,7 @@ export default async function ReportBookPage({
       <Link href={`/books/${id}`} className="text-sm text-muted hover:underline">
         &larr; Back to book
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">
+      <h1 className="mt-2 font-serif text-3xl font-normal">
         Report this book
       </h1>
       <p className="mt-1 text-sm text-muted">

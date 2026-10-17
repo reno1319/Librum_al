@@ -197,7 +197,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
         <p className="text-xs font-medium uppercase tracking-wide text-muted">
           {BLOG_CATEGORY_LABELS_SQ[post.category]}
         </p>
-        <h1 className="mt-1 font-serif text-3xl font-semibold text-foreground md:text-4xl">
+        <h1 className="mt-1 font-serif text-3xl font-normal text-foreground md:text-4xl">
           {post.title}
         </h1>
         <p className="mt-3 text-lg text-muted">{post.excerpt}</p>

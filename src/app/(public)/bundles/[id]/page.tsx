@@ -131,7 +131,7 @@ export default async function BundleDetailPage({
       <span className="text-xs uppercase tracking-wide text-muted">
         Bundle
       </span>
-      <h1 className="font-serif text-3xl font-semibold">{bundle.title}</h1>
+      <h1 className="font-serif text-3xl font-normal">{bundle.title}</h1>
       <p className="mt-1 text-sm text-muted">
         by{" "}
         <Link href={`/authors/${bundle.author_id}`} className="hover:underline">
@@ -194,7 +194,7 @@ export default async function BundleDetailPage({
         )}
       </div>
 
-      <h2 className="mt-10 font-serif text-xl font-semibold">
+      <h2 className="mt-10 font-serif text-xl font-normal">
         {books.length} book{books.length === 1 ? "" : "s"} in this bundle
       </h2>
       <ul

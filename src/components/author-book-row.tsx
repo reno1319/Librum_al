@@ -5,6 +5,7 @@ import { deleteBook } from "@/app/(public)/dashboard/books/actions";
 import { DeleteBookButton } from "@/app/(public)/dashboard/delete-book-button";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book } from "@/lib/types";
+import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 UI-6: the operational (not reader-facing) book row shared
 // between the Dashboard overview's book list and /dashboard/books'
@@ -84,7 +85,10 @@ export function AuthorBookRow({
           className="h-[84px] w-14 shrink-0 rounded-[2px] object-cover shadow-sm sm:h-24 sm:w-16"
         />
       ) : (
-        <div className="h-[84px] w-14 shrink-0 rounded-[2px] bg-[repeating-linear-gradient(45deg,#efe9dd,#efe9dd_6px,#e2daca_6px,#e2daca_12px)] sm:h-24 sm:w-16" />
+        <CoverPlaceholder
+          title={book.title}
+          className="h-[84px] w-14 shrink-0 rounded-[2px] sm:h-24 sm:w-16"
+        />
       )}
 
       <div className="flex min-w-0 flex-[1_1_14rem] flex-col gap-1">

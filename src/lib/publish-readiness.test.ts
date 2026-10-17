@@ -39,10 +39,11 @@ describe("resolvePublishReadiness", () => {
   // asserts the field is actually gone from the returned object, not
   // merely unused, so a later edit cannot quietly reintroduce a second
   // source of truth for the same question.
-  it("returns exactly missingAllPrice, paidPublishingBlocked and recommended -- no requiredMet", () => {
+  it("returns exactly missingAllPrice, missingDescription, paidPublishingBlocked and recommended -- no requiredMet", () => {
     const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true });
     expect(Object.keys(result).sort()).toEqual([
       "missingAllPrice",
+      "missingDescription",
       "paidPublishingBlocked",
       "recommended",
     ]);
@@ -139,5 +140,31 @@ describe("resolvePublishReadiness: the missing-ALL-price blocker", () => {
     });
     expect(result.missingAllPrice).toBe(false);
     expect(result.paidPublishingBlocked).toBe(true);
+  });
+
+  // FIX1 (X16): a description is required before Publish.
+  it("an empty or whitespace-only description is a blocker, not a recommendation", () => {
+    for (const description of ["", "   \n "]) {
+      const result = resolvePublishReadiness({
+        book: book({ description }),
+        paidPublishingAvailable: true,
+      });
+      expect(result.missingDescription).toBe(true);
+      expect(result.recommended.map((item) => item.label)).not.toContain(
+        "Write a description (a couple of sentences or more)",
+      );
+    }
+  });
+
+  it("a short description clears the blocker and keeps the longer-description recommendation", () => {
+    const result = resolvePublishReadiness({
+      book: book({ description: "Poems." }),
+      paidPublishingAvailable: true,
+    });
+    expect(result.missingDescription).toBe(false);
+    expect(result.recommended).toContainEqual({
+      label: "Write a description (a couple of sentences or more)",
+      done: false,
+    });
   });
 });

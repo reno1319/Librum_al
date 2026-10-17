@@ -72,7 +72,7 @@ export default async function AdminLoginPage({
           </Link>
           <form action={logout}>
             <button type="submit" className={buttonClasses("outline", "md", "w-full")}>
-              Sign out
+              Log out
             </button>
           </form>
         </div>

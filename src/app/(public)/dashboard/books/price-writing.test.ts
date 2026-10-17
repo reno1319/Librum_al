@@ -339,7 +339,7 @@ describe("an invalid author price performs no database write at all", () => {
     ["ninety-eight lek -- the top of that band", "98"],
     ["a fractional amount", "99,50"],
     ["a fractional amount, dot form", "99.50"],
-    ["an ambiguous grouped form", "1.500"],
+    ["a malformed grouped form", "1.5000"],
     ["a mixed separator form", "1,500.00"],
     ["a negative amount", "-99"],
     ["negative zero", "-0"],
@@ -440,5 +440,58 @@ describe("maintenance mode stops every price-writing action before any Supabase 
     await expect(createBook(await buildFormData("999"))).rejects.toBeInstanceOf(RedirectSignal);
     expect(mockCreateClientCalls).toHaveBeenCalled();
     expect(mockBookInsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+// FIX1 (X9): the Edit page's ISBN goes through the same check, with the
+// preserve-unchanged rule for a value saved before the check existed.
+describe("updateBook: ISBN check (FIX1 X9)", () => {
+  beforeEach(resetMocks);
+
+  const INVALID_ISBN_REDIRECT = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(
+    "Enter a valid ISBN-10 or ISBN-13, or leave it blank.",
+  )}`;
+
+  function withExistingIsbn(isbn: string | null) {
+    mockBookSelectResult.mockReturnValue({
+      data: {
+        id: BOOK_ID, cover_path: "c.png", file_path: "f.epub", author_id: USER_ID, language: "sq",
+        status: "draft", price_all: null, isbn,
+      },
+      error: null,
+    });
+  }
+
+  it("refuses a newly typed invalid ISBN and writes nothing", async () => {
+    withExistingIsbn(null);
+    const formData = await buildFormData("250");
+    formData.set("isbn", "12345");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(INVALID_ISBN_REDIRECT);
+    noWriteHappened();
+  });
+
+  it("keeps an old invalid ISBN that is resubmitted unchanged", async () => {
+    withExistingIsbn("12345");
+    const formData = await buildFormData("250");
+    formData.set("isbn", "12345");
+
+    await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).not.toHaveBeenCalledWith(INVALID_ISBN_REDIRECT);
+    expect(mockBookUpdatePayload).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a valid ISBN-10 and a cleared field", async () => {
+    for (const isbn of ["0-306-40615-2", ""]) {
+      withExistingIsbn("12345");
+      mockBookUpdatePayload.mockClear();
+      const formData = await buildFormData("250");
+      formData.set("isbn", isbn);
+      await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
+      expect(mockBookUpdatePayload).toHaveBeenCalledTimes(1);
+    }
   });
 });

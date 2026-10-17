@@ -184,14 +184,14 @@ describe("parseFixedDiscountAll: rejected inputs", () => {
 
 describe("formatFixedDiscountAll", () => {
   it.each([
-    [1, "1,00 ALL"],
-    [98, "98,00 ALL"],
-    [99, "99,00 ALL"],
-    [250, "250,00 ALL"],
-    [999, "999,00 ALL"],
-    [1000, "1.000,00 ALL"],
-    [12345, "12.345,00 ALL"],
-    [100_000, "100.000,00 ALL"],
+    [1, "1 ALL"],
+    [98, "98 ALL"],
+    [99, "99 ALL"],
+    [250, "250 ALL"],
+    [999, "999 ALL"],
+    [1000, "1.000 ALL"],
+    [12345, "12.345 ALL"],
+    [100_000, "100.000 ALL"],
   ])("%d -> %j (no catalog minimum applied)", (input, expected) => {
     expect(formatFixedDiscountAll(input)).toBe(expected);
   });
@@ -220,11 +220,11 @@ describe("describeDiscountCode", () => {
   });
 
   it("fixed ALL codes are displayed in lek without the catalog minimum", () => {
-    expect(describeDiscountCode({ ...none, amount_off_all: 1 })).toEqual({ kind: "fixed_all", label: "1,00 ALL off" });
-    expect(describeDiscountCode({ ...none, amount_off_all: 50 })).toEqual({ kind: "fixed_all", label: "50,00 ALL off" });
+    expect(describeDiscountCode({ ...none, amount_off_all: 1 })).toEqual({ kind: "fixed_all", label: "1 ALL off" });
+    expect(describeDiscountCode({ ...none, amount_off_all: 50 })).toEqual({ kind: "fixed_all", label: "50 ALL off" });
     expect(describeDiscountCode({ ...none, amount_off_all: 2500 })).toEqual({
       kind: "fixed_all",
-      label: "2.500,00 ALL off",
+      label: "2.500 ALL off",
     });
   });
 

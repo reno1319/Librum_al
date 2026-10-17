@@ -22,7 +22,7 @@ export default function PricingPage() {
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-4xl font-semibold">Earnings</h1>
+      <h1 className="font-serif text-4xl font-normal">Earnings</h1>
       <p className="mt-3 text-muted">
         You keep {authorSharePercent}% of every sale — Librum keeps{" "}
         {PLATFORM_FEE_PERCENT}%. No setup fees, no monthly subscription, no
@@ -33,7 +33,7 @@ export default function PricingPage() {
         <EarningsCalculator />
       </div>
 
-      <h2 className="mt-10 font-serif text-xl font-semibold">How it works</h2>
+      <h2 className="mt-10 font-serif text-xl font-normal">How it works</h2>
       <ul
         className="mt-3 text-foreground/90"
         style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
@@ -48,14 +48,14 @@ export default function PricingPage() {
           transitional author message. Deliberately does not name POK
           here: POK is only ever named for reader checkout, never as an
           implied author-payout provider. */}
-      <h2 className="mt-10 font-serif text-xl font-semibold">Payouts</h2>
+      <h2 className="mt-10 font-serif text-xl font-normal">Payouts</h2>
       <p className="mt-3 text-foreground/90">
         Paid publishing and author payout setup have not launched yet.
         Authors can continue to publish free books without payout setup
         while Librum completes its payment and payout systems.
       </p>
 
-      <h2 className="mt-10 font-serif text-xl font-semibold">
+      <h2 className="mt-10 font-serif text-xl font-normal">
         What the fee covers
       </h2>
       <p className="mt-3 text-foreground/90">

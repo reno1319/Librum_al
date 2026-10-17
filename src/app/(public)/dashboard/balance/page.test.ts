@@ -136,7 +136,7 @@ describe("Dashboard Balance: Payout setup section", () => {
   });
 
   it("renders the Payout setup section OUTSIDE the isEmpty ternary, so it is always visible", () => {
-    const sectionIndex = source.indexOf('<h2 className="font-serif text-xl font-semibold">Payout setup</h2>');
+    const sectionIndex = source.indexOf('<h2 className="font-serif text-xl font-normal">Payout setup</h2>');
     const ternaryCloseIndex = source.indexOf("        </>\n      )}\n\n      {/* BANK-PAYOUT-1E");
     expect(sectionIndex).toBeGreaterThan(-1);
     expect(ternaryCloseIndex).toBeGreaterThan(-1);
@@ -225,7 +225,7 @@ describe("Dashboard Balance: Payout setup section", () => {
   });
 
   it("this new section carries no Stripe-specific payout promise (distinct from the untouched /dashboard/payouts Stripe Connect page)", () => {
-    const setupSectionIndex = source.indexOf('<h2 className="font-serif text-xl font-semibold">Payout setup</h2>');
+    const setupSectionIndex = source.indexOf('<h2 className="font-serif text-xl font-normal">Payout setup</h2>');
     const finalAlertIndex = source.indexOf('Looking for unit sales and page views?');
     const setupSection = source.slice(setupSectionIndex, finalAlertIndex);
     expect(setupSection.toLowerCase()).not.toContain("stripe");
@@ -386,7 +386,7 @@ describe("BalancePage: amounts are separated by currency (Patch 4)", () => {
     expect(html).toContain(">USD</h2>");
     expect(html).toContain(">ALL</h2>");
     expect(html).toContain("USD 10.00"); // USD available
-    expect(html).toContain("1.234,00 ALL"); // ALL available
+    expect(html).toContain("1.234 ALL"); // ALL available
     expect(html).toContain("-USD 10.05"); // USD lifetime refunds
     expect(html).toContain("-1.234,05 ALL"); // ALL lifetime refunds
     // A cross-currency sum of the two available balances appears nowhere.
@@ -398,16 +398,16 @@ describe("BalancePage: amounts are separated by currency (Patch 4)", () => {
     const html = await renderBalance();
     expect(html).toContain("USD 6.99");
     expect(html).toContain("799,20 ALL");
-    expect(html).toContain("-8,00 ALL");
+    expect(html).toContain("-8 ALL");
     expect(html).toContain("USD 25.00");
-    expect(html).toContain("10.000,00 ALL");
+    expect(html).toContain("10.000 ALL");
   });
 
   it("a malformed currency is shown as unavailable, never guessed as USD or ALL", async () => {
     const html = await renderBalance();
     expect(html).toContain("Amount unavailable (currency unknown)");
     expect(html).not.toContain("USD 5.00");
-    expect(html).not.toContain("5,00 ALL");
+    expect(html).not.toMatch(/(?<![\d.,])5 ALL/);
   });
 
   it("no bare dollar sign appears anywhere on the page", async () => {

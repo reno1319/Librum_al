@@ -102,6 +102,10 @@ export function buildSiteHeaderNav(params: {
 // (5.85:1); cream on green is 11.1:1.
 const OUTLINE_ON_DARK_CLASSES =
   "focus-ring inline-flex items-center rounded-[3px] border border-primary-foreground/40 px-4 py-2.5 font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover";
+// FIX1 (X12): "Log out" is a quiet cream text link, quieter than any
+// button on the page; the outline button stays for "Log in" only.
+const QUIET_LINK_ON_DARK_CLASSES =
+  "focus-ring rounded-sm text-primary-foreground/85 underline underline-offset-4 transition-colors hover:text-primary-foreground hover:decoration-2";
 const BRASS_BUTTON_CLASSES =
   "focus-ring inline-flex items-center rounded-[3px] bg-accent px-4 py-2.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground";
 
@@ -136,8 +140,10 @@ export async function SiteHeader() {
 
   return (
     <header className="relative bg-primary text-primary-foreground">
-      <div className="mx-auto flex w-full max-w-wide flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3 sm:px-6">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-2">
+      {/* FIX1 (X12): one row from 1024px up -- no wrapping at lg, and
+          tighter gaps there; the roomier gaps return at xl. */}
+      <div className="mx-auto flex w-full max-w-wide flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3 sm:px-6 lg:flex-nowrap lg:gap-x-6 xl:gap-x-8">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-2 lg:flex-nowrap lg:gap-x-6 xl:gap-x-8">
           <Link
             href="/"
             className="focus-ring rounded-sm font-serif text-[1.75rem] font-bold text-primary-foreground"
@@ -148,18 +154,26 @@ export async function SiteHeader() {
           {/* Wraps onto a second row rather than scrolling sideways when
               the labels get longer (the Albanian translation runs about
               30% longer than this English copy). */}
-          <nav className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex">
+          <nav className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex lg:flex-nowrap lg:gap-x-4 lg:whitespace-nowrap xl:gap-x-6">
             <NavLinks items={nav.primaryLinks} onDark />
           </nav>
         </div>
 
-        <div className="flex items-center gap-3">
-          <nav className="hidden items-center gap-4 text-base lg:flex">
+        <div className="flex shrink-0 items-center gap-3">
+          <nav className="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap">
             {nav.recoveryLabel && (
               <span className="text-primary-foreground/80">{nav.recoveryLabel}</span>
             )}
+            {/* FIX1 (X12): the name joins the row from 1280px, where it
+                fits beside the links; a long one is cut with an ellipsis
+                (its full text stays in the title tooltip). */}
             {nav.showDisplayName && displayName && (
-              <span className="text-primary-foreground/80">{displayName}</span>
+              <span
+                title={displayName}
+                className="hidden max-w-[12rem] truncate text-primary-foreground/80 xl:inline"
+              >
+                {displayName}
+              </span>
             )}
             {/* LIBRUM 2.0 UI-3 final polish: logged-out desktop gets an
                 explicit "Log in" text link rather than relying solely on
@@ -178,14 +192,15 @@ export async function SiteHeader() {
                 <Link href={nav.accountHref} className={OUTLINE_ON_DARK_CLASSES}>
                   Log in
                 </Link>
-                <Link href="/signup" className={BRASS_BUTTON_CLASSES}>
+                {/* FIX1 (X2): Author chosen, as on Earnings. */}
+                <Link href="/signup?role=author" className={BRASS_BUTTON_CLASSES}>
                   Sign up
                 </Link>
               </>
             )}
             {nav.showLogout && (
               <form action={logout}>
-                <button type="submit" className={OUTLINE_ON_DARK_CLASSES}>
+                <button type="submit" className={QUIET_LINK_ON_DARK_CLASSES}>
                   Log out
                 </button>
               </form>

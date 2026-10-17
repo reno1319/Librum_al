@@ -355,7 +355,7 @@ export default async function DashboardPage({
         </section>
 
         <section className={BOX_CLASSES}>
-          <h2 className="font-serif text-lg font-normal text-primary">Financial Balance</h2>
+          <h2 className="font-serif text-lg font-normal text-primary">Financial balance</h2>
           <p className="mt-1 text-sm text-muted">Your ledger balance, pending settlement, and payout history.</p>
           <Link href="/dashboard/balance" className={`${TEXT_LINK_CLASSES} mt-3 inline-block`}>
             View financial balance &rarr;
@@ -561,7 +561,7 @@ const DASHBOARD_MENU: { href: string; label: string }[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/dashboard/books", label: "Books" },
   { href: "/dashboard/sales", label: "Sales" },
-  { href: "/dashboard/balance", label: "Financial Balance" },
+  { href: "/dashboard/balance", label: "Financial balance" },
   { href: "/dashboard/payouts", label: "Payouts" },
   { href: "/dashboard/bundles", label: "Bundles" },
   { href: "/dashboard/series", label: "Series" },

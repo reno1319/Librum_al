@@ -250,7 +250,7 @@ describe("UploadWizard: Step 1 gate uses the tested helper, required vs optional
   it.each(["subtitle", "isbn", "publisher", "edition", "originalPublicationDate", "keywords"])(
     "%s is never marked required",
     (fieldName) => {
-      const fieldBlock = source.match(new RegExp(`name="${fieldName}"[\\s\\S]{0,400}?/>`));
+      const fieldBlock = source.match(new RegExp(`name="${fieldName}"[\\s\\S]{0,800}?/>`));
       expect(fieldBlock).not.toBeNull();
       expect(fieldBlock![0]).not.toContain("required");
     },
@@ -352,7 +352,8 @@ describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
     const handler = source.match(/function handleSubmit\([\s\S]*?\n  }/)![0];
     expect(handler).toContain("if (!pricing.canSubmit) {");
     expect(handler).toContain("event.preventDefault();");
-    expect(handler).toContain("setStepError(PAID_PRICE_ERROR);");
+    // FIX1 (X8): the message now sits under the price box.
+    expect(handler).toContain("setPriceError(PAID_PRICE_ERROR);");
     expect(source).toContain(
       "const PAID_PRICE_ERROR = `Enter a price in lek: a whole number from ${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}.`;",
     );
@@ -388,5 +389,69 @@ describe("UploadWizard: no server/other-surface scope creep", () => {
     const importLines = source.split("\n").filter((l) => l.startsWith("import"));
     const actionsImport = importLines.find((l) => l.includes('"../actions"'));
     expect(actionsImport).toBe('import { createBook } from "../actions";');
+  });
+});
+
+// FIX1: source-level guards for the small-fixes step, in this file's
+// own convention (no DOM harness; live checks are in the step report).
+describe("UploadWizard: FIX1 per-field messages and wording", () => {
+  const pageSource = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
+
+  it("uses Renato's W-B wording for the step-1 fields, beside each field", () => {
+    expect(source).toContain('const TITLE_ERROR = "Add a title.";');
+    expect(source).toContain('const LANGUAGE_ERROR = "Choose a language.";');
+    expect(source).toContain('const GENRE_ERROR = "Choose a genre.";');
+    for (const id of ["wizard-title-error", "wizard-language-error", "wizard-genre-error", "wizard-isbn-error", "wizard-date-error", "wizard-price-error"]) {
+      expect(source).toContain(`<FieldError id="${id}"`);
+      expect(source).toContain(`"${id}" : undefined`);
+    }
+    // The old one-sentence-at-the-top message is gone.
+    expect(source).not.toContain("Add a title, language, and genre to continue.");
+    expect(source).not.toContain("stepError");
+  });
+
+  it("a required field's message is derived from the live value, so it clears as soon as the field is filled", () => {
+    expect(source).toContain('const titleError = title.trim() ? "" : TITLE_ERROR;');
+    expect(source).toContain('const genreError = genre.trim() ? "" : GENRE_ERROR;');
+  });
+
+  it("ISBN and date use the shared checks and wording", () => {
+    expect(source).toContain("isValidIsbn(isbn) ? INVALID_ISBN_MESSAGE");
+    expect(source).toContain("isFutureDateString(originalPublicationDate) ? FUTURE_DATE_MESSAGE");
+  });
+
+  it("keeps the step-2 sentence, now under the file fields", () => {
+    expect(source).toContain(
+      'const FILES_ERROR = "Add both a cover image and a manuscript file to continue.";',
+    );
+    expect(source.indexOf("{shownFilesError && (")).toBeGreaterThan(source.indexOf("<ManuscriptField"));
+  });
+
+  it("moves the cover tip under the cover field and out of the Tips box", () => {
+    const tip = "Covers work best as a portrait image, at least 1000px tall.";
+    expect(source.match(new RegExp(tip.replace(/\./g, "\\."), "g"))?.length).toBe(1);
+    expect(source.indexOf(tip)).toBeGreaterThan(source.indexOf("<CoverField"));
+    expect(source.indexOf(tip)).toBeLessThan(source.indexOf("<ManuscriptField"));
+  });
+
+  it("opens Create a series first in a new tab, said for screen readers", () => {
+    const link = source.match(/<Link\s+href="\/dashboard\/series"[\s\S]*?<\/Link>/)![0];
+    expect(link).toContain('target="_blank"');
+    expect(link).toContain('rel="noopener"');
+    expect(link).toContain("(opens in a new tab)");
+  });
+
+  it("labels the description \"Description\" and shows the missing-description blocker in Readiness", () => {
+    expect(source).not.toContain("Description (optional)");
+    expect(source).toContain(
+      '"Add a description before publishing. Your book will still be saved as a draft."',
+    );
+    expect(source).toContain("{readiness.missingDescription && (");
+    expect(source).toContain("!readiness.missingDescription &&");
+  });
+
+  it("replaces the false 'saved as a draft first' sentence with W-A", () => {
+    expect(pageSource).not.toContain("saved as a draft first");
+    expect(pageSource).toContain("Nothing is saved until you press Save as draft or Publish book.");
   });
 });

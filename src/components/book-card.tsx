@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import type { Book } from "@/lib/types";
+import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 UI-4: the shared reader-commerce card, used by the
 // Bookstore grid, the author profile page, the wishlist page, and
@@ -44,7 +45,11 @@ export function BookCard({
             className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_6px_14px_rgba(30,58,50,0.18)] transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-[0_10px_20px_rgba(30,58,50,0.24)] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
           />
         ) : (
-          <div className="aspect-[2/3] w-full rounded-[3px] bg-border shadow-[0_6px_14px_rgba(30,58,50,0.18)]" />
+          <CoverPlaceholder
+            title={book.title}
+            authorName={authorName}
+            className="aspect-[2/3] w-full rounded-[3px] shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
+          />
         )}
         <div>
           {book.genre && (
