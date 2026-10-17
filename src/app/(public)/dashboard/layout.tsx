@@ -40,6 +40,12 @@ export default async function DashboardLayout({
     .eq("id", user.id)
     .single();
 
+  // BECOME-AUTHOR-1: a reader is sent to the place where they can turn
+  // their account into an author account, instead of silently home.
+  if (profile?.role === "reader") {
+    redirect("/account#become-author");
+  }
+
   if (profile?.role !== "author") {
     redirect("/");
   }
