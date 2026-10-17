@@ -949,7 +949,7 @@ export default async function BookDetailPage({
             )}
             <Link
               href={`/authors/${book.author_id}`}
-              className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+              className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
             >
               View author profile &rarr;
             </Link>
@@ -1044,7 +1044,7 @@ export default async function BookDetailPage({
             <h2 className="font-serif text-xl font-semibold">{seriesInfo.title}</h2>
             <Link
               href={`/series/${seriesInfo.id}`}
-              className="focus-ring shrink-0 rounded-sm text-sm font-medium text-primary hover:underline"
+              className="focus-ring shrink-0 rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
             >
               View series &rarr;
             </Link>

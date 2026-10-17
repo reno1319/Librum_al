@@ -159,7 +159,7 @@ export function BlogEditorForm({
           <button
             type="button"
             onClick={() => setShowPreview((v) => !v)}
-            className="text-primary hover:underline"
+            className="text-primary underline underline-offset-2 hover:decoration-2"
           >
             {showPreview ? "Back to editing" : "Preview"}
           </button>

@@ -266,7 +266,7 @@ export default async function SalesPage() {
       <p className="mt-3 text-sm text-muted">
         This is an estimate from your order history. For your official ledger
         balance, pending settlement, and payout history, see{" "}
-        <Link href="/dashboard/balance" className="font-medium text-primary hover:underline">
+        <Link href="/dashboard/balance" className="font-medium text-primary underline underline-offset-2 hover:decoration-2">
           Financial Balance
         </Link>
         .

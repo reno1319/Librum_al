@@ -130,7 +130,7 @@ export default async function DashboardPage({
               </Link>
               <Link
                 href="/how-it-works"
-                className="focus-ring rounded-sm text-sm font-medium text-primary hover:underline"
+                className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
               >
                 How publishing works
               </Link>
@@ -247,7 +247,7 @@ export default async function DashboardPage({
         </ul>
         <Link
           href="/dashboard/books"
-          className="focus-ring mt-4 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+          className="focus-ring mt-4 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
         >
           View all books &rarr;
         </Link>
@@ -259,7 +259,7 @@ export default async function DashboardPage({
           <p className="mt-1 text-sm text-muted">See units sold and your net revenue.</p>
           <Link
             href="/dashboard/sales"
-            className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+            className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
           >
             View sales and earnings &rarr;
           </Link>
@@ -270,7 +270,7 @@ export default async function DashboardPage({
           <p className="mt-1 text-sm text-muted">Your ledger balance, pending settlement, and payout history.</p>
           <Link
             href="/dashboard/balance"
-            className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+            className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
           >
             View financial balance &rarr;
           </Link>
@@ -281,7 +281,7 @@ export default async function DashboardPage({
           <p className="mt-1 text-sm">{payoutLabel}</p>
           <Link
             href="/dashboard/payouts"
-            className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary hover:underline"
+            className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
           >
             View payouts &rarr;
           </Link>

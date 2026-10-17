@@ -97,6 +97,14 @@ export function buildSiteHeaderNav(params: {
   };
 }
 
+// REDESIGN STEP 2 (A2 "Library Green & Brass"): the header is a dark
+// green bar with cream text. Brass is a fill only, with green text on it
+// (5.85:1); cream on green is 11.1:1.
+const OUTLINE_ON_DARK_CLASSES =
+  "focus-ring inline-flex items-center rounded-[3px] border border-primary-foreground/40 px-4 py-2.5 font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover";
+const BRASS_BUTTON_CLASSES =
+  "focus-ring inline-flex items-center rounded-[3px] bg-accent px-4 py-2.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground";
+
 export async function SiteHeader() {
   const supabase = await createClient();
   const {
@@ -127,75 +135,83 @@ export async function SiteHeader() {
   });
 
   return (
-    <header className="relative flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface px-4 py-4 sm:px-6">
-      <div className="flex flex-wrap items-center gap-8">
-        <Link
-          href="/"
-          className="focus-ring rounded-sm font-serif text-xl font-semibold text-primary"
-        >
-          Librum
-        </Link>
+    <header className="relative bg-primary text-primary-foreground">
+      <div className="mx-auto flex w-full max-w-wide flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3 sm:px-6">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-2">
+          <Link
+            href="/"
+            className="focus-ring rounded-sm font-serif text-[1.75rem] font-bold text-primary-foreground"
+          >
+            Librum
+          </Link>
 
-        <nav className="hidden items-center gap-6 text-sm font-medium md:flex">
-          <NavLinks items={nav.primaryLinks} />
-        </nav>
-      </div>
+          {/* Wraps onto a second row rather than scrolling sideways when
+              the labels get longer (the Albanian translation runs about
+              30% longer than this English copy). */}
+          <nav className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex">
+            <NavLinks items={nav.primaryLinks} onDark />
+          </nav>
+        </div>
 
-      <div className="flex items-center gap-3">
-        <nav className="hidden items-center gap-6 text-sm md:flex">
-          {nav.recoveryLabel && (
-            <span className="text-muted">{nav.recoveryLabel}</span>
-          )}
-          {nav.showDisplayName && displayName && (
-            <span className="text-muted">{displayName}</span>
-          )}
-          {/* LIBRUM 2.0 UI-3 final polish: logged-out desktop gets an
-              explicit "Log in" text link rather than relying solely on
-              the person icon below -- purely a presentational split by
-              breakpoint, so it's driven directly off `user` here rather
-              than adding a field to buildSiteHeaderNav()'s state. `user`
-              being falsy already rules out recovery (a recovery session
-              always has a real Supabase user), so no separate
-              recoveryActive check is needed. */}
-          {!user && (
+        <div className="flex items-center gap-3">
+          <nav className="hidden items-center gap-4 text-base lg:flex">
+            {nav.recoveryLabel && (
+              <span className="text-primary-foreground/80">{nav.recoveryLabel}</span>
+            )}
+            {nav.showDisplayName && displayName && (
+              <span className="text-primary-foreground/80">{displayName}</span>
+            )}
+            {/* LIBRUM 2.0 UI-3 final polish: logged-out desktop gets an
+                explicit "Log in" text link rather than relying solely on
+                the person icon below -- purely a presentational split by
+                breakpoint, so it's driven directly off `user` here rather
+                than adding a field to buildSiteHeaderNav()'s state. `user`
+                being falsy already rules out recovery (a recovery session
+                always has a real Supabase user), so no separate
+                recoveryActive check is needed.
+                REDESIGN STEP 2: "Log in" is an outline button and "Sign
+                up" (the label the mobile menu already uses for /signup) a
+                brass one -- account actions, so the header stays
+                navigation/account-only as UI-3 decided. */}
+            {!user && (
+              <>
+                <Link href={nav.accountHref} className={OUTLINE_ON_DARK_CLASSES}>
+                  Log in
+                </Link>
+                <Link href="/signup" className={BRASS_BUTTON_CLASSES}>
+                  Sign up
+                </Link>
+              </>
+            )}
+            {nav.showLogout && (
+              <form action={logout}>
+                <button type="submit" className={OUTLINE_ON_DARK_CLASSES}>
+                  Log out
+                </button>
+              </form>
+            )}
+          </nav>
+
+          {nav.showAccountLink && (
             <Link
               href={nav.accountHref}
-              className="focus-ring rounded-sm text-foreground transition-colors hover:underline"
+              aria-label={nav.accountLabel}
+              className={`focus-ring flex size-11 items-center justify-center rounded-sm text-primary-foreground ${!user ? "lg:hidden" : ""}`}
             >
-              Log in
+              <span aria-hidden="true">
+                <IconPerson className="size-5" />
+              </span>
             </Link>
           )}
-          {nav.showLogout && (
-            <form action={logout}>
-              <button
-                type="submit"
-                className="focus-ring rounded-sm text-foreground transition-colors hover:underline"
-              >
-                Log out
-              </button>
-            </form>
-          )}
-        </nav>
 
-        {nav.showAccountLink && (
-          <Link
-            href={nav.accountHref}
-            aria-label={nav.accountLabel}
-            className={`focus-ring flex size-11 items-center justify-center rounded-sm text-foreground ${!user ? "md:hidden" : ""}`}
-          >
-            <span aria-hidden="true">
-              <IconPerson className="size-5" />
-            </span>
-          </Link>
-        )}
-
-        <MobileNav
-          items={nav.primaryLinks}
-          loggedIn={!!user}
-          accountHref={nav.accountHref}
-          logoutAction={logout}
-          recoveryActive={recoveryActive}
-        />
+          <MobileNav
+            items={nav.primaryLinks}
+            loggedIn={!!user}
+            accountHref={nav.accountHref}
+            logoutAction={logout}
+            recoveryActive={recoveryActive}
+          />
+        </div>
       </div>
     </header>
   );

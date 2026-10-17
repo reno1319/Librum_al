@@ -164,11 +164,11 @@ export default async function AdminBlogListPage({
 
               <div className="flex shrink-0 items-center gap-3">
                 <span className={`text-sm ${STATUS_CLASS[post.status]}`}>{STATUS_LABEL[post.status]}</span>
-                <Link href={`/admin/blog/${post.id}/preview`} className="text-sm text-primary hover:underline">
+                <Link href={`/admin/blog/${post.id}/preview`} className="text-sm text-primary underline underline-offset-2 hover:decoration-2">
                   Preview
                 </Link>
                 {canManage && (
-                  <Link href={`/admin/blog/${post.id}/edit`} className="text-sm text-primary hover:underline">
+                  <Link href={`/admin/blog/${post.id}/edit`} className="text-sm text-primary underline underline-offset-2 hover:decoration-2">
                     Edit
                   </Link>
                 )}

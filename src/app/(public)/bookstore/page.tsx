@@ -480,7 +480,7 @@ function BookstoreToolbar({
         {isFiltered && (
           <Link
             href="/bookstore"
-            className="focus-ring rounded-sm text-sm font-medium text-primary hover:underline"
+            className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
           >
             Clear filters
           </Link>
@@ -565,7 +565,7 @@ function BookGrid({
         action={
           <Link
             href="/"
-            className="focus-ring rounded-sm text-sm font-medium text-primary hover:underline"
+            className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
           >
             Back to Home
           </Link>

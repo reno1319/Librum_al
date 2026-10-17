@@ -287,7 +287,7 @@ function AuditFilterForm({
       </button>
 
       {isFiltered && (
-        <Link href="/admin/audit" className="focus-ring rounded-sm text-sm font-medium text-primary hover:underline">
+        <Link href="/admin/audit" className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2">
           Clear filters
         </Link>
       )}
@@ -337,7 +337,7 @@ function AuditDesktopTable({ rows }: { rows: AuditEventRow[] }) {
                 <td className="py-3 pr-4 font-medium text-foreground">{getActionLabel(row.action)}</td>
                 <td className="py-3 pr-4">
                   {target.href ? (
-                    <Link href={target.href} className="text-primary hover:underline">
+                    <Link href={target.href} className="text-primary underline underline-offset-2 hover:decoration-2">
                       {target.label}
                     </Link>
                   ) : (
@@ -371,7 +371,7 @@ function AuditMobileList({ rows }: { rows: AuditEventRow[] }) {
             <p className="mt-1 text-sm">
               <span className="text-muted">Target: </span>
               {target.href ? (
-                <Link href={target.href} className="text-primary hover:underline">
+                <Link href={target.href} className="text-primary underline underline-offset-2 hover:decoration-2">
                   {target.label}
                 </Link>
               ) : (
