@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/(public)/auth/actions";
 import { deleteAccount } from "./actions";
+import { becomeAuthor } from "./become-author";
 import { PageHeader } from "@/components/ui/page-header";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Alert } from "@/components/ui/alert";
@@ -90,13 +91,46 @@ export default async function AccountPage({
       </SurfaceCard>
 
       <SurfaceCard className="mt-4">
-        <Link
-          href={isAuthor ? "/dashboard" : "/library"}
-          className={`focus-ring inline-flex ${buttonClasses("outline", "sm")}`}
-        >
-          {isAuthor ? "Go to Dashboard" : "Go to Library"}
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          {isAuthor && (
+            <Link
+              href="/dashboard"
+              className={`focus-ring inline-flex ${buttonClasses("outline", "sm")}`}
+            >
+              Go to Dashboard
+            </Link>
+          )}
+          {/* BECOME-AUTHOR-1: an author keeps the books they bought, and a
+              reader who became an author is the most likely to have
+              some -- so the Library link stays for authors too. */}
+          <Link
+            href="/library"
+            className={`focus-ring inline-flex ${buttonClasses("outline", "sm")}`}
+          >
+            Go to Library
+          </Link>
+        </div>
       </SurfaceCard>
+
+      {profile?.role === "reader" && (
+        <div id="become-author">
+          <SurfaceCard className="mt-4">
+            <h2 className="font-serif text-lg font-semibold">Publish your own books</h2>
+            <p className="mt-1 text-sm text-muted">
+              Switch to an author account to publish and sell ebooks. You keep
+              your library and purchases. Your public author name will start
+              as <span className="font-medium text-foreground">{profile.display_name}</span>;
+              you can change it on your author profile. An author account
+              can&apos;t be switched back to a reader account.
+            </p>
+            <form action={becomeAuthor} className="mt-3">
+              <button type="submit" className={buttonClasses("primary", "sm")}>
+                Become an author
+              </button>
+            </form>
+          </SurfaceCard>
+        </div>
+      )}
 
       <form action={logout} className="mt-6">
         <button type="submit" className="focus-ring rounded-sm text-sm text-muted hover:underline">
