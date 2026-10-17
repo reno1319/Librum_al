@@ -70,7 +70,7 @@ export default async function AdminPage() {
           {showRefunds && (
             <Link
               href="/admin/refunds"
-              className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
+              className="w-full rounded-control border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
             >
               Refund requests
             </Link>
@@ -78,7 +78,7 @@ export default async function AdminPage() {
           {showReports && (
             <Link
               href="/admin/reports"
-              className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
+              className="w-full rounded-control border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
             >
               Book reports
             </Link>
@@ -89,7 +89,7 @@ export default async function AdminPage() {
           {showBlog && (
             <Link
               href="/admin/blog"
-              className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
+              className="w-full rounded-control border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
             >
               Blog
             </Link>

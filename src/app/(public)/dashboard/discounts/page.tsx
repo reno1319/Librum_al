@@ -61,8 +61,8 @@ export default async function DiscountsPage({
     .returns<DiscountCodeWithBook[]>();
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
@@ -92,7 +92,7 @@ export default async function DiscountsPage({
       ) : (
         <form
           action={createDiscountCode}
-          className="mt-6 flex flex-col gap-4 rounded-lg border border-border bg-surface p-4 shadow-sm"
+          className="mt-6 flex flex-col gap-4 rounded-card border border-border bg-surface p-4 shadow-sm"
         >
           <label className="flex flex-col gap-1 text-sm">
             Book
@@ -149,7 +149,7 @@ export default async function DiscountsPage({
               />
             </label>
           </div>
-          <p className="-mt-2 text-xs text-muted">
+          <p className="-mt-2 text-sm text-muted">
             Percentage: a whole number from 1 to 100. Fixed amount: whole lek, from{" "}
             {MINIMUM_FIXED_DISCOUNT_ALL} to {MAXIMUM_FIXED_DISCOUNT_ALL} ALL. A code that would take a
             book below its minimum price is refused at checkout.
@@ -178,7 +178,7 @@ export default async function DiscountsPage({
           return (
             <li
               key={code.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4 shadow-sm"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 shadow-sm"
             >
               <div>
                 <p className="font-medium">
@@ -198,7 +198,7 @@ export default async function DiscountsPage({
                 <form action={toggleDiscountCode.bind(null, code.id, code.active)}>
                   <button
                     type="submit"
-                    className="focus-ring rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-surface-hover"
+                    className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium hover:bg-surface-hover"
                   >
                     {code.active ? "Disable" : "Enable"}
                   </button>
@@ -206,7 +206,7 @@ export default async function DiscountsPage({
                 <form action={deleteDiscountCode.bind(null, code.id)}>
                   <button
                     type="submit"
-                    className="focus-ring rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                    className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
                   >
                     Delete
                   </button>
@@ -216,7 +216,9 @@ export default async function DiscountsPage({
           );
         })}
         {(codes ?? []).length === 0 && (
-          <p className="text-sm text-muted">No discount codes yet.</p>
+          <li>
+            <EmptyState description="No discount codes yet." />
+          </li>
         )}
       </ul>
     </main>

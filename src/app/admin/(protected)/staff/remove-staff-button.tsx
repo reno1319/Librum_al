@@ -15,7 +15,7 @@ function RemoveStaffSubmitButton({ confirmMessage }: { confirmMessage: string })
       type="submit"
       disabled={pending}
       onClick={(e) => handleConfirmGatedSubmit(confirmMessage, window.confirm, e)}
-      className="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+      className="rounded-control border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {pending ? "Removing…" : "Remove staff"}
     </button>

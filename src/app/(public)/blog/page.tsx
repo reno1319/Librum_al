@@ -92,7 +92,7 @@ export default async function BlogIndexPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-wide flex-1 px-4 py-12 sm:px-6">
+    <main className="page-container flex-1 pt-5 pb-12 sm:pt-10">
       <div className="max-w-2xl">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">Blog</p>
         <h1 className="mt-1 font-serif text-3xl font-normal text-foreground md:text-4xl">
@@ -162,7 +162,7 @@ export default async function BlogIndexPage() {
           <p className="text-muted">Gati të botosh librin tënd?</p>
           <Link
             href="/signup?role=author"
-            className="mt-3 inline-block rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+            className="mt-3 inline-block rounded-control bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
           >
             Boto librin tënd
           </Link>

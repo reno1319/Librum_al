@@ -39,13 +39,13 @@ export function LibraryBookCard({
           <img
             src={coverUrl}
             alt=""
-            className="aspect-[2/3] w-full rounded-md object-cover shadow-sm transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-md motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
+            className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-sm transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-md motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
           />
         ) : (
           <CoverPlaceholder
             title={title}
             authorName={authorName}
-            className="aspect-[2/3] w-full rounded-md"
+            className="aspect-[2/3] w-full rounded-[3px]"
           />
         )}
         <p className="font-serif text-base font-semibold leading-snug">{title}</p>
@@ -65,7 +65,7 @@ export function LibraryBookCard({
       {downloadable && (
         <a
           href={`/api/books/${bookId}/download`}
-          className="focus-ring mt-1 w-fit rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+          className="focus-ring mt-1 w-fit rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
         >
           Download EPUB
         </a>

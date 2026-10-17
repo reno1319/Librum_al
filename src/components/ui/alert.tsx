@@ -35,7 +35,7 @@ export function Alert({ variant = "info", title, children, className }: AlertPro
     <div
       role={variant === "error" ? "alert" : "status"}
       className={[
-        "rounded-md border-l-4 bg-surface px-4 py-3 text-sm text-foreground/90",
+        "rounded-card border-l-4 bg-surface px-4 py-3 text-sm text-foreground/90",
         border,
         className,
       ]

@@ -114,7 +114,7 @@ export async function AdminShell({
               <li key={item.href}>
                 <NavLinks
                   items={[item]}
-                  className="block rounded-md px-3 py-2 hover:bg-surface-hover"
+                  className="block rounded-control px-3 py-2 hover:bg-surface-hover"
                 />
               </li>
             ))}

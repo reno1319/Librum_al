@@ -397,7 +397,7 @@ export default async function BookstorePage({
 
   return (
     <main className="flex-1 bg-background">
-      <div className="mx-auto w-full max-w-wide px-4 py-10 sm:px-6 md:py-12">
+      <div className="page-container pt-5 pb-10 sm:pt-8 md:pb-12">
         <BookstoreToolbar query={rawQuery} isFiltered={isFiltered} />
 
         {featured && (
@@ -494,7 +494,11 @@ function BookstoreToolbar({
         </form>
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-y border-border py-2.5">
+      {/* V1 (V8): genre, sort and price range are one control look --
+          44px tall, the control border, 3px corners, the same type and
+          the same down arrow. Below 640px the three stack as equal,
+          full-width controls instead of a ragged wrapped row. */}
+      <div className="mt-6 grid grid-cols-1 gap-2 border-y border-border py-2.5 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-6 sm:gap-y-3">
         {/* REDESIGN STEP 3 r3 (Renato 14:21Z: "one button and when you
             click it, it opens the genres"): the button names the current
             genre, or "All genres"; the list opens under it. */}
@@ -524,22 +528,32 @@ function BookstoreToolbar({
           </nav>
         </details>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <label htmlFor="bookstore-sort" className="flex items-center gap-2 text-sm text-muted">
-            Sort by
-            <select
-              id="bookstore-sort"
-              name="sort"
-              form="bookstore-search"
-              defaultValue={sort ?? ""}
-              className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-2.5 py-2 text-sm font-semibold text-foreground"
-            >
-              {BOOKSTORE_SORT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2.5">
+          {/* Still a native select: the box around it (with "Sort by")
+              is drawn to match the two dropdown buttons beside it. */}
+          <label
+            htmlFor="bookstore-sort"
+            className={`${FILTER_CONTROL_CLASSES} has-[select:focus-visible]:shadow-[var(--focus-ring)]`}
+          >
+            <span className="font-normal text-muted">Sort by</span>
+            <span className="relative flex flex-1 items-center">
+              <select
+                id="bookstore-sort"
+                name="sort"
+                form="bookstore-search"
+                defaultValue={sort ?? ""}
+                className="w-full cursor-pointer appearance-none bg-transparent py-2 pr-5 font-semibold text-foreground outline-none"
+              >
+                {BOOKSTORE_SORT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-0 flex">
+                <ChevronIcon />
+              </span>
+            </span>
           </label>
 
           <details className="group relative text-sm">
@@ -593,7 +607,7 @@ function BookstoreToolbar({
           </details>
 
           {isFiltered && (
-            <Link href="/bookstore" className={`${TEXT_LINK_CLASSES} ml-1`}>
+            <Link href="/bookstore" className={`${TEXT_LINK_CLASSES} ml-1 justify-self-start`}>
               Clear filters
             </Link>
           )}
@@ -630,8 +644,11 @@ function GenreLink({
   );
 }
 
-const DROPDOWN_SUMMARY_CLASSES =
-  "focus-ring flex cursor-pointer list-none items-center gap-1.5 rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2 font-semibold select-none [&::-webkit-details-marker]:hidden";
+// V1 (V8): the one look shared by the genre and price buttons and the
+// box around the Sort select.
+const FILTER_CONTROL_CLASSES =
+  "flex min-h-11 cursor-pointer items-center justify-between gap-1.5 rounded-control border border-control bg-surface px-3 text-sm font-semibold text-foreground";
+const DROPDOWN_SUMMARY_CLASSES = `focus-ring ${FILTER_CONTROL_CLASSES} list-none select-none [&::-webkit-details-marker]:hidden`;
 
 function ChevronIcon() {
   return (

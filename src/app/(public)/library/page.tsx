@@ -86,7 +86,7 @@ export default async function LibraryPage({
     .sort((a, b) => a.title.localeCompare(b.title));
 
   return (
-    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
       <PageHeader title="Your library" description="The books you've collected on Librum." />
 
       {error && (

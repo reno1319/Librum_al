@@ -94,7 +94,7 @@ export function BlogEditorForm({
           maxLength={TITLE_MAX_LENGTH}
           value={title}
           onChange={(e) => handleTitleChange(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-2"
+          className="rounded-control border border-control bg-surface px-3 py-2"
         />
       </label>
 
@@ -108,11 +108,11 @@ export function BlogEditorForm({
           maxLength={SLUG_MAX_LENGTH}
           value={slug}
           onChange={(e) => handleSlugChange(e.target.value)}
-          className={`rounded-lg border border-border px-3 py-2 font-mono text-sm ${
+          className={`rounded-control border border-control px-3 py-2 font-mono text-sm ${
             slugReadOnly ? "bg-surface-hover text-muted" : "bg-surface"
           }`}
         />
-        <span className="text-xs text-muted">
+        <span className="text-sm text-muted">
           {slugReadOnly
             ? "The URL slug can't be changed once an article is published."
             : "Auto-filled from the title. Edit it directly if you need a different URL."}
@@ -125,7 +125,7 @@ export function BlogEditorForm({
           name="category"
           required
           defaultValue={initialValues?.category ?? BLOG_CATEGORIES[0].value}
-          className="rounded-lg border border-border bg-surface px-3 py-2"
+          className="rounded-control border border-control bg-surface px-3 py-2"
         >
           {BLOG_CATEGORIES.map((c) => (
             <option key={c.value} value={c.value}>
@@ -144,9 +144,9 @@ export function BlogEditorForm({
           maxLength={EXCERPT_MAX_LENGTH}
           value={excerpt}
           onChange={(e) => setExcerpt(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-2"
+          className="rounded-control border border-control bg-surface px-3 py-2"
         />
-        <span className="text-xs text-muted">
+        <span className="text-sm text-muted">
           {excerpt.length}/{EXCERPT_MAX_LENGTH}
         </span>
       </label>
@@ -170,7 +170,7 @@ export function BlogEditorForm({
           contentMarkdown={contentMarkdown}
           onChange={setContentMarkdown}
         />
-        <span className="text-xs text-muted">
+        <span className="text-sm text-muted">
           {contentMarkdown.length.toLocaleString()}/{CONTENT_MARKDOWN_MAX_LENGTH.toLocaleString()} characters
           {" · "}
           ~{readingMinutes} min read
@@ -190,9 +190,9 @@ export function BlogEditorForm({
           maxLength={SEO_TITLE_MAX_LENGTH}
           value={seoTitle}
           onChange={(e) => setSeoTitle(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-2"
+          className="rounded-control border border-control bg-surface px-3 py-2"
         />
-        <span className="text-xs text-muted">
+        <span className="text-sm text-muted">
           {seoTitle.length}/{SEO_TITLE_MAX_LENGTH}
         </span>
       </label>
@@ -205,9 +205,9 @@ export function BlogEditorForm({
           maxLength={SEO_DESCRIPTION_MAX_LENGTH}
           value={seoDescription}
           onChange={(e) => setSeoDescription(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-2"
+          className="rounded-control border border-control bg-surface px-3 py-2"
         />
-        <span className="text-xs text-muted">
+        <span className="text-sm text-muted">
           {seoDescription.length}/{SEO_DESCRIPTION_MAX_LENGTH}
         </span>
       </label>
@@ -237,7 +237,7 @@ export function ContentMarkdownInput({
     return (
       <>
         <input type="hidden" name="contentMarkdown" value={contentMarkdown} />
-        <div className="rounded-lg border border-border bg-surface px-4 py-3">
+        <div className="rounded-card border border-border bg-surface px-4 py-3">
           <BlogMarkdown markdown={contentMarkdown} />
         </div>
       </>
@@ -252,7 +252,7 @@ export function ContentMarkdownInput({
       maxLength={CONTENT_MARKDOWN_MAX_LENGTH}
       value={contentMarkdown}
       onChange={(e) => onChange(e.target.value)}
-      className="rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm"
+      className="rounded-control border border-control bg-surface px-3 py-2 font-mono text-sm"
     />
   );
 }

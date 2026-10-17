@@ -52,8 +52,8 @@ export default async function AllBooksPage() {
   const allBooks = books ?? [];
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 

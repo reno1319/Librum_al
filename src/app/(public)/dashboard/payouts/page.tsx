@@ -66,8 +66,8 @@ export default async function PayoutsPage({
   }
 
   return (
-    <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
@@ -84,7 +84,7 @@ export default async function PayoutsPage({
         </Alert>
       )}
 
-      <div className="mt-8 rounded-lg border border-border bg-surface p-6 shadow-sm">
+      <div className="mt-8 rounded-card border border-border bg-surface p-6 shadow-sm">
         {!profile?.stripe_account_id ? (
           // STRIPE-DISABLE-1: connecting a new payout account is
           // temporarily unavailable (locked product decision) -- a

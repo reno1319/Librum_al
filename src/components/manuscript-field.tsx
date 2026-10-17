@@ -518,7 +518,7 @@ export function ManuscriptField({
               disabled={status === "converting"}
               onChange={(e) => handleEpubChange(e.target.files?.[0] ?? null)}
             />
-            <span className="text-xs text-muted">
+            <span className="text-sm text-muted">
               EPUB · up to 50 MB.
               {existingFilename ? " Leave blank to keep your current manuscript." : ""}
             </span>
@@ -539,7 +539,7 @@ export function ManuscriptField({
           {status === "error" && (
             <p
               role="alert"
-              className="rounded-lg border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
+              className="rounded-card border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
             >
               {errorMessage}
             </p>
@@ -558,9 +558,9 @@ export function ManuscriptField({
               disabled={status === "converting"}
               onChange={(e) => handleDocxChange(e.target.files?.[0] ?? null)}
             />
-            <span className="text-xs text-muted">DOCX · up to 50 MB.</span>
+            <span className="text-sm text-muted">DOCX · up to 50 MB.</span>
           </label>
-          <p className="text-xs text-muted">
+          <p className="text-sm text-muted">
             Librum preserves common manuscript structure such as headings, paragraphs,
             basic formatting, lists, links, and supported images. Complex Word-specific
             layout may require review after conversion.
@@ -575,14 +575,14 @@ export function ManuscriptField({
           {status === "error" && (
             <p
               role="alert"
-              className="rounded-lg border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
+              className="rounded-card border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
             >
               {errorMessage}
             </p>
           )}
 
           {status === "success" && (
-            <div role="status" className="rounded-lg border-l-4 border-primary bg-surface px-3 py-2 text-sm">
+            <div role="status" className="rounded-card border-l-4 border-primary bg-surface px-3 py-2 text-sm">
               <p className="font-medium text-foreground">
                 Manuscript ready{readyName ? ` — ${readyName}` : ""}
               </p>

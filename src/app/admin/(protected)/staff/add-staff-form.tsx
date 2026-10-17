@@ -88,7 +88,7 @@ export function AddStaffForm({
         <AddStaffSubmitButton confirmMessage={confirmMessage} />
       </div>
 
-      {role === "editor" && <p className="text-xs text-muted">{EDITOR_ROLE_HELP_TEXT}</p>}
+      {role === "editor" && <p className="text-sm text-muted">{EDITOR_ROLE_HELP_TEXT}</p>}
     </form>
   );
 }

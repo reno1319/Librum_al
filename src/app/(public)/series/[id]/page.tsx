@@ -173,7 +173,7 @@ export default async function SeriesPage({
   const supabase = await createClient();
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
       {/* ============================================================
           Series hero -- title, author attribution, book count. No
           description field exists on this schema (series has only id/
@@ -208,7 +208,7 @@ export default async function SeriesPage({
           ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
         <h2 className="font-serif text-xl font-normal">Books in this series</h2>
-        <ol className="mt-6 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <ol className="mt-6 grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {books.map((book) => {
             const coverUrl = book.cover_path
               ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl

@@ -13,6 +13,7 @@ import { requestTransactionRefund, cancelRefundRequest } from "@/app/(public)/li
 import { RefundRequestForm } from "@/app/(public)/library/refund-request-form";
 import { CancelRefundButton } from "@/app/(public)/library/cancel-refund-button";
 import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
@@ -208,7 +209,7 @@ export default async function AccountPurchasesPage({
   const totalSpent = calculateTotalSpentByCurrency(transactionGroups);
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
       <PageHeader
         title="Purchases & refunds"
         description="Review your purchases and manage eligible refund requests."
@@ -226,9 +227,7 @@ export default async function AccountPurchasesPage({
       )}
 
       {transactionGroups.length === 0 ? (
-        <p className="mt-8 rounded-lg border border-dashed border-border px-6 py-16 text-center text-muted">
-          You haven&apos;t bought any books yet.
-        </p>
+        <EmptyState className="mt-8" description="You haven't bought any books yet." />
       ) : (
         <>
           {/* One figure per currency, never a converted or combined
@@ -289,7 +288,7 @@ export default async function AccountPurchasesPage({
                   key={group.key}
                   className={
                     isBundle
-                      ? "rounded-lg border border-border bg-surface p-4 shadow-sm"
+                      ? "rounded-card border border-border bg-surface p-4 shadow-sm"
                       : "border-b border-border pb-4 last:border-b-0"
                   }
                 >
@@ -331,7 +330,7 @@ export default async function AccountPurchasesPage({
                             {ownedByBookId.get(purchase.book_id) ? (
                               <a
                                 href={`/api/books/${purchase.book_id}/download`}
-                                className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+                                className="rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
                               >
                                 Download EPUB
                               </a>

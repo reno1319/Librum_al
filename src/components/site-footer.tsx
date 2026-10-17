@@ -51,7 +51,7 @@ const BOTO_ME_LK_HREF = "https://www.lamajkalemi.al";
 export function SiteFooter() {
   return (
     <footer className="bg-primary-hover text-primary-foreground">
-      <div className="mx-auto flex w-full max-w-wide flex-col gap-8 px-4 py-8 sm:px-6 md:flex-row md:justify-between">
+      <div className="page-container flex flex-col gap-8 py-8 md:flex-row md:justify-between">
         <div className="max-w-xs">
           <span className="font-serif text-[1.625rem]">Librum</span>
           <p className="mt-2 text-[0.9375rem] leading-relaxed text-primary-foreground/80">
@@ -92,7 +92,7 @@ export function SiteFooter() {
       </div>
 
       <div className="border-t border-primary-foreground/15">
-        <div className="mx-auto flex w-full max-w-wide flex-col gap-2 px-4 py-3 text-sm text-primary-foreground/80 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="page-container flex flex-col gap-2 py-3 text-sm text-primary-foreground/80 sm:flex-row sm:items-center sm:justify-between">
           <span>&copy; {new Date().getFullYear()} Librum.</span>
           {/* Styled as a secondary partner link -- smaller, muted, an
               explicit external-link mark -- so it doesn't read as a

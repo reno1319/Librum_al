@@ -210,7 +210,7 @@ export default async function AuthorProfilePage({
   const authorInitials = getAuthorInitials(authorPublicName);
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
       {/* ============================================================
           Author hero -- identity, bio, follow. Restrained on purpose:
           no cover photo, no stat dashboard, no social-profile framing.
@@ -255,7 +255,7 @@ export default async function AuthorProfilePage({
           </p>
 
           {author.bio ? (
-            <p className="mt-3 max-w-xl text-sm text-foreground/90 sm:text-base">{author.bio}</p>
+            <p className="mt-3 max-w-[42.5rem] text-sm text-foreground/90 sm:text-base">{author.bio}</p>
           ) : (
             <p className="mt-3 text-sm text-muted">No biography added yet.</p>
           )}
@@ -303,7 +303,7 @@ export default async function AuthorProfilePage({
             />
           </div>
         ) : (
-          <ul className="mt-6 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <ul className="mt-6 grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {publishedBooks.map((book) => {
               const coverUrl = book.cover_path
                 ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
@@ -344,11 +344,11 @@ export default async function AuthorProfilePage({
       {seriesGroups.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
           <h2 className="font-serif text-xl font-normal">Series</h2>
-          <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {seriesGroups.map((group) => (
               <li
                 key={group.id}
-                className="rounded-lg border border-border bg-surface p-4 shadow-sm"
+                className="rounded-card border border-border bg-surface p-4 shadow-sm"
               >
                 <Link
                   href={`/series/${group.id}`}
@@ -370,20 +370,20 @@ export default async function AuthorProfilePage({
                         key={book.id}
                         href={`/books/${book.id}`}
                         aria-label={book.title}
-                        className="focus-ring block w-16 shrink-0 rounded-sm"
+                        className="focus-ring block w-16 shrink-0 rounded-[2px]"
                       >
                         {coverUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={coverUrl}
                             alt=""
-                            className="aspect-[2/3] w-full rounded-sm object-cover shadow-sm"
+                            className="aspect-[2/3] w-full rounded-[2px] object-cover shadow-sm"
                           />
                         ) : (
                           <CoverPlaceholder
                             title={book.title}
                             authorName={authorPublicName}
-                            className="aspect-[2/3] w-full rounded-sm"
+                            className="aspect-[2/3] w-full rounded-[2px]"
                           />
                         )}
                       </Link>
@@ -411,12 +411,12 @@ export default async function AuthorProfilePage({
       {bundles && bundles.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
           <h2 className="font-serif text-xl font-normal">Bundles</h2>
-          <ul className="mt-6 flex flex-col gap-3">
+          <ul className="mt-6 flex max-w-[42.5rem] flex-col gap-3">
             {bundles.map((bundle) => (
               <li key={bundle.id}>
                 <Link
                   href={`/bundles/${bundle.id}`}
-                  className="focus-ring flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
+                  className="focus-ring flex flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
                 >
                   <span className="font-serif font-medium">{bundle.title}</span>
                   <span className="text-sm font-semibold text-primary">

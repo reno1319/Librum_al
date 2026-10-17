@@ -255,8 +255,8 @@ export default async function SalesPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
@@ -274,7 +274,7 @@ export default async function SalesPage() {
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
           <p className="text-sm text-muted">Net revenue</p>
           <p className="mt-1 font-serif text-2xl font-semibold text-primary">
             <CurrencyTotalsText totals={summary.netTotals} emptyLabel="No sales yet" />
@@ -287,19 +287,19 @@ export default async function SalesPage() {
             </p>
           )}
         </div>
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
           <p className="text-sm text-muted">Units</p>
           <p className="mt-1 font-serif text-2xl font-semibold">
             {totalUnitsSold}
           </p>
         </div>
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
           <p className="text-sm text-muted">Book page views</p>
           <p className="mt-1 font-serif text-2xl font-semibold">
             {totalViews}
           </p>
         </div>
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
           <p className="text-sm text-muted">Published books</p>
           <p className="mt-1 font-serif text-2xl font-semibold">
             {publishedCount}
@@ -311,7 +311,7 @@ export default async function SalesPage() {
         Net revenue, last {CHART_DAYS} days
       </h2>
       {summary.dailySeries.length === 0 ? (
-        <div className="mt-4 flex h-32 items-end gap-1.5 rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="mt-4 flex h-32 items-end gap-1.5 rounded-card border border-border bg-surface p-4 shadow-sm">
           {summary.chartDates.map((date, i) => (
             <div
               key={date.toISOString()}
@@ -330,7 +330,7 @@ export default async function SalesPage() {
           return (
             <section key={series.currency} className="mt-4">
               <h3 className="text-sm font-medium text-muted">{series.currency}</h3>
-              <div className="mt-2 flex h-32 items-end gap-1.5 rounded-lg border border-border bg-surface p-4 shadow-sm">
+              <div className="mt-2 flex h-32 items-end gap-1.5 rounded-card border border-border bg-surface p-4 shadow-sm">
                 {series.days.map((day, i) => (
                   <div
                     key={day.date.toISOString()}

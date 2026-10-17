@@ -179,8 +179,8 @@ export default async function EditBookPage({
   });
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
@@ -246,7 +246,7 @@ export default async function EditBookPage({
                     defaultValue={book.description}
                     className={formControlClasses}
                   />
-                  <span className="text-xs text-muted">
+                  <span className="text-sm text-muted">
                     A couple of sentences or more helps readers decide.
                   </span>
                 </label>
@@ -340,7 +340,7 @@ export default async function EditBookPage({
                   </select>
                 </label>
 
-                <details className="rounded-lg border border-border px-4 py-3">
+                <details className="rounded-card border border-border px-4 py-3">
                   <summary className="cursor-pointer text-sm font-medium text-foreground">
                     Additional book details
                   </summary>
@@ -354,7 +354,7 @@ export default async function EditBookPage({
                         placeholder="e.g. space opera, first contact, hard sci-fi"
                         className={formControlClasses}
                       />
-                      <span className="text-xs text-muted">
+                      <span className="text-sm text-muted">
                         Comma-separated. Helps readers find your book by terms
                         beyond its genre — up to 15.
                       </span>
@@ -369,7 +369,7 @@ export default async function EditBookPage({
                         defaultValue={book.isbn ?? ""}
                         placeholder="e.g. 978-3-16-148410-0"
                       />
-                      <span className="text-xs text-muted">
+                      <span className="text-sm text-muted">
                         Only if you already own one — Librum doesn&apos;t issue
                         or register ISBNs. Leave blank to skip.
                       </span>
@@ -384,7 +384,7 @@ export default async function EditBookPage({
                         maxLength={PUBLISHER_MAX_LENGTH}
                         className={formControlClasses}
                       />
-                      <span className="text-xs text-muted">
+                      <span className="text-sm text-muted">
                         The publishing name for this edition, if applicable.
                       </span>
                     </label>
@@ -409,14 +409,14 @@ export default async function EditBookPage({
                         name="originalPublicationDate"
                         defaultValue={book.original_publication_date ?? ""}
                       />
-                      <span className="text-xs text-muted">
+                      <span className="text-sm text-muted">
                         Only if this edition was first published elsewhere
                         before arriving on Librum.
                       </span>
                     </label>
 
                     {series && series.length === 0 && (
-                      <p className="text-xs text-muted">
+                      <p className="text-sm text-muted">
                         Want to group this with other books as a series?{" "}
                         {/* FIX1 (X11): a new tab, so unsaved edits stay. */}
                         <Link
@@ -477,7 +477,7 @@ export default async function EditBookPage({
                   <p className="text-sm font-medium">
                     {manuscriptName ? `Current manuscript: ${manuscriptName}` : "No manuscript on file"}
                   </p>
-                  <p className="text-xs text-muted">
+                  <p className="text-sm text-muted">
                     Leave blank to keep your current manuscript. Replacing it updates
                     the file existing readers receive on their next download. Readers
                     can preview approximately the first 10% of your ebook — generated
@@ -522,7 +522,7 @@ export default async function EditBookPage({
                     defaultValue={book.price_all == null ? "" : String(book.price_all)}
                     className={formControlClasses}
                   />
-                  <span className="text-xs text-muted">
+                  <span className="text-sm text-muted">
                     Whole lek: 0 for a free ebook, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
                     {MAXIMUM_CATALOG_PRICE_ALL}. Librum takes a{" "}
                     {PLATFORM_FEE_PERCENT}% platform fee — you keep the rest of
@@ -550,7 +550,7 @@ export default async function EditBookPage({
                 {contributors.map((c) => (
                   <li
                     key={c.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2"
+                    className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface px-3 py-2"
                   >
                     <span>
                       {c.name} <span className="text-muted">· {c.role}</span>
@@ -603,7 +603,7 @@ export default async function EditBookPage({
         </div>
 
         <div className="flex flex-col gap-6">
-          <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <section className="rounded-card border border-border bg-surface p-4 shadow-sm">
             <h2 className="font-serif text-lg font-normal">Publishing</h2>
             <p className="mt-2 text-sm">
               Status: <span className="font-medium">{book.status === "draft" ? "Draft" : "Published"}</span>
@@ -721,7 +721,7 @@ export default async function EditBookPage({
             )}
           </section>
 
-          <section className="rounded-lg border border-dashed border-border p-4">
+          <section className="rounded-card border border-dashed border-border p-4">
             <h2 className="font-serif text-sm font-normal text-muted">Danger zone</h2>
             <p className="mt-1 text-xs text-muted">This can&apos;t be undone.</p>
             <form action={deleteBook.bind(null, book.id)} className="mt-3">

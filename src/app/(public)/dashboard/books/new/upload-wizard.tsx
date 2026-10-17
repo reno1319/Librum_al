@@ -462,12 +462,12 @@ export function UploadWizard({
                 onChange={(e) => setDescription(e.target.value)}
                 className={formControlClassesFor(false)}
               />
-              <span className="text-xs text-muted">
+              <span className="text-sm text-muted">
                 A couple of sentences or more helps readers decide.
               </span>
             </label>
 
-            <details ref={moreDetailsRef} className="rounded-lg border border-border px-4 py-3">
+            <details ref={moreDetailsRef} className="rounded-card border border-border px-4 py-3">
               <summary className="cursor-pointer text-sm font-medium text-foreground">
                 Additional book details
               </summary>
@@ -487,7 +487,7 @@ export function UploadWizard({
                     className={formControlClassesFor(!!shownIsbnError)}
                   />
                   <FieldError id="wizard-isbn-error" message={shownIsbnError} />
-                  <span className="text-xs text-muted">
+                  <span className="text-sm text-muted">
                     Only if you already own one — Librum doesn&apos;t issue or
                     register ISBNs. Leave blank to skip.
                   </span>
@@ -528,7 +528,7 @@ export function UploadWizard({
                     className={formControlClassesFor(!!shownDateError)}
                   />
                   <FieldError id="wizard-date-error" message={shownDateError} />
-                  <span className="text-xs text-muted">
+                  <span className="text-sm text-muted">
                     Only if this edition was first published elsewhere before
                     arriving on Librum.
                   </span>
@@ -544,14 +544,14 @@ export function UploadWizard({
                     placeholder="e.g. space opera, first contact, hard sci-fi"
                     className={formControlClassesFor(false)}
                   />
-                  <span className="text-xs text-muted">
+                  <span className="text-sm text-muted">
                     Comma-separated. Helps readers find your book by terms beyond
                     its genre — up to 15.
                   </span>
                 </label>
 
                 {series.length === 0 && (
-                  <p className="text-xs text-muted">
+                  <p className="text-sm text-muted">
                     Want to group this with other books as a series?{" "}
                     {/* FIX1 (X11): a new tab, so nothing typed here is lost. */}
                     <Link
@@ -603,7 +603,7 @@ export function UploadWizard({
               <div className="flex flex-col gap-2">
                 <CoverField authorId={authorId} onCoverChange={setCover} />
                 {/* FIX1 (X10): the tip moved here from the Tips box. */}
-                <p className="text-xs text-muted">
+                <p className="text-sm text-muted">
                   Covers work best as a portrait image, at least 1000px tall.
                 </p>
               </div>
@@ -616,7 +616,7 @@ export function UploadWizard({
                 onManuscriptChange={setManuscript}
               />
 
-              <p role="status" className="text-xs text-muted">
+              <p role="status" className="text-sm text-muted">
                 {[cover, manuscript].filter(Boolean).length} of 2 files ready.
               </p>
 
@@ -627,13 +627,13 @@ export function UploadWizard({
                 </p>
               )}
 
-              <p className="text-xs text-muted">
+              <p className="text-sm text-muted">
                 Readers can preview approximately the first 10% of your ebook —
                 generated automatically, no extra steps needed.
               </p>
             </div>
 
-            <aside className="rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted">
+            <aside className="rounded-card border border-dashed border-border px-4 py-3 text-xs text-muted">
               <p className="font-medium text-foreground">Tips</p>
               <ul className="mt-1 flex flex-col gap-1 pl-4 list-disc">
                 <li>
@@ -730,7 +730,7 @@ export function UploadWizard({
                 </span>
                 {/* FIX1 (X8): the price message, under the price box. */}
                 <FieldError id="wizard-price-error" message={priceError} />
-                <span className="text-xs text-muted">
+                <span className="text-sm text-muted">
                   Whole lek: {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
                   {MAXIMUM_CATALOG_PRICE_ALL}. Librum takes a {PLATFORM_FEE_PERCENT}%
                   platform fee — you keep the rest of every sale.
@@ -744,7 +744,7 @@ export function UploadWizard({
                 and words, just above the buttons. Its missing-price line
                 is no longer reachable (an invalid paid price is blocked
                 before submit) and is not rendered. */}
-            <div className="rounded-lg border border-border bg-background p-4 text-sm">
+            <div className="rounded-card border border-border bg-background p-4 text-sm">
               <p className="text-xs font-medium uppercase tracking-wide text-muted">Readiness</p>
               {/* PR-G: replaces "Finish payout setup to publish paid books."
                   -- there is no payout setup to finish, and nothing an author
