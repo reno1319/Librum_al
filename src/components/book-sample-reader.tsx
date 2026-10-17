@@ -134,7 +134,7 @@ export function BookSampleReader({
         className={
           variant === "button"
             ? buttonClasses("outline", "md")
-            : "focus-ring rounded-sm text-sm font-medium text-primary hover:underline"
+            : "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
         }
       >
         Read sample

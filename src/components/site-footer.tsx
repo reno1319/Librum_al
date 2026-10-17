@@ -42,39 +42,45 @@ const SUPPORT_EMAIL = "support@librum.al";
 // from Librum's own product links.
 const BOTO_ME_LK_HREF = "https://www.lamajkalemi.al";
 
+// REDESIGN STEP 2 (A2 "Library Green & Brass"): the footer is the
+// darkest green on the site (primary-hover), one step below the header
+// and the homepage's closing green band so the two don't merge. Text is
+// cream: full strength 14.5:1, the softer 80% shade still well above AA.
+// Footer navigation links underline on hover; the support email sits
+// inside a sentence, so it is underlined at rest.
 export function SiteFooter() {
   return (
-    <footer className="border-t border-border bg-surface">
-      <div className="mx-auto flex w-full max-w-wide flex-col gap-10 px-4 py-12 sm:px-6 md:flex-row md:justify-between">
+    <footer className="bg-primary-hover text-primary-foreground">
+      <div className="mx-auto flex w-full max-w-wide flex-col gap-8 px-4 py-8 sm:px-6 md:flex-row md:justify-between">
         <div className="max-w-xs">
-          <span className="font-serif text-2xl text-primary">Librum</span>
-          <p className="mt-2 text-sm text-muted">
+          <span className="font-serif text-[1.625rem]">Librum</span>
+          <p className="mt-2 text-[0.9375rem] leading-relaxed text-primary-foreground/80">
             Independent ebooks, published directly by the people who wrote
             them.
           </p>
-          <p className="mt-4 text-sm text-muted">
+          <p className="mt-3 text-[0.9375rem] text-primary-foreground/80">
             Questions?{" "}
             <a
               href={`mailto:${SUPPORT_EMAIL}`}
-              className="focus-ring rounded-sm text-foreground hover:underline"
+              className="focus-ring rounded-sm text-primary-foreground underline underline-offset-2 hover:decoration-2"
             >
               {SUPPORT_EMAIL}
             </a>
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-x-10 gap-y-8 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-x-10 gap-y-6 sm:grid-cols-4">
           {Object.entries(FOOTER_GROUPS).map(([section, links]) => (
             <div key={section}>
-              <p className="text-xs font-medium uppercase tracking-wide text-muted">
+              <p className="text-[0.9375rem] font-semibold text-primary-foreground">
                 {section}
               </p>
-              <nav className="mt-3 flex flex-col gap-2 text-sm">
+              <nav className="mt-2 flex flex-col gap-1.5 text-[0.9375rem]">
                 {links.map((link) => (
                   <Link
                     key={link.href}
                     href={link.href}
-                    className="focus-ring rounded-sm hover:underline"
+                    className="focus-ring rounded-sm text-primary-foreground/80 hover:text-primary-foreground hover:underline"
                   >
                     {link.label}
                   </Link>
@@ -85,8 +91,8 @@ export function SiteFooter() {
         </div>
       </div>
 
-      <div className="border-t border-border">
-        <div className="mx-auto flex w-full max-w-wide flex-col gap-3 px-4 py-4 text-xs text-muted sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <div className="border-t border-primary-foreground/15">
+        <div className="mx-auto flex w-full max-w-wide flex-col gap-2 px-4 py-3 text-sm text-primary-foreground/80 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <span>&copy; {new Date().getFullYear()} Librum.</span>
           {/* Styled as a secondary partner link -- smaller, muted, an
               explicit external-link mark -- so it doesn't read as a
@@ -95,7 +101,7 @@ export function SiteFooter() {
             href={BOTO_ME_LK_HREF}
             target="_blank"
             rel="noopener noreferrer"
-            className="focus-ring rounded-sm hover:underline"
+            className="focus-ring rounded-sm hover:text-primary-foreground hover:underline"
           >
             Boto me L&amp;K ↗
           </a>

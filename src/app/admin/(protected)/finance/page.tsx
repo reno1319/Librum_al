@@ -343,7 +343,7 @@ function RefundSection({
         </button>
 
         {query.isFiltered && (
-          <Link href="/admin/finance#refunds" className="focus-ring rounded-sm text-sm font-medium text-primary hover:underline">
+          <Link href="/admin/finance#refunds" className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2">
             Clear filters
           </Link>
         )}
@@ -405,7 +405,7 @@ function RefundDesktopTable({ rows }: { rows: FinanceRefundReconciliationRow[] }
           {rows.map((row) => (
             <tr key={row.refund_request_id} className="border-b border-border align-top">
               <td className="py-3 pr-4">
-                <Link href={`/admin/refunds/${row.refund_request_id}`} className="text-primary hover:underline">
+                <Link href={`/admin/refunds/${row.refund_request_id}`} className="text-primary underline underline-offset-2 hover:decoration-2">
                   {resolveReaderDisplay(row.reader_id, row.reader_display_name)}
                 </Link>
               </td>
@@ -428,7 +428,7 @@ function RefundMobileList({ rows }: { rows: FinanceRefundReconciliationRow[] }) 
     <ul className="mt-4 flex flex-col gap-3 md:hidden">
       {rows.map((row) => (
         <li key={row.refund_request_id} className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <Link href={`/admin/refunds/${row.refund_request_id}`} className="font-medium text-primary hover:underline">
+          <Link href={`/admin/refunds/${row.refund_request_id}`} className="font-medium text-primary underline underline-offset-2 hover:decoration-2">
             {resolveReaderDisplay(row.reader_id, row.reader_display_name)}
           </Link>
           <p className="mt-0.5 text-xs text-muted">{formatTimestamp(row.requested_at)} &middot; {formatAmount(row)}</p>
@@ -495,7 +495,7 @@ function DisputeSection({
         </button>
 
         {query.isFiltered && (
-          <Link href="/admin/finance#disputes" className="focus-ring rounded-sm text-sm font-medium text-primary hover:underline">
+          <Link href="/admin/finance#disputes" className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2">
             Clear filters
           </Link>
         )}
@@ -740,7 +740,7 @@ function MismatchSection({
                 {resolveReaderDisplay(row.reader_id, row.reader_display_name)} &middot; {formatAmount(row)}
               </p>
               {row.refund_request_id && (
-                <Link href={`/admin/refunds/${row.refund_request_id}`} className="mt-2 inline-block text-sm text-primary hover:underline">
+                <Link href={`/admin/refunds/${row.refund_request_id}`} className="mt-2 inline-block text-sm text-primary underline underline-offset-2 hover:decoration-2">
                   View refund request
                 </Link>
               )}

@@ -387,7 +387,7 @@ export default async function AuthorProfilePage({
                 </div>
                 <Link
                   href={`/series/${group.id}`}
-                  className="focus-ring mt-3 inline-block rounded-sm text-xs font-medium text-primary hover:underline"
+                  className="focus-ring mt-3 inline-block rounded-sm text-xs font-medium text-primary underline underline-offset-2 hover:decoration-2"
                 >
                   View series &rarr;
                 </Link>

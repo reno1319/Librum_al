@@ -484,7 +484,7 @@ export function UploadWizard({
 
         <Link
           href="/pricing"
-          className="focus-ring w-fit rounded-sm text-sm font-medium text-primary hover:underline"
+          className="focus-ring w-fit rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
         >
           Not sure what to charge? See the earnings calculator &rarr;
         </Link>

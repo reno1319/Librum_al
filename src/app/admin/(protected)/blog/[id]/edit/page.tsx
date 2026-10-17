@@ -76,7 +76,7 @@ export default async function EditBlogPostPage({
           title="Edit article"
           description={isPublished ? "Published" : "Draft"}
           actions={
-            <Link href={`/admin/blog/${post.id}/preview`} className="text-sm text-primary hover:underline">
+            <Link href={`/admin/blog/${post.id}/preview`} className="text-sm text-primary underline underline-offset-2 hover:decoration-2">
               Preview
             </Link>
           }
