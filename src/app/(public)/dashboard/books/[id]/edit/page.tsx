@@ -29,6 +29,7 @@ import { CoverField } from "@/components/cover-field";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import { FormDraftKeeper } from "@/components/form-draft-keeper";
 import type { Book, Series, Contributor } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -58,6 +59,27 @@ export const dynamic = "force-dynamic";
 const SUBTITLE_MAX_LENGTH = 300;
 const PUBLISHER_MAX_LENGTH = 200;
 const EDITION_MAX_LENGTH = 100;
+
+// QA: the "Save changes" fields whose typed values come back after
+// updateBook rejects the form. Plain fields only -- the cover and
+// manuscript pickers carry upload paths and are never copied (see
+// src/lib/form-draft.ts).
+const EDIT_BOOK_FORM_ID = "edit-book-form";
+const EDIT_BOOK_DRAFT_FIELDS = [
+  "title",
+  "subtitle",
+  "description",
+  "language",
+  "genre",
+  "keywords",
+  "isbn",
+  "publisher",
+  "edition",
+  "originalPublicationDate",
+  "seriesId",
+  "seriesPosition",
+  "price",
+] as const;
 
 // LIBRUM 2.0 UI-7: single structured Server Component page (no client
 // boundary needed here -- DeleteBookButton is the one small existing
@@ -170,6 +192,13 @@ export default async function EditBookPage({
           {error}
         </Alert>
       )}
+      <FormDraftKeeper
+        formId={EDIT_BOOK_FORM_ID}
+        storageKey={`librum:edit-book-draft:${book.id}`}
+        fieldNames={EDIT_BOOK_DRAFT_FIELDS}
+        restore={Boolean(error)}
+        notice="Your changes were not saved, but what you typed is still in the form below. Fix the problem above and save again. A cover or manuscript file you picked needs to be chosen again."
+      />
       {success && (
         <Alert variant="success" className="mt-4">
           {success}
@@ -178,7 +207,11 @@ export default async function EditBookPage({
 
       <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_20rem] lg:items-start">
         <div className="flex flex-col gap-10">
-          <form action={updateBook.bind(null, book.id)} className="flex flex-col gap-10">
+          <form
+            id={EDIT_BOOK_FORM_ID}
+            action={updateBook.bind(null, book.id)}
+            className="flex flex-col gap-10"
+          >
             <section>
               <h2 className="font-serif text-xl font-semibold">Book Details</h2>
               <div className="mt-4 flex flex-col gap-4">
