@@ -2,7 +2,7 @@
 # BOOK-PEN-NAME-RIGHTS-CHOICE-1 (fix step F3): proves that a database
 # built from the PATCHED supabase/schema.sql and one built from the BASE
 # schema plus
-# supabase/migrations/20261018074425_book_pen_name_rights_librum_choice.sql
+# supabase/migrations/20261018091237_book_pen_name_rights_librum_choice.sql
 # describe the same database -- across every catalog that can differ.
 #
 # Modelled on 067_catalog_storage_path_authorization_catalog_equivalence.sh;
@@ -50,7 +50,7 @@ set -euo pipefail
 # The commit whose supabase/schema.sql is the BASE this migration was
 # written against: origin/staging at the time, the merge of PR #48.
 BASE_REF="${BASE_REF:-c5788fea3737c777ec846bd26678dce346669756}"
-MIGRATION="${MIGRATION:-supabase/migrations/20261018074425_book_pen_name_rights_librum_choice.sql}"
+MIGRATION="${MIGRATION:-supabase/migrations/20261018091237_book_pen_name_rights_librum_choice.sql}"
 STUB="${STUB:-supabase/tests/00_stub_supabase_platform.sql}"
 SCHEMA_PATH="${SCHEMA_PATH:-supabase/schema.sql}"
 # ABSENT from the base schema and PRESENT in the patched one.

@@ -8,7 +8,7 @@ import type { BookRightsDeclaration } from "@/lib/types";
 
 // BOOK-PEN-NAME-RIGHTS-CHOICE-1: recording and reading an author's rights
 // declaration for a book (public.book_rights_declarations, migration
-// 20261018074425). Server-only helpers, not Server Actions: F4 calls them
+// 20261018091237). Server-only helpers, not Server Actions: F4 calls them
 // from its own actions (Add a book, Edit, the publish gate), which run the
 // maintenance and recovery gates first. Nothing calls them in F3 except
 // tests, and performPublish does not require a declaration yet.

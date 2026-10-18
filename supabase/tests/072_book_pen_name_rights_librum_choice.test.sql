@@ -1,5 +1,5 @@
 -- Committed SQL regression suite for BOOK-PEN-NAME-RIGHTS-CHOICE-1
--- (migrations/20261018074425_book_pen_name_rights_librum_choice.sql):
+-- (migrations/20261018091237_book_pen_name_rights_librum_choice.sql):
 --
 -- * books.pen_name and books.librum_choice_at are readable like the
 --   title and neither insertable nor updatable by anon or authenticated;
