@@ -24,7 +24,38 @@ vi.mock("@/lib/supabase/admin", () => ({
   },
 }));
 
-const { setLibrumChoice, clearLibrumChoice } = await import("./actions");
+// F5: the form wrappers redirect (modelled as a throw, like Next's) and
+// read the book's price with the request client.
+const mockRedirect = vi.fn((url: string) => {
+  throw new RedirectSignal(url);
+});
+vi.mock("next/navigation", () => ({ redirect: (url: string) => mockRedirect(url) }));
+const mockRevalidatePath = vi.fn();
+vi.mock("next/cache", () => ({ revalidatePath: (p: string) => mockRevalidatePath(p) }));
+
+type BookRead = { data: unknown; error: { code?: string; message?: string } | null };
+let bookRead: BookRead;
+let bookReads: { columns: string; filters: [string, unknown][] }[];
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: () =>
+    Promise.resolve({
+      from: (table: string) => {
+        if (table !== "books") throw new Error(`unexpected table ${table}`);
+        const read = { columns: "", filters: [] as [string, unknown][] };
+        bookReads.push(read);
+        const chain = {
+          select: (columns: string) => ((read.columns = columns), chain),
+          eq: (column: string, value: unknown) => (read.filters.push([column, value]), chain),
+          maybeSingle: () => Promise.resolve(bookRead),
+        };
+        return chain;
+      },
+    }),
+}));
+
+const { setLibrumChoice, clearLibrumChoice, pickLibrumChoiceFromForm, removeLibrumChoiceFromForm } = await import(
+  "./actions"
+);
 
 const BOOK = "b0000000-0000-4000-8000-000000000001";
 
@@ -32,6 +63,10 @@ beforeEach(() => {
   rpcResults = {};
   rpcCalls = [];
   adminCreated = 0;
+  bookRead = { data: { id: BOOK, price_all: 199 }, error: null };
+  bookReads = [];
+  mockRedirect.mockClear();
+  mockRevalidatePath.mockClear();
   mockRequireStaff.mockReset();
   mockRequireStaff.mockResolvedValue({ userId: "s1", role: "admin" });
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -104,5 +139,115 @@ describe("clearLibrumChoice", () => {
   it("any other error -> error", async () => {
     rpcResults.clear_librum_choice = { data: null, error: { code: "08006", message: "connection" } };
     expect(await clearLibrumChoice()).toEqual({ ok: false, reason: "error" });
+  });
+});
+
+// ============================================================
+// F5 (C1): the admin page's form wrappers.
+// ============================================================
+function pickForm(bookId: string | null = BOOK): FormData {
+  const fd = new FormData();
+  if (typeof bookId === "string") fd.set("bookId", bookId);
+  return fd;
+}
+
+async function redirectOf(action: Promise<unknown>): Promise<string> {
+  try {
+    await action;
+  } catch (error) {
+    if (error instanceof RedirectSignal) return error.message;
+    throw error;
+  }
+  return "<no redirect>";
+}
+
+const SAVED = "/admin/librum-choice?success=Saved.";
+const CANT = `/admin/librum-choice?error=${encodeURIComponent("That book can't be picked.")}`;
+const WRONG = `/admin/librum-choice?error=${encodeURIComponent("Something went wrong. Please try again.")}`;
+
+describe("pickLibrumChoiceFromForm", () => {
+  it("requireStaff rejecting -> rejects with 0 book reads and no service-role client", async () => {
+    mockRequireStaff.mockRejectedValue(new RedirectSignal("/"));
+    await expect(pickLibrumChoiceFromForm(pickForm())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRequireStaff).toHaveBeenCalledWith("catalog.feature");
+    expect(bookReads).toEqual([]);
+    expect(adminCreated).toBe(0);
+    expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  it("a priced published book: reads its price with the request client, picks it, revalidates, Saved.", async () => {
+    rpcResults.set_librum_choice = { data: true, error: null };
+    expect(await redirectOf(pickLibrumChoiceFromForm(pickForm()))).toBe(SAVED);
+    expect(bookReads).toEqual([{ columns: "id, price_all", filters: [["id", BOOK]] }]);
+    expect(rpcCalls).toEqual([{ name: "set_librum_choice", params: { p_book_id: BOOK } }]);
+    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/bookstore", "/admin/librum-choice"]);
+  });
+
+  it("a free book (0) counts as priced", async () => {
+    bookRead = { data: { id: BOOK, price_all: 0 }, error: null };
+    rpcResults.set_librum_choice = { data: true, error: null };
+    expect(await redirectOf(pickLibrumChoiceFromForm(pickForm()))).toBe(SAVED);
+  });
+
+  it.each([
+    ["an unpriced book", { data: { id: BOOK, price_all: null }, error: null }],
+    ["a book not found (draft or missing)", { data: null, error: null }],
+  ])("%s is refused before set_librum_choice", async (_label, read) => {
+    bookRead = read;
+    expect(await redirectOf(pickLibrumChoiceFromForm(pickForm()))).toBe(CANT);
+    expect(adminCreated).toBe(0);
+    expect(rpcCalls).toEqual([]);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it.each([[null], ["not-a-uuid"]])("a missing or malformed id (%s) is refused without any read", async (id) => {
+    expect(await redirectOf(pickLibrumChoiceFromForm(pickForm(id)))).toBe(CANT);
+    expect(bookReads).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("a failed price read -> Something went wrong, nothing picked", async () => {
+    bookRead = { data: null, error: { code: "08006", message: "connection" } };
+    expect(await redirectOf(pickLibrumChoiceFromForm(pickForm()))).toBe(WRONG);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("not_published from the database -> That book can't be picked.", async () => {
+    rpcResults.set_librum_choice = { data: false, error: null };
+    expect(await redirectOf(pickLibrumChoiceFromForm(pickForm()))).toBe(CANT);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["feature_off", { data: null, error: { code: "42883", message: "missing" } }],
+    ["error", { data: null, error: { code: "42501", message: "denied" } }],
+  ])("%s -> Something went wrong", async (_label, result) => {
+    rpcResults.set_librum_choice = result;
+    expect(await redirectOf(pickLibrumChoiceFromForm(pickForm()))).toBe(WRONG);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("removeLibrumChoiceFromForm", () => {
+  it("requireStaff rejecting -> rejects with no service-role client", async () => {
+    mockRequireStaff.mockRejectedValue(new RedirectSignal("/"));
+    await expect(removeLibrumChoiceFromForm()).rejects.toBeInstanceOf(RedirectSignal);
+    expect(adminCreated).toBe(0);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("clears the pick, revalidates, Saved.", async () => {
+    expect(await redirectOf(removeLibrumChoiceFromForm())).toBe(SAVED);
+    expect(rpcCalls).toEqual([{ name: "clear_librum_choice", params: undefined }]);
+    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/bookstore", "/admin/librum-choice"]);
+  });
+
+  it.each([
+    ["feature_off", { data: null, error: { code: "PGRST202", message: "missing" } }],
+    ["error", { data: null, error: { code: "08006", message: "connection" } }],
+  ])("%s -> Something went wrong", async (_label, result) => {
+    rpcResults.clear_librum_choice = result;
+    expect(await redirectOf(removeLibrumChoiceFromForm())).toBe(WRONG);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });

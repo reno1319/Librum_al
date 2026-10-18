@@ -57,6 +57,11 @@ describe("BookstorePage: maintenance-mode gate", () => {
 // ============================================================
 type Row = Record<string, unknown>;
 
+// F5: makes the books LIST read fail (the Librum's choice read, a
+// maybeSingle, still works), to pin that a pick never shows over a
+// failed load.
+let failBookList = false;
+
 function tableStub(rows: Row[]) {
   let result = [...rows];
   const builder: Record<string, unknown> = {
@@ -69,7 +74,10 @@ function tableStub(rows: Row[]) {
       ((result = [...result].sort((a, b) => String(b[col]).localeCompare(String(a[col])))), builder),
     limit: (n: number) => ((result = result.slice(0, n)), builder),
     returns: () => builder,
-    then: (resolve: (v: unknown) => unknown) => resolve({ data: result, error: null }),
+    // F5: getLibrumChoiceBook's single-row read.
+    maybeSingle: () => Promise.resolve({ data: result[0] ?? null, error: null }),
+    then: (resolve: (v: unknown) => unknown) =>
+      resolve(failBookList ? { data: null, error: { message: "boom" } } : { data: result, error: null }),
   };
   return builder;
 }
@@ -85,6 +93,9 @@ function book(n: number, priceAll: number): Row {
 
 // Ten books, newest = book-10; books 3 and 8 are free.
 const BOOKS = Array.from({ length: 10 }, (_, i) => book(i + 1, i + 1 === 3 || i + 1 === 8 ? 0 : 199));
+// F5: the rows the books table holds in a test (BOOKS unless a test adds
+// a pick).
+let bookRows: Row[] = BOOKS;
 
 let signedInUser: { id: string } | null = null;
 
@@ -92,10 +103,12 @@ describe("BookstorePage: redesign step 3 layout", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     signedInUser = null;
+    bookRows = BOOKS;
+    failBookList = false;
     mockCreateClient.mockReset();
     mockCreateClient.mockImplementation(() => ({
       auth: { getUser: () => Promise.resolve({ data: { user: signedInUser } }) },
-      from: (table: string) => tableStub(table === "books" ? BOOKS : []),
+      from: (table: string) => tableStub(table === "books" ? bookRows : []),
       storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/c.png" } }) }) },
     }));
   });
@@ -124,6 +137,60 @@ describe("BookstorePage: redesign step 3 layout", () => {
 
   // FIX1 (X6): Renato 17:11Z "5a" -- the second "New on Librum" shelf
   // after the featured book is removed; the featured block keeps the label.
+  // F5 (C2, settled D7): a published, priced pick leads under "Librum's
+  // choice"; otherwise the newest book stays "New on Librum".
+  function withPick(n: number, extra: Row = {}): Row[] {
+    return BOOKS.map((b) => (b.id === `book-${String(n).padStart(2, "0")}` ? { ...b, librum_choice_at: "2026-10-18T09:00:00Z", ...extra } : b));
+  }
+  const featureOf = (html: string) =>
+    html.slice(html.indexOf("featured-book-title") - 200, html.indexOf("</section>"));
+
+  it("features Librum's choice when a published, priced book is picked", async () => {
+    bookRows = withPick(4);
+    const html = await render();
+    const feature = featureOf(html);
+    expect(feature).toContain("Librum&#x27;s choice");
+    expect(feature).not.toContain("New on Librum");
+    expect(feature).toContain("Book 04");
+    expect(feature).toContain("Buy · 199 ALL");
+    expect(feature).toContain("An Author");
+    expect(html).not.toContain("New on Librum");
+    // The pick still appears in the All books grid in its normal place.
+    expect(section(html, "All books")).toContain("Book 04");
+  });
+
+  it("an unpriced pick falls back to the newest book as New on Librum", async () => {
+    bookRows = withPick(4, { price_all: null });
+    const feature = featureOf(await render());
+    expect(feature).toContain("New on Librum");
+    expect(feature).not.toContain("Librum&#x27;s choice");
+    expect(feature).toContain("Book 10");
+  });
+
+  it("an unpublished pick falls back to the newest book as New on Librum", async () => {
+    bookRows = withPick(4, { status: "draft" });
+    const feature = featureOf(await render());
+    expect(feature).toContain("New on Librum");
+    expect(feature).toContain("Book 10");
+  });
+
+  it("a filtered view shows no feature block, pick or not", async () => {
+    bookRows = withPick(4);
+    const html = await render({ genre: "Fiction" });
+    expect(html).not.toContain("featured-book-title");
+    expect(html).not.toContain("Librum&#x27;s choice");
+  });
+
+  it("a failed book list shows no feature block, even with a pick", async () => {
+    bookRows = withPick(4);
+    failBookList = true;
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const html = await render();
+    quiet.mockRestore();
+    expect(html).not.toContain("featured-book-title");
+    expect(html).not.toContain("Librum&#x27;s choice");
+  });
+
   it("has no second New on Librum shelf after the featured book", async () => {
     const html = await render();
     expect(html).not.toContain(">New on Librum</h2>");

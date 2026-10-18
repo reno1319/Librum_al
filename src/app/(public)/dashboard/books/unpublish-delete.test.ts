@@ -59,6 +59,9 @@ const mockMemberQueryFilters = vi.fn();
 function makeChain(resolve: () => unknown) {
   const chain = {
     eq: () => chain,
+    // F5 (C5): unpublishBook's Librum's choice clear filters on
+    // librum_choice_at not null.
+    not: () => chain,
     single: () => Promise.resolve(resolve()),
     maybeSingle: () => Promise.resolve(resolve()),
     select: () => makeChain(resolve),

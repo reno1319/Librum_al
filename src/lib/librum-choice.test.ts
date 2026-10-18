@@ -41,7 +41,7 @@ describe("getLibrumChoiceBook", () => {
     expect(await getLibrumChoiceBook()).toEqual({ id: "b1", status: "published", librum_choice_at: "2026-10-18T08:00:00Z" });
     expect(calls).toEqual([
       { method: "from", args: ["books"] },
-      { method: "select", args: ["*"] },
+      { method: "select", args: ["*, profiles:public_author_profiles(public_author_name)"] },
       { method: "not", args: ["librum_choice_at", "is", null] },
       { method: "eq", args: ["status", "published"] },
     ]);

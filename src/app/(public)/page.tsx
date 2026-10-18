@@ -5,6 +5,8 @@ import { resolveHomepageCta, computeAuthorSharePercent, type HomepageCta } from 
 import { Alert } from "@/components/ui/alert";
 import { IconCheck } from "@/components/icons";
 import { attachPenNames, resolveBookByline } from "@/lib/book-byline";
+import { getLibrumChoiceBook, type LibrumChoiceBook } from "@/lib/librum-choice";
+import { orderHomepageBooks, qualifiesForHomepage } from "@/lib/librum-choice-logic";
 import type { Book, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -129,6 +131,21 @@ async function fetchPublishedCovers(supabase: SupabaseClient) {
   }));
 }
 
+// F5 (C3): Librum's choice as a Cover with the same fields as the others,
+// or null when nothing is picked or the pick would not be on the
+// homepage at all (no price or no cover).
+function librumChoiceCover(supabase: SupabaseClient, pick: LibrumChoiceBook | null): Cover | null {
+  if (!pick || !qualifiesForHomepage(pick)) return null;
+  return {
+    id: pick.id,
+    title: pick.title,
+    author: resolveBookByline(pick, pick.profiles),
+    genre: pick.genre,
+    description: pick.description,
+    url: supabase.storage.from("covers").getPublicUrl(pick.cover_path!).data.publicUrl,
+  };
+}
+
 type Cover = {
   id: string;
   title: string;
@@ -153,11 +170,17 @@ export default async function Home({
   const { account } = await searchParams;
   const supabase = await createClient();
 
-  const [covers, userResult] = await Promise.all([
+  const [newestCovers, librumChoice, userResult] = await Promise.all([
     fetchPublishedCovers(supabase),
+    getLibrumChoiceBook(),
     supabase.auth.getUser(),
   ]);
   const user = userResult.data.user;
+  // F5 (C3, Renato 10:17Z Q2 = b): Librum's choice, when it qualifies, is
+  // the first hero spine, followed by the newest other books; the same
+  // list feeds "Published with Librum" (pickFeaturedBooks, unchanged).
+  // Without a qualifying pick this is the newest list, as before.
+  const covers = orderHomepageBooks(newestCovers, librumChoiceCover(supabase, librumChoice));
 
   // Same minimal, page-local user/profile resolution pattern already
   // used throughout this codebase (dashboard pages, account page, the

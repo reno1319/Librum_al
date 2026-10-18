@@ -41,6 +41,10 @@ export type AdminNavItem = {
 // staff-permissions.ts), moderator/support do not, so this link
 // appears for exactly the three roles that can actually use it, same
 // visibility rule as every other entry here.
+//
+// F5: Librum's choice added, gated by catalog.feature -- the same
+// permission /admin/librum-choice and its actions require (owner and
+// admin only).
 export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   { href: "/admin", label: "Dashboard", permission: "admin.access" },
   { href: "/admin/reports", label: "Book reports", permission: "reports.view" },
@@ -49,6 +53,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   { href: "/admin/audit", label: "Audit log", permission: "audit.view" },
   { href: "/admin/finance", label: "Finance", permission: "finance.view" },
   { href: "/admin/blog", label: "Blog", permission: "blog.view" },
+  { href: "/admin/librum-choice", label: "Librum's choice", permission: "catalog.feature" },
 ];
 
 // Pure visibility resolver -- every /admin/* role's nav is derived from
