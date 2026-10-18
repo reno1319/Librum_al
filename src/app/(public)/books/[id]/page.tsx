@@ -32,6 +32,7 @@ import {
 } from "@/lib/book-purchase";
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveBookByline } from "@/lib/book-byline";
 import { buttonClasses } from "@/components/ui/button";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
@@ -568,6 +569,11 @@ export default async function BookDetailPage({
     paidCheckoutAvailable,
   });
   const authorName = resolvePublicAuthorName(book.profiles);
+  // F4 (P5, Q4 = a): the cover placeholder and the "by" line show the
+  // book's byline (its pen name, else the author's public name), still
+  // linking to the author's page. "About the author" and "More by ..."
+  // name the author, so they keep authorName.
+  const bookByline = resolveBookByline(book, book.profiles);
 
   return (
     <main className="page-container flex-1 pt-5 pb-16 sm:pt-6">
@@ -616,7 +622,7 @@ export default async function BookDetailPage({
           ) : (
             <CoverPlaceholder
               title={book.title}
-              authorName={authorName}
+              authorName={bookByline}
               className="aspect-[2/3] w-full rounded-[3px] shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
             />
           )}
@@ -654,7 +660,7 @@ export default async function BookDetailPage({
           <p className="mt-4 text-foreground">
             by{" "}
             <Link href={`/authors/${book.author_id}`} className={INLINE_LINK_CLASSES}>
-              {authorName}
+              {bookByline}
             </Link>
             {seriesInfo && (
               <>

@@ -15,6 +15,7 @@ import { BookSampleReader } from "@/components/book-sample-reader";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Bundle, Profile } from "@/lib/types";
@@ -673,7 +674,7 @@ function FeaturedBook({
   book: BookWithAuthor;
   coverUrl: string | null;
 }) {
-  const authorName = resolvePublicAuthorName(book.profiles);
+  const authorName = resolveBookByline(book, book.profiles);
   const priceState = resolveCatalogPriceState(book.price_all);
   const priceLabel = formatCatalogPriceLabel(book.price_all);
 
@@ -791,7 +792,7 @@ function CoverShelf({
             <BookCard
               book={book}
               coverUrl={coverUrlFor(supabase, book.cover_path)}
-              authorName={resolvePublicAuthorName(book.profiles)}
+              authorName={resolveBookByline(book, book.profiles)}
             />
           </li>
         ))}
@@ -872,7 +873,7 @@ function BookGrid({
             <BookCard
               book={book}
               coverUrl={coverUrlFor(supabase, book.cover_path)}
-              authorName={resolvePublicAuthorName(book.profiles)}
+              authorName={resolveBookByline(book, book.profiles)}
             />
           </li>
         ))}

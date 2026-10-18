@@ -4,7 +4,7 @@ import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { resolveHomepageCta, computeAuthorSharePercent, type HomepageCta } from "@/lib/homepage";
 import { Alert } from "@/components/ui/alert";
 import { IconCheck } from "@/components/icons";
-import { resolvePublicAuthorName } from "@/lib/author-name";
+import { attachPenNames, resolveBookByline } from "@/lib/book-byline";
 import type { Book, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -114,10 +114,15 @@ async function fetchPublishedCovers(supabase: SupabaseClient) {
       })[]
     >();
 
-  return (data ?? []).map((b) => ({
+  // F4 (P5): the spines and featured books show each book's byline. The
+  // select list above is explicit, so pen names come from one extra read
+  // (attachPenNames), which leaves the books unchanged before the
+  // migration.
+  const books = await attachPenNames(supabase, data ?? []);
+  return books.map((b) => ({
     id: b.id,
     title: b.title,
-    author: resolvePublicAuthorName(b.profiles),
+    author: resolveBookByline(b, b.profiles),
     genre: b.genre,
     description: b.description,
     url: supabase.storage.from("covers").getPublicUrl(b.cover_path!).data.publicUrl,

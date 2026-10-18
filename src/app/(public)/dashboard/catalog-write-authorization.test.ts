@@ -50,6 +50,14 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: () => Promise.resolve({ get: () => undefined }) }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ __emailAdmin: true }) }));
 vi.mock("@/lib/email", () => ({ sendNewBookEmails: vi.fn(async () => undefined) }));
+// F4 (P4): performPublish now reads the book's rights declaration
+// (src/lib/book-rights.ts). This suite is about catalog writes, so the
+// declaration is present and recording succeeds; the rights gate itself
+// is covered in dashboard/books/f4-rights-pen-name.test.ts.
+vi.mock("@/lib/book-rights", () => ({
+  getRightsDeclarationState: async () => ({ kind: "present", declaration: { basis: "own_rights" } }),
+  recordRightsDeclaration: async () => ({ ok: true }),
+}));
 
 let recoveryActive = false;
 vi.mock("@/lib/recovery-guard", () => ({
@@ -145,7 +153,13 @@ type Row = Record<string, unknown>;
 type Filter =
   | { kind: "eq"; column: string; value: unknown }
   | { kind: "is"; column: string; value: null }
-  | { kind: "in"; column: string; value: unknown[] };
+  | { kind: "in"; column: string; value: unknown[] }
+  // F4 (N1): performPublish's description guard.
+  | { kind: "neq"; column: string; value: unknown }
+  | { kind: "notNull"; column: string };
+
+const filterValue = (filter: Filter | undefined): unknown =>
+  filter && filter.kind !== "notNull" ? filter.value : undefined;
 type Via = "session" | "catalog-writer";
 type Write = {
   via: Via;
@@ -189,6 +203,9 @@ const INSERT_DEFAULTS: Record<string, Row> = {
 
 function matches(row: Row, filters: Filter[]): boolean {
   return filters.every((f) => {
+    // SQL: NULL <> x is not true, so a null column never matches neq.
+    if (f.kind === "neq") return row[f.column] != null && row[f.column] !== f.value;
+    if (f.kind === "notNull") return row[f.column] != null;
     if (f.kind === "eq") return f.value !== null && row[f.column] === f.value;
     if (f.kind === "is") return row[f.column] === null;
     return f.value.includes(row[f.column]);
@@ -236,10 +253,10 @@ function builder(table: string, via: Via) {
       if (table === "bundle_books" && columns.includes("bundles!inner")) {
         const statusFilter = filters.find((f) => f.column === "bundles.status");
         data = rows
-          .filter((r) => r.book_id === filters.find((f) => f.column === "book_id")?.value)
+          .filter((r) => r.book_id === filterValue(filters.find((f) => f.column === "book_id")))
           .filter((r) => {
             const b = tables.bundles.find((x) => x.id === r.bundle_id);
-            return !!b && (!statusFilter || b.status === statusFilter.value);
+            return !!b && (!statusFilter || b.status === filterValue(statusFilter));
           });
       }
       if (single === "single") {
@@ -320,6 +337,12 @@ function builder(table: string, via: Via) {
     eq: (column: string, value: unknown) => (filters.push({ kind: "eq", column, value }), chain),
     is: (column: string, value: null) => (filters.push({ kind: "is", column, value }), chain),
     in: (column: string, value: unknown[]) => (filters.push({ kind: "in", column, value }), chain),
+    neq: (column: string, value: unknown) => (filters.push({ kind: "neq", column, value }), chain),
+    not: (column: string, operator: string, value: unknown) => {
+      if (operator !== "is" || value !== null) throw new Error(`unsupported not(${operator})`);
+      filters.push({ kind: "notNull", column });
+      return chain;
+    },
     order: () => chain,
     returns: () => chain,
     single: () => ((single = "single"), chain),

@@ -6,7 +6,7 @@ import { BookCard } from "@/components/book-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
-import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book, Profile } from "@/lib/types";
@@ -97,7 +97,7 @@ export default async function WishlistPage() {
                 <BookCard
                   book={book}
                   coverUrl={coverUrl}
-                  authorName={resolvePublicAuthorName(book.profiles)}
+                  authorName={resolveBookByline(book, book.profiles)}
                 />
                 <form action={removeFromWishlist.bind(null, book.id)}>
                   <button

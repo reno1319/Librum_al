@@ -41,9 +41,16 @@ import type { Book } from "@/lib/types";
 // before it can be published -- the same check performPublish() makes.
 // While it is set, the "Write a description" recommendation is left out
 // of `recommended`, so one missing field is never listed twice.
+//
+// F4 (P4): `missingRights` is the fourth hard blocker, Renato's rule that
+// a rights choice is recorded before Publish -- the check performPublish()
+// makes after the description and before paid permission. The caller
+// says whether the book has a declaration (`hasRightsDeclaration`); this
+// module stays pure and never reads the database.
 export type PublishReadiness = {
   missingAllPrice: boolean;
   missingDescription: boolean;
+  missingRights: boolean;
   paidPublishingBlocked: boolean;
   recommended: ChecklistItem[];
 };
@@ -63,8 +70,9 @@ type ReadinessBook = Pick<Book, "description" | "keywords" | "price_all" | "cove
 export function resolvePublishReadiness(params: {
   book: ReadinessBook;
   paidPublishingAvailable: boolean;
+  hasRightsDeclaration: boolean;
 }): PublishReadiness {
-  const { book, paidPublishingAvailable } = params;
+  const { book, paidPublishingAvailable, hasRightsDeclaration } = params;
 
   // Mirrors performPublish()'s own real gate exactly (books/actions.ts),
   // including its ORDER: the missing-price refusal is decided first and
@@ -88,6 +96,7 @@ export function resolvePublishReadiness(params: {
   return {
     missingAllPrice,
     missingDescription,
+    missingRights: !hasRightsDeclaration,
     paidPublishingBlocked,
     recommended,
   };

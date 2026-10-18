@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractEpubSample } from "@/lib/epub-sample";
-import { resolvePublicAuthorName } from "@/lib/author-name";
+import { attachPenNames, resolveBookByline } from "@/lib/book-byline";
 import {
   BOOK_MANUSCRIPTS_BUCKET,
   isOwnCanonicalBookManuscriptPath,
@@ -120,10 +120,14 @@ export async function GET(
     return NextResponse.json({ error: "sample_unavailable" }, { status: 404 });
   }
 
+  // F4 (P5): the sample's author line is the book's byline. The select
+  // above names its columns, so the pen name comes from one extra read
+  // that leaves the book unchanged before the migration.
+  const [bylineBook] = await attachPenNames(supabase, [{ id: book.id }]);
   return NextResponse.json({
     bookId: id,
     title: book.title,
-    author: resolvePublicAuthorName(book.profiles),
+    author: resolveBookByline(bylineBook, book.profiles),
     sections: sample.sections,
     approximatePercent: sample.approximatePercent,
   });

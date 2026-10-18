@@ -11,6 +11,7 @@ import { followAuthor, unfollowAuthor } from "./actions";
 import { groupPublishedBooksBySeries } from "@/lib/author-series";
 import { getAuthorInitials } from "@/lib/author-initials";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
@@ -382,7 +383,7 @@ export default async function AuthorProfilePage({
                         ) : (
                           <CoverPlaceholder
                             title={book.title}
-                            authorName={authorPublicName}
+                            authorName={resolveBookByline(book, author) ?? authorPublicName}
                             className="aspect-[2/3] w-full rounded-[2px]"
                           />
                         )}

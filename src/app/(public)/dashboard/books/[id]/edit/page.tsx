@@ -27,6 +27,9 @@ import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CoverField } from "@/components/cover-field";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { getCatalogSchemaFeatures } from "@/lib/catalog-schema-features";
+import { getRightsDeclarationState } from "@/lib/book-rights";
+import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { FormDraftKeeper } from "@/components/form-draft-keeper";
@@ -60,14 +63,25 @@ export const dynamic = "force-dynamic";
 const SUBTITLE_MAX_LENGTH = 300;
 const PUBLISHER_MAX_LENGTH = 200;
 const EDITION_MAX_LENGTH = 100;
+// F4 (P1): books.pen_name's own 1-120 character check.
+const PEN_NAME_MAX_LENGTH = 120;
+
+// F4 (D3): the existing generic sentence, shown in the Publishing box
+// when the book's rights choice cannot be read (before the migration, or
+// a read error); Publish is disabled with it.
+const PUBLISH_NOT_POSSIBLE_YET_MESSAGE =
+  "We couldn't publish your book yet. Please try again from your dashboard";
 
 // QA: the "Save changes" fields whose typed values come back after
 // updateBook rejects the form. Plain fields only -- the cover and
 // manuscript pickers carry upload paths and are never copied (see
-// src/lib/form-draft.ts).
+// src/lib/form-draft.ts). F4: "penName" joins them; the Rights radios
+// are not kept (form-draft never copies radios) and show the stored
+// choice again after an error, because the page re-reads it.
 const EDIT_BOOK_FORM_ID = "edit-book-form";
 const EDIT_BOOK_DRAFT_FIELDS = [
   "title",
+  "penName",
   "subtitle",
   "description",
   "language",
@@ -173,9 +187,21 @@ export default async function EditBookPage({
     : null;
   const manuscriptName = book.file_path?.split("/").pop() ?? null;
 
+  // F4 (D1/P4): which new fields can be shown, and the book's rights
+  // choice read three ways. `unavailable` (before the migration, or a
+  // read error) hides the Rights choice, shows the generic notice and
+  // disables Publish; the server's publish gate decides on its own.
+  const [schemaFeatures, rightsState] = await Promise.all([
+    getCatalogSchemaFeatures(),
+    getRightsDeclarationState(book.id),
+  ]);
+  const currentRightsBasis = rightsState.kind === "present" ? rightsState.declaration.basis : null;
+  const authorPublicName = resolvePublicAuthorName(profile);
+
   const readiness = resolvePublishReadiness({
     book,
     paidPublishingAvailable: canPublishPaidTitle(),
+    hasRightsDeclaration: rightsState.kind === "present",
   });
 
   return (
@@ -226,6 +252,26 @@ export default async function EditBookPage({
                     className={formControlClasses}
                   />
                 </label>
+
+                {/* F4 (P1, Q1 = a): directly under Title, only once the
+                    database can store it. Cleared to none when emptied. */}
+                {schemaFeatures.penName && (
+                  <label className="flex flex-col gap-1 text-sm">
+                    Pen name (optional)
+                    <input
+                      name="penName"
+                      type="text"
+                      defaultValue={book.pen_name ?? ""}
+                      maxLength={PEN_NAME_MAX_LENGTH}
+                      className={formControlClasses}
+                    />
+                    {authorPublicName && (
+                      <span className="text-sm text-muted">
+                        Leave blank to use your author name, {authorPublicName}.
+                      </span>
+                    )}
+                  </label>
+                )}
 
                 <label className="flex flex-col gap-1 text-sm">
                   Subtitle (optional)
@@ -465,6 +511,31 @@ export default async function EditBookPage({
                     )}
                   </div>
                 </details>
+
+                {/* F4 (P3, Q3 = a): the last block of Book details, with
+                    the book's current choice preselected. Saved with
+                    "Save changes"; a new record is made only when the
+                    choice changes. Sentences from RIGHTS_STATEMENTS. */}
+                {schemaFeatures.rights && rightsState.kind !== "unavailable" && (
+                  <fieldset className="flex flex-col gap-3">
+                    <legend className="mb-3 font-bold text-foreground">Rights</legend>
+                    {RIGHTS_BASES.map((basis) => (
+                      <label
+                        key={basis}
+                        className="flex cursor-pointer items-center gap-3.5 rounded-[4px] border border-[#c9c0ae] bg-surface p-4 has-checked:border-2 has-checked:border-primary has-checked:bg-[#f4f8f5]"
+                      >
+                        <input
+                          type="radio"
+                          name="rightsBasis"
+                          value={basis}
+                          defaultChecked={currentRightsBasis === basis}
+                          className="focus-ring h-5 w-5 shrink-0 accent-primary"
+                        />
+                        <span className="text-foreground">{RIGHTS_STATEMENTS[basis].text}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
               </div>
             </section>
 
@@ -658,6 +729,14 @@ export default async function EditBookPage({
                     title="Add a description before publishing."
                     className="mt-4"
                   />
+                ) : rightsState.kind === "unavailable" ? (
+                  // F4 (D3): the rights choice cannot be read, so
+                  // Publish is refused; the existing generic sentence.
+                  <Alert variant="warning" title={PUBLISH_NOT_POSSIBLE_YET_MESSAGE} className="mt-4" />
+                ) : readiness.missingRights ? (
+                  // F4 (P4): after the description, as performPublish()
+                  // checks it.
+                  <Alert variant="warning" title="Choose the rights before publishing." className="mt-4" />
                 ) : readiness.paidPublishingBlocked ? (
                   <Alert
                     variant="warning"
@@ -694,6 +773,7 @@ export default async function EditBookPage({
                     disabled={
                       readiness.missingAllPrice ||
                       readiness.missingDescription ||
+                      readiness.missingRights ||
                       readiness.paidPublishingBlocked
                     }
                     className={buttonClasses(
