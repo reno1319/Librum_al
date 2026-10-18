@@ -69,7 +69,6 @@ export function ManuscriptField({
   authorName,
   authorId,
   onManuscriptChange,
-  existingFilename,
 }: {
   // Initial seed only -- see the title-input listener effect below for
   // why this isn't the ongoing source of truth once mounted.
@@ -109,10 +108,6 @@ export function ManuscriptField({
   // Client Component props"). Omitting the prop entirely is the fix,
   // not passing a no-op closure.
   onManuscriptChange?: (info: { name: string } | null) => void;
-  // Edit-page only: the currently-stored manuscript's own name, shown
-  // so "leave blank to keep the existing file" reads correctly instead
-  // of implying a manuscript is required on every edit.
-  existingFilename?: string;
 }) {
   const [mode, setMode] = useState<"epub" | "docx">("epub");
   const [status, setStatus] = useState<Status>("idle");
@@ -536,7 +531,6 @@ export function ManuscriptField({
             />
             <span className="text-sm text-muted">
               EPUB · up to 50 MB.
-              {existingFilename ? " Leave blank to keep your current manuscript." : ""}
             </span>
           </label>
 

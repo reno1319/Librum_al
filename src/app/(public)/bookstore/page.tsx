@@ -23,6 +23,7 @@ import { resolveBookstoreFeature } from "@/lib/librum-choice-logic";
 import type { Book, Bundle, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
+import { DismissableDetails } from "@/components/dismissable-details";
 
 export const metadata: Metadata = {
   title: "Bookstore",
@@ -514,7 +515,7 @@ function BookstoreToolbar({
         {/* REDESIGN STEP 3 r3 (Renato 14:21Z: "one button and when you
             click it, it opens the genres"): the button names the current
             genre, or "All genres"; the list opens under it. */}
-        <details className="group relative text-sm">
+        <DismissableDetails className="group relative text-sm">
           <summary className={DROPDOWN_SUMMARY_CLASSES}>
             {genre ?? "All genres"}
             <ChevronIcon />
@@ -538,7 +539,7 @@ function BookstoreToolbar({
               ))}
             </ul>
           </nav>
-        </details>
+        </DismissableDetails>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2.5">
           {/* Still a native select: the box around it (with "Sort by")
@@ -568,7 +569,7 @@ function BookstoreToolbar({
             </span>
           </label>
 
-          <details className="group relative text-sm">
+          <DismissableDetails className="group relative text-sm">
             <summary className={DROPDOWN_SUMMARY_CLASSES}>
               Price range (ALL)
               <ChevronIcon />
@@ -616,7 +617,7 @@ function BookstoreToolbar({
                 Apply
               </button>
             </form>
-          </details>
+          </DismissableDetails>
 
           {isFiltered && (
             <Link href="/bookstore" className={`${TEXT_LINK_CLASSES} ml-1 justify-self-start`}>

@@ -30,3 +30,21 @@ describe("getAuthorInitials", () => {
     expect(getAuthorInitials("   ")).toBe("");
   });
 });
+
+// LEFTOVERS (L3): punctuation, digits and emoji never become an initial.
+describe("getAuthorInitials: letters only", () => {
+  it.each([
+    ["Ana (local)", "AL"],
+    ["Ana Brati –", "AB"],
+    ["– Ana", "A"],
+    ['"Ana" Brati', "AB"],
+    ["'Ana", "A"],
+    ["3Dana", "D"],
+    ["😀", ""],
+    ["😀 Ana", "A"],
+    ["\u00C9lan \u00C7ela", "\u00C9\u00C7"], // composed
+    ["E\u0301lan C\u0327ela", "\u00C9\u00C7"], // decomposed: NFC first
+  ])("%s -> %s", (name, initials) => {
+    expect(getAuthorInitials(name)).toBe(initials);
+  });
+});

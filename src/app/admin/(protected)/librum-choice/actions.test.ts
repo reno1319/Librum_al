@@ -236,8 +236,24 @@ describe("removeLibrumChoiceFromForm", () => {
     expect(rpcCalls).toEqual([]);
   });
 
+  // LEFTOVERS (L5b): the wrapper's OWN gate. Its first requireStaff call
+  // passes and the second (clearLibrumChoice's) refuses, so nothing is
+  // cleared. This fails if the wrapper's gate is removed or moved after
+  // the clear, since clearLibrumChoice's gate would then be the one that
+  // passes.
+  it("its own gate runs first: second requireStaff refusing -> nothing cleared", async () => {
+    mockRequireStaff
+      .mockResolvedValueOnce({ userId: "s1", role: "admin" })
+      .mockRejectedValueOnce(new RedirectSignal("/"));
+    await expect(removeLibrumChoiceFromForm()).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRequireStaff.mock.calls).toEqual([["catalog.feature"], ["catalog.feature"]]);
+    expect(rpcCalls).toEqual([]);
+    expect(adminCreated).toBe(0);
+  });
+
   it("clears the pick, revalidates, Saved.", async () => {
     expect(await redirectOf(removeLibrumChoiceFromForm())).toBe(SAVED);
+    expect(mockRequireStaff.mock.calls).toEqual([["catalog.feature"], ["catalog.feature"]]);
     expect(rpcCalls).toEqual([{ name: "clear_librum_choice", params: undefined }]);
     expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/bookstore", "/admin/librum-choice"]);
   });

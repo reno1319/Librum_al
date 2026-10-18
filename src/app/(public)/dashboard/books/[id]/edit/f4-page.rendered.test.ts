@@ -283,8 +283,23 @@ describe("Edit page: iPhone step manuscript line (I3)", () => {
     expect(html).toContain("Current manuscript: EPUB file");
     expect(html).not.toContain(STORAGE_NAME);
     expect(html).not.toContain("26525d0c");
-    // ManuscriptField still knows a manuscript exists.
-    expect(html.replace(/<!-- -->/g, "")).toContain("EPUB · up to 50 MB. Leave blank to keep your current manuscript.</span>");
+    expect(html.replace(/<!-- -->/g, "")).toContain("EPUB · up to 50 MB.</span>");
+    // LEFTOVERS (L6, his Q1 = a): the paragraph says it once; the file
+    // button no longer repeats it.
+    expect(html.split("Leave blank to keep your current manuscript.")).toHaveLength(2);
+  });
+
+  // LEFTOVERS (L5a): nothing about the stored file reaches ManuscriptField
+  // (a client component), so its name can never be sent to the browser.
+  it("passes ManuscriptField no prop derived from the stored file", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const start = source.indexOf("<ManuscriptField");
+    expect(start).toBeGreaterThan(-1);
+    expect(source.indexOf("<ManuscriptField", start + 1)).toBe(-1);
+    const element = source.slice(start, source.indexOf("/>", start) + 2);
+    expect(element).not.toMatch(/existingFilename|file_path|manuscriptLabel|getManuscriptLabel/);
+    expect([...element.matchAll(/(\w+)=\{/g)].map((m) => m[1])).toEqual(["bookTitle", "authorName", "authorId"]);
   });
 
   it("no manuscript keeps 'No manuscript on file'", async () => {

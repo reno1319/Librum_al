@@ -560,7 +560,6 @@ export default async function EditBookPage({
                     bookTitle={book.title}
                     authorName={resolvePublicAuthorName(profile) ?? ""}
                     authorId={user.id}
-                    existingFilename={manuscriptLabel ?? undefined}
                   />
                 </div>
               </div>

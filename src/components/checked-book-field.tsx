@@ -19,6 +19,20 @@ import {
 // setCustomValidity() makes the browser refuse "Save changes" while it
 // stands, so the server's own check is a second line, not the first.
 // The New Book wizard has its own copy of this wiring in its state.
+
+/**
+ * LEFTOVERS (L2): the ISBN field's message. A stored legacy ISBN that
+ * the author has not changed is accepted by updateBook as it is (it
+ * compares the trimmed submission with the raw stored value), so it
+ * must not block "Save changes" here either. Any edited value is
+ * checked as before.
+ */
+export function isbnFieldMessage(value: string, defaultValue: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === defaultValue) return "";
+  return isValidIsbn(trimmed) ? "" : INVALID_ISBN_MESSAGE;
+}
+
 export function CheckedBookField({
   kind,
   name,
@@ -38,9 +52,7 @@ export function CheckedBookField({
     const value = input.value.trim();
     const message =
       kind === "isbn"
-        ? value && !isValidIsbn(value)
-          ? INVALID_ISBN_MESSAGE
-          : ""
+        ? isbnFieldMessage(input.value, defaultValue)
         : isFutureDateString(value)
           ? FUTURE_DATE_MESSAGE
           : "";
