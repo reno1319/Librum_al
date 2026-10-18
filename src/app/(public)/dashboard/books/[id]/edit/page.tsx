@@ -27,6 +27,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CoverField } from "@/components/cover-field";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { getManuscriptLabel } from "@/lib/manuscript-label";
 import { getCatalogSchemaFeatures } from "@/lib/catalog-schema-features";
 import { getRightsDeclarationState } from "@/lib/book-rights";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
@@ -185,7 +186,8 @@ export default async function EditBookPage({
   const coverUrl = book.cover_path
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
-  const manuscriptName = book.file_path?.split("/").pop() ?? null;
+  // iPhone step (I3): "EPUB file", never the storage file name (a UUID).
+  const manuscriptLabel = getManuscriptLabel(book.file_path);
 
   // F4 (D1/P4): which new fields can be shown, and the book's rights
   // choice read three ways. `unavailable` (before the migration, or a
@@ -546,7 +548,7 @@ export default async function EditBookPage({
 
                 <div className="flex flex-col gap-2">
                   <p className="text-sm font-medium">
-                    {manuscriptName ? `Current manuscript: ${manuscriptName}` : "No manuscript on file"}
+                    {manuscriptLabel ? `Current manuscript: ${manuscriptLabel}` : "No manuscript on file"}
                   </p>
                   <p className="text-sm text-muted">
                     Leave blank to keep your current manuscript. Replacing it updates
@@ -558,7 +560,7 @@ export default async function EditBookPage({
                     bookTitle={book.title}
                     authorName={resolvePublicAuthorName(profile) ?? ""}
                     authorId={user.id}
-                    existingFilename={manuscriptName ?? undefined}
+                    existingFilename={manuscriptLabel ?? undefined}
                   />
                 </div>
               </div>
@@ -583,16 +585,29 @@ export default async function EditBookPage({
                     book forces the author to supply one. That single
                     save is also what returns the book to listings and
                     search. */}
+                {/* iPhone step (I2): the same price box as Add a book
+                    step 3 (upload-wizard.tsx), copied, not shared: the
+                    wizard's source-text tests pin its own markup. This
+                    page has no per-field price error, so the border is
+                    always the control colour. */}
                 <label className="flex flex-col gap-1 text-sm">
                   Price (ALL)
-                  <input
-                    name="price"
-                    type="text"
-                    inputMode="decimal"
-                    required
-                    defaultValue={book.price_all == null ? "" : String(book.price_all)}
-                    className={formControlClasses}
-                  />
+                  <span className="flex w-full max-w-[17.5rem] items-stretch overflow-hidden rounded-[4px] border border-[#8c8472] bg-surface focus-within:shadow-[var(--focus-ring)]">
+                    <input
+                      name="price"
+                      type="text"
+                      inputMode="decimal"
+                      required
+                      defaultValue={book.price_all == null ? "" : String(book.price_all)}
+                      className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-lg outline-none"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="flex items-center bg-surface-hover px-4 font-bold text-foreground"
+                    >
+                      ALL
+                    </span>
+                  </span>
                   <span className="text-sm text-muted">
                     Whole lek: 0 for a free ebook, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
                     {MAXIMUM_CATALOG_PRICE_ALL}. Librum takes a{" "}
