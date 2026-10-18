@@ -111,6 +111,34 @@ export type Book = {
   published_at: string | null;
   created_at: string;
   updated_at: string;
+  // BOOK-PEN-NAME-RIGHTS-CHOICE-1 (migration 20261018074425). Optional
+  // because a `select *` before that migration is applied returns rows
+  // without them -- same precedent as `display_name?` in author-name.ts.
+  // pen_name: the per-book byline, null/undefined = the author's public
+  // name (resolveBookByline in src/lib/book-byline.ts).
+  // librum_choice_at: when staff picked this book as "Librum's choice",
+  // null/undefined = not picked; at most one book at a time.
+  pen_name?: string | null;
+  librum_choice_at?: string | null;
+};
+
+// BOOK-PEN-NAME-RIGHTS-CHOICE-1: one row of public.book_rights_declarations,
+// the append-only history of the rights basis an author claimed for a
+// book. book_id/author_id become null when the book/account is deleted;
+// the title, name and sentence are copies taken at the moment of
+// choosing. The current choice is the newest row for the book.
+export type RightsBasis = "own_rights" | "public_domain";
+
+export type BookRightsDeclaration = {
+  id: string;
+  book_id: string | null;
+  book_title: string;
+  author_id: string | null;
+  author_public_name: string;
+  basis: RightsBasis;
+  statement_version: string;
+  statement_text: string;
+  declared_at: string;
 };
 
 export type Review = {
@@ -241,7 +269,10 @@ export type Permission =
   // own header for why blog_posts carries no direct table-level write
   // grant for either permission to act through instead).
   | "blog.view"
-  | "blog.manage";
+  | "blog.manage"
+  // BOOK-PEN-NAME-RIGHTS-CHOICE-1: pick or clear the bookstore's
+  // "Librum's choice" book (owner and admin only).
+  | "catalog.feature";
 
 // Mirrors list_staff_members()'s exact return shape (migration 041,
 // ADMIN-1B Part B) -- the ONLY place a staff member's email is ever
