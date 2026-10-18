@@ -180,7 +180,7 @@ const REJECTED: Array<[string, unknown]> = [
   ["negative zero", "-0"],
   ["a plus sign", "+199"],
   ["comma grouping", "1,000"],
-  ["dot grouping", "1.000"],
+  ["malformed dot grouping", "1.50.000"],
   ["mixed grouping", "1.234,56"],
   ["a currency symbol", "$25"],
   ["a currency suffix", "199 ALL"],

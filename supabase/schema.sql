@@ -447,7 +447,24 @@ create table public.books (
   price_all integer
     constraint books_price_all_range_check
     check (price_all is null or price_all = 0
-           or (price_all >= 99 and price_all <= 100000))
+           or (price_all >= 99 and price_all <= 100000)),
+  -- BOOK-PEN-NAME-RIGHTS-CHOICE-1 (migration 20261018091237): declared
+  -- after price_all, in the migration's order, so attnum matches on both
+  -- build paths. pen_name: the per-book byline, null = the author's
+  -- public name; 120 = public_author_name's limit; no leading/trailing
+  -- whitespace. librum_choice_at: when staff picked this book as
+  -- "Librum's choice", null = not picked; at most one book is picked
+  -- (books_one_librum_choice below) and only set_librum_choice /
+  -- clear_librum_choice write it. Neither column is granted to anon or
+  -- authenticated for INSERT/UPDATE (the grants below name columns).
+  pen_name text
+    constraint books_pen_name_check
+    check (
+      pen_name is null
+      or (char_length(pen_name) between 1 and 120
+          and pen_name = btrim(pen_name, E' \t\r\n'))
+    ),
+  librum_choice_at timestamptz
 );
 
 comment on column public.books.price_all is
@@ -513,6 +530,11 @@ create index books_author_id_idx on public.books(author_id);
 create index books_status_idx on public.books(status);
 create index books_genre_idx on public.books(genre);
 create index books_series_id_idx on public.books(series_id);
+
+-- BOOK-PEN-NAME-RIGHTS-CHOICE-1: at most one picked book at a time.
+create unique index books_one_librum_choice
+  on public.books ((true))
+  where librum_choice_at is not null;
 
 -- Dedicated schema for extensions, per Supabase's own recommendation
 -- (avoids cluttering/coupling public with extension objects). Created
@@ -11768,3 +11790,125 @@ begin
   end if;
 end;
 $$;
+
+-- ============================================================
+-- BOOK-PEN-NAME-RIGHTS-CHOICE-1: rights declarations (append-only
+-- history of the rights basis an author claimed for a book, kept after
+-- the book or account is deleted) and the "Librum's choice" writers.
+-- Same statements and reasoning as
+-- migrations/20261018091237_book_pen_name_rights_librum_choice.sql; the
+-- books columns and the one-pick index are declared with books above.
+-- ============================================================
+create table public.book_rights_declarations (
+  id uuid primary key default gen_random_uuid(),
+  book_id uuid references public.books(id) on delete set null,
+  book_title text not null,
+  author_id uuid references public.profiles(id) on delete set null,
+  author_public_name text not null,
+  basis text not null check (basis in ('own_rights', 'public_domain')),
+  statement_version text not null,
+  statement_text text not null check (btrim(statement_text) <> ''),
+  declared_at timestamptz not null default now()
+);
+
+create index book_rights_declarations_book_id_declared_at_idx
+  on public.book_rights_declarations (book_id, declared_at desc);
+
+alter table public.book_rights_declarations enable row level security;
+
+-- service_role (the application's key) may only read and insert: no
+-- UPDATE, DELETE or TRUNCATE, so the key cannot destroy a record. The
+-- foreign keys' SET NULL runs as the table owner. Deleting rows (a
+-- retention purge, if the lawyer sets one) needs the owner role through
+-- the authorized migration route.
+revoke all on public.book_rights_declarations from public, anon, authenticated, service_role;
+grant select, insert on public.book_rights_declarations to service_role;
+grant select on public.book_rights_declarations to authenticated;
+
+create policy "Authors can read their own rights declarations"
+  on public.book_rights_declarations for select
+  to authenticated
+  using (auth.uid() = author_id);
+
+-- Everything except book_id/author_id is compared as one jsonb value, so
+-- a column added later is protected without editing this function.
+create function public.enforce_book_rights_declarations_append_only()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if (pg_catalog.to_jsonb(new) - 'book_id' - 'author_id')
+     is distinct from (pg_catalog.to_jsonb(old) - 'book_id' - 'author_id')
+  then
+    raise exception
+      'book_rights_declarations is append-only (declaration %)', old.id;
+  end if;
+
+  if new.book_id is distinct from old.book_id
+     and (new.book_id is not null
+          or exists (select 1 from public.books b where b.id = old.book_id))
+  then
+    raise exception
+      'book_rights_declarations: book_id may only become null when its book is deleted (declaration %)', old.id;
+  end if;
+
+  if new.author_id is distinct from old.author_id
+     and (new.author_id is not null
+          or exists (select 1 from public.profiles p where p.id = old.author_id))
+  then
+    raise exception
+      'book_rights_declarations: author_id may only become null when its profile is deleted (declaration %)', old.id;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger book_rights_declarations_enforce_append_only
+  before update on public.book_rights_declarations
+  for each row
+  execute function public.enforce_book_rights_declarations_append_only();
+
+-- A partial unique index cannot be deferred and is checked row by row,
+-- so "clear the old pick, set the new one" is two statements, in this
+-- order, under one lock.
+create function public.set_librum_choice(p_book_id uuid)
+returns boolean
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.books.librum_choice'));
+
+  perform 1 from public.books where id = p_book_id and status = 'published' for update;
+  if not found then
+    return false;
+  end if;
+
+  update public.books set librum_choice_at = null
+   where librum_choice_at is not null and id <> p_book_id;
+
+  update public.books set librum_choice_at = now() where id = p_book_id;
+  return true;
+end;
+$$;
+
+create function public.clear_librum_choice()
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.books.librum_choice'));
+
+  update public.books set librum_choice_at = null where librum_choice_at is not null;
+end;
+$$;
+
+revoke execute on function public.set_librum_choice(uuid) from public, anon, authenticated;
+revoke execute on function public.clear_librum_choice() from public, anon, authenticated;
+grant execute on function public.set_librum_choice(uuid) to service_role;
+grant execute on function public.clear_librum_choice() to service_role;

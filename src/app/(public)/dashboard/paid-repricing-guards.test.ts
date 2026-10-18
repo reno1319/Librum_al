@@ -25,12 +25,23 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: () => Promise.resolve({ get: () => undefined }) }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ __admin: true }) }));
 vi.mock("@/lib/email", () => ({ sendNewBookEmails: vi.fn(async () => undefined) }));
+// F4 (P4): performPublish now reads the book's rights declaration
+// (src/lib/book-rights.ts). This suite is about catalog writes, so the
+// declaration is present and recording succeeds; the rights gate itself
+// is covered in dashboard/books/f4-rights-pen-name.test.ts.
+vi.mock("@/lib/book-rights", () => ({
+  getRightsDeclarationState: async () => ({ kind: "present", declaration: { basis: "own_rights" } }),
+  recordRightsDeclaration: async () => ({ ok: true }),
+}));
 
 type Row = Record<string, unknown>;
 type Filter =
   | { kind: "eq"; column: string; value: unknown }
   | { kind: "is"; column: string; value: null }
-  | { kind: "in"; column: string; value: unknown[] };
+  | { kind: "in"; column: string; value: unknown[] }
+  // F4 (N1): performPublish's description guard.
+  | { kind: "neq"; column: string; value: unknown }
+  | { kind: "notNull"; column: string };
 // CATALOG-WRITE-AUTH-1: `via` records which client issued the write --
 // the author's session, or the trusted catalog writer. Both operate on
 // the same in-memory tables, so the race tests keep their meaning.
@@ -55,6 +66,9 @@ let interceptor: Interceptor | null = null;
 
 function matches(row: Row, filters: Filter[]): boolean {
   return filters.every((f) => {
+    // SQL: NULL <> x is not true, so a null column never matches neq.
+    if (f.kind === "neq") return row[f.column] != null && row[f.column] !== f.value;
+    if (f.kind === "notNull") return row[f.column] != null;
     if (f.kind === "eq") return f.value !== null && row[f.column] === f.value;
     if (f.kind === "is") return row[f.column] === null;
     return f.value.includes(row[f.column]);
@@ -121,6 +135,12 @@ function builder(table: string, via: Via = "session") {
     eq: (column: string, value: unknown) => (filters.push({ kind: "eq", column, value }), chain),
     is: (column: string, value: null) => (filters.push({ kind: "is", column, value }), chain),
     in: (column: string, value: unknown[]) => (filters.push({ kind: "in", column, value }), chain),
+    neq: (column: string, value: unknown) => (filters.push({ kind: "neq", column, value }), chain),
+    not: (column: string, operator: string, value: unknown) => {
+      if (operator !== "is" || value !== null) throw new Error(`unsupported not(${operator})`);
+      filters.push({ kind: "notNull", column });
+      return chain;
+    },
     order: () => chain,
     returns: () => chain,
     single: () => ((single = "single"), chain),
@@ -234,6 +254,7 @@ function seedBook(overrides: Row) {
       // A legacy value that would say "paid" if anything read it.
       price_cents: 799,
       published_at: "2026-09-01T00:00:00Z", cover_path: "c.png", file_path: "f.epub", language: "sq",
+      description: "A real description.",
       ...overrides,
     },
     // Two published books of the same author, for bundle membership.
@@ -658,8 +679,10 @@ describe("the writes keep their ownership filters", () => {
 
     // updateBundle's write is the update_bundle_with_membership RPC,
     // bound to the bundle id and the authenticated author.
+    // F5 (C5): publishBook's draft -> published also clears a leftover
+    // Librum's choice pick of this book (one more update, same filters).
     const updates = writes.filter((w) => w.op === "update" || (w.op === "rpc" && w.table === "bundles"));
-    expect(updates).toHaveLength(4);
+    expect(updates).toHaveLength(5);
     for (const u of updates) {
       expect(u.filters).toContainEqual({ kind: "eq", column: "author_id", value: USER_ID });
       expect(u.filters.some((f) => f.kind === "eq" && f.column === "id")).toBe(true);
@@ -672,7 +695,12 @@ describe("the writes keep their ownership filters", () => {
     await redirectOf(publishBook(BOOK_ID));
     await redirectOf(publishBundle(BUNDLE_ID));
 
-    const [bookPublish, bundlePublish] = writes.filter((w) => w.op === "update");
+    // F5 (C5): only the status writes; the pick clear that follows the
+    // book publish must not carry this compare-and-set (it would match no
+    // row after the publish).
+    const [bookPublish, bundlePublish] = writes.filter(
+      (w) => w.op === "update" && Object.prototype.hasOwnProperty.call(w.payload, "status"),
+    );
     for (const w of [bookPublish, bundlePublish]) {
       expect(w.filters).toContainEqual({ kind: "eq", column: "status", value: "draft" });
       expect(w.filters).toContainEqual({ kind: "eq", column: "price_all", value: 0 });

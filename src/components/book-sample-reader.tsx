@@ -134,7 +134,7 @@ export function BookSampleReader({
         className={
           variant === "button"
             ? buttonClasses("outline", "md")
-            : "focus-ring rounded-sm text-sm font-medium text-primary hover:underline"
+            : "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
         }
       >
         Read sample
@@ -166,7 +166,7 @@ export function BookSampleReader({
         // exactly when it opens the dialog, so this now renders in the
         // DOM tree the whole time (required for the ref/fetch logic) but
         // is only ever visually present once actually open.
-        className="hidden open:flex m-0 h-full max-h-full w-full max-w-full flex-col bg-surface p-0 shadow-md backdrop:bg-foreground/40 sm:m-auto sm:h-auto sm:max-h-[82vh] sm:w-[min(720px,calc(100vw-48px))] sm:rounded-lg sm:border sm:border-border"
+        className="hidden open:flex m-0 h-full max-h-full w-full max-w-full flex-col bg-surface p-0 shadow-md backdrop:bg-foreground/40 sm:m-auto sm:h-auto sm:max-h-[82vh] sm:w-[min(720px,calc(100vw-48px))] sm:rounded-card sm:border sm:border-border"
       >
         {/* ============================================================
             Header -- READ SAMPLE / title / author / Close

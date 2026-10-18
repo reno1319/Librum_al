@@ -23,15 +23,15 @@ const USD: CurrencyProvenance = { state: "resolved", currency: "USD" };
 
 describe("formatTransactionMinorUnits: ALL (100 minor units per lek)", () => {
   it.each([
-    [0, "0,00 ALL"],
+    [0, "0 ALL"],
     [1, "0,01 ALL"],
     [99, "0,99 ALL"],
-    [100, "1,00 ALL"],
-    [9900, "99,00 ALL"],
+    [100, "1 ALL"],
+    [9900, "99 ALL"],
     [12345, "123,45 ALL"],
     [17910, "179,10 ALL"],
     [123456, "1.234,56 ALL"],
-    [10000000, "100.000,00 ALL"],
+    [10000000, "100.000 ALL"],
     [123456789012, "1.234.567.890,12 ALL"],
   ])("%i -> %s", (minor, expected) => {
     expect(formatTransactionMinorUnits(minor, "ALL")).toBe(expected);
@@ -40,7 +40,7 @@ describe("formatTransactionMinorUnits: ALL (100 minor units per lek)", () => {
   it.each([
     [-1, "-0,01 ALL"],
     [-99, "-0,99 ALL"],
-    [-100, "-1,00 ALL"],
+    [-100, "-1 ALL"],
     [-12345, "-123,45 ALL"],
     [-123456, "-1.234,56 ALL"],
   ])("negative %i -> %s", (minor, expected) => {
@@ -85,7 +85,7 @@ describe("formatTransactionMinorUnits: the same amount never reads the same in t
   });
 
   it("-0 renders as zero, not negative zero", () => {
-    expect(formatTransactionMinorUnits(-0, "ALL")).toBe("0,00 ALL");
+    expect(formatTransactionMinorUnits(-0, "ALL")).toBe("0 ALL");
     expect(formatTransactionMinorUnits(-0, "USD")).toBe("USD 0.00");
   });
 

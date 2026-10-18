@@ -71,7 +71,7 @@ export default async function AdminBlogListPage({
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/admin" className="text-sm text-muted hover:underline">
+      <Link href="/admin" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to admin
       </Link>
       <div className="mt-2">
@@ -89,12 +89,12 @@ export default async function AdminBlogListPage({
       </div>
 
       {error && (
-        <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-4 rounded-card bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
       {success && (
-        <p role="status" className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+        <p role="status" className="mt-4 rounded-card bg-green-50 px-3 py-2 text-sm text-green-700">
           {success}
         </p>
       )}
@@ -108,7 +108,7 @@ export default async function AdminBlogListPage({
               key={filter.value}
               href={href}
               aria-current={isActive ? "true" : undefined}
-              className={`rounded-full border px-3 py-1 text-sm ${
+              className={`rounded-control border px-3 py-1 text-sm ${
                 isActive
                   ? "border-primary bg-primary text-primary-foreground"
                   : "border-border bg-surface text-foreground hover:bg-surface-hover"
@@ -135,7 +135,7 @@ export default async function AdminBlogListPage({
           {visiblePosts.map((post) => (
             <li
               key={post.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4 shadow-sm"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 shadow-sm"
             >
               <div className="min-w-0">
                 <p className="truncate font-medium">{post.title}</p>
@@ -164,11 +164,11 @@ export default async function AdminBlogListPage({
 
               <div className="flex shrink-0 items-center gap-3">
                 <span className={`text-sm ${STATUS_CLASS[post.status]}`}>{STATUS_LABEL[post.status]}</span>
-                <Link href={`/admin/blog/${post.id}/preview`} className="text-sm text-primary hover:underline">
+                <Link href={`/admin/blog/${post.id}/preview`} className="text-sm text-primary underline underline-offset-2 hover:decoration-2">
                   Preview
                 </Link>
                 {canManage && (
-                  <Link href={`/admin/blog/${post.id}/edit`} className="text-sm text-primary hover:underline">
+                  <Link href={`/admin/blog/${post.id}/edit`} className="text-sm text-primary underline underline-offset-2 hover:decoration-2">
                     Edit
                   </Link>
                 )}

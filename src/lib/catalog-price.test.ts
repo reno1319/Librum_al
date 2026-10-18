@@ -154,17 +154,63 @@ describe("parseCatalogPriceAll: rejected", () => {
     expect(parseCatalogPriceAll("1e2")).toEqual({ ok: false });
   });
 
-  // Grouping separators are never inferred from author input, even
-  // though "." is used as the THOUSANDS separator in reader-facing
-  // display -- parsing and formatting are deliberately different
-  // grammars. "1.000" is not "one thousand"; it fails the exactly-two-
-  // decimal-digit shape and must be rejected outright, never
-  // reinterpreted.
-  it("rejects grouping separators, never interpreting them as thousands", () => {
+  // FIX1 (X5): the thousands dot the site itself displays ("1.500 ALL")
+  // and a thousands space are accepted in groups of three; a comma is
+  // never a grouping separator, and "1.50" stays a (refused) decimal.
+  it("accepts a thousands dot in groups of three", () => {
+    expect(parseCatalogPriceAll("1.500")).toEqual({ ok: true, priceAll: 1500 });
+    expect(parseCatalogPriceAll("12.500")).toEqual({ ok: true, priceAll: 12_500 });
+    expect(parseCatalogPriceAll("100.000")).toEqual({ ok: true, priceAll: 100_000 });
+    expect(parseCatalogPriceAll("1.000")).toEqual({ ok: true, priceAll: 1000 });
+    expect(parseCatalogPriceAll("1.500,00")).toEqual({ ok: true, priceAll: 1500 });
+  });
+
+  it("accepts a thousands space (plain, no-break or narrow no-break) in groups of three", () => {
+    expect(parseCatalogPriceAll("1 500")).toEqual({ ok: true, priceAll: 1500 });
+    expect(parseCatalogPriceAll("100 000")).toEqual({ ok: true, priceAll: 100_000 });
+    expect(parseCatalogPriceAll("1\u00A0500")).toEqual({ ok: true, priceAll: 1500 });
+    expect(parseCatalogPriceAll("1\u202F500")).toEqual({ ok: true, priceAll: 1500 });
+    expect(parseCatalogPriceAll("1 500,00")).toEqual({ ok: true, priceAll: 1500 });
+  });
+
+  it("keeps the ungrouped forms working", () => {
+    expect(parseCatalogPriceAll("99")).toEqual({ ok: true, priceAll: 99 });
+    expect(parseCatalogPriceAll("99,00")).toEqual({ ok: true, priceAll: 99 });
+    expect(parseCatalogPriceAll("1500")).toEqual({ ok: true, priceAll: 1500 });
+  });
+
+  it("rejects a decimal, a comma grouping and malformed or mixed grouping", () => {
+    expect(parseCatalogPriceAll("1.50")).toEqual({ ok: false });
     expect(parseCatalogPriceAll("1,234")).toEqual({ ok: false });
-    expect(parseCatalogPriceAll("1.234")).toEqual({ ok: false });
-    expect(parseCatalogPriceAll("1.000")).toEqual({ ok: false });
-    expect(parseCatalogPriceAll("100.000")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("1.5000")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("1.50.000")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("1.500 000")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("1.500.00")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("1 50")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("1  500")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll(".500")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("1.500,50")).toEqual({ ok: false });
+  });
+
+  it("rejects a leading-zero first group instead of reading it as a price", () => {
+    expect(parseCatalogPriceAll("0.500")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("0.099")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("0 500")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("00.500")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("00.150")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("0.000")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("000.000")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("0 000")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("0")).toEqual({ ok: true, priceAll: 0 });
+    expect(parseCatalogPriceAll("1.500")).toEqual({ ok: true, priceAll: 1500 });
+    expect(parseCatalogPriceAll("1 500")).toEqual({ ok: true, priceAll: 1500 });
+    expect(parseCatalogPriceAll("100.000")).toEqual({ ok: true, priceAll: 100_000 });
+  });
+
+  it("still applies the price range to grouped input", () => {
+    expect(parseCatalogPriceAll("100.001")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("1 000 000")).toEqual({ ok: false });
+    expect(parseCatalogPriceAll("0.098")).toEqual({ ok: false });
   });
 
   it("rejects mixed comma/dot formats", () => {
@@ -265,24 +311,24 @@ describe("classifyCatalogPrice: domain enforcement", () => {
 // Owner-confirmed display convention: comma decimal separator, dot
 // thousands separator, always exactly two display decimals.
 describe("formatCatalogPriceAll: formatting and domain enforcement", () => {
-  it("formats 0 as 0,00 ALL", () => {
-    expect(formatCatalogPriceAll(0)).toBe("0,00 ALL");
+  it("formats 0 as 0 ALL", () => {
+    expect(formatCatalogPriceAll(0)).toBe("0 ALL");
   });
 
-  it("formats 99 as 99,00 ALL", () => {
-    expect(formatCatalogPriceAll(99)).toBe("99,00 ALL");
+  it("formats 99 as 99 ALL", () => {
+    expect(formatCatalogPriceAll(99)).toBe("99 ALL");
   });
 
-  it("formats 199 as 199,00 ALL", () => {
-    expect(formatCatalogPriceAll(199)).toBe("199,00 ALL");
+  it("formats 199 as 199 ALL", () => {
+    expect(formatCatalogPriceAll(199)).toBe("199 ALL");
   });
 
-  it("formats 1000 as 1.000,00 ALL", () => {
-    expect(formatCatalogPriceAll(1000)).toBe("1.000,00 ALL");
+  it("formats 1000 as 1.000 ALL", () => {
+    expect(formatCatalogPriceAll(1000)).toBe("1.000 ALL");
   });
 
-  it("formats the maximum (100000) as 100.000,00 ALL", () => {
-    expect(formatCatalogPriceAll(100_000)).toBe("100.000,00 ALL");
+  it("formats the maximum (100000) as 100.000 ALL", () => {
+    expect(formatCatalogPriceAll(100_000)).toBe("100.000 ALL");
   });
 
   it("throws for values below the floor, above the maximum, negative, fractional, NaN, Infinity, or unsafe integers", () => {
@@ -299,9 +345,9 @@ describe("formatCatalogPriceAll: formatting and domain enforcement", () => {
   // Number.isSafeInteger(-0) and (-0 === 0) are both true in JS, so this
   // specifically exercises the Object.is(-0) check in the shared
   // validator, not the generic negative-value case above.
-  it("throws for numeric negative zero, while positive zero still formats as 0,00 ALL", () => {
+  it("throws for numeric negative zero, while positive zero still formats as 0 ALL", () => {
     expect(() => formatCatalogPriceAll(-0)).toThrow();
-    expect(formatCatalogPriceAll(0)).toBe("0,00 ALL");
+    expect(formatCatalogPriceAll(0)).toBe("0 ALL");
   });
 
   it("never includes the raw invalid value in the thrown message", () => {
@@ -447,16 +493,16 @@ describe("formatCatalogPriceLabel", () => {
     expect(formatCatalogPriceLabel(null)).not.toBe(CATALOG_PRICE_FREE_LABEL);
   });
 
-  it("0 reads Free, not 0,00 ALL", () => {
+  it("0 reads Free, not 0 ALL", () => {
     expect(formatCatalogPriceLabel(0)).toBe("Free");
     expect(formatCatalogPriceLabel(0)).toBe(CATALOG_PRICE_FREE_LABEL);
   });
 
   it("a paid price reads as lek, in the Albanian convention", () => {
-    expect(formatCatalogPriceLabel(99)).toBe("99,00 ALL");
-    expect(formatCatalogPriceLabel(199)).toBe("199,00 ALL");
-    expect(formatCatalogPriceLabel(1000)).toBe("1.000,00 ALL");
-    expect(formatCatalogPriceLabel(100000)).toBe("100.000,00 ALL");
+    expect(formatCatalogPriceLabel(99)).toBe("99 ALL");
+    expect(formatCatalogPriceLabel(199)).toBe("199 ALL");
+    expect(formatCatalogPriceLabel(1000)).toBe("1.000 ALL");
+    expect(formatCatalogPriceLabel(100000)).toBe("100.000 ALL");
   });
 
   it("never renders a dollar sign, for any input in or out of the domain", () => {
@@ -502,11 +548,11 @@ describe("formatCatalogAmountAll", () => {
   });
 
   it("formats sums and differences outside the single-price domain", () => {
-    expect(formatCatalogAmountAll(1)).toBe("1,00 ALL");
-    expect(formatCatalogAmountAll(71)).toBe("71,00 ALL");
-    expect(formatCatalogAmountAll(100_001)).toBe("100.001,00 ALL");
-    expect(formatCatalogAmountAll(250_000)).toBe("250.000,00 ALL");
-    expect(formatCatalogAmountAll(100_000_000)).toBe("100.000.000,00 ALL");
+    expect(formatCatalogAmountAll(1)).toBe("1 ALL");
+    expect(formatCatalogAmountAll(71)).toBe("71 ALL");
+    expect(formatCatalogAmountAll(100_001)).toBe("100.001 ALL");
+    expect(formatCatalogAmountAll(250_000)).toBe("250.000 ALL");
+    expect(formatCatalogAmountAll(100_000_000)).toBe("100.000.000 ALL");
   });
 
   it("rejects anything that is not a non-negative safe integer", () => {

@@ -19,8 +19,8 @@ export default async function LoginPage({
   const { error, success, next } = await searchParams;
 
   return (
-    <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4">
-      <h1 className="font-serif text-3xl font-semibold">Log in</h1>
+    <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
+      <h1 className="font-serif text-3xl font-normal">Log in</h1>
       <p className="mt-1 text-sm text-muted">Welcome back to Librum.</p>
 
       {error && (
@@ -64,7 +64,7 @@ export default async function LoginPage({
       </form>
 
       <p className="mt-4 text-sm text-muted">
-        <Link href="/forgot-password" className="focus-ring rounded-sm hover:underline">
+        <Link href="/forgot-password" className="focus-ring rounded-sm underline underline-offset-2 hover:decoration-2">
           Forgot your password?
         </Link>
       </p>

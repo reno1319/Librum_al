@@ -49,7 +49,7 @@ export default function NotFound() {
       </span>
       <div className="relative mx-auto w-full max-w-md text-center">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">404</p>
-        <h1 className="mt-2 font-serif text-3xl font-semibold text-foreground md:text-4xl">
+        <h1 className="mt-2 font-serif text-3xl font-normal text-foreground md:text-4xl">
           Page not found
         </h1>
         <p className="mt-3 text-muted">

@@ -18,14 +18,19 @@
 // holds blog.view (migration 047/staff-permissions.ts) but neither
 // reportsView nor refundsView, so without this field editor would still
 // see that misleading fallback despite having a real destination.
+//
+// F5: showLibrumChoice added, gated by catalog.feature -- the same
+// permission /admin/librum-choice requires (owner and admin).
 export function resolveAdminLandingVisibility(permissions: {
   reportsView: boolean;
   refundsView: boolean;
   blogView: boolean;
-}): { showReports: boolean; showRefunds: boolean; showBlog: boolean } {
+  catalogFeature: boolean;
+}): { showReports: boolean; showRefunds: boolean; showBlog: boolean; showLibrumChoice: boolean } {
   return {
     showReports: permissions.reportsView,
     showRefunds: permissions.refundsView,
     showBlog: permissions.blogView,
+    showLibrumChoice: permissions.catalogFeature,
   };
 }

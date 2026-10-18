@@ -6,6 +6,18 @@ import { createClient } from "@/lib/supabase/client";
 import type { ConversionWarning } from "@/lib/docx-converter";
 import { fileInputClasses } from "@/lib/form-styles";
 
+// REDESIGN STEP 5 (A2): restyling only -- the picker sits in a dashed
+// drop-area box and the browser's own file button is drawn as an
+// outline button. Behaviour, names and every word are unchanged.
+const PICKER_BOX_CLASSES =
+  "flex flex-col gap-2 rounded-[4px] border border-dashed border-[#8c8472] bg-background p-4 text-sm sm:p-5";
+// FIX1 (X10): `text-transparent` hides the browser's own "No file
+// chosen" text, as in cover-field.tsx; "Manuscript ready" names the file.
+const PICKER_INPUT_CLASSES = `${fileInputClasses} w-full max-w-full text-transparent file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-[3px] file:border file:border-solid file:border-primary file:bg-surface file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-surface-hover disabled:opacity-60`;
+const FORMAT_CARD_CLASSES = "flex cursor-pointer items-start gap-3 rounded-[4px] p-4";
+const FORMAT_CARD_SELECTED_CLASSES = "border-2 border-primary bg-[#f4f8f5]";
+const FORMAT_CARD_IDLE_CLASSES = "border border-[#c9c0ae] bg-surface";
+
 // LIBRUM 2.0 PRODUCT-5 CB-1 CORRECTION: the 413 correction moved the
 // DOCX upload and the generated-EPUB response off Vercel Function
 // bodies, but still finished by downloading the generated temp EPUB
@@ -57,7 +69,6 @@ export function ManuscriptField({
   authorName,
   authorId,
   onManuscriptChange,
-  existingFilename,
 }: {
   // Initial seed only -- see the title-input listener effect below for
   // why this isn't the ongoing source of truth once mounted.
@@ -72,13 +83,14 @@ export function ManuscriptField({
   // directly-uploaded/converted manuscript's language metadata on Edit
   // Book is unaffected, exactly as before this parameter existed.
   bookLanguage?: string;
-  // Never live-edited anywhere in either book form (no author-name
-  // field exists in Book Details -- it's the caller's already-resolved
-  // reader-facing name, profiles.public_author_name ?? display_name via
-  // resolvePublicAuthorName(), only ever changed from Dashboard >
-  // Profile, a different page/session entirely), so unlike title this
-  // genuinely has no equivalent staleness/race to guard against -- a
-  // plain, stable prop is correct as-is.
+  // The caller's already-resolved reader-facing name,
+  // profiles.public_author_name ?? display_name via
+  // resolvePublicAuthorName(), only ever changed from Dashboard > Profile.
+  // F4 (P5): it is the FALLBACK for the book's byline. When the
+  // surrounding form has a "penName" field, its trimmed value wins
+  // (resolveBookByline's rule) and is tracked live exactly as the title
+  // is -- see the listener effect below -- so dc:creator is the byline
+  // readers see.
   authorName: string;
   // The signed-in author's own id -- used only to namespace this
   // upload's temporary Storage path ("<authorId>/tmp/..."), the same
@@ -96,10 +108,6 @@ export function ManuscriptField({
   // Client Component props"). Omitting the prop entirely is the fix,
   // not passing a no-op closure.
   onManuscriptChange?: (info: { name: string } | null) => void;
-  // Edit-page only: the currently-stored manuscript's own name, shown
-  // so "leave blank to keep the existing file" reads correctly instead
-  // of implying a manuscript is required on every edit.
-  existingFilename?: string;
 }) {
   const [mode, setMode] = useState<"epub" | "docx">("epub");
   const [status, setStatus] = useState<Status>("idle");
@@ -116,6 +124,7 @@ export function ManuscriptField({
   const hiddenPathInputRef = useRef<HTMLInputElement>(null);
   const liveTitleRef = useRef(bookTitle);
   const liveLanguageRef = useRef(bookLanguage ?? "");
+  const liveAuthorRef = useRef(authorName);
   const modeRef = useRef<"epub" | "docx">("epub");
   // The authoritative small reference this field maintains: whichever
   // temp EPUB Storage path (direct upload OR DOCX-generated, kept
@@ -178,7 +187,7 @@ export function ManuscriptField({
         const result = await repackageWithTitle(
           conversionId,
           liveTitleRef.current,
-          authorName,
+          liveAuthorRef.current,
           liveLanguageRef.current || null,
         );
         if (isStale(myRequestId)) return;
@@ -236,8 +245,15 @@ export function ManuscriptField({
         ? rawLanguageInput
         : null;
 
+    // F4 (P5): optional, like "language" -- absent while the Pen name
+    // field is not rendered, and then the byline is simply authorName.
+    const rawPenNameInput = form?.elements.namedItem("penName");
+    const penNameInput = rawPenNameInput instanceof HTMLInputElement ? rawPenNameInput : null;
+    const bylineFor = (input: HTMLInputElement | null) => input?.value.trim() || authorName;
+
     liveTitleRef.current = titleInput.value;
     if (languageInput) liveLanguageRef.current = languageInput.value;
+    liveAuthorRef.current = bylineFor(penNameInput);
 
     function triggerRepackageIfReady() {
       if (modeRef.current === "docx" && tempPathRef.current && displayNameRef.current) {
@@ -255,11 +271,18 @@ export function ManuscriptField({
       triggerRepackageIfReady();
     }
 
+    function handlePenNameInput() {
+      liveAuthorRef.current = bylineFor(penNameInput);
+      triggerRepackageIfReady();
+    }
+
     titleInput.addEventListener("input", handleTitleInput);
     languageInput?.addEventListener("change", handleLanguageChange);
+    penNameInput?.addEventListener("input", handlePenNameInput);
     return () => {
       titleInput.removeEventListener("input", handleTitleInput);
       languageInput?.removeEventListener("change", handleLanguageChange);
+      penNameInput?.removeEventListener("input", handlePenNameInput);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -462,43 +485,52 @@ export function ManuscriptField({
       <input ref={hiddenPathInputRef} type="hidden" name="manuscriptStoragePath" />
 
       <fieldset className="flex flex-col gap-2 text-sm">
-        <legend className="mb-1 font-medium text-foreground">Manuscript format</legend>
-        <div className="flex flex-wrap gap-4">
-          <label className="flex items-center gap-2">
+        <legend className="mb-1 font-semibold text-foreground">Manuscript format</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label
+            className={`${FORMAT_CARD_CLASSES} ${mode === "epub" ? FORMAT_CARD_SELECTED_CLASSES : FORMAT_CARD_IDLE_CLASSES}`}
+          >
             <input
               type="radio"
               checked={mode === "epub"}
               onChange={() => switchMode("epub")}
-              className="focus-ring"
+              className="focus-ring mt-0.5 h-5 w-5 shrink-0 accent-primary"
             />
-            EPUB — best if your ebook is already professionally formatted
+            <span>
+              <strong className="font-bold">EPUB</strong> — best if your ebook is already professionally formatted
+            </span>
           </label>
-          <label className="flex items-center gap-2">
+          <label
+            className={`${FORMAT_CARD_CLASSES} ${mode === "docx" ? FORMAT_CARD_SELECTED_CLASSES : FORMAT_CARD_IDLE_CLASSES}`}
+          >
             <input
               type="radio"
               checked={mode === "docx"}
               onChange={() => switchMode("docx")}
-              className="focus-ring"
+              className="focus-ring mt-0.5 h-5 w-5 shrink-0 accent-primary"
             />
-            DOCX — Librum converts it into a reflowable EPUB
+            <span>
+              <strong className="font-bold">DOCX</strong> — Librum converts it into a reflowable EPUB
+            </span>
           </label>
         </div>
       </fieldset>
 
       {mode === "epub" ? (
         <div className="flex flex-col gap-2">
-          <label className="flex flex-col gap-1 text-sm">
-            {status === "success" ? "Replace manuscript" : "Manuscript file"}
+          <label className={PICKER_BOX_CLASSES}>
+            <span className="font-semibold text-foreground">
+              {status === "success" ? "Replace manuscript" : "Manuscript file"}
+            </span>
             <input
               type="file"
               accept=".epub,application/epub+zip"
-              className={fileInputClasses}
+              className={PICKER_INPUT_CLASSES}
               disabled={status === "converting"}
               onChange={(e) => handleEpubChange(e.target.files?.[0] ?? null)}
             />
-            <span className="text-xs text-muted">
+            <span className="text-sm text-muted">
               EPUB · up to 50 MB.
-              {existingFilename ? " Leave blank to keep your current manuscript." : ""}
             </span>
           </label>
 
@@ -509,7 +541,7 @@ export function ManuscriptField({
           )}
 
           {status === "success" && readyName && (
-            <p role="status" className="text-sm text-primary">
+            <p role="status" className="text-sm font-semibold text-primary">
               Manuscript ready — {readyName}
             </p>
           )}
@@ -517,7 +549,7 @@ export function ManuscriptField({
           {status === "error" && (
             <p
               role="alert"
-              className="rounded-lg border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
+              className="rounded-card border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
             >
               {errorMessage}
             </p>
@@ -525,18 +557,20 @@ export function ManuscriptField({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <label className="flex flex-col gap-1 text-sm">
-            {status === "success" ? "Replace manuscript" : "Manuscript file"}
+          <label className={PICKER_BOX_CLASSES}>
+            <span className="font-semibold text-foreground">
+              {status === "success" ? "Replace manuscript" : "Manuscript file"}
+            </span>
             <input
               type="file"
               accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              className={fileInputClasses}
+              className={PICKER_INPUT_CLASSES}
               disabled={status === "converting"}
               onChange={(e) => handleDocxChange(e.target.files?.[0] ?? null)}
             />
-            <span className="text-xs text-muted">DOCX · up to 50 MB.</span>
+            <span className="text-sm text-muted">DOCX · up to 50 MB.</span>
           </label>
-          <p className="text-xs text-muted">
+          <p className="text-sm text-muted">
             Librum preserves common manuscript structure such as headings, paragraphs,
             basic formatting, lists, links, and supported images. Complex Word-specific
             layout may require review after conversion.
@@ -551,14 +585,14 @@ export function ManuscriptField({
           {status === "error" && (
             <p
               role="alert"
-              className="rounded-lg border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
+              className="rounded-card border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
             >
               {errorMessage}
             </p>
           )}
 
           {status === "success" && (
-            <div role="status" className="rounded-lg border-l-4 border-primary bg-surface px-3 py-2 text-sm">
+            <div role="status" className="rounded-card border-l-4 border-primary bg-surface px-3 py-2 text-sm">
               <p className="font-medium text-foreground">
                 Manuscript ready{readyName ? ` — ${readyName}` : ""}
               </p>

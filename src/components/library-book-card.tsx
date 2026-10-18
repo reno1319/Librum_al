@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 UI-8: the Reader Library's card -- deliberately NOT the
 // commerce-oriented BookCard (src/components/book-card.tsx). A Library
@@ -38,10 +39,14 @@ export function LibraryBookCard({
           <img
             src={coverUrl}
             alt=""
-            className="aspect-[2/3] w-full rounded-md object-cover shadow-sm transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-md motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
+            className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-sm transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-md motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
           />
         ) : (
-          <div className="aspect-[2/3] w-full rounded-md bg-border" />
+          <CoverPlaceholder
+            title={title}
+            authorName={authorName}
+            className="aspect-[2/3] w-full rounded-[3px]"
+          />
         )}
         <p className="font-serif text-base font-semibold leading-snug">{title}</p>
       </Link>
@@ -60,7 +65,7 @@ export function LibraryBookCard({
       {downloadable && (
         <a
           href={`/api/books/${bookId}/download`}
-          className="focus-ring mt-1 w-fit rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+          className="focus-ring mt-1 w-fit rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
         >
           Download EPUB
         </a>

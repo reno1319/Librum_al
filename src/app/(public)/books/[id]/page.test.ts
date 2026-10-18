@@ -405,7 +405,7 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     // current catalog price (250 lek).
     expect(html).toContain("4,99 ALL");
     expect(html).not.toContain("4.99 ALL");
-    expect(html).not.toContain("250,00 ALL</strong>. That is the amount");
+    expect(html).not.toContain("250 ALL</strong>. That is the amount");
     expect(html).toContain('name="resume_existing"');
     expect(html).toContain('name="expected_intent_id"');
     expect(html).toContain(`value="${INTENT_ID}"`);
@@ -453,5 +453,91 @@ describe("BookDetailPage: cancelled POK payment notice", () => {
 
   it("shows nothing once the reader owns the book", async () => {
     expect(await render({ canceled: "true" }, { owns: true })).not.toContain(NOTICE);
+  });
+});
+
+// ============================================================
+// REDESIGN STEP 3: the A2 book page -- the price card's paid-book lines
+// (Renato D4), the breadcrumb, and the Follow button in About the
+// Author (B5), which reuses the author page's follow state and actions.
+// ============================================================
+describe("BookDetailPage: redesign step 3", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    openPaidCheckout();
+    mockCreateClient.mockReset();
+    mockCreateAdminClient.mockReset();
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  async function render(options: { user: { id: string } | null; following?: boolean; book?: Record<string, unknown> }) {
+    const client = {
+      auth: { getUser: async () => ({ data: { user: options.user } }) },
+      rpc: vi.fn(async () => ({ data: false })),
+      storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/x.png" } }) }) },
+      from: (table: string) => {
+        if (table === "books") return queryStub({ data: [] }, { data: options.book ?? BOOK_ROW });
+        if (table === "author_follows") {
+          return queryStub({ data: [] }, { data: options.following ? { id: "follow-row" } : null });
+        }
+        return queryStub({ data: [] }, { data: null });
+      },
+    };
+    mockCreateClient.mockImplementation(() => client);
+    mockCreateAdminClient.mockImplementation(() => ({ from: () => queryStub({ data: null }) }));
+    const element = await BookDetailPage(pageArgs());
+    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+
+  it("a paid book's price card carries the mockup's three lines and the existing security note", async () => {
+    const html = await render({ user: { id: "reader" } });
+    expect(html).toContain("Buy ebook — 250 ALL");
+    expect(html).toContain("EPUB, no DRM. Read on your phone, tablet or e-reader.");
+    expect(html).toContain("Download anytime from your Librum library.");
+    expect(html).toContain("Pay by card.");
+    expect(html).not.toContain("POK app");
+    expect(html).toMatch(/Secure checkout( with POK)?\./);
+    expect(html).not.toContain("DRM-free EPUB. Download it anytime from your Librum Library.");
+  });
+
+  it("a free book keeps its existing sentence and none of the paid lines", async () => {
+    const html = await render({ user: { id: "reader" }, book: { ...BOOK_ROW, price_all: 0 } });
+    expect(html).toContain("Get ebook — Free");
+    expect(html).toContain("Free — no payment required.");
+    expect(html).not.toContain("Pay by card.");
+  });
+
+  it("the breadcrumb links the bookstore and the book's genre", async () => {
+    const html = await render({ user: null, book: { ...BOOK_ROW, genre: "Poetry" } });
+    expect(html).toContain('aria-label="Breadcrumb"');
+    expect(html).toContain('href="/bookstore?genre=Poetry"');
+  });
+
+  // FIX1 (X4): no star row until the first review.
+  it("shows no stars and no '0 out of 5 stars' before the first review, and keeps the words", async () => {
+    const html = await render({ user: null });
+    expect(html).toContain("No reviews yet");
+    expect(html).not.toContain("out of 5 stars");
+    expect(html).not.toContain("★");
+  });
+
+  // FIX1 (X14): a book with no cover gets the green placeholder with its
+  // title and author, not a blank block.
+  it("draws the cover placeholder with the title and author when there is no cover", async () => {
+    const html = await render({ user: null });
+    expect(html).toMatch(/aria-hidden="true" class="[^"]*bg-primary[^"]*"><div class="@container[^"]*"><div[^>]*><span[^>]*>Test Book<\/span><span[^>]*>An Author<\/span>/);
+  });
+
+  it("About the Author offers Follow to a signed-in reader, Following once followed", async () => {
+    expect(await render({ user: { id: "reader" } })).toMatch(/>Follow<\/button>/);
+    expect(await render({ user: { id: "reader" }, following: true })).toMatch(/>Following<\/button>/);
+  });
+
+  it("a visitor gets the author page's own Log in to follow link; the author gets no follow control", async () => {
+    const anon = await render({ user: null });
+    expect(anon).toContain("Log in to follow");
+    expect(anon).toContain('href="/login?next=/authors/author"');
+    const author = await render({ user: { id: "author" } });
+    expect(author).not.toContain("Follow");
   });
 });

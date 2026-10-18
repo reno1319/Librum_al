@@ -96,7 +96,7 @@ export class DeleteBundleButton extends Component<BundleDeleteTarget, DeleteBund
         disabled={pending}
         aria-busy={pending || undefined}
         aria-label={pending ? `Deleting bundle “${title}”…` : `Delete bundle “${title}”`}
-        className="focus-ring rounded-lg border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+        className="focus-ring rounded-control border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
         onClick={this.requestDeletion}
       >
         {pending ? "Deleting…" : "Delete"}

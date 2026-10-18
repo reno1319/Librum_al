@@ -127,11 +127,11 @@ export default async function BundleDetailPage({
   }
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
       <span className="text-xs uppercase tracking-wide text-muted">
         Bundle
       </span>
-      <h1 className="font-serif text-3xl font-semibold">{bundle.title}</h1>
+      <h1 className="font-serif text-3xl font-normal">{bundle.title}</h1>
       <p className="mt-1 text-sm text-muted">
         by{" "}
         <Link href={`/authors/${bundle.author_id}`} className="hover:underline">
@@ -140,19 +140,19 @@ export default async function BundleDetailPage({
       </p>
 
       {bundle.description && (
-        <p className="mt-4 whitespace-pre-line text-foreground/90">
+        <p className="mt-4 max-w-[42.5rem] whitespace-pre-line text-foreground/90">
           {bundle.description}
         </p>
       )}
 
       {purchase === "success" && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+        <p className="mt-4 rounded-card bg-green-50 px-3 py-2 text-sm text-green-700">
           Purchase complete — thank you! It may take a few seconds to show
           as owned below.
         </p>
       )}
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mt-4 rounded-card bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
@@ -171,7 +171,7 @@ export default async function BundleDetailPage({
         {isAuthor ? (
           <span className="text-sm text-muted">This is your bundle</span>
         ) : ownsEverything ? (
-          <span className="rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium">
+          <span className="rounded-control bg-surface-hover px-4 py-2 text-sm font-medium">
             You own every book in this bundle
           </span>
         ) : (
@@ -186,7 +186,7 @@ export default async function BundleDetailPage({
           // neutral "coming soon" that is true of a free bundle too.
           // Neither branch renders a control.
           <span
-            className="cursor-not-allowed rounded-lg bg-surface-hover px-4 py-2 text-sm font-medium text-muted"
+            className="cursor-not-allowed rounded-control bg-surface-hover px-4 py-2 text-sm font-medium text-muted"
             aria-disabled="true"
           >
             {bundleCheckoutNotice(bundle.price_all)}
@@ -194,17 +194,12 @@ export default async function BundleDetailPage({
         )}
       </div>
 
-      <h2 className="mt-10 font-serif text-xl font-semibold">
+      <h2 className="mt-10 font-serif text-xl font-normal">
         {books.length} book{books.length === 1 ? "" : "s"} in this bundle
       </h2>
-      <ul
-        className="mt-6"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-          gap: "1.5rem",
-        }}
-      >
+      {/* V1: exactly the Bookstore "All books" grid (bookstore/page.tsx),
+          so a wide page adds columns instead of growing the cards. */}
+      <ul className="mt-6 grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {books.map((book) => {
           const coverUrl = book.cover_path
             ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data

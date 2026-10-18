@@ -70,6 +70,9 @@ function makeChain(resolve: () => unknown) {
     // PAID-REPRICING-1: performPublish's write is now a compare-and-set
     // (`.is()` for a null price) proved by its returned rows (`.select()`).
     is: () => chain,
+    // F4 (N1): the publish write also requires a non-empty description.
+    not: () => chain,
+    neq: () => chain,
     select: () => chain,
     single: () => Promise.resolve(resolve()),
     maybeSingle: () => Promise.resolve(resolve()),
@@ -144,6 +147,13 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdmi
 const mockSendNewBookEmails = vi.fn<(admin: unknown, args: unknown) => Promise<void>>(() =>
   Promise.resolve(),
 );
+// F4 (P4): performPublish now reads the book's rights declaration. This
+// suite predates that gate, so the declaration is present; the gate's
+// own refusals are covered in f4-rights-pen-name.test.ts.
+vi.mock("@/lib/book-rights", () => ({
+  getRightsDeclarationState: async () => ({ kind: "present", declaration: { basis: "own_rights" } }),
+  recordRightsDeclaration: async () => ({ ok: true }),
+}));
 vi.mock("@/lib/email", () => ({
   sendNewBookEmails: (admin: unknown, args: unknown) => mockSendNewBookEmails(admin, args),
 }));
@@ -174,7 +184,7 @@ async function buildFormData(overrides: Record<string, string> = {}): Promise<Fo
   formData.set("title", overrides.title ?? "My Book");
   formData.set("description", "A description.");
   formData.set("keywords", "");
-  formData.set("isbn", "");
+  formData.set("isbn", overrides.isbn ?? "");
   formData.set("genre", "Fiction");
   formData.set("price", overrides.price ?? "0");
   if (overrides.intent) formData.set("intent", overrides.intent);
@@ -191,10 +201,17 @@ async function buildFormData(overrides: Record<string, string> = {}): Promise<Fo
 // every test that is not about the price gate wants; the missing-price
 // case is `price_all: null` and has its own describe block below.
 function bookRow(
-  overrides: Partial<{ status: string; price_all: number | null; published_at: string | null }> = {},
+  overrides: Partial<{
+    status: string;
+    price_all: number | null;
+    published_at: string | null;
+    description: string | null;
+  }> = {},
 ) {
   return {
-    data: { status: "draft", price_all: 0, published_at: null, ...overrides },
+    // FIX1 (X16): publishing now needs a description, so the default row
+    // has one; the missing-description tests below override it.
+    data: { status: "draft", price_all: 0, published_at: null, description: "A real description.", ...overrides },
     error: null,
   };
 }
@@ -908,7 +925,7 @@ describe("performPublish: price_all is the SOLE free/paid authority (ALL-WIRING-
     vi.stubEnv("PAID_PUBLISHING_MODE", "");
     // The select deliberately also carries the misleading legacy value.
     mockBookSelectResult.mockReturnValue({
-      data: { status: "draft", price_all: 199, price_cents: 0, published_at: null },
+      data: { status: "draft", price_all: 199, price_cents: 0, published_at: null, description: "A real description." },
       error: null,
     });
 
@@ -923,7 +940,7 @@ describe("performPublish: price_all is the SOLE free/paid authority (ALL-WIRING-
   it("price_all 0 is FREE and publishes with the mode unset, whatever price_cents says", async () => {
     vi.stubEnv("PAID_PUBLISHING_MODE", "");
     mockBookSelectResult.mockReturnValue({
-      data: { status: "draft", price_all: 0, price_cents: 9900, published_at: null },
+      data: { status: "draft", price_all: 0, price_cents: 9900, published_at: null, description: "A real description." },
       error: null,
     });
 
@@ -944,6 +961,115 @@ describe("performPublish: price_all is the SOLE free/paid authority (ALL-WIRING-
       "utf8",
     );
     const selectList = source.match(/\.select\("status, [^"]*"\)/)?.[0];
-    expect(selectList).toBe('.select("status, price_all, published_at")');
+    expect(selectList).toBe('.select("status, price_all, published_at, description")');
+  });
+});
+
+// FIX1 (X16): Renato's rule -- a description before Publish. A refusal
+// only: the draft createBook inserted stays saved, so the message's
+// "Your book will still be saved as a draft." is true.
+describe("performPublish: a description is required (FIX1 X16)", () => {
+  beforeEach(resetMocks);
+
+  const MISSING_FULL =
+    "/dashboard?success=Saved+as+draft&error=" +
+    encodeURIComponent(
+      "Add a description before publishing. Your book will still be saved as a draft.",
+    );
+
+  for (const [label, description] of [
+    ["empty", ""],
+    ["whitespace only", "  \n\t "],
+    ["null", null],
+  ] as const) {
+    it(`createBook intent=publish with a ${label} description saves the draft and does not publish`, async () => {
+      mockBookSelectResult.mockReturnValue(bookRow({ description }));
+      const formData = await buildFormData({ intent: "publish", price: "0" });
+
+      await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+      expect(mockBookInsert).toHaveBeenCalledOnce();
+      expect(mockBookInsert.mock.calls[0][0]).not.toHaveProperty("status");
+      expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+      expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+      expect(mockRedirect).toHaveBeenCalledWith(MISSING_FULL);
+    });
+
+    it(`publishBook with a ${label} description refuses and sends the author to the Edit page`, async () => {
+      mockBookSelectResult.mockReturnValue(bookRow({ description }));
+
+      await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+      expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+      expect(mockRedirect).toHaveBeenCalledWith(
+        `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Add a description before publishing.")}`,
+      );
+    });
+  }
+
+  it("is named before the paid-publishing refusal, which the author cannot fix", async () => {
+    vi.stubEnv("PAID_PUBLISHING_MODE", "");
+    mockBookSelectResult.mockReturnValue(bookRow({ price_all: 999, description: "" }));
+    const formData = await buildFormData({ intent: "publish", price: "999" });
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+    expect(mockRedirect).toHaveBeenCalledWith(MISSING_FULL);
+  });
+
+  it("a missing price is still named first", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ price_all: null, description: "" }));
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Set this book's price in lek before publishing it.")}`,
+    );
+  });
+
+  it("a one-word description is enough to publish", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ description: "Poems." }));
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+  });
+
+  it("saving a draft without a description is unchanged", async () => {
+    const formData = await buildFormData({ intent: "draft" });
+    formData.set("description", "");
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockBookInsert).toHaveBeenCalledOnce();
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
+  });
+});
+
+// FIX1 (X9): a filled ISBN must be a real ISBN-10 or ISBN-13; empty
+// stays allowed. Refused before any upload or insert.
+describe("createBook: ISBN check (FIX1 X9)", () => {
+  beforeEach(resetMocks);
+
+  it("refuses an invalid ISBN with the fixed message and writes nothing", async () => {
+    const formData = await buildFormData({ isbn: "12345" });
+
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/new?error=${encodeURIComponent("Enter a valid ISBN-10 or ISBN-13, or leave it blank.")}`,
+    );
+    expect(mockBookInsert).not.toHaveBeenCalled();
+    expect(mockUploadCover).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid hyphenated ISBN-13 and an empty field", async () => {
+    for (const isbn of ["978-3-16-148410-0", ""]) {
+      mockBookInsert.mockClear();
+      const formData = await buildFormData({ isbn });
+      await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+      expect(mockBookInsert).toHaveBeenCalledOnce();
+    }
   });
 });

@@ -5,6 +5,7 @@ import { UploadWizard } from "./upload-wizard";
 import { Alert } from "@/components/ui/alert";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import { getCatalogSchemaFeatures } from "@/lib/catalog-schema-features";
 import type { Series } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -27,7 +28,7 @@ export default async function NewBookPage({
     redirect("/login?next=/dashboard/books/new");
   }
 
-  const [{ data: series }, { data: profile }] = await Promise.all([
+  const [{ data: series }, { data: profile }, schemaFeatures] = await Promise.all([
     supabase.from("series").select("*").eq("author_id", user.id).order("title").returns<Series[]>(),
     // LIBRUM 2.0 PRODUCT-5: display_name is passed through to
     // ManuscriptField so a DOCX-converted EPUB's internal dc:creator
@@ -50,17 +51,30 @@ export default async function NewBookPage({
       .select("display_name, public_author_name")
       .eq("id", user.id)
       .single(),
+    // F4 (D1): whether the Pen name field and the Rights choice can be
+    // shown yet (rendering only; see catalog-schema-features.ts).
+    getCatalogSchemaFeatures(),
   ]);
 
   return (
-    <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    // REDESIGN STEP 5 (A2): a wider page so the Price step's side panel
+    // fits beside the form; the title row keeps its existing words in the
+    // dashboard's heading style, and its text link is underlined at rest.
+    <main className="page-container flex-1 pt-5 pb-16 sm:pt-8">
+      <Link
+        href="/dashboard"
+        className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
+      >
         &larr; Back to dashboard
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">Add a book</h1>
-      <p className="mt-1 text-sm text-muted">
-        It&apos;s saved as a draft first — you can publish it from your
-        dashboard once you&apos;re happy with it.
+      <h1 className="mt-4 font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
+        Add a book
+      </h1>
+      {/* FIX1 (X7): Renato's W-A wording. The sentence it replaces said
+          a draft was kept from the start; nothing is saved until a
+          final button is pressed (no autosave, his D2). */}
+      <p className="mt-2 text-muted">
+        Nothing is saved until you press Save as draft or Publish book.
       </p>
 
       {error && (
@@ -69,7 +83,7 @@ export default async function NewBookPage({
         </Alert>
       )}
 
-      {/* paidPublishingAvailable is display-only context for the Review
+      {/* paidPublishingAvailable is display-only context for the Price
           step's readiness section, never a pre-submit gate: Publish book
           can still be pressed regardless, since performPublish()
           (actions.ts) remains the one real server-side enforcement point.
@@ -81,6 +95,8 @@ export default async function NewBookPage({
         authorName={resolvePublicAuthorName(profile) ?? ""}
         authorId={user.id}
         paidPublishingAvailable={canPublishPaidTitle()}
+        penNameAvailable={schemaFeatures.penName}
+        rightsAvailable={schemaFeatures.rights}
       />
     </main>
   );

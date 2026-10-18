@@ -88,8 +88,8 @@ export default async function BundlesPage({
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
@@ -119,7 +119,7 @@ export default async function BundlesPage({
       ) : (
         <form
           action={createBundle}
-          className="mt-6 flex flex-col gap-4 rounded-lg border border-border bg-surface p-4 shadow-sm"
+          className="mt-6 flex flex-col gap-4 rounded-card border border-border bg-surface p-4 shadow-sm"
         >
           <label className="flex flex-col gap-1 text-sm">
             Bundle title
@@ -150,7 +150,7 @@ export default async function BundlesPage({
               required
               className={`w-40 ${formControlClasses}`}
             />
-            <span className="text-xs text-muted">
+            <span className="text-sm text-muted">
               Whole lek: 0 for a free bundle, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
               {MAXIMUM_CATALOG_PRICE_ALL}.
             </span>
@@ -158,7 +158,7 @@ export default async function BundlesPage({
 
           <fieldset>
             <legend className="text-sm">Books in this bundle</legend>
-            <div className="mt-2 flex flex-col gap-2 rounded-lg border border-border p-3">
+            <div className="mt-2 flex flex-col gap-2 rounded-card border border-border p-3">
               {books.map((book) => (
                 <label key={book.id} className="flex items-center gap-2 text-sm">
                   <input type="checkbox" name="bookIds" value={book.id} className="focus-ring" />
@@ -166,7 +166,7 @@ export default async function BundlesPage({
                 </label>
               ))}
             </div>
-            <span className="text-xs text-muted">Choose at least 2.</span>
+            <span className="text-sm text-muted">Choose at least 2.</span>
           </fieldset>
 
           <button type="submit" className={buttonClasses("primary", "md", "w-fit")}>
@@ -179,7 +179,7 @@ export default async function BundlesPage({
         {(bundles ?? []).map((bundle) => (
           <li
             key={bundle.id}
-            className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-4 shadow-sm"
+            className="flex flex-wrap items-center gap-3 rounded-card border border-border bg-surface p-4 shadow-sm"
           >
             <div className="flex-[1_1_12rem]">
               <p className="font-medium">
@@ -214,7 +214,9 @@ export default async function BundlesPage({
           </li>
         ))}
         {(bundles ?? []).length === 0 && (
-          <p className="text-sm text-muted">No bundles yet.</p>
+          <li>
+            <EmptyState description="No bundles yet." />
+          </li>
         )}
       </ul>
     </main>

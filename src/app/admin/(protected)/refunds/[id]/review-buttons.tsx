@@ -45,7 +45,7 @@ export function ReviewButtons({
             e.preventDefault();
           }
         }}
-        className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+        className="rounded-control bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
       >
         {pending ? "Submitting…" : "Approve"}
       </button>
@@ -58,7 +58,7 @@ export function ReviewButtons({
             e.preventDefault();
           }
         }}
-        className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+        className="rounded-control border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
       >
         {pending ? "Submitting…" : "Reject"}
       </button>

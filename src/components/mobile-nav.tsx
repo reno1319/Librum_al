@@ -50,17 +50,21 @@ export function MobileNav({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  const linkClassName = "focus-ring rounded-sm text-sm font-medium hover:underline";
+  // REDESIGN STEP 2: the open panel continues the header's dark green
+  // bar, so links are cream (11.1:1 on green). Menu items, not inline
+  // text links, so they underline on hover only.
+  const linkClassName =
+    "focus-ring rounded-sm py-1 text-base font-medium text-primary-foreground hover:underline";
 
   return (
-    <div className="md:hidden">
+    <div className="lg:hidden">
       <button
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen((v) => !v)}
-        className="focus-ring flex size-11 items-center justify-center rounded-sm text-foreground"
+        className="focus-ring flex size-11 items-center justify-center rounded-sm text-primary-foreground"
       >
         <span aria-hidden="true">
           {open ? <IconClose className="size-6" /> : <IconMenu className="size-6" />}
@@ -70,11 +74,11 @@ export function MobileNav({
       {open && (
         <div
           id={panelId}
-          className="absolute inset-x-0 top-full border-b border-border bg-surface px-4 py-4 shadow-md"
+          className="absolute inset-x-0 top-full z-20 border-t border-primary-foreground/15 bg-primary px-4 py-4 shadow-md sm:px-6"
         >
           {recoveryActive ? (
             <div className="flex flex-col gap-3.5">
-              <span className="text-sm text-muted">Password recovery</span>
+              <span className="text-sm text-primary-foreground/80">Password recovery</span>
               <form action={logoutAction}>
                 <button type="submit" className={linkClassName}>
                   Log out
@@ -91,7 +95,7 @@ export function MobileNav({
                 ))}
               </nav>
 
-              <div className="mt-4 flex flex-col gap-3.5 border-t border-border pt-4">
+              <div className="mt-4 flex flex-col gap-3.5 border-t border-primary-foreground/15 pt-4">
                 {loggedIn ? (
                   <>
                     <Link href={accountHref} className={linkClassName}>
@@ -108,7 +112,8 @@ export function MobileNav({
                     <Link href="/login" className={linkClassName}>
                       Log in
                     </Link>
-                    <Link href="/signup" className={linkClassName}>
+                    {/* FIX1 (X2): Author chosen, as on Earnings. */}
+                    <Link href="/signup?role=author" className={linkClassName}>
                       Sign up
                     </Link>
                   </>

@@ -1,51 +1,46 @@
 @import "tailwindcss";
 
 @theme inline {
-  /* LIBRUM 2.0 — INK / PAPER / LIBRUM VIOLET. A warm, editorial palette
-     (warm off-white "paper" surfaces, warm near-black "ink" text) in
-     place of the earlier cool-gray "dark blue + orange + light gray"
-     scheme this comment used to describe. Librum Violet (--color-primary)
-     is unchanged — it was already the brand's recognizable accent, just
-     never rationalized as a token on its own (see the UI-1 audit). */
-  --color-background: #f8f6f1;
-  --color-surface: #fffdf9;
-  --color-surface-hover: #f1eee7;
-  --color-foreground: #201c1a;
-  --color-muted: #706a64;
-  --color-border: #ded9d1;
-  /* QA-FIX-5: darkened from #6a5cf0 (4.42:1 on the page background,
-     below the WCAG AA 4.5:1 minimum for text) to #5f50e4, which clears
-     4.5:1 on background, surface, surface-hover and violet-tint, and
-     gives white button text 5.6:1. Hover stays the darker #5849dc. */
-  --color-primary: #5f50e4;
-  --color-primary-hover: #5849dc;
-  --color-primary-foreground: #ffffff;
+  /* REDESIGN STEP 1 — A2 "LIBRARY GREEN & BRASS". Cream paper
+     backgrounds, white surfaces, deep library-green text and actions,
+     and a brass accent, replacing the earlier INK / PAPER / LIBRUM
+     VIOLET palette. Every text/background pair below keeps the QA-FIX-5
+     WCAG AA 4.5:1 minimum: foreground 13.1:1+, muted 6.2:1+ and primary
+     10.2:1+ on background, surface, surface-hover and all three tints;
+     primary at 80% opacity 5.8:1+; primary-foreground 11.1:1 on primary
+     and 14.5:1 on primary-hover. */
+  --color-background: #f7f3ea;
+  --color-surface: #ffffff;
+  --color-surface-hover: #efe9dd;
+  --color-foreground: #1c2420;
+  --color-muted: #4c5751;
+  --color-border: #e2daca;
+  /* V1 (visual consistency): form controls -- inputs, selects,
+     textareas, file buttons and the price box -- get the mockup's
+     darker control border (3.71:1 on white, 3.35:1 on cream, above the
+     3:1 a control's edge needs). --color-border stays for cards and
+     dividers, which are not controls. Placeholder text 5.6:1 on white,
+     5.0:1 on cream. */
+  --color-control: #8c8472;
+  --color-placeholder: #6e675b;
+  --color-primary: #1e3a32;
+  --color-primary-hover: #122520;
+  --color-primary-foreground: #f7f3ea;
 
-  /* A restrained warm terracotta accent, replacing the earlier bright
-     orange -- still a second brand color distinct from Librum Violet,
-     but tonally consistent with the warm PAPER/INK palette rather than
-     reading as a bold, separate "second product color." */
-  --color-accent: #9a5b45;
-  --color-accent-foreground: #ffffff;
+  /* Brass. A FILL only (button/badge background with green
+     accent-foreground text, 5.85:1) -- never brass text on cream or
+     white, which is only 1.9:1. */
+  --color-accent: #d4af37;
+  --color-accent-foreground: #1e3a32;
 
-  /* Subtle full-bleed background tints — a faint wash of each page's
-     color over the base background, not a bold block of color.
-     Unchanged in this pass: neither is a text color, so the PAPER
-     background change doesn't create a new contrast problem for either,
-     and revisiting their exact hues is deferred to whichever page
-     redesign (UI-3+) actually renders them. */
-  --color-author-tint: #e9eff8;
-  --color-reader-tint: #fdf0e3;
-
-  /* LIBRUM 2.0 GLOBAL VISUAL POLISH 1 — the homepage's own distinctive
-     section tint: a very pale Librum-violet wash, deliberately lighter
-     and more neutral than --color-primary itself (never used as an
-     action color) so dark Ink text stays comfortably readable and the
-     hero/closing sections read as "tinted paper," not a saturated
-     purple block. Kept as one shared token (not a per-section variant)
-     since the same value intentionally bookends the homepage — hero and
-     final CTA both use it, sections in between stay paper/surface. */
-  --color-violet-tint: #f1eefb;
+  /* Subtle full-bleed background tints — a faint wash over the base
+     background, not a bold block of color. Token names are kept as-is
+     (renaming is out of scope for the colour/font step), so
+     --color-violet-tint is now a warm cream wash, not violet: it still
+     bookends the homepage (hero and final CTA). */
+  --color-author-tint: #eef3ef;
+  --color-reader-tint: #fbf3dc;
+  --color-violet-tint: #f1eee4;
 
   /* LIBRUM 2.0 UI-1 — small structural token layer. Radius/shadow/
      container are all Tailwind v4's own recognized @theme namespaces,
@@ -62,19 +57,25 @@
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-full: 999px;
+  /* V1: the mockup's two corners. 3px on buttons, fields, chips/filter
+     controls and status tags (rounded-control); 4px on cards, panels,
+     bands, alerts, empty states and dialogs (rounded-card). These
+     replace the pre-redesign 8/12px corners (rounded-md/-lg). */
+  --radius-control: 3px;
+  --radius-card: 4px;
 
-  --shadow-sm: 0 1px 2px rgb(32 28 26 / 0.06);
-  --shadow-md: 0 6px 18px rgb(32 28 26 / 0.08);
+  --shadow-sm: 0 1px 2px rgb(28 36 32 / 0.06);
+  --shadow-md: 0 6px 18px rgb(28 36 32 / 0.08);
 
   --space-section: 4rem;
 
   --container-form: 24rem;
   --container-content: 42rem;
   --container-app: 64rem;
-  --container-wide: 72rem;
+  --container-wide: 75rem;
 
-  --font-sans: var(--font-inter-sans);
-  --font-serif: var(--font-playfair);
+  --font-sans: var(--font-libre-franklin);
+  --font-serif: var(--font-libre-caslon);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -84,7 +85,7 @@
    .focus-ring, not a global outline reset: outline is suppressed only
    on those elements, and only ever paired with the box-shadow ring
    below at :focus-visible -- never silently removed with nothing to
-   replace it. Based on Librum Violet (--color-primary), with a
+   replace it. Based on --color-primary (library green), with a
    background-colored inner ring so it reads clearly against either a
    PAPER surface or a filled primary-colored button. */
 :root {
@@ -112,6 +113,36 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* V1: the one page container shared by the header, every wide page
+   and the footer -- 1200px wide INCLUDING its side gutter (Tailwind's
+   border-box), so at a 1280px window the content's left edge sits at
+   64px everywhere. Gutter 24px, 16px on phone. */
+@utility page-container {
+  margin-inline: auto;
+  width: 100%;
+  max-width: var(--container-wide);
+  padding-inline: 1rem;
+  @media (width >= 40rem) {
+    padding-inline: 1.5rem;
+  }
+}
+
+@layer base {
+  /* V1: one placeholder colour for every field (5.6:1 on white, 5.0:1
+     on cream); opacity 1 because Firefox dims placeholders by default. */
+  ::placeholder {
+    color: var(--color-placeholder);
+    opacity: 1;
+  }
+
+  /* V1: every native radio and checkbox in the library green, as Add a
+     book's own radios already were, instead of the browser's blue. */
+  input[type="radio"],
+  input[type="checkbox"] {
+    accent-color: var(--color-primary);
   }
 }
 
@@ -152,4 +183,27 @@ body {
 .homepage-shelf .overflow-x-auto::-webkit-scrollbar-thumb {
   background-color: var(--color-border);
   border-radius: 999px;
+}
+
+/* iPhone step (I1): iOS Safari zooms the page when a focused field's
+   text is under 16px, and most fields here are text-sm (14px). On
+   phones (under 640px) every text field, select and textarea gets 16px.
+   This rule is deliberately UNLAYERED: unlayered CSS beats Tailwind's
+   utilities layer, so it wins over text-sm and every other Tailwind
+   font-size utility on a field under 640px, including any future
+   max-sm:text-*. The 18px price boxes (.text-lg) keep their 18px.
+   Radios, checkboxes, file and range inputs have no typed text. Do not
+   use maximum-scale or user-scalable=no instead: that blocks pinch
+   zoom. Desktop (640px and up) is unchanged.
+   LEFTOVERS (L4): "under 640px" is written as Tailwind's own 40rem, the
+   exact complement of sm's (width >= 40rem), so it scales the same way
+   when a browser's default font size is raised. Tailwind's build turns
+   this range query into the classic `not all and (min-width:40rem)`,
+   which every iOS Safari version parses, and it leaves no gap at 640px. */
+@media (width < 40rem) {
+  input:not([type="radio"]):not([type="checkbox"]):not([type="file"]):not([type="range"]):not(.text-lg),
+  select:not(.text-lg),
+  textarea:not(.text-lg) {
+    font-size: 16px;
+  }
 }

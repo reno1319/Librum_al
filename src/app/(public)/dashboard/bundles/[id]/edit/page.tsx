@@ -79,8 +79,8 @@ export default async function EditBundlePage({
   const currentBookIds = new Set((currentBookRows ?? []).map((r) => r.book_id));
 
   return (
-    <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard/bundles" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
+      <Link href="/dashboard/bundles" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to bundles
       </Link>
 
@@ -133,7 +133,7 @@ export default async function EditBundlePage({
             defaultValue={bundle.price_all == null ? "" : String(bundle.price_all)}
             className={`w-40 ${formControlClasses}`}
           />
-          <span className="text-xs text-muted">
+          <span className="text-sm text-muted">
             Whole lek: 0 for a free bundle, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
             {MAXIMUM_CATALOG_PRICE_ALL}.
           </span>
@@ -141,7 +141,7 @@ export default async function EditBundlePage({
 
         <fieldset>
           <legend className="text-sm">Books in this bundle</legend>
-          <div className="mt-2 flex flex-col gap-2 rounded-lg border border-border p-3">
+          <div className="mt-2 flex flex-col gap-2 rounded-card border border-border p-3">
             {(books ?? []).map((book) => (
               <label key={book.id} className="flex items-center gap-2 text-sm">
                 <input
@@ -155,7 +155,7 @@ export default async function EditBundlePage({
               </label>
             ))}
           </div>
-          <span className="text-xs text-muted">Choose at least 2.</span>
+          <span className="text-sm text-muted">Choose at least 2.</span>
         </fieldset>
 
         <button type="submit" className={buttonClasses("primary", "md", "mt-2 w-fit")}>

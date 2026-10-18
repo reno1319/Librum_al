@@ -14,38 +14,42 @@ function visibilityFor(role: StaffRole) {
     reportsView: roleHasPermission(role, "reports.view"),
     refundsView: roleHasPermission(role, "refunds.view"),
     blogView: roleHasPermission(role, "blog.view"),
+    catalogFeature: roleHasPermission(role, "catalog.feature"),
   });
 }
 
 describe("resolveAdminLandingVisibility", () => {
-  it("owner sees all three links", () => {
-    expect(visibilityFor("owner")).toEqual({ showReports: true, showRefunds: true, showBlog: true });
+  it("owner sees all four links", () => {
+    expect(visibilityFor("owner")).toEqual({ showReports: true, showRefunds: true, showBlog: true, showLibrumChoice: true });
   });
 
-  it("admin sees all three links", () => {
-    expect(visibilityFor("admin")).toEqual({ showReports: true, showRefunds: true, showBlog: true });
+  it("admin sees all four links", () => {
+    expect(visibilityFor("admin")).toEqual({ showReports: true, showRefunds: true, showBlog: true, showLibrumChoice: true });
   });
 
   it("moderator sees only Book reports", () => {
-    expect(visibilityFor("moderator")).toEqual({ showReports: true, showRefunds: false, showBlog: false });
+    expect(visibilityFor("moderator")).toEqual({ showReports: true, showRefunds: false, showBlog: false, showLibrumChoice: false });
   });
 
   it("support sees only Refund requests", () => {
-    expect(visibilityFor("support")).toEqual({ showReports: false, showRefunds: true, showBlog: false });
+    expect(visibilityFor("support")).toEqual({ showReports: false, showRefunds: true, showBlog: false, showLibrumChoice: false });
   });
 
   it("editor sees only Blog -- BLOG-1C's own fix for the 'no admin tools' fallback", () => {
-    expect(visibilityFor("editor")).toEqual({ showReports: false, showRefunds: false, showBlog: true });
+    expect(visibilityFor("editor")).toEqual({ showReports: false, showRefunds: false, showBlog: true, showLibrumChoice: false });
   });
 
   it("never shows a link the caller's own permission is false for, regardless of combination", () => {
     for (const reportsView of [true, false]) {
       for (const refundsView of [true, false]) {
         for (const blogView of [true, false]) {
-          const visibility = resolveAdminLandingVisibility({ reportsView, refundsView, blogView });
-          expect(visibility.showReports).toBe(reportsView);
-          expect(visibility.showRefunds).toBe(refundsView);
-          expect(visibility.showBlog).toBe(blogView);
+          for (const catalogFeature of [true, false]) {
+            const visibility = resolveAdminLandingVisibility({ reportsView, refundsView, blogView, catalogFeature });
+            expect(visibility.showReports).toBe(reportsView);
+            expect(visibility.showRefunds).toBe(refundsView);
+            expect(visibility.showBlog).toBe(blogView);
+            expect(visibility.showLibrumChoice).toBe(catalogFeature);
+          }
         }
       }
     }

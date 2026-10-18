@@ -6,7 +6,7 @@ import type { ReactElement, ReactNode } from "react";
 // this component calls) -- this file only proves AdminShell itself is
 // correctly wired to that resolver and actually passes the resulting
 // items down to its nav components, for a couple of representative
-// roles, plus that identity/Sign out are present.
+// roles, plus that identity/Log out are present.
 //
 // Nav item LABELS themselves live inside NavLinks'/AdminMobileNav's own
 // rendering, which a plain "walk element.props.children" traversal never
@@ -75,7 +75,7 @@ describe("AdminShell", () => {
     mockSingle.mockClear();
   });
 
-  it("owner: passes Dashboard/Book reports/Refund requests/Staff/Audit log/Finance to its nav components, plus identity and Sign out", async () => {
+  it("owner: passes Dashboard/Book reports/Refund requests/Staff/Audit log/Finance to its nav components, plus identity and Log out", async () => {
     const shell = await AdminShell({ userId: "user-1", role: "owner", children: "content" });
     const text = collectText(shell).join(" | ");
     const labels = collectItems(shell).map((i) => i.label);
@@ -83,7 +83,7 @@ describe("AdminShell", () => {
     expect(text).toContain("Librum Administration");
     expect(text).toContain("Renato Kalemi");
     expect(text).toContain("Owner");
-    expect(text).toContain("Sign out");
+    expect(text).toContain("Log out");
     expect(text).toContain("content");
     expect(labels).toContain("Dashboard");
     expect(labels).toContain("Book reports");

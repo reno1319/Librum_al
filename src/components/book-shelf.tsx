@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
-import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveBookByline } from "@/lib/book-byline";
 import type { Book, Profile } from "@/lib/types";
 
 // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved here at the render boundary
@@ -9,6 +9,8 @@ import type { Book, Profile } from "@/lib/types";
 // string, never a profile object. AUTHOR-1C: every caller now queries
 // the safe public_author_profiles view (aliased as `profiles`), which
 // physically has no display_name column -- dropped from this type too.
+// F4: the string is now the book's byline (its pen name, else the
+// author's public name; resolveBookByline).
 type BookWithAuthor = Book & {
   profiles: Pick<Profile, "public_author_name"> | null;
 };
@@ -26,11 +28,13 @@ export function BookShelf({
   if (books.length === 0) return null;
 
   return (
-    <section style={{ marginTop: "3rem" }}>
-      <h2 className="font-serif text-xl font-semibold">{title}</h2>
+    // REDESIGN STEP 3: A2 heading (thin green serif) and the restyled
+    // BookCard, in the same sideways-scrolling row.
+    <section style={{ marginTop: "3.5rem" }}>
+      <h2 className="font-serif text-[1.75rem] font-normal leading-tight text-primary">{title}</h2>
       <div
         className="overflow-x-auto pb-2"
-        style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}
+        style={{ display: "flex", gap: "1.5rem", marginTop: "1.25rem" }}
       >
         {books.map((book) => {
           const coverUrl = book.cover_path
@@ -46,7 +50,7 @@ export function BookShelf({
               <BookCard
                 book={book}
                 coverUrl={coverUrl}
-                authorName={resolvePublicAuthorName(book.profiles)}
+                authorName={resolveBookByline(book, book.profiles)}
               />
             </div>
           );

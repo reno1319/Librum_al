@@ -33,10 +33,10 @@ export function BlogArticleCard({ post }: { post: BlogArticleCardPost }) {
         <img
           src={post.coverUrl}
           alt=""
-          className="aspect-[3/2] w-full rounded-md object-cover shadow-sm transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-md motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
+          className="aspect-[3/2] w-full rounded-card object-cover shadow-sm transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-md motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
         />
       ) : (
-        <div className="aspect-[3/2] w-full rounded-md bg-border" />
+        <div className="aspect-[3/2] w-full rounded-card bg-border" />
       )}
       <div>
         <span className="text-xs font-medium uppercase tracking-wide text-muted">

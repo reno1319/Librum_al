@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { LibraryBookCard } from "@/components/library-book-card";
-import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveBookByline } from "@/lib/book-byline";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -86,7 +86,7 @@ export default async function LibraryPage({
     .sort((a, b) => a.title.localeCompare(b.title));
 
   return (
-    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
       <PageHeader title="Your library" description="The books you've collected on Librum." />
 
       {error && (
@@ -125,7 +125,7 @@ export default async function LibraryPage({
                 title={book.title}
                 coverUrl={coverUrl}
                 authorId={book.author_id}
-                authorName={resolvePublicAuthorName(book.profiles)}
+                authorName={resolveBookByline(book, book.profiles)}
                 isPublished={book.status === "published"}
                 downloadable={ownedByBookId.get(book.id) ?? false}
               />

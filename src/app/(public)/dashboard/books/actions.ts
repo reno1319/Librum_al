@@ -15,6 +15,9 @@ import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-val
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import { INVALID_ISBN_MESSAGE, isValidIsbn } from "@/lib/book-identifiers";
+import { getRightsDeclarationState, recordRightsDeclaration } from "@/lib/book-rights";
+import { isRightsBasis } from "@/lib/rights-statements";
 import {
   CATALOG_ROW_CHANGED_MESSAGE,
   PAID_REPRICING_UNAVAILABLE_MESSAGE,
@@ -24,6 +27,7 @@ import {
   resolvePriceUpdateAuthorization,
 } from "@/lib/paid-repricing";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
+import { isSchemaFeatureOffError, logSchemaFeatureOffOnce } from "@/lib/schema-feature-off";
 import {
   BOOK_COVERS_BUCKET,
   BOOK_MANUSCRIPTS_BUCKET,
@@ -51,6 +55,35 @@ import {
 // four was unexpected.
 const MISSING_ALL_PRICE_MESSAGE =
   "Set this book's price in lek before publishing it.";
+
+// FIX1 (X16): Renato's W-B wording. True on the one path that shows it
+// (createBook's intent=publish), because that path inserts the draft
+// before performPublish refuses; publishBook's own refusal names only
+// the first sentence, since there the book already is a draft.
+const MISSING_DESCRIPTION_MESSAGE =
+  "Add a description before publishing. Your book will still be saved as a draft.";
+const MISSING_DESCRIPTION_SHORT_MESSAGE = "Add a description before publishing.";
+
+// F4 (P4): Renato's rule, a rights choice before Publish. The same
+// sentence on both publish paths; createBook adds "Saved as draft" as
+// its success line, as for the missing description.
+const MISSING_RIGHTS_MESSAGE = "Choose the rights before publishing.";
+
+// F4 (D3): the existing generic refusal, also used when the rights
+// choice cannot be read at all (before the migration, or a read error).
+const PUBLISH_NOT_POSSIBLE_YET_QUERY =
+  "We+couldn%27t+publish+your+book+yet.+Please+try+again+from+your+dashboard";
+
+// F4 (P6): a published book cannot have its description cleared.
+const PUBLISHED_NEEDS_DESCRIPTION_MESSAGE = "A published book needs a description.";
+
+// The existing contributor failure sentence, shared by addContributor and
+// Add a book's Translator field (F4, P2).
+const ADD_CONTRIBUTOR_ERROR_MESSAGE = "We couldn't add the contributor. Please try again.";
+
+// F4 (P2): the Translator field's bound (its input's maxLength). Over it,
+// nothing is inserted and the contributor message applies.
+const TRANSLATOR_MAX_LENGTH = 120;
 
 const CATALOG_PRICE_ERROR_MESSAGE =
   `Enter your price in lek: 0 for a free ebook, or a whole number from ` +
@@ -573,6 +606,11 @@ export async function createBook(formData: FormData) {
     redirect("/dashboard/books/new?error=Please+choose+a+genre");
   }
 
+  // FIX1 (X9): empty stays allowed; a filled ISBN must be a real one.
+  if (isbn !== null && !isValidIsbn(isbn)) {
+    redirect(`/dashboard/books/new?error=${encodeURIComponent(INVALID_ISBN_MESSAGE)}`);
+  }
+
   // LIBRUM 2.0 PUBLISHING-UX-1 PART B: every one of these five is
   // optional and absent entirely from the current (pre-Part-C) wizard's
   // own FormData -- formData.get() simply returns null for a field the
@@ -604,6 +642,11 @@ export async function createBook(formData: FormData) {
     "/dashboard/books/new",
   ).value;
   const originalPublicationDate = resolveOriginalPublicationDate(formData, "/dashboard/books/new").value;
+  // F4 (P1): the per-book pen name, trimmed; empty means none. No length
+  // check of its own (Renato's Q6 = a): the field's maxLength is 120 and
+  // the database's own check rejects anything longer, which ends in the
+  // existing save-failure message below.
+  const penName = String(formData.get("penName") ?? "").trim() || null;
 
   const { seriesId, seriesPosition } = await resolveSeriesSelection(
     supabase,
@@ -710,6 +753,12 @@ export async function createBook(formData: FormData) {
     price_all: parsedPrice.priceAll,
     cover_path: coverPath,
     file_path: manuscriptPath,
+    // F4 (P1): named only when the author typed one -- an empty field
+    // leaves the column's own null default, exactly as not naming it.
+    // Written whenever it was submitted, whatever the page's feature
+    // probe said; a database that cannot take it fails this insert, and
+    // the author gets the save-failure message below.
+    ...(penName !== null ? { pen_name: penName } : {}),
     // Always inserted as a draft, regardless of the submitted intent
     // (see below) -- the draft-first transition is intentional
     // (PUBLISHING-UX-1 Part B's own brief): a book is never inserted
@@ -762,6 +811,47 @@ export async function createBook(formData: FormData) {
 
   revalidatePath("/dashboard");
 
+  // F4 (P2): the Translator field becomes one book_contributors row,
+  // inserted with the author's own session (the RLS path addContributor
+  // uses) now that the book row exists. Its failure never costs the
+  // book: it is logged, and the existing contributor message is shown
+  // only when no publish refusal needs the one error slot.
+  let translatorFailed = false;
+  const translator = String(formData.get("translator") ?? "").trim();
+  if (translator) {
+    if (translator.length > TRANSLATOR_MAX_LENGTH) {
+      console.error("createBook: translator name too long; not added", {
+        bookId,
+        length: translator.length,
+      });
+      translatorFailed = true;
+    } else {
+      const { error: translatorError } = await supabase
+        .from("book_contributors")
+        .insert({ book_id: bookId, name: translator, role: "Translator" });
+      if (translatorError) {
+        console.error("createBook: translator insert failed:", translatorError);
+        translatorFailed = true;
+      }
+    }
+  }
+  const translatorErrorQuery = translatorFailed
+    ? `error=${encodeURIComponent(ADD_CONTRIBUTOR_ERROR_MESSAGE)}`
+    : null;
+
+  // F4 (P3): the rights choice, recorded only when one of the two bases
+  // was submitted. recordRightsDeclaration takes nothing else from the
+  // client: the book, title, author and sentence all come from the
+  // server. A failure is logged and never loses the saved draft; with
+  // intent=publish the publish gate below then refuses.
+  const rightsBasis = formData.get("rightsBasis");
+  if (isRightsBasis(rightsBasis)) {
+    const recorded = await recordRightsDeclaration(bookId, rightsBasis);
+    if (!recorded.ok) {
+      console.error("createBook: rights declaration not recorded", { bookId, reason: recorded.reason });
+    }
+  }
+
   // LIBRUM 2.0 PUBLISHING-UX-1 PART B: prepares createBook() for Part
   // C's eventual two final-step buttons (Save as draft / Publish book)
   // without changing anything about today's wizard, which never
@@ -771,7 +861,7 @@ export async function createBook(formData: FormData) {
   // with the book already safely saved as a draft.
   const intent = String(formData.get("intent") ?? "draft");
   if (intent !== "publish") {
-    redirect("/dashboard");
+    redirect(translatorErrorQuery ? `/dashboard?${translatorErrorQuery}` : "/dashboard");
   }
 
   // The book row above is already a fully-saved, permanent draft at
@@ -810,7 +900,11 @@ export async function createBook(formData: FormData) {
       });
     }
 
-    redirect("/dashboard?success=Your+book+is+now+live");
+    redirect(
+      translatorErrorQuery
+        ? `/dashboard?success=Your+book+is+now+live&${translatorErrorQuery}`
+        : "/dashboard?success=Your+book+is+now+live",
+    );
   }
 
   // Publish failed -- the draft inserted above remains exactly as
@@ -824,14 +918,23 @@ export async function createBook(formData: FormData) {
       `/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
     );
   }
+  if (publishResult.reason === "missing_description") {
+    redirect(
+      `/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_DESCRIPTION_MESSAGE)}`,
+    );
+  }
+  // F4 (P4): a publish refusal always takes the one error slot; a
+  // translator failure is then only logged (above).
+  if (publishResult.reason === "missing_rights") {
+    redirect(`/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_RIGHTS_MESSAGE)}`);
+  }
   if (publishResult.reason === "paid_mode_required") {
     redirect(
       "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
     );
   }
-  redirect(
-    "/dashboard?success=Saved+as+draft&error=We+couldn%27t+publish+your+book+yet.+Please+try+again+from+your+dashboard",
-  );
+  // "rights_unavailable" (F4, D3) lands here too: the existing sentence.
+  redirect(`/dashboard?success=Saved+as+draft&error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
 }
 
 export async function updateBook(bookId: string, formData: FormData) {
@@ -868,7 +971,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   // author's row or any id mismatch stops here, before any upload.
   const { data: existing, error: existingError } = await supabase
     .from("books")
-    .select("id, cover_path, file_path, author_id, language, status, price_all")
+    .select("id, cover_path, file_path, author_id, language, status, price_all, isbn")
     .eq("id", bookId)
     .single();
 
@@ -902,6 +1005,16 @@ export async function updateBook(bookId: string, formData: FormData) {
     redirect(`/dashboard/books/${bookId}/edit?error=Please+choose+a+genre`);
   }
 
+  // FIX1 (X9): same rule as createBook. An ISBN resubmitted exactly as
+  // the row already holds it is kept, so a book saved before this check
+  // existed can still have an unrelated field edited (the same
+  // preserve-unchanged rule as resolveLanguageForUpdate).
+  if (isbn !== null && isbn !== existing.isbn && !isValidIsbn(isbn)) {
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(INVALID_ISBN_MESSAGE)}`,
+    );
+  }
+
   // PAID-REPRICING-1: an edit that would make a PUBLISHED book paid, or
   // change its paid price, is a paid publication and needs the same
   // permission performPublish() requires. Decided by the one shared rule
@@ -929,6 +1042,25 @@ export async function updateBook(bookId: string, formData: FormData) {
     status: existing.status,
     priceAll: existing.price_all,
   });
+
+  // F4 (P6, FIX1 advisory A5): a published book keeps a description,
+  // Renato's publish rule, so clearing it is refused here -- before any
+  // upload and any write. Drafts may still clear it. The write below
+  // also requires the row to still be a draft whenever the description
+  // is empty, so a publish that lands in between cannot be followed by
+  // this clear (zero rows -> CATALOG_ROW_CHANGED_MESSAGE).
+  const clearsDescription = description === "";
+  if (clearsDescription && existing.status === "published") {
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(PUBLISHED_NEEDS_DESCRIPTION_MESSAGE)}`,
+    );
+  }
+
+  // F4 (P1): the same present/absent rule as the metadata below: a form
+  // without the Pen name field leaves the column untouched; a present,
+  // empty field clears it to null. No length check of its own (Q6 = a).
+  const penNamePresent = formData.has("penName");
+  const penName = String(formData.get("penName") ?? "").trim() || null;
 
   // LIBRUM 2.0 PUBLISHING-UX-1 PART B FINAL PRE-COMMIT ROLLOUT-
   // COMPATIBILITY CORRECTION: same five author-editable fields as
@@ -1204,6 +1336,10 @@ export async function updateBook(bookId: string, formData: FormData) {
       ...(originalPublicationDateResolved.present
         ? { original_publication_date: originalPublicationDateResolved.value }
         : {}),
+      // F4 (P1): written through this trusted writer whenever the key was
+      // submitted, never dropped because of the page's feature probe; a
+      // database that cannot take it fails this write (existing message).
+      ...(penNamePresent ? { pen_name: penName } : {}),
     })
     .eq("id", existing.id)
     .eq("author_id", user.id);
@@ -1218,8 +1354,12 @@ export async function updateBook(bookId: string, formData: FormData) {
       : existing.cover_path === null
         ? updateQuery.is("cover_path", null)
         : updateQuery.eq("cover_path", existing.cover_path);
+  // F4 (P6): see the published-description check above.
+  const descriptionGuardedQuery = clearsDescription
+    ? coverGuardedQuery.eq("status", "draft")
+    : coverGuardedQuery;
   const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
-    coverGuardedQuery,
+    descriptionGuardedQuery,
     priceGuard,
   ).select("id");
 
@@ -1237,6 +1377,29 @@ export async function updateBook(bookId: string, formData: FormData) {
     redirect(
       `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`,
     );
+  }
+
+  // F4 (P3): the Edit page's rights choice, recorded only now that the
+  // save is proven (so the declaration's book_title is the saved title),
+  // and only when it changes something: no declaration yet, or a
+  // different basis from the current one. An identical resubmission, or
+  // a book whose declarations cannot be read (`unavailable`), records
+  // nothing. A failure is logged and never undoes the save.
+  const rightsBasis = formData.get("rightsBasis");
+  if (isRightsBasis(rightsBasis)) {
+    const rightsState = await getRightsDeclarationState(existing.id);
+    if (
+      rightsState.kind === "none" ||
+      (rightsState.kind === "present" && rightsState.declaration.basis !== rightsBasis)
+    ) {
+      const recorded = await recordRightsDeclaration(existing.id, rightsBasis);
+      if (!recorded.ok) {
+        console.error("updateBook: rights declaration not recorded", {
+          bookId: existing.id,
+          reason: recorded.reason,
+        });
+      }
+    }
   }
 
   // QA-FIX-3: the row update is proven, so an in-place replacement may
@@ -1323,6 +1486,18 @@ type PerformPublishResult =
       reason:
         | "not_found"
         | "missing_all_price"
+        // FIX1 (X16): an empty (after trimming) description. Checked
+        // after the price and before paid permission: the author can fix
+        // it themselves, so it is named before a refusal they can't.
+        | "missing_description"
+        // F4 (P4): no rights choice recorded for this book yet. Checked
+        // after the description and before paid permission, for the same
+        // reason: the author can fix it themselves.
+        | "missing_rights"
+        // F4 (D3): the rights choice could not be read at all (before the
+        // migration, or a read error). Fails closed, with the generic
+        // message, because no choice can be shown to exist.
+        | "rights_unavailable"
         | "paid_mode_required"
         | "update_failed";
     };
@@ -1343,7 +1518,7 @@ async function performPublish(
 
   const { data: book } = await supabase
     .from("books")
-    .select("status, price_all, published_at")
+    .select("status, price_all, published_at, description")
     .eq("id", bookId)
     .eq("author_id", userId)
     .single();
@@ -1364,6 +1539,25 @@ async function performPublish(
   // else in this patch moves a row back to draft.
   if (catalogPriceState === "unavailable") {
     return { ok: false, reason: "missing_all_price" };
+  }
+
+  // FIX1 (X16): Renato's rule, a description before Publish. A refusal
+  // only: an already-published book without one is never moved back to
+  // draft, and saving a draft without one is untouched (createBook
+  // inserts the draft before calling this).
+  if (typeof book.description !== "string" || book.description.trim().length === 0) {
+    return { ok: false, reason: "missing_description" };
+  }
+
+  // F4 (P4): Renato's rule, a rights choice before Publish -- read with
+  // the author's own session, three ways (book-rights.ts). A refusal
+  // only: an already-published book is never moved back to draft.
+  const rightsState = await getRightsDeclarationState(bookId);
+  if (rightsState.kind === "none") {
+    return { ok: false, reason: "missing_rights" };
+  }
+  if (rightsState.kind === "unavailable") {
+    return { ok: false, reason: "rights_unavailable" };
   }
 
   // Only a book that will actually be sold needs paid-publishing
@@ -1431,11 +1625,19 @@ async function performPublish(
   // created only now -- after the recovery check, the ownership-scoped
   // read, the price classification and the paid-publishing permission
   // above have all passed. The read stays on the author's session.
+  //
+  // F4 (N1): the write also requires a non-empty description, so a draft
+  // edit that clears it after the read above leaves this publish matching
+  // no row (update_failed) instead of publishing a book with none. Both
+  // writers trim, so "" is the only empty stored form.
   const catalogWriter = createCatalogWriteClient();
   const { data: publishedRows, error } = await applyCatalogRowGuard(
     catalogWriter.from("books").update(updatePayload).eq("id", bookId).eq("author_id", userId),
     { status: book.status, priceAll: book.price_all },
-  ).select("id");
+  )
+    .not("description", "is", null)
+    .neq("description", "")
+    .select("id");
 
   if (error) {
     return { ok: false, reason: "update_failed" };
@@ -1445,7 +1647,58 @@ async function performPublish(
     return { ok: false, reason: "update_failed" };
   }
 
+  // F5 (C5 self-heal): a real draft -> published transition never brings
+  // back a "Librum's choice" pick an earlier unpublish failed to clear.
+  // Keyed on the status read above, not on isFirstPublication: a write
+  // to an already-published book (which may be the valid pick) clears
+  // nothing. No status/price compare-and-set here -- after the publish
+  // above, `status = 'draft'` would match no row.
+  if (book.status !== "published") {
+    await clearOwnBookLibrumChoice(catalogWriter, bookId, userId, "performPublish");
+  }
+
   return { ok: true, wasNewlyPublished: isFirstPublication };
+}
+
+// F5 (C5, Renato 10:25Z): an unpublished book loses its "Librum's choice"
+// pick and never gets it back by itself. Runs only after the caller's
+// own auth, ownership read and guarded status write have succeeded, and
+// reuses the catalog writer that caller already created after those
+// checks (authenticated has no UPDATE on librum_choice_at). The filters
+// reach at most this one book, owned by the caller, and only its pick
+// column; it can only clear, never set. The RPC clear_librum_choice is
+// not used: it clears whatever is picked, so a race could clear a newer
+// pick of another book.
+//
+// catalog-write-client.ts rule 3's audited exception: 0 rows is the
+// normal case (the book is not picked), so there is no
+// isExactlyOneRowWritten and no log on 0 rows. Best effort: before the
+// migration the column is missing (feature off, warned once); any other
+// error is logged and never turns the caller's successful write into a
+// failure -- getLibrumChoiceBook() still hides an unpublished pick.
+async function clearOwnBookLibrumChoice(
+  catalogWriter: ReturnType<typeof createCatalogWriteClient>,
+  bookId: string,
+  userId: string,
+  caller: string,
+): Promise<void> {
+  try {
+    const { error } = await catalogWriter
+      .from("books")
+      .update({ librum_choice_at: null })
+      .eq("id", bookId)
+      .eq("author_id", userId)
+      .not("librum_choice_at", "is", null);
+    if (error) {
+      if (isSchemaFeatureOffError(error)) {
+        logSchemaFeatureOffOnce("Librum's choice", error);
+      } else {
+        console.error(`${caller}: clearing the Librum's choice pick failed`, { bookId, error });
+      }
+    }
+  } catch (error) {
+    console.error(`${caller}: clearing the Librum's choice pick failed`, { bookId, error });
+  }
 }
 
 export async function publishBook(bookId: string) {
@@ -1482,6 +1735,18 @@ export async function publishBook(bookId: string) {
       redirect(
         `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
       );
+    }
+    if (result.reason === "missing_description") {
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_DESCRIPTION_SHORT_MESSAGE)}`,
+      );
+    }
+    if (result.reason === "missing_rights") {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_RIGHTS_MESSAGE)}`);
+    }
+    // F4 (D3): the existing generic sentence, on the dashboard.
+    if (result.reason === "rights_unavailable") {
+      redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
     }
     if (result.reason === "paid_mode_required") {
       redirect("/dashboard?error=Paid+publishing+isn%27t+available+right+now");
@@ -1670,6 +1935,10 @@ export async function unpublishBook(bookId: string) {
     console.error("unpublishBook: update did not change exactly one row", { bookId, userId: user.id });
     redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
   }
+
+  // F5 (C5): the unpublish above succeeded, so this book stops being
+  // Librum's choice (best effort, see clearOwnBookLibrumChoice).
+  await clearOwnBookLibrumChoice(catalogWriter, bookId, user.id, "unpublishBook");
 
   revalidatePath("/dashboard");
   revalidatePath("/");
@@ -1884,7 +2153,7 @@ export async function addContributor(bookId: string, formData: FormData) {
     // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: was error.message -- see the
     // identical correction in src/app/books/[id]/actions.ts for why.
     redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("We couldn't add the contributor. Please try again.")}`,
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(ADD_CONTRIBUTOR_ERROR_MESSAGE)}`,
     );
   }
 

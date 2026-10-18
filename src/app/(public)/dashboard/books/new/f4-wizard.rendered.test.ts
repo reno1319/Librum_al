@@ -1,0 +1,145 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { RIGHTS_STATEMENTS } from "@/lib/rights-statements";
+
+// F4: Add a book rendered (all three steps are mounted; only the current
+// one is visible), with and without migration 20261018091237. The
+// browser-only behaviour (blocking Publish book without a choice) is
+// pinned at source level below and exercised in the local render.
+
+vi.mock("../actions", () => ({ createBook: async () => undefined }));
+
+const { UploadWizard } = await import("./upload-wizard");
+const source = readFileSync(new URL("./upload-wizard.tsx", import.meta.url), "utf8");
+const manuscriptSource = readFileSync(
+  new URL("../../../../../components/manuscript-field.tsx", import.meta.url),
+  "utf8",
+);
+
+function render(features: { penNameAvailable: boolean; rightsAvailable: boolean }, authorName = "Arben Leka") {
+  return renderToStaticMarkup(
+    createElement(UploadWizard, {
+      series: [],
+      authorName,
+      authorId: "a1b2c3d4-1111-4111-8111-abcdef111111",
+      paidPublishingAvailable: true,
+      ...features,
+    }),
+  );
+}
+
+describe("Add a book with the migration applied", () => {
+  const html = render({ penNameAvailable: true, rightsAvailable: true });
+
+  it("Pen name (optional) sits directly under Title, maxLength 120, with the help naming the author", () => {
+    const input = html.match(/<input[^>]*name="penName"[^>]*>/)![0];
+    expect(input).toContain('maxLength="120"');
+    expect(html).toContain("Pen name (optional)");
+    expect(html).toContain("Leave blank to use your author name, Arben Leka.");
+    expect(html.indexOf('name="penName"')).toBeGreaterThan(html.indexOf('name="title"'));
+    expect(html.indexOf('name="penName"')).toBeLessThan(html.indexOf('name="language"'));
+  });
+
+  it("no help sentence when the author has no name yet (never 'author name, .')", () => {
+    expect(render({ penNameAvailable: true, rightsAvailable: true }, "")).not.toContain("Leave blank to use your author name");
+  });
+
+  it("Translator (optional) is inside Additional book details, maxLength 120", () => {
+    const details = html.slice(html.indexOf("Additional book details"), html.indexOf("</details>"));
+    expect(details).toContain("Translator (optional)");
+    expect(details.match(/<input[^>]*name="translator"[^>]*>/)![0]).toContain('maxLength="120"');
+  });
+
+  it("Rights: a visible legend, two radios named rightsBasis, nothing preselected", () => {
+    expect(html).toContain('<legend class="mb-3 font-bold text-foreground">Rights</legend>');
+    const radios = html.match(/<input[^>]*name="rightsBasis"[^>]*>/g)!;
+    expect(radios).toHaveLength(2);
+    for (const radio of radios) expect(radio).not.toContain("checked");
+  });
+
+  it("the two labels equal RIGHTS_STATEMENTS code point for code point", () => {
+    for (const basis of ["own_rights", "public_domain"] as const) {
+      const label = html.match(new RegExp(`value="${basis}"[^>]*/><span[^>]*>([^<]*)</span>`))![1].replace(/&#x27;/g, "'");
+      expect([...label].map((c) => c.codePointAt(0))).toEqual(
+        [...RIGHTS_STATEMENTS[basis].text].map((c) => c.codePointAt(0)),
+      );
+    }
+    expect(html).not.toContain("&apos;");
+  });
+
+  it("the two sentences are plain text under the bold legend (Renato 10-18: 1. b)", () => {
+    for (const basis of ["own_rights", "public_domain"] as const) {
+      expect(html).toMatch(new RegExp(`value="${basis}"[^>]*/><span class="text-foreground">`));
+    }
+  });
+
+  it("Rights sits on step 3 between Readiness and the buttons", () => {
+    const readiness = html.indexOf(">Readiness</p>");
+    const rights = html.indexOf(">Rights</legend>");
+    expect(readiness).toBeGreaterThan(html.indexOf('name="pricing"'));
+    expect(rights).toBeGreaterThan(readiness);
+    // The step's buttons are rendered after the step bodies.
+    expect(html.indexOf(">Next</button>")).toBeGreaterThan(rights);
+  });
+
+  it("Readiness lists the missing choice, and never says ready while it is missing", () => {
+    const readiness = html.slice(html.indexOf(">Readiness</p>"), html.indexOf(">Rights</legend>"));
+    expect(readiness).toContain("Choose the rights before publishing.");
+    expect(readiness).not.toContain("Looks good — ready to publish.");
+  });
+
+  it("the preview card shows the author name while no pen name is typed", () => {
+    const card = html.slice(html.indexOf("How readers will see it"));
+    expect(card).toContain("Arben Leka");
+  });
+});
+
+describe("Add a book before the migration (D2/D3)", () => {
+  const html = render({ penNameAvailable: false, rightsAvailable: false });
+
+  it("no Pen name field, no Rights choice, no new readiness line", () => {
+    expect(html).not.toContain('name="penName"');
+    expect(html).not.toContain("Pen name (optional)");
+    expect(html).not.toContain('name="rightsBasis"');
+    expect(html).not.toContain(">Rights</legend>");
+    expect(html).not.toContain("Choose the rights before publishing.");
+  });
+
+  it("never says 'ready to publish' (the server refuses Publish without the rights table)", () => {
+    expect(html).not.toContain("Looks good — ready to publish.");
+  });
+
+  it("the Translator field is still there (book_contributors exists before F3)", () => {
+    expect(html).toContain('name="translator"');
+  });
+});
+
+describe("Add a book: the client rule (source)", () => {
+  it("Publish book without a choice is blocked before submit; Save as draft never is", () => {
+    const handler = source.slice(source.indexOf("function handleSubmit"), source.indexOf("// ALL-WIRING-2: readiness is previewed"));
+    expect(handler).toContain("(event.nativeEvent as SubmitEvent).submitter");
+    expect(handler).toContain('submitter.value === "publish"');
+    expect(handler).toContain('const rightsMissing = publishing && rightsAvailable && rightsBasis === "";');
+    expect(handler).toMatch(/if \(rightsMissing\) \{\s*event\.preventDefault\(\);/);
+  });
+
+  it("the radios carry the Paid / Free cards' Enter guard", () => {
+    const rights = source.slice(source.indexOf('name="rightsBasis"'), source.indexOf("</fieldset>", source.indexOf('name="rightsBasis"')));
+    expect(rights).toContain('if (e.key === "Enter") e.preventDefault();');
+  });
+
+  it("the byline (typed pen name, else the author name) feeds the preview card and the placeholder", () => {
+    expect(source).toContain('const byline = (penNameAvailable ? penName.trim() : "") || authorName;');
+    expect(source).toContain("authorName={byline}");
+    expect(source).toContain("{byline && <p");
+  });
+
+  it("ManuscriptField keeps dc:creator live on the form's penName field, as it does the title", () => {
+    expect(manuscriptSource).toContain('form?.elements.namedItem("penName")');
+    expect(manuscriptSource).toContain("input?.value.trim() || authorName");
+    expect(manuscriptSource).toContain('penNameInput?.addEventListener("input", handlePenNameInput);');
+    expect(manuscriptSource).toMatch(/repackageWithTitle\(\s*conversionId,\s*liveTitleRef\.current,\s*liveAuthorRef\.current,/);
+  });
+});

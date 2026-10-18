@@ -4,6 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { fileInputClasses } from "@/lib/form-styles";
 
+// REDESIGN STEP 5 (A2): restyling only -- the picker sits in a dashed
+// drop-area box and the browser's own file button is drawn as an
+// outline button. Behaviour, names and every word are unchanged.
+const PICKER_BOX_CLASSES =
+  "flex flex-col gap-2 rounded-[4px] border border-dashed border-[#8c8472] bg-background p-4 text-sm sm:p-5";
+// FIX1 (X10): `text-transparent` hides the browser's own "No file
+// chosen" / file-name text beside the styled button (the field's own
+// "Cover ready — name" line says what was picked); the input itself,
+// its label and its keyboard focus are unchanged.
+const PICKER_INPUT_CLASSES = `${fileInputClasses} w-full max-w-full text-transparent file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-[3px] file:border file:border-solid file:border-primary file:bg-surface file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-surface-hover disabled:opacity-60`;
+
 // LIBRUM 2.0 PRODUCT-5 COVER-1 CORRECTION: a cover between ~4.5MB and
 // the app's own advertised 5MB limit could 413 through the old
 // File-in-FormData path -- Vercel's own request-body ceiling sits
@@ -47,6 +58,9 @@ const MANUSCRIPTS_BUCKET = "manuscripts";
 const GENERIC_ERROR = "We couldn't upload your cover. Please try again.";
 const TOO_LARGE_ERROR = "This cover is larger than the 5 MB limit.";
 const UNSUPPORTED_FORMAT_ERROR = "Unsupported cover format. Use JPEG or PNG.";
+// FIX1 (X10): Renato's W-C pick -- warn, but allow.
+const MIN_RECOMMENDED_COVER_HEIGHT = 1000;
+const SMALL_COVER_WARNING = "This image is smaller than 1000px tall, so it may look blurry.";
 
 export function CoverField({
   authorId,
@@ -75,6 +89,7 @@ export function CoverField({
   const [errorMessage, setErrorMessage] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [readyFileName, setReadyFileName] = useState<string | null>(null);
+  const [smallCover, setSmallCover] = useState(false);
 
   const hiddenPathInputRef = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
@@ -138,6 +153,7 @@ export function CoverField({
     setHiddenPath(null);
     setErrorMessage("");
     setReadyFileName(null);
+    setSmallCover(false);
 
     if (!file) {
       setStatus("idle");
@@ -171,6 +187,16 @@ export function CoverField({
     setStatus("uploading");
 
     const myRequestId = beginRequest();
+
+    // FIX1 (X10): measured from the same local preview, off the upload's
+    // path -- it never delays or blocks the upload, and a newer pick
+    // discards an older measurement.
+    const probe = new Image();
+    probe.onload = () => {
+      if (isStale(myRequestId)) return;
+      setSmallCover(probe.naturalHeight < MIN_RECOMMENDED_COVER_HEIGHT);
+    };
+    probe.src = nextPreviewUrl;
     const extension = file.type === "image/png" ? "png" : "jpg";
     const tempPath = `${authorId}/tmp/cover/${crypto.randomUUID()}.${extension}`;
 
@@ -239,25 +265,31 @@ export function CoverField({
 
       {isReplaceMode && (
         <>
-          <p className="text-sm font-medium">Current cover</p>
+          <p className="text-sm font-semibold text-foreground">Current cover</p>
           {displayedPreview ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={displayedPreview} alt="" className="h-24 w-16 rounded object-cover" />
+            <img
+              src={displayedPreview}
+              alt=""
+              className="h-24 w-16 rounded-[2px] object-cover shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
+            />
           ) : (
-            <div className="h-24 w-16 rounded bg-border" />
+            <div className="h-24 w-16 rounded-[2px] bg-border" />
           )}
         </>
       )}
 
-      <label className="flex flex-col gap-1 text-sm">
-        {status === "success" ? "Replace cover" : isReplaceMode ? "Replace cover image" : "Cover image"}
+      <label className={PICKER_BOX_CLASSES}>
+        <span className="font-semibold text-foreground">
+          {status === "success" ? "Replace cover" : isReplaceMode ? "Replace cover image" : "Cover image"}
+        </span>
         <input
           type="file"
           accept="image/png,image/jpeg"
-          className={fileInputClasses}
+          className={PICKER_INPUT_CLASSES}
           onChange={(e) => handleCoverChange(e.target.files?.[0] ?? null)}
         />
-        <span className="text-xs text-muted">
+        <span className="text-sm text-muted">
           JPEG or PNG · up to 5 MB.
           {isReplaceMode ? " Leave blank to keep the current cover." : ""}
         </span>
@@ -265,7 +297,11 @@ export function CoverField({
 
       {!isReplaceMode && previewUrl && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={previewUrl} alt="" className="aspect-[2/3] w-32 rounded-md object-cover shadow-sm" />
+        <img
+          src={previewUrl}
+          alt=""
+          className="aspect-[2/3] w-32 rounded-[3px] object-cover shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
+        />
       )}
 
       {status === "uploading" && (
@@ -275,15 +311,21 @@ export function CoverField({
       )}
 
       {status === "success" && readyFileName && (
-        <p role="status" className="text-sm text-primary">
+        <p role="status" className="text-sm font-semibold text-primary">
           Cover ready — {readyFileName}
+        </p>
+      )}
+
+      {smallCover && status !== "error" && (
+        <p role="status" className="text-sm font-medium text-[#7a5a00]">
+          {SMALL_COVER_WARNING}
         </p>
       )}
 
       {status === "error" && (
         <p
           role="alert"
-          className="rounded-lg border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
+          className="rounded-card border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
         >
           {errorMessage}
         </p>

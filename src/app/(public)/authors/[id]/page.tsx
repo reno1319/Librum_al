@@ -11,10 +11,12 @@ import { followAuthor, unfollowAuthor } from "./actions";
 import { groupPublishedBooksBySeries } from "@/lib/author-series";
 import { getAuthorInitials } from "@/lib/author-initials";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import type { Book, Bundle, Profile, Series } from "@/lib/types";
+import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
 // dashboard or a social profile -- see the PRODUCT-2 audit. It shows
@@ -209,7 +211,7 @@ export default async function AuthorProfilePage({
   const authorInitials = getAuthorInitials(authorPublicName);
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
       {/* ============================================================
           Author hero -- identity, bio, follow. Restrained on purpose:
           no cover photo, no stat dashboard, no social-profile framing.
@@ -242,7 +244,7 @@ export default async function AuthorProfilePage({
           </div>
         )}
         <div className="min-w-0">
-          <h1 className="font-serif text-2xl font-semibold text-foreground sm:text-3xl">
+          <h1 className="font-serif text-2xl font-normal text-foreground sm:text-3xl">
             {authorPublicName}
           </h1>
           {/* Quiet by design -- a small text line, not a stat card:
@@ -254,7 +256,7 @@ export default async function AuthorProfilePage({
           </p>
 
           {author.bio ? (
-            <p className="mt-3 max-w-xl text-sm text-foreground/90 sm:text-base">{author.bio}</p>
+            <p className="mt-3 max-w-[42.5rem] text-sm text-foreground/90 sm:text-base">{author.bio}</p>
           ) : (
             <p className="mt-3 text-sm text-muted">No biography added yet.</p>
           )}
@@ -287,7 +289,7 @@ export default async function AuthorProfilePage({
           Books by this author -- the page's primary content.
           ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
-        <h2 className="font-serif text-xl font-semibold">Books by {authorPublicName}</h2>
+        <h2 className="font-serif text-xl font-normal">Books by {authorPublicName}</h2>
 
         {publishedBooks.length === 0 ? (
           // LIBRUM 2.0 PRODUCT-2 PRE-COMMIT CORRECTION: EmptyState
@@ -302,7 +304,7 @@ export default async function AuthorProfilePage({
             />
           </div>
         ) : (
-          <ul className="mt-6 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <ul className="mt-6 grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {publishedBooks.map((book) => {
               const coverUrl = book.cover_path
                 ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
@@ -342,12 +344,12 @@ export default async function AuthorProfilePage({
           ============================================================ */}
       {seriesGroups.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
-          <h2 className="font-serif text-xl font-semibold">Series</h2>
-          <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <h2 className="font-serif text-xl font-normal">Series</h2>
+          <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {seriesGroups.map((group) => (
               <li
                 key={group.id}
-                className="rounded-lg border border-border bg-surface p-4 shadow-sm"
+                className="rounded-card border border-border bg-surface p-4 shadow-sm"
               >
                 <Link
                   href={`/series/${group.id}`}
@@ -369,17 +371,21 @@ export default async function AuthorProfilePage({
                         key={book.id}
                         href={`/books/${book.id}`}
                         aria-label={book.title}
-                        className="focus-ring block w-16 shrink-0 rounded-sm"
+                        className="focus-ring block w-16 shrink-0 rounded-[2px]"
                       >
                         {coverUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={coverUrl}
                             alt=""
-                            className="aspect-[2/3] w-full rounded-sm object-cover shadow-sm"
+                            className="aspect-[2/3] w-full rounded-[2px] object-cover shadow-sm"
                           />
                         ) : (
-                          <div className="aspect-[2/3] w-full rounded-sm bg-border" />
+                          <CoverPlaceholder
+                            title={book.title}
+                            authorName={resolveBookByline(book, author) ?? authorPublicName}
+                            className="aspect-[2/3] w-full rounded-[2px]"
+                          />
                         )}
                       </Link>
                     );
@@ -387,7 +393,7 @@ export default async function AuthorProfilePage({
                 </div>
                 <Link
                   href={`/series/${group.id}`}
-                  className="focus-ring mt-3 inline-block rounded-sm text-xs font-medium text-primary hover:underline"
+                  className="focus-ring mt-3 inline-block rounded-sm text-xs font-medium text-primary underline underline-offset-2 hover:decoration-2"
                 >
                   View series &rarr;
                 </Link>
@@ -405,13 +411,13 @@ export default async function AuthorProfilePage({
           ============================================================ */}
       {bundles && bundles.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
-          <h2 className="font-serif text-xl font-semibold">Bundles</h2>
-          <ul className="mt-6 flex flex-col gap-3">
+          <h2 className="font-serif text-xl font-normal">Bundles</h2>
+          <ul className="mt-6 flex max-w-[42.5rem] flex-col gap-3">
             {bundles.map((bundle) => (
               <li key={bundle.id}>
                 <Link
                   href={`/bundles/${bundle.id}`}
-                  className="focus-ring flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
+                  className="focus-ring flex flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
                 >
                   <span className="font-serif font-medium">{bundle.title}</span>
                   <span className="text-sm font-semibold text-primary">

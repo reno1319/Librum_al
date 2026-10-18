@@ -105,7 +105,7 @@ export function AdminMobileNav({
           <div className="mt-4 flex flex-col gap-3.5 border-t border-border pt-4">
             <form action={logoutAction}>
               <button type="submit" className={linkClassName}>
-                Sign out
+                Log out
               </button>
             </form>
           </div>

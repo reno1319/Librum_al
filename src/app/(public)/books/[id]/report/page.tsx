@@ -39,11 +39,11 @@ export default async function ReportBookPage({
   }
 
   return (
-    <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10 sm:px-6">
-      <Link href={`/books/${id}`} className="text-sm text-muted hover:underline">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
+      <Link href={`/books/${id}`} className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to book
       </Link>
-      <h1 className="mt-2 font-serif text-3xl font-semibold">
+      <h1 className="mt-2 font-serif text-3xl font-normal">
         Report this book
       </h1>
       <p className="mt-1 text-sm text-muted">
@@ -51,7 +51,7 @@ export default async function ReportBookPage({
       </p>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mt-4 rounded-card bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
@@ -66,7 +66,7 @@ export default async function ReportBookPage({
             name="reason"
             required
             defaultValue=""
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className="rounded-control border border-control bg-surface px-3 py-2"
           >
             <option value="" disabled>
               Choose a reason
@@ -84,13 +84,13 @@ export default async function ReportBookPage({
           <textarea
             name="details"
             rows={4}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className="rounded-control border border-control bg-surface px-3 py-2"
           />
         </label>
 
         <button
           type="submit"
-          className="w-fit rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+          className="w-fit rounded-control bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
         >
           Submit report
         </button>

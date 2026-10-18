@@ -92,6 +92,19 @@ describe("AdminPage", () => {
     expect(hrefs).not.toContain("/admin/refunds");
   });
 
+  // F5: the Librum's choice card follows catalog.feature (owner, admin).
+  it.each<[StaffRole, boolean]>([
+    ["owner", true],
+    ["admin", true],
+    ["editor", false],
+    ["moderator", false],
+    ["support", false],
+  ])("%s: Librum's choice link shown = %s", async (role, shown) => {
+    mockRequireStaff.mockResolvedValueOnce({ userId: "staff-1", role });
+    const hrefs = collectLinkHrefs(await AdminPage());
+    expect(hrefs.includes("/admin/librum-choice")).toBe(shown);
+  });
+
   it("owner: also shows the Blog link", async () => {
     mockRequireStaff.mockResolvedValueOnce({ userId: "staff-1", role: "owner" });
     const page = await AdminPage();

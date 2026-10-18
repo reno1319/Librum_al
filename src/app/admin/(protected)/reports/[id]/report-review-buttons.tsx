@@ -35,7 +35,7 @@ export function ReportReviewButtons({
             e.preventDefault();
           }
         }}
-        className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+        className="rounded-control bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
       >
         {pending ? "Submitting…" : "Resolve report"}
       </button>
@@ -48,7 +48,7 @@ export function ReportReviewButtons({
             e.preventDefault();
           }
         }}
-        className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-60"
+        className="rounded-control border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-60"
       >
         {pending ? "Submitting…" : "Dismiss report"}
       </button>

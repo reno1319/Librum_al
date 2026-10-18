@@ -22,9 +22,9 @@ import ReactMarkdown, { type Components } from "react-markdown";
 // reuse this app's own existing typographic tokens (font-serif
 // headings, text-primary links, text-muted blockquotes) instead.
 const COMPONENTS: Components = {
-  h1: (props) => <h1 className="mt-6 font-serif text-2xl font-semibold text-foreground" {...props} />,
-  h2: (props) => <h2 className="mt-6 font-serif text-xl font-semibold text-foreground" {...props} />,
-  h3: (props) => <h3 className="mt-4 font-serif text-lg font-semibold text-foreground" {...props} />,
+  h1: (props) => <h1 className="mt-6 font-serif text-2xl font-normal text-foreground" {...props} />,
+  h2: (props) => <h2 className="mt-6 font-serif text-xl font-normal text-foreground" {...props} />,
+  h3: (props) => <h3 className="mt-4 font-serif text-lg font-normal text-foreground" {...props} />,
   p: (props) => <p className="mt-4 leading-relaxed text-foreground/90" {...props} />,
   a: (props) => <a className="text-primary underline underline-offset-2" {...props} />,
   ul: (props) => <ul className="mt-4 list-disc space-y-1 pl-6" {...props} />,
@@ -35,7 +35,7 @@ const COMPONENTS: Components = {
   hr: (props) => <hr className="my-8 border-border" {...props} />,
   strong: (props) => <strong className="font-semibold" {...props} />,
   // eslint-disable-next-line @next/next/no-img-element -- Markdown source URLs are arbitrary strings, not statically known at build time, so next/image's own required width/height/loader contract doesn't apply here.
-  img: (props) => <img className="mt-4 aspect-[3/2] w-full rounded-lg object-cover" {...props} alt={props.alt ?? ""} />,
+  img: (props) => <img className="mt-4 aspect-[3/2] w-full rounded-card object-cover" {...props} alt={props.alt ?? ""} />,
 };
 
 export function BlogMarkdown({ markdown }: { markdown: string }) {

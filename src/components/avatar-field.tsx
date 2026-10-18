@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { fileInputClasses } from "@/lib/form-styles";
+import { plainFileInputClasses } from "@/lib/form-styles";
 
 // LIBRUM 2.0 LAUNCH-FIX-1A AVATAR-1: the same direct browser->Storage
 // pattern PRODUCT-5 proved for manuscripts and covers (see
@@ -210,19 +210,19 @@ export function AvatarField({
         <img
           src={displayedPreview}
           alt=""
-          className="h-16 w-16 rounded-full object-cover"
+          className="size-16 shrink-0 rounded-full object-cover"
         />
       ) : (
-        <div className="h-16 w-16 rounded-full bg-border" />
+        <div className="size-16 shrink-0 rounded-full bg-border" />
       )}
 
-      <div className="flex flex-1 flex-col gap-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
         <label className="flex flex-col gap-1 text-sm">
           Photo (JPG or PNG, up to 5MB)
           <input
             type="file"
             accept="image/png,image/jpeg"
-            className={fileInputClasses}
+            className={plainFileInputClasses}
             onChange={(e) => handleAvatarChange(e.target.files?.[0] ?? null)}
           />
         </label>
@@ -236,7 +236,7 @@ export function AvatarField({
         {status === "error" && (
           <p
             role="alert"
-            className="rounded-lg border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
+            className="rounded-card border-l-4 border-red-600 bg-surface px-3 py-2 text-sm text-red-800"
           >
             {errorMessage}
           </p>

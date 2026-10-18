@@ -21,7 +21,7 @@ export default async function NewBlogPostPage({
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/admin/blog" className="text-sm text-muted hover:underline">
+      <Link href="/admin/blog" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to Blog
       </Link>
       <div className="mt-2">
@@ -29,7 +29,7 @@ export default async function NewBlogPostPage({
       </div>
 
       {error && (
-        <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-4 rounded-card bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}

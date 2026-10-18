@@ -86,12 +86,12 @@ describe("formatMinorAmount", () => {
 
   it("never clamps a negative balance to zero -- renders the negative sign", () => {
     expect(formatMinorAmount(-800, "USD")).toBe("-USD 8.00");
-    expect(formatMinorAmount(-800, "ALL")).toBe("-8,00 ALL");
+    expect(formatMinorAmount(-800, "ALL")).toBe("-8 ALL");
   });
 
   it("formats zero without throwing", () => {
     expect(formatMinorAmount(0, "USD")).toBe("USD 0.00");
-    expect(formatMinorAmount(0, "ALL")).toBe("0,00 ALL");
+    expect(formatMinorAmount(0, "ALL")).toBe("0 ALL");
   });
 
   it("a malformed ledger currency is never guessed", () => {

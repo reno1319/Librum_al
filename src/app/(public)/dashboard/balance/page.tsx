@@ -36,7 +36,7 @@ import type { AuthorPayoutOverviewRow } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Financial Balance",
+  title: "Financial balance",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -157,14 +157,14 @@ export default async function BalancePage({
   const isEditingBank = editBank === "1";
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-8">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
       <div className="mt-2">
         <PageHeader
-          title="Financial Balance"
+          title="Financial balance"
           description={`Your ledger balance across every sale, refund, adjustment, and payout. New sales settle ${AUTHOR_EARNINGS_SETTLEMENT_DAYS} days after purchase, once Librum's refund window has closed, and become available for payout at that point${schedulerEnabled ? "." : " — an exact payout date isn't scheduled yet."}`}
         />
       </div>
@@ -222,7 +222,7 @@ export default async function BalancePage({
 
             return (
               <section key={row.currency} className="mt-8">
-                <h2 className="font-serif text-lg font-semibold">{row.currency}</h2>
+                <h2 className="font-serif text-lg font-normal">{row.currency}</h2>
 
                 <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-4">
                   <BalanceCard
@@ -282,7 +282,7 @@ export default async function BalancePage({
             );
           })}
 
-          <h2 className="mt-10 font-serif text-xl font-semibold">Recent activity</h2>
+          <h2 className="mt-10 font-serif text-xl font-normal">Recent activity</h2>
           {activity.length === 0 ? (
             <EmptyState className="mt-4" title="No activity yet." />
           ) : (
@@ -316,7 +316,7 @@ export default async function BalancePage({
               failure detail, no controls -- this is reporting only, not the
               legacy Stripe Connect onboarding UI (that stays at
               /dashboard/payouts, untouched). */}
-          <h2 className="mt-10 font-serif text-xl font-semibold">Payout history</h2>
+          <h2 className="mt-10 font-serif text-xl font-normal">Payout history</h2>
           {payoutHistory.length === 0 ? (
             <EmptyState className="mt-4" title="No payouts yet." />
           ) : (
@@ -370,10 +370,10 @@ export default async function BalancePage({
           only prepares the NOT-YET-ACTIVE bank-transfer payout path
           this migration foundation exists for. */
       <section className="mt-10 border-t border-border pt-8">
-        <h2 className="font-serif text-xl font-semibold">Payout setup</h2>
+        <h2 className="font-serif text-xl font-normal">Payout setup</h2>
 
-        <div className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <h3 className="font-serif text-base font-semibold">Bank account</h3>
+        <div className="mt-4 rounded-card border border-border bg-surface p-4 shadow-sm">
+          <h3 className="font-serif text-base font-normal">Bank account</h3>
 
           {destination && !isEditingBank ? (
             <>
@@ -430,7 +430,7 @@ export default async function BalancePage({
                     placeholder="AL47 2121 1009 0000 0002 3569 8741"
                     className={formControlClasses}
                   />
-                  <span className="text-xs text-muted">
+                  <span className="text-sm text-muted">
                     We check that this is a validly formatted IBAN — this confirms the format
                     only, not that the account belongs to you.
                   </span>
@@ -456,8 +456,8 @@ export default async function BalancePage({
           )}
         </div>
 
-        <div className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <h3 className="font-serif text-base font-semibold">Payout threshold</h3>
+        <div className="mt-4 rounded-card border border-border bg-surface p-4 shadow-sm">
+          <h3 className="font-serif text-base font-normal">Payout threshold</h3>
           <p className="mt-2 text-sm text-muted">
             {minimumPolicyConfigured
               ? "Payout threshold is ready to be set."
@@ -490,7 +490,7 @@ function BalanceCard({
   emphasize?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+    <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
       <p className="text-sm text-muted">{label}</p>
       <p
         className={

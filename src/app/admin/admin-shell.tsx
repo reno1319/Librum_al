@@ -96,7 +96,7 @@ export async function AdminShell({
               type="submit"
               className="focus-ring rounded-sm text-sm font-medium text-foreground transition-colors hover:underline"
             >
-              Sign out
+              Log out
             </button>
           </form>
 
@@ -114,7 +114,7 @@ export async function AdminShell({
               <li key={item.href}>
                 <NavLinks
                   items={[item]}
-                  className="block rounded-md px-3 py-2 hover:bg-surface-hover"
+                  className="block rounded-control px-3 py-2 hover:bg-surface-hover"
                 />
               </li>
             ))}

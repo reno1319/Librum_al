@@ -16,7 +16,7 @@ export type SurfaceCardProps = {
 export function SurfaceCard({ children, className }: SurfaceCardProps) {
   return (
     <div
-      className={["rounded-lg border border-border bg-surface p-6", className]
+      className={["rounded-card border border-border bg-surface p-6", className]
         .filter(Boolean)
         .join(" ")}
     >

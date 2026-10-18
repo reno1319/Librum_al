@@ -27,9 +27,14 @@ import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CoverField } from "@/components/cover-field";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { getManuscriptLabel } from "@/lib/manuscript-label";
+import { getCatalogSchemaFeatures } from "@/lib/catalog-schema-features";
+import { getRightsDeclarationState } from "@/lib/book-rights";
+import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { FormDraftKeeper } from "@/components/form-draft-keeper";
+import { CheckedBookField } from "@/components/checked-book-field";
 import type { Book, Series, Contributor } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -59,14 +64,25 @@ export const dynamic = "force-dynamic";
 const SUBTITLE_MAX_LENGTH = 300;
 const PUBLISHER_MAX_LENGTH = 200;
 const EDITION_MAX_LENGTH = 100;
+// F4 (P1): books.pen_name's own 1-120 character check.
+const PEN_NAME_MAX_LENGTH = 120;
+
+// F4 (D3): the existing generic sentence, shown in the Publishing box
+// when the book's rights choice cannot be read (before the migration, or
+// a read error); Publish is disabled with it.
+const PUBLISH_NOT_POSSIBLE_YET_MESSAGE =
+  "We couldn't publish your book yet. Please try again from your dashboard";
 
 // QA: the "Save changes" fields whose typed values come back after
 // updateBook rejects the form. Plain fields only -- the cover and
 // manuscript pickers carry upload paths and are never copied (see
-// src/lib/form-draft.ts).
+// src/lib/form-draft.ts). F4: "penName" joins them; the Rights radios
+// are not kept (form-draft never copies radios) and show the stored
+// choice again after an error, because the page re-reads it.
 const EDIT_BOOK_FORM_ID = "edit-book-form";
 const EDIT_BOOK_DRAFT_FIELDS = [
   "title",
+  "penName",
   "subtitle",
   "description",
   "language",
@@ -170,16 +186,29 @@ export default async function EditBookPage({
   const coverUrl = book.cover_path
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
-  const manuscriptName = book.file_path?.split("/").pop() ?? null;
+  // iPhone step (I3): "EPUB file", never the storage file name (a UUID).
+  const manuscriptLabel = getManuscriptLabel(book.file_path);
+
+  // F4 (D1/P4): which new fields can be shown, and the book's rights
+  // choice read three ways. `unavailable` (before the migration, or a
+  // read error) hides the Rights choice, shows the generic notice and
+  // disables Publish; the server's publish gate decides on its own.
+  const [schemaFeatures, rightsState] = await Promise.all([
+    getCatalogSchemaFeatures(),
+    getRightsDeclarationState(book.id),
+  ]);
+  const currentRightsBasis = rightsState.kind === "present" ? rightsState.declaration.basis : null;
+  const authorPublicName = resolvePublicAuthorName(profile);
 
   const readiness = resolvePublishReadiness({
     book,
     paidPublishingAvailable: canPublishPaidTitle(),
+    hasRightsDeclaration: rightsState.kind === "present",
   });
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted hover:underline">
+    <main className="page-container flex-1 pt-5 pb-10 sm:pt-8">
+      <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to dashboard
       </Link>
 
@@ -213,7 +242,7 @@ export default async function EditBookPage({
             className="flex flex-col gap-10"
           >
             <section>
-              <h2 className="font-serif text-xl font-semibold">Book Details</h2>
+              <h2 className="font-serif text-xl font-normal">Book details</h2>
               <div className="mt-4 flex flex-col gap-4">
                 <label className="flex flex-col gap-1 text-sm">
                   Title
@@ -225,6 +254,26 @@ export default async function EditBookPage({
                     className={formControlClasses}
                   />
                 </label>
+
+                {/* F4 (P1, Q1 = a): directly under Title, only once the
+                    database can store it. Cleared to none when emptied. */}
+                {schemaFeatures.penName && (
+                  <label className="flex flex-col gap-1 text-sm">
+                    Pen name (optional)
+                    <input
+                      name="penName"
+                      type="text"
+                      defaultValue={book.pen_name ?? ""}
+                      maxLength={PEN_NAME_MAX_LENGTH}
+                      className={formControlClasses}
+                    />
+                    {authorPublicName && (
+                      <span className="text-sm text-muted">
+                        Leave blank to use your author name, {authorPublicName}.
+                      </span>
+                    )}
+                  </label>
+                )}
 
                 <label className="flex flex-col gap-1 text-sm">
                   Subtitle (optional)
@@ -238,14 +287,14 @@ export default async function EditBookPage({
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
-                  Description (optional)
+                  Description
                   <textarea
                     name="description"
                     rows={4}
                     defaultValue={book.description}
                     className={formControlClasses}
                   />
-                  <span className="text-xs text-muted">
+                  <span className="text-sm text-muted">
                     A couple of sentences or more helps readers decide.
                   </span>
                 </label>
@@ -339,7 +388,7 @@ export default async function EditBookPage({
                   </select>
                 </label>
 
-                <details className="rounded-lg border border-border px-4 py-3">
+                <details className="rounded-card border border-border px-4 py-3">
                   <summary className="cursor-pointer text-sm font-medium text-foreground">
                     Additional book details
                   </summary>
@@ -353,7 +402,7 @@ export default async function EditBookPage({
                         placeholder="e.g. space opera, first contact, hard sci-fi"
                         className={formControlClasses}
                       />
-                      <span className="text-xs text-muted">
+                      <span className="text-sm text-muted">
                         Comma-separated. Helps readers find your book by terms
                         beyond its genre — up to 15.
                       </span>
@@ -361,14 +410,14 @@ export default async function EditBookPage({
 
                     <label className="flex flex-col gap-1 text-sm">
                       ISBN (optional)
-                      <input
+                      <CheckedBookField
+                        kind="isbn"
+                        id="edit-book-isbn"
                         name="isbn"
-                        type="text"
                         defaultValue={book.isbn ?? ""}
                         placeholder="e.g. 978-3-16-148410-0"
-                        className={formControlClasses}
                       />
-                      <span className="text-xs text-muted">
+                      <span className="text-sm text-muted">
                         Only if you already own one — Librum doesn&apos;t issue
                         or register ISBNs. Leave blank to skip.
                       </span>
@@ -383,7 +432,7 @@ export default async function EditBookPage({
                         maxLength={PUBLISHER_MAX_LENGTH}
                         className={formControlClasses}
                       />
-                      <span className="text-xs text-muted">
+                      <span className="text-sm text-muted">
                         The publishing name for this edition, if applicable.
                       </span>
                     </label>
@@ -402,23 +451,30 @@ export default async function EditBookPage({
 
                     <label className="flex flex-col gap-1 text-sm">
                       Originally published (optional)
-                      <input
+                      <CheckedBookField
+                        kind="pastDate"
+                        id="edit-book-original-publication-date"
                         name="originalPublicationDate"
-                        type="date"
                         defaultValue={book.original_publication_date ?? ""}
-                        className={formControlClasses}
                       />
-                      <span className="text-xs text-muted">
+                      <span className="text-sm text-muted">
                         Only if this edition was first published elsewhere
                         before arriving on Librum.
                       </span>
                     </label>
 
                     {series && series.length === 0 && (
-                      <p className="text-xs text-muted">
+                      <p className="text-sm text-muted">
                         Want to group this with other books as a series?{" "}
-                        <Link href="/dashboard/series" className="focus-ring rounded-sm underline">
+                        {/* FIX1 (X11): a new tab, so unsaved edits stay. */}
+                        <Link
+                          href="/dashboard/series"
+                          target="_blank"
+                          rel="noopener"
+                          className="focus-ring rounded-sm underline"
+                        >
                           Create a series first
+                          <span className="sr-only"> (opens in a new tab)</span>
                         </Link>
                         , then come back here.
                       </p>
@@ -457,19 +513,44 @@ export default async function EditBookPage({
                     )}
                   </div>
                 </details>
+
+                {/* F4 (P3, Q3 = a): the last block of Book details, with
+                    the book's current choice preselected. Saved with
+                    "Save changes"; a new record is made only when the
+                    choice changes. Sentences from RIGHTS_STATEMENTS. */}
+                {schemaFeatures.rights && rightsState.kind !== "unavailable" && (
+                  <fieldset className="flex flex-col gap-3">
+                    <legend className="mb-3 font-bold text-foreground">Rights</legend>
+                    {RIGHTS_BASES.map((basis) => (
+                      <label
+                        key={basis}
+                        className="flex cursor-pointer items-center gap-3.5 rounded-[4px] border border-[#c9c0ae] bg-surface p-4 has-checked:border-2 has-checked:border-primary has-checked:bg-[#f4f8f5]"
+                      >
+                        <input
+                          type="radio"
+                          name="rightsBasis"
+                          value={basis}
+                          defaultChecked={currentRightsBasis === basis}
+                          className="focus-ring h-5 w-5 shrink-0 accent-primary"
+                        />
+                        <span className="text-foreground">{RIGHTS_STATEMENTS[basis].text}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
               </div>
             </section>
 
             <section>
-              <h2 className="font-serif text-xl font-semibold">Files</h2>
+              <h2 className="font-serif text-xl font-normal">Files</h2>
               <div className="mt-4 flex flex-col gap-6">
                 <CoverField authorId={user.id} existingCoverUrl={coverUrl ?? undefined} />
 
                 <div className="flex flex-col gap-2">
                   <p className="text-sm font-medium">
-                    {manuscriptName ? `Current manuscript: ${manuscriptName}` : "No manuscript on file"}
+                    {manuscriptLabel ? `Current manuscript: ${manuscriptLabel}` : "No manuscript on file"}
                   </p>
-                  <p className="text-xs text-muted">
+                  <p className="text-sm text-muted">
                     Leave blank to keep your current manuscript. Replacing it updates
                     the file existing readers receive on their next download. Readers
                     can preview approximately the first 10% of your ebook — generated
@@ -479,14 +560,13 @@ export default async function EditBookPage({
                     bookTitle={book.title}
                     authorName={resolvePublicAuthorName(profile) ?? ""}
                     authorId={user.id}
-                    existingFilename={manuscriptName ?? undefined}
                   />
                 </div>
               </div>
             </section>
 
             <section>
-              <h2 className="font-serif text-xl font-semibold">Pricing</h2>
+              <h2 className="font-serif text-xl font-normal">Pricing</h2>
               <div className="mt-4">
                 {/* ALL-WIRING-2: an ALL text field, not a USD number
                     field. `type="number"` is wrong for this input in two
@@ -504,17 +584,30 @@ export default async function EditBookPage({
                     book forces the author to supply one. That single
                     save is also what returns the book to listings and
                     search. */}
+                {/* iPhone step (I2): the same price box as Add a book
+                    step 3 (upload-wizard.tsx), copied, not shared: the
+                    wizard's source-text tests pin its own markup. This
+                    page has no per-field price error, so the border is
+                    always the control colour. */}
                 <label className="flex flex-col gap-1 text-sm">
                   Price (ALL)
-                  <input
-                    name="price"
-                    type="text"
-                    inputMode="decimal"
-                    required
-                    defaultValue={book.price_all == null ? "" : String(book.price_all)}
-                    className={formControlClasses}
-                  />
-                  <span className="text-xs text-muted">
+                  <span className="flex w-full max-w-[17.5rem] items-stretch overflow-hidden rounded-[4px] border border-[#8c8472] bg-surface focus-within:shadow-[var(--focus-ring)]">
+                    <input
+                      name="price"
+                      type="text"
+                      inputMode="decimal"
+                      required
+                      defaultValue={book.price_all == null ? "" : String(book.price_all)}
+                      className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-lg outline-none"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="flex items-center bg-surface-hover px-4 font-bold text-foreground"
+                    >
+                      ALL
+                    </span>
+                  </span>
+                  <span className="text-sm text-muted">
                     Whole lek: 0 for a free ebook, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
                     {MAXIMUM_CATALOG_PRICE_ALL}. Librum takes a{" "}
                     {PLATFORM_FEE_PERCENT}% platform fee — you keep the rest of
@@ -530,7 +623,7 @@ export default async function EditBookPage({
           </form>
 
           <section className="border-t border-border pt-8">
-            <h2 className="font-serif text-xl font-semibold">People</h2>
+            <h2 className="font-serif text-xl font-normal">People</h2>
             <p className="mt-1 text-sm text-muted">
               Credit anyone besides yourself — an illustrator, translator,
               narrator, or co-author. Just a name and a role, no Librum account
@@ -542,7 +635,7 @@ export default async function EditBookPage({
                 {contributors.map((c) => (
                   <li
                     key={c.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2"
+                    className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface px-3 py-2"
                   >
                     <span>
                       {c.name} <span className="text-muted">· {c.role}</span>
@@ -595,8 +688,8 @@ export default async function EditBookPage({
         </div>
 
         <div className="flex flex-col gap-6">
-          <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-            <h2 className="font-serif text-lg font-semibold">Publishing</h2>
+          <section className="rounded-card border border-border bg-surface p-4 shadow-sm">
+            <h2 className="font-serif text-lg font-normal">Publishing</h2>
             <p className="mt-2 text-sm">
               Status: <span className="font-medium">{book.status === "draft" ? "Draft" : "Published"}</span>
             </p>
@@ -640,6 +733,24 @@ export default async function EditBookPage({
                       your changes.
                     </p>
                   </Alert>
+                ) : readiness.missingDescription ? (
+                  // FIX1 (X16): Renato's rule, a description before
+                  // Publish. Checked after the price, as performPublish()
+                  // does; the second W-B sentence is left out here
+                  // because this book already is a draft.
+                  <Alert
+                    variant="warning"
+                    title="Add a description before publishing."
+                    className="mt-4"
+                  />
+                ) : rightsState.kind === "unavailable" ? (
+                  // F4 (D3): the rights choice cannot be read, so
+                  // Publish is refused; the existing generic sentence.
+                  <Alert variant="warning" title={PUBLISH_NOT_POSSIBLE_YET_MESSAGE} className="mt-4" />
+                ) : readiness.missingRights ? (
+                  // F4 (P4): after the description, as performPublish()
+                  // checks it.
+                  <Alert variant="warning" title="Choose the rights before publishing." className="mt-4" />
                 ) : readiness.paidPublishingBlocked ? (
                   <Alert
                     variant="warning"
@@ -673,7 +784,12 @@ export default async function EditBookPage({
                 <form action={publishBook.bind(null, book.id)} className="mt-4">
                   <button
                     type="submit"
-                    disabled={readiness.missingAllPrice || readiness.paidPublishingBlocked}
+                    disabled={
+                      readiness.missingAllPrice ||
+                      readiness.missingDescription ||
+                      readiness.missingRights ||
+                      readiness.paidPublishingBlocked
+                    }
                     className={buttonClasses(
                       "primary",
                       "md",
@@ -699,8 +815,8 @@ export default async function EditBookPage({
             )}
           </section>
 
-          <section className="rounded-lg border border-dashed border-border p-4">
-            <h2 className="font-serif text-sm font-semibold text-muted">Danger zone</h2>
+          <section className="rounded-card border border-dashed border-border p-4">
+            <h2 className="font-serif text-sm font-normal text-muted">Danger zone</h2>
             <p className="mt-1 text-xs text-muted">This can&apos;t be undone.</p>
             <form action={deleteBook.bind(null, book.id)} className="mt-3">
               <DeleteBookButton title={book.title} />

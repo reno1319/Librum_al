@@ -40,7 +40,7 @@ export default function PublicError({
     <main className="flex w-full flex-1 items-center justify-center px-4 py-24 sm:px-6">
       <div className="mx-auto w-full max-w-md text-center">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">Error</p>
-        <h1 className="mt-2 font-serif text-3xl font-semibold text-foreground md:text-4xl">
+        <h1 className="mt-2 font-serif text-3xl font-normal text-foreground md:text-4xl">
           Something went wrong
         </h1>
         <p className="mt-3 text-muted">

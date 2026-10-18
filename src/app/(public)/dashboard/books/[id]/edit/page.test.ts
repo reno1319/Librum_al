@@ -87,9 +87,11 @@ describe("Edit page: bibliographic metadata fields", () => {
     const editionBlock = source.match(/name="edition"[\s\S]{0,400}?\/>/)![0];
     expect(editionBlock).toContain('defaultValue={book.edition ?? ""}');
 
-    const dateBlock = source.match(/name="originalPublicationDate"[\s\S]{0,400}?\/>/)![0];
+    const dateBlock = source.match(/kind="pastDate"[\s\S]{0,400}?\/>/)![0];
+    expect(dateBlock).toContain('name="originalPublicationDate"');
     expect(dateBlock).toContain('defaultValue={book.original_publication_date ?? ""}');
-    expect(dateBlock).toContain('type="date"');
+    // FIX1 (X9): the checked field renders type="date" for kind="pastDate".
+    expect(dateBlock).toContain('kind="pastDate"');
   });
 
   it("Subtitle/Publisher/Edition carry the same client-side max lengths actions.ts enforces server-side", () => {
@@ -218,7 +220,7 @@ describe("Edit page: form organization", () => {
 
   it("Title, Subtitle, Description, Language, and Genre stay directly visible (not inside the disclosure)", () => {
     const detailsStart = source.indexOf("<details");
-    const bookDetailsSectionStart = source.indexOf('<h2 className="font-serif text-xl font-semibold">Book Details</h2>');
+    const bookDetailsSectionStart = source.indexOf('<h2 className="font-serif text-xl font-normal">Book details</h2>');
     const beforeDisclosure = source.slice(bookDetailsSectionStart, detailsStart);
     for (const fieldName of ["title", "subtitle", "description", "language", "genre"]) {
       expect(beforeDisclosure).toContain(`name="${fieldName}"`);

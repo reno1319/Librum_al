@@ -63,6 +63,12 @@ import type { Permission, StaffRole } from "@/lib/types";
 // neither -- editorial content is unrelated to either role's existing
 // responsibilities (dispute/refund/report triage), so granting it would
 // be scope creep, not a real current need.
+//
+// BOOK-PEN-NAME-RIGHTS-CHOICE-1 adds catalog.feature (pick or clear the
+// "Librum's choice" book), granted to owner and admin only; editor stays
+// the blog role. It is TypeScript-only: SQL staff_has_permission() does
+// not know it, because the two functions it gates (set_librum_choice,
+// clear_librum_choice) are service_role-only and never call it.
 export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>> = {
   owner: [
     "admin.access",
@@ -76,6 +82,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "finance.view",
     "blog.view",
     "blog.manage",
+    "catalog.feature",
   ],
   admin: [
     "admin.access",
@@ -88,6 +95,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "finance.view",
     "blog.view",
     "blog.manage",
+    "catalog.feature",
   ],
   moderator: ["admin.access", "reports.view", "reports.resolve"],
   support: ["admin.access", "refunds.view"],

@@ -7,49 +7,51 @@ export const metadata: Metadata = {
   description: "Learn how to prepare, publish, price, and sell your ebook with Librum.",
 };
 
+// FIX1 (X3): the step numbers come from the numbered list itself, once
+// (they were typed into each title as well, so readers heard "1. 1.").
 const steps = [
   {
-    title: "1. Sign up as an author",
+    title: "Sign up as an author",
     body: "Create an account and choose \"Author\" when you sign up.",
   },
   {
-    title: "2. Payout setup",
+    title: "Payout setup",
     body: "Paid publishing and author payout setup have not launched yet. Authors can continue to publish free books while Librum completes its payment and payout systems.",
   },
   {
-    title: "3. Upload your book",
+    title: "Upload your book",
     body: "From your dashboard, add a title, description, genre, price, a cover image (JPG or PNG, up to 5MB), and your manuscript — an EPUB file, or a DOCX file that Librum converts into an EPUB for you (either way, up to 50MB). It's saved as a draft.",
   },
   {
-    title: "4. Publish",
+    title: "Publish",
     body: "When you're ready, publish the draft. It immediately appears on the storefront and in search.",
   },
   {
-    title: "5. Get paid",
+    title: "Get paid",
     body: `When paid publishing launches, the current commission terms allocate ${100 - PLATFORM_FEE_PERCENT}% to the author and ${PLATFORM_FEE_PERCENT}% to Librum. The author payout method and timing will be published before paid publishing launches.`,
   },
 ];
 
 export default function HowItWorksPage() {
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="font-serif text-4xl font-semibold">
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
+      <h1 className="font-serif text-4xl font-normal">
         How self-publishing works
       </h1>
       <p className="mt-3 text-muted">
         From signing up to getting paid, here&apos;s the whole process.
       </p>
 
-      <ol className="mt-8 flex flex-col gap-6">
+      <ol className="mt-8 flex list-decimal flex-col gap-6 pl-6 marker:font-serif marker:text-lg">
         {steps.map((step) => (
-          <li key={step.title}>
-            <h2 className="font-serif text-lg font-semibold">{step.title}</h2>
+          <li key={step.title} className="pl-1">
+            <h2 className="font-serif text-lg font-normal">{step.title}</h2>
             <p className="mt-1 text-foreground/90">{step.body}</p>
           </li>
         ))}
       </ol>
 
-      <h2 className="mt-10 font-serif text-xl font-semibold">
+      <h2 className="mt-10 font-serif text-xl font-normal">
         File requirements
       </h2>
       <ul className="mt-3 list-disc pl-5 text-foreground/90">
@@ -59,7 +61,8 @@ export default function HowItWorksPage() {
 
       <p className="mt-10 text-sm text-muted">
         Ready to start?{" "}
-        <Link href="/signup" className="text-primary underline">
+        {/* FIX1 (X2): Author chosen, as on Earnings. */}
+        <Link href="/signup?role=author" className="text-primary underline">
           Sign up
         </Link>{" "}
         or check the{" "}

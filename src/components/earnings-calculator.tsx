@@ -45,7 +45,7 @@ export function EarningsCalculator() {
     : { grossMinor: 0, platformFeeMinor: 0, authorEarningsMinor: 0 };
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-6 shadow-sm">
+    <div className="rounded-card border border-border bg-surface p-6 shadow-sm">
       <p className="text-xs font-medium uppercase tracking-wide text-muted">
         Earnings calculator
       </p>

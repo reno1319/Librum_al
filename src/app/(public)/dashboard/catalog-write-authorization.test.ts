@@ -50,6 +50,14 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: () => Promise.resolve({ get: () => undefined }) }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ __emailAdmin: true }) }));
 vi.mock("@/lib/email", () => ({ sendNewBookEmails: vi.fn(async () => undefined) }));
+// F4 (P4): performPublish now reads the book's rights declaration
+// (src/lib/book-rights.ts). This suite is about catalog writes, so the
+// declaration is present and recording succeeds; the rights gate itself
+// is covered in dashboard/books/f4-rights-pen-name.test.ts.
+vi.mock("@/lib/book-rights", () => ({
+  getRightsDeclarationState: async () => ({ kind: "present", declaration: { basis: "own_rights" } }),
+  recordRightsDeclaration: async () => ({ ok: true }),
+}));
 
 let recoveryActive = false;
 vi.mock("@/lib/recovery-guard", () => ({
@@ -145,7 +153,13 @@ type Row = Record<string, unknown>;
 type Filter =
   | { kind: "eq"; column: string; value: unknown }
   | { kind: "is"; column: string; value: null }
-  | { kind: "in"; column: string; value: unknown[] };
+  | { kind: "in"; column: string; value: unknown[] }
+  // F4 (N1): performPublish's description guard.
+  | { kind: "neq"; column: string; value: unknown }
+  | { kind: "notNull"; column: string };
+
+const filterValue = (filter: Filter | undefined): unknown =>
+  filter && filter.kind !== "notNull" ? filter.value : undefined;
 type Via = "session" | "catalog-writer";
 type Write = {
   via: Via;
@@ -178,6 +192,9 @@ let forcedCatalogWriterInsertResult:
   | null = null;
 // Forces the NEXT membership RPC's result, without writing anything.
 let forcedRpcResult: { data: unknown; error: { code: string; message: string } | null } | null = null;
+// F5 (C5): forces the NEXT catalog-writer update of librum_choice_at to
+// fail with this error (or to throw), without changing any row.
+let forcedPickClearError: { code: string; message: string } | "throw" | null = null;
 // Objects the session's storage double can download (temporary uploads).
 let storedObjects: Record<string, Buffer> = {};
 
@@ -189,6 +206,9 @@ const INSERT_DEFAULTS: Record<string, Row> = {
 
 function matches(row: Row, filters: Filter[]): boolean {
   return filters.every((f) => {
+    // SQL: NULL <> x is not true, so a null column never matches neq.
+    if (f.kind === "neq") return row[f.column] != null && row[f.column] !== f.value;
+    if (f.kind === "notNull") return row[f.column] != null;
     if (f.kind === "eq") return f.value !== null && row[f.column] === f.value;
     if (f.kind === "is") return row[f.column] === null;
     return f.value.includes(row[f.column]);
@@ -236,10 +256,10 @@ function builder(table: string, via: Via) {
       if (table === "bundle_books" && columns.includes("bundles!inner")) {
         const statusFilter = filters.find((f) => f.column === "bundles.status");
         data = rows
-          .filter((r) => r.book_id === filters.find((f) => f.column === "book_id")?.value)
+          .filter((r) => r.book_id === filterValue(filters.find((f) => f.column === "book_id")))
           .filter((r) => {
             const b = tables.bundles.find((x) => x.id === r.bundle_id);
-            return !!b && (!statusFilter || b.status === statusFilter.value);
+            return !!b && (!statusFilter || b.status === filterValue(statusFilter));
           });
       }
       if (single === "single") {
@@ -297,6 +317,13 @@ function builder(table: string, via: Via) {
       return { data: null, error: { code: "42501", message: "permission denied" } };
     }
     const changed = rows.filter((r) => rlsScoped(r) && matches(r, filters));
+    if (via === "catalog-writer" && forcedPickClearError !== null && keys.includes("librum_choice_at")) {
+      const forced = forcedPickClearError;
+      forcedPickClearError = null;
+      writes.push({ via, table, op, payload, filters: [...filters], rowsChanged: 0, denied: false });
+      if (forced === "throw") throw new Error("network down");
+      return { data: null, error: forced };
+    }
     if (via === "catalog-writer" && forcedCatalogWriterRowCount !== null) {
       const count = forcedCatalogWriterRowCount;
       forcedCatalogWriterRowCount = null;
@@ -320,6 +347,12 @@ function builder(table: string, via: Via) {
     eq: (column: string, value: unknown) => (filters.push({ kind: "eq", column, value }), chain),
     is: (column: string, value: null) => (filters.push({ kind: "is", column, value }), chain),
     in: (column: string, value: unknown[]) => (filters.push({ kind: "in", column, value }), chain),
+    neq: (column: string, value: unknown) => (filters.push({ kind: "neq", column, value }), chain),
+    not: (column: string, operator: string, value: unknown) => {
+      if (operator !== "is" || value !== null) throw new Error(`unsupported not(${operator})`);
+      filters.push({ kind: "notNull", column });
+      return chain;
+    },
     order: () => chain,
     returns: () => chain,
     single: () => ((single = "single"), chain),
@@ -540,7 +573,7 @@ function seed(overrides: { book?: Row; bundle?: Row } = {}) {
     {
       id: BOOK_ID, author_id: USER_ID, title: "Book", status: "draft", price_all: 0, price_cents: 0,
       published_at: null, cover_path: "c.png", file_path: "f.epub", language: "sq",
-      series_id: SERIES_ID, series_position: 2, ...overrides.book,
+      description: "A real description.", series_id: SERIES_ID, series_position: 2, ...overrides.book,
     },
     { id: "book-a", author_id: USER_ID, status: "published", price_all: 0, price_cents: 0, series_id: SERIES_ID, series_position: 1 },
     { id: "book-b", author_id: USER_ID, status: "published", price_all: 0, price_cents: 0, series_id: null, series_position: null },
@@ -594,6 +627,7 @@ beforeEach(() => {
   forcedCatalogWriterRowCount = null;
   forcedCatalogWriterInsertResult = null;
   forcedRpcResult = null;
+  forcedPickClearError = null;
   storedObjects = {};
   mockRedirect.mockClear();
   mockCreateCatalogWriteClient.mockClear();
@@ -765,9 +799,12 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
     expect(tables.books[0]).toMatchObject({ status: "published", price_all: 0 });
     expect(tables.books[0].published_at).toEqual(expect.any(String));
     expect(sessionWritesTo("books")).toEqual([]);
-    expect(catalogWrites().map((w) => w.op)).toEqual(["insert", "update"]);
+    // F5 (C5): the draft -> published transition then clears any leftover
+    // Librum's choice pick of this book (0 rows on a new book).
+    expect(catalogWrites().map((w) => w.op)).toEqual(["insert", "update", "update"]);
     expect(catalogWrites()[0].payload).not.toHaveProperty("status");
     expect(catalogWrites()[1].payload).toMatchObject({ status: "published" });
+    expect(catalogWrites()[2]).toMatchObject({ payload: { librum_choice_at: null }, rowsChanged: 0 });
   });
 
   it("updateBook: one atomic catalog-writer update carries metadata AND price_all", async () => {
@@ -790,7 +827,9 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
     expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
     expect(bookRow()).toMatchObject({ status: "published" });
     expect(bookRow().published_at).toEqual(expect.any(String));
-    expect(catalogWrites()).toHaveLength(1);
+    // F5 (C5): the publish, then the best-effort pick clear (0 rows here).
+    expect(catalogWrites()).toHaveLength(2);
+    expect(catalogWrites()[1]).toMatchObject({ payload: { librum_choice_at: null }, rowsChanged: 0 });
   });
 
   it("publishBook on a republish keeps the original published_at", async () => {
@@ -811,7 +850,9 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
     seed({ book: { status: "published", price_all: 0, published_at: "2026-09-01T00:00:00Z" } });
     await unpublishBook(BOOK_ID);
     expect(bookRow()).toMatchObject({ status: "draft", published_at: "2026-09-01T00:00:00Z" });
-    expect(catalogWrites()).toHaveLength(1);
+    // F5 (C5): the unpublish, then the best-effort pick clear (0 rows here).
+    expect(catalogWrites()).toHaveLength(2);
+    expect(catalogWrites()[1]).toMatchObject({ payload: { librum_choice_at: null }, rowsChanged: 0 });
   });
 
   it("updateBundle: details AND membership in ONE trusted update_bundle_with_membership call", async () => {
@@ -1020,7 +1061,8 @@ describe("privileged writes stay narrow", () => {
 
     await redirectOf(createBundle(bundleForm("0", "New")));
 
-    expect(catalogWrites()).toHaveLength(7);
+    // F5 (C5): publishBook and unpublishBook each add their pick clear.
+    expect(catalogWrites()).toHaveLength(9);
     for (const w of catalogWrites()) {
       if (w.op === "rpc") {
         // BUNDLE-MEMBERSHIP-AUTH-1: the membership writers are bound to
@@ -1043,7 +1085,12 @@ describe("privileged writes stay narrow", () => {
     seed({ book: { price_all: 0 }, bundle: { price_all: 0 } });
     await redirectOf(publishBook(BOOK_ID));
     await redirectOf(publishBundle(BUNDLE_ID));
-    for (const w of catalogWrites()) {
+    // F5 (C5): the status writes only. The pick clear after the book
+    // publish must NOT carry this compare-and-set (status = 'draft' would
+    // match no row after the publish); it is pinned below.
+    const statusWrites = catalogWrites().filter((w) => Object.prototype.hasOwnProperty.call(w.payload, "status"));
+    expect(statusWrites).toHaveLength(2);
+    for (const w of statusWrites) {
       expect(w.filters).toContainEqual({ kind: "eq", column: "status", value: "draft" });
       expect(w.filters).toContainEqual({ kind: "eq", column: "price_all", value: 0 });
     }
@@ -1533,5 +1580,123 @@ describe("Patch 8: the trusted insert is the only one, and stays in createBook",
     // BOOK-STORAGE-MUTATION-AUTH-1: through the shared constructors.
     expect(createBookBody).toMatch(/const coverPath = canonicalBookCoverPath\(user\.id, bookId, coverResult\.extension\);/);
     expect(createBookBody).toMatch(/const manuscriptPath = canonicalBookManuscriptPath\(user\.id, bookId\);/);
+  });
+});
+
+// ============================================================
+// F5 (C5, Renato 10:25Z): an unpublished book stops being Librum's
+// choice and never gets the pick back by itself. The clear reuses the
+// action's own catalog writer, is scoped to the caller's own book, and
+// is best effort: it never turns a successful unpublish or publish into
+// a failure.
+// ============================================================
+describe("F5: the Librum's choice pick is cleared on unpublish and on a real publish", () => {
+  const PICKED_AT = "2026-10-18T09:00:00Z";
+  const pickClears = () => catalogWrites().filter((w) => writtenKeys(w).includes("librum_choice_at"));
+
+  beforeEach(async () => {
+    const { resetSchemaFeatureOffLogForTests } = await import("@/lib/schema-feature-off");
+    resetSchemaFeatureOffLogForTests();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("unpublishing the picked book clears its pick: exact payload and the three filters", async () => {
+    seed({ book: { status: "published", librum_choice_at: PICKED_AT } });
+    await unpublishBook(BOOK_ID);
+    expect(bookRow()).toMatchObject({ status: "draft", librum_choice_at: null });
+    const [clear] = pickClears();
+    expect(clear.payload).toEqual({ librum_choice_at: null });
+    expect(clear.filters).toEqual([
+      { kind: "eq", column: "id", value: BOOK_ID },
+      { kind: "eq", column: "author_id", value: USER_ID },
+      { kind: "notNull", column: "librum_choice_at" },
+    ]);
+    expect(clear.rowsChanged).toBe(1);
+    // Same writer as the unpublish; no second privileged client.
+    expect(events.filter((e) => e === "createCatalogWriteClient")).toHaveLength(1);
+  });
+
+  it("unpublishing another book leaves the pick where it is", async () => {
+    seed({ book: { status: "published" } });
+    tables.books.push({ id: "book-picked", author_id: USER_ID, status: "published", price_all: 0, librum_choice_at: PICKED_AT });
+    await unpublishBook(BOOK_ID);
+    expect(bookRow("book-picked").librum_choice_at).toBe(PICKED_AT);
+    expect(pickClears()).toHaveLength(1);
+    expect(pickClears()[0].rowsChanged).toBe(0);
+  });
+
+  it("a refused unpublish clears nothing", async () => {
+    seed({ book: { id: "book-x", status: "published" }, bundle: { status: "published" } });
+    bookRow("book-a").librum_choice_at = PICKED_AT;
+    expect(await redirectOf(unpublishBook("book-a"))).toContain("/dashboard?error=");
+    expect(bookRow("book-a")).toMatchObject({ status: "published", librum_choice_at: PICKED_AT });
+    expect(pickClears()).toEqual([]);
+  });
+
+  it("an unpublish that changed no row clears nothing", async () => {
+    seed({ book: { status: "published", librum_choice_at: PICKED_AT } });
+    forcedCatalogWriterRowCount = 0;
+    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("/dashboard?error=Could+not+unpublish+that+book+right+now");
+    expect(pickClears()).toEqual([]);
+  });
+
+  it.each<[string, { code: string; message: string } | "throw"]>([
+    ["a database error", { code: "08006", message: "connection" }],
+    ["a thrown error", "throw"],
+  ])("%s on the clear keeps the successful unpublish and is logged", async (_label, failure) => {
+    seed({ book: { status: "published", librum_choice_at: PICKED_AT } });
+    forcedPickClearError = failure;
+    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("<no redirect>");
+    expect(bookRow().status).toBe("draft");
+    expect(console.error).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["42703", "PGRST204"])("before the migration (%s) the unpublish still succeeds and warns exactly once", async (code) => {
+    seed({ book: { status: "published" } });
+    forcedPickClearError = { code, message: "missing" };
+    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("<no redirect>");
+    bookRow().status = "published";
+    forcedPickClearError = { code, message: "missing" };
+    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("<no redirect>");
+    expect(bookRow().status).toBe("draft");
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("a republished book with a leftover pick comes back without it (publish self-heal)", async () => {
+    seed({ book: { status: "draft", published_at: "2026-09-01T00:00:00Z", librum_choice_at: PICKED_AT } });
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(bookRow()).toMatchObject({ status: "published", librum_choice_at: null });
+    const [clear] = pickClears();
+    expect(clear.filters).toEqual([
+      { kind: "eq", column: "id", value: BOOK_ID },
+      { kind: "eq", column: "author_id", value: USER_ID },
+      { kind: "notNull", column: "librum_choice_at" },
+    ]);
+    expect(events.filter((e) => e === "createCatalogWriteClient")).toHaveLength(1);
+  });
+
+  it("a publish write on an already-published picked book does NOT clear the pick", async () => {
+    seed({ book: { status: "published", published_at: "2026-09-01T00:00:00Z", librum_choice_at: PICKED_AT } });
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(bookRow().librum_choice_at).toBe(PICKED_AT);
+    expect(pickClears()).toEqual([]);
+  });
+
+  it("a refused publish clears nothing", async () => {
+    seed({ book: { status: "draft", price_all: null, librum_choice_at: PICKED_AT } });
+    await redirectOf(publishBook(BOOK_ID));
+    expect(bookRow().librum_choice_at).toBe(PICKED_AT);
+    expect(pickClears()).toEqual([]);
+  });
+
+  it("a failing self-heal clear keeps the successful publish", async () => {
+    seed({ book: { status: "draft", librum_choice_at: PICKED_AT } });
+    forcedPickClearError = { code: "08006", message: "connection" };
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(bookRow().status).toBe("published");
+    expect(console.error).toHaveBeenCalledTimes(1);
   });
 });

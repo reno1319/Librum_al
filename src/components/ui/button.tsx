@@ -21,7 +21,7 @@ export type ButtonSize = "sm" | "md" | "lg";
 // so it deliberately never receives the padding/sizing classes below --
 // its own VARIANT_CLASSES entry supplies everything it needs.
 const BASE_CLASSES =
-  "focus-ring inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  "focus-ring inline-flex items-center justify-center gap-2 rounded-control font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary: "bg-primary text-primary-foreground hover:bg-primary-hover",

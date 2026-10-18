@@ -5,9 +5,14 @@ import type { ReactNode } from "react";
 // system, per the approved UI-1 scope. `action` is typically a Button
 // or a Link styled as one; left as plain ReactNode rather than a
 // narrower type so either works without this component knowing which.
+//
+// V1 (V9): the one empty-state look -- a white box with the card border
+// and 4px corners (no dashed border). `title` is optional so a message
+// that has no heading today keeps showing as plain muted text, in the
+// same box.
 
 export type EmptyStateProps = {
-  title: string;
+  title?: string;
   description?: string;
   action?: ReactNode;
   className?: string;
@@ -17,13 +22,13 @@ export function EmptyState({ title, description, action, className }: EmptyState
   return (
     <div
       className={[
-        "flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-surface px-6 py-12 text-center",
+        "flex flex-col items-center gap-2 rounded-card border border-border bg-surface px-6 py-12 text-center",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <p className="font-serif text-lg font-semibold text-foreground">{title}</p>
+      {title && <p className="font-serif text-lg font-semibold text-foreground">{title}</p>}
       {description && <p className="max-w-sm text-sm text-muted">{description}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>

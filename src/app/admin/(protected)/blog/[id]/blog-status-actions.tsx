@@ -67,7 +67,7 @@ function SubmitButtonInner({
           e.preventDefault();
         }
       }}
-      className={`rounded-md px-4 py-2 text-sm font-medium disabled:opacity-60 ${variantClasses}`}
+      className={`rounded-control px-4 py-2 text-sm font-medium disabled:opacity-60 ${variantClasses}`}
     >
       {pending ? pendingLabel : label}
     </button>

@@ -68,6 +68,19 @@ const MAX_TRIMMED_INPUT_LENGTH = 32;
 
 const WHOLE_ALL_INPUT = /^(\d+)(?:[.,](\d{2}))?$/;
 
+// FIX1 (X5): the thousands-grouped shapes the site itself displays
+// ("1.500 ALL") or a phone keyboard / copy-paste produces ("1 500").
+// Groups after the first are exactly three digits, and one input uses
+// one grouping character throughout. A dot-grouped amount takes only a
+// comma for its decimals ("1.500,00"); "1.500.00" stays rejected rather
+// than guessed at. "1.50" never reaches these: it matches neither, and
+// WHOLE_ALL_INPUT reads it as fifty qindarka, which is refused below.
+// The first group starts 1-9, so "0.500" and "0 500" are refused, not
+// read as 500.
+const DOT_GROUPED_ALL_INPUT = /^([1-9]\d{0,2}(?:\.\d{3})+)(?:,(\d{2}))?$/;
+// A plain space, a no-break space or a narrow no-break space.
+const SPACE_GROUPED_ALL_INPUT = /^([1-9]\d{0,2}(?:[ \u00A0\u202F]\d{3})+)(?:[.,](\d{2}))?$/;
+
 /**
  * The single canonical numeric domain shared by parsing, classification,
  * and formatting -- exactly POSITIVE zero (free), or a safe integer from
@@ -123,18 +136,21 @@ function assertValidCatalogPriceAll(value: number): void {
  * all-zero two-digit decimal part when one is present, since a
  * whole-lek catalog price has no fractional component at all. Leading
  * zeros are accepted and normalized: `"099"` and `"00099"` both parse to
- * 99; `"00"`/`"000,00"` parse to the free price 0. Grouping separators
- * are never inferred from this -- `"1.000"` is not "one thousand", it is
- * rejected outright (a decimal point followed by three digits does not
- * match the required exactly-two-digit decimal shape).
+ * 99; `"00"`/`"000,00"` parse to the free price 0. FIX1 (X5): a
+ * thousands dot or space in groups of three is accepted -- `"1.500"`,
+ * `"12.500"`, `"100.000"`, `"1 500"` and `"1.500,00"` are all whole
+ * lek -- while `"1.50"` (a decimal, fifty qindarka) and `"1.5000"` (not
+ * a group of three) stay rejected.
  *
  * Rejects: empty/whitespace-only input, an excessively long trimmed
  * input, any nonzero decimal part (e.g. `"98,99"`, `"99.50"`,
  * `"00099,01"`), a nonzero paid amount below the 99 ALL floor (`"1"`..
  * `"98"`) or above the 100,000 ALL ceiling (`"100001"` and beyond,
  * including zero-prefixed forms of it), negative values (including
- * `"-0"`), a leading `+` sign, exponent notation, grouping separators
- * (`"1,234"`, `"1.234,56"`, `"1.000"`), any non-decimal-digit character,
+ * `"-0"`), a leading `+` sign, exponent notation, a comma as a grouping
+ * separator (`"1,234"`), grouped amounts with qindarka (`"1.234,56"`),
+ * mixed or misplaced grouping (`"1.500 000"`, `"15.00.0"`,
+ * `"1.500.00"`), any other non-decimal-digit character,
  * an integer part unsafe for exact integer arithmetic, and any input
  * that isn't a string at all (a defensive guard for callers passing a
  * raw `FormData` value, which can be a `File`, or any other unexpected
@@ -147,10 +163,14 @@ export function parseCatalogPriceAll(input: unknown): ParsedCatalogPrice {
   if (trimmed.length === 0) return { ok: false };
   if (trimmed.length > MAX_TRIMMED_INPUT_LENGTH) return { ok: false };
 
-  const match = WHOLE_ALL_INPUT.exec(trimmed);
+  const match =
+    WHOLE_ALL_INPUT.exec(trimmed) ??
+    DOT_GROUPED_ALL_INPUT.exec(trimmed) ??
+    SPACE_GROUPED_ALL_INPUT.exec(trimmed);
   if (!match) return { ok: false };
 
-  const [, wholeDigits, decimalDigits] = match;
+  const [, wholeGroups, decimalDigits] = match;
+  const wholeDigits = wholeGroups.replace(/[. \u00A0\u202F]/g, "");
   // A whole-lek catalog price has no fractional component -- a present
   // decimal part must be exactly "00", never merely two digits.
   if (decimalDigits !== undefined && decimalDigits !== "00") return { ok: false };
@@ -180,17 +200,17 @@ export function classifyCatalogPrice(priceAll: number): "free" | "paid" {
 
 /**
  * Albanian reader-facing display for a validated whole-ALL catalog
- * price -- the owner-confirmed convention is comma as the decimal
- * separator, dot as the thousands separator, always exactly two display
- * decimals: `99` -> `"99,00 ALL"`, `1000` -> `"1.000,00 ALL"`,
- * `100000` -> `"100.000,00 ALL"`. Enforces the same canonical numeric
+ * price -- dot as the thousands separator and, since FIX1 (X5), no
+ * decimals at all, because a catalog price is always whole lek:
+ * `99` -> `"99 ALL"`, `1000` -> `"1.000 ALL"`,
+ * `100000` -> `"100.000 ALL"`. Enforces the same canonical numeric
  * domain `parseCatalogPriceAll`/`classifyCatalogPrice` do -- a value
  * outside the domain throws rather than silently formatting (e.g.
  * `formatCatalogPriceAll(1)` throws; it never again returns
- * `"1,00 ALL"` for a value that was never a valid catalog price in the
+ * `"1 ALL"` for a value that was never a valid catalog price in the
  * first place). Every catalog price is whole lek by construction, so
- * the displayed fractional part is always the literal `"00"` -- this
- * never performs (or needs) qindarka-level arithmetic.
+ * there is no fractional part to display -- this never performs (or
+ * needs) qindarka-level arithmetic.
  *
  * Grouping is implemented with plain digit-string manipulation, not
  * `Intl.NumberFormat` -- deliberately, so this never depends on the
@@ -210,9 +230,12 @@ export function formatCatalogPriceAll(priceAll: number): string {
 // The one digit-grouping step behind both formatters in this module, so
 // a catalog price and a whole-lek sum of catalog prices can never be
 // displayed in two different shapes.
+//
+// FIX1 (X5): no ",00" -- a catalog price is whole lek, so it reads
+// "199 ALL", "1.500 ALL", "100.000 ALL" (the thousands dot stays).
 function groupWholeAll(amountAll: number): string {
   const grouped = String(amountAll).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${grouped},00 ALL`;
+  return `${grouped} ALL`;
 }
 
 // Fixed, non-sensitive message, same posture as INVALID_DOMAIN_MESSAGE.

@@ -9,7 +9,7 @@ import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
 // resolveBookPurchaseState(), resolveDashboardAttention(), and
 // resolvePublishReadiness(). upload-wizard.tsx itself has no React
 // DOM-testing-library pattern established anywhere in this codebase,
-// so these four functions are deliberately the only part of its step
+// so these functions are deliberately the only part of its step
 // gating and price/earnings display with independent test coverage --
 // everything else about a step (what it renders, which fields it
 // submits) stays in the component, unchanged in kind from before this
@@ -96,5 +96,41 @@ export function resolveWizardPriceSummary(price: string): WizardPriceSummary {
     grossMinor: estimate.grossMinor,
     feeMinor: estimate.platformFeeMinor,
     earningsMinor: estimate.authorEarningsMinor,
+  };
+}
+
+// REDESIGN STEP 5: the Price step now starts with a Paid / Free choice
+// (Renato's D3), so the price the form submits is no longer simply
+// what is in the box. Free always submits "0", whatever the box holds;
+// Paid submits the box and is only submittable for a real PAID price --
+// 0 is a valid catalog price but NOT a paid one, so under Paid it is
+// rejected here rather than quietly saving a free book. The summary for
+// a rejected paid price is the same zeroed "not valid" summary
+// resolveWizardPriceSummary already returns for a typo, so the earnings
+// box and preview card never show "Free" while Paid is chosen.
+export type WizardPriceMode = "paid" | "free";
+
+export type WizardPricing = WizardPriceSummary & {
+  submittedPrice: string;
+  canSubmit: boolean;
+};
+
+export function resolveWizardPricing(params: {
+  mode: WizardPriceMode;
+  paidPrice: string;
+}): WizardPricing {
+  if (params.mode === "free") {
+    return { ...resolveWizardPriceSummary("0"), submittedPrice: "0", canSubmit: true };
+  }
+
+  const summary = resolveWizardPriceSummary(params.paidPrice);
+  if (summary.priceValid && !summary.isFreeBook) {
+    return { ...summary, submittedPrice: params.paidPrice, canSubmit: true };
+  }
+
+  return {
+    ...resolveWizardPriceSummary(""),
+    submittedPrice: params.paidPrice,
+    canSubmit: false,
   };
 }

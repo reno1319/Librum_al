@@ -34,7 +34,7 @@ function RoleChangeSaveButton({
       type="submit"
       disabled={disabled || pending}
       onClick={(e) => handleConfirmGatedSubmit(confirmMessage, window.confirm, e)}
-      className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+      className="rounded-control border border-border px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
     >
       {pending ? "Saving…" : "Save"}
     </button>

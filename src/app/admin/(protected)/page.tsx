@@ -47,10 +47,11 @@ export default async function AdminPage() {
   // src/app/admin/refunds/page.tsx requires refunds.view) -- a staff
   // member is never shown a link that would immediately redirect them
   // away.
-  const { showReports, showRefunds, showBlog } = resolveAdminLandingVisibility({
+  const { showReports, showRefunds, showBlog, showLibrumChoice } = resolveAdminLandingVisibility({
     reportsView: roleHasPermission(role, "reports.view"),
     refundsView: roleHasPermission(role, "refunds.view"),
     blogView: roleHasPermission(role, "blog.view"),
+    catalogFeature: roleHasPermission(role, "catalog.feature"),
   });
 
   return (
@@ -61,7 +62,7 @@ export default async function AdminPage() {
         Signed in as {profile?.display_name ?? "staff member"}.
       </p>
 
-      {showReports || showRefunds || showBlog ? (
+      {showReports || showRefunds || showBlog || showLibrumChoice ? (
         // MOBILE ADMIN SHELL CORRECTION: stacked by default (a narrow
         // phone width squeezed these two side-by-side), back to the
         // original flex-row + wrap layout from `sm:` up -- unchanged at
@@ -70,7 +71,7 @@ export default async function AdminPage() {
           {showRefunds && (
             <Link
               href="/admin/refunds"
-              className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
+              className="w-full rounded-control border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
             >
               Refund requests
             </Link>
@@ -78,7 +79,7 @@ export default async function AdminPage() {
           {showReports && (
             <Link
               href="/admin/reports"
-              className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
+              className="w-full rounded-control border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
             >
               Book reports
             </Link>
@@ -89,9 +90,18 @@ export default async function AdminPage() {
           {showBlog && (
             <Link
               href="/admin/blog"
-              className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
+              className="w-full rounded-control border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
             >
               Blog
+            </Link>
+          )}
+          {/* F5: owner and admin pick the Bookstore's Librum's choice. */}
+          {showLibrumChoice && (
+            <Link
+              href="/admin/librum-choice"
+              className="w-full rounded-control border border-border bg-surface px-4 py-2 text-center text-sm font-medium hover:bg-surface-hover sm:w-auto sm:text-left"
+            >
+              Librum&apos;s choice
             </Link>
           )}
         </div>

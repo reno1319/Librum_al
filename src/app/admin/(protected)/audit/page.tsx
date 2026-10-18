@@ -125,7 +125,7 @@ export default async function AdminAuditLogPage({
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
-      <Link href="/admin" className="text-sm text-muted hover:underline">
+      <Link href="/admin" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to admin
       </Link>
       <div className="mt-2">
@@ -197,13 +197,13 @@ function AuditFilterForm({
   isFiltered: boolean;
 }) {
   const controlClass =
-    "focus-ring rounded-md border border-border bg-surface px-3 py-1.5 text-sm";
+    "focus-ring rounded-control border border-control bg-surface px-3 py-1.5 text-sm";
 
   return (
     <form
       action="/admin/audit"
       method="get"
-      className="mt-6 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4"
+      className="mt-6 flex flex-wrap items-end gap-3 rounded-card border border-border bg-surface p-4"
     >
       <div>
         <label htmlFor="audit-action" className="block text-xs text-muted">
@@ -287,7 +287,7 @@ function AuditFilterForm({
       </button>
 
       {isFiltered && (
-        <Link href="/admin/audit" className="focus-ring rounded-sm text-sm font-medium text-primary hover:underline">
+        <Link href="/admin/audit" className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2">
           Clear filters
         </Link>
       )}
@@ -337,7 +337,7 @@ function AuditDesktopTable({ rows }: { rows: AuditEventRow[] }) {
                 <td className="py-3 pr-4 font-medium text-foreground">{getActionLabel(row.action)}</td>
                 <td className="py-3 pr-4">
                   {target.href ? (
-                    <Link href={target.href} className="text-primary hover:underline">
+                    <Link href={target.href} className="text-primary underline underline-offset-2 hover:decoration-2">
                       {target.label}
                     </Link>
                   ) : (
@@ -361,7 +361,7 @@ function AuditMobileList({ rows }: { rows: AuditEventRow[] }) {
         const target = resolveAuditTargetDisplay(row.target_type, row.target_id);
         const details = formatAuditDetails(row.action, row.metadata);
         return (
-          <li key={row.id} className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <li key={row.id} className="rounded-card border border-border bg-surface p-4 shadow-sm">
             <p className="font-medium text-foreground">{getActionLabel(row.action)}</p>
             <p className="mt-0.5 text-xs text-muted">{formatAuditTimestamp(row.created_at)}</p>
             <p className="mt-2 text-sm">
@@ -371,7 +371,7 @@ function AuditMobileList({ rows }: { rows: AuditEventRow[] }) {
             <p className="mt-1 text-sm">
               <span className="text-muted">Target: </span>
               {target.href ? (
-                <Link href={target.href} className="text-primary hover:underline">
+                <Link href={target.href} className="text-primary underline underline-offset-2 hover:decoration-2">
                   {target.label}
                 </Link>
               ) : (

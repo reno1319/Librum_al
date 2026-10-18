@@ -35,7 +35,7 @@ export function IssueRefundButton({
           e.preventDefault();
         }
       }}
-      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+      className="rounded-control bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
     >
       {pending ? "Submitting…" : "Issue refund"}
     </button>
