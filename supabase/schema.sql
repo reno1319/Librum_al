@@ -448,7 +448,7 @@ create table public.books (
     constraint books_price_all_range_check
     check (price_all is null or price_all = 0
            or (price_all >= 99 and price_all <= 100000)),
-  -- BOOK-PEN-NAME-RIGHTS-CHOICE-1 (migration 20261018074425): declared
+  -- BOOK-PEN-NAME-RIGHTS-CHOICE-1 (migration 20261018091237): declared
   -- after price_all, in the migration's order, so attnum matches on both
   -- build paths. pen_name: the per-book byline, null = the author's
   -- public name; 120 = public_author_name's limit; no leading/trailing
@@ -11796,7 +11796,7 @@ $$;
 -- history of the rights basis an author claimed for a book, kept after
 -- the book or account is deleted) and the "Librum's choice" writers.
 -- Same statements and reasoning as
--- migrations/20261018074425_book_pen_name_rights_librum_choice.sql; the
+-- migrations/20261018091237_book_pen_name_rights_librum_choice.sql; the
 -- books columns and the one-pick index are declared with books above.
 -- ============================================================
 create table public.book_rights_declarations (

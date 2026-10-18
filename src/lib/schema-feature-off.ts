@@ -1,5 +1,5 @@
 // BOOK-PEN-NAME-RIGHTS-CHOICE-1: the application ships before migration
-// 20261018074425 is applied, so every new read and write of the pen
+// 20261018091237 is applied, so every new read and write of the pen
 // name, the rights declarations and the "Librum's choice" pick treats
 // "that column / table / function does not exist yet" as the feature
 // being off -- a null read or a clean refusal, never a thrown error or

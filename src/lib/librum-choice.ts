@@ -4,7 +4,7 @@ import { isSchemaFeatureOffError, logSchemaFeatureOffOnce } from "@/lib/schema-f
 import type { Book } from "@/lib/types";
 
 // BOOK-PEN-NAME-RIGHTS-CHOICE-1: the book staff picked as "Librum's
-// choice" (books.librum_choice_at, migration 20261018074425), only while
+// choice" (books.librum_choice_at, migration 20261018091237), only while
 // it is still published; null when nothing is picked, before the
 // migration, or on any error. Not called by any page in F3: F5 wires it
 // into the Bookstore, where an empty pick keeps the "New on Librum"

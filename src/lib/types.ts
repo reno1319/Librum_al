@@ -111,7 +111,7 @@ export type Book = {
   published_at: string | null;
   created_at: string;
   updated_at: string;
-  // BOOK-PEN-NAME-RIGHTS-CHOICE-1 (migration 20261018074425). Optional
+  // BOOK-PEN-NAME-RIGHTS-CHOICE-1 (migration 20261018091237). Optional
   // because a `select *` before that migration is applied returns rows
   // without them -- same precedent as `display_name?` in author-name.ts.
   // pen_name: the per-book byline, null/undefined = the author's public
