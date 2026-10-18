@@ -38,6 +38,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //   3. Every write returns `.select("id")` and must prove exactly one row
 //      changed (isExactlyOneRowWritten); the insert must also return the
 //      id it generated. Zero or several rows fail closed.
+//      The audited exception (F5): clearOwnBookLibrumChoice in
+//      dashboard/books/actions.ts clears the caller's own book's
+//      librum_choice_at after a successful unpublish or publish; it may
+//      change 0 or 1 rows (0 = the book was not picked), so it does not
+//      prove a row count.
 //   4. Ordinary reads, uploads, deletes and the series unlink stay on the
 //      least-privileged session client.
 //

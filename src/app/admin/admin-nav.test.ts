@@ -10,7 +10,7 @@ import type { StaffRole } from "@/lib/types";
 // for the new Audit log entry (audit.view-gated), without touching the
 // existing Dashboard/Book reports/Refund requests/Staff expectations.
 describe("resolveVisibleAdminNavItems", () => {
-  it("owner sees dashboard, reports, refunds, staff, audit log, finance, and blog", () => {
+  it("owner sees dashboard, reports, refunds, staff, audit log, finance, blog, and Librum's choice", () => {
     const hrefs = resolveVisibleAdminNavItems("owner").map((i) => i.href);
     expect(hrefs).toEqual([
       "/admin",
@@ -20,10 +20,11 @@ describe("resolveVisibleAdminNavItems", () => {
       "/admin/audit",
       "/admin/finance",
       "/admin/blog",
+      "/admin/librum-choice",
     ]);
   });
 
-  it("admin sees dashboard, reports, refunds, staff, audit log, finance, and blog", () => {
+  it("admin sees dashboard, reports, refunds, staff, audit log, finance, blog, and Librum's choice", () => {
     const hrefs = resolveVisibleAdminNavItems("admin").map((i) => i.href);
     expect(hrefs).toEqual([
       "/admin",
@@ -33,6 +34,7 @@ describe("resolveVisibleAdminNavItems", () => {
       "/admin/audit",
       "/admin/finance",
       "/admin/blog",
+      "/admin/librum-choice",
     ]);
   });
 
@@ -71,6 +73,15 @@ describe("resolveVisibleAdminNavItems", () => {
     expect(blogItem?.permission).toBe("blog.view");
   });
 
+  // F5: owner and admin only; editor, moderator and support never see it.
+  it("the Librum's choice entry is gated by catalog.feature and shown to owner and admin only", () => {
+    const item = ADMIN_NAV_ITEMS.find((i) => i.href === "/admin/librum-choice");
+    expect(item).toEqual({ href: "/admin/librum-choice", label: "Librum's choice", permission: "catalog.feature" });
+    for (const role of ["editor", "moderator", "support"] as StaffRole[]) {
+      expect(resolveVisibleAdminNavItems(role).map((i) => i.href)).not.toContain("/admin/librum-choice");
+    }
+  });
+
   it("the Staff entry is gated by staff.view, not a role-name check", () => {
     const staffItem = ADMIN_NAV_ITEMS.find((i) => i.href === "/admin/staff");
     expect(staffItem?.permission).toBe("staff.view");
@@ -101,6 +112,7 @@ describe("resolveVisibleAdminNavItems", () => {
       "/admin/audit": "audit.view",
       "/admin/finance": "finance.view",
       "/admin/blog": "blog.view",
+      "/admin/librum-choice": "catalog.feature",
     };
     for (const item of ADMIN_NAV_ITEMS) {
       expect(item.permission).toBe(expected[item.href]);

@@ -679,8 +679,10 @@ describe("the writes keep their ownership filters", () => {
 
     // updateBundle's write is the update_bundle_with_membership RPC,
     // bound to the bundle id and the authenticated author.
+    // F5 (C5): publishBook's draft -> published also clears a leftover
+    // Librum's choice pick of this book (one more update, same filters).
     const updates = writes.filter((w) => w.op === "update" || (w.op === "rpc" && w.table === "bundles"));
-    expect(updates).toHaveLength(4);
+    expect(updates).toHaveLength(5);
     for (const u of updates) {
       expect(u.filters).toContainEqual({ kind: "eq", column: "author_id", value: USER_ID });
       expect(u.filters.some((f) => f.kind === "eq" && f.column === "id")).toBe(true);
@@ -693,7 +695,12 @@ describe("the writes keep their ownership filters", () => {
     await redirectOf(publishBook(BOOK_ID));
     await redirectOf(publishBundle(BUNDLE_ID));
 
-    const [bookPublish, bundlePublish] = writes.filter((w) => w.op === "update");
+    // F5 (C5): only the status writes; the pick clear that follows the
+    // book publish must not carry this compare-and-set (it would match no
+    // row after the publish).
+    const [bookPublish, bundlePublish] = writes.filter(
+      (w) => w.op === "update" && Object.prototype.hasOwnProperty.call(w.payload, "status"),
+    );
     for (const w of [bookPublish, bundlePublish]) {
       expect(w.filters).toContainEqual({ kind: "eq", column: "status", value: "draft" });
       expect(w.filters).toContainEqual({ kind: "eq", column: "price_all", value: 0 });

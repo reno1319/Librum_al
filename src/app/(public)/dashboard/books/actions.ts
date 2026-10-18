@@ -27,6 +27,7 @@ import {
   resolvePriceUpdateAuthorization,
 } from "@/lib/paid-repricing";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
+import { isSchemaFeatureOffError, logSchemaFeatureOffOnce } from "@/lib/schema-feature-off";
 import {
   BOOK_COVERS_BUCKET,
   BOOK_MANUSCRIPTS_BUCKET,
@@ -1646,7 +1647,58 @@ async function performPublish(
     return { ok: false, reason: "update_failed" };
   }
 
+  // F5 (C5 self-heal): a real draft -> published transition never brings
+  // back a "Librum's choice" pick an earlier unpublish failed to clear.
+  // Keyed on the status read above, not on isFirstPublication: a write
+  // to an already-published book (which may be the valid pick) clears
+  // nothing. No status/price compare-and-set here -- after the publish
+  // above, `status = 'draft'` would match no row.
+  if (book.status !== "published") {
+    await clearOwnBookLibrumChoice(catalogWriter, bookId, userId, "performPublish");
+  }
+
   return { ok: true, wasNewlyPublished: isFirstPublication };
+}
+
+// F5 (C5, Renato 10:25Z): an unpublished book loses its "Librum's choice"
+// pick and never gets it back by itself. Runs only after the caller's
+// own auth, ownership read and guarded status write have succeeded, and
+// reuses the catalog writer that caller already created after those
+// checks (authenticated has no UPDATE on librum_choice_at). The filters
+// reach at most this one book, owned by the caller, and only its pick
+// column; it can only clear, never set. The RPC clear_librum_choice is
+// not used: it clears whatever is picked, so a race could clear a newer
+// pick of another book.
+//
+// catalog-write-client.ts rule 3's audited exception: 0 rows is the
+// normal case (the book is not picked), so there is no
+// isExactlyOneRowWritten and no log on 0 rows. Best effort: before the
+// migration the column is missing (feature off, warned once); any other
+// error is logged and never turns the caller's successful write into a
+// failure -- getLibrumChoiceBook() still hides an unpublished pick.
+async function clearOwnBookLibrumChoice(
+  catalogWriter: ReturnType<typeof createCatalogWriteClient>,
+  bookId: string,
+  userId: string,
+  caller: string,
+): Promise<void> {
+  try {
+    const { error } = await catalogWriter
+      .from("books")
+      .update({ librum_choice_at: null })
+      .eq("id", bookId)
+      .eq("author_id", userId)
+      .not("librum_choice_at", "is", null);
+    if (error) {
+      if (isSchemaFeatureOffError(error)) {
+        logSchemaFeatureOffOnce("Librum's choice", error);
+      } else {
+        console.error(`${caller}: clearing the Librum's choice pick failed`, { bookId, error });
+      }
+    }
+  } catch (error) {
+    console.error(`${caller}: clearing the Librum's choice pick failed`, { bookId, error });
+  }
 }
 
 export async function publishBook(bookId: string) {
@@ -1883,6 +1935,10 @@ export async function unpublishBook(bookId: string) {
     console.error("unpublishBook: update did not change exactly one row", { bookId, userId: user.id });
     redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
   }
+
+  // F5 (C5): the unpublish above succeeded, so this book stops being
+  // Librum's choice (best effort, see clearOwnBookLibrumChoice).
+  await clearOwnBookLibrumChoice(catalogWriter, bookId, user.id, "unpublishBook");
 
   revalidatePath("/dashboard");
   revalidatePath("/");

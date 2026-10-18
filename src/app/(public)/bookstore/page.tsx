@@ -18,6 +18,8 @@ import { resolvePublicAuthorName } from "@/lib/author-name";
 import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import { getLibrumChoiceBook } from "@/lib/librum-choice";
+import { resolveBookstoreFeature } from "@/lib/librum-choice-logic";
 import type { Book, Bundle, Profile } from "@/lib/types";
 import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
@@ -335,9 +337,8 @@ function coverUrlFor(supabase: SupabaseClient, coverPath: string | null | undefi
 }
 
 // REDESIGN STEP 3 (Renato D1/D7): the feature block shows the newest
-// published book under this label. Kept in one place so a later
-// hand-picked "Librum's choice" can swap it without touching layout.
-const FEATURED_BOOK_LABEL = "New on Librum";
+// published book as "New on Librum". F5: or the hand-picked book as
+// "Librum's choice" -- chosen, with its label, by resolveBookstoreFeature.
 
 // Books per shelf on the unfiltered view.
 const SHELF_SIZE = 6;
@@ -379,13 +380,16 @@ export default async function BookstorePage({
   // REDESIGN STEP 3: the free shelf follows the same rule.
   // FIX1 (X1): the author band's button depends on whether anyone is
   // signed in, so the unfiltered view (the only one with the band) asks.
-  const [{ books, error, totalMatched }, bundles, freeBooks, signedIn] = await Promise.all([
+  // F5: the unfiltered view also asks for Librum's choice (null when
+  // nothing is picked, the pick is unpublished, or before the migration).
+  const [{ books, error, totalMatched }, bundles, freeBooks, signedIn, librumChoice] = await Promise.all([
     fetchSearchResults(supabase, { q, genre, sort, minPriceAll, maxPriceAll }),
     isFiltered ? Promise.resolve([]) : fetchPublishedBundles(supabase),
     isFiltered ? Promise.resolve([]) : fetchFreeBooks(supabase),
     isFiltered
       ? Promise.resolve(false)
       : supabase.auth.getUser().then(({ data }) => !!data.user),
+    isFiltered ? Promise.resolve(null) : getLibrumChoiceBook(),
   ]);
 
   // REDESIGN STEP 3: the unfiltered view leads with the newest book
@@ -393,8 +397,11 @@ export default async function BookstorePage({
   // grid alone (B4). FIX1 (X6): the second "New on Librum" shelf that
   // followed the featured book is gone (Renato 17:11Z, 5a); the
   // featured block keeps its label.
+  // F5 (C2): same gate as before, so a pick never shows over a failed
+  // load; inside it, the priced pick as "Librum's choice", else the
+  // newest book as "New on Librum".
   const showShelves = !isFiltered && !error && books.length > 0;
-  const featured = showShelves ? books[0] : null;
+  const featured = showShelves ? resolveBookstoreFeature<BookWithAuthor>(librumChoice, books[0]) : null;
 
   return (
     <main className="flex-1 bg-background">
@@ -402,7 +409,11 @@ export default async function BookstorePage({
         <BookstoreToolbar query={rawQuery} isFiltered={isFiltered} />
 
         {featured && (
-          <FeaturedBook book={featured} coverUrl={coverUrlFor(supabase, featured.cover_path)} />
+          <FeaturedBook
+            book={featured.book}
+            label={featured.label}
+            coverUrl={coverUrlFor(supabase, featured.book.cover_path)}
+          />
         )}
 
         {freeBooks.length > 0 && (
@@ -669,9 +680,11 @@ function ChevronIcon() {
 // purchase; "Read sample" is the same sample reader the book page uses.
 function FeaturedBook({
   book,
+  label,
   coverUrl,
 }: {
   book: BookWithAuthor;
+  label: string;
   coverUrl: string | null;
 }) {
   const authorName = resolveBookByline(book, book.profiles);
@@ -685,7 +698,7 @@ function FeaturedBook({
     >
       <div className="flex min-w-0 flex-[1_1_24rem] flex-col justify-center gap-4 p-6 sm:p-10">
         <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">
-          {FEATURED_BOOK_LABEL}
+          {label}
         </p>
         <h2
           id="featured-book-title"
