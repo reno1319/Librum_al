@@ -233,3 +233,65 @@ describe("Edit page before the migration (D2/D3)", () => {
     expect(html).toContain("We couldn&#x27;t publish your book yet. Please try again from your dashboard");
   });
 });
+
+describe("Edit page: iPhone step price box (I2)", () => {
+  function priceBox(html: string): string {
+    const start = html.indexOf("Price (ALL)");
+    return html.slice(start, html.indexOf("</label>", start));
+  }
+
+  it("keeps name, type, inputMode, required and the stored price as defaultValue", async () => {
+    book.price_all = 249;
+    const html = await render();
+    const input = html.match(/<input[^>]*name="price"[^>]*>/)![0];
+    expect(input).toContain('type="text"');
+    expect(input).toContain('inputMode="decimal"');
+    expect(input).toContain('required=""');
+    expect(input).toContain('value="249"');
+    expect(input).toContain("text-lg");
+  });
+
+  it("a legacy book with no ALL price still renders blank", async () => {
+    book.price_all = null;
+    const html = await render();
+    expect(html.match(/<input[^>]*name="price"[^>]*>/)![0]).toContain('value=""');
+  });
+
+  it("is Add a book step 3's bordered box with the aria-hidden ALL tag, always the control border", async () => {
+    const box = priceBox(await render());
+    expect(box).toContain("max-w-[17.5rem]");
+    expect(box).toContain("border-[#8c8472]");
+    expect(box).toContain("focus-within:shadow-[var(--focus-ring)]");
+    expect(box).not.toContain("border-red-700");
+    expect(box).toMatch(/<span aria-hidden="true"[^>]*>ALL<\/span>/);
+  });
+
+  it("keeps the help sentence word for word, with 0 = free", async () => {
+    const box = priceBox(await render());
+    expect(box.replace(/<!-- -->/g, "")).toContain(
+      "Whole lek: 0 for a free ebook, or 99 to 100000. Librum takes a 20% platform fee — you keep the rest of every sale.",
+    );
+  });
+});
+
+describe("Edit page: iPhone step manuscript line (I3)", () => {
+  const STORAGE_NAME = "26525d0c-1111-4111-8111-111111111111.epub";
+
+  it("names a stored EPUB as 'EPUB file', never by its storage name", async () => {
+    book.file_path = `${USER_ID}/${STORAGE_NAME}`;
+    const html = await render();
+    expect(html).toContain("Current manuscript: EPUB file");
+    expect(html).not.toContain(STORAGE_NAME);
+    expect(html).not.toContain("26525d0c");
+    // ManuscriptField still knows a manuscript exists.
+    expect(html.replace(/<!-- -->/g, "")).toContain("EPUB · up to 50 MB. Leave blank to keep your current manuscript.</span>");
+  });
+
+  it("no manuscript keeps 'No manuscript on file'", async () => {
+    book.file_path = null;
+    const html = await render();
+    expect(html).toContain("No manuscript on file");
+    expect(html).not.toContain("Current manuscript:");
+    expect(html.replace(/<!-- -->/g, "")).toContain("EPUB · up to 50 MB.</span>");
+  });
+});

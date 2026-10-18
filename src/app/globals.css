@@ -184,3 +184,21 @@ body {
   background-color: var(--color-border);
   border-radius: 999px;
 }
+
+/* iPhone step (I1): iOS Safari zooms the page when a focused field's
+   text is under 16px, and most fields here are text-sm (14px). On
+   phones (under 640px) every text field, select and textarea gets 16px.
+   This rule is deliberately UNLAYERED: unlayered CSS beats Tailwind's
+   utilities layer, so it wins over text-sm and every other Tailwind
+   font-size utility on a field under 640px, including any future
+   max-sm:text-*. The 18px price boxes (.text-lg) keep their 18px.
+   Radios, checkboxes, file and range inputs have no typed text. Do not
+   use maximum-scale or user-scalable=no instead: that blocks pinch
+   zoom. Desktop (640px and up) is unchanged. */
+@media (max-width: 639.98px) {
+  input:not([type="radio"]):not([type="checkbox"]):not([type="file"]):not([type="range"]):not(.text-lg),
+  select:not(.text-lg),
+  textarea:not(.text-lg) {
+    font-size: 16px;
+  }
+}

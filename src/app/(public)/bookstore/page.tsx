@@ -657,9 +657,11 @@ function GenreLink({
 }
 
 // V1 (V8): the one look shared by the genre and price buttons and the
-// box around the Sort select.
+// box around the Sort select. iPhone step (I1b): 16px on phones, so the
+// row stays matched with the 16px sort select (globals.css), 14px from
+// 640px up.
 const FILTER_CONTROL_CLASSES =
-  "flex min-h-11 cursor-pointer items-center justify-between gap-1.5 rounded-control border border-control bg-surface px-3 text-sm font-semibold text-foreground";
+  "flex min-h-11 cursor-pointer items-center justify-between gap-1.5 rounded-control border border-control bg-surface px-3 text-base font-semibold text-foreground sm:text-sm";
 const DROPDOWN_SUMMARY_CLASSES = `focus-ring ${FILTER_CONTROL_CLASSES} list-none select-none [&::-webkit-details-marker]:hidden`;
 
 function ChevronIcon() {

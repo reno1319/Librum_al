@@ -32,6 +32,7 @@ import {
 } from "@/lib/book-purchase";
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { getAuthorInitials } from "@/lib/author-initials";
 import { resolveBookByline } from "@/lib/book-byline";
 import { buttonClasses } from "@/components/ui/button";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
@@ -1003,7 +1004,15 @@ export default async function BookDetailPage({
               className="size-20 shrink-0 rounded-full object-cover sm:size-[5.5rem]"
             />
           ) : (
-            <div className="size-20 shrink-0 rounded-full bg-[#d9e2dc] sm:size-[5.5rem]" />
+            // iPhone step (I4): the author's initials, as on the author's
+            // own page, instead of an empty circle. aria-hidden: the name
+            // is the very next element.
+            <div
+              aria-hidden="true"
+              className="flex size-20 shrink-0 items-center justify-center rounded-full bg-[#d9e2dc] text-lg font-semibold text-foreground/70 sm:size-[5.5rem] sm:text-xl"
+            >
+              {getAuthorInitials(authorName ?? "")}
+            </div>
           )}
           <div className="min-w-0 flex-[1_1_20rem]">
             <p className="font-serif text-[1.375rem] text-primary">{authorName}</p>
