@@ -494,7 +494,8 @@ describe("BookDetailPage: redesign step 3", () => {
     expect(html).toContain("Buy ebook — 250 ALL");
     expect(html).toContain("EPUB, no DRM. Read on your phone, tablet or e-reader.");
     expect(html).toContain("Download anytime from your Librum library.");
-    expect(html).toContain("Pay by card or with the POK app.");
+    expect(html).toContain("Pay by card.");
+    expect(html).not.toContain("POK app");
     expect(html).toMatch(/Secure checkout( with POK)?\./);
     expect(html).not.toContain("DRM-free EPUB. Download it anytime from your Librum Library.");
   });
@@ -503,7 +504,7 @@ describe("BookDetailPage: redesign step 3", () => {
     const html = await render({ user: { id: "reader" }, book: { ...BOOK_ROW, price_all: 0 } });
     expect(html).toContain("Get ebook — Free");
     expect(html).toContain("Free — no payment required.");
-    expect(html).not.toContain("Pay by card or with the POK app.");
+    expect(html).not.toContain("Pay by card.");
   });
 
   it("the breadcrumb links the bookstore and the book's genre", async () => {

@@ -726,12 +726,13 @@ export default async function BookDetailPage({
                 </p>
               ) : (
                 // REDESIGN STEP 3 (Renato D4): the mockup's three lines
-                // for a paid book. RELEASE CHECK: the POK app line must
-                // be true in our checkout before any Production release.
+                // for a paid book. The third line said "or with the POK
+                // app" until Renato's C1 answer (b): it comes back only once
+                // paying with the POK app is proven in our checkout.
                 <ul className="flex flex-col gap-1.5 text-sm text-muted">
                   <li>EPUB, no DRM. Read on your phone, tablet or e-reader.</li>
                   <li>Download anytime from your Librum library.</li>
-                  <li>Pay by card or with the POK app.</li>
+                  <li>Pay by card.</li>
                   {checkoutSecurityNote && <li>{checkoutSecurityNote.trim()}</li>}
                 </ul>
               ))}
