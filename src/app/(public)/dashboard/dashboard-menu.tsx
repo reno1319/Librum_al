@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { DismissableDetails } from "@/components/dismissable-details";
 import {
   DASHBOARD_MENU_GROUPS,
   findDashboardMenuMatch,
@@ -71,8 +72,8 @@ export function DashboardMenu() {
       {/* Phone: one "Section" control listing every page under its
           group. A <details> works without JavaScript; key={pathname}
           remounts it on client navigation, so it is closed on the new
-          page. */}
-      <details key={pathname} className="group relative md:hidden">
+          page. A tap outside or Escape also closes it (LEFTOVERS L1). */}
+      <DismissableDetails key={pathname} className="group relative md:hidden">
         <summary className="focus-ring flex min-h-11 w-full cursor-pointer list-none items-center justify-between gap-2 rounded-control border border-control bg-surface px-3.5 text-[0.9375rem] text-foreground select-none [&::-webkit-details-marker]:hidden">
           <span>
             <span className="text-muted">Section{match ? ":" : ""}</span>
@@ -122,7 +123,7 @@ export function DashboardMenu() {
             );
           })}
         </div>
-      </details>
+      </DismissableDetails>
     </nav>
   );
 }

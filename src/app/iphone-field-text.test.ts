@@ -9,7 +9,9 @@ import { describe, expect, it } from "vitest";
 
 const SRC = join(__dirname, "..");
 const css = readFileSync(join(__dirname, "globals.css"), "utf8");
-const RULE_MEDIA = "@media (max-width: 639.98px)";
+// LEFTOVERS (L4): Tailwind's sm breakpoint unit, as a range query (the
+// built CSS is checked after `next build`, not here).
+const RULE_MEDIA = "@media (width < 40rem)";
 
 /** The at-rule preludes enclosing `index` in `text` (comments stripped). */
 function enclosingBlocks(text: string, index: number): string[] {
@@ -34,7 +36,7 @@ describe("globals.css: phone field text is 16px (I1)", () => {
   const mediaAt = plain.indexOf(RULE_MEDIA);
   const block = plain.slice(mediaAt, plain.indexOf("}", plain.indexOf("{", plain.indexOf("{", mediaAt) + 1)) + 1);
 
-  it("has exactly one rule under max-width: 639.98px", () => {
+  it("has exactly one rule under width < 40rem", () => {
     expect(mediaAt).toBeGreaterThan(-1);
     expect(plain.indexOf(RULE_MEDIA, mediaAt + 1)).toBe(-1);
   });

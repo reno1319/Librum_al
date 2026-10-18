@@ -8,13 +8,14 @@ let pathname = "/dashboard";
 vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 const { DashboardMenu } = await import("./dashboard-menu");
+const { DismissableDetails } = await import("@/components/dismissable-details");
 
 function render(path: string): string {
   pathname = path;
   return renderToStaticMarkup(createElement(DashboardMenu));
 }
 
-function findElement(node: ReactNode, type: string): ReactElement | null {
+function findElement(node: ReactNode, type: ReactElement["type"]): ReactElement | null {
   if (Array.isArray(node)) {
     for (const child of node) {
       const found = findElement(child, type);
@@ -101,11 +102,13 @@ describe("DashboardMenu", () => {
     expect(html).toMatch(/<details class="[^"]*\bmd:hidden\b/);
   });
 
+  // LEFTOVERS (L1): the <details> is now rendered by DismissableDetails,
+  // which carries the key.
   it("the phone control remounts (closes) on client navigation: keyed by the path", () => {
     pathname = "/dashboard/sales";
-    const first = findElement(DashboardMenu(), "details");
+    const first = findElement(DashboardMenu(), DismissableDetails);
     pathname = "/dashboard/payouts";
-    const second = findElement(DashboardMenu(), "details");
+    const second = findElement(DashboardMenu(), DismissableDetails);
     expect(first?.key).toBe("/dashboard/sales");
     expect(second?.key).toBe("/dashboard/payouts");
   });
