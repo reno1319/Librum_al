@@ -50,10 +50,21 @@ const READER_FACING_ATTRIBUTION_FILES = [
 ];
 
 describe("AUTHOR-1B privacy contract: every reader-facing attribution surface imports and uses the shared resolver", () => {
-  it.each(READER_FACING_ATTRIBUTION_FILES)("%s imports resolvePublicAuthorName from @/lib/author-name", (file) => {
+  // F4: a surface that shows a BOOK's author may resolve it through
+  // resolveBookByline (@/lib/book-byline) instead -- the book's pen name,
+  // else exactly resolvePublicAuthorName(), pinned below.
+  it.each(READER_FACING_ATTRIBUTION_FILES)("%s imports resolvePublicAuthorName from @/lib/author-name (or resolveBookByline from @/lib/book-byline)", (file) => {
     const source = readSrc(file);
-    expect(source).toContain('from "@/lib/author-name"');
-    expect(source).toMatch(/resolvePublicAuthorName/);
+    const direct = source.includes('from "@/lib/author-name"') && /resolvePublicAuthorName/.test(source);
+    const viaByline = source.includes('from "@/lib/book-byline"') && /resolveBookByline\(/.test(source);
+    expect(direct || viaByline).toBe(true);
+  });
+
+  it("resolveBookByline falls back to resolvePublicAuthorName, never a raw display_name", () => {
+    const source = readSrc("lib/book-byline.ts");
+    expect(source).toContain('import { resolvePublicAuthorName } from "@/lib/author-name"');
+    expect(source).toContain("return book?.pen_name ?? resolvePublicAuthorName(authorProfile);");
+    expect(source).not.toMatch(/\.display_name/);
   });
 });
 

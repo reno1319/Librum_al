@@ -14,6 +14,7 @@ describe("resolvePublishReadiness", () => {
     const result = resolvePublishReadiness({
       book: book({ price_all: 0 }),
       paidPublishingAvailable: false,
+      hasRightsDeclaration: true,
     });
     expect(result.paidPublishingBlocked).toBe(false);
   });
@@ -22,6 +23,7 @@ describe("resolvePublishReadiness", () => {
     const result = resolvePublishReadiness({
       book: book({ price_all: 199 }),
       paidPublishingAvailable: false,
+      hasRightsDeclaration: true,
     });
     expect(result.paidPublishingBlocked).toBe(true);
   });
@@ -30,6 +32,7 @@ describe("resolvePublishReadiness", () => {
     const result = resolvePublishReadiness({
       book: book({ price_all: 199 }),
       paidPublishingAvailable: true,
+      hasRightsDeclaration: true,
     });
     expect(result.paidPublishingBlocked).toBe(false);
   });
@@ -39,11 +42,12 @@ describe("resolvePublishReadiness", () => {
   // asserts the field is actually gone from the returned object, not
   // merely unused, so a later edit cannot quietly reintroduce a second
   // source of truth for the same question.
-  it("returns exactly missingAllPrice, missingDescription, paidPublishingBlocked and recommended -- no requiredMet", () => {
-    const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true });
+  it("returns exactly missingAllPrice, missingDescription, missingRights, paidPublishingBlocked and recommended -- no requiredMet", () => {
+    const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true, hasRightsDeclaration: true });
     expect(Object.keys(result).sort()).toEqual([
       "missingAllPrice",
       "missingDescription",
+      "missingRights",
       "paidPublishingBlocked",
       "recommended",
     ]);
@@ -53,7 +57,7 @@ describe("resolvePublishReadiness", () => {
   // PR-G: the readiness model is provider-neutral now. No field, and no
   // input, may carry a payment-provider or payout name.
   it("exposes no payout- or Stripe-named field", () => {
-    const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true });
+    const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true, hasRightsDeclaration: true });
     for (const key of Object.keys(result)) {
       expect(key.toLowerCase()).not.toContain("payout");
       expect(key.toLowerCase()).not.toContain("stripe");
@@ -64,6 +68,7 @@ describe("resolvePublishReadiness", () => {
     const result = resolvePublishReadiness({
       book: book({ description: "a".repeat(60), keywords: "sci-fi" }),
       paidPublishingAvailable: true,
+      hasRightsDeclaration: true,
     });
     expect(result.recommended).toHaveLength(2);
     const doneCount = result.recommended.filter((item) => item.done).length;
@@ -75,7 +80,7 @@ describe("resolvePublishReadiness", () => {
   // former purpose (the "Look inside" recommended item) was removed,
   // not relabeled, once Read Sample replaced that public presentation.
   it("never recommends a preview-excerpt item -- that surface no longer exists", () => {
-    const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true });
+    const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true, hasRightsDeclaration: true });
     const labels = result.recommended.map((item) => item.label.toLowerCase());
     expect(labels.some((label) => label.includes("look inside"))).toBe(false);
     expect(labels.some((label) => label.includes("preview"))).toBe(false);
@@ -85,6 +90,7 @@ describe("resolvePublishReadiness", () => {
     const incomplete = resolvePublishReadiness({
       book: book({ price_all: 0 }),
       paidPublishingAvailable: false,
+      hasRightsDeclaration: true,
     });
     const complete = resolvePublishReadiness({
       book: book({
@@ -93,13 +99,14 @@ describe("resolvePublishReadiness", () => {
         keywords: "x",
       }),
       paidPublishingAvailable: false,
+      hasRightsDeclaration: true,
     });
     expect(incomplete.paidPublishingBlocked).toBe(false);
     expect(complete.paidPublishingBlocked).toBe(false);
   });
 
   it("excludes cover and price checklist items from the recommended list", () => {
-    const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true });
+    const result = resolvePublishReadiness({ book: book(), paidPublishingAvailable: true, hasRightsDeclaration: true });
     const labels = result.recommended.map((item) => item.label.toLowerCase());
     expect(labels.some((label) => label.includes("cover"))).toBe(false);
     expect(labels.some((label) => label.includes("price"))).toBe(false);
@@ -116,6 +123,7 @@ describe("resolvePublishReadiness: the missing-ALL-price blocker", () => {
       const result = resolvePublishReadiness({
         book: book({ price_all: null }),
         paidPublishingAvailable,
+        hasRightsDeclaration: true,
       });
       expect(result.missingAllPrice).toBe(true);
       // Never BOTH: naming two obstacles for one refusal is the failure
@@ -128,6 +136,7 @@ describe("resolvePublishReadiness: the missing-ALL-price blocker", () => {
     const result = resolvePublishReadiness({
       book: book({ price_all: 0 }),
       paidPublishingAvailable: false,
+      hasRightsDeclaration: true,
     });
     expect(result.missingAllPrice).toBe(false);
     expect(result.paidPublishingBlocked).toBe(false);
@@ -137,6 +146,7 @@ describe("resolvePublishReadiness: the missing-ALL-price blocker", () => {
     const result = resolvePublishReadiness({
       book: book({ price_all: 199 }),
       paidPublishingAvailable: false,
+      hasRightsDeclaration: true,
     });
     expect(result.missingAllPrice).toBe(false);
     expect(result.paidPublishingBlocked).toBe(true);
@@ -148,6 +158,7 @@ describe("resolvePublishReadiness: the missing-ALL-price blocker", () => {
       const result = resolvePublishReadiness({
         book: book({ description }),
         paidPublishingAvailable: true,
+        hasRightsDeclaration: true,
       });
       expect(result.missingDescription).toBe(true);
       expect(result.recommended.map((item) => item.label)).not.toContain(
@@ -160,11 +171,41 @@ describe("resolvePublishReadiness: the missing-ALL-price blocker", () => {
     const result = resolvePublishReadiness({
       book: book({ description: "Poems." }),
       paidPublishingAvailable: true,
+      hasRightsDeclaration: true,
     });
     expect(result.missingDescription).toBe(false);
     expect(result.recommended).toContainEqual({
       label: "Write a description (a couple of sentences or more)",
       done: false,
     });
+  });
+});
+
+describe("resolvePublishReadiness: the rights choice (F4, P4)", () => {
+  it("a book without a rights declaration reports missingRights", () => {
+    const result = resolvePublishReadiness({
+      book: book({ description: "A real description." }),
+      paidPublishingAvailable: true,
+      hasRightsDeclaration: false,
+    });
+    expect(result.missingRights).toBe(true);
+  });
+
+  it("a book with a declaration does not", () => {
+    const result = resolvePublishReadiness({
+      book: book({ description: "A real description." }),
+      paidPublishingAvailable: true,
+      hasRightsDeclaration: true,
+    });
+    expect(result.missingRights).toBe(false);
+  });
+
+  it("is independent of the other blockers (each is its own flag)", () => {
+    const result = resolvePublishReadiness({
+      book: book({ description: "", price_all: null }),
+      paidPublishingAvailable: false,
+      hasRightsDeclaration: false,
+    });
+    expect(result).toMatchObject({ missingAllPrice: true, missingDescription: true, missingRights: true });
   });
 });

@@ -17,7 +17,9 @@ export type AuthorSeriesGroup = {
   bookCount: number;
   // Capped, ordered subset used for the small cover strip -- never the
   // full member list, so a long series can't blow up the section.
-  covers: Pick<Book, "id" | "title" | "cover_path">[];
+  // F4: pen_name rides along (the rows are `select *`), for the cover
+  // placeholder's byline on the author page.
+  covers: Pick<Book, "id" | "title" | "cover_path" | "pen_name">[];
 };
 
 const MAX_COVERS_PER_SERIES = 4;

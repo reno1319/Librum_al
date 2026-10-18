@@ -84,13 +84,14 @@ export function ManuscriptField({
   // directly-uploaded/converted manuscript's language metadata on Edit
   // Book is unaffected, exactly as before this parameter existed.
   bookLanguage?: string;
-  // Never live-edited anywhere in either book form (no author-name
-  // field exists in Book Details -- it's the caller's already-resolved
-  // reader-facing name, profiles.public_author_name ?? display_name via
-  // resolvePublicAuthorName(), only ever changed from Dashboard >
-  // Profile, a different page/session entirely), so unlike title this
-  // genuinely has no equivalent staleness/race to guard against -- a
-  // plain, stable prop is correct as-is.
+  // The caller's already-resolved reader-facing name,
+  // profiles.public_author_name ?? display_name via
+  // resolvePublicAuthorName(), only ever changed from Dashboard > Profile.
+  // F4 (P5): it is the FALLBACK for the book's byline. When the
+  // surrounding form has a "penName" field, its trimmed value wins
+  // (resolveBookByline's rule) and is tracked live exactly as the title
+  // is -- see the listener effect below -- so dc:creator is the byline
+  // readers see.
   authorName: string;
   // The signed-in author's own id -- used only to namespace this
   // upload's temporary Storage path ("<authorId>/tmp/..."), the same
@@ -128,6 +129,7 @@ export function ManuscriptField({
   const hiddenPathInputRef = useRef<HTMLInputElement>(null);
   const liveTitleRef = useRef(bookTitle);
   const liveLanguageRef = useRef(bookLanguage ?? "");
+  const liveAuthorRef = useRef(authorName);
   const modeRef = useRef<"epub" | "docx">("epub");
   // The authoritative small reference this field maintains: whichever
   // temp EPUB Storage path (direct upload OR DOCX-generated, kept
@@ -190,7 +192,7 @@ export function ManuscriptField({
         const result = await repackageWithTitle(
           conversionId,
           liveTitleRef.current,
-          authorName,
+          liveAuthorRef.current,
           liveLanguageRef.current || null,
         );
         if (isStale(myRequestId)) return;
@@ -248,8 +250,15 @@ export function ManuscriptField({
         ? rawLanguageInput
         : null;
 
+    // F4 (P5): optional, like "language" -- absent while the Pen name
+    // field is not rendered, and then the byline is simply authorName.
+    const rawPenNameInput = form?.elements.namedItem("penName");
+    const penNameInput = rawPenNameInput instanceof HTMLInputElement ? rawPenNameInput : null;
+    const bylineFor = (input: HTMLInputElement | null) => input?.value.trim() || authorName;
+
     liveTitleRef.current = titleInput.value;
     if (languageInput) liveLanguageRef.current = languageInput.value;
+    liveAuthorRef.current = bylineFor(penNameInput);
 
     function triggerRepackageIfReady() {
       if (modeRef.current === "docx" && tempPathRef.current && displayNameRef.current) {
@@ -267,11 +276,18 @@ export function ManuscriptField({
       triggerRepackageIfReady();
     }
 
+    function handlePenNameInput() {
+      liveAuthorRef.current = bylineFor(penNameInput);
+      triggerRepackageIfReady();
+    }
+
     titleInput.addEventListener("input", handleTitleInput);
     languageInput?.addEventListener("change", handleLanguageChange);
+    penNameInput?.addEventListener("input", handlePenNameInput);
     return () => {
       titleInput.removeEventListener("input", handleTitleInput);
       languageInput?.removeEventListener("change", handleLanguageChange);
+      penNameInput?.removeEventListener("input", handlePenNameInput);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

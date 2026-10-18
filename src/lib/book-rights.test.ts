@@ -56,7 +56,9 @@ vi.mock("@/lib/supabase/admin", () => ({
   },
 }));
 
-const { recordRightsDeclaration, getCurrentRightsDeclaration } = await import("./book-rights");
+const { recordRightsDeclaration, getCurrentRightsDeclaration, getRightsDeclarationState } = await import(
+  "./book-rights"
+);
 
 const STORED = {
   id: "d0000000-0000-4000-8000-000000000001",
@@ -228,6 +230,43 @@ describe("getCurrentRightsDeclaration", () => {
   it("any other error -> null (fails closed) and is logged as an error", async () => {
     sessionResults.book_rights_declarations = { data: null, error: { code: "08006", message: "connection" } };
     expect(await getCurrentRightsDeclaration(BOOK)).toBeNull();
+    expect(console.error).toHaveBeenCalledTimes(1);
+  });
+});
+
+// F4 (P4): the publish gate's three-way read.
+describe("getRightsDeclarationState", () => {
+  it("a stored row -> present, with the row, read with the session client", async () => {
+    sessionResults.book_rights_declarations = { data: STORED, error: null };
+    expect(await getRightsDeclarationState(BOOK)).toEqual({ kind: "present", declaration: STORED });
+    expect(sessionCalls.filter((c) => c.table === "book_rights_declarations")[1]).toEqual({
+      table: "book_rights_declarations",
+      method: "eq",
+      args: ["book_id", BOOK],
+    });
+    expect(adminCreated).toBe(0);
+  });
+
+  it("no row -> none", async () => {
+    sessionResults.book_rights_declarations = { data: null, error: null };
+    expect(await getRightsDeclarationState(BOOK)).toEqual({ kind: "none" });
+  });
+
+  it("signed out -> unavailable, without a query", async () => {
+    sessionUser = null;
+    expect(await getRightsDeclarationState(BOOK)).toEqual({ kind: "unavailable" });
+    expect(sessionCalls).toEqual([]);
+  });
+
+  it.each(["42P01", "PGRST205"])("before the migration (%s) -> unavailable, never none", async (code) => {
+    sessionResults.book_rights_declarations = { data: null, error: { code, message: "missing" } };
+    expect(await getRightsDeclarationState(BOOK)).toEqual({ kind: "unavailable" });
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("any other read error -> unavailable, logged", async () => {
+    sessionResults.book_rights_declarations = { data: null, error: { code: "08006", message: "connection" } };
+    expect(await getRightsDeclarationState(BOOK)).toEqual({ kind: "unavailable" });
     expect(console.error).toHaveBeenCalledTimes(1);
   });
 });

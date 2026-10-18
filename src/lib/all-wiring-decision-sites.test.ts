@@ -154,6 +154,7 @@ describe("decision site 5 of 13: resolvePublishReadiness", () => {
     const readiness = resolvePublishReadiness({
       book: LEGACY_PAID,
       paidPublishingAvailable: false,
+      hasRightsDeclaration: true,
     });
     expect(readiness.paidPublishingBlocked).toBe(true);
     expect(readiness.missingAllPrice).toBe(false);
@@ -166,6 +167,7 @@ describe("decision site 5 of 13: resolvePublishReadiness", () => {
     const readiness = resolvePublishReadiness({
       book: UNPRICED,
       paidPublishingAvailable: false,
+      hasRightsDeclaration: true,
     });
     expect(readiness.missingAllPrice).toBe(true);
     expect(readiness.paidPublishingBlocked).toBe(false);
@@ -175,6 +177,7 @@ describe("decision site 5 of 13: resolvePublishReadiness", () => {
     const readiness = resolvePublishReadiness({
       book: UNPRICED,
       paidPublishingAvailable: true,
+      hasRightsDeclaration: true,
     });
     expect(readiness.missingAllPrice).toBe(true);
     expect(readiness.paidPublishingBlocked).toBe(false);
@@ -185,6 +188,7 @@ describe("decision site 5 of 13: resolvePublishReadiness", () => {
       const readiness = resolvePublishReadiness({
         book: FREE,
         paidPublishingAvailable: available,
+        hasRightsDeclaration: true,
       });
       expect(readiness.missingAllPrice).toBe(false);
       expect(readiness.paidPublishingBlocked).toBe(false);
@@ -198,6 +202,7 @@ describe("decision site 5 of 13: resolvePublishReadiness", () => {
         const r = resolvePublishReadiness({
           book: { ...LEGACY_PAID, price_all },
           paidPublishingAvailable: available,
+          hasRightsDeclaration: true,
         });
         expect(r.missingAllPrice && r.paidPublishingBlocked).toBe(false);
       }
@@ -357,7 +362,7 @@ describe("no pure decision site reads price_cents at all", () => {
       resolveCheckoutSecurityNote({ priceAll: legacyOnly.price_all, usePok: true, paidCheckoutAvailable: true }),
     ).toBeNull();
     expect(
-      resolvePublishReadiness({ book: legacyOnly, paidPublishingAvailable: true }).missingAllPrice,
+      resolvePublishReadiness({ book: legacyOnly, paidPublishingAvailable: true, hasRightsDeclaration: true }).missingAllPrice,
     ).toBe(true);
     expect(
       getPublishChecklist(legacyOnly).find((item) => item.label.includes("price"))?.done,

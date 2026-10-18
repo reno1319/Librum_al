@@ -70,6 +70,9 @@ function makeChain(resolve: () => unknown) {
     // PAID-REPRICING-1: performPublish's write is now a compare-and-set
     // (`.is()` for a null price) proved by its returned rows (`.select()`).
     is: () => chain,
+    // F4 (N1): the publish write also requires a non-empty description.
+    not: () => chain,
+    neq: () => chain,
     select: () => chain,
     single: () => Promise.resolve(resolve()),
     maybeSingle: () => Promise.resolve(resolve()),
@@ -144,6 +147,13 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdmi
 const mockSendNewBookEmails = vi.fn<(admin: unknown, args: unknown) => Promise<void>>(() =>
   Promise.resolve(),
 );
+// F4 (P4): performPublish now reads the book's rights declaration. This
+// suite predates that gate, so the declaration is present; the gate's
+// own refusals are covered in f4-rights-pen-name.test.ts.
+vi.mock("@/lib/book-rights", () => ({
+  getRightsDeclarationState: async () => ({ kind: "present", declaration: { basis: "own_rights" } }),
+  recordRightsDeclaration: async () => ({ ok: true }),
+}));
 vi.mock("@/lib/email", () => ({
   sendNewBookEmails: (admin: unknown, args: unknown) => mockSendNewBookEmails(admin, args),
 }));

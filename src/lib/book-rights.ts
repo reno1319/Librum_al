@@ -10,8 +10,7 @@ import type { BookRightsDeclaration } from "@/lib/types";
 // declaration for a book (public.book_rights_declarations, migration
 // 20261018091237). Server-only helpers, not Server Actions: F4 calls them
 // from its own actions (Add a book, Edit, the publish gate), which run the
-// maintenance and recovery gates first. Nothing calls them in F3 except
-// tests, and performPublish does not require a declaration yet.
+// maintenance and recovery gates first.
 //
 // The table is append-only and anon/authenticated hold no write on it, so
 // the one insert goes through the service role, and only after the
@@ -100,16 +99,25 @@ export async function recordRightsDeclaration(
   return { ok: true, declaration: declaration as BookRightsDeclaration };
 }
 
-// The book's current declaration (its newest row), read with the caller's
-// own session: RLS shows an author only their own declarations. null when
-// there is none, when the caller is signed out, before the migration, or
-// on any error -- a caller gating on it therefore fails closed.
-export async function getCurrentRightsDeclaration(bookId: string): Promise<BookRightsDeclaration | null> {
+// F4: the publish gate's three-way read of a book's current declaration
+// (its newest row), with the caller's own session: RLS shows an author
+// only their own declarations. `none` means the read worked and found
+// nothing; `unavailable` means it could not be answered -- signed out,
+// before the migration (feature off), or any read error. performPublish
+// refuses on both, with different messages (missing_rights /
+// rights_unavailable), so the gate fails closed and never mistakes "we
+// couldn't tell" for "no choice yet".
+export type RightsDeclarationState =
+  | { kind: "present"; declaration: BookRightsDeclaration }
+  | { kind: "none" }
+  | { kind: "unavailable" };
+
+export async function getRightsDeclarationState(bookId: string): Promise<RightsDeclarationState> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return null;
+  if (!user) return { kind: "unavailable" };
 
   const { data, error } = await supabase
     .from("book_rights_declarations")
@@ -123,9 +131,19 @@ export async function getCurrentRightsDeclaration(bookId: string): Promise<BookR
     if (isSchemaFeatureOffError(error)) {
       logSchemaFeatureOffOnce(FEATURE, error);
     } else {
-      console.error("getCurrentRightsDeclaration: read failed:", error);
+      console.error("getRightsDeclarationState: read failed:", error);
     }
-    return null;
+    return { kind: "unavailable" };
   }
-  return (data as BookRightsDeclaration | null) ?? null;
+  if (!data) return { kind: "none" };
+  return { kind: "present", declaration: data as BookRightsDeclaration };
+}
+
+// The book's current declaration (its newest row), or null when there is
+// none, when the caller is signed out, before the migration, or on any
+// error -- a caller gating on it therefore fails closed. The publish gate
+// uses getRightsDeclarationState above, which tells those cases apart.
+export async function getCurrentRightsDeclaration(bookId: string): Promise<BookRightsDeclaration | null> {
+  const state = await getRightsDeclarationState(bookId);
+  return state.kind === "present" ? state.declaration : null;
 }

@@ -31,7 +31,8 @@ import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CoverField } from "@/components/cover-field";
-import type { Series } from "@/lib/types";
+import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
+import type { RightsBasis, Series } from "@/lib/types";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART C: redesigned step order and content --
 // "Book Details" now comes FIRST (Title/Language/Genre, the fields the
@@ -71,6 +72,12 @@ const STEPS = ["Details", "Manuscript & cover", "Price"];
 const SUBTITLE_MAX_LENGTH = 300;
 const PUBLISHER_MAX_LENGTH = 200;
 const EDITION_MAX_LENGTH = 100;
+// F4: books.pen_name's own check (1-120 characters) and the Translator
+// field's server bound. Over-long input that bypasses maxLength ends in
+// the existing save-failure (pen name) or contributor (translator)
+// message; there is no sentence of its own (Renato's Q6 = a).
+const PEN_NAME_MAX_LENGTH = 120;
+const TRANSLATOR_MAX_LENGTH = 120;
 
 // REDESIGN STEP 5: Q7's wording -- the free-ebook "0" option is gone
 // from the paid price's error, hint and earnings sentences, because Free
@@ -86,6 +93,9 @@ const FILES_ERROR = "Add both a cover image and a manuscript file to continue.";
 // here: Publish book always saves the draft before the publish check.
 const MISSING_DESCRIPTION_LINE =
   "Add a description before publishing. Your book will still be saved as a draft.";
+// F4 (P3): shown under the Rights choice when Publish book is pressed
+// without one, and as a Readiness blocker until one is chosen.
+const MISSING_RIGHTS_LINE = "Choose the rights before publishing.";
 
 // FIX1 (X8): a field's own message, tied to the field by id.
 function FieldError({ id, message }: { id: string; message: string }) {
@@ -142,10 +152,18 @@ export function UploadWizard({
   authorName,
   authorId,
   paidPublishingAvailable,
+  penNameAvailable,
+  rightsAvailable,
 }: {
   series: Series[];
   authorName: string;
   authorId: string;
+  // F4 (D1/D2/D3): whether the database has the pen name column and the
+  // rights table yet (getCatalogSchemaFeatures(), evaluated by page.tsx).
+  // Rendering only: without them the Pen name field and the Rights
+  // choice are not shown, and the server refuses Publish on its own.
+  penNameAvailable: boolean;
+  rightsAvailable: boolean;
   // LIBRUM 2.0 PUBLISHING-UX-1 PART C / PR-G: display-only context for
   // the Price step's readiness section -- never a pre-submit gate.
   // Publish book can still be pressed even when this is false;
@@ -210,6 +228,12 @@ export function UploadWizard({
   // the author typed before, never a carried-over 0.
   const [priceMode, setPriceMode] = useState<WizardPriceMode>("paid");
   const [paidPrice, setPaidPrice] = useState("");
+  // F4 (P1/P5): controlled so "How readers will see it" shows the byline
+  // live: the typed pen name, else the author name.
+  const [penName, setPenName] = useState("");
+  // F4 (P3): nothing is chosen when the page opens (no preselect).
+  const [rightsBasis, setRightsBasis] = useState<RightsBasis | "">("");
+  const [rightsError, setRightsError] = useState("");
 
   // Moves keyboard and screen-reader focus to the new step's (visually
   // hidden) heading on every step change, but not on first render.
@@ -221,6 +245,7 @@ export function UploadWizard({
   const isbnInputRef = useRef<HTMLInputElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
   const moreDetailsRef = useRef<HTMLDetailsElement>(null);
+  const firstRightsRadioRef = useRef<HTMLInputElement>(null);
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) {
@@ -281,6 +306,8 @@ export function UploadWizard({
     setStep(target);
   }
 
+  const byline = (penNameAvailable ? penName.trim() : "") || authorName;
+
   const pricing = resolveWizardPricing({ mode: priceMode, paidPrice });
   const { priceValid, isFreeBook, priceAll, grossMinor, feeMinor, earningsMinor } = pricing;
 
@@ -300,10 +327,21 @@ export function UploadWizard({
       setShowDetailErrors(true);
       return;
     }
+    // F4 (P3): Publish book needs a rights choice; Save as draft never
+    // does. Checked like the price, before anything is sent.
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const publishing = submitter instanceof HTMLButtonElement && submitter.value === "publish";
+    const rightsMissing = publishing && rightsAvailable && rightsBasis === "";
+    if (rightsMissing) setRightsError(MISSING_RIGHTS_LINE);
     if (!pricing.canSubmit) {
       event.preventDefault();
       setPriceError(PAID_PRICE_ERROR);
       priceInputRef.current?.focus();
+      return;
+    }
+    if (rightsMissing) {
+      event.preventDefault();
+      firstRightsRadioRef.current?.focus();
     }
   }
 
@@ -320,6 +358,9 @@ export function UploadWizard({
       cover_path: cover ? "pending" : null,
     },
     paidPublishingAvailable,
+    // F4 (D3): with the rights table missing, no choice can be made and
+    // the server refuses Publish, so the book is never "ready" here.
+    hasRightsDeclaration: rightsAvailable && rightsBasis !== "",
   });
 
   return (
@@ -394,6 +435,27 @@ export function UploadWizard({
               />
               <FieldError id="wizard-title-error" message={shownTitleError} />
             </label>
+
+            {/* F4 (P1, Q1 = a): directly under Title, only once the
+                database can store it. */}
+            {penNameAvailable && (
+              <label className="flex flex-col gap-1 text-sm">
+                Pen name (optional)
+                <input
+                  name="penName"
+                  type="text"
+                  maxLength={PEN_NAME_MAX_LENGTH}
+                  value={penName}
+                  onChange={(e) => setPenName(e.target.value)}
+                  className={formControlClassesFor(false)}
+                />
+                {authorName && (
+                  <span className="text-sm text-muted">
+                    Leave blank to use your author name, {authorName}.
+                  </span>
+                )}
+              </label>
+            )}
 
             <label className="flex flex-col gap-1 text-sm">
               Language
@@ -510,6 +572,19 @@ export function UploadWizard({
                     type="text"
                     placeholder="e.g. 2nd edition"
                     maxLength={EDITION_MAX_LENGTH}
+                    className={formControlClassesFor(false)}
+                  />
+                </label>
+
+                {/* F4 (P2, Q2 = a): saved as one contributor with the
+                    Translator role; edited or removed later under People
+                    on the Edit page. */}
+                <label className="flex flex-col gap-1 text-sm">
+                  Translator (optional)
+                  <input
+                    name="translator"
+                    type="text"
+                    maxLength={TRANSLATOR_MAX_LENGTH}
                     className={formControlClassesFor(false)}
                   />
                 </label>
@@ -754,6 +829,9 @@ export function UploadWizard({
               {readiness.missingDescription && (
                 <p className="mt-2 text-red-800">{MISSING_DESCRIPTION_LINE}</p>
               )}
+              {rightsAvailable && readiness.missingRights && (
+                <p className="mt-2 text-red-800">{MISSING_RIGHTS_LINE}</p>
+              )}
               {readiness.paidPublishingBlocked && (
                 <p className="mt-2 text-red-800">
                   Paid publishing hasn&apos;t launched yet. Your book will still
@@ -771,11 +849,57 @@ export function UploadWizard({
               )}
               {!readiness.missingAllPrice &&
                 !readiness.missingDescription &&
+                !readiness.missingRights &&
                 !readiness.paidPublishingBlocked &&
                 readiness.recommended.every((item) => item.done) && (
                 <p className="mt-2 text-muted">Looks good — ready to publish.</p>
               )}
             </div>
+
+            {/* F4 (P3, Q3 = a): the rights choice, between Readiness and
+                the buttons. The sentences come from RIGHTS_STATEMENTS,
+                never retyped; the cards are the Paid / Free cards above,
+                with the same Enter guard. Nothing is preselected. */}
+            {rightsAvailable && (
+              <fieldset
+                aria-describedby={rightsError ? "wizard-rights-error" : undefined}
+                className={`flex flex-col gap-3 rounded-[4px] ${
+                  rightsError ? "outline-2 outline-offset-4 outline-red-700" : ""
+                }`}
+              >
+                <legend className="mb-3 font-bold text-foreground">Rights</legend>
+                {RIGHTS_BASES.map((basis, index) => (
+                  <label
+                    key={basis}
+                    className={`flex cursor-pointer items-center gap-3.5 rounded-[4px] p-4 ${
+                      rightsBasis === basis
+                        ? "border-2 border-primary bg-[#f4f8f5]"
+                        : "border border-[#c9c0ae] bg-surface"
+                    }`}
+                  >
+                    <input
+                      ref={index === 0 ? firstRightsRadioRef : undefined}
+                      type="radio"
+                      name="rightsBasis"
+                      value={basis}
+                      checked={rightsBasis === basis}
+                      onChange={() => {
+                        setRightsBasis(basis);
+                        setRightsError("");
+                      }}
+                      onKeyDown={(e) => {
+                        // Enter on a radio must not submit the form as
+                        // "Save as draft" (the first submit button).
+                        if (e.key === "Enter") e.preventDefault();
+                      }}
+                      className="focus-ring h-5 w-5 shrink-0 accent-primary"
+                    />
+                    <span className="text-foreground">{RIGHTS_STATEMENTS[basis].text}</span>
+                  </label>
+                ))}
+                <FieldError id="wizard-rights-error" message={rightsError} />
+              </fieldset>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-surface-hover pt-6">
@@ -838,8 +962,9 @@ export function UploadWizard({
           </div>
 
           {/* D5: the book as a reader's book card shows it -- cover (or
-              the card's own no-cover fallback), title, public author
-              name and formatCatalogPriceLabel(). No price line while the
+              the card's own no-cover fallback), title, byline (F4: the
+              typed pen name, else the public author name) and
+              formatCatalogPriceLabel(). No price line while the
               paid price is empty or invalid; no title line while the
               title is blank. */}
           <div className={`${CARD_CLASSES} flex gap-4 p-5`}>
@@ -853,7 +978,7 @@ export function UploadWizard({
             ) : (
               <CoverPlaceholder
                 title={title}
-                authorName={authorName}
+                authorName={byline}
                 className="h-[6.75rem] w-[4.5rem] shrink-0 rounded-[2px] shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
               />
             )}
@@ -862,7 +987,7 @@ export function UploadWizard({
               {title.trim() && (
                 <p className="break-words font-serif text-lg leading-snug text-foreground">{title}</p>
               )}
-              {authorName && <p className="text-[0.8125rem] text-muted">{authorName}</p>}
+              {byline && <p className="text-[0.8125rem] text-muted">{byline}</p>}
               {priceValid && (
                 <p className={`text-sm font-bold ${isFreeBook ? "text-[#2f6b4f]" : "text-primary"}`}>
                   {formatCatalogPriceLabel(priceAll)}

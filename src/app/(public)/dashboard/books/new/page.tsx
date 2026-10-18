@@ -5,6 +5,7 @@ import { UploadWizard } from "./upload-wizard";
 import { Alert } from "@/components/ui/alert";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import { getCatalogSchemaFeatures } from "@/lib/catalog-schema-features";
 import type { Series } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -27,7 +28,7 @@ export default async function NewBookPage({
     redirect("/login?next=/dashboard/books/new");
   }
 
-  const [{ data: series }, { data: profile }] = await Promise.all([
+  const [{ data: series }, { data: profile }, schemaFeatures] = await Promise.all([
     supabase.from("series").select("*").eq("author_id", user.id).order("title").returns<Series[]>(),
     // LIBRUM 2.0 PRODUCT-5: display_name is passed through to
     // ManuscriptField so a DOCX-converted EPUB's internal dc:creator
@@ -50,6 +51,9 @@ export default async function NewBookPage({
       .select("display_name, public_author_name")
       .eq("id", user.id)
       .single(),
+    // F4 (D1): whether the Pen name field and the Rights choice can be
+    // shown yet (rendering only; see catalog-schema-features.ts).
+    getCatalogSchemaFeatures(),
   ]);
 
   return (
@@ -91,6 +95,8 @@ export default async function NewBookPage({
         authorName={resolvePublicAuthorName(profile) ?? ""}
         authorId={user.id}
         paidPublishingAvailable={canPublishPaidTitle()}
+        penNameAvailable={schemaFeatures.penName}
+        rightsAvailable={schemaFeatures.rights}
       />
     </main>
   );

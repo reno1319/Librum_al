@@ -111,15 +111,22 @@ function publishedBook(overrides: FakeBook = {}): FakeBook {
   };
 }
 
-function makeFakeSupabase(overrides: { book?: FakeBook | null; result?: QueryResult } = {}) {
+// F4 (P5): a second, separate read -- `.select("id, pen_name").in("id",
+// [id])` (attachPenNames) -- supplies the book's pen name; `penNames`
+// is its result (an error object models "before the migration").
+function makeFakeSupabase(
+  overrides: { book?: FakeBook | null; result?: QueryResult; penNames?: QueryResult } = {},
+) {
   const book = "book" in overrides ? overrides.book : publishedBook();
   const result = overrides.result ?? { data: book, error: null };
+  const penNames = overrides.penNames ?? { data: [], error: null };
 
   const maybeSingle = vi.fn(() => Promise.resolve(result));
   const eq = vi.fn(() => ({ maybeSingle }));
-  const select = vi.fn(() => ({ eq }));
+  const inFilter = vi.fn(() => Promise.resolve(penNames));
+  const select = vi.fn((columns: string) => (columns === "id, pen_name" ? { in: inFilter } : { eq }));
   const from = vi.fn(() => ({ select }));
-  return { from, __from: from, __select: select, __eq: eq, __maybeSingle: maybeSingle };
+  return { from, __from: from, __select: select, __eq: eq, __in: inFilter, __maybeSingle: maybeSingle };
 }
 
 function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: unknown } = {}) {
@@ -314,13 +321,43 @@ describe("GET /api/books/[id]/sample", () => {
 
       await callRoute();
 
-      expect(supabase.__from).toHaveBeenCalledTimes(1);
-      expect(supabase.__from).toHaveBeenCalledWith("books");
-      expect(supabase.__select).toHaveBeenCalledTimes(1);
-      expect(supabase.__select).toHaveBeenCalledWith(EXPECTED_COLUMNS);
+      // F4 (P5): plus one pen-name read for the same id (attachPenNames).
+      expect(supabase.__from).toHaveBeenCalledTimes(2);
+      expect(supabase.__from).toHaveBeenNthCalledWith(1, "books");
+      expect(supabase.__from).toHaveBeenNthCalledWith(2, "books");
+      expect(supabase.__select).toHaveBeenCalledTimes(2);
+      expect(supabase.__select).toHaveBeenNthCalledWith(1, EXPECTED_COLUMNS);
+      expect(supabase.__select).toHaveBeenNthCalledWith(2, "id, pen_name");
       expect(supabase.__eq).toHaveBeenCalledTimes(1);
       expect(supabase.__eq).toHaveBeenCalledWith("id", BOOK_ID);
+      expect(supabase.__in).toHaveBeenCalledWith("id", [BOOK_ID]);
       expect(supabase.__maybeSingle).toHaveBeenCalledTimes(1);
+    });
+
+    it("F4: the sample's author is the book's pen name when it has one", async () => {
+      mockCreateClient.mockResolvedValue(
+        makeFakeSupabase({ penNames: { data: [{ id: BOOK_ID, pen_name: "Jo Pen" }], error: null } }),
+      );
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() }));
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).author).toBe("Jo Pen");
+    });
+
+    it("F4: before the migration (pen-name read fails as feature-off) the author's public name is kept", async () => {
+      const supabase = makeFakeSupabase({
+        penNames: { data: null, error: { code: "42703", message: "column books.pen_name does not exist" } },
+      });
+      mockCreateClient.mockResolvedValue(supabase);
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() }));
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.author).toBe("Renata Author");
     });
 
     it("a published canonical book fetches exactly <author>/<book>.epub from the manuscripts bucket", async () => {

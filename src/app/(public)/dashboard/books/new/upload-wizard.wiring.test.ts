@@ -319,8 +319,11 @@ describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
     expect(start).toBeGreaterThan(-1);
     expect(priceBlock).toContain('["paid", "Paid"]');
     expect(priceBlock).toContain('["free", "Free"]');
-    expect(priceBlock.match(/type="radio"/g)?.length).toBe(1);
-    expect(priceBlock).toContain("<fieldset");
+    // F4: the Rights choice is a second fieldset on this step, so the
+    // Paid / Free count is taken from the first fieldset only.
+    const pricingFieldset = priceBlock.slice(priceBlock.indexOf("<fieldset"), priceBlock.indexOf("</fieldset>"));
+    expect(pricingFieldset.match(/type="radio"/g)?.length).toBe(1);
+    expect(pricingFieldset).toContain('name="pricing"');
   });
 
   it("submits name=\"price\" from the box under Paid and a fixed 0 under Free -- never both", () => {
@@ -377,7 +380,9 @@ describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
     expect(priceBlock).toContain("How readers will see it");
     expect(priceBlock).toContain("formatCatalogPriceLabel(priceAll)");
     expect(priceBlock).toContain("cover.previewUrl");
-    expect(priceBlock).toContain("{authorName}");
+    // F4 (P5): the byline -- the typed pen name, else the author name.
+    expect(priceBlock).toContain("{byline}");
+    expect(source).toContain('const byline = (penNameAvailable ? penName.trim() : "") || authorName;');
     expect(priceBlock).toContain("{title.trim() && (");
     // No price line at all while the price is not valid.
     expect(priceBlock).toContain("{priceValid && (");
