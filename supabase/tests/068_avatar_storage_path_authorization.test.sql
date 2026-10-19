@@ -208,10 +208,13 @@ begin
       || 'Users can view their own full profile|SELECT|PERMISSIVE|public|(auth.uid() = id)|',
     'part1: the three profiles policies are unchanged');
 
-  -- Triggers on profiles: only the BEFORE DELETE reader-hold cleanup.
+  -- Triggers on profiles: the BEFORE DELETE reader-hold cleanup and,
+  -- since PEN-NAMES-1 (migration 20261019184512), the AFTER trigger that
+  -- keeps the default pen name equal to public_author_name.
   perform pg_temp.assert(
     (select string_agg(tgname, ',' order by tgname) from pg_trigger
-      where tgrelid = 'public.profiles'::regclass and not tgisinternal) = 'clear_expired_reader_holds_trigger',
+      where tgrelid = 'public.profiles'::regclass and not tgisinternal)
+      = 'clear_expired_reader_holds_trigger,profiles_sync_default_pen_name',
     'part1: profiles triggers unchanged');
 
   -- The public view keeps exactly its SELECT grant to anon and authenticated.

@@ -483,6 +483,11 @@ const mockCreateCatalogWriteClient = vi.fn(() => {
   events.push("createCatalogWriteClient");
   return catalogWriter;
 });
+// PEN-NAMES-1: the pen name box resolves through the server-only pen
+// name writer; here it always resolves to the author's default.
+vi.mock("@/lib/pen-name-write-client", () => ({
+  resolveOwnPenNameId: async () => ({ ok: true, penNameId: "f0000000-0000-4000-8000-00000000pen0" }),
+}));
 vi.mock("@/lib/catalog-write-client", () => ({
   createCatalogWriteClient: () => mockCreateCatalogWriteClient(),
 }));

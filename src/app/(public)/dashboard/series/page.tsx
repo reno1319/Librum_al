@@ -29,12 +29,24 @@ export default async function SeriesPage({
     redirect("/login?next=/dashboard/series");
   }
 
-  const { data: series } = await supabase
-    .from("series")
-    .select("*")
-    .eq("author_id", user.id)
-    .order("created_at", { ascending: false })
-    .returns<Series[]>();
+  const [{ data: series }, { data: penNames }] = await Promise.all([
+    supabase
+      .from("series")
+      .select("*")
+      .eq("author_id", user.id)
+      .order("created_at", { ascending: false })
+      .returns<Series[]>(),
+    // PEN-NAMES-1 (11a): the author's own pen names, default first, for
+    // the new series' pen name and each series' label.
+    supabase
+      .from("pen_names")
+      .select("id, name, is_default")
+      .eq("author_id", user.id)
+      .order("is_default", { ascending: false })
+      .order("created_at")
+      .returns<{ id: string; name: string; is_default: boolean }[]>(),
+  ]);
+  const penNameById = new Map((penNames ?? []).map((p) => [p.id, p.name]));
 
   const { data: booksInSeries } = await supabase
     .from("books")
@@ -56,7 +68,7 @@ export default async function SeriesPage({
       <div className="mt-2">
         <PageHeader
           title="Series"
-          description="Create a series here, then assign each book to it (and set its reading order) from the book's edit page."
+          description="Create a series here, then assign each book to it (and set its reading order) from the book's edit page. All books in a series use the series' pen name."
         />
       </div>
 
@@ -85,6 +97,20 @@ export default async function SeriesPage({
             className={formControlClasses}
           />
         </label>
+        {/* PEN-NAMES-1 (11a): every book in the series must use this
+            pen name. Shown only when the author has more than one. */}
+        {(penNames ?? []).length > 1 && (
+          <label className="flex flex-col gap-1 text-sm">
+            Pen name
+            <select name="penNameId" defaultValue={penNames![0].id} className={formControlClasses}>
+              {penNames!.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button type="submit" className={buttonClasses("primary", "md", "w-fit")}>
           Create series
         </button>
@@ -101,6 +127,9 @@ export default async function SeriesPage({
               <p className="text-xs text-muted">
                 {counts.get(s.id) ?? 0}{" "}
                 {(counts.get(s.id) ?? 0) === 1 ? "book" : "books"}
+                {(penNames ?? []).length > 1 && s.pen_name_id && penNameById.get(s.pen_name_id)
+                  ? ` · ${penNameById.get(s.pen_name_id)}`
+                  : ""}
               </p>
             </div>
             <form action={deleteSeries.bind(null, s.id)}>

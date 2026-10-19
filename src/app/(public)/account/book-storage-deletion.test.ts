@@ -90,6 +90,11 @@ function sessionFrom(table: string) {
       }),
     };
   }
+  // PEN-NAMES-1: deleteAccount also reads the account's pen name photos
+  // (none in these book-storage cases).
+  if (table === "pen_names") {
+    return { select: () => ({ eq: () => ({ returns: async () => ({ data: [], error: null }) }) }) };
+  }
   if (table === "purchases") {
     return {
       select: () => ({

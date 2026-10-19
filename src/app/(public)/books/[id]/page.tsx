@@ -12,7 +12,7 @@ import {
   addToWishlist,
   removeFromWishlist,
 } from "./actions";
-import { followAuthor, unfollowAuthor } from "../../authors/[id]/actions";
+import { followPenName, unfollowPenName } from "../../authors/[id]/actions";
 import { buildBookstoreHref } from "@/lib/bookstore";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
@@ -34,6 +34,13 @@ import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { getAuthorInitials } from "@/lib/author-initials";
 import { resolveBookByline } from "@/lib/book-byline";
+import {
+  authorPagePath,
+  penNameLinkLabel,
+  readPenNameLinks,
+  type PenNameRef,
+  type PublicPenName,
+} from "@/lib/pen-names";
 import { buttonClasses } from "@/components/ui/button";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
@@ -84,11 +91,17 @@ import { CoverPlaceholder } from "@/components/cover-placeholder";
 // reviewer alike, so this join can no longer request it at all without
 // breaking the whole page with a hard permission error. See the reviews
 // render site further below for the resulting fallback behavior.
+//
+// PEN-NAMES-1 (migration 20261019184512): the book's own byline, "About
+// the author" and "More by" now come from the BOOK'S PEN NAME (3a),
+// embedded from the public_pen_names view as `pen` (no account
+// columns); the shelves embed it too. Only the reviews join still reads
+// public_author_profiles (out of scope here; PR B).
 type BookWithAuthorBio = Book & {
-  profiles: Pick<Profile, "public_author_name" | "bio" | "avatar_path"> | null;
+  pen: PublicPenName | null;
 };
 type BookWithAuthor = Book & {
-  profiles: Pick<Profile, "public_author_name"> | null;
+  pen: PenNameRef | null;
 };
 // LIBRUM 2.0 PRODUCT-3: `created_at` added to what this already-existing
 // query selects (no new query, no new PERF-1 batch member) so
@@ -134,7 +147,7 @@ const getBookForDetail = cache(async (id: string) => {
   const supabase = await createClient();
   const { data: book } = await supabase
     .from("books")
-    .select("*, profiles:public_author_profiles(public_author_name, bio, avatar_path)")
+    .select("*, pen:public_pen_names(id, name, bio, avatar_path, links)")
     .eq("id", id)
     .single<BookWithAuthorBio>();
   return book;
@@ -384,12 +397,13 @@ export default async function BookDetailPage({
           .order("series_position", { ascending: true, nullsFirst: false })
           .returns<SeriesEntry[]>()
       : Promise.resolve({ data: null }),
+    // 3a: "More by" = only books under this book's pen name.
     supabase
       .from("books")
-      .select("*, profiles:public_author_profiles(public_author_name)")
+      .select("*, pen:public_pen_names(id, name)")
       .eq("status", "published")
       .not("price_all", "is", null)
-      .eq("author_id", book.author_id)
+      .eq("pen_name_id", book.pen_name_id)
       .neq("id", id)
       .order("created_at", { ascending: false })
       .limit(8)
@@ -397,7 +411,7 @@ export default async function BookDetailPage({
     book.genre
       ? supabase
           .from("books")
-          .select("*, profiles:public_author_profiles(public_author_name)")
+          .select("*, pen:public_pen_names(id, name)")
           .eq("status", "published")
           .not("price_all", "is", null)
           .eq("genre", book.genre)
@@ -408,15 +422,15 @@ export default async function BookDetailPage({
           .returns<BookWithAuthor[]>()
       : Promise.resolve({ data: null }),
     // REDESIGN STEP 3 (B5): whether this reader already follows the
-    // author, for the Follow button in About the Author -- the same
-    // query the author's own page runs. Never asked for the author
-    // themself or for a visitor who is not signed in.
-    user && !isAuthor
+    // book's pen name (PEN-NAMES-1, 4a), for the Follow button in About
+    // the Author -- the same query the pen name's own page runs. Never
+    // asked for the author themself or for a visitor who is not signed in.
+    user && !isAuthor && book.pen_name_id
       ? supabase
-          .from("author_follows")
-          .select("id")
+          .from("pen_name_follows")
+          .select("pen_name_id")
           .eq("follower_id", user.id)
-          .eq("author_id", book.author_id)
+          .eq("pen_name_id", book.pen_name_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
     // A basic view count, not deduplicated unique visitors — a reload
@@ -551,9 +565,11 @@ export default async function BookDetailPage({
   // converted from DOCX.
   const showSample = resolveShowSample(purchaseState);
 
-  const authorAvatarUrl = book.profiles?.avatar_path
-    ? supabase.storage.from("avatars").getPublicUrl(book.profiles.avatar_path).data.publicUrl
+  const authorAvatarUrl = book.pen?.avatar_path
+    ? supabase.storage.from("avatars").getPublicUrl(book.pen.avatar_path).data.publicUrl
     : null;
+  const penNameLinks = readPenNameLinks(book.pen?.links);
+  const penNamePath = book.pen ? authorPagePath(book.pen.id) : null;
 
   // REDESIGN STEP 3 (P2): the existing purchase sentence, as the price
   // card's footnote. Shown in the same purchase states as before.
@@ -569,12 +585,10 @@ export default async function BookDetailPage({
     usePok,
     paidCheckoutAvailable,
   });
-  const authorName = resolvePublicAuthorName(book.profiles);
-  // F4 (P5, Q4 = a): the cover placeholder and the "by" line show the
-  // book's byline (its pen name, else the author's public name), still
-  // linking to the author's page. "About the author" and "More by ..."
-  // name the author, so they keep authorName.
-  const bookByline = resolveBookByline(book, book.profiles);
+  // PEN-NAMES-1 (3a): the byline, "About the author" and "More by ..."
+  // all name the book's pen name and link to its page.
+  const bookByline = resolveBookByline(book);
+  const authorName = bookByline;
 
   return (
     <main className="page-container flex-1 pt-5 pb-16 sm:pt-6">
@@ -660,9 +674,13 @@ export default async function BookDetailPage({
               mockup ("by <author> · Book 1 of <series>"). */}
           <p className="mt-4 text-foreground">
             by{" "}
-            <Link href={`/authors/${book.author_id}`} className={INLINE_LINK_CLASSES}>
-              {bookByline}
-            </Link>
+            {penNamePath ? (
+              <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
+                {bookByline}
+              </Link>
+            ) : (
+              <span className="font-semibold">{bookByline}</span>
+            )}
             {seriesInfo && (
               <>
                 {" · "}
@@ -1017,22 +1035,43 @@ export default async function BookDetailPage({
           )}
           <div className="min-w-0 flex-[1_1_20rem]">
             <p className="font-serif text-[1.375rem] text-primary">{authorName}</p>
-            {book.profiles?.bio && (
-              <p className="mt-2 max-w-prose leading-relaxed text-muted">{book.profiles.bio}</p>
+            {book.pen?.bio && (
+              <p className="mt-2 max-w-prose whitespace-pre-line leading-relaxed text-muted">
+                {book.pen.bio}
+              </p>
             )}
-            <Link
-              href={`/authors/${book.author_id}`}
-              className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
-            >
-              View author profile &rarr;
-            </Link>
+            {penNameLinks.length > 0 && (
+              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                {penNameLinks.map((link) => (
+                  <li key={link} className="min-w-0 max-w-full">
+                    <a
+                      href={link}
+                      rel="nofollow ugc noopener noreferrer"
+                      target="_blank"
+                      className="focus-ring break-all rounded-sm text-primary underline underline-offset-2 hover:decoration-2"
+                    >
+                      {penNameLinkLabel(link)}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {penNamePath && (
+              <Link
+                href={penNamePath}
+                className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
+              >
+                View author profile &rarr;
+              </Link>
+            )}
           </div>
           {!isAuthor &&
+            penNamePath &&
             (user ? (
               <form
                 action={(isFollowingAuthor ? unfollowAuthorFromBook : followAuthorFromBook).bind(
                   null,
-                  book.author_id,
+                  book.pen_name_id!,
                   book.id,
                 )}
               >
@@ -1051,7 +1090,7 @@ export default async function BookDetailPage({
               // The author page's own "Log in to follow" link, unchanged:
               // after logging in the reader follows from that page.
               <Link
-                href={`/login?next=/authors/${book.author_id}`}
+                href={`/login?next=${penNamePath}`}
                 className={buttonClasses("outline", "md", "rounded-[3px] border-primary px-5 py-3 font-semibold")}
               >
                 Log in to follow
@@ -1261,15 +1300,16 @@ const DETAIL_VALUE_CLASSES = "mt-1 font-semibold text-foreground";
 // unchanged, plus a refresh of this book page so the button shows the
 // new state at once (those actions only refresh the author's page).
 // Only rendered for a signed-in reader who is not the author.
-async function followAuthorFromBook(authorId: string, bookId: string) {
+// PEN-NAMES-1: the id is the book's pen name id.
+async function followAuthorFromBook(penNameId: string, bookId: string) {
   "use server";
-  await followAuthor(authorId);
+  await followPenName(penNameId);
   revalidatePath(`/books/${bookId}`);
 }
 
-async function unfollowAuthorFromBook(authorId: string, bookId: string) {
+async function unfollowAuthorFromBook(penNameId: string, bookId: string) {
   "use server";
-  await unfollowAuthor(authorId);
+  await unfollowPenName(penNameId);
   revalidatePath(`/books/${bookId}`);
 }
 

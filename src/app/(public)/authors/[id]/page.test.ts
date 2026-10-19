@@ -12,7 +12,7 @@ const mockCreateClient = vi.fn(() => {
 });
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => { throw new Error("ADMIN_CLIENT_CALLED"); } }));
-vi.mock("./actions", () => ({ followAuthor: vi.fn(), unfollowAuthor: vi.fn() }));
+vi.mock("./actions", () => ({ followPenName: vi.fn(), unfollowPenName: vi.fn(), removePenNameLinks: vi.fn() }));
 
 const { default: AuthorProfilePage, generateMetadata } = await import("./page");
 

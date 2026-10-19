@@ -17,6 +17,8 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { INVALID_ISBN_MESSAGE, isValidIsbn } from "@/lib/book-identifiers";
 import { getRightsDeclarationState, recordRightsDeclaration } from "@/lib/book-rights";
+import { resolveOwnPenNameId } from "@/lib/pen-name-write-client";
+import { penNameErrorMessage } from "@/lib/pen-names";
 import { isRightsBasis } from "@/lib/rights-statements";
 import {
   CATALOG_ROW_CHANGED_MESSAGE,
@@ -642,10 +644,8 @@ export async function createBook(formData: FormData) {
     "/dashboard/books/new",
   ).value;
   const originalPublicationDate = resolveOriginalPublicationDate(formData, "/dashboard/books/new").value;
-  // F4 (P1): the per-book pen name, trimmed; empty means none. No length
-  // check of its own (Renato's Q6 = a): the field's maxLength is 120 and
-  // the database's own check rejects anything longer, which ends in the
-  // existing save-failure message below.
+  // F4 (P1) / PEN-NAMES-1 (10a): the pen name box, trimmed; empty means
+  // the author's default pen name.
   const penName = String(formData.get("penName") ?? "").trim() || null;
 
   const { seriesId, seriesPosition } = await resolveSeriesSelection(
@@ -654,6 +654,23 @@ export async function createBook(formData: FormData) {
     formData,
     "/dashboard/books/new",
   );
+
+  // PEN-NAMES-1 (10a, N1): the box resolves to one of the author's own pen
+  // names -- found by name (any case) or created -- through the
+  // server-only pen name writer, with the session user as the author.
+  // Only pen_name_id is written below; the database keeps the legacy
+  // books.pen_name text in step. Resolved before any upload, so a
+  // refused name costs no storage object.
+  const penNameResolution = await resolveOwnPenNameId(user.id, penName);
+  if (!penNameResolution.ok) {
+    redirect(
+      `/dashboard/books/new?error=${encodeURIComponent(
+        penNameResolution.reason === "invalid"
+          ? penNameResolution.message
+          : "Something went wrong saving your book. Please try again",
+      )}`,
+    );
+  }
 
   // Normalizes EITHER a direct File OR a coverStoragePath/
   // manuscriptStoragePath reference into the same validated bytes --
@@ -753,12 +770,10 @@ export async function createBook(formData: FormData) {
     price_all: parsedPrice.priceAll,
     cover_path: coverPath,
     file_path: manuscriptPath,
-    // F4 (P1): named only when the author typed one -- an empty field
-    // leaves the column's own null default, exactly as not naming it.
-    // Written whenever it was submitted, whatever the page's feature
-    // probe said; a database that cannot take it fails this insert, and
-    // the author gets the save-failure message below.
-    ...(penName !== null ? { pen_name: penName } : {}),
+    // PEN-NAMES-1: the resolved pen name (the author's own, above). The
+    // books trigger re-checks it belongs to author_id and that it
+    // matches the chosen series' pen name (11a, LB451).
+    pen_name_id: penNameResolution.penNameId,
     // Always inserted as a draft, regardless of the submitted intent
     // (see below) -- the draft-first transition is intentional
     // (PUBLISHING-UX-1 Part B's own brief): a book is never inserted
@@ -778,6 +793,10 @@ export async function createBook(formData: FormData) {
 
   if (insertError) {
     console.error("createBook: book insert failed:", insertError);
+    const penNameMessage = penNameErrorMessage(insertError);
+    if (penNameMessage) {
+      redirect(`/dashboard/books/new?error=${encodeURIComponent(penNameMessage)}`);
+    }
     redirect(
       "/dashboard/books/new?error=Something+went+wrong+saving+your+book.+Please+try+again",
     );
@@ -1057,10 +1076,29 @@ export async function updateBook(bookId: string, formData: FormData) {
   }
 
   // F4 (P1): the same present/absent rule as the metadata below: a form
-  // without the Pen name field leaves the column untouched; a present,
-  // empty field clears it to null. No length check of its own (Q6 = a).
+  // without the Pen name field leaves the book's pen name untouched; a
+  // present, empty field means the author's default pen name
+  // (PEN-NAMES-1).
   const penNamePresent = formData.has("penName");
   const penName = String(formData.get("penName") ?? "").trim() || null;
+  // PEN-NAMES-1 (10a): resolved through the server-only pen name writer
+  // (found by name or created), before any upload. 14a -- a book in a
+  // series or bundle keeps its pen name -- is the database's refusal
+  // (LB452), shown below as its own message.
+  let penNameId: string | null = null;
+  if (penNamePresent) {
+    const penNameResolution = await resolveOwnPenNameId(user.id, penName);
+    if (!penNameResolution.ok) {
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
+          penNameResolution.reason === "invalid"
+            ? penNameResolution.message
+            : "Something went wrong saving your changes. Please try again",
+        )}`,
+      );
+    }
+    penNameId = penNameResolution.penNameId;
+  }
 
   // LIBRUM 2.0 PUBLISHING-UX-1 PART B FINAL PRE-COMMIT ROLLOUT-
   // COMPATIBILITY CORRECTION: same five author-editable fields as
@@ -1336,10 +1374,9 @@ export async function updateBook(bookId: string, formData: FormData) {
       ...(originalPublicationDateResolved.present
         ? { original_publication_date: originalPublicationDateResolved.value }
         : {}),
-      // F4 (P1): written through this trusted writer whenever the key was
-      // submitted, never dropped because of the page's feature probe; a
-      // database that cannot take it fails this write (existing message).
-      ...(penNamePresent ? { pen_name: penName } : {}),
+      // PEN-NAMES-1: only pen_name_id is written (the database keeps the
+      // legacy text in step), and only when the box was submitted.
+      ...(penNameId !== null ? { pen_name_id: penNameId } : {}),
     })
     .eq("id", existing.id)
     .eq("author_id", user.id);
@@ -1365,6 +1402,10 @@ export async function updateBook(bookId: string, formData: FormData) {
 
   if (updateError) {
     console.error("updateBook: book update failed:", updateError);
+    const penNameMessage = penNameErrorMessage(updateError);
+    if (penNameMessage) {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(penNameMessage)}`);
+    }
     redirect(
       `/dashboard/books/${bookId}/edit?error=Something+went+wrong+saving+your+changes.+Please+try+again`,
     );

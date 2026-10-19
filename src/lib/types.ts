@@ -120,6 +120,10 @@ export type Book = {
   // null/undefined = not picked; at most one book at a time.
   pen_name?: string | null;
   librum_choice_at?: string | null;
+  // PEN-NAMES-1 (migration 20261019184512): the book's pen name
+  // (NOT NULL in the database; optional here only so older fixtures and
+  // narrow selects type-check). Readers see it through public_pen_names.
+  pen_name_id?: string;
 };
 
 // BOOK-PEN-NAME-RIGHTS-CHOICE-1: one row of public.book_rights_declarations,
@@ -139,6 +143,8 @@ export type BookRightsDeclaration = {
   statement_version: string;
   statement_text: string;
   declared_at: string;
+  // PEN-NAMES-1 (16a): the book's pen name; null on older rows.
+  pen_name?: string | null;
 };
 
 export type Review = {
@@ -155,6 +161,8 @@ export type Series = {
   author_id: string;
   title: string;
   created_at: string;
+  // PEN-NAMES-1: every book in a series carries this pen name (11a).
+  pen_name_id?: string;
 };
 
 export type Contributor = {
@@ -185,6 +193,8 @@ export type Bundle = {
   status: BookStatus;
   created_at: string;
   updated_at: string;
+  // PEN-NAMES-1: every book in a bundle carries this pen name (11a).
+  pen_name_id?: string;
 };
 
 export type AuthorFollow = {
@@ -311,9 +321,11 @@ export type AuditAction =
   | "report.dismissed"
   | "refund.review_approved"
   | "refund.review_rejected"
-  | "refund.issuance_submitted";
+  | "refund.issuance_submitted"
+  // PEN-NAMES-1 (8a): staff removed a pen name's links.
+  | "pen_name.links_removed";
 
-export type AuditTargetType = "staff_members" | "book_reports" | "refund_requests";
+export type AuditTargetType = "staff_members" | "book_reports" | "refund_requests" | "pen_names";
 
 // Mirrors list_admin_audit_events()'s exact return shape. actor_id/
 // actor_display_name are both nullable -- admin_audit_log.actor_id is

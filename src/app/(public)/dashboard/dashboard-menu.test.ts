@@ -65,11 +65,13 @@ describe("DashboardMenu", () => {
     expect(tabs).not.toMatch(/>Discounts</);
   });
 
-  it("has no second line for Profile, which is a single page", () => {
-    const html = render("/dashboard/profile");
+  // PEN-NAMES-1: Profile now has a second page, Pen names.
+  it("shows Profile and Pen names on a second line under Profile", () => {
+    const html = render("/dashboard/pen-names");
     const tabs = html.slice(0, html.indexOf("<details"));
-    expect(tabs.match(/<ul/g)).toHaveLength(1);
-    expect(linkTag(tabs, "Profile")).toContain('aria-current="page"');
+    expect(tabs.match(/<ul/g)).toHaveLength(2);
+    expect(linkTag(tabs, "Pen names")).toContain('aria-current="page"');
+    expect(linkTag(tabs, "Pen names")).toContain('href="/dashboard/pen-names"');
   });
 
   it("an unknown path marks nothing", () => {

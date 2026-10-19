@@ -16,13 +16,26 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 const mockGetUser = vi.fn();
 const mockInsertSeries = vi.fn();
+const ownPenNames = ["pen-own"];
 
 const mockCreateClient = vi.fn(() =>
   Promise.resolve({
     auth: { getUser: mockGetUser },
     from: (table: string) => {
+      if (table === "pen_names") {
+        // PEN-NAMES-1: RLS shows only the caller's own pen names.
+        const filters: Record<string, unknown> = {};
+        const chain = {
+          select: () => chain,
+          eq: (c: string, v: unknown) => ((filters[c] = v), chain),
+          maybeSingle: async () => ({
+            data: filters.author_id === "author-1" && ownPenNames.includes(filters.id as string) ? { id: filters.id } : null,
+          }),
+        };
+        return chain;
+      }
       if (table !== "series") throw new Error(`unexpected table in this focused test: ${table}`);
-      return { insert: () => mockInsertSeries() };
+      return { insert: (row: unknown) => mockInsertSeries(row) };
     },
   }),
 );
@@ -63,5 +76,37 @@ describe("createSeries: ERR-2 error-message mapping", () => {
       expect.stringContaining("error=Please+enter+a+series+title"),
     );
     expect(mockInsertSeries).not.toHaveBeenCalled();
+  });
+});
+
+describe("createSeries: PEN-NAMES-1 (11a) pen name", () => {
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: "author-1" } } });
+    mockInsertSeries.mockReset().mockResolvedValue({ error: null });
+  });
+
+  it("one of the author's own pen names is stored on the series", async () => {
+    const formData = new FormData();
+    formData.set("title", "Saga");
+    formData.set("penNameId", "pen-own");
+    await expect(createSeries(formData)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockInsertSeries).toHaveBeenCalledWith({ author_id: "author-1", title: "Saga", pen_name_id: "pen-own" });
+  });
+
+  it("someone else's pen name id is refused before the insert", async () => {
+    const formData = new FormData();
+    formData.set("title", "Saga");
+    formData.set("penNameId", "pen-other");
+    await expect(createSeries(formData)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect.mock.calls[0][0]).toContain(encodeURIComponent("Please choose one of your pen names."));
+    expect(mockInsertSeries).not.toHaveBeenCalled();
+  });
+
+  it("no pen name chosen: no pen_name_id sent (the database uses the default)", async () => {
+    const formData = new FormData();
+    formData.set("title", "Saga");
+    await expect(createSeries(formData)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockInsertSeries).toHaveBeenCalledWith({ author_id: "author-1", title: "Saga" });
   });
 });

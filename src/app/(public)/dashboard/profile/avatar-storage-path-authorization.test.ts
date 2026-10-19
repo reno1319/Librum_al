@@ -2,10 +2,13 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// AVATAR-STORAGE-PATH-AUTH-1 (Patch 9): updateProfile writes
-// profiles.avatar_path only through the trusted server-only writer, with a
-// path the server derives, and fails closed on anything but exactly the
-// caller's own row holding that path.
+// AVATAR-STORAGE-PATH-AUTH-1 (Patch 9), revised by PEN-NAMES-1 r4 (owner
+// decision 18a): Dashboard > Profile no longer edits a photo or a bio, so
+// updateProfile writes NO avatar_path and NO bio at all -- only
+// display_name and (for an author) public_author_name, on the session
+// client -- and never touches Storage or the service role. The trusted
+// profile writer (src/lib/profile-write-client.ts) is gone; nothing in
+// the application writes profiles.avatar_path any more.
 //
 // The real Server Action runs against a small in-memory profiles table
 // reached through two clients:
@@ -241,7 +244,6 @@ async function run(fields: Record<string, string>): Promise<string> {
   throw new Error("updateProfile returned without redirecting");
 }
 
-const SAVE_PHOTO_ERROR = `/dashboard/profile?error=${encodeURIComponent("We couldn't save your profile photo. Please try again.")}`;
 const SAVE_PROFILE_ERROR = `/dashboard/profile?error=${encodeURIComponent("We couldn't save your profile. Please try again.")}`;
 
 function avatarWrites(): DbWrite[] {
@@ -296,401 +298,81 @@ describe("the ACLs this suite models come from the real SQL", () => {
 });
 
 // ============================================================
-// 2. The legitimate flow, under both ACLs (rollout compatibility).
+// 2. PEN-NAMES-1 r4 (18a): updateProfile writes no photo and no bio.
 // ============================================================
-describe.each<AclMode>(["pre-migration", "migrated"])("legitimate avatar save under the %s ACL", (mode) => {
+describe.each<AclMode>(["pre-migration", "migrated"])("updateProfile under the %s ACL", (mode) => {
   beforeEach(() => {
     aclMode = mode;
   });
 
-  it("uploads to the canonical key, writes avatar_path only through the trusted writer, the rest through the session, then removes the temp object", async () => {
-    const target = await run({ displayName: "Jane Author", bio: "new bio", publicAuthorName: "J. Author", avatarStoragePath: TEMP_PNG });
-
-    expect(target).toBe("/dashboard/profile?success=1");
-    const own = profiles.find((r) => r.id === USER_ID)!;
-    expect(own).toMatchObject({
-      avatar_path: `${USER_ID}/avatar.png`,
-      display_name: "Jane Author",
-      bio: "new bio",
-      public_author_name: "J. Author",
-    });
-
-    // The one avatar_path write: service client, payload avatar_path only,
-    // filtered by the session user's id, returning id + avatar_path.
-    expect(avatarWrites()).toEqual([
-      {
-        via: "service",
-        payload: { avatar_path: `${USER_ID}/avatar.png` },
-        filters: [["id", USER_ID]],
-        selected: "id, avatar_path",
-        denied: false,
-        rowsChanged: 1,
-      },
-    ]);
-    // The one session write: the ordinary fields only, filtered by the
-    // session user's id, returning id, and it changed exactly one row.
-    const sessionWrites = dbWrites.filter((w) => w.via === "session");
-    expect(sessionWrites).toEqual([
-      {
-        via: "session",
-        payload: { display_name: "Jane Author", bio: "new bio", public_author_name: "J. Author" },
-        filters: [["id", USER_ID]],
-        selected: "id",
-        denied: false,
-        rowsChanged: 1,
-      },
-    ]);
-    expect(serviceClientsCreated).toBe(1);
-
-    // Success is reported only after both writes proved their row; the
-    // temp object is removed only after both writes.
-    expect(events).toEqual([
-      "storage:session:manuscripts:download",
-      "storage:session:avatars:upload",
-      "db:service:update",
-      "db:session:update",
-      "storage:session:manuscripts:remove",
-      "revalidate",
-    ]);
-    expect(mockRevalidatePath).toHaveBeenCalledTimes(1);
-    expect(mockRevalidatePath).toHaveBeenCalledWith("/", "layout");
-
-    expect(storageCalls).toEqual([
-      { via: "session", bucket: "manuscripts", op: "download", args: [TEMP_PNG] },
-      {
-        via: "session",
-        bucket: "avatars",
-        op: "upload",
-        args: [`${USER_ID}/avatar.png`, expect.any(Buffer), { contentType: "image/png", upsert: true }],
-      },
-      { via: "session", bucket: "manuscripts", op: "remove", args: [[TEMP_PNG]] },
-    ]);
-    expect(profiles.find((r) => r.id === OTHER_ID)).toMatchObject({ avatar_path: OTHER_AVATAR, display_name: "Victim" });
-  });
-
-  it("the extension comes from the verified bytes: a JPEG saves as avatar.jpg", async () => {
-    expect(await run({ displayName: "Jane", avatarStoragePath: TEMP_JPG })).toBe("/dashboard/profile?success=1");
-    expect(profiles.find((r) => r.id === USER_ID)!.avatar_path).toBe(`${USER_ID}/avatar.jpg`);
-    expect(avatarWrites()).toHaveLength(1);
-    expect(avatarWrites()[0].via).toBe("service");
-  });
-
-  it("a save without a photo stays entirely on the session and never creates the trusted writer", async () => {
-    expect(await run({ displayName: "Jane", bio: "b" })).toBe("/dashboard/profile?success=1");
-    expect(serviceClientsCreated).toBe(0);
-    expect(avatarWrites()).toEqual([]);
-    expect(dbWrites).toEqual([
-      {
-        via: "session",
-        payload: { display_name: "Jane", bio: "b" },
-        filters: [["id", USER_ID]],
-        selected: "id",
-        denied: false,
-        rowsChanged: 1,
-      },
-    ]);
-    expect(storageCalls).toEqual([]);
-    expect(events).toEqual(["db:session:update", "revalidate"]);
-  });
-});
-
-// ============================================================
-// 3. Refusals happen before any privileged authority exists.
-// ============================================================
-describe("a refused request never creates the trusted writer", () => {
-  it("unauthenticated: redirected to /login with no database or Storage call", async () => {
-    authUser = null;
-    expect(await run({ displayName: "Jane", avatarStoragePath: TEMP_PNG })).toBe("/login");
-    expect(serviceClientsCreated).toBe(0);
-    expect(dbWrites).toEqual([]);
-    expect(storageCalls).toEqual([]);
-  });
-
-  it.each([
-    ["another user's temp namespace", { avatarStoragePath: `${OTHER_ID}/tmp/avatar/x.png` }],
-    ["a path outside tmp/avatar", { avatarStoragePath: `${USER_ID}/avatar.png` }],
-    ["an unsupported extension", { avatarStoragePath: `${USER_ID}/tmp/avatar/x.gif` }],
-    ["an empty display name", { displayName: "", avatarStoragePath: TEMP_PNG }],
-  ])("%s", async (_label, fields) => {
-    const before = snapshot();
-    const target = await run({ displayName: "Jane", ...fields });
-    expect(target).toContain("/dashboard/profile?error=");
-    expect(serviceClientsCreated).toBe(0);
-    expect(dbWrites).toEqual([]);
-    expect(storageCalls.filter((c) => c.op !== "download")).toEqual([]);
-    expect(snapshot()).toBe(before);
-  });
-
-  it("bytes that are not a JPEG/PNG", async () => {
-    tempObjects[TEMP_PNG] = Buffer.from("not an image at all");
-    expect(await run({ displayName: "Jane", avatarStoragePath: TEMP_PNG })).toContain(encodeURIComponent("valid JPEG or PNG"));
-    expect(serviceClientsCreated).toBe(0);
-    expect(storageCalls.map((c) => c.op)).toEqual(["download"]);
-  });
-
-  it("bytes over 5 MB", async () => {
-    tempObjects[TEMP_PNG] = Buffer.concat([REAL_PNG_BYTES, Buffer.alloc(5 * 1024 * 1024)]);
-    expect(await run({ displayName: "Jane", avatarStoragePath: TEMP_PNG })).toContain(encodeURIComponent("5 MB"));
-    expect(serviceClientsCreated).toBe(0);
-    expect(storageCalls.map((c) => c.op)).toEqual(["download"]);
-  });
-
-  it("a failed temp download", async () => {
-    delete tempObjects[TEMP_PNG];
-    expect(await run({ displayName: "Jane", avatarStoragePath: TEMP_PNG })).toContain("error=");
-    expect(serviceClientsCreated).toBe(0);
-  });
-
-  it("a failed canonical upload: no writer, no profile change, no removal", async () => {
-    uploadError = { message: "upload failed" };
-    const before = snapshot();
-    expect(await run({ displayName: "Changed", avatarStoragePath: TEMP_PNG })).toContain(encodeURIComponent("couldn't upload"));
-    expect(serviceClientsCreated).toBe(0);
-    expect(dbWrites).toEqual([]);
-    expect(storageCalls.filter((c) => c.op === "remove")).toEqual([]);
-    expect(snapshot()).toBe(before);
-  });
-});
-
-// ============================================================
-// 4. Identity and path come only from the server.
-// ============================================================
-describe("hostile FormData cannot choose the identity or the path", () => {
-  const HOSTILE = {
-    id: OTHER_ID,
-    userId: OTHER_ID,
-    user_id: OTHER_ID,
-    profileId: OTHER_ID,
-    avatarPath: OTHER_AVATAR,
-    avatar_path: OTHER_AVATAR,
-    finalAvatarPath: OTHER_AVATAR,
-    avatarBucket: "manuscripts",
-    role: "admin",
-  };
-
-  it.each<AclMode>(["pre-migration", "migrated"])("under the %s ACL the write targets only the session user's row with the derived path", async (mode) => {
-    aclMode = mode;
-    expect(await run({ displayName: "Jane", avatarStoragePath: TEMP_PNG, ...HOSTILE })).toBe("/dashboard/profile?success=1");
-
-    expect(avatarWrites()).toHaveLength(1);
-    expect(avatarWrites()[0]).toMatchObject({
-      via: "service",
-      payload: { avatar_path: `${USER_ID}/avatar.png` },
-      filters: [["id", USER_ID]],
-    });
-    expect(storageCalls.find((c) => c.op === "upload")!.args[0]).toBe(`${USER_ID}/avatar.png`);
-    expect(storageCalls.find((c) => c.op === "upload")!.bucket).toBe("avatars");
-    for (const w of dbWrites) {
-      expect(w.payload).not.toHaveProperty("role");
-      expect(w.payload).not.toHaveProperty("id");
-      expect(w.filters).toEqual([["id", USER_ID]]);
-    }
-    expect(profiles.find((r) => r.id === OTHER_ID)).toMatchObject({ avatar_path: OTHER_AVATAR, display_name: "Victim", role: "author" });
-    expect(profiles.find((r) => r.id === USER_ID)!.role).toBe("author");
-  });
-
-  it("a raw avatar File field still goes through the same derivation", async () => {
-    const fd = form({ displayName: "Jane", ...HOSTILE });
-    fd.set("avatar", new File([new Uint8Array(REAL_PNG_BYTES)], "../../evil.svg", { type: "image/svg+xml" }));
-    await expect(updateProfile(fd)).rejects.toMatchObject({ target: "/dashboard/profile?success=1" });
-    expect(avatarWrites()).toHaveLength(1);
-    expect(avatarWrites()[0]).toMatchObject({ via: "service", payload: { avatar_path: `${USER_ID}/avatar.png` }, filters: [["id", USER_ID]] });
-  });
-});
-
-// ============================================================
-// 5. The trusted write fails closed.
-// ============================================================
-describe("the trusted avatar_path write fails closed", () => {
-  function expectFailedClosed(target: string, before: Row) {
-    expect(target).toBe(SAVE_PHOTO_ERROR);
-    // Nothing on the profile other than what the trusted write itself did
-    // changed: the session write of name/bio/pen name never ran.
-    expect(dbWrites.filter((w) => w.via === "session")).toEqual([]);
-    const own = profiles.find((r) => r.id === USER_ID)!;
-    expect({ display_name: own.display_name, bio: own.bio, public_author_name: own.public_author_name, role: own.role }).toEqual({
-      display_name: before.display_name,
-      bio: before.bio,
-      public_author_name: before.public_author_name,
-      role: before.role,
-    });
-    // No Storage removal of any kind -- the temp object is kept and the
-    // canonical key (which may be the photo already shown) is untouched.
-    expect(storageCalls.filter((c) => c.op === "remove")).toEqual([]);
-    expect(profiles.find((r) => r.id === OTHER_ID)).toMatchObject({ avatar_path: OTHER_AVATAR, display_name: "Victim" });
-    expect(mockRevalidatePath).not.toHaveBeenCalled();
-  }
-
-  const cases: [string, () => void][] = [
-    ["a database error", () => { serviceUpdateFails = true; }],
-    ["zero returned rows", () => { serviceUpdateOverride = () => ({ data: [], error: null }); }],
-    ["null data", () => { serviceUpdateOverride = () => ({ data: null, error: null }); }],
-    ["two returned rows", () => {
-      serviceUpdateOverride = () => ({ data: [{ id: USER_ID, avatar_path: `${USER_ID}/avatar.png` }, { id: USER_ID, avatar_path: `${USER_ID}/avatar.png` }], error: null });
-    }],
-    ["a mismatched returned id", () => { serviceUpdateOverride = () => ({ data: [{ id: OTHER_ID, avatar_path: `${USER_ID}/avatar.png` }], error: null }); }],
-    ["a mismatched returned avatar_path", () => { serviceUpdateOverride = () => ({ data: [{ id: USER_ID, avatar_path: OTHER_AVATAR }], error: null }); }],
-    ["a returned row missing avatar_path", () => { serviceUpdateOverride = () => ({ data: [{ id: USER_ID }], error: null }); }],
-    ["a non-array response", () => { serviceUpdateOverride = () => ({ data: { id: USER_ID, avatar_path: `${USER_ID}/avatar.png` }, error: null }); }],
-    ["an error alongside a plausible row", () => {
-      serviceUpdateOverride = () => ({ data: [{ id: USER_ID, avatar_path: `${USER_ID}/avatar.png` }], error: { message: "boom" } });
-    }],
-  ];
-
-  it.each(cases)("%s", async (_label, arrange) => {
-    arrange();
-    const before = { ...profiles.find((r) => r.id === USER_ID)! };
-    const target = await run({ displayName: "Changed", bio: "changed", publicAuthorName: "Changed Pen", avatarStoragePath: TEMP_PNG });
-    expectFailedClosed(target, before);
-    expect(console.error).toHaveBeenCalledWith("updateProfile: trusted avatar_path write failed:", expect.anything());
-  });
-
-  it("the trusted write is the only avatar write and happens before any other profile write", async () => {
-    await run({ displayName: "Jane", avatarStoragePath: TEMP_PNG });
-    expect(dbWrites.map((w) => w.via)).toEqual(["service", "session"]);
-  });
-});
-
-// ============================================================
-// 5b. The session metadata write fails closed too, in both branches.
-// ============================================================
-// display_name, bio and public_author_name stay on the session client and
-// are checked with the same exact-row classifier. On any failure the
-// action reports a profile-save error -- never success -- and does
-// nothing further: no revalidation, no temp removal, no further privileged
-// call, no compensating rollback. In the photo branch the trusted
-// avatar_path write has ALREADY happened, so the new avatar_path and
-// canonical object may stay in place; these tests pin that honestly.
-const METADATA_FAILURES: [string, () => void][] = [
-  ["a database error", () => { sessionUpdateFails = true; }],
-  ["zero returned rows", () => { sessionUpdateOverride = () => ({ data: [], error: null }); }],
-  ["null data", () => { sessionUpdateOverride = () => ({ data: null, error: null }); }],
-  ["two returned rows", () => { sessionUpdateOverride = () => ({ data: [{ id: USER_ID }, { id: USER_ID }], error: null }); }],
-  ["a mismatched returned id", () => { sessionUpdateOverride = () => ({ data: [{ id: OTHER_ID }], error: null }); }],
-  ["a returned row missing id", () => { sessionUpdateOverride = () => ({ data: [{}], error: null }); }],
-  ["a non-array response", () => { sessionUpdateOverride = () => ({ data: { id: USER_ID }, error: null }); }],
-  ["a malformed row (null)", () => { sessionUpdateOverride = () => ({ data: [null], error: null }); }],
-  ["an error alongside a plausible own row", () => {
-    sessionUpdateOverride = () => ({ data: [{ id: USER_ID }], error: { code: "XX000", message: "boom" } });
-  }],
-];
-
-const METADATA_FIELDS = { displayName: "Changed Name", bio: "changed bio", publicAuthorName: "Changed Pen" };
-
-function expectStableMetadataDiagnostic() {
-  const calls = vi.mocked(console.error).mock.calls.filter((c) => c[0] === "updateProfile: profile details update failed");
-  expect(calls).toHaveLength(1);
-  const detail = calls[0][1] as Record<string, unknown>;
-  expect(Object.keys(detail).sort()).toEqual(["code", "rows"]);
-  // No profile value reaches any log line.
-  const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
-  for (const value of Object.values(METADATA_FIELDS)) expect(logged).not.toContain(value);
-}
-
-describe.each<AclMode>(["pre-migration", "migrated"])("a failed metadata write after the trusted avatar write (%s ACL)", (mode) => {
-  beforeEach(() => {
-    aclMode = mode;
-  });
-
-  it.each(METADATA_FAILURES)("%s", async (_label, arrange) => {
-    arrange();
-    const otherBefore = JSON.stringify(profiles.find((r) => r.id === OTHER_ID));
-    const ownBefore = { ...profiles.find((r) => r.id === USER_ID)! };
-
-    const target = await run({ ...METADATA_FIELDS, avatarStoragePath: TEMP_PNG });
-
-    // Failure is reported, never success, and nothing is revalidated.
-    expect(target).toBe(SAVE_PROFILE_ERROR);
-    expect(target).not.toContain("success");
-    expect(mockRevalidatePath).not.toHaveBeenCalled();
-
-    // The trusted avatar_path write had already happened (and is NOT
-    // rolled back): the new canonical path may stay on the own row.
-    expect(avatarWrites()).toEqual([
-      {
-        via: "service",
-        payload: { avatar_path: `${USER_ID}/avatar.png` },
-        filters: [["id", USER_ID]],
-        selected: "id, avatar_path",
-        denied: false,
-        rowsChanged: 1,
-      },
-    ]);
-    expect(profiles.find((r) => r.id === USER_ID)!.avatar_path).toBe(`${USER_ID}/avatar.png`);
-
-    // Exactly one session metadata attempt, on the own row only, then stop:
-    // no additional service-role write, no second writer, no Storage
-    // removal of any kind (the temp object is kept), no service Storage.
-    expect(dbWrites.map((w) => w.via)).toEqual(["service", "session"]);
-    expect(dbWrites[1]).toMatchObject({ filters: [["id", USER_ID]], selected: "id", denied: false });
-    expect(serviceClientsCreated).toBe(1);
-    expect(storageCalls.filter((c) => c.via === "service")).toEqual([]);
-    expect(storageCalls.filter((c) => c.op === "remove")).toEqual([]);
-    expect(events).toEqual([
-      "storage:session:manuscripts:download",
-      "storage:session:avatars:upload",
-      "db:service:update",
-      "db:session:update",
-    ]);
-
-    // Nothing else moved: the other user's row is byte-identical and the
-    // own row's other columns are untouched.
-    expect(JSON.stringify(profiles.find((r) => r.id === OTHER_ID))).toBe(otherBefore);
-    const own = profiles.find((r) => r.id === USER_ID)!;
-    expect({ role: own.role, stripe_account_id: own.stripe_account_id, id: own.id }).toEqual({
-      role: ownBefore.role,
-      stripe_account_id: ownBefore.stripe_account_id,
-      id: ownBefore.id,
-    });
-    expectStableMetadataDiagnostic();
-  });
-});
-
-describe.each<AclMode>(["pre-migration", "migrated"])("a failed metadata write without a photo (%s ACL)", (mode) => {
-  beforeEach(() => {
-    aclMode = mode;
-  });
-
-  it.each(METADATA_FAILURES)("%s", async (_label, arrange) => {
-    arrange();
-    const otherBefore = JSON.stringify(profiles.find((r) => r.id === OTHER_ID));
-    const ownBefore = { ...profiles.find((r) => r.id === USER_ID)! };
-
-    const target = await run(METADATA_FIELDS);
-
-    expect(target).toBe(SAVE_PROFILE_ERROR);
-    expect(target).not.toContain("success");
-    expect(mockRevalidatePath).not.toHaveBeenCalled();
-
-    // No trusted writer, no Storage operation, exactly one session write.
-    expect(serviceClientsCreated).toBe(0);
-    expect(storageCalls).toEqual([]);
+  it("saves display_name and public_author_name on the session, alone, filtered by the caller's id", async () => {
+    expect(await run({ displayName: "Jane B", publicAuthorName: "J. Pen" })).toBe("/dashboard/profile?success=1");
     expect(dbWrites).toHaveLength(1);
     expect(dbWrites[0]).toMatchObject({
       via: "session",
-      payload: { display_name: "Changed Name", bio: "changed bio", public_author_name: "Changed Pen" },
+      payload: { display_name: "Jane B", public_author_name: "J. Pen" },
       filters: [["id", USER_ID]],
-      selected: "id",
       denied: false,
+      rowsChanged: 1,
     });
-    expect(events).toEqual(["db:session:update"]);
+    expect(serviceClientsCreated).toBe(0);
+    expect(storageCalls).toEqual([]);
+  });
 
-    // No unrelated mutation.
-    expect(JSON.stringify(profiles.find((r) => r.id === OTHER_ID))).toBe(otherBefore);
+  it("a photo reference, a raw avatar File or a bio in the request is ignored: no Storage call, no avatar_path or bio write", async () => {
+    const fd = form({ displayName: "Jane", publicAuthorName: "J. Pen", avatarStoragePath: TEMP_PNG, bio: "new bio" });
+    fd.set("avatar", new File([new Uint8Array(REAL_PNG_BYTES)], "a.png", { type: "image/png" }));
+    let target = "";
+    try {
+      await updateProfile(fd);
+    } catch (error) {
+      if (error instanceof RedirectSignal) target = error.target;
+      else throw error;
+    }
+    expect(target).toBe("/dashboard/profile?success=1");
+    expect(storageCalls).toEqual([]);
+    expect(serviceClientsCreated).toBe(0);
+    expect(avatarWrites()).toEqual([]);
+    expect(dbWrites.every((w) => !("bio" in w.payload))).toBe(true);
     const own = profiles.find((r) => r.id === USER_ID)!;
-    expect({ role: own.role, avatar_path: own.avatar_path, stripe_account_id: own.stripe_account_id }).toEqual({
-      role: ownBefore.role,
-      avatar_path: ownBefore.avatar_path,
-      stripe_account_id: ownBefore.stripe_account_id,
-    });
-    expectStableMetadataDiagnostic();
+    expect(own.bio).toBe("old bio");
+    expect(own.avatar_path).toBeNull();
+  });
+
+  it("another user's row, bio and avatar are never touched", async () => {
+    const before = JSON.stringify(profiles.find((r) => r.id === OTHER_ID));
+    await run({ displayName: "Jane", id: OTHER_ID, avatar_path: OTHER_AVATAR, avatarStoragePath: `${OTHER_ID}/tmp/avatar/x.png` });
+    expect(JSON.stringify(profiles.find((r) => r.id === OTHER_ID))).toBe(before);
+    expect(storageCalls).toEqual([]);
+  });
+});
+
+describe("updateProfile fails closed", () => {
+  it("unauthenticated: redirected to /login with no database or Storage call", async () => {
+    authUser = null;
+    const before = snapshot();
+    expect(await run({ displayName: "Jane" })).toBe("/login");
+    expect(dbWrites).toEqual([]);
+    expect(storageCalls).toEqual([]);
+    expect(snapshot()).toBe(before);
+  });
+
+  it("a failed session write, or a result that is not exactly the caller's row, is a failed save without revalidation", async () => {
+    sessionUpdateFails = true;
+    expect(await run({ displayName: "Jane" })).toBe(SAVE_PROFILE_ERROR);
+    sessionUpdateFails = false;
+    sessionUpdateOverride = () => ({ data: [], error: null });
+    expect(await run({ displayName: "Jane" })).toBe(SAVE_PROFILE_ERROR);
+    sessionUpdateOverride = () => ({ data: [{ id: OTHER_ID }], error: null });
+    expect(await run({ displayName: "Jane" })).toBe(SAVE_PROFILE_ERROR);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 
 // ============================================================
-// 6. Structural boundaries of the trusted writer.
+// 3. Structural: nothing in the application writes profiles.avatar_path.
 // ============================================================
-describe("the trusted profile writer's boundary", () => {
+describe("no profile photo writer remains", () => {
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir).flatMap((name) => {
       const full = path.join(dir, name);
@@ -699,35 +381,26 @@ describe("the trusted profile writer's boundary", () => {
     });
   }
 
-  it("profile-write-client imports server-only and nothing but the admin factory", () => {
-    const source = readFileSync(path.join(REPO_ROOT, "src/lib/profile-write-client.ts"), "utf8");
-    expect(source).toMatch(/^import "server-only";/);
-    expect(source.match(/^import .*$/gm)).toEqual([
-      'import "server-only";',
-      'import { createAdminClient } from "@/lib/supabase/admin";',
-    ]);
-  });
-
-  it("only updateProfile's module uses the profile writer, and no client component imports it", () => {
+  it("the trusted profile writer module is gone and nothing imports it", () => {
     const files = sourceFiles(path.join(REPO_ROOT, "src"));
-    const users = files
-      .filter((file) => /from\s+["']@\/lib\/profile-write-client["']/.test(readFileSync(file, "utf8")))
-      .map((file) => path.relative(REPO_ROOT, file));
-    expect(users).toEqual(["src/app/(public)/dashboard/profile/actions.ts"]);
-    const clientOffenders = files.filter((file) => {
-      const source = readFileSync(file, "utf8");
-      return /^\s*["']use client["']/.test(source) && /from\s+["']@\/lib\/(profile-write-client|supabase\/admin)["']/.test(source);
-    });
-    expect(clientOffenders).toEqual([]);
+    expect(files.some((file) => file.endsWith("src/lib/profile-write-client.ts"))).toBe(false);
+    expect(files.filter((file) => /profile-write-client/.test(readFileSync(file, "utf8")))).toEqual([]);
   });
 
-  it("no application code writes avatar_path through anything but the one trusted update", () => {
+  it("the only avatar_path write in the application is the pen name photo, through the pen name writer", () => {
     const writers = sourceFiles(path.join(REPO_ROOT, "src")).filter((file) => {
       const source = readFileSync(file, "utf8");
       return /avatar_path\s*:/.test(source) && /\.(update|insert|upsert)\(/.test(source);
     });
-    expect(writers.map((file) => path.relative(REPO_ROOT, file))).toEqual(["src/app/(public)/dashboard/profile/actions.ts"]);
-    const actions = readFileSync(path.join(REPO_ROOT, "src/app/(public)/dashboard/profile/actions.ts"), "utf8");
-    expect(actions.match(/avatar_path\s*:/g)).toHaveLength(1);
+    expect(writers.map((file) => path.relative(REPO_ROOT, file))).toEqual([
+      "src/app/(public)/dashboard/pen-names/actions.ts",
+    ]);
+    const penNameActions = readFileSync(path.join(REPO_ROOT, "src/app/(public)/dashboard/pen-names/actions.ts"), "utf8");
+    expect(penNameActions.match(/\.(update|insert|upsert)\(\{[^}]*avatar_path/g)).toHaveLength(1);
+    expect(penNameActions).toMatch(/\.from\("pen_names"\)\s*\.update\(\{ avatar_path: newPhotoPath \}\)/);
+    const profileActions = readFileSync(path.join(REPO_ROOT, "src/app/(public)/dashboard/profile/actions.ts"), "utf8").replace(/\/\/[^\n]*/g, "");
+    expect(profileActions).not.toMatch(/avatar_path\s*:/);
+    expect(profileActions).not.toMatch(/\bbio\s*[:,]/);
+    expect(profileActions).not.toMatch(/\.storage\b/);
   });
 });

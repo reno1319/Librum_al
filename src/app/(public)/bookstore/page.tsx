@@ -14,13 +14,13 @@ import { BookCard } from "@/components/book-card";
 import { BookSampleReader } from "@/components/book-sample-reader";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
-import { resolvePublicAuthorName } from "@/lib/author-name";
 import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { getLibrumChoiceBook } from "@/lib/librum-choice";
 import { resolveBookstoreFeature } from "@/lib/librum-choice-logic";
-import type { Book, Bundle, Profile } from "@/lib/types";
+import type { Book, Bundle } from "@/lib/types";
+import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
@@ -49,21 +49,15 @@ export const dynamic = "force-dynamic";
 // renders the same way -- the unfiltered case is just "Newest, no
 // filters applied", not a separate page.
 
-// LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: the reader-facing byline resolves
-// through resolvePublicAuthorName() -- never a raw display_name read.
-// AUTHOR-1C moved every public author-attribution query (this file
-// included) off the base `profiles` table entirely, onto the safe
-// public_author_profiles VIEW (migration 045) -- aliased back to
-// `profiles` in every select string below so this file's own property
-// access (`book.profiles`, `bundle.profiles`) needs no further changes.
-// That view physically has no display_name column, so `Pick<Profile,
-// "display_name" | ...>` would be a lie about what these rows can ever
-// contain -- dropped from both types below.
+// PEN-NAMES-1 (migration 20261019184512): every byline on this page is
+// the book's (or bundle's) pen name, embedded from the public_pen_names
+// view as `pen` -- no account columns -- and links to /authors/<pen
+// name id>.
 type BookWithAuthor = Book & {
-  profiles: Pick<Profile, "public_author_name"> | null;
+  pen: PenNameRef | null;
 };
 type BundleWithAuthor = Pick<Bundle, "id" | "title" | "price_all"> & {
-  profiles: Pick<Profile, "public_author_name"> | null;
+  pen: PenNameRef | null;
   // REDESIGN STEP 3: member rows, for the stacked covers and the count.
   bundle_books?: { books: Pick<Book, "cover_path"> | null }[] | null;
 };
@@ -124,7 +118,7 @@ async function fetchSearchResults(
   const baseQuery = () => {
     let query = supabase
       .from("books")
-      .select("*, profiles:public_author_profiles(public_author_name)")
+      .select("*, pen:public_pen_names(id, name)")
       .eq("status", "published")
       .not("price_all", "is", null);
     if (genre) query = query.eq("genre", genre);
@@ -190,7 +184,7 @@ async function fetchSearchResults(
         // RPC only ever hands back ids, never book/profile data itself.
         const { data: fetchedBooks, error: fetchError } = await supabase
           .from("books")
-          .select("*, profiles:public_author_profiles(public_author_name)")
+          .select("*, pen:public_pen_names(id, name)")
           .eq("status", "published")
           .not("price_all", "is", null)
           .in("id", matchedIds)
@@ -289,7 +283,7 @@ async function fetchPublishedBundles(
   const { data, error } = await supabase
     .from("bundles")
     .select(
-      "id, title, price_all, profiles:public_author_profiles(public_author_name), bundle_books(books(cover_path))",
+      "id, title, price_all, pen:public_pen_names(id, name), bundle_books(books(cover_path))",
     )
     .eq("status", "published")
     .not("price_all", "is", null)
@@ -316,7 +310,7 @@ async function fetchPublishedBundles(
 async function fetchFreeBooks(supabase: SupabaseClient): Promise<BookWithAuthor[]> {
   const { data, error } = await supabase
     .from("books")
-    .select("*, profiles:public_author_profiles(public_author_name)")
+    .select("*, pen:public_pen_names(id, name)")
     .eq("status", "published")
     .eq("price_all", 0)
     .order("created_at", { ascending: false })
@@ -690,7 +684,7 @@ function FeaturedBook({
   label: string;
   coverUrl: string | null;
 }) {
-  const authorName = resolveBookByline(book, book.profiles);
+  const authorName = resolveBookByline(book);
   const priceState = resolveCatalogPriceState(book.price_all);
   const priceLabel = formatCatalogPriceLabel(book.price_all);
 
@@ -713,11 +707,11 @@ function FeaturedBook({
           </Link>
         </h2>
         <p className="text-muted">
-          {authorName && (
+          {authorName && book.pen && (
             <>
               by{" "}
               <Link
-                href={`/authors/${book.author_id}`}
+                href={authorPagePath(book.pen.id)}
                 className="focus-ring rounded-sm hover:underline"
               >
                 {authorName}
@@ -808,7 +802,7 @@ function CoverShelf({
             <BookCard
               book={book}
               coverUrl={coverUrlFor(supabase, book.cover_path)}
-              authorName={resolveBookByline(book, book.profiles)}
+              authorName={resolveBookByline(book)}
             />
           </li>
         ))}
@@ -889,7 +883,7 @@ function BookGrid({
             <BookCard
               book={book}
               coverUrl={coverUrlFor(supabase, book.cover_path)}
-              authorName={resolveBookByline(book, book.profiles)}
+              authorName={resolveBookByline(book)}
             />
           </li>
         ))}
@@ -921,7 +915,7 @@ function BundlesSection({
           const covers = members
             .map((m) => m.books?.cover_path ?? null)
             .slice(0, BUNDLE_COVER_LIMIT);
-          const authorName = resolvePublicAuthorName(bundle.profiles);
+          const authorName = bundle.pen?.name ?? null;
           const countLabel = `${members.length} ${members.length === 1 ? "book" : "books"}`;
           // Offsets are taken from the right so the front cover always
           // sits in the same place however many covers there are.

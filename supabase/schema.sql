@@ -314,6 +314,276 @@ create trigger on_auth_user_created
 revoke all on function public.handle_new_user() from public, anon, authenticated;
 
 -- ============================================================
+-- PEN-NAMES-1 (migration 20261019184512): pen_names -- one row per
+-- pen name. Every author has a default pen name (is_default), kept equal
+-- to profiles.public_author_name by the triggers below (both ways).
+-- Owner-only: authenticated reads its own rows (staff with
+-- reports.resolve read every row; that policy is defined after
+-- staff_has_permission() below) and may update only name, bio and
+-- links. author_id, avatar_path, is_default, inserts and deletes go
+-- through the service-role server writer. Readers see pen names only
+-- through public.public_pen_names (no author_id), defined after
+-- public.bundles below. See the migration's header for the rollout
+-- order and the release rule (never to Production without PR B).
+-- ============================================================
+
+create function public.pen_name_links_valid(p_links jsonb)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select p_links is not null
+    and pg_catalog.jsonb_typeof(p_links) = 'array'
+    and pg_catalog.jsonb_array_length(p_links) <= 3
+    and not exists (
+      select 1
+      from pg_catalog.jsonb_array_elements(p_links) as e(value)
+      where pg_catalog.jsonb_typeof(e.value) <> 'string'
+         or pg_catalog.char_length(e.value #>> '{}') > 500
+         or (e.value #>> '{}') !~ '^https://[^[:space:]/?#]+[^[:space:]]*$'
+    );
+$$;
+
+create table public.pen_names (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.profiles(id) on delete cascade,
+  name text not null
+    constraint pen_names_name_check
+    check (char_length(name) between 1 and 120
+           and name = btrim(name, E' \t\r\n')),
+  bio text,
+  avatar_path text
+    constraint pen_names_avatar_path_check
+    check (avatar_path is null
+           or avatar_path ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/pen-name\.(jpg|png)$'
+           -- r4 (17a): the account's own profile photo, copied onto its
+           -- default pen name ("<account id>/avatar.<ext>", the one key
+           -- shape the profile photo writer ever used). Moved off the
+           -- account folder in PR B.
+           or avatar_path in (author_id::text || '/avatar.jpg', author_id::text || '/avatar.png')),
+  links jsonb not null default '[]'::jsonb
+    constraint pen_names_links_check
+    check (public.pen_name_links_valid(links)),
+  is_default boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create unique index pen_names_author_id_lower_name_key
+  on public.pen_names (author_id, lower(name));
+
+create unique index pen_names_one_default_per_author
+  on public.pen_names (author_id)
+  where is_default;
+
+alter table public.pen_names enable row level security;
+
+revoke all on public.pen_names from public, anon, authenticated;
+grant select on public.pen_names to authenticated;
+grant update (name, bio, links) on public.pen_names to authenticated;
+
+create policy "Authors can view their own pen names"
+  on public.pen_names for select
+  to authenticated
+  using (auth.uid() = author_id);
+
+create policy "Authors can edit their own pen names"
+  on public.pen_names for update
+  to authenticated
+  using (auth.uid() = author_id)
+  with check (auth.uid() = author_id);
+
+-- Finds the author's pen name for p_name (case-insensitive, trimmed),
+-- creating it when it does not exist; null, blank or the default's own
+-- name gives the default. service_role (the server writer) may call it.
+create function public.resolve_author_pen_name(p_author_id uuid, p_name text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_name text;
+  v_id uuid;
+begin
+  if p_author_id is null then
+    raise exception 'pen names: an author is required' using errcode = '22023';
+  end if;
+
+  v_name := pg_catalog.btrim(coalesce(p_name, ''), E' \t\r\n');
+
+  if v_name = '' then
+    select pn.id into v_id
+      from public.pen_names pn
+     where pn.author_id = p_author_id and pn.is_default;
+    if v_id is null then
+      raise exception 'pen names: this account has no default pen name' using errcode = 'LB454';
+    end if;
+    return v_id;
+  end if;
+
+  select pn.id into v_id
+    from public.pen_names pn
+   where pn.author_id = p_author_id
+     and pg_catalog.lower(pn.name) = pg_catalog.lower(v_name);
+  if v_id is not null then
+    return v_id;
+  end if;
+
+  insert into public.pen_names (author_id, name)
+  values (p_author_id, v_name)
+  on conflict (author_id, (pg_catalog.lower(name))) do nothing
+  returning id into v_id;
+
+  if v_id is null then
+    select pn.id into v_id
+      from public.pen_names pn
+     where pn.author_id = p_author_id
+       and pg_catalog.lower(pn.name) = pg_catalog.lower(v_name);
+  end if;
+
+  return v_id;
+end;
+$$;
+
+-- profiles -> default pen name. AFTER (the pen name's foreign key needs
+-- the profile row). Covers handle_new_user() and becomeAuthor.
+create function public.pen_names_sync_profile_default()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_name text;
+  v_default_id uuid;
+  v_default_name text;
+  v_clash uuid;
+  v_bio text;
+  v_avatar text;
+begin
+  if new.role <> 'author' then
+    return null;
+  end if;
+  if tg_op = 'UPDATE'
+     and new.role is not distinct from old.role
+     and new.public_author_name is not distinct from old.public_author_name
+  then
+    return null;
+  end if;
+
+  v_name := pg_catalog.btrim(coalesce(new.public_author_name, ''), E' \t\r\n');
+  if v_name = '' then
+    raise exception 'Your public author name cannot be empty.' using errcode = '23514';
+  end if;
+
+  select pn.id, pn.name into v_default_id, v_default_name
+    from public.pen_names pn
+   where pn.author_id = new.id and pn.is_default;
+
+  select pn.id into v_clash
+    from public.pen_names pn
+   where pn.author_id = new.id
+     and pg_catalog.lower(pn.name) = pg_catalog.lower(v_name)
+     and pn.id is distinct from v_default_id;
+
+  -- r4 (17a): a new default pen name starts with the profile's bio and
+  -- photo, when set (the photo only in its canonical
+  -- "<account id>/avatar.<ext>" shape); an existing pen name promoted to
+  -- default keeps its own and takes the profile's only where it has none.
+  v_bio := case when pg_catalog.btrim(coalesce(new.bio, ''), E' \t\r\n') = '' then null else new.bio end;
+  v_avatar := case when new.avatar_path in (new.id::text || '/avatar.jpg', new.id::text || '/avatar.png')
+                   then new.avatar_path end;
+
+  if v_default_id is null then
+    if v_clash is not null then
+      update public.pen_names
+         set is_default = true, name = v_name,
+             bio = coalesce(bio, v_bio), avatar_path = coalesce(avatar_path, v_avatar)
+       where id = v_clash;
+    else
+      insert into public.pen_names (author_id, name, is_default, bio, avatar_path)
+      values (new.id, v_name, true, v_bio, v_avatar);
+    end if;
+  elsif v_default_name is distinct from v_name then
+    if v_clash is not null then
+      raise exception 'You already use "%" as one of your pen names. Choose another name, or rename that pen name first.', v_name
+        using errcode = 'LB453';
+    end if;
+    update public.pen_names set name = v_name where id = v_default_id;
+  end if;
+
+  return null;
+end;
+$$;
+
+create trigger profiles_sync_default_pen_name
+  after insert or update of role, public_author_name on public.profiles
+  for each row
+  execute function public.pen_names_sync_profile_default();
+
+-- pen_names rename -> books.pen_name text, and the default's name ->
+-- profiles.public_author_name (the Profile field IS the default).
+create function public.pen_names_after_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_text text;
+begin
+  if new.name is distinct from old.name or new.is_default is distinct from old.is_default then
+    v_text := case when new.is_default then null else new.name end;
+    update public.books b
+       set pen_name = v_text
+     where b.pen_name_id = new.id
+       and b.pen_name is distinct from v_text;
+  end if;
+
+  if new.is_default and new.name is distinct from old.name then
+    update public.profiles p
+       set public_author_name = new.name
+     where p.id = new.author_id
+       and pg_catalog.btrim(coalesce(p.public_author_name, ''), E' \t\r\n') is distinct from new.name;
+  end if;
+
+  return null;
+end;
+$$;
+
+create trigger pen_names_after_update
+  after update of name, is_default on public.pen_names
+  for each row
+  execute function public.pen_names_after_update();
+
+-- The default pen name goes only with its account.
+create function public.pen_names_before_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if old.is_default and exists (select 1 from public.profiles p where p.id = old.author_id) then
+    raise exception 'The default pen name cannot be deleted.' using errcode = 'LB456';
+  end if;
+  return old;
+end;
+$$;
+
+create trigger pen_names_before_delete
+  before delete on public.pen_names
+  for each row
+  execute function public.pen_names_before_delete();
+
+revoke all on function public.resolve_author_pen_name(uuid, text) from public, anon, authenticated, service_role;
+grant execute on function public.resolve_author_pen_name(uuid, text) to service_role;
+revoke all on function public.pen_names_sync_profile_default() from public, anon, authenticated;
+revoke all on function public.pen_names_after_update() from public, anon, authenticated;
+revoke all on function public.pen_names_before_delete() from public, anon, authenticated;
+
+-- ============================================================
 -- series: an author's named grouping of their own books, in reading
 -- order. Publicly viewable (a book's series info shows on its page to
 -- everyone), but only the owning author can create/rename/delete one.
@@ -324,7 +594,10 @@ create table public.series (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references public.profiles(id) on delete cascade,
   title text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- PEN-NAMES-1: the series' pen name; its books carry the same one
+  -- (11a, series_enforce_pen_name and books_enforce_pen_name).
+  pen_name_id uuid not null references public.pen_names(id)
 );
 
 alter table public.series enable row level security;
@@ -345,6 +618,60 @@ create policy "Authors can rename their own series"
 create policy "Authors can delete their own series"
   on public.series for delete
   using (auth.uid() = author_id);
+
+-- series: default fill, ownership, and a non-empty series keeps the pen
+-- name of its books (11a).
+create function public.series_enforce_pen_name()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner uuid;
+begin
+  -- r5 (audit F1): a data-API caller (anon or authenticated) writing a
+  -- series row for ANOTHER account is refused by RLS anyway. Return
+  -- before any pen name lookup, so that refusal is RLS's generic error
+  -- whatever the pen name is -- never an error that tells whether a pen
+  -- name belongs to that account (or whether it has a default one).
+  -- The role GUC is the caller's role even inside SECURITY DEFINER.
+  -- service_role and the owner's own rows are checked as before.
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated')
+     and new.author_id is distinct from auth.uid()
+  then
+    return new;
+  end if;
+
+  if new.pen_name_id is null then
+    new.pen_name_id := public.resolve_author_pen_name(new.author_id, null);
+  end if;
+
+  select pn.author_id into v_owner from public.pen_names pn where pn.id = new.pen_name_id;
+  if v_owner is null or v_owner <> new.author_id then
+    raise exception 'pen names: the pen name does not belong to this series'' author' using errcode = '42501';
+  end if;
+
+  if tg_op = 'UPDATE'
+     and new.pen_name_id is distinct from old.pen_name_id
+     and exists (select 1 from public.books b
+                  where b.series_id = new.id and b.pen_name_id is distinct from new.pen_name_id)
+  then
+    raise exception 'A series holds books of one pen name only.' using errcode = 'LB451';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger series_enforce_pen_name
+  before insert or update of pen_name_id, author_id on public.series
+  for each row
+  execute function public.series_enforce_pen_name();
+
+revoke all on function public.series_enforce_pen_name() from public, anon, authenticated;
+
+create index series_pen_name_id_idx on public.series(pen_name_id);
 
 -- ============================================================
 -- books: owned by an author, visible to everyone once published
@@ -428,7 +755,12 @@ create table public.books (
       or (char_length(pen_name) between 1 and 120
           and pen_name = btrim(pen_name, E' \t\r\n'))
     ),
-  librum_choice_at timestamptz
+  librum_choice_at timestamptz,
+  -- PEN-NAMES-1 (migration 20261019184512): the book's pen name, declared
+  -- last as the migration adds it. books.pen_name is kept equal to that
+  -- pen name's name (null for the author's default) by
+  -- books_enforce_pen_name below, both ways, until a later step drops it.
+  pen_name_id uuid not null references public.pen_names(id)
 );
 
 comment on column public.books.price_all is
@@ -494,6 +826,88 @@ create index books_author_id_idx on public.books(author_id);
 create index books_status_idx on public.books(status);
 create index books_genre_idx on public.books(genre);
 create index books_series_id_idx on public.books(series_id);
+create index books_pen_name_id_idx on public.books(pen_name_id);
+
+-- books: default fill, ownership, two-way text sync (N1), 14a and 11a.
+create function public.books_enforce_pen_name()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner uuid;
+  v_name text;
+  v_is_default boolean;
+  v_series_pen uuid;
+begin
+  -- The text keeps books_pen_name_check's own refusal (old code, and
+  -- any direct write) before it is resolved to a pen name.
+  if new.pen_name is not null
+     and (tg_op = 'INSERT' or new.pen_name is distinct from old.pen_name)
+     and not (pg_catalog.char_length(new.pen_name) between 1 and 120
+              and new.pen_name = pg_catalog.btrim(new.pen_name, E' \t\r\n'))
+  then
+    raise exception 'new row for relation "books" violates check constraint "books_pen_name_check"'
+      using errcode = '23514', constraint = 'books_pen_name_check';
+  end if;
+
+  if tg_op = 'INSERT' then
+    if new.pen_name_id is null then
+      new.pen_name_id := public.resolve_author_pen_name(new.author_id, new.pen_name);
+    end if;
+  elsif new.pen_name_id is null then
+    new.pen_name_id := public.resolve_author_pen_name(new.author_id, null);
+  elsif new.pen_name_id is not distinct from old.pen_name_id
+        and new.pen_name is distinct from old.pen_name
+  then
+    -- Only the text changed: a pen-name rename being synced (it already
+    -- equals the pen name's text) or old code writing books.pen_name.
+    select pn.name, pn.is_default into v_name, v_is_default
+      from public.pen_names pn where pn.id = new.pen_name_id;
+    if new.pen_name is distinct from (case when v_is_default then null else v_name end) then
+      new.pen_name_id := public.resolve_author_pen_name(new.author_id, new.pen_name);
+    end if;
+  end if;
+
+  select pn.author_id, pn.name, pn.is_default into v_owner, v_name, v_is_default
+    from public.pen_names pn where pn.id = new.pen_name_id;
+  if v_owner is null or v_owner <> new.author_id then
+    raise exception 'pen names: the pen name does not belong to this book''s author' using errcode = '42501';
+  end if;
+
+  new.pen_name := case when v_is_default then null else v_name end;
+
+  if tg_op = 'UPDATE' and new.pen_name_id is distinct from old.pen_name_id then
+    if (old.series_id is not null and new.series_id is not null)
+       or exists (select 1 from public.bundle_books bb where bb.book_id = new.id)
+    then
+      raise exception 'This book is in a series or bundle. Take it out first, then change its pen name.'
+        using errcode = 'LB452';
+    end if;
+  end if;
+
+  if new.series_id is not null
+     and (tg_op = 'INSERT'
+          or new.series_id is distinct from old.series_id
+          or new.pen_name_id is distinct from old.pen_name_id)
+  then
+    select s.pen_name_id into v_series_pen from public.series s where s.id = new.series_id;
+    if found and v_series_pen is distinct from new.pen_name_id then
+      raise exception 'A series holds books of one pen name only.' using errcode = 'LB451';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger books_enforce_pen_name
+  before insert or update of pen_name_id, pen_name, author_id, series_id on public.books
+  for each row
+  execute function public.books_enforce_pen_name();
+
+revoke all on function public.books_enforce_pen_name() from public, anon, authenticated;
 
 -- LIBRUM 2.0 AUTHOR-1C (migration 045): the safe, reader-facing replacement for direct
 -- public access to profiles -- exposes ONLY the columns a reader ever
@@ -567,123 +981,8 @@ create unique index books_one_librum_choice
 create schema if not exists extensions;
 create extension if not exists unaccent with schema extensions;
 
--- Diacritic-tolerant bookstore search (see the Phase 6B search audit).
--- Matches title/description/keywords/author-display-name using
--- extensions.unaccent() on both the stored text and the search term, so
--- e.g. a search for "Kerc" matches stored "Kërc" and vice versa -- ë/e
--- and ç/c fold together (along with other accented Latin letters,
--- unaccent's normal behavior), while ILIKE keeps matching
--- case-insensitive as before.
---
--- SECURITY INVOKER (the default, stated explicitly): unlike
--- bestselling_books, this only reads books/profiles data that's already
--- publicly selectable under existing RLS ("Published books are viewable
--- by everyone" / "Profiles are viewable by everyone") -- there is no
--- privileged data to bypass, so no elevated privilege is used or
--- needed. It runs under the calling role's own RLS, same as any other
--- query the bookstore already makes.
---
--- Returns ONLY book_id -- never any profiles or purchases column -- the
--- caller re-fetches full book rows (with profiles(display_name)) the
--- same way the rest of the bookstore code already does.
---
--- SEARCH CANDIDATE LIMIT vs. VISIBLE SEARCH RESULT LIMIT: result_limit
--- here clamps to 1-500 -- this is a CANDIDATE ceiling, not the 48
--- results the bookstore actually displays. The application sorts
--- (newest / price / bestselling) over whatever this function returns,
--- then applies its own separate 48-row display cap AFTER sorting -- so
--- this limit must cover every book that could plausibly match a query,
--- not just the number shown on screen, or sorting would silently run
--- over an incomplete/arbitrary subset of the true matches (see the
--- Phase 6B-2 correction audit). 500 is a bounded ceiling judged
--- appropriate for Librum's current catalog size (low hundreds of
--- published books, per the Phase 6B-1 audit) -- it is NOT claimed to be
--- correct at arbitrary catalog size. If the catalog can plausibly grow
--- to where a single query matches more than 500 published books, this
--- architecture (push sorting into the database, or paginate, or both)
--- must be revisited before that happens -- raising this constant alone
--- would silently reintroduce the same truncate-before-sort bug this
--- fixes, just at a higher threshold.
---
--- This still guards against an unbounded scan/result set -- 500 is a
--- hard cap, not "no limit" -- mirroring the same defensive
--- least/greatest/coalesce pattern already used by bestselling_books.
---
--- ALL-SEARCH-1 (migration 20260922162155): the price predicates read
--- `books.price_all` -- the ALL catalog column, in WHOLE LEK -- and a
--- row with no authored ALL price is excluded outright. The parameters
--- are still NAMED `min_price_cents`/`max_price_cents`, deliberately and
--- temporarily: renaming a function's parameters changes its call
--- signature for every PostgREST caller at once, so that is a separate
--- change from the one that performed the free/paid cutover. See the
--- migration's own header for the full rationale and rollout note.
-create or replace function public.search_books(
-  search_term text default null,
-  genre_filter text default null,
-  min_price_cents int default null,
-  max_price_cents int default null,
-  result_limit int default 500
-)
-returns table (book_id uuid)
-language sql
-security invoker
-set search_path = ''
-stable
-as $$
-  select books.id as book_id
-  from public.books
-  where books.status = 'published'
-    and (genre_filter is null or books.genre = genre_filter)
-    -- ALL-SEARCH-1: a row with no authored ALL price is not ALL-ready.
-    -- Unconditional, never folded into the two bound checks below: a
-    -- reader who applies no price filter at all must not be shown an
-    -- unpriced book either.
-    and books.price_all is not null
-    -- ALL-SEARCH-1: whole-ALL catalog bounds. The parameter names still
-    -- read "cents" and are deliberately not renamed here -- see the
-    -- header. `price_cents` is never consulted: it is legacy USD minor
-    -- units and its values are not lek.
-    and (min_price_cents is null or books.price_all >= min_price_cents)
-    and (max_price_cents is null or books.price_all <= max_price_cents)
-    and (
-      search_term is null
-      or extensions.unaccent(books.title) ilike extensions.unaccent('%' || search_term || '%')
-      or extensions.unaccent(books.description) ilike extensions.unaccent('%' || search_term || '%')
-      or extensions.unaccent(books.keywords) ilike extensions.unaccent('%' || search_term || '%')
-      or exists (
-        -- LIBRUM 2.0 AUTHOR-1C (migration 045): reads public_author_profiles (the safe
-        -- view), never public.profiles directly. This function is
-        -- SECURITY INVOKER (deliberately -- see this function's own
-        -- long-standing posture, unchanged), meaning it runs with the
-        -- CALLING role's own privileges -- anon or an ordinary
-        -- authenticated reader included. Since AUTHOR-1C now restricts
-        -- direct SELECT on public.profiles to a caller's own row (or an
-        -- authorized staff permission), a public search call from anon/
-        -- an ordinary reader would get "permission denied for table
-        -- profiles" (confirmed directly against a real local Postgres
-        -- instance while building this fix) if this EXISTS clause still
-        -- queried the base table -- the view is what makes this
-        -- function work at all post-AUTHOR-1C, not merely what keeps it
-        -- private. public_author_profiles is already scoped to
-        -- role = 'author' and already only ever contains a non-null
-        -- public_author_name (see that view's own comment and the
-        -- profiles table's public_author_name_required_for_authors
-        -- CHECK) -- so this matches ONLY the public pen name, with no
-        -- coalesce and no possible path to a private display_name.
-        select 1
-        from public.public_author_profiles p
-        where p.id = books.author_id
-          and extensions.unaccent(p.public_author_name)
-            ilike extensions.unaccent('%' || search_term || '%')
-      )
-    )
-  -- SEARCH CANDIDATE LIMIT (500) -- see the comment block above. NOT the
-  -- 48-row VISIBLE SEARCH RESULT LIMIT the bookstore displays.
-  limit least(greatest(coalesce(result_limit, 500), 1), 500);
-$$;
-
-revoke all on function public.search_books(text, text, int, int, int) from public;
-grant execute on function public.search_books(text, text, int, int, int) to anon, authenticated;
+-- search_books() is defined below public.public_pen_names, which it reads
+-- (PEN-NAMES-1, migration 20261019184512).
 
 -- ============================================================
 -- book_contributors: credits shown on a book's page beyond the single
@@ -790,7 +1089,10 @@ create table public.bundles (
   price_all integer
     constraint bundles_price_all_range_check
     check (price_all is null or price_all = 0
-           or (price_all >= 99 and price_all <= 100000))
+           or (price_all >= 99 and price_all <= 100000)),
+  -- PEN-NAMES-1: the bundle's pen name; every book in it carries the
+  -- same one (11a). Set by the bundle RPCs from their books.
+  pen_name_id uuid not null references public.pen_names(id)
 );
 
 comment on column public.bundles.price_all is
@@ -887,6 +1189,101 @@ create policy "Authors can remove books from their own bundles"
 
 create index bundle_books_bundle_id_idx on public.bundle_books(bundle_id);
 create index bundle_books_book_id_idx on public.bundle_books(book_id);
+
+create index bundles_pen_name_id_idx on public.bundles(pen_name_id);
+
+-- bundles: default fill and ownership. Membership is checked per row
+-- by bundle_books_enforce_pen_name and, for a change of the bundle's
+-- pen name, at commit by bundles_check_member_pen_names (the update RPC
+-- sets the pen name before it replaces the membership).
+create function public.bundles_enforce_pen_name()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner uuid;
+begin
+  if new.pen_name_id is null then
+    new.pen_name_id := public.resolve_author_pen_name(new.author_id, null);
+  end if;
+
+  select pn.author_id into v_owner from public.pen_names pn where pn.id = new.pen_name_id;
+  if v_owner is null or v_owner <> new.author_id then
+    raise exception 'pen names: the pen name does not belong to this bundle''s author' using errcode = '42501';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger bundles_enforce_pen_name
+  before insert or update of pen_name_id, author_id on public.bundles
+  for each row
+  execute function public.bundles_enforce_pen_name();
+
+create function public.bundles_check_member_pen_names()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if exists (
+    select 1
+      from public.bundles bu
+      join public.bundle_books bb on bb.bundle_id = bu.id
+      join public.books b on b.id = bb.book_id
+     where bu.id = new.id
+       and b.pen_name_id is distinct from bu.pen_name_id
+  ) then
+    raise exception 'A bundle holds books of one pen name only.' using errcode = 'LB451';
+  end if;
+  return null;
+end;
+$$;
+
+create constraint trigger bundles_check_member_pen_names
+  after update of pen_name_id on public.bundles
+  deferrable initially deferred
+  for each row
+  execute function public.bundles_check_member_pen_names();
+
+create function public.bundle_books_enforce_pen_name()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_book_pen uuid;
+  v_book_author uuid;
+  v_bundle_pen uuid;
+  v_bundle_author uuid;
+begin
+  -- One author's pen names only: a book of another account is refused
+  -- by the bundle writers' own ownership checks, not here.
+  select b.pen_name_id, b.author_id into v_book_pen, v_book_author
+    from public.books b where b.id = new.book_id;
+  select bu.pen_name_id, bu.author_id into v_bundle_pen, v_bundle_author
+    from public.bundles bu where bu.id = new.bundle_id;
+  if v_book_author = v_bundle_author and v_book_pen <> v_bundle_pen then
+    raise exception 'A bundle holds books of one pen name only.' using errcode = 'LB451';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger bundle_books_enforce_pen_name
+  before insert or update of bundle_id, book_id on public.bundle_books
+  for each row
+  execute function public.bundle_books_enforce_pen_name();
+
+revoke all on function public.bundles_enforce_pen_name() from public, anon, authenticated;
+revoke all on function public.bundles_check_member_pen_names() from public, anon, authenticated;
+revoke all on function public.bundle_books_enforce_pen_name() from public, anon, authenticated;
+
 
 -- BUNDLE-MEMBERSHIP-AUTH-1 (migrations 20260926061034 and
 -- 20260926061037): no client role writes membership directly. anon and
@@ -1047,14 +1444,29 @@ volatile
 security invoker
 set search_path = ''
 as $$
+declare
+  v_pen_count integer;
+  v_pen_name_id uuid;
 begin
   if p_bundle_id is null or p_author_id is null then
     raise exception 'bundle membership: bundle and author are required'
       using errcode = '22023';
   end if;
 
-  insert into public.bundles (id, author_id, title, description, price_all)
-  values (p_bundle_id, p_author_id, p_title, p_description, p_price_all);
+  -- PEN-NAMES-1 (11a): one pen name per bundle, taken from its books.
+  select pg_catalog.count(distinct bo.pen_name_id), pg_catalog.min(bo.pen_name_id::text)::uuid
+    into v_pen_count, v_pen_name_id
+    from public.books bo
+   where bo.id = any (p_book_ids)
+     and bo.author_id = p_author_id;
+
+  if v_pen_count > 1 then
+    raise exception 'A bundle holds books of one pen name only.'
+      using errcode = 'LB451';
+  end if;
+
+  insert into public.bundles (id, author_id, title, description, price_all, pen_name_id)
+  values (p_bundle_id, p_author_id, p_title, p_description, p_price_all, v_pen_name_id);
 
   return query
     select r.member_bundle_id, r.member_book_id
@@ -1093,6 +1505,8 @@ declare
   v_title text;
   v_description text;
   v_new_price_all integer;
+  v_pen_count integer;
+  v_pen_name_id uuid;
 begin
   if p_bundle_id is null or p_author_id is null or p_check_expected_price_all is null then
     raise exception 'bundle update: bundle, author and guard are required'
@@ -1124,11 +1538,27 @@ begin
       using errcode = 'LB409';
   end if;
 
-  -- 3. The details. price_cents and status are never named.
+  -- PEN-NAMES-1 (11a, N4): one pen name per bundle, taken from the
+  -- requested books, refused when they are mixed -- before the bundle
+  -- row is written.
+  select pg_catalog.count(distinct bo.pen_name_id), pg_catalog.min(bo.pen_name_id::text)::uuid
+    into v_pen_count, v_pen_name_id
+    from public.books bo
+   where bo.id = any (p_book_ids)
+     and bo.author_id = p_author_id;
+
+  if v_pen_count > 1 then
+    raise exception 'A bundle holds books of one pen name only.'
+      using errcode = 'LB451';
+  end if;
+
+  -- 3. The details. price_cents and status are never named. The pen
+  --    name is set here, before the membership is replaced (step 4).
   update public.bundles b
      set title = p_title,
          description = p_description,
-         price_all = p_price_all
+         price_all = p_price_all,
+         pen_name_id = coalesce(v_pen_name_id, b.pen_name_id)
    where b.id = p_bundle_id
      and b.author_id = p_author_id;
 
@@ -1185,6 +1615,139 @@ grant execute on function public.create_bundle_with_membership(uuid, uuid, text,
   to service_role;
 grant execute on function public.update_bundle_with_membership(uuid, uuid, text, boolean, integer, text, text, integer, uuid[])
   to service_role;
+
+-- ============================================================
+-- PEN-NAMES-1 (migration 20261019184512): public.public_pen_names, the
+-- reader-facing pen name: id, name, bio, avatar_path, links and NO
+-- author_id. Same owner/ACL pattern as public_author_profiles (a plain
+-- view running as its owner, so pen_names' RLS does not apply inside
+-- it; anon and authenticated hold SELECT only). Only pen names used by
+-- a book (any status), a series or a bundle are listed, so a name typed
+-- at signup is not public until something is published under it.
+-- ============================================================
+
+create view public.public_pen_names as
+  select pn.id, pn.name, pn.bio, pn.avatar_path, pn.links
+  from public.pen_names pn
+  where exists (select 1 from public.books b where b.pen_name_id = pn.id)
+     or exists (select 1 from public.series s where s.pen_name_id = pn.id)
+     or exists (select 1 from public.bundles bu where bu.pen_name_id = pn.id);
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.public_pen_names
+  from anon, authenticated;
+
+grant select
+  on table public.public_pen_names
+  to anon, authenticated;
+
+-- Diacritic-tolerant bookstore search (see the Phase 6B search audit).
+-- Matches title/description/keywords/author-display-name using
+-- extensions.unaccent() on both the stored text and the search term, so
+-- e.g. a search for "Kerc" matches stored "Kërc" and vice versa -- ë/e
+-- and ç/c fold together (along with other accented Latin letters,
+-- unaccent's normal behavior), while ILIKE keeps matching
+-- case-insensitive as before.
+--
+-- SECURITY INVOKER (the default, stated explicitly): unlike
+-- bestselling_books, this only reads books/profiles data that's already
+-- publicly selectable under existing RLS ("Published books are viewable
+-- by everyone" / "Profiles are viewable by everyone") -- there is no
+-- privileged data to bypass, so no elevated privilege is used or
+-- needed. It runs under the calling role's own RLS, same as any other
+-- query the bookstore already makes.
+--
+-- Returns ONLY book_id -- never any profiles or purchases column -- the
+-- caller re-fetches full book rows (with profiles(display_name)) the
+-- same way the rest of the bookstore code already does.
+--
+-- SEARCH CANDIDATE LIMIT vs. VISIBLE SEARCH RESULT LIMIT: result_limit
+-- here clamps to 1-500 -- this is a CANDIDATE ceiling, not the 48
+-- results the bookstore actually displays. The application sorts
+-- (newest / price / bestselling) over whatever this function returns,
+-- then applies its own separate 48-row display cap AFTER sorting -- so
+-- this limit must cover every book that could plausibly match a query,
+-- not just the number shown on screen, or sorting would silently run
+-- over an incomplete/arbitrary subset of the true matches (see the
+-- Phase 6B-2 correction audit). 500 is a bounded ceiling judged
+-- appropriate for Librum's current catalog size (low hundreds of
+-- published books, per the Phase 6B-1 audit) -- it is NOT claimed to be
+-- correct at arbitrary catalog size. If the catalog can plausibly grow
+-- to where a single query matches more than 500 published books, this
+-- architecture (push sorting into the database, or paginate, or both)
+-- must be revisited before that happens -- raising this constant alone
+-- would silently reintroduce the same truncate-before-sort bug this
+-- fixes, just at a higher threshold.
+--
+-- PEN-NAMES-1 (migration 20261019184512): the author-name match reads
+-- the book's OWN pen name through public.public_pen_names (5a), no
+-- longer public_author_profiles -- the account's public name finds only
+-- the books under its default pen name.
+--
+-- This still guards against an unbounded scan/result set -- 500 is a
+-- hard cap, not "no limit" -- mirroring the same defensive
+-- least/greatest/coalesce pattern already used by bestselling_books.
+--
+-- ALL-SEARCH-1 (migration 20260922162155): the price predicates read
+-- `books.price_all` -- the ALL catalog column, in WHOLE LEK -- and a
+-- row with no authored ALL price is excluded outright. The parameters
+-- are still NAMED `min_price_cents`/`max_price_cents`, deliberately and
+-- temporarily: renaming a function's parameters changes its call
+-- signature for every PostgREST caller at once, so that is a separate
+-- change from the one that performed the free/paid cutover. See the
+-- migration's own header for the full rationale and rollout note.
+create or replace function public.search_books(
+  search_term text default null,
+  genre_filter text default null,
+  min_price_cents int default null,
+  max_price_cents int default null,
+  result_limit int default 500
+)
+returns table (book_id uuid)
+language sql
+security invoker
+set search_path = ''
+stable
+as $$
+  select books.id as book_id
+  from public.books
+  where books.status = 'published'
+    and (genre_filter is null or books.genre = genre_filter)
+    -- ALL-SEARCH-1: a row with no authored ALL price is not ALL-ready.
+    -- Unconditional, never folded into the two bound checks below: a
+    -- reader who applies no price filter at all must not be shown an
+    -- unpriced book either.
+    and books.price_all is not null
+    -- ALL-SEARCH-1: whole-ALL catalog bounds. The parameter names still
+    -- read "cents" and are deliberately not renamed here -- see the
+    -- header. `price_cents` is never consulted: it is legacy USD minor
+    -- units and its values are not lek.
+    and (min_price_cents is null or books.price_all >= min_price_cents)
+    and (max_price_cents is null or books.price_all <= max_price_cents)
+    and (
+      search_term is null
+      or extensions.unaccent(books.title) ilike extensions.unaccent('%' || search_term || '%')
+      or extensions.unaccent(books.description) ilike extensions.unaccent('%' || search_term || '%')
+      or extensions.unaccent(books.keywords) ilike extensions.unaccent('%' || search_term || '%')
+      or exists (
+        -- PEN-NAMES-1 (5a): the book's OWN pen name, through the public
+        -- view (no author_id). The account's public name finds only the
+        -- books published under it (its default pen name), never a book
+        -- under another pen name.
+        select 1
+        from public.public_pen_names pn
+        where pn.id = books.pen_name_id
+          and extensions.unaccent(pn.name)
+            ilike extensions.unaccent('%' || search_term || '%')
+      )
+    )
+  -- SEARCH CANDIDATE LIMIT (500) -- see the comment block above. NOT the
+  -- 48-row VISIBLE SEARCH RESULT LIMIT the bookstore displays.
+  limit least(greatest(coalesce(result_limit, 500), 1), 500);
+$$;
+
+revoke all on function public.search_books(text, text, int, int, int) from public;
+grant execute on function public.search_books(text, text, int, int, int) to anon, authenticated;
 
 -- ============================================================
 -- bundle_checkout_snapshots: one durable row per bundle checkout
@@ -2457,6 +3020,113 @@ create index author_follows_follower_id_idx on public.author_follows(follower_id
 create index author_follows_author_id_idx on public.author_follows(author_id);
 
 -- ============================================================
+-- PEN-NAMES-1 (migration 20261019184512): pen_name_follows -- a reader
+-- follows a pen name (4a); the new-book email names that pen name. Own
+-- rows only; follower counts are read server-side with the service
+-- role. author_follows stays until PR B: its rows were copied to the
+-- author's default pen name (12a) and old code's follows and unfollows
+-- are mirrored there by the trigger below.
+-- ============================================================
+
+create table public.pen_name_follows (
+  follower_id uuid not null references public.profiles(id) on delete cascade,
+  pen_name_id uuid not null references public.pen_names(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (follower_id, pen_name_id)
+);
+
+create index pen_name_follows_pen_name_id_idx on public.pen_name_follows(pen_name_id);
+
+alter table public.pen_name_follows enable row level security;
+
+revoke all on public.pen_name_follows from public, anon, authenticated;
+grant select, insert, delete on public.pen_name_follows to authenticated;
+
+create policy "Readers can view their own pen name follows"
+  on public.pen_name_follows for select
+  to authenticated
+  using (auth.uid() = follower_id);
+
+create policy "Readers can follow a pen name"
+  on public.pen_name_follows for insert
+  to authenticated
+  with check (auth.uid() = follower_id);
+
+create policy "Readers can unfollow a pen name"
+  on public.pen_name_follows for delete
+  to authenticated
+  using (auth.uid() = follower_id);
+
+create function public.pen_name_follows_refuse_own()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- r5 (audit F1): a row for ANOTHER follower is refused by RLS anyway;
+  -- return before the lookup so the refusal is RLS's generic error
+  -- whether or not the pen name is that follower's own. The caller's
+  -- own follows and service_role writes are checked as before.
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated')
+     and new.follower_id is distinct from auth.uid()
+  then
+    return new;
+  end if;
+
+  if exists (select 1 from public.pen_names pn
+              where pn.id = new.pen_name_id and pn.author_id = new.follower_id) then
+    raise exception 'You cannot follow your own pen name.' using errcode = 'LB457';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger pen_name_follows_refuse_own
+  before insert or update on public.pen_name_follows
+  for each row
+  execute function public.pen_name_follows_refuse_own();
+
+-- Until PR B drops author_follows: old code's follow and unfollow land
+-- on the author's default pen name.
+create function public.author_follows_mirror_pen_name_follows()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_pen uuid;
+begin
+  if tg_op = 'INSERT' then
+    select pn.id into v_pen from public.pen_names pn
+     where pn.author_id = new.author_id and pn.is_default;
+    if v_pen is not null then
+      insert into public.pen_name_follows (follower_id, pen_name_id)
+      values (new.follower_id, v_pen)
+      on conflict (follower_id, pen_name_id) do nothing;
+    end if;
+  else
+    select pn.id into v_pen from public.pen_names pn
+     where pn.author_id = old.author_id and pn.is_default;
+    if v_pen is not null then
+      delete from public.pen_name_follows f
+       where f.follower_id = old.follower_id and f.pen_name_id = v_pen;
+    end if;
+  end if;
+  return null;
+end;
+$$;
+
+create trigger author_follows_mirror_pen_name_follows
+  after insert or delete on public.author_follows
+  for each row
+  execute function public.author_follows_mirror_pen_name_follows();
+
+revoke all on function public.pen_name_follows_refuse_own() from public, anon, authenticated;
+revoke all on function public.author_follows_mirror_pen_name_follows() from public, anon, authenticated;
+
+-- ============================================================
 -- book_reports: readers flag a book for review. Write-only from an
 -- ordinary reader's perspective -- there is deliberately no select
 -- policy for regular users (not even the reported book's own author).
@@ -2641,6 +3311,15 @@ create policy "Staff with an authorized permission can view any profile"
     or public.staff_has_permission('refunds.view')
     or public.staff_has_permission('audit.view')
   );
+
+-- PEN-NAMES-1 (13a): staff with reports.resolve (moderator, admin,
+-- owner) can see which account is behind a pen name. Deferred to here
+-- because CREATE POLICY resolves staff_has_permission() at creation.
+create policy "Staff with reports.resolve can view every pen name"
+  on public.pen_names for select
+  to authenticated
+  using (public.staff_has_permission('reports.resolve'));
+
 
 -- ============================================================
 -- refund_requests: one durable row per reader-initiated refund request,
@@ -6919,6 +7598,8 @@ grant execute on function public.staff_has_permission(text) to anon, authenticat
 -- default view already shows every admin_audit_log row regardless of
 -- this list. Full function body restated (same CREATE OR REPLACE
 -- reasoning as staff_has_permission() above).
+-- PEN-NAMES-1 (migration 20261019184512, r4): 'pen_name.links_removed'
+-- (staff_remove_pen_name_links) and the 'pen_names' target type added.
 create or replace function public.list_admin_audit_events(
   p_action text default null,
   p_actor_id uuid default null,
@@ -6960,13 +7641,15 @@ begin
     'report.resolved', 'report.dismissed',
     'refund.review_approved', 'refund.review_rejected',
     'refund.issuance_submitted',
-    'blog_post.published', 'blog_post.unpublished', 'blog_post.deleted'
+    'blog_post.published', 'blog_post.unpublished', 'blog_post.deleted',
+    'pen_name.links_removed'
   ) then
     raise exception 'invalid action filter';
   end if;
 
   if p_target_type is not null and p_target_type not in (
-    'staff_members', 'book_reports', 'refund_requests', 'blog_posts'
+    'staff_members', 'book_reports', 'refund_requests', 'blog_posts',
+    'pen_names'
   ) then
     raise exception 'invalid target_type filter';
   end if;
@@ -11832,7 +12515,13 @@ create table public.book_rights_declarations (
   basis text not null check (basis in ('own_rights', 'public_domain')),
   statement_version text not null,
   statement_text text not null check (btrim(statement_text) <> ''),
-  declared_at timestamptz not null default now()
+  declared_at timestamptz not null default now(),
+  -- PEN-NAMES-1 (16a): the book's pen name at that moment, beside the
+  -- account's public name; null on rows written before migration
+  -- 20261019184512.
+  pen_name text
+    constraint book_rights_declarations_pen_name_check
+    check (pen_name is null or char_length(pen_name) between 1 and 120)
 );
 
 create index book_rights_declarations_book_id_declared_at_idx
@@ -11936,3 +12625,48 @@ revoke execute on function public.set_librum_choice(uuid) from public, anon, aut
 revoke execute on function public.clear_librum_choice() from public, anon, authenticated;
 grant execute on function public.set_librum_choice(uuid) to service_role;
 grant execute on function public.clear_librum_choice() to service_role;
+
+-- ============================================================
+-- PEN-NAMES-1 (migration 20261019184512): staff with reports.resolve
+-- remove a pen name's links (8a, 13a); audited like the other staff
+-- functions. The author may add links again afterwards (15a).
+-- ============================================================
+
+create function public.staff_remove_pen_name_links(p_pen_name_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_links jsonb;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('reports.resolve') then
+    raise exception 'not authorized';
+  end if;
+
+  select pn.links into v_links
+    from public.pen_names pn
+   where pn.id = p_pen_name_id
+     for update;
+
+  if not found then
+    raise exception 'no pen name found for this id';
+  end if;
+
+  update public.pen_names set links = '[]'::jsonb where id = p_pen_name_id;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'pen_name.links_removed', 'pen_names', p_pen_name_id,
+          pg_catalog.jsonb_build_object('removed_links', v_links));
+end;
+$$;
+
+revoke all on function public.staff_remove_pen_name_links(uuid) from public, anon, authenticated;
+grant execute on function public.staff_remove_pen_name_links(uuid) to authenticated;

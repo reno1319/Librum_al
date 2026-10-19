@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
+import { authorPagePath } from "@/lib/pen-names";
 
 // LIBRUM 2.0 UI-8: the Reader Library's card -- deliberately NOT the
 // commerce-oriented BookCard (src/components/book-card.tsx). A Library
@@ -15,7 +16,7 @@ export function LibraryBookCard({
   bookId,
   title,
   coverUrl,
-  authorId,
+  penNameId,
   authorName,
   isPublished,
   downloadable,
@@ -23,7 +24,8 @@ export function LibraryBookCard({
   bookId: string;
   title: string;
   coverUrl: string | null;
-  authorId: string;
+  // PEN-NAMES-1: the book's pen name id (the byline links to its page).
+  penNameId: string | null;
   authorName: string | null;
   isPublished: boolean;
   downloadable: boolean;
@@ -51,14 +53,17 @@ export function LibraryBookCard({
         <p className="font-serif text-base font-semibold leading-snug">{title}</p>
       </Link>
 
-      {authorName && (
-        <Link
-          href={`/authors/${authorId}`}
-          className="focus-ring w-fit rounded-sm text-xs text-muted hover:underline"
-        >
-          by {authorName}
-        </Link>
-      )}
+      {authorName &&
+        (penNameId ? (
+          <Link
+            href={authorPagePath(penNameId)}
+            className="focus-ring w-fit rounded-sm text-xs text-muted hover:underline"
+          >
+            by {authorName}
+          </Link>
+        ) : (
+          <span className="w-fit text-xs text-muted">by {authorName}</span>
+        ))}
 
       {!isPublished && <p className="text-xs text-muted">Unavailable in Bookstore</p>}
 

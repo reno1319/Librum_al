@@ -5,7 +5,6 @@ import { updateProfile } from "./actions";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
-import { AvatarField } from "@/components/avatar-field";
 import { formControlClasses } from "@/lib/form-styles";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { Profile } from "@/lib/types";
@@ -35,14 +34,12 @@ export default async function EditProfilePage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("*")
+    .select("display_name, public_author_name, role")
     .eq("id", user.id)
-    .single<Profile>();
+    .single<Pick<Profile, "display_name" | "public_author_name" | "role">>();
 
-  const avatarUrl = profile?.avatar_path
-    ? supabase.storage.from("avatars").getPublicUrl(profile.avatar_path).data
-        .publicUrl
-    : null;
+  // PEN-NAMES-1 r4 (owner decision 18a): no Bio box and no photo here --
+  // bio and photo are edited per pen name in Dashboard > Pen names.
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
@@ -66,8 +63,6 @@ export default async function EditProfilePage({
       )}
 
       <form action={updateProfile} className="mt-6 flex flex-col gap-4">
-        <AvatarField userId={user.id} existingAvatarUrl={avatarUrl} />
-
         <label className="flex flex-col gap-1 text-sm">
           Account name
           <input
@@ -116,23 +111,23 @@ export default async function EditProfilePage({
             <span className="text-sm text-muted">
               This is the name readers will see on your books and author page.
             </span>
+            {/* PEN-NAMES-1: the Public author name is the default pen
+                name; each pen name's own bio, photo and links are what
+                readers see. */}
+            <span className="text-sm text-muted">
+              It is also your default pen name. Set the bio, photo and links readers see for each
+              pen name in{" "}
+              <Link href="/dashboard/pen-names" className="underline underline-offset-2">
+                Pen names
+              </Link>
+              .
+            </span>
             <span className="text-sm text-muted">
               If you publish under a pen name, set it before publishing. The author name may be
               embedded in your EPUB file.
             </span>
           </label>
         )}
-
-        <label className="flex flex-col gap-1 text-sm">
-          Bio
-          <textarea
-            name="bio"
-            rows={4}
-            defaultValue={profile?.bio ?? ""}
-            placeholder="A few sentences about you and what you write."
-            className={formControlClasses}
-          />
-        </label>
 
         <button type="submit" className={buttonClasses("primary", "md", "mt-2")}>
           Save

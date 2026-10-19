@@ -28,7 +28,7 @@ export default async function NewBookPage({
     redirect("/login?next=/dashboard/books/new");
   }
 
-  const [{ data: series }, { data: profile }, schemaFeatures] = await Promise.all([
+  const [{ data: series }, { data: profile }, schemaFeatures, { data: penNames }] = await Promise.all([
     supabase.from("series").select("*").eq("author_id", user.id).order("title").returns<Series[]>(),
     // LIBRUM 2.0 PRODUCT-5: display_name is passed through to
     // ManuscriptField so a DOCX-converted EPUB's internal dc:creator
@@ -54,6 +54,15 @@ export default async function NewBookPage({
     // F4 (D1): whether the Pen name field and the Rights choice can be
     // shown yet (rendering only; see catalog-schema-features.ts).
     getCatalogSchemaFeatures(),
+    // PEN-NAMES-1 (10a): the author's own pen names (RLS: own rows; the
+    // author_id filter also keeps a staff account to its own) for the
+    // box's suggestions.
+    supabase
+      .from("pen_names")
+      .select("name, is_default")
+      .eq("author_id", user.id)
+      .order("created_at")
+      .returns<{ name: string; is_default: boolean }[]>(),
   ]);
 
   return (
@@ -96,6 +105,7 @@ export default async function NewBookPage({
         authorId={user.id}
         paidPublishingAvailable={canPublishPaidTitle()}
         penNameAvailable={schemaFeatures.penName}
+        penNameSuggestions={(penNames ?? []).filter((p) => !p.is_default).map((p) => p.name)}
         rightsAvailable={schemaFeatures.rights}
       />
     </main>

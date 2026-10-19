@@ -6,6 +6,7 @@ import {
   isExactBundleMembership,
   isExactBundleState,
 } from "@/lib/bundle-membership";
+import { PEN_NAME_MIXED_MESSAGE } from "@/lib/pen-names";
 
 // BUNDLE-MEMBERSHIP-AUTH-1 (Patch 13): every trusted membership path of
 // createBundle and updateBundle, and every failure class.
@@ -67,6 +68,8 @@ type Rpc = { fn: string; args: Record<string, unknown> };
 let signedIn = true;
 // The author's own published books, as resolveBookSelection() reads them.
 let ownPublishedBooks: string[] = [BOOK_A, BOOK_B, BOOK_C];
+// PEN-NAMES-1 (11a): each book's pen name id (unset = one shared pen name).
+let bookPen: Record<string, string> = {};
 let existingBundle: { id: string; status: string; price_all: number | null } | null = null;
 // Any table write through the catalog writer is recorded here: since the
 // correction, updateBundle has none (it is one RPC).
@@ -104,7 +107,7 @@ const sessionClient = {
               const requested = (filters.id as string[]) ?? [];
               const ok = filters.author_id === USER_ID && filters.status === "published";
               const rows = ok ? [...new Set(requested)].filter((id) => ownPublishedBooks.includes(id)) : [];
-              return Promise.resolve({ data: rows.map((id) => ({ id })) }).then(onFulfilled);
+              return Promise.resolve({ data: rows.map((id) => ({ id, pen_name_id: bookPen[id] ?? "pen-1" })) }).then(onFulfilled);
             },
           };
           return chain;
@@ -222,6 +225,7 @@ beforeEach(() => {
   recoveryActive = false;
   signedIn = true;
   ownPublishedBooks = [BOOK_A, BOOK_B, BOOK_C];
+  bookPen = {};
   existingBundle = { id: BUNDLE_ID, status: "draft", price_all: 0 };
   writerTableWrites = [];
   rpcResult = null;
@@ -446,6 +450,29 @@ describe("createBundle: one trusted call, bound to the server", () => {
 // ============================================================
 // 3. updateBundle.
 // ============================================================
+describe("PEN-NAMES-1 (11a): one pen name per bundle", () => {
+  const MIXED = encodeURIComponent(PEN_NAME_MIXED_MESSAGE);
+
+  it("books of two pen names: refused before any privileged client exists (create and update)", async () => {
+    bookPen = { [BOOK_A]: "pen-1", [BOOK_B]: "pen-2" };
+    expect(await redirectOf(createBundle(form()))).toBe(`/dashboard/bundles?error=${MIXED}`);
+    expect(await redirectOf(updateBundle(BUNDLE_ID, form()))).toContain(MIXED);
+    expect(mockCreateCatalogWriteClient).not.toHaveBeenCalled();
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("books of a pen name other than the one the create form showed: refused", async () => {
+    expect(await redirectOf(createBundle(form([BOOK_A, BOOK_B], { penNameId: "pen-2" })))).toBe(
+      `/dashboard/bundles?error=${MIXED}`,
+    );
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("books of the form's pen name: created", async () => {
+    expect(await redirectOf(createBundle(form([BOOK_A, BOOK_B], { penNameId: "pen-1" })))).toBe(CREATED);
+  });
+});
+
 describe("updateBundle: the owned bundle, the authenticated author, ONE atomic save", () => {
   it("saves details and membership through update_bundle_with_membership only -- no separate bundles update", async () => {
     const fd = form([BOOK_C, BOOK_A], {
