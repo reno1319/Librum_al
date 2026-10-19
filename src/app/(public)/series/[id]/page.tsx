@@ -5,10 +5,10 @@ import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
 import { orderSeriesBooks } from "@/lib/series-order";
-import { resolvePublicAuthorName } from "@/lib/author-name";
+import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
-import type { Book, Profile } from "@/lib/types";
+import type { Book } from "@/lib/types";
 
 // LIBRUM 2.0 PRODUCT-3: the public series page didn't exist before this
 // pass -- see the PRODUCT-3 audit (no /series/[id] route, no series
@@ -19,15 +19,13 @@ import type { Book, Profile } from "@/lib/types";
 // per-visitor data -- BookCard already renders each book's real price
 // with no purchase logic attached.
 
-// LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName()
-// at every render site below. AUTHOR-1C moved this join onto the safe
-// public_author_profiles VIEW (migration 045, aliased back to
-// `profiles`), which physically has no display_name column.
+// PEN-NAMES-1 (migration 20261019184512): a series belongs to one pen
+// name (11a); its byline is that pen name, embedded from the
+// public_pen_names view as `pen`, linking to /authors/<pen name id>.
 type PublicSeries = {
   id: string;
   title: string;
-  author_id: string;
-  profiles: Pick<Profile, "public_author_name"> | null;
+  pen: PenNameRef | null;
 };
 
 type PublicSeriesPageData = {
@@ -64,14 +62,15 @@ export const dynamic = "force-dynamic";
 // stays narrow (never `profiles(*)`) -- AUTHOR-1C: it now targets the
 // safe public_author_profiles view rather than the base table, so
 // there is no display_name/Stripe/private profile column to even
-// accidentally select here any more.
+// accidentally select here any more. PEN-NAMES-1: the join is now the
+// series' pen name (public_pen_names view) instead.
 const getPublicSeriesPageData = cache(
   async (id: string): Promise<PublicSeriesPageData | null> => {
     const supabase = await createClient();
 
     const { data: series } = await supabase
       .from("series")
-      .select("id, title, author_id, profiles:public_author_profiles(public_author_name)")
+      .select("id, title, pen:public_pen_names(id, name)")
       .eq("id", id)
       .single<PublicSeries>();
 
@@ -138,7 +137,7 @@ export async function generateMetadata({
     return {};
   }
 
-  const authorName = resolvePublicAuthorName(data.series.profiles);
+  const authorName = data.series.pen?.name ?? null;
   return {
     title: data.series.title,
     description: authorName
@@ -184,14 +183,14 @@ export default async function SeriesPage({
       <h1 className="mt-1 font-serif text-3xl font-normal text-foreground sm:text-4xl">
         {series.title}
       </h1>
-      {resolvePublicAuthorName(series.profiles) && (
+      {series.pen && (
         <p className="mt-2 text-sm text-muted">
           by{" "}
           <Link
-            href={`/authors/${series.author_id}`}
+            href={authorPagePath(series.pen.id)}
             className="focus-ring rounded-sm font-medium text-foreground hover:underline"
           >
-            {resolvePublicAuthorName(series.profiles)}
+            {series.pen.name}
           </Link>
         </p>
       )}
@@ -222,7 +221,8 @@ export default async function SeriesPage({
                   {positionLabel}
                 </p>
                 {/* No authorName -- every book on this page shares the
-                    same one author, already named in the hero above. */}
+                    same one pen name (11a), already named in the hero
+                    above. */}
                 <BookCard book={book} coverUrl={coverUrl} />
               </li>
             );

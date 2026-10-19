@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
-import { resolvePublicAuthorName } from "@/lib/author-name";
+import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
@@ -11,7 +11,7 @@ import {
   formatBundleSavingsAll,
   resolveBundleSavingsAll,
 } from "@/lib/bundle-catalog";
-import type { Book, Bundle, Profile } from "@/lib/types";
+import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
 
 // LIBRUM 2.0 SEO-1: static title, not "<bundle title> | Librum" -- same
@@ -29,10 +29,9 @@ export const metadata: Metadata = {
 // this route must never be statically cached -- see V3 §3.
 export const dynamic = "force-dynamic";
 
-// LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
-// AUTHOR-1C moved this join onto the safe public_author_profiles VIEW
-// (migration 045, aliased back to `profiles`), which physically has no
-// display_name column.
+// PEN-NAMES-1 (migration 20261019184512): a bundle belongs to one pen
+// name (11a); its byline is that pen name, embedded from the
+// public_pen_names view as `pen`, linking to /authors/<pen name id>.
 //
 // ALL-WIRING-5: the bundle's own columns are selected by name, and the
 // legacy `price_cents` is not among them -- this page's price, its
@@ -41,7 +40,7 @@ type BundleWithAuthor = Pick<
   Bundle,
   "id" | "author_id" | "title" | "description" | "status" | "price_all"
 > & {
-  profiles: Pick<Profile, "public_author_name"> | null;
+  pen: PenNameRef | null;
 };
 type BundleBookRow = { book_id: string; books: Book | null };
 
@@ -69,7 +68,7 @@ export default async function BundleDetailPage({
   const { data: bundle } = await supabase
     .from("bundles")
     .select(
-      "id, author_id, title, description, status, price_all, profiles:public_author_profiles(public_author_name)",
+      "id, author_id, title, description, status, price_all, pen:public_pen_names(id, name)",
     )
     .eq("id", id)
     .single<BundleWithAuthor>();
@@ -132,12 +131,14 @@ export default async function BundleDetailPage({
         Bundle
       </span>
       <h1 className="font-serif text-3xl font-normal">{bundle.title}</h1>
-      <p className="mt-1 text-sm text-muted">
-        by{" "}
-        <Link href={`/authors/${bundle.author_id}`} className="hover:underline">
-          {resolvePublicAuthorName(bundle.profiles)}
-        </Link>
-      </p>
+      {bundle.pen && (
+        <p className="mt-1 text-sm text-muted">
+          by{" "}
+          <Link href={authorPagePath(bundle.pen.id)} className="hover:underline">
+            {bundle.pen.name}
+          </Link>
+        </p>
+      )}
 
       {bundle.description && (
         <p className="mt-4 max-w-[42.5rem] whitespace-pre-line text-foreground/90">

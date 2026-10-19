@@ -26,7 +26,7 @@ import {
 } from "./audit-log-logic";
 
 describe("isValidAuditAction", () => {
-  it("accepts every one of the eight known actions", () => {
+  it("accepts every one of the known actions", () => {
     for (const action of AUDIT_ACTIONS) {
       expect(isValidAuditAction(action)).toBe(true);
     }
@@ -42,7 +42,7 @@ describe("isValidAuditAction", () => {
 });
 
 describe("isValidAuditTargetType", () => {
-  it("accepts every one of the three known target types", () => {
+  it("accepts every one of the known target types", () => {
     for (const targetType of AUDIT_TARGET_TYPES) {
       expect(isValidAuditTargetType(targetType)).toBe(true);
     }
@@ -459,5 +459,32 @@ describe("mapAuditRpcError", () => {
 
   it("does not map the 'not authenticated' message -- callers handle that case separately", () => {
     expect(AUDIT_RPC_NOT_AUTHENTICATED_MESSAGE).toBe("not authenticated");
+  });
+});
+
+// PEN-NAMES-1 r4: staff_remove_pen_name_links writes
+// 'pen_name.links_removed' on target 'pen_names'; the filter, label,
+// details and target link know it. The database function's own
+// allow-list is pinned by supabase/tests/074_pen_names.test.sql.
+describe("pen_name.links_removed (PEN-NAMES-1)", () => {
+  it("is a filterable action and target type with readable labels", () => {
+    expect(isValidAuditAction("pen_name.links_removed")).toBe(true);
+    expect(isValidAuditTargetType("pen_names")).toBe(true);
+    expect(getActionLabel("pen_name.links_removed")).toBe("Pen name links removed");
+  });
+
+  it("details show only how many links were removed, never the addresses", () => {
+    const details = formatAuditDetails("pen_name.links_removed", {
+      removed_links: ["https://a.example/x", "https://b.example/y"],
+    });
+    expect(details).toBe("2 links removed");
+    expect(formatAuditDetails("pen_name.links_removed", { removed_links: ["https://a.example"] })).toBe("1 link removed");
+    expect(formatAuditDetails("pen_name.links_removed", {})).toBeNull();
+  });
+
+  it("the target links to the pen name's Author Page", () => {
+    const id = "9e000000-0000-4000-8000-0000000000a2";
+    expect(resolveAuditTargetDisplay("pen_names", id).href).toBe(`/authors/${id}`);
+    expect(resolveAuditTargetDisplay("pen_names", id).label).toMatch(/^Pen name · /);
   });
 });

@@ -9,7 +9,8 @@ import { buttonClasses } from "@/components/ui/button";
 import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
-import type { Book, Profile } from "@/lib/types";
+import type { Book } from "@/lib/types";
+import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -23,12 +24,11 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
-// AUTHOR-1C moved this join onto the safe public_author_profiles VIEW
-// (migration 045, aliased back to `profiles`), which physically has no
-// display_name column.
+// PEN-NAMES-1: the byline is the book's pen name, embedded from the
+// public_pen_names view as `pen` (no account columns).
 type WishlistItemWithBook = {
   book_id: string;
-  books: (Book & { profiles: Pick<Profile, "public_author_name"> | null }) | null;
+  books: (Book & { pen: PenNameRef | null }) | null;
 };
 
 export default async function WishlistPage() {
@@ -59,7 +59,7 @@ export default async function WishlistPage() {
   // excluded; see the patch report.
   const { data: items } = await supabase
     .from("wishlist_items")
-    .select("book_id, books(*, profiles:public_author_profiles(public_author_name))")
+    .select("book_id, books(*, pen:public_pen_names(id, name))")
     .eq("reader_id", user.id)
     .order("created_at", { ascending: false })
     .returns<WishlistItemWithBook[]>();
@@ -97,7 +97,7 @@ export default async function WishlistPage() {
                 <BookCard
                   book={book}
                   coverUrl={coverUrl}
-                  authorName={resolveBookByline(book, book.profiles)}
+                  authorName={resolveBookByline(book)}
                 />
                 <form action={removeFromWishlist.bind(null, book.id)}>
                   <button

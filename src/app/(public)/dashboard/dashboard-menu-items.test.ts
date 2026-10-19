@@ -19,7 +19,8 @@ describe("dashboard menu groups", () => {
       ["Books", ["Books /dashboard", "Series /dashboard/series"]],
       ["Money", ["Sales /dashboard/sales", "Financial balance /dashboard/balance"]],
       ["Promotion", ["Bundles /dashboard/bundles", "Discounts /dashboard/discounts"]],
-      ["Profile", ["Profile /dashboard/profile"]],
+      // PEN-NAMES-1: Pen names joins the Profile group.
+      ["Profile", ["Profile /dashboard/profile", "Pen names /dashboard/pen-names"]],
     ]);
   });
 
@@ -44,6 +45,7 @@ describe("findDashboardMenuMatch", () => {
     ["/dashboard/bundles/abc/edit", "Promotion/Bundles"],
     ["/dashboard/discounts", "Promotion/Discounts"],
     ["/dashboard/profile", "Profile/Profile"],
+    ["/dashboard/pen-names", "Profile/Pen names"],
   ])("%s -> %s", (pathname, expected) => {
     expect(labels(pathname)).toBe(expected);
   });
@@ -84,7 +86,7 @@ describe("aria-current", () => {
   it("an item is 'page' only on its own page, the group 'true'", () => {
     expect(current("/dashboard")).toEqual({
       groups: ["true", undefined, undefined, undefined],
-      items: ["page", undefined, undefined, undefined, undefined, undefined, undefined],
+      items: ["page", undefined, undefined, undefined, undefined, undefined, undefined, undefined],
     });
     expect(current("/dashboard/balance").items[3]).toBe("page");
     expect(current("/dashboard/balance").groups).toEqual([undefined, "true", undefined, undefined]);
@@ -103,8 +105,13 @@ describe("aria-current", () => {
     expect(current("/dashboard/bundles/abc/edit").groups[2]).toBe("true");
   });
 
-  it("the single-item Profile tab is 'page'", () => {
-    expect(current("/dashboard/profile").groups[3]).toBe("page");
+  // PEN-NAMES-1: Profile now has two items (Profile, Pen names), so its
+  // tab is 'true' like the other groups and each item is 'page' on its own.
+  it("the Profile group is 'true'; Profile and Pen names are each 'page' on their own page", () => {
+    expect(current("/dashboard/profile").groups[3]).toBe("true");
+    expect(current("/dashboard/profile").items[6]).toBe("page");
+    expect(current("/dashboard/pen-names").groups[3]).toBe("true");
+    expect(current("/dashboard/pen-names").items[7]).toBe("page");
   });
 
   it("an unknown path marks nothing", () => {

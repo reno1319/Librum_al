@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Book, Profile } from "@/lib/types";
+import type { Book } from "@/lib/types";
+import type { PenNameRef } from "@/lib/pen-names";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
@@ -25,12 +26,11 @@ export const metadata: Metadata = {
 // still needs both -- but nothing about grouping transactions, "Total
 // spent," or refund status/actions is fetched or rendered here anymore.
 // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
-// AUTHOR-1C moved this join onto the safe public_author_profiles VIEW
-// (migration 045, aliased back to `profiles`), which physically has no
-// display_name column.
+// PEN-NAMES-1: the byline is the book's pen name, embedded from the
+// public_pen_names view as `pen` (no account columns).
 type PurchaseWithBook = {
   book_id: string;
-  books: (Book & { profiles: Pick<Profile, "public_author_name"> | null }) | null;
+  books: (Book & { pen: PenNameRef | null }) | null;
 };
 
 export default async function LibraryPage({
@@ -50,7 +50,7 @@ export default async function LibraryPage({
 
   const { data: purchases } = await supabase
     .from("purchases")
-    .select("book_id, books(*, profiles:public_author_profiles(public_author_name))")
+    .select("book_id, books(*, pen:public_pen_names(id, name))")
     .eq("reader_id", user.id)
     .returns<PurchaseWithBook[]>();
 
@@ -124,8 +124,8 @@ export default async function LibraryPage({
                 bookId={book.id}
                 title={book.title}
                 coverUrl={coverUrl}
-                authorId={book.author_id}
-                authorName={resolveBookByline(book, book.profiles)}
+                penNameId={book.pen?.id ?? null}
+                authorName={resolveBookByline(book)}
                 isPublished={book.status === "published"}
                 downloadable={ownedByBookId.get(book.id) ?? false}
               />

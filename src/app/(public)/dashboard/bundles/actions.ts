@@ -29,6 +29,7 @@ import {
   parseCatalogPriceAll,
   resolveCatalogPriceState,
 } from "@/lib/catalog-price";
+import { PEN_NAME_MIXED_MESSAGE, penNameErrorMessage } from "@/lib/pen-names";
 
 // ALL-WIRING-5: one message for every rejected bundle price, built from
 // the catalog module's own constants so it cannot drift from the rule
@@ -93,13 +94,22 @@ async function resolveBookSelection(
 
   const { data: books } = await supabase
     .from("books")
-    .select("id")
+    .select("id, pen_name_id")
     .eq("author_id", userId)
     .eq("status", "published")
     .in("id", bookIds);
 
   if (!books || books.length !== bookIds.length) {
     return { bookIds: null, error: "Choose+only+your+own+published+books" };
+  }
+
+  // PEN-NAMES-1 (11a): one pen name per bundle -- and, from the create
+  // form, the pen name it was showing. The bundle functions refuse a
+  // mixed set again (LB451) inside their transaction.
+  const penNameIds = new Set(books.map((b) => (b as { pen_name_id?: string | null }).pen_name_id ?? null));
+  const formPenNameId = String(formData.get("penNameId") ?? "").trim();
+  if (penNameIds.size !== 1 || (formPenNameId !== "" && !penNameIds.has(formPenNameId))) {
+    return { bookIds: null, error: encodeURIComponent(PEN_NAME_MIXED_MESSAGE) };
   }
 
   return { bookIds, error: null };
@@ -195,7 +205,10 @@ export async function createBundle(formData: FormData) {
       error: createError,
       rowCount: Array.isArray(members) ? members.length : null,
     });
-    const message = outcome === "unconfirmed" ? BUNDLE_CREATE_UNCONFIRMED_MESSAGE : BUNDLE_CREATE_FAILED_MESSAGE;
+    const message =
+      outcome === "unconfirmed"
+        ? BUNDLE_CREATE_UNCONFIRMED_MESSAGE
+        : (penNameErrorMessage(createError) ?? BUNDLE_CREATE_FAILED_MESSAGE);
     redirect(`/dashboard/bundles?error=${encodeURIComponent(message)}`);
   }
 
@@ -334,7 +347,7 @@ export async function updateBundle(bundleId: string, formData: FormData) {
       outcome === "changed"
         ? CATALOG_ROW_CHANGED_MESSAGE
         : outcome === "rolled_back"
-          ? BUNDLE_SAVE_ROLLED_BACK_MESSAGE
+          ? (penNameErrorMessage(saveError) ?? BUNDLE_SAVE_ROLLED_BACK_MESSAGE)
           : BUNDLE_SAVE_UNCONFIRMED_MESSAGE;
     redirect(`/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(message)}`);
   }

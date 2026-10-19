@@ -193,10 +193,19 @@ export default async function EditBookPage({
   // choice read three ways. `unavailable` (before the migration, or a
   // read error) hides the Rights choice, shows the generic notice and
   // disables Publish; the server's publish gate decides on its own.
-  const [schemaFeatures, rightsState] = await Promise.all([
+  const [schemaFeatures, rightsState, { data: penNames }] = await Promise.all([
     getCatalogSchemaFeatures(),
     getRightsDeclarationState(book.id),
+    // PEN-NAMES-1 (10a): the author's own pen names for the box's
+    // suggestions (RLS: own rows).
+    supabase
+      .from("pen_names")
+      .select("name, is_default")
+      .eq("author_id", user.id)
+      .order("created_at")
+      .returns<{ name: string; is_default: boolean }[]>(),
   ]);
+  const penNameSuggestions = (penNames ?? []).filter((p) => !p.is_default).map((p) => p.name);
   const currentRightsBasis = rightsState.kind === "present" ? rightsState.declaration.basis : null;
   const authorPublicName = resolvePublicAuthorName(profile);
 
@@ -265,13 +274,28 @@ export default async function EditBookPage({
                       type="text"
                       defaultValue={book.pen_name ?? ""}
                       maxLength={PEN_NAME_MAX_LENGTH}
+                      list={penNameSuggestions.length > 0 ? "edit-pen-name-suggestions" : undefined}
+                      autoComplete="off"
                       className={formControlClasses}
                     />
+                    {penNameSuggestions.length > 0 && (
+                      <datalist id="edit-pen-name-suggestions">
+                        {penNameSuggestions.map((name) => (
+                          <option key={name} value={name} />
+                        ))}
+                      </datalist>
+                    )}
                     {authorPublicName && (
                       <span className="text-sm text-muted">
                         Leave blank to use your author name, {authorPublicName}.
                       </span>
                     )}
+                    {/* PEN-NAMES-1 (10a, 14a). */}
+                    <span className="text-sm text-muted">
+                      A new name becomes a new pen name with its own author page.
+                      {book.series_id &&
+                        " This book is in a series: take it out of the series before changing its pen name."}
+                    </span>
                   </label>
                 )}
 

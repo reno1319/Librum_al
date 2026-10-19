@@ -34,7 +34,7 @@ export const dynamic = "force-dynamic";
 export default async function BundlesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; pen?: string }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive page -- renders bundles.price_all
   // in the bundle list (exhaustive route audit) -- checked as the first
@@ -43,7 +43,7 @@ export default async function BundlesPage({
     return <MaintenanceNotice />;
   }
 
-  const { error, success } = await searchParams;
+  const { error, success, pen } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -53,13 +53,37 @@ export default async function BundlesPage({
     redirect("/login?next=/dashboard/bundles");
   }
 
-  const { data: books } = await supabase
-    .from("books")
-    .select("id, title")
-    .eq("author_id", user.id)
-    .eq("status", "published")
-    .order("title")
-    .returns<Pick<Book, "id" | "title">[]>();
+  const [{ data: publishedBooks }, { data: penNames }] = await Promise.all([
+    supabase
+      .from("books")
+      .select("id, title, pen_name_id")
+      .eq("author_id", user.id)
+      .eq("status", "published")
+      .order("title")
+      .returns<Pick<Book, "id" | "title" | "pen_name_id">[]>(),
+    supabase
+      .from("pen_names")
+      .select("id, name, is_default")
+      .eq("author_id", user.id)
+      .order("is_default", { ascending: false })
+      .order("created_at")
+      .returns<{ id: string; name: string; is_default: boolean }[]>(),
+  ]);
+
+  // PEN-NAMES-1 (11a): a bundle holds books of one pen name only, so the
+  // form offers the books of ONE pen name at a time -- chosen with ?pen=
+  // when the author has published books under more than one.
+  const penNamesWithBooks = (penNames ?? []).filter((p) =>
+    (publishedBooks ?? []).some((b) => b.pen_name_id === p.id),
+  );
+  const chosenPenName =
+    penNamesWithBooks.find((p) => p.id === pen) ??
+    penNamesWithBooks.find((p) => (publishedBooks ?? []).filter((b) => b.pen_name_id === p.id).length >= 2) ??
+    penNamesWithBooks[0] ??
+    null;
+  const books = chosenPenName
+    ? (publishedBooks ?? []).filter((b) => b.pen_name_id === chosenPenName.id)
+    : (publishedBooks ?? []);
 
   // ALL-WIRING-5: every one of the author's bundles, priced or not, and
   // deliberately NOT filtered on price_all -- this list is where an
@@ -111,16 +135,42 @@ export default async function BundlesPage({
         </Alert>
       )}
 
-      {!books || books.length < 2 ? (
+      {penNamesWithBooks.length > 1 && (
+        <form method="get" className="mt-6 flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-sm">
+            Pen name
+            <select name="pen" defaultValue={chosenPenName?.id} className={formControlClasses}>
+              {penNamesWithBooks.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" className={buttonClasses("outline", "md", "w-fit")}>
+            Show books
+          </button>
+          <span className="basis-full text-sm text-muted">
+            A bundle holds books of one pen name only.
+          </span>
+        </form>
+      )}
+
+      {books.length < 2 ? (
         <EmptyState
           className="mt-6"
-          title="You need at least 2 published books before you can create a bundle."
+          title={
+            penNamesWithBooks.length > 1
+              ? "You need at least 2 published books under this pen name to create a bundle."
+              : "You need at least 2 published books before you can create a bundle."
+          }
         />
       ) : (
         <form
           action={createBundle}
           className="mt-6 flex flex-col gap-4 rounded-card border border-border bg-surface p-4 shadow-sm"
         >
+          {chosenPenName && <input type="hidden" name="penNameId" value={chosenPenName.id} />}
           <label className="flex flex-col gap-1 text-sm">
             Bundle title
             <input
@@ -157,7 +207,10 @@ export default async function BundlesPage({
           </label>
 
           <fieldset>
-            <legend className="text-sm">Books in this bundle</legend>
+            <legend className="text-sm">
+              Books in this bundle
+              {penNamesWithBooks.length > 1 && chosenPenName ? ` (${chosenPenName.name})` : ""}
+            </legend>
             <div className="mt-2 flex flex-col gap-2 rounded-card border border-border p-3">
               {books.map((book) => (
                 <label key={book.id} className="flex items-center gap-2 text-sm">

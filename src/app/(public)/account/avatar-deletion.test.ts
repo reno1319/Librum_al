@@ -47,6 +47,7 @@ let events: string[];
 let adminClientsCreated: number;
 let signOut: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
 let failingRemoveBucket: string | null;
+let penNamesResult: { data: unknown; error: unknown };
 
 function sessionFrom(table: string) {
   if (table === "staff_members") {
@@ -66,6 +67,19 @@ function sessionFrom(table: string) {
           returns: async () => {
             events.push("read:books");
             return { data: books, error: null };
+          },
+        }),
+      }),
+    };
+  }
+  // PEN-NAMES-1: the account's pen name photos.
+  if (table === "pen_names") {
+    return {
+      select: () => ({
+        eq: () => ({
+          returns: async () => {
+            events.push("read:pen_names");
+            return penNamesResult;
           },
         }),
       }),
@@ -148,6 +162,7 @@ beforeEach(() => {
   adminClientsCreated = 0;
   signOut = vi.fn();
   failingRemoveBucket = null;
+  penNamesResult = { data: [], error: null };
   cookieStore.get.mockReset().mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -326,5 +341,74 @@ describe("deleteAccount: existing gates are intact and run before any profile re
   it("the happy path deletes exactly the authenticated user", async () => {
     expect(await run()).toBe("/?account=deleted");
     expect(events.filter((e) => e.startsWith("deleteUser"))).toEqual([`deleteUser:${USER_ID}`]);
+  });
+});
+
+// PEN-NAMES-1: pen name photos live in the avatars bucket under a random
+// folder (<uuid>/pen-name.<ext>); deleteAccount removes the account's own
+// ones (read from its own pen_names rows) after deleteUser, and only
+// values of exactly that shape.
+describe("deleteAccount: pen name photos", () => {
+  const PHOTO_A = "d0000000-0000-4000-8000-000000000001/pen-name.png";
+  const PHOTO_B = "d0000000-0000-4000-8000-000000000002/pen-name.jpg";
+
+  it("removes every canonical pen name photo, once, after deleteUser, beside the profile avatar", async () => {
+    profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
+    penNamesResult = {
+      data: [{ avatar_path: PHOTO_A }, { avatar_path: null }, { avatar_path: PHOTO_B }],
+      error: null,
+    };
+
+    expect(await run()).toBe("/?account=deleted");
+
+    expect(avatarRemovals()).toEqual([
+      { via: "service", bucket: "avatars", op: "remove", paths: [`${USER_ID}/avatar.png`] },
+      { via: "service", bucket: "avatars", op: "remove", paths: [PHOTO_A, PHOTO_B] },
+    ]);
+    expect(events.indexOf("read:pen_names")).toBeLessThan(events.indexOf(`deleteUser:${USER_ID}`));
+    expect(events.lastIndexOf("remove:avatars")).toBeGreaterThan(events.indexOf(`deleteUser:${USER_ID}`));
+  });
+
+  it.each([
+    ["another user's avatar", `${"e0000000-0000-4000-8000-000000000009"}/avatar.png`],
+    ["traversal", "d0000000-0000-4000-8000-000000000001/../x/pen-name.png"],
+    ["wrong file name", "d0000000-0000-4000-8000-000000000001/avatar.png"],
+    ["upper case", "D0000000-0000-4000-8000-000000000001/pen-name.png"],
+  ])("a non-canonical stored value (%s) is skipped, never passed to service-role remove", async (_label, value) => {
+    penNamesResult = { data: [{ avatar_path: value }], error: null };
+    expect(await run()).toBe("/?account=deleted");
+    expect(avatarRemovals()).toEqual([]);
+    expect(console.warn).toHaveBeenCalled();
+  });
+
+  // r4 (17a): the migration copied the profile photo onto the default
+  // pen name, so both rows may name the SAME object; it is removed once.
+  it("a pen name holding the profile's own photo key: the shared object is removed exactly once", async () => {
+    profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
+    penNamesResult = { data: [{ avatar_path: `${USER_ID}/avatar.png` }, { avatar_path: PHOTO_A }], error: null };
+
+    expect(await run()).toBe("/?account=deleted");
+
+    const removed = avatarRemovals().flatMap((c) => c.paths);
+    expect(removed.filter((p) => p === `${USER_ID}/avatar.png`)).toHaveLength(1);
+    expect(removed.sort()).toEqual([`${USER_ID}/avatar.png`, PHOTO_A].sort());
+  });
+
+  it("a pen name still holding the old profile key after the profile moved on: that object is removed too, once", async () => {
+    profileResult = { data: { avatar_path: null }, error: null };
+    penNamesResult = { data: [{ avatar_path: `${USER_ID}/avatar.jpg` }], error: null };
+
+    expect(await run()).toBe("/?account=deleted");
+
+    expect(avatarRemovals()).toEqual([
+      { via: "service", bucket: "avatars", op: "remove", paths: [`${USER_ID}/avatar.jpg`] },
+    ]);
+  });
+
+  it("a pen names read failure stops before anything irreversible", async () => {
+    penNamesResult = { data: null, error: { message: "down" } };
+    expect(await run()).toBe("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+    expect(events).not.toContain(`deleteUser:${USER_ID}`);
+    expect(storageCalls).toEqual([]);
   });
 });

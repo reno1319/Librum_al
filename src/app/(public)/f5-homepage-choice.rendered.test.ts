@@ -42,7 +42,7 @@ function book(n: number, extra: Row = {}): Row {
   return {
     id: `book-${day}`, title: `Book ${day}`, author_id: "author", status: "published", price_all: 199,
     genre: "Fiction", cover_path: `c/${day}.png`, description: `About ${day}.`, pen_name: null,
-    created_at: `2026-10-${day}T00:00:00Z`, profiles: { public_author_name: "An Author" }, ...extra,
+    created_at: `2026-10-${day}T00:00:00Z`, pen: { id: "pen-an-author", name: "An Author" }, ...extra,
   };
 }
 const PICKED = { librum_choice_at: "2026-10-18T09:00:00Z" };
@@ -121,7 +121,7 @@ describe("homepage hero with Librum's choice", () => {
   });
 
   it("the pick's spine carries its pen name when it has one", async () => {
-    rows = Array.from({ length: 9 }, (_, i) => book(i + 1, i === 0 ? { ...PICKED, pen_name: "Pena" } : {}));
+    rows = Array.from({ length: 9 }, (_, i) => book(i + 1, i === 0 ? { ...PICKED, pen: { id: "pen-pena", name: "Pena" } } : {}));
     const html = await render();
     expect(html.slice(0, html.indexOf(">Published with Librum</h2>"))).toContain("Pena");
   });

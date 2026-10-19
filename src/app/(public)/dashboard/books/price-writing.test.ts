@@ -112,6 +112,11 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient()
 // the same session double so its payload and filter assertions still see
 // every write; WHICH client performs which write is pinned separately in
 // dashboard/catalog-write-authorization.test.ts.
+// PEN-NAMES-1: the pen name box resolves through the server-only pen
+// name writer; here it always resolves to the author's default.
+vi.mock("@/lib/pen-name-write-client", () => ({
+  resolveOwnPenNameId: async () => ({ ok: true, penNameId: "f0000000-0000-4000-8000-00000000pen0" }),
+}));
 vi.mock("@/lib/catalog-write-client", async () => {
   const { catalogWriterReplayingOnto } = await import("@/lib/catalog-write-test-double");
   return { createCatalogWriteClient: () => catalogWriterReplayingOnto(() => mockCreateClient()) };

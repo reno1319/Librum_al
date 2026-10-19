@@ -49,45 +49,68 @@ const READER_FACING_ATTRIBUTION_FILES = [
   "lib/email.ts",
 ];
 
-describe("AUTHOR-1B privacy contract: every reader-facing attribution surface imports and uses the shared resolver", () => {
-  // F4: a surface that shows a BOOK's author may resolve it through
-  // resolveBookByline (@/lib/book-byline) instead -- the book's pen name,
-  // else exactly resolvePublicAuthorName(), pinned below.
-  it.each(READER_FACING_ATTRIBUTION_FILES)("%s imports resolvePublicAuthorName from @/lib/author-name (or resolveBookByline from @/lib/book-byline)", (file) => {
-    const source = readSrc(file);
-    const direct = source.includes('from "@/lib/author-name"') && /resolvePublicAuthorName/.test(source);
-    const viaByline = source.includes('from "@/lib/book-byline"') && /resolveBookByline\(/.test(source);
-    expect(direct || viaByline).toBe(true);
+// PEN-NAMES-1 (migration 20261019184512) supersedes the two AUTHOR-1B /
+// AUTHOR-1C blocks that stood here: every reader-facing author name is
+// now a PEN NAME, read through the public_pen_names view (no author_id,
+// no account columns) -- or, for the follower email, from pen_names
+// through the admin client. No reader-facing surface reads the
+// account's public_author_name for an author byline any more; the one
+// remaining public_author_profiles join is the reviewer name on the
+// book page (out of scope, PR B).
+describe("PEN-NAMES-1 privacy contract: every reader-facing author name is a pen name", () => {
+  const viewFiles = READER_FACING_ATTRIBUTION_FILES.filter((file) => file !== "lib/email.ts" && file !== "components/book-shelf.tsx");
+
+  it.each(viewFiles)("%s reads pen names through the public_pen_names view", (file) => {
+    expect(readSrc(file)).toContain("public_pen_names");
   });
 
-  it("resolveBookByline falls back to resolvePublicAuthorName, never a raw display_name", () => {
+  it.each(READER_FACING_ATTRIBUTION_FILES)("%s never reads an author byline from public_author_profiles or resolvePublicAuthorName", (file) => {
+    const source = readSrc(file);
+    const authorJoins = (source.match(/public_author_profiles\(public_author_name[^)]*\)/g) ?? []).filter(
+      (join) => join !== "public_author_profiles(public_author_name)" || file !== "app/(public)/books/[id]/page.tsx",
+    );
+    expect(authorJoins).toEqual([]);
+    expect(source).not.toMatch(/\.from\("public_author_profiles"\)/);
+    if (file !== "app/(public)/books/[id]/page.tsx") {
+      const code = source
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+        .join("\n");
+      expect(code).not.toMatch(/resolvePublicAuthorName\(/);
+    }
+  });
+
+  it("components/book-shelf.tsx takes the embedded pen name (resolveBookByline)", () => {
+    const source = readSrc("components/book-shelf.tsx");
+    expect(source).toContain('from "@/lib/book-byline"');
+    expect(source).toContain("resolveBookByline(book)");
+    expect(source).toContain("pen: PenNameRef | null");
+  });
+
+  it("resolveBookByline is the embedded pen name only -- never an account name", () => {
     const source = readSrc("lib/book-byline.ts");
-    expect(source).toContain('import { resolvePublicAuthorName } from "@/lib/author-name"');
-    expect(source).toContain("return book?.pen_name ?? resolvePublicAuthorName(authorProfile);");
-    expect(source).not.toMatch(/\.display_name/);
-  });
-});
-
-describe("AUTHOR-1C privacy contract: every reader-facing query reads the safe public_author_profiles view, never the base table", () => {
-  // lib/email.ts reads through the admin/service-role client
-  // (createAdminClient()), which bypasses RLS and the profiles/
-  // public_author_profiles grant boundary entirely -- it's authorized
-  // to read the base table's own display_name directly (that's how
-  // resolvePublicAuthorName() there gets its fallback value), so it's
-  // the one legitimate exception to "must reference the view."
-  const filesExpectedToUseTheView = READER_FACING_ATTRIBUTION_FILES.filter(
-    (file) => file !== "lib/email.ts",
-  );
-
-  it.each(filesExpectedToUseTheView)("%s queries public_author_profiles for author attribution", (file) => {
-    const source = readSrc(file);
-    expect(source).toContain("public_author_profiles");
+    expect(source).toContain('export const BOOK_PEN_NAME_EMBED = "pen:public_pen_names(id, name)";');
+    expect(source).toContain("return book?.pen?.name ?? null;");
+    expect(source).not.toContain("@/lib/author-name");
+    expect(source).not.toMatch(/display_name|public_author_name/);
   });
 
-  it("lib/email.ts is the one exception -- it reads the base table via the admin client, which is authorized to see display_name", () => {
+  it("lib/email.ts names the book's pen name (admin client) and mails that pen name's followers", () => {
     const source = readSrc("lib/email.ts");
     expect(source).not.toContain("public_author_profiles");
-    expect(source).toMatch(/admin\s*\.from\("profiles"\)/);
+    expect(source).toMatch(/\.from\("pen_names"\)/);
+    expect(source).toMatch(/\.from\("pen_name_follows"\)/);
+    expect(source).not.toMatch(/\.from\("author_follows"\)/);
+  });
+
+  it("no reader-facing page links to /authors/<account id> any more", () => {
+    for (const file of READER_FACING_ATTRIBUTION_FILES) {
+      expect(readSrc(file)).not.toMatch(/\/authors\/\$\{[a-zA-Z.?]*author_id\}/);
+    }
+    for (const file of ["components/book-card.tsx", "components/library-book-card.tsx"]) {
+      expect(readSrc(file)).not.toMatch(/\/authors\/\$\{/);
+      expect(readSrc(file)).toContain("authorPagePath(");
+    }
   });
 });
 
@@ -146,10 +169,14 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
     expect(source).not.toContain("review.profiles?.display_name");
   });
 
-  it("every author-attribution select on this page targets the safe view, never the base profiles table's display_name column", () => {
-    expect(source).toContain('.select("*, profiles:public_author_profiles(public_author_name, bio, avatar_path)")');
-    const widenedAuthorSelects = source.match(/profiles:public_author_profiles\(public_author_name\)/g) ?? [];
-    expect(widenedAuthorSelects.length).toBeGreaterThanOrEqual(2); // moreByAuthor + youMightLike
+  // PEN-NAMES-1: the book's own author block and both shelves read the
+  // pen name view; only the reviewer join (above) still reads
+  // public_author_profiles.
+  it("every author-attribution select on this page reads the pen name view, never the base profiles table", () => {
+    expect(source).toContain('.select("*, pen:public_pen_names(id, name, bio, avatar_path, links)")');
+    const shelfSelects = source.match(/\.select\("\*, pen:public_pen_names\(id, name\)"\)/g) ?? [];
+    expect(shelfSelects.length).toBe(2); // moreByAuthor + youMightLike
+    expect(source.match(/public_author_profiles\(/g)).toHaveLength(1); // the reviewer join only
     expect(source).not.toMatch(/profiles\(display_name, public_author_name/);
   });
 });

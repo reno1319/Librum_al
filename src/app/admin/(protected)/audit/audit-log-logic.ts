@@ -30,6 +30,7 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   "refund.review_approved",
   "refund.review_rejected",
   "refund.issuance_submitted",
+  "pen_name.links_removed",
 ];
 
 export function isValidAuditAction(value: string): value is AuditAction {
@@ -40,6 +41,7 @@ export const AUDIT_TARGET_TYPES: readonly AuditTargetType[] = [
   "staff_members",
   "book_reports",
   "refund_requests",
+  "pen_names",
 ];
 
 export function isValidAuditTargetType(value: string): value is AuditTargetType {
@@ -190,6 +192,7 @@ export const ACTION_LABELS: Record<AuditAction, string> = {
   "refund.review_approved": "Refund request approved",
   "refund.review_rejected": "Refund request denied",
   "refund.issuance_submitted": "Refund submitted to Stripe",
+  "pen_name.links_removed": "Pen name links removed",
 };
 
 const UNKNOWN_ACTION_LABEL = "Admin action";
@@ -270,6 +273,7 @@ const AUDIT_TARGET_TYPE_LABELS: Record<AuditTargetType, string> = {
   staff_members: "Staff member",
   book_reports: "Book report",
   refund_requests: "Refund request",
+  pen_names: "Pen name",
 };
 
 export type AuditTargetDisplay = { label: string; href: string | null };
@@ -342,6 +346,11 @@ export function resolveAuditTargetDisplay(targetType: string, targetId: string |
   if (targetId && targetType === "refund_requests") {
     return { label, href: `/admin/refunds/${targetId}` };
   }
+  // PEN-NAMES-1: a pen name's own Author Page (public, keyed by the pen
+  // name id).
+  if (targetId && targetType === "pen_names") {
+    return { label, href: `/authors/${targetId}` };
+  }
   return { label, href: null };
 }
 
@@ -362,6 +371,11 @@ export function formatAuditDetails(action: string, metadata: unknown): string | 
       return `${displayStatus(data.old_status)} → ${displayStatus(data.new_status)}`;
     case "refund.issuance_submitted":
       return typeof data.stripe_status === "string" ? `Stripe status: ${data.stripe_status}` : null;
+    case "pen_name.links_removed": {
+      // Only the count -- the removed addresses themselves are not shown.
+      const count = Array.isArray(data.removed_links) ? data.removed_links.length : null;
+      return count === null ? null : `${count} ${count === 1 ? "link" : "links"} removed`;
+    }
     default:
       return null;
   }

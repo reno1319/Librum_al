@@ -15,14 +15,32 @@ export async function createSeries(formData: FormData) {
   }
 
   const title = String(formData.get("title") ?? "").trim();
+  // PEN-NAMES-1 (11a): a series belongs to one pen name, chosen here.
+  // Empty means the author's default pen name (the database fills it).
+  const penNameId = String(formData.get("penNameId") ?? "").trim();
 
   if (!title) {
     redirect("/dashboard/series?error=Please+enter+a+series+title");
   }
 
+  if (penNameId) {
+    // Must be one of the caller's own pen names (RLS + author filter);
+    // the series trigger checks the same again.
+    const { data: ownPenName } = await supabase
+      .from("pen_names")
+      .select("id")
+      .eq("id", penNameId)
+      .eq("author_id", user.id)
+      .maybeSingle();
+    if (!ownPenName) {
+      redirect(`/dashboard/series?error=${encodeURIComponent("Please choose one of your pen names.")}`);
+    }
+  }
+
   const { error } = await supabase.from("series").insert({
     author_id: user.id,
     title,
+    ...(penNameId ? { pen_name_id: penNameId } : {}),
   });
 
   if (error) {

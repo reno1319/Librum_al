@@ -38,7 +38,7 @@ const OTHER_AUTHOR_ID = "7e6d5c4b-3a29-4817-8a6b-5c4d3e2f1a0b";
 const OTHER_BOOK_ID = "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091";
 const CANONICAL_PATH = `${AUTHOR_ID}/${BOOK_ID}.epub`;
 const EXPECTED_COLUMNS =
-  "id, author_id, title, status, file_path, profiles:public_author_profiles(public_author_name)";
+  "id, author_id, title, status, file_path, pen:public_pen_names(id, name)";
 
 // Every value here is refused for a row whose id is BOOK_ID and whose
 // author_id is AUTHOR_ID.
@@ -96,7 +96,7 @@ type FakeBook = {
   title?: unknown;
   status?: unknown;
   file_path?: unknown;
-  profiles?: { display_name?: string; public_author_name?: string | null } | null;
+  pen?: { id: string; name: string } | null;
 };
 
 function publishedBook(overrides: FakeBook = {}): FakeBook {
@@ -106,27 +106,22 @@ function publishedBook(overrides: FakeBook = {}): FakeBook {
     title: "Test Book",
     status: "published",
     file_path: CANONICAL_PATH,
-    profiles: { display_name: "Renata Author" },
+    pen: { id: "f0000000-0000-4000-8000-000000000001", name: "Renata Author" },
     ...overrides,
   };
 }
 
-// F4 (P5): a second, separate read -- `.select("id, pen_name").in("id",
-// [id])` (attachPenNames) -- supplies the book's pen name; `penNames`
-// is its result (an error object models "before the migration").
-function makeFakeSupabase(
-  overrides: { book?: FakeBook | null; result?: QueryResult; penNames?: QueryResult } = {},
-) {
+// PEN-NAMES-1: the book row embeds its pen name (public_pen_names view)
+// as `pen`, in the one read.
+function makeFakeSupabase(overrides: { book?: FakeBook | null; result?: QueryResult } = {}) {
   const book = "book" in overrides ? overrides.book : publishedBook();
   const result = overrides.result ?? { data: book, error: null };
-  const penNames = overrides.penNames ?? { data: [], error: null };
 
   const maybeSingle = vi.fn(() => Promise.resolve(result));
   const eq = vi.fn(() => ({ maybeSingle }));
-  const inFilter = vi.fn(() => Promise.resolve(penNames));
-  const select = vi.fn((columns: string) => (columns === "id, pen_name" ? { in: inFilter } : { eq }));
+  const select = vi.fn(() => ({ eq }));
   const from = vi.fn(() => ({ select }));
-  return { from, __from: from, __select: select, __eq: eq, __in: inFilter, __maybeSingle: maybeSingle };
+  return { from, __from: from, __select: select, __eq: eq, __maybeSingle: maybeSingle };
 }
 
 function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: unknown } = {}) {
@@ -203,17 +198,14 @@ describe("GET /api/books/[id]/sample", () => {
       expect(typeof body.approximatePercent).toBe("number");
     });
 
-    // LIBRUM 2.0 AUTHOR-1B: this route's "author" field is the one and
-    // only place a pseudonymous author's identity is exposed here -- it
-    // must be the reader-facing public_author_name, never the private
-    // account display_name, whenever the two differ.
-    it("author has set a public author name (pen name) -> JSON 'author' is the pen name, never the account display_name", async () => {
+    // LIBRUM 2.0 AUTHOR-1B / PEN-NAMES-1: this route's "author" field is
+    // the book's pen name, from the embedded view row -- never an
+    // account column.
+    it("JSON 'author' is the book's pen name", async () => {
       const fileBytes = await buildValidEpubBytes();
       mockCreateClient.mockResolvedValue(
         makeFakeSupabase({
-          book: publishedBook({
-            profiles: { display_name: "Renata Author", public_author_name: "R. A. Nightingale" },
-          }),
+          book: publishedBook({ pen: { id: "f0000000-0000-4000-8000-000000000002", name: "R. A. Nightingale" } }),
         }),
       );
       mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes }));
@@ -222,32 +214,25 @@ describe("GET /api/books/[id]/sample", () => {
       const body = await response.json();
 
       expect(body.author).toBe("R. A. Nightingale");
-      const serialized = JSON.stringify(body);
-      expect(serialized).not.toContain("Renata Author");
+      expect(JSON.stringify(body)).not.toContain("f0000000-0000-4000-8000-000000000002");
     });
 
-    it("no public author name set -> falls back to the account display_name", async () => {
+    it("no pen name embed -> author null, never an account name", async () => {
       const fileBytes = await buildValidEpubBytes();
-      mockCreateClient.mockResolvedValue(
-        makeFakeSupabase({
-          book: publishedBook({
-            profiles: { display_name: "Renata Author", public_author_name: null },
-          }),
-        }),
-      );
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ pen: null }) }));
       mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes }));
 
       const response = await callRoute();
       const body = await response.json();
 
-      expect(body.author).toBe("Renata Author");
+      expect(body.author).toBeNull();
     });
 
     // The draft carries a canonical path, so only the published-status
     // gate (not the path check) can be what refuses it.
     it("draft/unpublished book with a canonical manuscript -> 404, never reaches storage", async () => {
       mockCreateClient.mockResolvedValue(
-        makeFakeSupabase({ book: publishedBook({ title: "Draft", status: "draft", profiles: null }) }),
+        makeFakeSupabase({ book: publishedBook({ title: "Draft", status: "draft", pen: null }) }),
       );
       const adminClient = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() });
       mockCreateAdminClient.mockReturnValue(adminClient);
@@ -299,7 +284,7 @@ describe("GET /api/books/[id]/sample", () => {
 
     it("published book with no manuscript on file -> 404, never calls storage", async () => {
       mockCreateClient.mockResolvedValue(
-        makeFakeSupabase({ book: publishedBook({ file_path: null, profiles: null }) }),
+        makeFakeSupabase({ book: publishedBook({ file_path: null, pen: null }) }),
       );
       const adminClient = makeFakeAdminClient();
       mockCreateAdminClient.mockReturnValue(adminClient);
@@ -314,50 +299,20 @@ describe("GET /api/books/[id]/sample", () => {
   });
 
   describe("row identity binding", () => {
-    it("selects exactly id, author_id, title, status, file_path and the public author view for the route's own id", async () => {
+    it("selects exactly id, author_id, title, status, file_path and the pen name view for the route's own id, in one read", async () => {
       const supabase = makeFakeSupabase();
       mockCreateClient.mockResolvedValue(supabase);
       mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() }));
 
       await callRoute();
 
-      // F4 (P5): plus one pen-name read for the same id (attachPenNames).
-      expect(supabase.__from).toHaveBeenCalledTimes(2);
-      expect(supabase.__from).toHaveBeenNthCalledWith(1, "books");
-      expect(supabase.__from).toHaveBeenNthCalledWith(2, "books");
-      expect(supabase.__select).toHaveBeenCalledTimes(2);
-      expect(supabase.__select).toHaveBeenNthCalledWith(1, EXPECTED_COLUMNS);
-      expect(supabase.__select).toHaveBeenNthCalledWith(2, "id, pen_name");
+      expect(supabase.__from).toHaveBeenCalledTimes(1);
+      expect(supabase.__from).toHaveBeenCalledWith("books");
+      expect(supabase.__select).toHaveBeenCalledTimes(1);
+      expect(supabase.__select).toHaveBeenCalledWith(EXPECTED_COLUMNS);
       expect(supabase.__eq).toHaveBeenCalledTimes(1);
       expect(supabase.__eq).toHaveBeenCalledWith("id", BOOK_ID);
-      expect(supabase.__in).toHaveBeenCalledWith("id", [BOOK_ID]);
       expect(supabase.__maybeSingle).toHaveBeenCalledTimes(1);
-    });
-
-    it("F4: the sample's author is the book's pen name when it has one", async () => {
-      mockCreateClient.mockResolvedValue(
-        makeFakeSupabase({ penNames: { data: [{ id: BOOK_ID, pen_name: "Jo Pen" }], error: null } }),
-      );
-      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() }));
-
-      const response = await callRoute();
-
-      expect(response.status).toBe(200);
-      expect((await response.json()).author).toBe("Jo Pen");
-    });
-
-    it("F4: before the migration (pen-name read fails as feature-off) the author's public name is kept", async () => {
-      const supabase = makeFakeSupabase({
-        penNames: { data: null, error: { code: "42703", message: "column books.pen_name does not exist" } },
-      });
-      mockCreateClient.mockResolvedValue(supabase);
-      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() }));
-
-      const response = await callRoute();
-
-      expect(response.status).toBe(200);
-      const body = await response.json();
-      expect(body.author).toBe("Renata Author");
     });
 
     it("a published canonical book fetches exactly <author>/<book>.epub from the manuscripts bucket", async () => {

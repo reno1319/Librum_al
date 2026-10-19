@@ -4,10 +4,11 @@ import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { resolveHomepageCta, computeAuthorSharePercent, type HomepageCta } from "@/lib/homepage";
 import { Alert } from "@/components/ui/alert";
 import { IconCheck } from "@/components/icons";
-import { attachPenNames, resolveBookByline } from "@/lib/book-byline";
+import { resolveBookByline } from "@/lib/book-byline";
+import type { PenNameRef } from "@/lib/pen-names";
 import { getLibrumChoiceBook, type LibrumChoiceBook } from "@/lib/librum-choice";
 import { orderHomepageBooks, qualifiesForHomepage } from "@/lib/librum-choice-logic";
-import type { Book, Profile } from "@/lib/types";
+import type { Book } from "@/lib/types";
 import {
   BRASS_CTA_CLASSES,
   ClosingCtaBand,
@@ -94,12 +95,12 @@ const MAX_HOMEPAGE_COVERS = 8;
 async function fetchPublishedCovers(supabase: SupabaseClient) {
   const { data } = await supabase
     .from("books")
-    // REDESIGN STEP 2: the hero shelf writes each book's author on its
-    // spine, through the public author view (never raw display_name),
-    // the same alias pattern the bookstore uses.
+    // REDESIGN STEP 2 / PEN-NAMES-1: the hero shelf writes each book's
+    // pen name on its spine, embedded from the public_pen_names view,
+    // as the bookstore does.
     // r8: genre and description too, for the three-book showcase in
     // "Published with Librum" (each book's own data, no site copy).
-    .select("id, title, cover_path, genre, description, profiles:public_author_profiles(public_author_name)")
+    .select("id, title, cover_path, genre, description, pen:public_pen_names(id, name)")
     .eq("status", "published")
     .not("price_all", "is", null)
     .not("cover_path", "is", null)
@@ -107,19 +108,17 @@ async function fetchPublishedCovers(supabase: SupabaseClient) {
     .limit(MAX_HOMEPAGE_COVERS)
     .returns<
       (Pick<Book, "id" | "title" | "cover_path" | "genre" | "description"> & {
-        profiles: Pick<Profile, "public_author_name"> | null;
+        pen: PenNameRef | null;
       })[]
     >();
 
-  // F4 (P5): the spines and featured books show each book's byline. The
-  // select list above is explicit, so pen names come from one extra read
-  // (attachPenNames), which leaves the books unchanged before the
-  // migration.
-  const books = await attachPenNames(supabase, data ?? []);
+  // F4 (P5): the spines and featured books show each book's byline (its
+  // pen name, embedded above).
+  const books = data ?? [];
   return books.map((b) => ({
     id: b.id,
     title: b.title,
-    author: resolveBookByline(b, b.profiles),
+    author: resolveBookByline(b),
     genre: b.genre,
     description: b.description,
     url: supabase.storage.from("covers").getPublicUrl(b.cover_path!).data.publicUrl,
@@ -134,7 +133,7 @@ function librumChoiceCover(supabase: SupabaseClient, pick: LibrumChoiceBook | nu
   return {
     id: pick.id,
     title: pick.title,
-    author: resolveBookByline(pick, pick.profiles),
+    author: resolveBookByline(pick),
     genre: pick.genre,
     description: pick.description,
     url: supabase.storage.from("covers").getPublicUrl(pick.cover_path!).data.publicUrl,

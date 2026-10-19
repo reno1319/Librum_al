@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { AVATARS_BUCKET, isOwnCanonicalAvatarPath } from "@/lib/avatar-path";
+import { isPenNamePhotoPath } from "@/lib/pen-name-photo-path";
 import {
   BOOK_COVERS_BUCKET,
   BOOK_MANUSCRIPTS_BUCKET,
@@ -134,6 +135,41 @@ export async function deleteAccount(formData: FormData) {
   const authoredBooks = books;
   const bookIds = authoredBooks.map((b) => b.id);
 
+  // PEN-NAMES-1: the account's pen name photos (avatars bucket, under a
+  // random folder each -- src/lib/pen-name-photo-path.ts). Read with the
+  // session client (RLS: own rows; the author_id filter keeps it to this
+  // account) before anything irreversible, like the reads above; only a
+  // value of exactly the canonical shape is removed below. The rows
+  // themselves go with the account (on delete cascade).
+  const { data: penNameRows, error: penNamesReadError } = await supabase
+    .from("pen_names")
+    .select("avatar_path")
+    .eq("author_id", user.id)
+    .returns<{ avatar_path: string | null }[]>();
+
+  if (penNamesReadError || !Array.isArray(penNameRows)) {
+    console.error("deleteAccount: pen names read failed; nothing was deleted");
+    redirect("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+  }
+
+  // PEN-NAMES-1 r4 (17a): the migration copied the profile photo onto the
+  // default pen name, so a pen name may hold this user's own canonical
+  // avatar key ("<uid>/avatar.<ext>") -- the SAME object as
+  // profiles.avatar_path. Every object is removed exactly once: a key
+  // already removed as the profile avatar is not listed again here.
+  const penNamePhotoPaths = new Set<string>();
+  for (const row of penNameRows) {
+    const storedPhotoPath: unknown = row.avatar_path;
+    if (storedPhotoPath === null) continue;
+    if (isPenNamePhotoPath(storedPhotoPath)) {
+      penNamePhotoPaths.add(storedPhotoPath);
+    } else if (isOwnCanonicalAvatarPath(storedPhotoPath, user.id)) {
+      if (storedPhotoPath !== avatarPathToRemove) penNamePhotoPaths.add(storedPhotoPath);
+    } else {
+      console.warn("deleteAccount: a stored pen name photo path is not canonical; cleanup skipped");
+    }
+  }
+
   // A book with ANY acquisition history -- paid, free, or refunded --
   // must never be destroyed, matching Phase 8A's rule for deleteBook
   // (purchases.book_id is ON DELETE RESTRICT -- see migration 023).
@@ -249,6 +285,14 @@ export async function deleteAccount(formData: FormData) {
       .remove([avatarPathToRemove]);
     if (avatarError) {
       console.error("deleteAccount: failed to remove orphaned avatar file:", avatarError);
+    }
+  }
+  if (penNamePhotoPaths.size > 0) {
+    const { error: penNamePhotoError } = await admin.storage
+      .from(AVATARS_BUCKET)
+      .remove([...penNamePhotoPaths]);
+    if (penNamePhotoError) {
+      console.error("deleteAccount: failed to remove orphaned pen name photos:", penNamePhotoError);
     }
   }
 

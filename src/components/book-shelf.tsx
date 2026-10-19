@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
 import { resolveBookByline } from "@/lib/book-byline";
-import type { Book, Profile } from "@/lib/types";
+import type { Book } from "@/lib/types";
+import type { PenNameRef } from "@/lib/pen-names";
 
 // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved here at the render boundary
 // via resolvePublicAuthorName(), never a raw display_name read. BookCard
@@ -9,10 +10,10 @@ import type { Book, Profile } from "@/lib/types";
 // string, never a profile object. AUTHOR-1C: every caller now queries
 // the safe public_author_profiles view (aliased as `profiles`), which
 // physically has no display_name column -- dropped from this type too.
-// F4: the string is now the book's byline (its pen name, else the
-// author's public name; resolveBookByline).
+// PEN-NAMES-1: callers embed the book's pen name (BOOK_PEN_NAME_EMBED,
+// public_pen_names view) as `pen`; that is the byline.
 type BookWithAuthor = Book & {
-  profiles: Pick<Profile, "public_author_name"> | null;
+  pen: PenNameRef | null;
 };
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -50,7 +51,7 @@ export function BookShelf({
               <BookCard
                 book={book}
                 coverUrl={coverUrl}
-                authorName={resolveBookByline(book, book.profiles)}
+                authorName={resolveBookByline(book)}
               />
             </div>
           );

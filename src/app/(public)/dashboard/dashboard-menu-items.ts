@@ -46,7 +46,11 @@ export const DASHBOARD_MENU_GROUPS: DashboardMenuGroup[] = [
   },
   {
     label: "Profile",
-    items: [{ href: "/dashboard/profile", label: "Profile", nested: true }],
+    // PEN-NAMES-1: each pen name's own name, bio, photo and links.
+    items: [
+      { href: "/dashboard/profile", label: "Profile", nested: true },
+      { href: "/dashboard/pen-names", label: "Pen names", nested: true },
+    ],
   },
 ];
 
@@ -100,8 +104,8 @@ export function itemAriaCurrent(
   return normalize(pathname) === item.href ? "page" : "true";
 }
 
-// aria-current for a group tab: "true", except the single-item Profile
-// group, whose tab is that page itself.
+// aria-current for a group tab: "true", except a single-item group,
+// whose tab is that page itself (PEN-NAMES-1: Profile now has two items).
 export function groupAriaCurrent(
   group: DashboardMenuGroup,
   match: DashboardMenuMatch | null,
