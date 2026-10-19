@@ -313,9 +313,7 @@ export default async function BalancePage({
 
           {/* LEDGER-1E-C: safe payout history -- amount/currency/status/date
               only, via list_author_payout_history(). No provider/reference/
-              failure detail, no controls -- this is reporting only, not the
-              legacy Stripe Connect onboarding UI (that stays at
-              /dashboard/payouts, untouched). */}
+              failure detail, no controls -- this is reporting only. */}
           <h2 className="mt-10 font-serif text-xl font-normal">Payout history</h2>
           {payoutHistory.length === 0 ? (
             <EmptyState className="mt-4" title="No payouts yet." />
@@ -347,10 +345,9 @@ export default async function BalancePage({
       {/* BANK-PAYOUT-1E.1: the ENTIRE bank-destination setup section is
           gated on bankPayoutSetupEnabled and OMITTED ENTIRELY while
           disabled (option A of Section 5) -- not merely hidden behind a
-          disabled form. Stripe Connect remains the only live author-
-          payout mechanism today, and showing this section (even as an
-          informational notice) risks telling authors they need to set
-          up two competing payout systems. The underlying read is
+          disabled form: showing it (even as an informational notice)
+          before bank payouts are live would ask authors to set up a
+          payout system that does not run yet. The underlying read is
           already skipped above when disabled, so this omission is a
           real data-minimization boundary, not cosmetic. */}
       {bankPayoutSetupEnabled && (
@@ -363,12 +360,10 @@ export default async function BalancePage({
           migration-055 set_author_payout_destination() RPC (via the
           Server Action in ./actions.ts) -- no direct write to
           author_payout_destinations anywhere here, and no author_id is
-          ever read from or sent by this page. This is a SEPARATE
-          concern from the existing Stripe Connect onboarding at
-          /dashboard/payouts (left untouched by this task -- that page
-          still gates real paid-book publishing today) -- this section
-          only prepares the NOT-YET-ACTIVE bank-transfer payout path
-          this migration foundation exists for. */
+          ever read from or sent by this page. This section only
+          prepares the NOT-YET-ACTIVE bank-transfer payout path this
+          migration foundation exists for (the old Stripe Payouts page
+          is gone; /dashboard/payouts redirects here). */
       <section className="mt-10 border-t border-border pt-8">
         <h2 className="font-serif text-xl font-normal">Payout setup</h2>
 

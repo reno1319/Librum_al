@@ -1,7 +1,8 @@
-import Link from "next/link";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { computeAuthorSharePercent } from "@/lib/homepage";
+import { getAuthorPageCta } from "@/lib/author-page-cta";
 import { EarningsCalculator } from "@/components/earnings-calculator";
+import { ClosingCtaBand, PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -17,67 +18,83 @@ const HOW_IT_WORKS = [
   "Refunded transactions, or disputes resolved against the payment, are adjusted accordingly.",
 ];
 
-export default function PricingPage() {
+const SUBHEADING = "font-serif text-2xl font-normal text-primary";
+
+// AUTHOR PAGES REDESIGN (Renato's Q15 a): the green header band with
+// today's author share, the calculator in a white two-column box, and
+// the three text sections restyled. Every sentence and number is
+// unchanged; royalty wording waits for the live POK build.
+export default async function PricingPage() {
   const authorSharePercent = computeAuthorSharePercent();
+  const cta = await getAuthorPageCta();
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
-      <h1 className="font-serif text-4xl font-normal">Earnings</h1>
-      <p className="mt-3 text-muted">
-        You keep {authorSharePercent}% of every sale — Librum keeps{" "}
-        {PLATFORM_FEE_PERCENT}%. No setup fees, no monthly subscription, no
-        minimum sales. Librum only makes money when you do.
-      </p>
+    <main className="flex-1">
+      <PageBand
+        eyebrow="Earnings"
+        title="Earnings"
+        lead={
+          <>
+            You keep {authorSharePercent}% of every sale — Librum keeps{" "}
+            {PLATFORM_FEE_PERCENT}%. No setup fees, no monthly subscription, no
+            minimum sales. Librum only makes money when you do.
+          </>
+        }
+        aside={
+          <div className="border-t border-accent pt-5 md:border-t-0 md:border-l md:pt-0 md:pl-10">
+            <span className="block font-serif text-6xl leading-none font-normal sm:text-7xl lg:text-8xl">
+              {authorSharePercent}%
+            </span>
+            <p className="mt-2 text-sm font-medium tracking-wide text-primary-foreground/85 uppercase">
+              Author share
+            </p>
+          </div>
+        }
+      />
 
-      <div className="mt-8">
-        <EarningsCalculator />
-      </div>
+      <section className="bg-background">
+        <div className={SECTION_CONTAINER}>
+          <EarningsCalculator />
+        </div>
+      </section>
 
-      <h2 className="mt-10 font-serif text-xl font-normal">How it works</h2>
-      <ul
-        className="mt-3 text-foreground/90"
-        style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
-      >
-        {HOW_IT_WORKS.map((line) => (
-          <li key={line}>&middot; {line}</li>
-        ))}
-      </ul>
+      <section className="border-y border-border bg-surface">
+        <div className={`${SECTION_CONTAINER} grid gap-10 lg:grid-cols-3`}>
+          <div>
+            <h2 className={SUBHEADING}>How it works</h2>
+            <ul className="mt-4 flex list-disc flex-col gap-2 pl-5 leading-relaxed text-foreground/90 marker:text-[#8a6d12]">
+              {HOW_IT_WORKS.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
 
-      {/* TRANSITIONAL-PAYMENT-COPY-2 CORRECTION: paid-book publishing and
-          author payout setup have not launched yet -- see the approved
-          transitional author message. Deliberately does not name POK
-          here: POK is only ever named for reader checkout, never as an
-          implied author-payout provider. */}
-      <h2 className="mt-10 font-serif text-xl font-normal">Payouts</h2>
-      <p className="mt-3 text-foreground/90">
-        Paid publishing and author payout setup have not launched yet.
-        Authors can continue to publish free books without payout setup
-        while Librum completes its payment and payout systems.
-      </p>
+          {/* TRANSITIONAL-PAYMENT-COPY-2 CORRECTION: paid-book publishing and
+              author payout setup have not launched yet -- see the approved
+              transitional author message. Deliberately does not name POK
+              here: POK is only ever named for reader checkout, never as an
+              implied author-payout provider. */}
+          <div>
+            <h2 className={SUBHEADING}>Payouts</h2>
+            <p className="mt-4 leading-relaxed text-foreground/90">
+              Paid publishing and author payout setup have not launched yet.
+              Authors can continue to publish free books without payout setup
+              while Librum completes its payment and payout systems.
+            </p>
+          </div>
 
-      <h2 className="mt-10 font-serif text-xl font-normal">
-        What the fee covers
-      </h2>
-      <p className="mt-3 text-foreground/90">
-        Hosting, secure checkout, ebook delivery, and watermarking — plus
-        every tool in your dashboard: sales analytics, discount codes,
-        series, and contributor credits. All included, no extra charge.
-      </p>
+          <div>
+            <h2 className={SUBHEADING}>What the fee covers</h2>
+            <p className="mt-4 leading-relaxed text-foreground/90">
+              Hosting, secure checkout, ebook delivery, and watermarking — plus
+              every tool in your dashboard: sales analytics, discount codes,
+              series, and contributor credits. All included, no extra charge.
+            </p>
+          </div>
+        </div>
+      </section>
 
-      <p className="mt-10 text-sm text-muted">
-        Ready to start?{" "}
-        <Link
-          href="/signup?role=author"
-          className="text-primary underline"
-        >
-          Sign up as an author
-        </Link>{" "}
-        or read{" "}
-        <Link href="/how-it-works" className="text-primary underline">
-          how self-publishing works
-        </Link>
-        .
-      </p>
+      {cta && <ClosingCtaBand cta={cta} />}
     </main>
   );
 }

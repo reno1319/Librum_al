@@ -224,49 +224,11 @@ describe("Dashboard Balance: Payout setup section", () => {
     expect(source.toLowerCase()).not.toContain("bank account verified");
   });
 
-  it("this new section carries no Stripe-specific payout promise (distinct from the untouched /dashboard/payouts Stripe Connect page)", () => {
+  it("this new section carries no Stripe-specific payout promise", () => {
     const setupSectionIndex = source.indexOf('<h2 className="font-serif text-xl font-normal">Payout setup</h2>');
     const finalAlertIndex = source.indexOf('Looking for unit sales and page views?');
     const setupSection = source.slice(setupSectionIndex, finalAlertIndex);
     expect(setupSection.toLowerCase()).not.toContain("stripe");
-  });
-});
-
-// ---------------------------------------------------------------------
-// BANK-PAYOUT-1E.1 Section 11: /dashboard/payouts (the live Stripe
-// Connect onboarding surface) must remain completely untouched by this
-// rollout gate -- a durable regression guard against a future change
-// accidentally touching it in the same pass as this feature.
-//
-// PR-G corrected the WORDING here, not the assertions. That page no
-// longer gates paid-book publishing -- performPublish() reads no
-// profiles row at all, and canPublishPaidTitle() is the sole gate. What
-// the page still does is read and WRITE profiles.stripe_account_id and
-// profiles.stripe_payouts_enabled against the real Stripe SDK, which is
-// author-payout operational state that later payout work will need. The
-// guard is kept for exactly that reason: its justification changed, the
-// thing it guards did not.
-// ---------------------------------------------------------------------
-describe("Dashboard Balance: /dashboard/payouts (Stripe Connect) remains untouched", () => {
-  const payoutsSource = readFileSync(
-    path.join(__dirname, "..", "payouts", "page.tsx"),
-    "utf8",
-  );
-
-  it("still imports and calls the real Stripe SDK -- no redirect/neutralization was introduced", () => {
-    expect(payoutsSource).toContain('import { getStripe } from "@/lib/stripe"');
-    expect(payoutsSource).toContain("getStripe().accounts.retrieve(");
-  });
-
-  it("still reads/writes stripe_account_id and stripe_payouts_enabled, the live author-payout state", () => {
-    expect(payoutsSource).toContain("stripe_account_id");
-    expect(payoutsSource).toContain("stripe_payouts_enabled");
-  });
-
-  it("does not import or reference anything from the new bank-destination module", () => {
-    expect(payoutsSource).not.toContain("saveAuthorPayoutDestination");
-    expect(payoutsSource).not.toContain("getAuthorPayoutDestination");
-    expect(payoutsSource).not.toContain("isBankPayoutSetupEnabled");
   });
 });
 

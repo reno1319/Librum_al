@@ -37,6 +37,11 @@ const nextConfig: NextConfig = {
     // over gets silently truncated, corrupting the multipart upload.
     proxyClientMaxBodySize: "60mb",
   },
+  // AUTHOR PAGES REDESIGN (Renato's Q13): the Stripe Payouts page is
+  // gone; old links land on Financial balance. Permanent (308).
+  redirects() {
+    return [{ source: "/dashboard/payouts", destination: "/dashboard/balance", permanent: true }];
+  },
 };
 
 export default nextConfig;
