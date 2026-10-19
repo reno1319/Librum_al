@@ -168,46 +168,10 @@ grant update (display_name, bio, public_author_name)
   on public.profiles
   to authenticated;
 
--- LIBRUM 2.0 AUTHOR-1C (migration 045): the safe, reader-facing replacement for direct
--- public access to profiles -- exposes ONLY the columns a reader ever
--- legitimately needs for author attribution (never display_name, never
--- role, never any Stripe/internal column). Deliberately a plain view,
--- not `security_invoker` -- Postgres runs a non-security-invoker view
--- with the privileges of the view's OWNER (this migration-applying
--- role, the same owner as public.profiles itself), which is NOT subject
--- to profiles' own RLS (RLS never applies to a table's owner unless
--- FORCE ROW LEVEL SECURITY is set, which it isn't here) -- so this view
--- can see every author's row regardless of the caller's own identity,
--- while still only ever returning these four columns. Verified directly
--- against a real local Postgres instance (not merely reasoned about):
--- anon and an ordinary authenticated reader can both read another
--- author's public_author_name/bio/avatar_path through this view, while
--- neither can read one byte of that same author's display_name through
--- either this view (the column isn't in it) or the base table (RLS+grant
--- above now block it).
---
--- Filtered to role = 'author' -- mirrors public_author_name's own
--- "never populated for a reader" invariant (see the column's own
--- comment and the CHECK constraint above): a reader's row simply isn't
--- in this view at all, which is exactly the right behavior everywhere
--- this view is embedded, including reviews' reviewer-identity join
--- (src/app/(public)/books/[id]/page.tsx) -- a plain reader-reviewer
--- resolves to no public name (never their private display_name), and a
--- reviewer who is ALSO an author with a pen name resolves to that pen
--- name, through the exact same mechanism as any other author
--- attribution on the site.
-create view public.public_author_profiles as
-  select id, public_author_name, bio, avatar_path
-  from public.profiles
-  where role = 'author';
-
-revoke insert, update, delete, truncate, references, trigger, maintain
-  on table public.public_author_profiles
-  from anon, authenticated;
-
-grant select
-  on public.public_author_profiles
-  to anon, authenticated;
+-- The public_author_profiles view (migration 045) -- the reader-facing
+-- replacement for direct public access to profiles -- is defined after
+-- public.books below, because AUTHOR-VIEW-REQUIRE-BOOK-1 (migration
+-- 20261019154308) makes it read books.
 
 -- ============================================================
 -- staff_members: ADMIN-1A's staff/RBAC foundation, replacing binary
@@ -530,6 +494,66 @@ create index books_author_id_idx on public.books(author_id);
 create index books_status_idx on public.books(status);
 create index books_genre_idx on public.books(genre);
 create index books_series_id_idx on public.books(series_id);
+
+-- LIBRUM 2.0 AUTHOR-1C (migration 045): the safe, reader-facing replacement for direct
+-- public access to profiles -- exposes ONLY the columns a reader ever
+-- legitimately needs for author attribution (never display_name, never
+-- role, never any Stripe/internal column). Deliberately a plain view,
+-- not `security_invoker` -- Postgres runs a non-security-invoker view
+-- with the privileges of the view's OWNER (this migration-applying
+-- role, the same owner as public.profiles itself), which is NOT subject
+-- to profiles' own RLS (RLS never applies to a table's owner unless
+-- FORCE ROW LEVEL SECURITY is set, which it isn't here) -- so this view
+-- can see every author's row regardless of the caller's own identity,
+-- while still only ever returning these four columns. Verified directly
+-- against a real local Postgres instance (not merely reasoned about):
+-- anon and an ordinary authenticated reader can both read another
+-- author's public_author_name/bio/avatar_path through this view, while
+-- neither can read one byte of that same author's display_name through
+-- either this view (the column isn't in it) or the base table (RLS+grant
+-- above now block it).
+--
+-- Filtered to role = 'author' -- mirrors public_author_name's own
+-- "never populated for a reader" invariant (see the column's own
+-- comment and the CHECK constraint above): a reader's row simply isn't
+-- in this view at all, which is exactly the right behavior everywhere
+-- this view is embedded, including reviews' reviewer-identity join
+-- (src/app/(public)/books/[id]/page.tsx) -- a plain reader-reviewer
+-- resolves to no public name (never their private display_name), and a
+-- reviewer who is ALSO an author with a pen name resolves to that pen
+-- name, through the exact same mechanism as any other author
+-- attribution on the site.
+--
+-- AUTHOR-VIEW-REQUIRE-BOOK-1 (migration 20261019154308): and only once
+-- the author has at least one book, of any status (Renato, 2026-10-19).
+-- handle_new_user() creates an author's profiles row at signup, before
+-- email confirmation and whether or not they ever start a book, and
+-- copies the signup form's "Name" into public_author_name -- so without
+-- this filter that name was publicly readable for people who never
+-- wrote anything. Any status, not only published: a buyer keeps a book
+-- after its author unpublishes it ("Owners can view books they've acquired"
+-- below), and an author previews their own first draft, and both must
+-- still show the author's name. The view runs as its owner, so books'
+-- RLS does not apply inside it; books_author_id_idx serves the EXISTS.
+-- An author with zero books has no row: /authors/[id] is "not found"
+-- and a review they wrote shows no name, exactly as for a reader.
+create view public.public_author_profiles as
+  select p.id, p.public_author_name, p.bio, p.avatar_path
+  from public.profiles p
+  where p.role = 'author'
+    and exists (
+      select 1
+      from public.books b
+      where b.author_id = p.id
+    );
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.public_author_profiles
+  from anon, authenticated;
+
+grant select
+  on public.public_author_profiles
+  to anon, authenticated;
 
 -- BOOK-PEN-NAME-RIGHTS-CHOICE-1: at most one picked book at a time.
 create unique index books_one_librum_choice

@@ -45,13 +45,17 @@ end;
 $$;
 
 -- ============================================================
--- Fixture: one author, matching this migration's own audit evidence
--- (row-count parity between the base table and the view).
+-- Fixture: one author with one draft book, matching this migration's
+-- own audit evidence (row-count parity between the base table and the
+-- view). The draft is needed since AUTHOR-VIEW-REQUIRE-BOOK-1 (migration
+-- 20261019154308): the view lists an author only once they have a book.
 -- ============================================================
 insert into auth.users (id, email, raw_user_meta_data) values
   ('11111111-1111-1111-1111-111111111111', 'pen-name-author@test', '{"role":"author","display_name":"Real Account Name"}');
 update public.profiles set public_author_name = 'Public Pen Name'
   where id = '11111111-1111-1111-1111-111111111111';
+insert into public.books (id, author_id, title) values
+  ('b1111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111', 'A Draft');
 
 -- ============================================================
 -- Part 1: read privileges preserved -- anon and authenticated must
@@ -194,7 +198,8 @@ reset role;
 
 -- ============================================================
 -- Part 6: unchanged boundary checks -- column projection, author-only
--- filter, and row-count parity between the base table and the view.
+-- filter, and row-count parity between the base table's authors who
+-- have at least one book (AUTHOR-VIEW-REQUIRE-BOOK-1) and the view.
 -- Not new coverage (045_public_author_name.test.sql Part 5 already
 -- owns this) -- reasserted only to prove this migration didn't touch
 -- either.
@@ -202,15 +207,17 @@ reset role;
 do $$
 begin
   perform pg_temp.assert(
-    (select array_agg(column_name order by ordinal_position) from information_schema.columns
+    (select array_agg(column_name::text order by ordinal_position) from information_schema.columns
       where table_schema = 'public' and table_name = 'public_author_profiles')
       = array['id', 'public_author_name', 'bio', 'avatar_path'],
     'part6: public_author_profiles must expose exactly these four columns, in this order'
   );
   perform pg_temp.assert(
-    (select count(*) from public.profiles where role = 'author')
+    (select count(*) from public.profiles p
+      where p.role = 'author'
+        and exists (select 1 from public.books b where b.author_id = p.id))
       = (select count(*) from public.public_author_profiles),
-    'part6: the view row count must equal the count of author rows in the base table'
+    'part6: the view row count must equal the count of author rows with at least one book in the base table'
   );
 end $$;
 
