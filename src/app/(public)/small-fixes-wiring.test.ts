@@ -139,6 +139,7 @@ describe("FIX1 X15: one heading style", () => {
       "src/app/(public)/help/page.tsx",
       "src/app/(public)/pricing/page.tsx",
       "src/app/(public)/privacy/page.tsx",
+      "src/app/(public)/refunds/page.tsx",
     ];
     for (const file of files) {
       const headings = read(file).match(/<h[1-4]\b[^>]*font-serif[^>]*>/g) ?? [];

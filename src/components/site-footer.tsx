@@ -33,6 +33,7 @@ export const FOOTER_GROUPS = {
   Legal: [
     { href: "/terms", label: "Terms" },
     { href: "/privacy", label: "Privacy" },
+    { href: "/refunds", label: "Refunds" },
   ],
 };
 

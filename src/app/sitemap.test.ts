@@ -39,6 +39,7 @@ describe("sitemap", () => {
       "/contact",
       "/terms",
       "/privacy",
+      "/refunds",
     ]) {
       expect(paths).toContain(path);
     }

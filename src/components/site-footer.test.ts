@@ -21,3 +21,10 @@ describe("SiteFooter FOOTER_GROUPS", () => {
     }
   });
 });
+
+describe("REFUND POLICY: footer Legal group", () => {
+  it("lists Terms, Privacy and Refunds, in that order", () => {
+    expect(FOOTER_GROUPS.Legal.map((l) => l.href)).toEqual(["/terms", "/privacy", "/refunds"]);
+    expect(FOOTER_GROUPS.Legal.find((l) => l.href === "/refunds")?.label).toBe("Refunds");
+  });
+});
