@@ -12,7 +12,8 @@ const AUTHOR_SHARE_PERCENT = 100 - PLATFORM_FEE_PERCENT;
 
 // AUTHOR PAGES REDESIGN: the green header band, a "Contents" box (Renato,
 // 1. a) linking each section by its anchor, and gold section numbers.
-// No closing band here (Q16 a). The Terms text is unchanged. The
+// No closing band here (Q16 a). The Terms text is unchanged, except a
+// sentence in section 8 linking the Refund Policy (/refunds). The
 // contents titles must match the section headings below
 // (small-fixes-wiring.test.ts checks it).
 const SECTION_TITLES = [
@@ -185,6 +186,13 @@ export default function TermsPage() {
                 corresponding platform fee is also refunded. Librum
                 doesn&apos;t promise a specific settlement time for a refund
                 to appear.
+              </p>
+              <p className="mt-2">
+                To find out when and how you can ask for a refund, see our{" "}
+                <Link href="/refunds" className="text-primary underline">
+                  Refund Policy
+                </Link>
+                .
               </p>
             </section>
 

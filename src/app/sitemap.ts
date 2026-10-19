@@ -34,6 +34,7 @@ const STATIC_PUBLIC_ROUTES = [
   "/contact",
   "/terms",
   "/privacy",
+  "/refunds",
 ];
 
 // LIBRUM 2.0 BLOG-1D: the first dynamic, DB-backed entries this sitemap
