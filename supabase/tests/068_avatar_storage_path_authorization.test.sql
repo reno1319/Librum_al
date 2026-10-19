@@ -166,6 +166,12 @@ update public.profiles set avatar_path = 'legacy/avatars/c.JPEG'
 insert into storage.objects (bucket_id, name) values
   ('avatars', 'e0680000-0000-4000-8000-00000000000b/avatar.png');
 
+-- B has a draft book: since AUTHOR-VIEW-REQUIRE-BOOK-1 (migration
+-- 20261019154308) public_author_profiles lists an author only once they
+-- have a book, and part 4 reads B's avatar_path through that view.
+insert into public.books (id, author_id, title) values
+  ('e0680001-0000-4000-8000-00000000000b', 'e0680000-0000-4000-8000-00000000000b', 'P068 B draft');
+
 create temp table fixture_rows_before as select pg_temp.profile_rows() as fp;
 
 -- ============================================================
