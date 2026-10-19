@@ -43,6 +43,22 @@ export function resolveHomepageCta(params: {
   return { hero: null, final: null };
 }
 
+// AUTHOR PAGES REDESIGN (Renato's R5 a): the closing band's button on
+// About, How it works, Earnings and Help. Signed out and author get the
+// home page's final CTA; a signed-in reader gets the account page's
+// "Become an author" section (rendered only for role "reader"). Anyone
+// else signed in (an admin, a missing profile) gets no band, as on the
+// home page.
+export function resolveAuthorPageCta(params: {
+  user: { id: string } | null;
+  role: string | null;
+}): HomepageCta | null {
+  if (params.user && params.role === "reader") {
+    return { label: "Become an author", href: "/account#become-author" };
+  }
+  return resolveHomepageCta(params).final;
+}
+
 // LIBRUM 2.0 UI-3: the single source authors' displayed share derives
 // from -- PLATFORM_FEE_PERCENT (src/lib/pricing.ts), never a literal
 // "80" written on the homepage itself. Both numbers stay derived, not

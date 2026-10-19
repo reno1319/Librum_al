@@ -84,7 +84,6 @@ describe("DashboardPage: step 4 dashboard", () => {
     { ...BOOK_BASE, id: "b3", title: "Udhetim ne Jug", status: "draft", price_all: null, published_at: null },
   ];
   const TABLES = {
-    profiles: { data: { stripe_account_id: null, stripe_payouts_enabled: false }, error: null },
     books: { data: BOOKS, error: null },
     purchases: {
       data: [

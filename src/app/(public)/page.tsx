@@ -8,6 +8,15 @@ import { attachPenNames, resolveBookByline } from "@/lib/book-byline";
 import { getLibrumChoiceBook, type LibrumChoiceBook } from "@/lib/librum-choice";
 import { orderHomepageBooks, qualifiesForHomepage } from "@/lib/librum-choice-logic";
 import type { Book, Profile } from "@/lib/types";
+import {
+  BRASS_CTA_CLASSES,
+  ClosingCtaBand,
+  Eyebrow,
+  NUMERAL_CLASSES,
+  SECTION_CONTAINER,
+  SECTION_HEADING,
+  TEXT_LINK_CLASSES,
+} from "@/components/page-bands";
 import type { Metadata } from "next";
 
 // LIBRUM 2.0 UI-3: this page is the AUTHOR/self-publishing homepage --
@@ -46,25 +55,11 @@ export const metadata: Metadata = {
     "The self-publishing platform built for Albanian-language authors. Publish independently, set your own price, and reach readers through Librum.",
 };
 
-// Brass call-to-action button (square-cornered, like the mockup) for the green bands: brass fill with green
-// text (5.85:1), cream fill on hover (11.1:1). Kept page-local so the
-// shared Button primitive is unchanged in this step.
-const BRASS_CTA_CLASSES =
-  "focus-ring inline-flex items-center justify-center gap-2 rounded-[3px] bg-accent px-7 py-4 text-base font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground";
+// BRASS_CTA_CLASSES, TEXT_LINK_CLASSES, the section frame
+// (SECTION_CONTAINER, SECTION_HEADING), NUMERAL_CLASSES, the eyebrow and
+// the closing band live in @/components/page-bands (AUTHOR PAGES
+// REDESIGN), shared with the inner author pages.
 
-// Underlined at rest, thicker underline on hover (C1).
-const TEXT_LINK_CLASSES =
-  "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2";
-
-// REDESIGN STEP 2: the A2 mockup's section frame -- a wide container,
-// generous vertical rhythm and left-aligned regular-weight serif
-// headings in green. Every section between the hero and the closing band
-// uses these, alternating cream and white backgrounds.
-const SECTION_CONTAINER = "page-container py-12 md:py-16";
-const SECTION_HEADING = "font-serif text-3xl font-normal text-primary sm:text-4xl lg:text-[2.625rem]";
-// Italic dark-brass numerals, as in the mockup (4.43:1 on cream and
-// white; large text, so 3:1 applies).
-const NUMERAL_CLASSES = "block font-serif text-[1.75rem] italic leading-none text-[#8a6d12]";
 // Outline button on the green hero, beside the brass one.
 const OUTLINE_ON_DARK_CTA_CLASSES =
   "focus-ring inline-flex items-center justify-center gap-2 rounded-[3px] border border-primary-foreground/40 px-7 py-4 text-base font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover";
@@ -214,7 +209,7 @@ export default async function Home({
       <PublishInFourStepsSection />
       <EarningsSection />
       {covers.length > 0 && <PublishedWithLibrumSection books={pickFeaturedBooks(covers)} />}
-      {cta.final && <FinalCtaSection cta={cta.final} />}
+      {cta.final && <ClosingCtaBand cta={cta.final} />}
     </main>
   );
 }
@@ -250,12 +245,7 @@ function HeroSection({ cta, covers }: { cta: HomepageCta | null; covers: Cover[]
           className={`grid gap-10 lg:grid-cols-[55fr_45fr] lg:gap-12 ${showShelf ? "lg:items-end" : "lg:items-center"}`}
         >
           <div className={`max-w-xl ${showShelf ? "lg:pb-14" : ""}`}>
-            <div className="flex items-center gap-3">
-              <span aria-hidden="true" className="block h-px w-10 bg-accent" />
-              <p className="text-[0.8125rem] font-semibold uppercase tracking-[0.14em] text-accent">
-                Self-publishing for Albanian-language authors
-              </p>
-            </div>
+            <Eyebrow>Self-publishing for Albanian-language authors</Eyebrow>
             <h1 className="mt-5 font-serif text-4xl font-normal leading-[1.1] sm:text-5xl lg:text-[3.5rem]">
               Publish your book.
               <br />
@@ -670,24 +660,6 @@ function PublishedWithLibrumSection({ books }: { books: Cover[] }) {
 // for the long run." tools section is gone -- its price and payout
 // columns repeated the hero, "Why Librum" and step 04 -- and its one
 // unique line, about following sales, now sits in the Earnings section.
+// AUTHOR PAGES REDESIGN: the band itself is ClosingCtaBand
+// (@/components/page-bands), shared with the inner author pages.
 // ============================================================
-
-function FinalCtaSection({ cta }: { cta: HomepageCta }) {
-  return (
-    <section className="bg-primary text-primary-foreground">
-      <div className="mx-auto w-full max-w-content px-4 py-12 text-center sm:px-6 md:py-14">
-        <h2 className="font-serif text-3xl font-normal sm:text-[2.875rem] sm:leading-tight">
-          Ready to publish your book?
-        </h2>
-        <p className="mt-3 text-lg text-primary-foreground/85">
-          Create your first book on Librum and publish on your terms.
-        </p>
-        {/* REDESIGN STEP 2: both lines above the button, as in the mockup. */}
-        <p className="mt-2 text-primary-foreground/80">No setup fee. No monthly subscription.</p>
-        <Link href={cta.href} className={`${BRASS_CTA_CLASSES} mt-6`}>
-          {cta.label}
-        </Link>
-      </div>
-    </section>
-  );
-}

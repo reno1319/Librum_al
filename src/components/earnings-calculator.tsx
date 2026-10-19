@@ -21,6 +21,9 @@ import { formControlClasses } from "@/lib/form-styles";
 // value property silently drops what it considers invalid -- "990,00"
 // was literally unreachable through the old control. Every figure it
 // renders goes through formatAllMinorUnits, so no `$` can appear here.
+//
+// AUTHOR PAGES REDESIGN: a white two-column box (inputs left, estimate
+// right; stacked on phones). Same rows, labels, messages and maths.
 export function EarningsCalculator() {
   const [priceInput, setPriceInput] = useState("990");
   const [salesInput, setSalesInput] = useState("1");
@@ -45,14 +48,14 @@ export function EarningsCalculator() {
     : { grossMinor: 0, platformFeeMinor: 0, authorEarningsMinor: 0 };
 
   return (
-    <div className="rounded-card border border-border bg-surface p-6 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted">
-        Earnings calculator
-      </p>
+    <div className="grid gap-8 rounded-[4px] border border-border bg-surface p-5 sm:p-7 md:grid-cols-2">
+      <div className="flex flex-col gap-4">
+        <p className="text-[0.8125rem] font-semibold uppercase tracking-[0.14em] text-[#8a6d12]">
+          Earnings calculator
+        </p>
 
-      <div className="mt-4 flex flex-wrap gap-4">
-        <label className="flex flex-1 min-w-40 flex-col gap-1 text-sm">
-          Book price (ALL)
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-semibold">Book price (ALL)</span>
           <input
             type="text"
             inputMode="decimal"
@@ -62,8 +65,8 @@ export function EarningsCalculator() {
             className={`${formControlClasses} w-full`}
           />
         </label>
-        <label className="flex flex-1 min-w-40 flex-col gap-1 text-sm">
-          Number of sales
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-semibold">Number of sales</span>
           <input
             type="number"
             inputMode="numeric"
@@ -77,7 +80,7 @@ export function EarningsCalculator() {
         </label>
       </div>
 
-      <div aria-live="polite" className="mt-6 border-t border-border pt-6">
+      <div aria-live="polite" className="border-t border-border pt-6 md:border-t-0 md:border-l md:pt-0 md:pl-8">
         {isFreeBook ? (
           <div>
             <p className="font-serif text-lg font-semibold text-foreground">Free book</p>
@@ -105,7 +108,7 @@ export function EarningsCalculator() {
               </div>
               <div className="flex items-baseline justify-between gap-4 border-t border-border pt-3">
                 <span className="font-medium text-foreground">Estimated author earnings</span>
-                <span className="font-serif text-xl font-semibold text-primary">
+                <span className="font-serif text-[2rem] leading-none font-normal text-primary">
                   {formatAllMinorUnits(estimate.authorEarningsMinor)}
                 </span>
               </div>
