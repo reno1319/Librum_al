@@ -87,7 +87,7 @@ describe("Add a book with the migration applied", () => {
   it("Readiness lists the missing choice, and never says ready while it is missing", () => {
     const readiness = html.slice(html.indexOf(">Readiness</p>"), html.indexOf(">Rights</legend>"));
     expect(readiness).toContain("Choose the rights before publishing.");
-    expect(readiness).not.toContain("Looks good — ready to publish.");
+    expect(readiness).not.toContain("Looks good — ready to send for review.");
   });
 
   it("the preview card shows the author name while no pen name is typed", () => {
@@ -107,8 +107,8 @@ describe("Add a book before the migration (D2/D3)", () => {
     expect(html).not.toContain("Choose the rights before publishing.");
   });
 
-  it("never says 'ready to publish' (the server refuses Publish without the rights table)", () => {
-    expect(html).not.toContain("Looks good — ready to publish.");
+  it("never says 'ready to send for review' (the server refuses Publish without the rights table)", () => {
+    expect(html).not.toContain("Looks good — ready to send for review.");
   });
 
   it("the Translator field is still there (book_contributors exists before F3)", () => {

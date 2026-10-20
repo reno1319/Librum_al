@@ -305,3 +305,38 @@ export async function sendBookTakedownEmail(
       </div>`,
   );
 }
+
+// ADMIN-3-REVIEW (J): best effort, like the takedown email. The caller
+// (the admin Approve / Send back action) reads the author's address
+// through the admin auth API after the RPC has committed, never blocks
+// on this, and logs a failure. The Dashboard is what always works.
+export async function sendBookApprovedEmail(to: string, { title, bookId }: { title: string; bookId: string }) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    `Your book “${title}” is live on Librum`,
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Your book <strong>${escapeEmailHtml(title)}</strong> is live on Librum</h1>
+        <p>We checked it and it's now in the Bookstore.</p>
+        <p><a href="${origin}/books/${encodeURIComponent(bookId)}">See your book</a></p>
+      </div>`,
+  );
+}
+
+export async function sendBookSentBackEmail(
+  to: string,
+  { title, reasonLabel, message }: { title: string; reasonLabel: string; message: string },
+) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    `Librum sent “${title}” back`,
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Librum sent <strong>${escapeEmailHtml(title)}</strong> back</h1>
+        <p>Reason: ${escapeEmailHtml(reasonLabel)}</p>
+        <p>${escapeEmailHtmlWithBreaks(message)}</p>
+        <p>Fix it and send it for review again. Questions? Write to support@librum.al</p>
+        <p><a href="${origin}/dashboard">Open your dashboard</a></p>
+      </div>`,
+  );
+}

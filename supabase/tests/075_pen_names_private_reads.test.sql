@@ -550,6 +550,9 @@ insert into pg_temp.allow values
   -- to the author's own rows); reports.view staff read every row.
   -- id, report_id and the staff ids are not granted to authenticated.
   ('book_takedowns', 'author_id', 'own+staff', 'authors read own takedowns; reports.view staff'),
+  -- ADMIN-3-REVIEW (20261020120000): authors read their own review rows
+  -- (author_id is in the column grant); staff read through the service role.
+  ('book_reviews', 'author_id', 'own', 'authors read own reviews'),
   ('payments', 'buyer_id', 'staff', 'finance.view'),
   ('author_ledger_entries', 'author_id', 'staff', 'finance.view'),
   ('author_payouts', 'author_id', 'staff', 'finance.view'),
@@ -732,6 +735,10 @@ do $$
 declare
   a text := 'e0750000-0000-4000-8000-00000000000a';
 begin
+  -- ADMIN-3-REVIEW fixture: a live book's cover can no longer change
+  -- (LB463), so these CHECK/UNIQUE probes run on the book as a draft; it
+  -- is published again below with an approval of its new cover.
+  update public.books set status = 'draft' where id = 'e0750001-0000-4000-8000-0000000000a2';
   perform pg_temp.assert(pg_temp.run_as('service_role', null,
       $q$update public.books set cover_path = 'e0750000-0000-4000-8000-00000000000a/e0750001-0000-4000-8000-0000000000a2-cover.jpg' where id = 'e0750001-0000-4000-8000-0000000000a2'$q$)
       like '23514:%books_cover_path_check%',
@@ -747,6 +754,9 @@ begin
   perform pg_temp.assert(pg_temp.run_as('service_role', null,
       $q$update public.books set cover_path = 'e075c0de-0000-4000-8000-0000000000a2/cover.png' where id = 'e0750001-0000-4000-8000-0000000000a2'$q$) = 'OK:1',
     'part6: a new-shape cover key is accepted');
+  insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, status, grandfathered, decided_at)
+  select id, title, author_id, file_path, cover_path, 'approved', true, now() from public.books where id = 'e0750001-0000-4000-8000-0000000000a2';
+  update public.books set status = 'published' where id = 'e0750001-0000-4000-8000-0000000000a2';
   perform pg_temp.assert(pg_temp.run_as('service_role', null,
       format($q$update public.pen_names set avatar_path = %L where id = %L$q$, a || '/avatar.png', pg_temp.dflt(a::uuid))) like '23514:%pen_names_avatar_path_check%',
     'part6: the account photo key is no longer accepted on a pen name (C8)');

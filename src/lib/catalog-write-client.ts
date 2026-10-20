@@ -49,6 +49,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //      is uploaded under a fresh random key (newBookCoverPath) and removed
 //      only through this client, after every gate and, for a removal,
 //      only for a key read from the author's own row.
+//      ADMIN-3-REVIEW (M5, N3): the same now holds for a manuscript's
+//      final key. Authors may write only under `<uid>/tmp/` in the
+//      manuscripts bucket; a final manuscript is uploaded under a fresh
+//      versioned key (newBookManuscriptPath) through this client, and an
+//      old one is removed through it only when it is own-key classified
+//      and no longer retained (removeUnretainedManuscripts in
+//      book-reviews.ts: the current file, the latest approved snapshot
+//      and a pending snapshot are kept).
 //
 // `server-only` makes any import of this module from a client component
 // a build error, so the key can never reach browser code through it.

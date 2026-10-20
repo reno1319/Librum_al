@@ -22,6 +22,13 @@ vi.mock("../../../actions", () => ({
   publishBook: { bind: () => async () => undefined },
   unpublishBook: { bind: () => async () => undefined },
   deleteBook: { bind: () => async () => undefined },
+  cancelBookReview: { bind: () => async () => undefined },
+}));
+// ADMIN-3-REVIEW: a draft with no approval and nothing pending -- the
+// Publish control reads "Send for review" (its own states are in
+// review-state.rendered.test.ts).
+vi.mock("@/lib/book-reviews", () => ({
+  getBookReviewState: async () => ({ kind: "ok", pending: false, approvalValid: false, latestSentBack: null }),
 }));
 
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
@@ -77,8 +84,8 @@ function radio(html: string, basis: string): string {
 }
 
 function publishButton(html: string): string {
-  const start = html.lastIndexOf("<button", html.indexOf("Publish book</button>"));
-  return html.slice(start, html.indexOf("Publish book</button>"));
+  const start = html.lastIndexOf("<button", html.indexOf("Send for review</button>"));
+  return html.slice(start, html.indexOf("Send for review</button>"));
 }
 
 beforeEach(() => {
@@ -207,10 +214,11 @@ describe("Edit page: the Publishing box (P4, D3)", () => {
     expect(html).not.toContain("Choose the rights before publishing.");
   });
 
-  it("with a declaration -> Ready to publish, Publish enabled", async () => {
+  it("with a declaration -> Ready to send for review, the control enabled", async () => {
     rightsState = { kind: "present", declaration: { basis: "own_rights" } };
     const html = await render();
-    expect(html).toContain("Ready to publish.");
+    // ADMIN-3-REVIEW (B): no approval yet, so the line names the review.
+    expect(html).toContain("Ready to send for review.");
     expect(html).not.toContain("Choose the rights before publishing.");
     expect(publishButton(html)).not.toContain('disabled=""');
   });

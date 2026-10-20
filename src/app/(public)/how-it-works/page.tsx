@@ -41,8 +41,8 @@ const steps: { title: string; body: string; rights?: boolean }[] = [
     rights: true,
   },
   {
-    title: "Publish",
-    body: "When you're ready, publish the draft. It immediately appears on the storefront and in search.",
+    title: "Send for review",
+    body: "When you're ready, send the draft for review. Once Librum approves it, it appears on the storefront and in search.",
   },
   {
     title: "Get paid",

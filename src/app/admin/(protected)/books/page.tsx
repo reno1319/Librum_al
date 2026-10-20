@@ -6,7 +6,7 @@ import { formControlClasses } from "@/lib/form-styles";
 import { buttonClasses } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import type { Metadata } from "next";
-import { readActiveTakedownBookIds } from "./admin-book-reads";
+import { readActiveTakedownBookIds, readPendingReviewBookIds } from "./admin-book-reads";
 import {
   BOOKS_FILTERS,
   BOOKS_PAGE_SIZE,
@@ -36,6 +36,8 @@ export const dynamic = "force-dynamic";
 // only. Search by
 // title or author (the book's pen name, or the account's public author
 // name), filter Live / Draft / Taken down, 50 per page, newest first.
+// ADMIN-3-REVIEW (G): and "In review" -- a draft with a pending review
+// (read the same way); "Draft" excludes those and taken-down books.
 const LIST_ID_LIMIT = 200;
 const LOAD_ERROR = "Couldn't load the books. Please try again.";
 
@@ -50,21 +52,22 @@ type BookListRow = {
 
 const CHIP_CLASSES: Record<BookStateLabel, string> = {
   Live: "bg-[#e1f0e7] text-[#1e5c3e]",
+  "In review": "bg-[#fbf0d4] text-[#806510]",
   Draft: "bg-reader-tint text-[#7a5a00]",
   "Taken down": "bg-[#f6e3df] text-[#8e2a1e]",
 };
 
 type ListResult =
-  | { ok: true; rows: BookListRow[]; total: number; takenDownIds: Set<string> }
+  | { ok: true; rows: BookListRow[]; total: number; takenDownIds: Set<string>; inReviewIds: Set<string> }
   | { ok: false };
 
 async function loadBooks(filter: ReturnType<typeof parseBooksFilter>, q: string, page: number): Promise<ListResult> {
   const admin = createAdminClient();
-  const takenDownIds = await readActiveTakedownBookIds();
-  if (!takenDownIds) return { ok: false };
+  const [takenDownIds, inReviewIds] = await Promise.all([readActiveTakedownBookIds(), readPendingReviewBookIds()]);
+  if (!takenDownIds || !inReviewIds) return { ok: false };
 
-  if (filter === "taken_down" && takenDownIds.size === 0) {
-    return { ok: true, rows: [], total: 0, takenDownIds };
+  if ((filter === "taken_down" && takenDownIds.size === 0) || (filter === "in_review" && inReviewIds.size === 0)) {
+    return { ok: true, rows: [], total: 0, takenDownIds, inReviewIds };
   }
 
   let orFilter: string | null = null;
@@ -96,8 +99,10 @@ async function loadBooks(filter: ReturnType<typeof parseBooksFilter>, q: string,
   if (filter === "live") query = query.eq("status", "published");
   if (filter === "draft") {
     query = query.eq("status", "draft");
-    if (takenDownIds.size > 0) query = query.not("id", "in", `(${Array.from(takenDownIds).join(",")})`);
+    const excluded = [...takenDownIds, ...inReviewIds];
+    if (excluded.length > 0) query = query.not("id", "in", `(${excluded.join(",")})`);
   }
+  if (filter === "in_review") query = query.eq("status", "draft").in("id", Array.from(inReviewIds));
   if (filter === "taken_down") query = query.in("id", Array.from(takenDownIds));
   if (orFilter) query = query.or(orFilter);
 
@@ -111,7 +116,7 @@ async function loadBooks(filter: ReturnType<typeof parseBooksFilter>, q: string,
     console.error("admin books: list read failed", { error });
     return { ok: false };
   }
-  return { ok: true, rows: data ?? [], total: count ?? 0, takenDownIds };
+  return { ok: true, rows: data ?? [], total: count ?? 0, takenDownIds, inReviewIds };
 }
 
 export default async function AdminBooksPage({
@@ -135,7 +140,7 @@ export default async function AdminBooksPage({
         <p className="text-xs font-semibold tracking-[0.14em] text-[#806510] uppercase md:text-[0.8125rem]">Catalog</p>
         <h1 className="mt-1 font-serif text-[2rem] font-bold text-primary md:text-[2.5rem]">Books</h1>
         <p className="mt-1 text-sm text-muted">
-          Every book, drafts included. Open a book to see its reports and rights history, or to unpublish it.
+          Every book, drafts included. Open a book to review it, see its reports and rights history, or unpublish it.
         </p>
       </div>
 
@@ -189,7 +194,11 @@ export default async function AdminBooksPage({
           </p>
           <ul className="flex flex-col">
             {result.rows.map((book) => {
-              const state = bookStateLabel(book.status, result.takenDownIds.has(book.id));
+              const state = bookStateLabel(
+                book.status,
+                result.takenDownIds.has(book.id),
+                result.inReviewIds.has(book.id),
+              );
               return (
                 <li key={book.id} className="border-t border-border first:border-t-0">
                   <Link

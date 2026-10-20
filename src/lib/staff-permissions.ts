@@ -69,6 +69,12 @@ import type { Permission, StaffRole } from "@/lib/types";
 // the blog role. It is TypeScript-only: SQL staff_has_permission() does
 // not know it, because the two functions it gates (set_librum_choice,
 // clear_librum_choice) are service_role-only and never call it.
+//
+// ADMIN-3-REVIEW adds books.review (approve or send back a book waiting
+// for review), owner and admin only (Renato's 6a). Unlike
+// catalog.feature it IS in SQL staff_has_permission() (migration
+// 20261020120000): admin_approve_book_review and
+// admin_send_back_book_review check it themselves.
 export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>> = {
   owner: [
     "admin.access",
@@ -83,6 +89,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "blog.view",
     "blog.manage",
     "catalog.feature",
+    "books.review",
   ],
   admin: [
     "admin.access",
@@ -96,6 +103,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "blog.view",
     "blog.manage",
     "catalog.feature",
+    "books.review",
   ],
   moderator: ["admin.access", "reports.view", "reports.resolve"],
   support: ["admin.access", "refunds.view"],

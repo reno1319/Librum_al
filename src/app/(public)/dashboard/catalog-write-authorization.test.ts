@@ -45,6 +45,13 @@ class RedirectSignal extends Error {
 const mockRedirect = vi.fn((url: string) => {
   throw new RedirectSignal(url);
 });
+// ADMIN-3-REVIEW: book_reviews reads/writes replaced by a settable
+// double (default: nothing pending, approval valid); see
+// src/lib/book-reviews-test-double.ts.
+vi.mock("@/lib/book-reviews", async (importOriginal) => {
+  const { bookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+  return bookReviewsDouble(await importOriginal<object>());
+});
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: () => Promise.resolve({ get: () => undefined }) }));
@@ -480,6 +487,9 @@ function membershipRpc(fn: string, args: MembershipArgs) {
 // "upload:<bucket>:<key>" events as the session's, plus a "writer-"
 // marker so a test can tell which client made the call.
 let failWriterCoverUpload = false;
+// ADMIN-3-REVIEW (M5): manuscripts' final keys are written by the
+// catalog writer too; this fails only those uploads.
+let failWriterManuscriptUpload = false;
 const writerRemoved: string[] = [];
 const catalogWriter = {
   from: (table: string) => builder(table, "catalog-writer"),
@@ -488,7 +498,9 @@ const catalogWriter = {
     from: (bucket: string) => ({
       upload: async (p: string): Promise<{ error: { message: string } | null }> => {
         events.push(`upload:${bucket}:${p}`, `writer-upload:${bucket}`);
-        return failWriterCoverUpload ? { error: { message: "boom" } } : { error: null };
+        return failWriterCoverUpload || (bucket === "manuscripts" && failWriterManuscriptUpload)
+          ? { error: { message: "boom" } }
+          : { error: null };
       },
       remove: async (paths: string[]) => {
         events.push(`writer-remove:${bucket}`);
@@ -654,6 +666,7 @@ beforeEach(() => {
   forcedPickClearError = null;
   storedObjects = {};
   failWriterCoverUpload = false;
+  failWriterManuscriptUpload = false;
   writerRemoved.length = 0;
   mockRedirect.mockClear();
   mockCreateCatalogWriteClient.mockClear();
@@ -1264,6 +1277,9 @@ describe("the privileged client stays server-only", () => {
 //    with paths the server derived, through the trusted writer only.
 // ============================================================
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+// ADMIN-3-REVIEW (M5): `<author>/<book>/<random uuid>.epub`.
+const versionedManuscriptKey = (bookId: unknown) =>
+  new RegExp(`^${USER_ID}/${String(bookId)}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.epub$`);
 const NEW_COVER_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.(?:jpg|png)$/;
 const STORAGE_PATH_COLUMNS = ["cover_path", "file_path"];
 const NEW_BOOK_ERROR = "/dashboard/books/new?error=Something+went+wrong+saving+your+book.+Please+try+again";
@@ -1372,7 +1388,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
       const row = insert.payload as Row;
       expect(row.author_id).toBe(USER_ID);
       expect(row.id).toMatch(UUID);
-      expect(row.file_path).toBe(`${USER_ID}/${row.id}.epub`);
+      expect(row.file_path).toMatch(versionedManuscriptKey(row.id));
       // PEN-2 (L10): a fresh random cover folder, never the account or book.
       expect(row.cover_path).toMatch(NEW_COVER_KEY);
       expect(String(row.cover_path)).not.toContain(USER_ID);
@@ -1380,6 +1396,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
       // The permanent objects uploaded are exactly the paths persisted.
       expect(events).toContain(`upload:covers:${row.cover_path}`);
       expect(events).toContain(`upload:manuscripts:${row.file_path}`);
+      expect(events).toContain("writer-upload:manuscripts");
       expect(tables.books).toEqual([expect.objectContaining({ id: row.id, status: "draft", author_id: USER_ID })]);
     });
 
@@ -1396,7 +1413,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
       const row = bookInserts()[0].payload as Row;
       expect(row.author_id).toBe(USER_ID);
       expect(row.id).toMatch(UUID);
-      expect(row.file_path).toBe(`${USER_ID}/${row.id}.epub`);
+      expect(row.file_path).toMatch(versionedManuscriptKey(row.id));
       expect(row.cover_path).toMatch(NEW_COVER_KEY);
       expect(JSON.stringify(row)).not.toContain("forged");
       expect(JSON.stringify(row)).not.toContain(OTHER_AUTHOR);
@@ -1417,7 +1434,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
 
       expect(await redirectOf(createBook(fd))).toBe("/dashboard");
       const row = bookInserts()[0].payload as Row;
-      expect(row.file_path).toBe(`${USER_ID}/${row.id}.epub`);
+      expect(row.file_path).toMatch(versionedManuscriptKey(row.id));
       expect(row.cover_path).toMatch(NEW_COVER_KEY);
       expect(events).toContain(`download:manuscripts:${tempEpub}`);
       expect(events).toContain(`download:manuscripts:${tempCover}`);
@@ -1489,16 +1506,8 @@ describe("Patch 8: createBook never creates the trusted writer for a refused req
   });
 
   it("a failed manuscripts upload never reaches the trusted insert, and the new cover is removed", async () => {
-    const original = sessionClient.storage.from;
-    sessionClient.storage.from = (b: string) => {
-      const real = original(b);
-      return b === "manuscripts" ? { ...real, upload: async () => ({ error: { message: "boom" } }) } : real;
-    };
-    try {
-      expect(await redirectOf(createBook(await createBookForm("199")))).toMatch(/^\/dashboard\/books\/new\?error=Could\+not\+upload/);
-    } finally {
-      sessionClient.storage.from = original;
-    }
+    failWriterManuscriptUpload = true;
+    expect(await redirectOf(createBook(await createBookForm("199")))).toMatch(/^\/dashboard\/books\/new\?error=Could\+not\+upload/);
     expect(bookInserts()).toEqual([]);
     expect(writerRemoved).toHaveLength(1);
     expect(writerRemoved[0]).toMatch(NEW_COVER_KEY);
@@ -1581,12 +1590,16 @@ describe("Patch 8: book edits and replacement uploads stay protected", () => {
       expect(update.op).toBe("update");
       expect(update.payload).toMatchObject({
         cover_path: expect.stringMatching(NEW_COVER_KEY),
-        file_path: `${USER_ID}/${BOOK_ID}.epub`,
+        file_path: expect.stringMatching(versionedManuscriptKey(BOOK_ID)),
       });
       expect(events).toContain("writer-upload:covers");
+      expect(events).toContain("writer-upload:manuscripts");
       expect(update.payload).not.toHaveProperty("author_id");
       expect(update.payload).not.toHaveProperty("id");
-      expect(update.payload).not.toHaveProperty("status");
+      // ADMIN-3-REVIEW (S5): a new file or cover always writes the book
+      // back to a draft (the only status value a file change may carry).
+      expect((update.payload as Row).status).toBe("draft");
+      expect((update.payload as Row).librum_choice_at).toBeNull();
       expect(update.filters).toContainEqual({ kind: "eq", column: "id", value: BOOK_ID });
       expect(update.filters).toContainEqual({ kind: "eq", column: "author_id", value: USER_ID });
       expect(sessionWritesTo("books")).toEqual([]);
@@ -1642,7 +1655,8 @@ describe("Patch 8: the trusted insert is the only one, and stays in createBook",
     // BOOK-STORAGE-MUTATION-AUTH-1 / PEN-2 (L10): through the shared
     // constructors; the cover key is a fresh random folder.
     expect(createBookBody).toMatch(/const coverPath = newBookCoverPath\(coverResult\.extension\);/);
-    expect(createBookBody).toMatch(/const manuscriptPath = canonicalBookManuscriptPath\(user\.id, bookId\);/);
+    // ADMIN-3-REVIEW (M5): a versioned manuscript key in the new book's folder.
+    expect(createBookBody).toMatch(/const manuscriptPath = newBookManuscriptPath\(user\.id, bookId\);/);
   });
 });
 

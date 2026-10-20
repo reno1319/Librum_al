@@ -6,15 +6,16 @@ import { watermarkEpub } from "@/lib/watermark";
 import { isRecoverySessionActive } from "@/lib/recovery-session";
 import {
   BOOK_MANUSCRIPTS_BUCKET,
-  isOwnCanonicalBookManuscriptPath,
+  isOwnBookManuscriptPath,
 } from "@/lib/book-storage-path";
+import { readDownloadFilePath } from "@/lib/book-reviews";
 
 // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the exact row this route may act
 // on. `id` and `author_id` come back from the database with the path so
 // the manuscript key is checked against the row's own identity, never
 // against the URL parameter alone and never against anything parsed out
 // of the stored path. `file_path` stays `unknown` here on purpose: it is
-// data, not authority, until isOwnCanonicalBookManuscriptPath() accepts it.
+// data, not authority, until isOwnBookManuscriptPath() accepts it.
 //
 // PEN-NAMES-2 (D2): entitlement is decided first (own book by an own-row
 // query, or user_owns_book), from the public row (public_books: id and
@@ -134,14 +135,30 @@ export async function GET(
     return fileUnavailable();
   }
 
+  // ADMIN-3-REVIEW (N2 ★a, P3): which file. The author always gets the
+  // current file; a buyer gets the file of the book's latest APPROVED
+  // review (so a new file waiting for review never reaches buyers before
+  // Librum approves it), or the current file when the book has never had
+  // an approval. Read with the same service-role client; any read error
+  // fails CLOSED -- never the current file as a fallback.
+  const chosen = await readDownloadFilePath(admin, {
+    bookId: book.id,
+    isAuthor: book.author_id === user.id,
+    currentFilePath: typeof book.file_path === "string" ? book.file_path : null,
+  });
+  if (!chosen.ok) {
+    return fileUnavailable();
+  }
+
   // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the service-role client bypasses
   // Storage RLS, and storage-js interpolates the key into the request URL
   // unencoded (a "../" segment would leave the bucket). So nothing reaches
-  // it unless the stored value is exactly `<row author_id>/<row id>.epub`.
-  // A missing, legacy or forged value gets the same file-unavailable
-  // answer as a missing row, with nothing logged or echoed.
-  const filePath = book.file_path;
-  if (!isOwnCanonicalBookManuscriptPath(filePath, book.author_id, book.id)) {
+  // it unless the chosen value is exactly `<row author_id>/<row id>.epub`
+  // or (ADMIN-3) `<row author_id>/<row id>/<uuid>.epub`. A missing,
+  // legacy or forged value gets the same file-unavailable answer as a
+  // missing row, with nothing logged or echoed.
+  const filePath = chosen.filePath;
+  if (!isOwnBookManuscriptPath(filePath, book.author_id, book.id)) {
     return fileUnavailable();
   }
 

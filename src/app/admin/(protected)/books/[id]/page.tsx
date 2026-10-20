@@ -6,13 +6,26 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { takedownReasonForReport, takedownReasonLabel } from "@/lib/takedown-reasons";
+import {
+  BUYER_FILE_ONLY_HISTORY_LABEL,
+  GRANDFATHERED_HISTORY_LABEL,
+  REVIEW_CHECKLIST_ITEMS,
+  REVIEW_STATUS_LABELS,
+  type BookReviewStatus,
+} from "@/lib/book-review-copy";
 import { Alert } from "@/components/ui/alert";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import type { Metadata } from "next";
 import { formatActivityTime, formatRelativeTime, formatTodayDate } from "../../../admin-landing-logic";
 import { describeBookEyebrow, isUuid, resolveTakedownReport } from "../book-admin-logic";
-import { allowBookAgainAsStaff, unpublishBookAsStaff } from "../actions";
+import {
+  allowBookAgainAsStaff,
+  approveBookReviewAsStaff,
+  sendBackBookReviewAsStaff,
+  unpublishBookAsStaff,
+} from "../actions";
 import { UnpublishForm } from "./unpublish-form";
+import { SendBackForm } from "./send-back-form";
 
 export const metadata: Metadata = {
   title: "Book",
@@ -29,6 +42,12 @@ export const dynamic = "force-dynamic";
 // session cannot see drafts (M2). The panel, and both of its actions,
 // need reports.resolve. Opened from a report (?report=<id>), the form
 // carries that report only when it is an OPEN report of this book.
+//
+// ADMIN-3-REVIEW (H): when the book is waiting for review, the right
+// column opens with "Review this book" -- the file link, the cover, the
+// four checks, Approve and publish, and Send back -- for books.review
+// staff only (owner, admin); other staff see that it is in review,
+// read-only. The left column adds the review history (newest first).
 
 type AdminBook = {
   id: string;
@@ -37,6 +56,7 @@ type AdminBook = {
   price_all: number | null;
   published_at: string | null;
   cover_path: string | null;
+  file_path: string | null;
   author_id: string;
   pen_name_id: string | null;
   pen: { name: string } | null;
@@ -49,6 +69,19 @@ type RightsRow = {
   author_public_name: string;
   pen_name: string | null;
   statement_text: string;
+};
+
+type ReviewRow = {
+  id: string;
+  status: BookReviewStatus;
+  grandfathered: boolean;
+  buyer_file_only: boolean;
+  submitted_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  reason: string | null;
+  file_path: string | null;
+  cover_path: string | null;
 };
 
 type ActiveTakedown = {
@@ -71,6 +104,7 @@ export default async function AdminBookPage({
 }) {
   const { role } = await requireStaff("reports.view");
   const canResolve = roleHasPermission(role, "reports.resolve");
+  const canReview = roleHasPermission(role, "books.review");
 
   const { id } = await params;
   const { report: reportParam, error, success } = await searchParams;
@@ -79,12 +113,12 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, author_id, pen_name_id, pen:pen_names(name)")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names(name)")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();
 
-  const [profileResult, reportsResult, rightsResult, takedownResult, bundlesResult] = await Promise.all([
+  const [profileResult, reportsResult, rightsResult, takedownResult, bundlesResult, reviewsResult] = await Promise.all([
     admin
       .from("profiles")
       .select("display_name, public_author_name")
@@ -115,6 +149,12 @@ export default async function AdminBookPage({
       .eq("book_id", book.id)
       .eq("bundles.status", "published")
       .returns<{ bundle_id: string; bundles: { title: string; status: string } }[]>(),
+    admin
+      .from("book_reviews")
+      .select("id, status, grandfathered, buyer_file_only, submitted_at, decided_at, decided_by, reason, file_path, cover_path")
+      .eq("book_id", book.id)
+      .order("submitted_at", { ascending: false })
+      .returns<ReviewRow[]>(),
   ]);
 
   const openReports = reportsResult.data ?? [];
@@ -124,6 +164,19 @@ export default async function AdminBookPage({
   // is offered (the RPCs would decide on their own anyway).
   const takedownUnknown = Boolean(takedownResult.error);
   const publishedBundleTitles = (bundlesResult.data ?? []).map((row) => row.bundles.title);
+  const reviews = reviewsResult.data ?? [];
+  const pendingReview = book.status === "draft" ? (reviews.find((r) => r.status === "pending") ?? null) : null;
+  // S6 / 6: the pending snapshot must still be the book's current files.
+  const pendingIsCurrent =
+    pendingReview !== null &&
+    pendingReview.file_path === book.file_path &&
+    pendingReview.cover_path === book.cover_path;
+  const deciderIds = Array.from(new Set(reviews.map((r) => r.decided_by).filter((v): v is string => !!v)));
+  const decidersResult =
+    deciderIds.length > 0
+      ? await admin.from("profiles").select("id, display_name").in("id", deciderIds).returns<{ id: string; display_name: string | null }[]>()
+      : { data: [] as { id: string; display_name: string | null }[] };
+  const deciderName = new Map((decidersResult.data ?? []).map((p) => [p.id, p.display_name ?? "a staff member"]));
 
   const [takenByResult, takenDownBundlesResult] = takedown
     ? await Promise.all([
@@ -177,7 +230,7 @@ export default async function AdminBookPage({
           )}
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-[0.14em] text-[#806510] uppercase md:text-[0.8125rem]">
-              {describeBookEyebrow(book, Boolean(takedown))}
+              {describeBookEyebrow(book, Boolean(takedown), pendingReview !== null)}
             </p>
             <h1 className="mt-1.5 mb-1 font-serif text-[1.75rem] leading-tight font-bold break-words text-primary md:text-[2.125rem]">
               {book.title}
@@ -244,84 +297,177 @@ export default async function AdminBookPage({
             </ul>
           )}
         </section>
+
+        <section aria-labelledby="book-review-history" className={SECTION_CLASSES}>
+          <h2 id="book-review-history" className={SECTION_HEADING_CLASSES}>
+            Review history
+          </h2>
+          {reviewsResult.error ? (
+            <p className="text-sm text-red-700">Couldn’t load the review history.</p>
+          ) : reviews.length === 0 ? (
+            <p className="text-sm text-muted">Never sent for review.</p>
+          ) : (
+            <ul className="flex flex-col gap-2 text-sm">
+              {reviews.map((review) => (
+                <li key={review.id} className="break-words">
+                  {formatActivityTime(review.decided_at ?? review.submitted_at)} ·{" "}
+                  {review.buyer_file_only
+                    ? BUYER_FILE_ONLY_HISTORY_LABEL
+                    : review.grandfathered
+                      ? GRANDFATHERED_HISTORY_LABEL
+                      : REVIEW_STATUS_LABELS[review.status]}
+                  {review.reason && ` · ${takedownReasonLabel(review.reason)}`}
+                  {review.decided_by && ` · by ${deciderName.get(review.decided_by) ?? "a former staff member"}`}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
 
-      <section
-        aria-labelledby="book-unpublish"
-        className="flex min-w-0 flex-[2_1_340px] flex-col gap-4 rounded-card border-2 border-primary bg-surface p-5 md:p-6"
-      >
-        {takedownUnknown ? (
-          <>
-            <h2 id="book-unpublish" className="font-serif text-2xl font-bold text-primary">
-              Unpublish this book
+      <div className="flex min-w-0 flex-[2_1_340px] flex-col gap-5">
+        {reviewsResult.error ? (
+          <section aria-labelledby="book-review" className="flex flex-col gap-3 rounded-card border-2 border-primary bg-surface p-5 md:p-6">
+            <h2 id="book-review" className="font-serif text-2xl font-bold text-primary">
+              Review this book
             </h2>
-            <p className="text-sm text-red-700">Couldn’t check whether this book is taken down. Please reload the page.</p>
-          </>
-        ) : takedown ? (
-          <>
-            <h2 id="book-unpublish" className="font-serif text-2xl font-bold text-primary">
-              Taken down
+            <p className="text-sm text-red-700">Couldn’t check whether this book is waiting for review. Please reload the page.</p>
+          </section>
+        ) : pendingReview ? (
+          <section aria-labelledby="book-review" className="flex flex-col gap-4 rounded-card border-2 border-primary bg-surface p-5 md:p-6">
+            <h2 id="book-review" className="font-serif text-2xl font-bold text-primary">
+              {canReview ? "Review this book" : "In review"}
             </h2>
             <p className="text-[0.9375rem]">
-              Taken down {formatRelativeTime(takedown.taken_down_at, now)} by {takenByName}.
+              Sent {formatRelativeTime(pendingReview.submitted_at, now)} by {publicName}.
             </p>
-            <dl className="flex flex-col gap-3 text-sm">
-              <div>
-                <dt className="font-semibold">Reason</dt>
-                <dd>{takedownReasonLabel(takedown.reason)}</dd>
-              </div>
-              <div>
-                <dt className="font-semibold">Message sent to the author</dt>
-                <dd className="whitespace-pre-wrap break-words">{takedown.message_to_author}</dd>
-              </div>
-              <div>
-                <dt className="font-semibold">Bundles unpublished</dt>
-                <dd>{takenDownBundleTitles.length > 0 ? takenDownBundleTitles.join(", ") : "None"}</dd>
-              </div>
-            </dl>
-            <p className="text-sm text-muted">
-              The author can&apos;t publish it again until you allow it. Readers who already bought it keep it.
-            </p>
-            {canResolve && (
-              <form action={allowBookAgainAsStaff.bind(null, book.id)}>
-                <button
-                  type="submit"
-                  className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
-                >
-                  Allow the author to publish again
-                </button>
-              </form>
+            {!canReview ? (
+              <p className="text-sm text-muted">Only owners and admins can approve or send back a book.</p>
+            ) : !pendingIsCurrent ? (
+              <p className="text-sm text-red-700">
+                The author changed the file or cover after sending it. They need to send it for review again.
+              </p>
+            ) : (
+              <>
+                <div className="flex items-start gap-4">
+                  {coverUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={coverUrl} alt="The cover sent for review" className="h-24 w-16 shrink-0 rounded-[3px] object-cover" />
+                  ) : (
+                    <CoverPlaceholder title={book.title} authorName={publicName} className="h-24 w-16 shrink-0 rounded-[3px]" />
+                  )}
+                  <a
+                    href={`/admin/books/${book.id}/file?review=${pendingReview.id}`}
+                    className="focus-ring inline-flex min-h-11 items-center text-[0.9375rem] font-semibold text-primary underline underline-offset-2 hover:decoration-2"
+                  >
+                    Open the book file
+                  </a>
+                </div>
+                <form action={approveBookReviewAsStaff} className="flex flex-col gap-3">
+                  <input type="hidden" name="bookId" value={book.id} />
+                  <input type="hidden" name="reviewId" value={pendingReview.id} />
+                  <input type="hidden" name="filePath" value={pendingReview.file_path ?? ""} />
+                  <input type="hidden" name="coverPath" value={pendingReview.cover_path ?? ""} />
+                  <fieldset className="flex flex-col gap-1">
+                    <legend className="mb-1 text-[0.9375rem] font-semibold">Check before you approve</legend>
+                    {REVIEW_CHECKLIST_ITEMS.map((item) => (
+                      <label key={item.key} className="flex min-h-11 items-center gap-3 text-[0.9375rem]">
+                        <input type="checkbox" name={item.key} required className="size-5 shrink-0 accent-primary" />
+                        {item.label}
+                      </label>
+                    ))}
+                  </fieldset>
+                  <button
+                    type="submit"
+                    className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground hover:opacity-90"
+                  >
+                    Approve and publish
+                  </button>
+                </form>
+                <SendBackForm action={sendBackBookReviewAsStaff} bookId={book.id} reviewId={pendingReview.id} />
+                <p className="text-[0.8125rem] text-muted">Saved in the Audit log with your name, the time and the reason.</p>
+              </>
             )}
-          </>
-        ) : canResolve ? (
-          <>
-            <h2 id="book-unpublish" className="font-serif text-2xl font-bold text-primary">
-              Unpublish this book
-            </h2>
-            <p className="text-sm text-muted">
-              The book leaves the Bookstore at once. The author can&apos;t publish it again until you allow it.
-              Readers who already bought it keep it.
-            </p>
-            {publishedBundleTitles.length > 0 && (
-              <p className="text-sm font-semibold">This also unpublishes: {publishedBundleTitles.join(", ")}.</p>
-            )}
-            <UnpublishForm
-              action={unpublishBookAsStaff}
-              bookId={book.id}
-              reportId={formReport?.id ?? null}
-              defaultReason={takedownReasonForReport(formReport?.reason)}
-            />
-            <p className="text-[0.8125rem] text-muted">Saved in the Audit log with your name, the time and the reason.</p>
-          </>
-        ) : (
-          <>
-            <h2 id="book-unpublish" className="font-serif text-2xl font-bold text-primary">
-              Unpublish this book
-            </h2>
-            <p className="text-sm text-muted">Only staff who can resolve reports can unpublish a book.</p>
-          </>
-        )}
-      </section>
+          </section>
+        ) : null}
+
+        <section
+          aria-labelledby="book-unpublish"
+          className="flex min-w-0 flex-col gap-4 rounded-card border-2 border-primary bg-surface p-5 md:p-6"
+        >
+          {takedownUnknown ? (
+            <>
+              <h2 id="book-unpublish" className="font-serif text-2xl font-bold text-primary">
+                Unpublish this book
+              </h2>
+              <p className="text-sm text-red-700">Couldn’t check whether this book is taken down. Please reload the page.</p>
+            </>
+          ) : takedown ? (
+            <>
+              <h2 id="book-unpublish" className="font-serif text-2xl font-bold text-primary">
+                Taken down
+              </h2>
+              <p className="text-[0.9375rem]">
+                Taken down {formatRelativeTime(takedown.taken_down_at, now)} by {takenByName}.
+              </p>
+              <dl className="flex flex-col gap-3 text-sm">
+                <div>
+                  <dt className="font-semibold">Reason</dt>
+                  <dd>{takedownReasonLabel(takedown.reason)}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Message sent to the author</dt>
+                  <dd className="whitespace-pre-wrap break-words">{takedown.message_to_author}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Bundles unpublished</dt>
+                  <dd>{takenDownBundleTitles.length > 0 ? takenDownBundleTitles.join(", ") : "None"}</dd>
+                </div>
+              </dl>
+              <p className="text-sm text-muted">
+                The author can&apos;t publish it again until you allow it. Readers who already bought it keep it.
+              </p>
+              {canResolve && (
+                <form action={allowBookAgainAsStaff.bind(null, book.id)}>
+                  <button
+                    type="submit"
+                    className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
+                  >
+                    Allow the author to publish again
+                  </button>
+                </form>
+              )}
+            </>
+          ) : canResolve ? (
+            <>
+              <h2 id="book-unpublish" className="font-serif text-2xl font-bold text-primary">
+                Unpublish this book
+              </h2>
+              <p className="text-sm text-muted">
+                The book leaves the Bookstore at once. The author can&apos;t publish it again until you allow it.
+                Readers who already bought it keep it.
+              </p>
+              {publishedBundleTitles.length > 0 && (
+                <p className="text-sm font-semibold">This also unpublishes: {publishedBundleTitles.join(", ")}.</p>
+              )}
+              <UnpublishForm
+                action={unpublishBookAsStaff}
+                bookId={book.id}
+                reportId={formReport?.id ?? null}
+                defaultReason={takedownReasonForReport(formReport?.reason)}
+              />
+              <p className="text-[0.8125rem] text-muted">Saved in the Audit log with your name, the time and the reason.</p>
+            </>
+          ) : (
+            <>
+              <h2 id="book-unpublish" className="font-serif text-2xl font-bold text-primary">
+                Unpublish this book
+              </h2>
+              <p className="text-sm text-muted">Only staff who can resolve reports can unpublish a book.</p>
+            </>
+          )}
+        </section>
+      </div>
     </main>
   );
 }

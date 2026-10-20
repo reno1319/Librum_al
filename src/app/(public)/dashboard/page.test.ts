@@ -170,6 +170,37 @@ describe("DashboardPage: step 4 dashboard", () => {
     expect(enabled).not.toContain("Not scheduled yet");
   });
 
+  // ADMIN-3-REVIEW (F, N9): the row's IN REVIEW tag and send-back notice
+  // come from ONE read of the author's own review rows.
+  it("shows In review and the send-back notice from the author's review rows", async () => {
+    const reviewRow = (status: string, extra: Record<string, unknown> = {}) => ({
+      book_id: "b3",
+      book_title: "Udhetim ne Jug",
+      author_id: "author-1",
+      status,
+      submitted_at: "2026-10-18T10:00:00Z",
+      reason: null,
+      message_to_author: null,
+      decided_at: null,
+      ...extra,
+    });
+    const pending = await render({ ...TABLES, book_reviews: { data: [reviewRow("pending")], error: null } }, RPCS);
+    expect(pending).toContain(">IN REVIEW<");
+    const sentBack = await render(
+      {
+        ...TABLES,
+        book_reviews: {
+          data: [reviewRow("sent_back", { reason: "broken_file", message_to_author: "Please fix the file", decided_at: "2026-10-19T10:00:00Z" })],
+          error: null,
+        },
+      },
+      RPCS,
+    );
+    expect(sentBack).not.toContain(">IN REVIEW<");
+    expect(sentBack).toContain("Librum sent this book back on");
+    expect(sentBack).toContain("Please fix the file.");
+  });
+
   it("filters by tab and title search", async () => {
     const drafts = await render(TABLES, RPCS, { tab: "drafts" });
     expect(drafts).toContain("Udhetim ne Jug");

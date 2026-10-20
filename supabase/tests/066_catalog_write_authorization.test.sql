@@ -602,6 +602,10 @@ select pg_temp.expect_ok('authenticated', 'e0660000-0000-0000-0000-00000000000a'
 -- Part 7: service_role -- the trusted server path -- keeps every
 -- protected write.
 -- ============================================================
+-- ADMIN-3-REVIEW fixture: publishing needs an approval of the book's
+-- current files; seed one for the draft published below.
+insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, status, grandfathered, decided_at)
+select id, title, author_id, file_path, cover_path, 'approved', true, now() from public.books where id = 'e0661000-0000-0000-0000-0000000000a1';
 select pg_temp.expect_ok('service_role', null,
   $q$update public.books set status = 'published', published_at = now()
       where id = 'e0661000-0000-0000-0000-0000000000a1' and author_id = 'e0660000-0000-0000-0000-00000000000a'

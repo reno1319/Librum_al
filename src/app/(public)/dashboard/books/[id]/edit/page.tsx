@@ -8,6 +8,7 @@ import {
   publishBook,
   unpublishBook,
   deleteBook,
+  cancelBookReview,
 } from "../../actions";
 import { GENRES } from "@/lib/genres";
 import { LANGUAGES, isSupportedLanguage } from "@/lib/languages";
@@ -32,6 +33,14 @@ import { getCatalogSchemaFeatures } from "@/lib/catalog-schema-features";
 import { getRightsDeclarationState } from "@/lib/book-rights";
 import { loadAuthorTakedownNoticeForBook } from "@/lib/book-takedowns";
 import { buildAuthorTakedownNoticeLines } from "@/lib/takedown-reasons";
+import { getBookReviewState } from "@/lib/book-reviews";
+import {
+  CANCEL_REVIEW_LABEL,
+  IN_REVIEW_LABEL,
+  LIVE_FILES_WARNING,
+  buildAuthorSentBackNoticeLines,
+  publishControlLabel,
+} from "@/lib/book-review-copy";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
@@ -204,7 +213,11 @@ export default async function EditBookPage({
   // Publish control with its notice; an unreadable takedown state shows
   // the generic sentence and disables Publish (the server gate refuses
   // both on its own).
-  const [schemaFeatures, rightsState, takedown, { data: penNames }] = await Promise.all([
+  // ADMIN-3-REVIEW (B, E, F, N9): the book's review state from
+  // book_review_state() -- pending, whether Librum's approval still
+  // matches the current files, and the newest send back. Unreadable
+  // disables the publish control (performPublish refuses on its own).
+  const [schemaFeatures, rightsState, takedown, { data: penNames }, reviewState] = await Promise.all([
     getCatalogSchemaFeatures(),
     getRightsDeclarationState(book.id),
     loadAuthorTakedownNoticeForBook(supabase, book.id),
@@ -216,7 +229,15 @@ export default async function EditBookPage({
       .eq("author_id", user.id)
       .order("created_at")
       .returns<{ name: string; is_default: boolean }[]>(),
+    getBookReviewState(supabase, book.id),
   ]);
+  const isLive = book.status === "published";
+  const inReview = !takedown.notice && book.status === "draft" && reviewState.kind === "ok" && reviewState.pending;
+  const sentBack =
+    !takedown.notice && book.status === "draft" && !inReview && reviewState.kind === "ok"
+      ? reviewState.latestSentBack
+      : null;
+  const approvalValid = reviewState.kind === "ok" && reviewState.approvalValid;
   const penNameSuggestions = (penNames ?? []).filter((p) => !p.is_default).map((p) => p.name);
   // The box shows the book's pen name, blank for the default one (blank
   // means "your author name", as before).
@@ -585,6 +606,9 @@ export default async function EditBookPage({
             <section>
               <h2 className="font-serif text-xl font-normal">Files</h2>
               <div className="mt-4 flex flex-col gap-6">
+                {/* ADMIN-3-REVIEW (C): a live book's new file or cover
+                    goes back through review; said before the pickers. */}
+                {isLive && <Alert variant="warning" title={LIVE_FILES_WARNING} />}
                 <CoverField authorId={user.id} existingCoverUrl={coverUrl ?? undefined} />
 
                 <div className="flex flex-col gap-2">
@@ -592,9 +616,9 @@ export default async function EditBookPage({
                     {manuscriptLabel ? `Current manuscript: ${manuscriptLabel}` : "No manuscript on file"}
                   </p>
                   <p className="text-sm text-muted">
-                    Leave blank to keep your current manuscript. Replacing it updates
-                    the file existing readers receive on their next download. Readers
-                    can preview approximately the first 10% of your ebook — generated
+                    Leave blank to keep your current manuscript. A new file is checked
+                    by Librum before readers receive it. Readers can preview
+                    approximately the first 10% of your ebook — generated
                     automatically, no extra steps needed.
                   </p>
                   <ManuscriptField
@@ -734,7 +758,13 @@ export default async function EditBookPage({
             <p className="mt-2 text-sm">
               Status:{" "}
               <span className="font-medium">
-                {takedown.notice ? "Taken down by Librum" : book.status === "draft" ? "Draft" : "Published"}
+                {takedown.notice
+                  ? "Taken down by Librum"
+                  : inReview
+                    ? IN_REVIEW_LABEL
+                    : book.status === "draft"
+                      ? "Draft"
+                      : "Published"}
               </span>
             </p>
 
@@ -749,8 +779,33 @@ export default async function EditBookPage({
                   </p>
                 ))}
               </Alert>
+            ) : inReview ? (
+              // ADMIN-3-REVIEW (E, F): waiting for Librum -- no timing
+              // promise; the author may take it back to a draft.
+              <>
+                <p className="mt-4 text-sm text-muted">
+                  Librum is checking your book. We&apos;ll tell you when it&apos;s live.
+                </p>
+                <form action={cancelBookReview.bind(null, book.id)} className="mt-4">
+                  <button type="submit" className={buttonClasses("outline", "md", "w-full")}>
+                    {CANCEL_REVIEW_LABEL}
+                  </button>
+                </form>
+              </>
             ) : book.status === "draft" ? (
               <>
+                {sentBack && (
+                  <Alert variant="warning" className="mt-4">
+                    {buildAuthorSentBackNoticeLines(sentBack, formatTimestampAsDate).map((line, index) => (
+                      <p
+                        key={index}
+                        className={index === 0 ? "font-semibold" : "mt-1 whitespace-pre-wrap break-words"}
+                      >
+                        {line}
+                      </p>
+                    ))}
+                  </Alert>
+                )}
                 {/* PR-G: this replaced "Finish payout setup to publish paid
                     books." above a "Manage payouts" link. Stated precisely,
                     because the looser version of this is wrong: the payouts
@@ -798,7 +853,9 @@ export default async function EditBookPage({
                     title="Add a description before publishing."
                     className="mt-4"
                   />
-                ) : rightsState.kind === "unavailable" || takedown.state.kind === "unavailable" ? (
+                ) : rightsState.kind === "unavailable" ||
+                  takedown.state.kind === "unavailable" ||
+                  reviewState.kind === "unavailable" ? (
                   // F4 (D3): the rights choice cannot be read, so
                   // Publish is refused; the existing generic sentence.
                   <Alert variant="warning" title={PUBLISH_NOT_POSSIBLE_YET_MESSAGE} className="mt-4" />
@@ -815,7 +872,9 @@ export default async function EditBookPage({
                     <p>You can publish free books now.</p>
                   </Alert>
                 ) : (
-                  <p className="mt-4 text-sm text-muted">Ready to publish.</p>
+                  <p className="mt-4 text-sm text-muted">
+                    {approvalValid ? "Ready to publish." : "Ready to send for review. Librum checks every book before it goes live."}
+                  </p>
                 )}
 
                 {readiness.recommended.length > 0 && (
@@ -844,7 +903,8 @@ export default async function EditBookPage({
                       readiness.missingDescription ||
                       readiness.missingRights ||
                       readiness.paidPublishingBlocked ||
-                      takedown.state.kind === "unavailable"
+                      takedown.state.kind === "unavailable" ||
+                      reviewState.kind === "unavailable"
                     }
                     className={buttonClasses(
                       "primary",
@@ -852,7 +912,7 @@ export default async function EditBookPage({
                       "w-full disabled:cursor-not-allowed disabled:opacity-50",
                     )}
                   >
-                    Publish book
+                    {publishControlLabel(approvalValid)}
                   </button>
                 </form>
               </>

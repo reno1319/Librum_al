@@ -26,6 +26,13 @@ class RedirectSignal extends Error {
 const mockRedirect = vi.fn((url: string) => {
   throw new RedirectSignal(url);
 });
+// ADMIN-3-REVIEW: book_reviews reads/writes replaced by a settable
+// double (default: nothing pending, approval valid); see
+// src/lib/book-reviews-test-double.ts.
+vi.mock("@/lib/book-reviews", async (importOriginal) => {
+  const { bookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+  return bookReviewsDouble(await importOriginal<object>());
+});
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -54,6 +61,17 @@ const mockCreateClient = vi.fn(() =>
   Promise.resolve({
     auth: { getUser: mockGetUser },
     from: (table: string) => {
+      // ADMIN-3-REVIEW (C): a new file or cover on a LIVE book first
+      // checks published-bundle membership; none here.
+      if (table === "bundle_books") {
+        const none = { data: [], error: null };
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: () => chain,
+          then: (f: (v: unknown) => unknown, r?: (e: unknown) => unknown) => Promise.resolve(none).then(f, r),
+        };
+        return chain;
+      }
       if (table !== "books") {
         throw new Error(`unexpected table in this focused test: ${table}`);
       }
@@ -1061,6 +1079,12 @@ describe("createBook: create atomicity when the final manuscript write fails (CB
   });
 });
 
+// ADMIN-3-REVIEW (C): the book in these doubles is live, so a new file
+// or cover takes it out of the Bookstore until Librum approves it.
+const LIVE_FILES_SAVED_REDIRECT = `/dashboard?success=${encodeURIComponent(
+  "Saved. Your book is out of the Bookstore until Librum approves the new file or cover.",
+)}`;
+
 describe("updateBook: manuscriptStoragePath reference (CB-1)", () => {
   beforeEach(resetMocks);
 
@@ -1074,9 +1098,15 @@ describe("updateBook: manuscriptStoragePath reference (CB-1)", () => {
 
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Book+updated");
+    expect(mockRedirect).toHaveBeenCalledWith(LIVE_FILES_SAVED_REDIRECT);
     expect(mockUpdate).toHaveBeenCalledOnce();
-    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ file_path: `${USER_ID}/${BOOK_ID}.epub` });
+    // ADMIN-3-REVIEW (M5): a versioned key, never the live one.
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({
+      file_path: expect.stringMatching(
+        new RegExp(`^${USER_ID}/${BOOK_ID}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.epub$`),
+      ),
+      status: "draft",
+    });
     expect(mockRemoveManuscript).toHaveBeenCalledWith([tempPath]);
   });
 
@@ -1090,7 +1120,7 @@ describe("updateBook: manuscriptStoragePath reference (CB-1)", () => {
 
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Book+updated");
+    expect(mockRedirect).toHaveBeenCalledWith(LIVE_FILES_SAVED_REDIRECT);
     const [, uploadedBytes] = mockUploadManuscript.mock.calls[0];
     expect(uploadedBytes.length).toBeGreaterThan(4.5 * 1024 * 1024);
   });
@@ -1126,21 +1156,15 @@ describe("updateBook: update atomicity when the final manuscript write fails (CB
 
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    // QA-FIX-3: an in-place replacement is uploaded only after the row
-    // update, so a failed upload leaves the old, still-valid manuscript
-    // in place under the unchanged file_path, the other details saved,
-    // and the author told exactly that -- never a success message.
+    // ADMIN-3-REVIEW (M5): the new manuscript goes to a fresh versioned
+    // key BEFORE the row write, so a failed upload stops before it: the
+    // row still names the old, still-valid manuscript, nothing is
+    // saved, and the temporary upload is kept for a retry.
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(
-        "Your changes were saved, but the new manuscript could not be uploaded. The previous file is still in place. Please choose the file again.",
-      )}`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Could+not+upload+your+manuscript.+Please+try+again`,
     );
-    expect(mockUpdate).toHaveBeenCalledOnce();
-    expect(mockUpdate.mock.invocationCallOrder[0]).toBeLessThan(
-      mockUploadManuscript.mock.invocationCallOrder[0],
-    );
-    // Only the temporary upload is removed; the live key never is.
-    expect(mockRemoveManuscript).toHaveBeenCalledWith([tempPath]);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockRemoveManuscript).not.toHaveBeenCalled();
   });
 });
 
@@ -1320,7 +1344,7 @@ describe("updateBook: coverStoragePath reference (COVER-1)", () => {
 
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Book+updated");
+    expect(mockRedirect).toHaveBeenCalledWith(LIVE_FILES_SAVED_REDIRECT);
     expect(mockUpdate).toHaveBeenCalledOnce();
     // PEN-2 (L10): a new random-folder key on every replace.
     expect(mockUpdate.mock.calls[0][0]).toMatchObject({

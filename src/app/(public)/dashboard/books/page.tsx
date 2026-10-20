@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AuthorBookRow } from "@/components/author-book-row";
 import { loadAuthorTakedownNotices } from "@/lib/book-takedowns";
+import { loadAuthorReviewNotices } from "@/lib/book-reviews";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
@@ -53,6 +54,8 @@ export default async function AllBooksPage() {
   const allBooks = books ?? [];
   // ADMIN-2-TAKEDOWN (G): the takedown notices, as on the Dashboard.
   const takedownNotices = allBooks.length > 0 ? await loadAuthorTakedownNotices(supabase, user.id) : new Map();
+  // ADMIN-3-REVIEW (F, N9): review state, as on the Dashboard.
+  const reviewNotices = allBooks.length > 0 ? await loadAuthorReviewNotices(supabase, user.id) : new Map();
 
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-8">
@@ -94,6 +97,7 @@ export default async function AllBooksPage() {
                 book={book}
                 coverUrl={coverUrl}
                 takedown={takedownNotices.get(book.id) ?? null}
+                review={reviewNotices.get(book.id) ?? null}
               />
             );
           })}

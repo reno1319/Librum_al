@@ -43,13 +43,18 @@ vi.mock("next/navigation", () => ({
 
 type Result = { data: unknown; error: { message: string } | null };
 let rows: Record<string, Result> = {};
+// ADMIN-3 r2: the columns each read names.
+const selects: { table: string; columns: string }[] = [];
 const mockAdminFrom = vi.fn((table: string) => {
-  const done = () => Promise.resolve(rows[table] ?? { data: null, error: null });
+  // ADMIN-3-REVIEW: a `.in()` read (the review deciders' names) answers
+  // from "<table>:in" when a test sets one.
+  let key = table;
+  const done = () => Promise.resolve(rows[key] ?? rows[table] ?? { data: null, error: null });
   const chain = {
-    select: () => chain,
+    select: (columns?: string) => (selects.push({ table, columns: columns ?? "" }), chain),
     eq: () => chain,
     is: () => chain,
-    in: () => chain,
+    in: () => ((key = `${table}:in`), chain),
     order: () => chain,
     maybeSingle: done,
     returns: done,
@@ -63,7 +68,12 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
-vi.mock("../actions", () => ({ unpublishBookAsStaff: vi.fn(), allowBookAgainAsStaff: vi.fn() }));
+vi.mock("../actions", () => ({
+  unpublishBookAsStaff: vi.fn(),
+  allowBookAgainAsStaff: vi.fn(),
+  approveBookReviewAsStaff: vi.fn(),
+  sendBackBookReviewAsStaff: vi.fn(),
+}));
 
 const { default: AdminBookPage } = await import("./page");
 
@@ -214,5 +224,126 @@ describe("AdminBookPage", () => {
     expect(html).not.toContain("Allow the author to publish again");
     expect(html).toContain("Couldn’t check whether this book is taken down.");
     expect(html).not.toContain("boom");
+  });
+
+  // ============================================================
+  // ADMIN-3-REVIEW (H, 6): the review panel and the review history.
+  // ============================================================
+  describe("review (ADMIN-3)", () => {
+    const REVIEW_ID = "55555555-5555-4555-8555-555555555555";
+    const FILE = "author-1/22222222-2222-4222-8222-222222222222/0f0e0d0c-0b0a-4908-8706-050403020100.epub";
+    const COVER = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
+    const pending = {
+      id: REVIEW_ID,
+      status: "pending",
+      grandfathered: false,
+      buyer_file_only: false,
+      submitted_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      decided_at: null,
+      decided_by: null,
+      reason: null,
+      file_path: FILE,
+      cover_path: COVER,
+    };
+
+    beforeEach(() => {
+      rows.books.data = { ...(rows.books.data as object), status: "draft", file_path: FILE, cover_path: COVER };
+      rows.book_reviews = { data: [pending], error: null };
+    });
+
+    it("books.review staff get the panel: file link, cover, four checks, Approve and Send back", async () => {
+      const html = await render("admin");
+      expect(html).toContain("Review this book");
+      expect(html).toContain("In review");
+      expect(html).toContain(`href="/admin/books/${BOOK_ID}/file?review=${REVIEW_ID}"`);
+      expect(html).toContain("Open the book file");
+      expect(html).toContain(`src="https://cdn.test/${COVER}"`);
+      for (const label of [
+        "The cover is fine",
+        "The book file opens",
+        "It isn't someone else's work",
+        "The author declared their rights",
+      ]) {
+        expect(html.replace(/&#x27;/g, "'")).toContain(label);
+      }
+      expect(html.match(/type="checkbox"[^>]*required=""/g) ?? []).toHaveLength(4);
+      expect(html).toContain(`name="reviewId" value="${REVIEW_ID}"`);
+      expect(html).toContain(`name="filePath" value="${FILE}"`);
+      expect(html).toContain(`name="coverPath" value="${COVER}"`);
+      expect(html).toContain("Approve and publish");
+      expect(html).toContain(">Send back</summary>");
+    });
+
+    it("staff without books.review see that it is in review, read-only", async () => {
+      const html = await render("moderator");
+      expect(html).toMatch(/>In review<\/h2>/);
+      expect(html).toContain("Only owners and admins can approve or send back a book.");
+      expect(html).not.toContain("Approve and publish");
+      expect(html).not.toContain("Open the book file");
+    });
+
+    it("files changed since it was sent: no Approve, says why", async () => {
+      rows.books.data = { ...(rows.books.data as object), cover_path: "1a2b3c4d-5e6f-4a0b-9c1d-2e3f4a5b6c7d/cover.png" };
+      const html = await render("admin");
+      expect(html).toContain("The author changed the file or cover after sending it.");
+      expect(html).not.toContain("Approve and publish");
+    });
+
+    it("a live book shows no review panel, whatever its history", async () => {
+      rows.books.data = { ...(rows.books.data as object), status: "published" };
+      const html = await render("admin");
+      expect(html).not.toContain("Approve and publish");
+      expect(html).not.toContain("Review this book");
+    });
+
+    it("an unreadable review state says so, offers nothing", async () => {
+      rows.book_reviews = { data: null, error: { message: "boom" } };
+      const html = await render("admin");
+      expect(html).toContain("Couldn’t check whether this book is waiting for review.");
+      expect(html).toContain("Couldn’t load the review history.");
+      expect(html).not.toContain("Approve and publish");
+      expect(html).not.toContain("boom");
+    });
+
+    it("lists the review history newest first, with the decision, reason and who decided", async () => {
+      rows.book_reviews = {
+        data: [
+          pending,
+          { ...pending, id: "r2", status: "sent_back", reason: "broken_file", decided_at: "2026-10-18T10:00:00Z", decided_by: "staff-9" },
+          { ...pending, id: "r3", status: "approved", grandfathered: true, decided_at: "2026-10-01T10:00:00Z" },
+        ],
+        error: null,
+      };
+      rows["profiles:in"] = { data: [{ id: "staff-9", display_name: "Renato" }], error: null };
+      const html = await render("admin");
+      const history = html.slice(html.indexOf("Review history"));
+      expect(history).toContain("Waiting");
+      expect(history).toContain("Sent back · Wrong or broken file · by Renato");
+      expect(history).toContain("Live before reviews began");
+      expect(history.indexOf("Waiting")).toBeLessThan(history.indexOf("Sent back"));
+    });
+
+    it("a backfilled readers' copy row (buyer_file_only) gets its own label, not 'Live before reviews began' (R5/U1)", async () => {
+      rows.book_reviews = {
+        data: [{ ...pending, id: "r4", status: "approved", grandfathered: true, buyer_file_only: true, decided_at: "2026-10-01T10:00:00Z" }],
+        error: null,
+      };
+      const html = await render("admin");
+      const history = html.slice(html.indexOf("Review history")).replace(/&#x27;/g, "'");
+      expect(history).toContain("Readers' copy from before reviews began (needs review to go live)");
+      expect(history).not.toContain("Live before reviews began");
+      expect(history).not.toContain("Approved");
+    });
+
+    it("the history read names buyer_file_only", async () => {
+      rows.book_reviews = { data: [], error: null };
+      await render("admin");
+      expect(selects.some((s) => s.table === "book_reviews" && s.columns.includes("buyer_file_only"))).toBe(true);
+    });
+
+    it("a book never sent for review says so", async () => {
+      rows.book_reviews = { data: [], error: null };
+      expect(await render("admin")).toContain("Never sent for review.");
+    });
   });
 });

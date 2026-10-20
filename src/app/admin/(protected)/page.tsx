@@ -12,11 +12,12 @@ import {
   TODO_LIMIT,
   type TodayRefund,
   type TodayReport,
+  type TodayReview,
 } from "../admin-landing-logic";
 import { resolveProfileDisplayName } from "./refunds/refund-review-logic";
 import { listAdminAuditEvents } from "./audit/actions";
 import { getActionLabel, resolveAuditActorDisplay } from "./audit/audit-log-logic";
-import { readBookTitlesForStaff } from "./books/admin-book-reads";
+import { readBookTitlesForStaff, readPendingReviewsForStaff } from "./books/admin-book-reads";
 import type { AuditEventRow } from "@/lib/types";
 import { loadStaffDisplayNames } from "@/lib/staff-display-names";
 import type { Metadata } from "next";
@@ -59,10 +60,11 @@ type WaitingRefundRow = {
 export default async function AdminPage() {
   const { role } = await requireStaff("admin.access");
 
-  const { showReports, showRefunds, showActivity } = resolveTodayVisibility({
+  const { showReports, showRefunds, showActivity, showReviews } = resolveTodayVisibility({
     reportsView: roleHasPermission(role, "reports.view"),
     refundsView: roleHasPermission(role, "refunds.view"),
     auditView: roleHasPermission(role, "audit.view"),
+    booksReview: roleHasPermission(role, "books.review"),
   });
 
   // Labels only, from `.allowed`: the resolvers' reasons and the raw
@@ -96,6 +98,14 @@ export default async function AdminPage() {
         .order("requested_at", { ascending: true })
         .returns<WaitingRefundRow[]>()
     : null;
+
+  // ADMIN-3-REVIEW (I): books waiting for review, oldest first, for
+  // books.review only. Read with the service-role client after
+  // requireStaff (staff sessions cannot read review rows); the oldest
+  // TODO_LIMIT rows plus the total for the tile.
+  const reviewsResult = showReviews ? await readPendingReviewsForStaff(TODO_LIMIT) : undefined;
+  const reviewsFailed = reviewsResult === null;
+  const todoReviews: TodayReview[] = reviewsResult?.items ?? [];
 
   const openReports = reportsResult?.data ?? [];
   const waitingRefunds = refundsResult?.data ?? [];
@@ -136,12 +146,20 @@ export default async function AdminPage() {
       whenMissing: "an unknown reader",
     }),
   }));
-  const todoItems = buildTodoItems(todoReports, todoRefunds);
+  const todoItems = buildTodoItems(todoReports, todoRefunds, TODO_LIMIT, new Date(), todoReviews);
 
   const activityResult = showActivity ? await listAdminAuditEvents({ limit: 5 }) : null;
   const activity: AuditEventRow[] = activityResult?.ok ? activityResult.data : [];
 
   const tiles = [
+    showReviews && {
+      key: "reviews",
+      href: "/admin/books?status=in_review",
+      label: "Books waiting for review",
+      failed: reviewsFailed,
+      count: reviewsResult?.total ?? 0,
+      oldestAt: todoReviews[0]?.submittedAt ?? null,
+    },
     showReports && {
       key: "reports",
       href: "/admin/reports",
@@ -208,9 +226,9 @@ export default async function AdminPage() {
             To do
           </h2>
           <p className="mt-1 mb-4 text-sm text-muted">Oldest first. Each item opens the page where you act on it.</p>
-          {(reportsFailed || refundsFailed) && (
+          {(reportsFailed || refundsFailed || reviewsFailed) && (
             <p role="alert" className="mb-3 text-sm text-red-700">
-              Some items couldn’t be loaded. Open Book reports or Refund requests to check.
+              Some items couldn’t be loaded. Open Books, Book reports or Refund requests to check.
             </p>
           )}
           {todoItems.length === 0 ? (
