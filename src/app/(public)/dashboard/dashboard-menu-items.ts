@@ -2,6 +2,9 @@
 // Money, Promotion, Profile; Bundles under Promotion; "Books" opens
 // /dashboard (the bookshelf) and the old separate "Dashboard" item is
 // gone. Every item keeps its page's existing name.
+// AUTHOR PAGES REDESIGN (Q11 a, Q13): the Stripe "Payouts" page is
+// gone; /dashboard/payouts redirects to Financial balance
+// (next.config.ts).
 
 export type DashboardMenuItem = {
   href: string;
@@ -32,7 +35,6 @@ export const DASHBOARD_MENU_GROUPS: DashboardMenuGroup[] = [
     items: [
       { href: "/dashboard/sales", label: "Sales", nested: true },
       { href: "/dashboard/balance", label: "Financial balance", nested: true },
-      { href: "/dashboard/payouts", label: "Payouts", nested: true },
     ],
   },
   {

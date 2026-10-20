@@ -1,112 +1,103 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "fs";
 import path from "path";
-import {
-  getAdminMobileNavAriaLabel,
-  shouldCloseAdminMobileNavOnPathnameChange,
-  isAdminMobileNavCloseKey,
-} from "./admin-mobile-nav";
+import { resolveVisibleAdminNavGroups } from "./admin-nav";
+import type { StaffRole } from "@/lib/types";
 
-// MOBILE ADMIN SHELL CORRECTION: two layers of proof, matching this
-// codebase's own established split for interactive Client Components
-// with no DOM harness available (vitest.config.mts runs `environment:
-// "node"`, no jsdom/RTL -- see src/app/error.test.ts's own comment on
-// why).
-//
-//   1. Pure decision logic (which aria-label a given `open` state
-//      implies, whether a pathname change should close the drawer,
-//      whether a keypress should close it) is now extracted into plain,
-//      hook-free functions -- these are called directly below, so this
-//      IS real behavioral proof, not a source-text guess.
-//
-//   2. Everything else (the icon ternary, the {open && (...)} conditional
-//      mount, the drawer's own positioning classes, aria-expanded/
-//      aria-controls wiring, that the drawer content reuses NavLinks
-//      instead of a duplicated <Link> map) cannot be extracted into pure
-//      functions without changing what the component actually renders,
-//      and cannot be exercised via useState/render here (calling
-//      AdminMobileNav() directly, outside a real React render, would
-//      violate the Rules of Hooks and throw). These are asserted as
-//      source-level regression guards instead, same technique as
-//      src/app/error.test.ts -- this proves the JSX still has the
-//      expected SHAPE, not that it paints correctly on screen (that is
-//      what the live 390px/1440px verification in this pass's own
-//      report covers, or reports as a limitation where unavailable).
-describe("AdminMobileNav: pure open/closed decision logic", () => {
-  describe("getAdminMobileNavAriaLabel", () => {
-    it("closed: 'Open administration navigation'", () => {
-      expect(getAdminMobileNavAriaLabel(false)).toBe("Open administration navigation");
-    });
+// ADMIN-1 (A2 look): the phone "Section ▾" control. vitest runs in
+// `node` with no DOM, so the component is rendered to static HTML (the
+// same HTML a phone gets before JavaScript loads) and asserted on that.
+// The outside-tap and Escape closing is DismissableDetails' own
+// attachDismiss, tested in src/components/dismissable-details.test.ts.
+let pathname = "/admin";
+vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
-    it("open: 'Close administration navigation'", () => {
-      expect(getAdminMobileNavAriaLabel(true)).toBe("Close administration navigation");
-    });
+const { AdminMobileNav } = await import("./admin-mobile-nav");
+
+function render(role: StaffRole, at: string): string {
+  pathname = at;
+  return renderToStaticMarkup(
+    createElement(AdminMobileNav, { groups: resolveVisibleAdminNavGroups(role), logoutAction: vi.fn() }),
+  );
+}
+
+function anchor(html: string, href: string): string {
+  return html.match(new RegExp(`<a [^>]*href="${href.replace(/\//g, "\\/")}"[^>]*>`))?.[0] ?? "";
+}
+
+describe("AdminMobileNav (phone Section control)", () => {
+  it("is a closed native <details> without JavaScript, hidden from md up", () => {
+    const html = render("owner", "/admin");
+    expect(html).toMatch(/<nav aria-label="Admin" class="md:hidden">/);
+    expect(html).toContain("<details");
+    expect(html).not.toMatch(/<details[^>]*\sopen/);
+    expect(html).toContain("<summary");
   });
 
-  describe("shouldCloseAdminMobileNavOnPathnameChange", () => {
-    it("true when the pathname actually changed -- a nav item was tapped and navigation happened", () => {
-      expect(shouldCloseAdminMobileNavOnPathnameChange("/admin/staff", "/admin")).toBe(true);
-    });
-
-    it("false when the pathname is unchanged -- no spurious close on every render", () => {
-      expect(shouldCloseAdminMobileNavOnPathnameChange("/admin", "/admin")).toBe(false);
-    });
+  it("names the current page in the summary", () => {
+    expect(render("owner", "/admin")).toMatch(/Section:<\/span> <span class="font-bold text-primary">Today<\/span>/);
+    expect(render("owner", "/admin/reports/abc")).toMatch(/<span class="font-bold text-primary">Book reports<\/span>/);
   });
 
-  describe("isAdminMobileNavCloseKey", () => {
-    it("true for Escape", () => {
-      expect(isAdminMobileNavCloseKey("Escape")).toBe(true);
-    });
-
-    it("false for any other key", () => {
-      expect(isAdminMobileNavCloseKey("Enter")).toBe(false);
-      expect(isAdminMobileNavCloseKey("Tab")).toBe(false);
-      expect(isAdminMobileNavCloseKey("a")).toBe(false);
-    });
-  });
-});
-
-describe("AdminMobileNav: source-level regression guards", () => {
-  const source = readFileSync(path.join(__dirname, "admin-mobile-nav.tsx"), "utf8");
-
-  it("initial state is CLOSED", () => {
-    expect(source).toMatch(/const \[open, setOpen\] = useState\(false\)/);
+  it("lists the owner's groups in order, with every page", () => {
+    const html = render("owner", "/admin");
+    const order = ["Daily", "Today", "Book reports", "Refund requests", "Catalog", "Librum&#x27;s choice", "Blog", "Money", "Finance", "Team", "Staff", "Audit log", "Log out"];
+    let last = -1;
+    for (const text of order) {
+      const at = html.indexOf(`>${text}<`, last + 1);
+      expect(at, text).toBeGreaterThan(last);
+      last = at;
+    }
   });
 
-  it("closed state renders the menu trigger (hamburger), not the close icon", () => {
-    expect(source).toMatch(/\{open \? <IconClose[^]*?: <IconMenu/);
+  it("editor: Daily (Today) and Catalog (Blog) only, then Log out", () => {
+    const html = render("editor", "/admin/blog");
+    expect(html).toContain(">Daily<");
+    expect(html).toContain(">Catalog<");
+    expect(html).not.toContain(">Money<");
+    expect(html).not.toContain(">Team<");
+    expect(html).not.toContain(">Librum&#x27;s choice<");
+    expect(anchor(html, "/admin/blog")).toContain('aria-current="page"');
+    expect(html).toContain(">Log out<");
   });
 
-  it("the drawer/menu content is only mounted while open -- not merely visually hidden", () => {
-    expect(source).toMatch(/\{open && \(/);
+  it("moderator and support see only their own queue", () => {
+    const moderator = render("moderator", "/admin");
+    expect(moderator).toContain('href="/admin/reports"');
+    expect(moderator).not.toContain('href="/admin/refunds"');
+    const support = render("support", "/admin");
+    expect(support).toContain('href="/admin/refunds"');
+    expect(support).not.toContain('href="/admin/reports"');
   });
 
-  it("wires aria-expanded and aria-controls to the actual open state and panel id", () => {
-    expect(source).toMatch(/aria-expanded=\{open\}/);
-    expect(source).toMatch(/aria-controls=\{panelId\}/);
-    expect(source).toMatch(/id=\{panelId\}/);
+  it("marks exactly one current page", () => {
+    const html = render("owner", "/admin/audit");
+    expect(html.match(/aria-current="page"/g)).toHaveLength(1);
+    expect(anchor(html, "/admin/audit")).toContain('aria-current="page"');
   });
 
-  it("the trigger toggles open/closed with a single control (tapping X closes it)", () => {
-    expect(source).toMatch(/onClick=\{\(\)\s*=>\s*setOpen\(\(v\)\s*=>\s*!v\)\}/);
+  it("keeps Log out reachable as a form submit", () => {
+    const html = render("support", "/admin");
+    expect(html).toMatch(/<form[^>]*>\s*<button type="submit"[^>]*>Log out<\/button><\/form>/);
   });
 
-  it("nav entries render through the shared NavLinks component, not a duplicated Link map", () => {
-    expect(source).toMatch(/<NavLinks items=\{items\}/);
-    expect(source).not.toMatch(/items\.map\(\(item\)/);
+  it("touch targets are at least 44px and the text is 16px", () => {
+    const html = render("owner", "/admin");
+    const summary = html.match(/<summary class="([^"]+)"/)?.[1] ?? "";
+    expect(summary.split(" ")).toEqual(expect.arrayContaining(["min-h-12", "text-base"]));
+    const linkClasses = [...html.matchAll(/<a [^>]*class="([^"]+)"/g)].map((m) => m[1]);
+    expect(linkClasses.length).toBeGreaterThan(0);
+    for (const cls of linkClasses) {
+      expect(cls.split(" ")).toEqual(expect.arrayContaining(["min-h-11", "text-base"]));
+    }
   });
 
-  it("Escape-to-close is wired to isAdminMobileNavCloseKey, not a duplicated inline check", () => {
-    expect(source).toMatch(/if \(isAdminMobileNavCloseKey\(e\.key\)\) setOpen\(false\)/);
-  });
-
-  it("close-on-navigate is wired to shouldCloseAdminMobileNavOnPathnameChange, not a duplicated inline check", () => {
-    expect(source).toMatch(
-      /if \(shouldCloseAdminMobileNavOnPathnameChange\(pathname, lastPathname\)\)/,
-    );
-  });
-
-  it("the aria-label is wired to getAdminMobileNavAriaLabel, not a duplicated inline ternary", () => {
-    expect(source).toMatch(/aria-label=\{getAdminMobileNavAriaLabel\(open\)\}/);
+  it("remounts on navigation so the menu is closed on the new page (source guard)", () => {
+    const source = readFileSync(path.join(__dirname, "admin-mobile-nav.tsx"), "utf8");
+    expect(source).toMatch(/<DismissableDetails key=\{pathname\}/);
+    expect(source).toContain('from "@/components/dismissable-details"');
+    expect(source).not.toMatch(/from\s+"[^"]*dashboard-menu/);
   });
 });

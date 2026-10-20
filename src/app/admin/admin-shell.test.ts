@@ -8,12 +8,13 @@ import type { ReactElement, ReactNode } from "react";
 // items down to its nav components, for a couple of representative
 // roles, plus that identity/Log out are present.
 //
-// Nav item LABELS themselves live inside NavLinks'/AdminMobileNav's own
-// rendering, which a plain "walk element.props.children" traversal never
-// reaches (those are separate component functions, never invoked by
-// simply holding a <Component .../> element descriptor) -- collectItems()
-// below instead reads the `items` prop straight off any element that
-// carries one, which is exactly what AdminShell hands to both.
+// Nav item LABELS themselves live inside AdminSidebarNav's/
+// AdminMobileNav's own rendering, which a plain "walk
+// element.props.children" traversal never reaches (those are separate
+// component functions, never invoked by simply holding a
+// <Component .../> element descriptor) -- collectItems() below instead
+// reads the `groups` prop straight off any element that carries one,
+// which is exactly what AdminShell hands to both (ADMIN-1: grouped).
 const mockSingle = vi.fn(() =>
   Promise.resolve({ data: { display_name: "Renato Kalemi" } as { display_name: string } | null }),
 );
@@ -26,6 +27,8 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient()
 vi.mock("@/app/auth/actions", () => ({ logout: vi.fn() }));
 
 const { AdminShell } = await import("./admin-shell");
+const { AdminMobileNav } = await import("./admin-mobile-nav");
+const { AdminSidebarNav } = await import("./admin-sidebar-nav");
 
 function collectText(node: ReactNode): string[] {
   if (node === null || node === undefined || typeof node === "boolean") return [];
@@ -37,16 +40,33 @@ function collectText(node: ReactNode): string[] {
 }
 
 type NavItemLike = { href: string; label: string };
+type NavGroupLike = { label: string; items: NavItemLike[] };
 
-function collectItems(node: ReactNode): NavItemLike[] {
+function collectGroupProps(node: ReactNode): NavGroupLike[][] {
   if (node === null || node === undefined || typeof node === "boolean") return [];
   if (typeof node === "string" || typeof node === "number") return [];
-  if (Array.isArray(node)) return node.flatMap(collectItems);
+  if (Array.isArray(node)) return node.flatMap(collectGroupProps);
   if (typeof node !== "object") return [];
-  const element = node as ReactElement<{ children?: ReactNode; items?: NavItemLike[] }>;
+  const element = node as ReactElement<{ children?: ReactNode; groups?: NavGroupLike[] }>;
   if (!("props" in element)) return [];
-  const own = Array.isArray(element.props.items) ? element.props.items : [];
-  return [...own, ...collectItems(element.props.children)];
+  const own = Array.isArray(element.props.groups) ? [element.props.groups] : [];
+  return [...own, ...collectGroupProps(element.props.children)];
+}
+
+// Every nav component gets the same groups; the labels of the first.
+function collectItems(node: ReactNode): NavItemLike[] {
+  const all = collectGroupProps(node);
+  return (all[0] ?? []).flatMap((g) => g.items);
+}
+
+function findAllByType(node: ReactNode, type: unknown): ReactElement<Record<string, unknown>>[] {
+  if (node === null || node === undefined || typeof node === "boolean") return [];
+  if (Array.isArray(node)) return node.flatMap((child) => findAllByType(child, type));
+  if (typeof node !== "object") return [];
+  const element = node as ReactElement<{ children?: ReactNode }>;
+  if (!("props" in element)) return [];
+  const own = element.type === type ? [element as ReactElement<Record<string, unknown>>] : [];
+  return [...own, ...findAllByType(element.props.children, type)];
 }
 
 // MOBILE ADMIN SHELL CORRECTION: unlike NavLinks/AdminMobileNav (separate
@@ -75,17 +95,19 @@ describe("AdminShell", () => {
     mockSingle.mockClear();
   });
 
-  it("owner: passes Dashboard/Book reports/Refund requests/Staff/Audit log/Finance to its nav components, plus identity and Log out", async () => {
+  it("owner: passes Today/Book reports/Refund requests/Staff/Audit log/Finance to its nav components, plus identity and Log out", async () => {
     const shell = await AdminShell({ userId: "user-1", role: "owner", children: "content" });
     const text = collectText(shell).join(" | ");
     const labels = collectItems(shell).map((i) => i.label);
 
-    expect(text).toContain("Librum Administration");
+    expect(text).toContain("Librum");
+    expect(text).toContain("Administration");
     expect(text).toContain("Renato Kalemi");
     expect(text).toContain("Owner");
     expect(text).toContain("Log out");
     expect(text).toContain("content");
-    expect(labels).toContain("Dashboard");
+    expect(labels).toContain("Today");
+    expect(labels).not.toContain("Dashboard");
     expect(labels).toContain("Book reports");
     expect(labels).toContain("Refund requests");
     expect(labels).toContain("Staff");
@@ -142,19 +164,36 @@ describe("AdminShell", () => {
     expect(text).toContain("Staff member");
   });
 
-  // MOBILE ADMIN SHELL CORRECTION: root-cause regression guard. The
-  // reported bug (X visible, no usable nav on a real phone) traced to
-  // this <header> missing `relative` -- AdminMobileNav's open drawer is
-  // `absolute inset-x-0 top-full`, which without a positioned ancestor
-  // anchors against the viewport instead of the header, rendering the
-  // drawer roughly a screen-height below where it visually belongs. This
-  // asserts the actual returned element carries the fix, not just that
-  // the source file happens to contain the string "relative" somewhere.
-  it("header carries `relative` so AdminMobileNav's absolute drawer anchors under it, not the viewport", async () => {
+  // ADMIN-1 (A2 look): the header is the dark green bar, the shield
+  // icon is gone, and the sidebar and phone Section control both get
+  // the same grouped nav and the real logout action.
+  it("header is the dark green A2 bar with the gold ADMINISTRATION eyebrow and gold role", async () => {
     const shell = await AdminShell({ userId: "user-1", role: "owner", children: "content" });
     const header = findFirstByTagName(shell, "header");
+    expect(header?.props.className?.split(/\s+/)).toEqual(
+      expect.arrayContaining(["bg-primary", "text-primary-foreground"]),
+    );
+    const golds = findAllByType(header, "span").filter((s) =>
+      String(s.props.className ?? "").split(/\s+/).includes("text-accent"),
+    );
+    const goldText = golds.map((s) => collectText(s.props.children as ReactNode).join(""));
+    expect(goldText).toEqual(expect.arrayContaining(["AdminAdministration", "Owner"]));
+  });
 
-    expect(header).not.toBeNull();
-    expect(header?.props.className?.split(/\s+/)).toContain("relative");
+  it("no longer imports the shield icon", async () => {
+    const { readFileSync } = await import("fs");
+    const source = readFileSync(new URL("./admin-shell.tsx", import.meta.url), "utf8");
+    expect(source).not.toContain("IconShield");
+  });
+
+  it("gives the sidebar and the phone Section control the same groups, and the phone control the logout action", async () => {
+    const shell = await AdminShell({ userId: "user-2", role: "editor", children: "content" });
+    const [sidebar] = findAllByType(shell, AdminSidebarNav);
+    const [mobile] = findAllByType(shell, AdminMobileNav);
+    expect(sidebar).toBeDefined();
+    expect(mobile).toBeDefined();
+    expect(mobile.props.groups).toEqual(sidebar.props.groups);
+    expect(typeof mobile.props.logoutAction).toBe("function");
+    expect((sidebar.props.groups as NavGroupLike[]).map((g) => g.label)).toEqual(["Daily", "Catalog"]);
   });
 });

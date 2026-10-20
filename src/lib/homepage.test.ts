@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveHomepageCta, computeAuthorSharePercent } from "./homepage";
+import { resolveHomepageCta, resolveAuthorPageCta, computeAuthorSharePercent } from "./homepage";
 
 describe("resolveHomepageCta", () => {
   it("logged out: hero and final both point at signup with author role intent", () => {
@@ -47,5 +47,32 @@ describe("resolveHomepageCta", () => {
 describe("computeAuthorSharePercent", () => {
   it("derives from PLATFORM_FEE_PERCENT, not a hardcoded literal", () => {
     expect(computeAuthorSharePercent()).toBe(80);
+  });
+});
+
+describe("resolveAuthorPageCta", () => {
+  it("signed out: the home page's Publish your book", () => {
+    expect(resolveAuthorPageCta({ user: null, role: null })).toEqual({
+      label: "Publish your book",
+      href: "/signup?role=author",
+    });
+  });
+
+  it("author: the home page's final Start a new book", () => {
+    expect(resolveAuthorPageCta({ user: { id: "a" }, role: "author" })).toEqual({
+      label: "Start a new book",
+      href: "/dashboard/books/new",
+    });
+  });
+
+  it("reader: Become an author, on the account page's section", () => {
+    expect(resolveAuthorPageCta({ user: { id: "r" }, role: "reader" })).toEqual({
+      label: "Become an author",
+      href: "/account#become-author",
+    });
+  });
+
+  it.each([null, "admin", "Reader"])("signed in with role %s: no band", (role) => {
+    expect(resolveAuthorPageCta({ user: { id: "u" }, role })).toBeNull();
   });
 });

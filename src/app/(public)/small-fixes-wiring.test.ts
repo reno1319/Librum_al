@@ -1,10 +1,20 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { chartDayLabels } from "@/lib/chart-day-labels";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
-import HowItWorksPage from "./how-it-works/page";
+import { RIGHTS_STATEMENTS } from "@/lib/rights-statements";
+
+// AUTHOR PAGES REDESIGN: How it works reads the visitor (closing band),
+// so it is async and renders against a signed-out Supabase client.
+vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: () => Promise.resolve({ auth: { getUser: () => Promise.resolve({ data: { user: null } }) } }),
+}));
+
+const { default: HowItWorksPage } = await import("./how-it-works/page");
+const renderHowItWorks = async () => renderToStaticMarkup(await HowItWorksPage());
 
 // FIX1: source-level guards for the small fixes that have no page-level
 // render harness, in the same style as upload-wizard.wiring.test.ts.
@@ -12,25 +22,40 @@ const root = path.join(__dirname, "..", "..", "..");
 const read = (relative: string) => readFileSync(path.join(root, relative), "utf8");
 
 describe("FIX1 X2: every header Sign up preselects Author", () => {
-  it("desktop header, phone menu and How it works link to /signup?role=author", () => {
-    for (const file of [
-      "src/components/site-header.tsx",
-      "src/components/mobile-nav.tsx",
-      "src/app/(public)/how-it-works/page.tsx",
-    ]) {
+  it("desktop header and phone menu link to /signup?role=author", () => {
+    for (const file of ["src/components/site-header.tsx", "src/components/mobile-nav.tsx"]) {
       const source = read(file);
       expect(source).toContain('href="/signup?role=author"');
       expect(source).not.toContain('href="/signup"');
     }
   });
+
+  // AUTHOR PAGES REDESIGN: How it works' sign-up link is now the shared
+  // closing band's button (signed out: the home page's).
+  it("How it works, signed out, links to /signup?role=author", async () => {
+    const html = await renderHowItWorks();
+    expect(html).toContain('href="/signup?role=author"');
+    expect(html).not.toContain('href="/signup"');
+  });
 });
 
 describe("FIX1 X3: How it works numbers each step once", () => {
-  it("the titles carry no typed number and the list numbers them", () => {
-    const html = renderToStaticMarkup(HowItWorksPage());
-    expect(html).toContain("list-decimal");
-    expect(html).toContain(">Sign up as an author</h2>");
+  // AUTHOR PAGES REDESIGN: the numbers are the grid's numerals (01-06),
+  // shown once; the titles still carry none.
+  it("the titles carry no typed number and the numerals number them once", async () => {
+    const html = await renderHowItWorks();
+    const numerals = [...html.matchAll(/<span class="[^"]*italic[^"]*">(\d\d)<\/span>/g)].map((m) => m[1]);
+    expect(numerals).toEqual(["01", "02", "03", "04", "05", "06"]);
+    expect(html).toContain(">Sign up as an author</h3>");
     expect(html).not.toMatch(/>\d\. /);
+    expect(html).not.toContain("list-decimal");
+  });
+
+  it("step 4 shows both rights sentences exactly, from RIGHTS_STATEMENTS", async () => {
+    const html = await renderHowItWorks();
+    for (const { text } of Object.values(RIGHTS_STATEMENTS)) {
+      expect(html).toContain(`>${text.replace("'", "&#x27;")}</li>`);
+    }
   });
 });
 
@@ -109,6 +134,12 @@ describe("FIX1 X15: one heading style", () => {
       "src/app/(public)/dashboard/balance/page.tsx",
       "src/app/(public)/terms/page.tsx",
       "src/app/(public)/account/page.tsx",
+      "src/components/page-bands.tsx",
+      "src/app/(public)/about/page.tsx",
+      "src/app/(public)/help/page.tsx",
+      "src/app/(public)/pricing/page.tsx",
+      "src/app/(public)/privacy/page.tsx",
+      "src/app/(public)/refunds/page.tsx",
     ];
     for (const file of files) {
       const headings = read(file).match(/<h[1-4]\b[^>]*font-serif[^>]*>/g) ?? [];
@@ -116,5 +147,17 @@ describe("FIX1 X15: one heading style", () => {
         expect(tag).not.toMatch(/font-(semibold|bold|medium)/);
       }
     }
+  });
+});
+
+describe("AUTHOR PAGES REDESIGN: the Terms contents box", () => {
+  it("lists every numbered section heading, in order, by its anchor", () => {
+    const source = read("src/app/(public)/terms/page.tsx");
+    const list = source.match(/const SECTION_TITLES = \[([\s\S]*?)\];/)![1];
+    const titles = [...list.matchAll(/"([^"]+)"/g)].map((m) => m[1].replace("'", "&apos;"));
+    const headings = [...source.matchAll(/<section id="section-(\d+)"[^>]*>\s*<h2[^>]*>\s*<span[^>]*>\1\.<\/span> ([^\n<]+)/g)];
+    expect(headings.map((m) => m[1])).toEqual(titles.map((_, i) => String(i + 1)));
+    expect(headings.map((m) => m[2].trim())).toEqual(titles);
+    expect(titles).toHaveLength(16);
   });
 });

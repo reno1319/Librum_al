@@ -45,16 +45,46 @@ export type AdminNavItem = {
 // F5: Librum's choice added, gated by catalog.feature -- the same
 // permission /admin/librum-choice and its actions require (owner and
 // admin only).
-export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
-  { href: "/admin", label: "Dashboard", permission: "admin.access" },
-  { href: "/admin/reports", label: "Book reports", permission: "reports.view" },
-  { href: "/admin/refunds", label: "Refund requests", permission: "refunds.view" },
-  { href: "/admin/staff", label: "Staff", permission: "staff.view" },
-  { href: "/admin/audit", label: "Audit log", permission: "audit.view" },
-  { href: "/admin/finance", label: "Finance", permission: "finance.view" },
-  { href: "/admin/blog", label: "Blog", permission: "blog.view" },
-  { href: "/admin/librum-choice", label: "Librum's choice", permission: "catalog.feature" },
+//
+// ADMIN-1 (A2 look): the menu is now grouped -- Daily, Catalog, Money,
+// Team -- and "Dashboard" is renamed "Today". Each item keeps the exact
+// permission above; ADMIN_NAV_ITEMS stays the flat list, read off the
+// groups in menu order.
+export type AdminNavGroup = {
+  label: string;
+  items: readonly AdminNavItem[];
+};
+
+export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
+  {
+    label: "Daily",
+    items: [
+      { href: "/admin", label: "Today", permission: "admin.access" },
+      { href: "/admin/reports", label: "Book reports", permission: "reports.view" },
+      { href: "/admin/refunds", label: "Refund requests", permission: "refunds.view" },
+    ],
+  },
+  {
+    label: "Catalog",
+    items: [
+      { href: "/admin/librum-choice", label: "Librum's choice", permission: "catalog.feature" },
+      { href: "/admin/blog", label: "Blog", permission: "blog.view" },
+    ],
+  },
+  {
+    label: "Money",
+    items: [{ href: "/admin/finance", label: "Finance", permission: "finance.view" }],
+  },
+  {
+    label: "Team",
+    items: [
+      { href: "/admin/staff", label: "Staff", permission: "staff.view" },
+      { href: "/admin/audit", label: "Audit log", permission: "audit.view" },
+    ],
+  },
 ];
+
+export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = ADMIN_NAV_GROUPS.flatMap((group) => group.items);
 
 // Pure visibility resolver -- every /admin/* role's nav is derived from
 // this one function, driven entirely by roleHasPermission() (the same
@@ -62,4 +92,33 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
 // kept in sync with), never by role identity directly.
 export function resolveVisibleAdminNavItems(role: StaffRole): AdminNavItem[] {
   return ADMIN_NAV_ITEMS.filter((item) => roleHasPermission(role, item.permission));
+}
+
+// The same filter, kept in groups; a group left with no item for this
+// role is dropped, so no eyebrow ever sits over an empty list.
+export function resolveVisibleAdminNavGroups(role: StaffRole): AdminNavGroup[] {
+  return ADMIN_NAV_GROUPS.map((group) => ({
+    label: group.label,
+    items: group.items.filter((item) => roleHasPermission(role, item.permission)),
+  })).filter((group) => group.items.length > 0);
+}
+
+// Which menu item is the current page. Today matches /admin only; every
+// other item also matches its own sub-pages (/admin/reports/<id> marks
+// Book reports), so a detail page still shows where it belongs.
+export function isAdminNavItemCurrent(pathname: string, href: string): boolean {
+  if (href === "/admin") return pathname === "/admin";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+export function findCurrentAdminNavItem(
+  pathname: string,
+  groups: readonly AdminNavGroup[],
+): AdminNavItem | null {
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (isAdminNavItemCurrent(pathname, item.href)) return item;
+    }
+  }
+  return null;
 }

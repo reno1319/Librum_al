@@ -39,7 +39,7 @@ describe("DashboardMenu", () => {
   it("keeps the Dashboard nav label and only the new group words", () => {
     const html = render("/dashboard");
     expect(html).toMatch(/^<nav aria-label="Dashboard">/);
-    for (const word of ["Books", "Money", "Promotion", "Profile", "Series", "Sales", "Financial balance", "Payouts", "Bundles", "Discounts", "Section"]) {
+    for (const word of ["Books", "Money", "Promotion", "Profile", "Series", "Sales", "Financial balance", "Bundles", "Discounts", "Section"]) {
       expect(html).toContain(word);
     }
     expect(html).not.toContain(">Dashboard<");
@@ -61,7 +61,7 @@ describe("DashboardMenu", () => {
     expect(linkTag(tabs, "Financial balance")).toContain('aria-current="page"');
     expect(linkTag(tabs, "Financial balance")).toContain("font-bold");
     expect(linkTag(tabs, "Sales")).not.toContain("aria-current");
-    expect(tabs).toMatch(/>Payouts</);
+    expect(tabs).not.toMatch(/>Payouts</);
     expect(tabs).not.toMatch(/>Discounts</);
   });
 
@@ -107,10 +107,10 @@ describe("DashboardMenu", () => {
   it("the phone control remounts (closes) on client navigation: keyed by the path", () => {
     pathname = "/dashboard/sales";
     const first = findElement(DashboardMenu(), DismissableDetails);
-    pathname = "/dashboard/payouts";
+    pathname = "/dashboard/balance";
     const second = findElement(DashboardMenu(), DismissableDetails);
     expect(first?.key).toBe("/dashboard/sales");
-    expect(second?.key).toBe("/dashboard/payouts");
+    expect(second?.key).toBe("/dashboard/balance");
   });
 });
 

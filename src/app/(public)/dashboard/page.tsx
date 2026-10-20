@@ -33,7 +33,7 @@ export const dynamic = "force-dynamic";
 
 // LIBRUM 2.0 UI-6: DASHBOARD = AUTHOR OPERATIONS / WORKSPACE. This page
 // is the hub -- one prioritized next action, the author's books, and
-// quiet link-outs to Sales, Payouts, and secondary tools.
+// quiet link-outs to secondary tools.
 //
 // REDESIGN STEP 4 (A2 dashboard mockup, Renato's D1-D6): books first
 // with a small money summary, KDP Bookshelf style. A menu row of the
@@ -51,13 +51,14 @@ export const dynamic = "force-dynamic";
 // figures are replaced by "Could not load sales data. Please try
 // again." and the book list still renders.
 //
-// PR-G: stripe_payouts_enabled is read HERE AND ONLY HERE on this page,
-// and only to choose the payout status LABEL. It is NOT a publishing
-// input any more and must never become one again: paid publishing is
-// decided by canPublishPaidTitle() alone (see performPublish() in
-// dashboard/books/actions.ts, which reads no profiles row at all). The
-// column stays because an author's legacy Stripe Connect state is real
-// operational history that later payout work will still need to know.
+// AUTHOR PAGES REDESIGN (Renato's Q12 c): the row of three link boxes
+// under "Your books" (Sales & earnings, Financial balance, Payouts) is
+// gone -- the dashboard menu already links each page -- and with it the
+// payout-status label and the profiles read of stripe_account_id /
+// stripe_payouts_enabled it alone needed. This page reads no profiles
+// row. Paid publishing is decided by canPublishPaidTitle() alone (see
+// performPublish() in dashboard/books/actions.ts). The live POK build
+// adds one "Bank account" box here.
 
 type BookTab = "all" | "published" | "drafts";
 
@@ -101,12 +102,6 @@ export default async function DashboardPage({
     redirect("/login?next=/dashboard");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("stripe_account_id, stripe_payouts_enabled")
-    .eq("id", user.id)
-    .single();
-
   const { data: books } = await supabase
     .from("books")
     .select("*")
@@ -115,10 +110,6 @@ export default async function DashboardPage({
     .returns<Book[]>();
 
   const allBooks = books ?? [];
-  // Payout STATUS only -- see the note at the top of this file. The
-  // attention decision below takes the paid-publishing capability
-  // instead, which is the thing performPublish() actually enforces.
-  const payoutsEnabled = !!profile?.stripe_payouts_enabled;
 
   const attention = resolveDashboardAttention({
     books: allBooks,
@@ -209,18 +200,6 @@ export default async function DashboardPage({
         ).filter((item) => !item.done).length
       : 0;
 
-  const payoutStatus = !profile?.stripe_account_id
-    ? "not-connected"
-    : payoutsEnabled
-      ? "enabled"
-      : "pending";
-  const payoutLabel =
-    payoutStatus === "not-connected"
-      ? "Payout setup not available"
-      : payoutStatus === "pending"
-        ? "Payout setup not available"
-        : "Legacy payout account on file";
-
   return (
     <main className="page-container flex-1 pb-16">
       {heading}
@@ -236,14 +215,9 @@ export default async function DashboardPage({
           title="Paid publishing and author payout setup have not launched yet."
           className="mt-6"
         >
-          {/* PR-G: the "Payout details" link to /dashboard/payouts was
-              removed from THIS alert only. That page cannot change this
-              outcome -- paid publishing is gated by canPublishPaidTitle()
-              and nothing on the payouts page affects it -- so the link was
-              a dead end from the alert that tells an author they cannot
-              publish a priced title. The payout-status block further down
-              this page, and its own links, are unchanged: they report real
-              author-payout state, which is a different question. */}
+          {/* PR-G: no payout link in this alert: nothing an author can
+              set up changes this outcome -- paid publishing is gated by
+              canPublishPaidTitle() alone. */}
           <p>
             You can continue to publish free books while Librum completes
             its payment and payout systems.
@@ -342,32 +316,6 @@ export default async function DashboardPage({
           View all books &rarr;
         </Link>
       </section>
-
-      <div className="mt-10 grid gap-4 sm:grid-cols-3">
-        <section className={BOX_CLASSES}>
-          <h2 className="font-serif text-lg font-normal text-primary">Sales &amp; earnings</h2>
-          <p className="mt-1 text-sm text-muted">See units sold and your net revenue.</p>
-          <Link href="/dashboard/sales" className={`${TEXT_LINK_CLASSES} mt-3 inline-block`}>
-            View sales and earnings &rarr;
-          </Link>
-        </section>
-
-        <section className={BOX_CLASSES}>
-          <h2 className="font-serif text-lg font-normal text-primary">Financial balance</h2>
-          <p className="mt-1 text-sm text-muted">Your ledger balance, pending settlement, and payout history.</p>
-          <Link href="/dashboard/balance" className={`${TEXT_LINK_CLASSES} mt-3 inline-block`}>
-            View financial balance &rarr;
-          </Link>
-        </section>
-
-        <section className={BOX_CLASSES}>
-          <h2 className="font-serif text-lg font-normal text-primary">Payouts</h2>
-          <p className="mt-1 text-sm">{payoutLabel}</p>
-          <Link href="/dashboard/payouts" className={`${TEXT_LINK_CLASSES} mt-3 inline-block`}>
-            View payouts &rarr;
-          </Link>
-        </section>
-      </div>
 
       <section className="mt-10">
         <h2 className="font-serif text-2xl font-normal text-primary">Tools</h2>

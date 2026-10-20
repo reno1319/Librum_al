@@ -17,7 +17,7 @@ describe("dashboard menu groups", () => {
   it("has Renato's four groups and the existing page names", () => {
     expect(DASHBOARD_MENU_GROUPS.map((g) => [g.label, g.items.map((i) => `${i.label} ${i.href}`)])).toEqual([
       ["Books", ["Books /dashboard", "Series /dashboard/series"]],
-      ["Money", ["Sales /dashboard/sales", "Financial balance /dashboard/balance", "Payouts /dashboard/payouts"]],
+      ["Money", ["Sales /dashboard/sales", "Financial balance /dashboard/balance"]],
       ["Promotion", ["Bundles /dashboard/bundles", "Discounts /dashboard/discounts"]],
       ["Profile", ["Profile /dashboard/profile"]],
     ]);
@@ -40,7 +40,6 @@ describe("findDashboardMenuMatch", () => {
     ["/dashboard/series", "Books/Series"],
     ["/dashboard/sales", "Money/Sales"],
     ["/dashboard/balance", "Money/Financial balance"],
-    ["/dashboard/payouts", "Money/Payouts"],
     ["/dashboard/bundles", "Promotion/Bundles"],
     ["/dashboard/bundles/abc/edit", "Promotion/Bundles"],
     ["/dashboard/discounts", "Promotion/Discounts"],
@@ -53,6 +52,7 @@ describe("findDashboardMenuMatch", () => {
     "/dashboard/unknown",
     "/dashboard/booksx",
     "/dashboard/salesx",
+    "/dashboard/payouts",
     "/dashboard-other",
     "/dashboardx",
     "/account",
@@ -84,7 +84,7 @@ describe("aria-current", () => {
   it("an item is 'page' only on its own page, the group 'true'", () => {
     expect(current("/dashboard")).toEqual({
       groups: ["true", undefined, undefined, undefined],
-      items: ["page", undefined, undefined, undefined, undefined, undefined, undefined, undefined],
+      items: ["page", undefined, undefined, undefined, undefined, undefined, undefined],
     });
     expect(current("/dashboard/balance").items[3]).toBe("page");
     expect(current("/dashboard/balance").groups).toEqual([undefined, "true", undefined, undefined]);
@@ -99,7 +99,7 @@ describe("aria-current", () => {
   );
 
   it("bundle edit marks Bundles 'true'", () => {
-    expect(current("/dashboard/bundles/abc/edit").items[5]).toBe("true");
+    expect(current("/dashboard/bundles/abc/edit").items[4]).toBe("true");
     expect(current("/dashboard/bundles/abc/edit").groups[2]).toBe("true");
   });
 
