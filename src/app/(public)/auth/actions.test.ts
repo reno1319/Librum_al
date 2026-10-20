@@ -688,3 +688,40 @@ describe("signup: Terms/Privacy consent gate", () => {
     expect(mockCookieStore.delete).not.toHaveBeenCalled();
   });
 });
+
+// PEN-2 (N3): the signup name becomes the display name and, for an
+// author, the public author name and default pen name, so it is trimmed.
+// A name that is only whitespace gets the profile page's own message.
+describe("signup: N3 name trim", () => {
+  beforeEach(resetMocks);
+
+  function signupFormData(overrides: Record<string, string> = {}) {
+    return formData({
+      email: "newauthor@example.com",
+      password: "hunter2",
+      displayName: "New Author",
+      role: "author",
+      accept_terms: "on",
+      ...overrides,
+    });
+  }
+
+  it("sends the trimmed name to signUp", async () => {
+    await expectRedirectTo(signup(signupFormData({ displayName: "  Ana Pen \t" })), "/dashboard");
+    expect(mockSupabaseAuth.signUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({ data: { display_name: "Ana Pen", role: "author" } }),
+      }),
+    );
+  });
+
+  it.each(["   ", "\t\n"])("refuses a whitespace-only name (%j) before signUp, with the profile page's message", async (name) => {
+    await expectRedirectTo(signup(signupFormData({ displayName: name })), "/signup?error=Name+can%27t+be+empty");
+    expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
+  });
+
+  it("an absent name is still 'Please fill in every field'", async () => {
+    await expectRedirectTo(signup(signupFormData({ displayName: "" })), "/signup?error=Please+fill+in+every+field");
+    expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
+  });
+});

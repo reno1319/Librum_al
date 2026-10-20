@@ -87,13 +87,24 @@ do $$
 begin
   -- Table-level ACL: SELECT only, to both anon and authenticated --
   -- never INSERT/UPDATE/DELETE to either.
+  -- PEN-NAMES-2 (E2): SELECT is now a column grant that leaves out
+  -- created_by (a staff account id), so neither role holds table-level
+  -- SELECT any more; both can still read every public column.
   perform pg_temp.assert(
-    has_table_privilege('anon', 'public.blog_posts', 'SELECT'),
-    'part0: anon must have table-level SELECT on blog_posts'
+    not has_table_privilege('anon', 'public.blog_posts', 'SELECT')
+      and not has_table_privilege('authenticated', 'public.blog_posts', 'SELECT'),
+    'part0 (PEN-NAMES-2): anon/authenticated must NOT have table-level SELECT on blog_posts (column grant only)'
   );
   perform pg_temp.assert(
-    has_table_privilege('authenticated', 'public.blog_posts', 'SELECT'),
-    'part0: authenticated must have table-level SELECT on blog_posts'
+    has_column_privilege('anon', 'public.blog_posts', 'title', 'SELECT')
+      and has_column_privilege('anon', 'public.blog_posts', 'content_markdown', 'SELECT')
+      and has_column_privilege('authenticated', 'public.blog_posts', 'slug', 'SELECT'),
+    'part0 (PEN-NAMES-2): anon/authenticated must still SELECT the public blog_posts columns'
+  );
+  perform pg_temp.assert(
+    not has_column_privilege('anon', 'public.blog_posts', 'created_by', 'SELECT')
+      and not has_column_privilege('authenticated', 'public.blog_posts', 'created_by', 'SELECT'),
+    'part0 (PEN-NAMES-2): anon/authenticated must NOT SELECT blog_posts.created_by'
   );
   perform pg_temp.assert(
     not has_table_privilege('anon', 'public.blog_posts', 'INSERT'),
@@ -739,11 +750,33 @@ end $$;
 
 do $$
 begin
-  -- public blog object read remains possible for anon.
+  -- PEN-NAMES-2 (C9): the blog bucket is public, so its images are served
+  -- by public URL, which never reads storage.objects through RLS. The
+  -- anon listing policy is gone: anon can no longer enumerate (or read
+  -- the owner of) blog objects through the API.
   set local role anon;
   perform pg_temp.assert(
+    not exists (select 1 from storage.objects where bucket_id = 'blog' and name = 'covers/test-cover.jpg'),
+    'part7 (PEN-NAMES-2): anon must NOT be able to list objects in the blog bucket (public URL delivery only)'
+  );
+  reset role;
+end $$;
+
+do $$
+begin
+  -- PEN-NAMES-2 (C9): staff with blog.manage can still read blog objects.
+  perform set_config('request.jwt.claim.sub', 'e0000000-0000-0000-0000-000000000003', true);
+  set local role authenticated;
+  perform pg_temp.assert(
     exists (select 1 from storage.objects where bucket_id = 'blog' and name = 'covers/test-cover.jpg'),
-    'part7: anon must be able to read an object in the public blog bucket'
+    'part7 (PEN-NAMES-2): blog.manage (editor) must be able to read objects in the blog bucket'
+  );
+  reset role;
+  perform set_config('request.jwt.claim.sub', 'e0000000-0000-0000-0000-000000000006', true);
+  set local role authenticated;
+  perform pg_temp.assert(
+    not exists (select 1 from storage.objects where bucket_id = 'blog' and name = 'covers/test-cover.jpg'),
+    'part7 (PEN-NAMES-2): a non-staff user must NOT be able to list objects in the blog bucket'
   );
   reset role;
 end $$;

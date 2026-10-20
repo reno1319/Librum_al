@@ -95,7 +95,7 @@ function sessionFrom(table: string) {
   if (table === "pen_names") {
     return { select: () => ({ eq: () => ({ returns: async () => ({ data: [], error: null }) }) }) };
   }
-  if (table === "purchases") {
+  if (table === "purchases" || table === "author_book_purchases") {
     return {
       select: () => ({
         in: async (_column: string, ids: unknown[]) => {
@@ -291,6 +291,32 @@ describe("successful reads", () => {
     expect(objects.covers.has(OWN_COVER)).toBe(false);
     expect(objects.manuscripts.has(OWN_MANUSCRIPT)).toBe(false);
     expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  // PEN-2 (L10): new covers are `<random uuid>/cover.<ext>`; taken from
+  // the account's own books rows, they are removed with the service role.
+  it("a new random-folder cover from the account's own row is removed too, after deleteUser", async () => {
+    const NEW_COVER = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
+    objects.covers.add(NEW_COVER);
+    setBooks([{ id: BOOK_ID, cover_path: NEW_COVER, file_path: OWN_MANUSCRIPT }]);
+    expect(await run()).toBe("/?account=deleted");
+    expect(storageCalls).toEqual([
+      { via: "service", bucket: "covers", paths: [NEW_COVER] },
+      { via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] },
+    ]);
+    expect(events.indexOf(`deleteUser:${USER_ID}`)).toBeLessThan(events.indexOf("remove:covers"));
+  });
+
+  it.each([
+    "0f0e0d0c-0b0a-4908-8706-050403020100/cover.jpeg",
+    "0F0E0D0C-0B0A-4908-8706-050403020100/cover.png",
+    "0f0e0d0c-0b0a-4908-8706-050403020100/x/cover.png",
+    "covers/0f0e0d0c-0b0a-4908-8706-050403020100/cover.png",
+    "0f0e0d0c-0b0a-4908-8706-050403020100/pen-name.png",
+  ])("a near-miss of the new cover shape (%s) is skipped", async (value) => {
+    setBooks([{ id: BOOK_ID, cover_path: value, file_path: null }]);
+    expect(await run()).toBe("/?account=deleted");
+    expect(removalsFor("covers")).toEqual([]);
   });
 
   it("a canonical .jpg cover is removed too", async () => {

@@ -8,7 +8,7 @@ import {
   UNSAFE_COVER_PATHS,
   UNSAFE_MANUSCRIPT_PATHS,
 } from "@/lib/book-storage-path-test-fixtures";
-import { canonicalBookCoverPath, canonicalBookManuscriptPath } from "@/lib/book-storage-path";
+import { canonicalBookCoverPath, canonicalBookManuscriptPath, isNewBookCoverPath } from "@/lib/book-storage-path";
 
 // BOOK-STORAGE-MUTATION-AUTH-1 (F5): the real createBook/updateBook/
 // deleteBook actions against one recording Supabase double. Every
@@ -44,6 +44,9 @@ let deleteResult: Result | null;
 let removeError: unknown = null;
 let failUploadsTo: Set<string> = new Set();
 let storedObjects: Record<string, Buffer> = {};
+// PEN-2 (L10): every Storage call made through the catalog writer
+// (service role), as "<op>:<bucket>".
+let writerStorageOps: string[] = [];
 
 function query(table: string) {
   const filters: Filter[] = [];
@@ -54,7 +57,7 @@ function query(table: string) {
     if (op === "select") {
       if (table === "books") return bookReadResult;
       if (table === "bundle_books") return { data: [], error: null };
-      if (table === "purchases") return { data: null, error: null, count: 0 } as Result;
+      if (table === "purchases" || table === "author_book_purchases") return { data: null, error: null, count: 0 } as Result;
       throw new Error(`unexpected read of ${table}`);
     }
     const write = { table, op, payload, filters: [...filters] };
@@ -118,7 +121,7 @@ function storageBucket(bucket: string) {
   return {
     upload: async (path: unknown) => {
       record("upload", [path]);
-      return failUploadsTo.has(`${bucket}:${String(path)}`)
+      return failUploadsTo.has(`${bucket}:${String(path)}`) || failUploadsTo.has(`${bucket}:*`)
         ? { error: { message: "upload failed" } }
         : { error: null };
     },
@@ -163,7 +166,13 @@ vi.mock("@/lib/pen-name-write-client", () => ({
 }));
 vi.mock("@/lib/catalog-write-client", async () => {
   const { catalogWriterReplayingOnto } = await import("@/lib/catalog-write-test-double");
-  return { createCatalogWriteClient: () => catalogWriterReplayingOnto(() => sessionClient) };
+  return {
+    createCatalogWriteClient: () =>
+      catalogWriterReplayingOnto(
+        () => sessionClient,
+        (op, bucket) => writerStorageOps.push(`${op}:${bucket}`),
+      ),
+  };
 });
 
 const { createBook, updateBook, deleteBook } = await import("./actions");
@@ -177,6 +186,11 @@ const OWN_PNG = canonicalBookCoverPath(USER_ID, BOOK_ID, "png");
 const OWN_JPG = canonicalBookCoverPath(USER_ID, BOOK_ID, "jpg");
 const OWN_EPUB = canonicalBookManuscriptPath(USER_ID, BOOK_ID);
 const LEGACY_JPEG = `${USER_ID}/${BOOK_ID}-cover.jpeg`;
+// PEN-2 (L10): a new cover key is `<random uuid>/cover.<ext>`.
+const NEW_JPG = expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.jpg$/);
+const NEW_PNG = expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.png$/);
+const RANDOM_STORED = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
+const uploadedCoverKey = () => String(storageCalls.find((c) => c.op === "upload" && c.bucket === "covers")?.paths[0]);
 
 async function validEpub(): Promise<Buffer> {
   const zip = new JSZip();
@@ -254,6 +268,7 @@ beforeEach(() => {
   removeError = null;
   failUploadsTo = new Set();
   storedObjects = {};
+  writerStorageOps = [];
   consoleOutput = [];
   for (const level of ["log", "info", "warn", "error"] as const) {
     vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
@@ -324,22 +339,53 @@ describe("updateBook with a replacement", () => {
   it("cover only: writes only cover_path, never re-persists or removes the manuscript", async () => {
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
     const payload = bookUpdates()[0].payload as Record<string, unknown>;
-    expect(payload.cover_path).toBe(OWN_JPG);
+    expect(payload.cover_path).toEqual(NEW_JPG);
     expect(payload).not.toHaveProperty("file_path");
     expect(storageCalls).toEqual([
-      { op: "upload", bucket: "covers", paths: [OWN_JPG] },
+      { op: "upload", bucket: "covers", paths: [NEW_JPG] },
       { op: "remove", bucket: "covers", paths: [OWN_PNG] },
     ]);
   });
 
-  it("the key is derived from the session user, the row id and the verified bytes -- not the file name", async () => {
+  // PEN-2 (L10): a fresh random folder plus the verified bytes' extension;
+  // nothing from the account, the book or the file name.
+  it("the key is a fresh random folder and the verified bytes' extension -- not the file name, account or book", async () => {
     await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
-    expect(storageCalls[0]).toEqual({ op: "upload", bucket: "covers", paths: [OWN_PNG] });
+    expect(storageCalls[0]).toEqual({ op: "upload", bucket: "covers", paths: [NEW_PNG] });
+    expect(uploadedCoverKey()).not.toContain(USER_ID);
+    expect(uploadedCoverKey()).not.toContain(BOOK_ID);
+    expect(uploadedCoverKey()).not.toContain("anything");
   });
 
-  it("same key replaced in place: nothing is removed", async () => {
+  it("covers are uploaded and removed with the catalog writer (service role, C9), never the session", async () => {
+    await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
+    expect(writerStorageOps).toEqual(["upload:covers", "remove:covers"]);
+  });
+
+  // PEN-2 (L10): every replace gets a new key, so even a same-extension
+  // replace never overwrites the live object; the previous one is removed
+  // after the proven write.
+  it("a same-extension replace gets a new key and removes the previous object after the write", async () => {
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), PNG)))).toBe("/dashboard?success=Book+updated");
-    expect(removals()).toEqual([]);
+    expect(uploadedCoverKey()).not.toBe(OWN_PNG);
+    expect(events).toEqual(["storage:upload:covers", "db:update:books", "storage:remove:covers"]);
+    expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [OWN_PNG] }]);
+  });
+
+  it("a new-shape stored cover (read from the author's own row) is replaced and removed after the write", async () => {
+    bookReadResult = { data: row({ cover_path: RANDOM_STORED }), error: null };
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
+    expect(bookUpdates()[0].filters).toContainEqual({ kind: "eq", column: "cover_path", value: RANDOM_STORED });
+    expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [RANDOM_STORED] }]);
+  });
+
+  it("two replaces never reuse a key", async () => {
+    await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
+    const first = uploadedCoverKey();
+    storageCalls = [];
+    await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
+    expect(isNewBookCoverPath(first)).toBe(true);
+    expect(uploadedCoverKey()).not.toBe(first);
   });
 
   it("the exact own-book legacy .jpeg cover is removed only after the write, and never re-created", async () => {
@@ -348,7 +394,7 @@ describe("updateBook with a replacement", () => {
     expect(events).toEqual(["storage:upload:covers", "db:update:books", "storage:remove:covers"]);
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [LEGACY_JPEG] }]);
     expect(everyStorageKey().filter((k) => String(k).endsWith(".jpeg"))).toEqual([LEGACY_JPEG]);
-    expect((bookUpdates()[0].payload as Record<string, unknown>).cover_path).toBe(OWN_JPG);
+    expect((bookUpdates()[0].payload as Record<string, unknown>).cover_path).toEqual(NEW_JPG);
   });
 
   it("filters the write by id, author_id and the cover_path it read (compare-and-set)", async () => {
@@ -402,8 +448,8 @@ describe("updateBook never hands an unsafe stored path to Storage", () => {
   it.each(coverCases)("stored cover %s: replacement succeeds, the old value is left untouched", async (_label, value) => {
     bookReadResult = { data: row({ cover_path: value }), error: null };
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
-    expect(storageCalls).toEqual([{ op: "upload", bucket: "covers", paths: [OWN_JPG] }]);
-    expect((bookUpdates()[0].payload as Record<string, unknown>).cover_path).toBe(OWN_JPG);
+    expect(storageCalls).toEqual([{ op: "upload", bucket: "covers", paths: [NEW_JPG] }]);
+    expect((bookUpdates()[0].payload as Record<string, unknown>).cover_path).toEqual(NEW_JPG);
     if (value.trim().length > 8) expect(loggedText()).not.toContain(value);
   });
 
@@ -457,27 +503,32 @@ describe("updateBook fails closed on identity, read and write failures", () => {
     ["null data", { data: null, error: null }],
     ["a mismatched row", { data: [{ id: OTHER_BOOK }], error: null }],
     ["a row without an id", { data: [{}], error: null }],
-  ])("%s returned: no success and no removal", async (_label, result) => {
+  ])("%s returned: no success, the stored cover is kept and only the new upload is removed", async (_label, result) => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
     updateResult = result as Result;
     const target = await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
     expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
-    expect(removals()).toEqual([]);
+    expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [uploadedCoverKey()] }]);
+    expect(removals().flatMap((c) => c.paths)).not.toContain(LEGACY_JPEG);
   });
 
-  it("a write error: no success and no removal", async () => {
+  it("a write error: no success, the stored cover is kept and only the new upload is removed", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
     updateResult = { data: null, error: { message: "db exploded" } };
     const target = await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
     expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
-    expect(removals()).toEqual([]);
+    expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [uploadedCoverKey()] }]);
   });
 
-  it("a concurrent cover change (compare-and-set matches no row): the old cover is not removed", async () => {
+  // PEN-2 (L10): when the compare-and-set misses, the new upload is the
+  // unreferenced object and is removed; the previous object stays.
+  it("a concurrent cover change (compare-and-set matches no row): the old cover stays, the new upload is removed", async () => {
     bookReadResult = { data: row({ cover_path: OWN_JPG }), error: null };
     updateResult = { data: [], error: null };
     await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
-    expect(removals()).toEqual([]);
+    expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [uploadedCoverKey()] }]);
+    expect(isNewBookCoverPath(uploadedCoverKey())).toBe(true);
+    expect(writerStorageOps).toEqual(["upload:covers", "remove:covers"]);
   });
 });
 
@@ -522,19 +573,39 @@ describe("createBook", () => {
     return f;
   }
 
-  it("writes the keys built by the shared constructors for the session user and the new id", async () => {
+  // PEN-2 (L10): the cover gets a fresh random key, uploaded with the
+  // catalog writer; the manuscript keeps its canonical key on the session.
+  it("writes a random cover key (catalog writer) and the canonical manuscript key for the new id", async () => {
     expect(await run(createBook(await createForm()))).toBe("/dashboard");
     const insert = dbWrites.find((w) => w.op === "insert")!;
     const id = (insert.payload as { id: string }).id;
     expect(insert.payload).toMatchObject({
       author_id: USER_ID,
-      cover_path: canonicalBookCoverPath(USER_ID, id, "png"),
+      cover_path: NEW_PNG,
       file_path: canonicalBookManuscriptPath(USER_ID, id),
     });
-    expect(everyStorageKey()).toEqual([
-      canonicalBookCoverPath(USER_ID, id, "png"),
-      canonicalBookManuscriptPath(USER_ID, id),
-    ]);
+    expect(everyStorageKey()).toEqual([NEW_PNG, canonicalBookManuscriptPath(USER_ID, id)]);
+    expect(uploadedCoverKey()).not.toContain(USER_ID);
+    expect(uploadedCoverKey()).not.toContain(id);
+    expect(uploadedCoverKey()).not.toBe(canonicalBookCoverPath(USER_ID, id, "png"));
+    expect(writerStorageOps).toEqual(["upload:covers"]);
+  });
+
+  it("an insert failure removes the new cover upload", async () => {
+    sessionClient.from = ((table: string) => {
+      const q = query(table) as Record<string, unknown>;
+      if (table === "books") {
+        q.insert = () => ({ select: async () => ({ data: null, error: { message: "boom" } }) });
+      }
+      return q;
+    }) as typeof sessionClient.from;
+    try {
+      expect(await run(createBook(await createForm()))).toMatch(/^\/dashboard\/books\/new\?error=/);
+    } finally {
+      sessionClient.from = (table: string) => query(table);
+    }
+    expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [uploadedCoverKey()] }]);
+    expect(writerStorageOps).toEqual(["upload:covers", "remove:covers"]);
   });
 
   it("temporary uploads are removed only after the insert, in one de-duplicated call", async () => {
@@ -568,6 +639,18 @@ describe("deleteBook", () => {
       { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] },
     ]);
     expect(events.indexOf("db:delete:books")).toBeLessThan(events.indexOf("storage:remove:covers"));
+  });
+
+  // PEN-2 (L10): a new-shape cover read from the author's own row is
+  // removed, with the catalog writer (C9: no user write policy on covers).
+  it("removes a new-shape stored cover with the catalog writer", async () => {
+    bookReadResult = { data: row({ cover_path: RANDOM_STORED }), error: null };
+    await run(deleteBook(BOOK_ID));
+    expect(removals()).toEqual([
+      { op: "remove", bucket: "covers", paths: [RANDOM_STORED] },
+      { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] },
+    ]);
+    expect(writerStorageOps).toEqual(["remove:covers"]);
   });
 
   it("removes the exact own-book legacy .jpeg cover (the lowercase spelling of the Stage A class)", async () => {
@@ -806,10 +889,18 @@ describe("updateBook never overwrites a live file before the save is proven", ()
     expect(dbWrites).toEqual([]);
   });
 
-  it("same-key cover and manuscript are uploaded only after the row update", async () => {
+  // PEN-2 (L10): a cover is never same-key any more (new random key on
+  // every replace), so it always goes before the write; the same-key
+  // manuscript still goes only after it.
+  it("the new cover goes before the row update, the same-key manuscript only after it", async () => {
     const f = await withManuscript(withCover(editForm(), PNG));
     expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Book+updated");
-    expect(events).toEqual(["db:update:books", "storage:upload:covers", "storage:upload:manuscripts"]);
+    expect(events).toEqual([
+      "storage:upload:covers",
+      "db:update:books",
+      "storage:upload:manuscripts",
+      "storage:remove:covers",
+    ]);
   });
 
   it("a new-key cover is still uploaded before the row update, so the row never points at a missing file", async () => {
@@ -827,12 +918,15 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   it.each([
     ["a write error", { data: null, error: { message: "db exploded" } }],
     ["zero rows", { data: [], error: null }],
-  ])("%s: the live same-key files are never touched", async (_label, result) => {
+  ])("%s: the live files are never touched and the new cover upload is removed", async (_label, result) => {
     updateResult = result as Result;
     const f = await withManuscript(withCover(editForm(), PNG));
     const target = await run(updateBook(BOOK_ID, f));
     expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
-    expect(storageCalls.filter((c) => c.op === "upload")).toEqual([]);
+    expect(storageCalls.filter((c) => c.op === "upload")).toEqual([{ op: "upload", bucket: "covers", paths: [NEW_PNG] }]);
+    expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [uploadedCoverKey()] }]);
+    expect(everyStorageKey()).not.toContain(OWN_PNG);
+    expect(everyStorageKey()).not.toContain(OWN_EPUB);
   });
 
   it("an in-place upload that fails after the save keeps the save and says the old file is still in place", async () => {
@@ -847,7 +941,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   });
 
   it("a new-key upload that fails stops before the row update", async () => {
-    failUploadsTo = new Set([`covers:${OWN_JPG}`]);
+    failUploadsTo = new Set(["covers:*"]);
     const target = await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
     expect(target).toBe(`/dashboard/books/${BOOK_ID}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`);
     expect(dbWrites).toEqual([]);

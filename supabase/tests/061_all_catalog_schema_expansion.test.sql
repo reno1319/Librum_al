@@ -555,9 +555,11 @@ begin
   -- this view omits, is pinned by 066); authenticated's INSERT and series
   -- UPDATE are column-level and pinned by
   -- 066_catalog_write_authorization.test.sql.
+  -- PEN-NAMES-2 (C1, E5): anon has no SELECT on books (it reads
+  -- public_books), and authenticated has no INSERT at all (column or
+  -- table) -- books are created by the service-role writer.
   perform pg_temp.assert(v_actual =
-    'anon:SELECT'
-    || ' | authenticated:DELETE,SELECT'
+    'authenticated:DELETE,SELECT'
     || ' | service_role:DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part8: public.books table privileges changed -- found %s', v_actual));
 
@@ -571,9 +573,9 @@ begin
        group by grantee
     ) s;
   -- CATALOG-WRITE-AUTH-1: the same narrowing as public.books.
+  -- PEN-NAMES-2 (C1): anon has no SELECT on bundles (it reads public_bundles).
   perform pg_temp.assert(v_actual =
-    'anon:SELECT'
-    || ' | authenticated:DELETE,SELECT'
+    'authenticated:DELETE,SELECT'
     || ' | service_role:DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part8: public.bundles table privileges changed -- found %s', v_actual));
 
@@ -610,12 +612,14 @@ begin
       'books/Authors can delete their own books/DELETE'
       || ' | books/Authors can insert their own books/INSERT'
       || ' | books/Authors can update their own books/UPDATE'
-      || ' | books/Owners can view books they''ve acquired/SELECT'
-      || ' | books/Published books are viewable by everyone, drafts by their autho/SELECT'
+      -- PEN-NAMES-2 (C1): the public/owner SELECT policies are replaced by
+      -- own-row and staff policies; public reads go through the views.
+      || ' | books/Authors can view their own books/SELECT'
+      || ' | books/Staff with reports.resolve can view every book/SELECT'
       || ' | bundles/Authors can delete their own bundles/DELETE'
       || ' | bundles/Authors can insert their own bundles/INSERT'
       || ' | bundles/Authors can update their own bundles/UPDATE'
-      || ' | bundles/Published bundles are viewable by everyone, drafts by their aut/SELECT'
+      || ' | bundles/Authors can view their own bundles/SELECT'
       || ' | discount_codes/Authors can create discount codes for their own books/INSERT'
       || ' | discount_codes/Authors can delete their own discount codes/DELETE'
       || ' | discount_codes/Authors can update their own discount codes/UPDATE'

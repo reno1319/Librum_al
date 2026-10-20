@@ -68,11 +68,11 @@ const mockCreateClient = vi.fn(() =>
               Promise.resolve({ data: [{ id: (payload as { id: string }).id }], error: null }),
           };
         },
-        select: () => ({
-          eq: () => ({
-            single: () => mockExistingSingle(),
-          }),
-        }),
+        // PEN-2: updateBook's ownership read filters by id AND author_id.
+        select: () => {
+          const read = { eq: () => read, single: () => mockExistingSingle() };
+          return read;
+        },
         // PAID-REPRICING-1: updateBook's write is now guarded and proved
         // by its returned rows, so the double supports `.is()` and ends
         // in `.select()`, reporting the one row it changed.
@@ -90,7 +90,8 @@ const mockCreateClient = vi.fn(() =>
     storage: {
       from: (bucket: string) => {
         if (bucket === "covers") {
-          return { upload: mockUploadCover };
+          // PEN-2 (L10): a replaced cover is removed after the write.
+          return { upload: mockUploadCover, remove: async () => ({ data: [], error: null }) };
         }
         if (bucket === "manuscripts") {
           return {
@@ -1230,7 +1231,9 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
     expect(mockDownloadManuscript).toHaveBeenCalledWith(tempPath);
     expect(mockUploadCover).toHaveBeenCalledOnce();
     const [uploadedPath, uploadedBytes, uploadOpts] = mockUploadCover.mock.calls[0];
-    expect(uploadedPath).toMatch(new RegExp(`^${USER_ID}/.+-cover\\.png$`));
+    // PEN-2 (L10): a fresh random folder, never the account id.
+    expect(uploadedPath).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.png$/);
+    expect(uploadedPath).not.toContain(USER_ID);
     expect(Buffer.isBuffer(uploadedBytes) ? uploadedBytes.equals(bytes) : false).toBe(true);
     expect(uploadOpts).toMatchObject({ contentType: "image/png" });
     // Cleaned up only after the full save succeeded -- from the SAME
@@ -1319,7 +1322,10 @@ describe("updateBook: coverStoragePath reference (COVER-1)", () => {
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Book+updated");
     expect(mockUpdate).toHaveBeenCalledOnce();
-    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ cover_path: `${USER_ID}/${BOOK_ID}-cover.png` });
+    // PEN-2 (L10): a new random-folder key on every replace.
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({
+      cover_path: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.png$/),
+    });
     expect(mockRemoveManuscript).toHaveBeenCalledWith([tempPath]);
   });
 
@@ -1340,7 +1346,10 @@ describe("updateBook: coverStoragePath reference (COVER-1)", () => {
 describe("updateBook: update atomicity when the final cover write fails (COVER-1)", () => {
   beforeEach(resetMocks);
 
-  it("leaves the old cover authoritative -- no broken replacement -- when the final storage write fails", async () => {
+  // PEN-2 (L10): the cover always has a new key, so it is uploaded BEFORE
+  // the write; a failed upload stops before the row is touched, and the
+  // old cover stays authoritative.
+  it("leaves the old cover authoritative -- no broken replacement -- when the cover upload fails", async () => {
     const bytes = buildPngBytesOfSize(1024);
     const tempPath = `${USER_ID}/tmp/cover/6320f67a-2588-445d-85fc-a7a51fb20540.png`;
     mockDownloadManuscript.mockResolvedValueOnce(downloadResult(bytes));
@@ -1351,17 +1360,12 @@ describe("updateBook: update atomicity when the final cover write fails (COVER-1
 
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    // QA-FIX-3: same in-place contract as the manuscript case above.
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(
-        "Your changes were saved, but the new cover could not be uploaded. The previous file is still in place. Please choose the file again.",
-      )}`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`,
     );
-    expect(mockUpdate).toHaveBeenCalledOnce();
-    expect(mockUpdate.mock.invocationCallOrder[0]).toBeLessThan(
-      mockUploadCover.mock.invocationCallOrder[0],
-    );
-    expect(mockRemoveManuscript).toHaveBeenCalledWith([tempPath]);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    // The staged temp cover is kept for a retry.
+    expect(mockRemoveManuscript).not.toHaveBeenCalled();
   });
 });
 

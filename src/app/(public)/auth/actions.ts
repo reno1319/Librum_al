@@ -28,11 +28,18 @@ function resolveSignupRole(value: FormDataEntryValue | null): SignupRole {
 export async function signup(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
-  const displayName = String(formData.get("displayName") ?? "");
+  // PEN-2 (N3): the name is trimmed; it becomes the display name and, for
+  // an author, the public author name and default pen name.
+  const rawDisplayName = String(formData.get("displayName") ?? "");
+  const displayName = rawDisplayName.trim();
   const role = resolveSignupRole(formData.get("role"));
 
-  if (!email || !password || !displayName) {
+  if (!email || !password || !rawDisplayName) {
     redirect("/signup?error=Please+fill+in+every+field");
+  }
+  if (!displayName) {
+    // The same message the profile page shows for an empty name.
+    redirect("/signup?error=Name+can%27t+be+empty");
   }
 
   // LAUNCH-1 P2: required, unchecked-by-default signup clickwrap --

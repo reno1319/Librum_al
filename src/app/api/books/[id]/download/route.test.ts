@@ -107,11 +107,34 @@ const INVALID_NON_STRING_PATHS: Array<[string, unknown]> = [
 ];
 
 type QueryResult = { data: unknown; error: unknown };
+type Call = { table: string; columns: string; filters: [string, unknown][]; terminal: string };
+
+// PEN-NAMES-2: the route reads public_books (existence), then the
+// caller's OWN books row (author check) or user_owns_book, all with the
+// session; only after that does the service role read the row's
+// author_id/file_path/title. `bookResult` is what that service-role read
+// returns.
+let currentBookResult: QueryResult;
+
+function recordingFrom(calls: Call[], resolve: (call: Call) => QueryResult) {
+  return vi.fn((table: string) => {
+    const call: Call = { table, columns: "", filters: [], terminal: "" };
+    const chain = {
+      select: (columns: string) => ((call.columns = columns), chain),
+      eq: (column: string, value: unknown) => (call.filters.push([column, value]), chain),
+      maybeSingle: () => ((call.terminal = "maybeSingle"), calls.push(call), Promise.resolve(resolve(call))),
+      single: () => ((call.terminal = "single"), calls.push(call), Promise.resolve(resolve(call))),
+    };
+    return chain;
+  });
+}
 
 function makeFakeSupabase(overrides: {
   userId?: string | null;
   userEmail?: string | null;
   bookResult?: QueryResult;
+  publicResult?: QueryResult;
+  ownRow?: boolean;
   ownsBookRpcResult?: unknown;
   ownsBookRpcError?: unknown;
 } = {}) {
@@ -122,14 +145,25 @@ function makeFakeSupabase(overrides: {
       data: { id: BOOK_ID, author_id: AUTHOR_ID, file_path: CANONICAL_PATH, title: "Test Book" },
       error: null,
     },
+    publicResult,
+    ownRow = userId !== null && userId !== READER_ID,
     ownsBookRpcResult = false,
     ownsBookRpcError = null,
   } = overrides;
+  currentBookResult = bookResult;
 
-  const single = vi.fn(() => Promise.resolve(bookResult));
-  const eq = vi.fn(() => ({ single }));
-  const select = vi.fn(() => ({ eq }));
-  const from = vi.fn(() => ({ select }));
+  const calls: Call[] = [];
+  const from = recordingFrom(calls, (call) => {
+    if (call.table === "public_books") {
+      const routeId = call.filters.find(([c]) => c === "id")?.[1];
+      return publicResult ?? { data: { id: routeId }, error: null };
+    }
+    if (call.table === "books") {
+      const routeId = call.filters.find(([c]) => c === "id")?.[1];
+      return { data: ownRow ? { id: routeId } : null, error: null };
+    }
+    throw new Error(`unexpected session table ${call.table}`);
+  });
   const rpc = vi.fn(() => Promise.resolve({ data: ownsBookRpcResult, error: ownsBookRpcError }));
 
   return {
@@ -142,9 +176,7 @@ function makeFakeSupabase(overrides: {
     from,
     rpc,
     __from: from,
-    __select: select,
-    __eq: eq,
-    __single: single,
+    __calls: calls,
     __rpc: rpc,
   };
 }
@@ -165,8 +197,13 @@ function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: un
         : { data: new Blob([new Uint8Array(fileBytes)]), error: null },
     ),
   );
-  const from = vi.fn((_bucket: string) => ({ download }));
-  return { storage: { from }, __from: from, __download: download };
+  const storageFrom = vi.fn((_bucket: string) => ({ download }));
+  const calls: Call[] = [];
+  const from = recordingFrom(calls, (call) => {
+    if (call.table !== "books") throw new Error(`unexpected admin table ${call.table}`);
+    return currentBookResult;
+  });
+  return { storage: { from: storageFrom }, from, __from: storageFrom, __download: download, __calls: calls };
 }
 
 function makeRequest() {
@@ -244,21 +281,37 @@ describe("GET /api/books/[id]/download", () => {
   });
 
   describe("row identity binding", () => {
-    it("selects exactly id, author_id, file_path, title for the route's own id", async () => {
+    // PEN-NAMES-2: the session reads only public_books (id) and the
+    // caller's own books row (id, filtered by author_id); the account
+    // columns come from one service-role read, after entitlement.
+    it("session: public_books then an own-row check; service role: exactly id, author_id, file_path, title", async () => {
       const supabase = makeFakeSupabase();
+      const admin = makeFakeAdminClient();
       mockCreateClient.mockResolvedValue(supabase);
-      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient());
+      mockCreateAdminClient.mockReturnValue(admin);
       mockWatermarkEpub.mockResolvedValue({ watermarked: true, bytes: Buffer.from("w") });
 
       await callRoute();
 
-      expect(supabase.__from).toHaveBeenCalledTimes(1);
-      expect(supabase.__from).toHaveBeenCalledWith("books");
-      expect(supabase.__select).toHaveBeenCalledTimes(1);
-      expect(supabase.__select).toHaveBeenCalledWith(EXPECTED_COLUMNS);
-      expect(supabase.__eq).toHaveBeenCalledTimes(1);
-      expect(supabase.__eq).toHaveBeenCalledWith("id", BOOK_ID);
-      expect(supabase.__single).toHaveBeenCalledTimes(1);
+      expect(supabase.__calls).toEqual([
+        { table: "public_books", columns: "id", filters: [["id", BOOK_ID]], terminal: "maybeSingle" },
+        { table: "books", columns: "id", filters: [["id", BOOK_ID], ["author_id", AUTHOR_ID]], terminal: "maybeSingle" },
+      ]);
+      expect(admin.__calls).toEqual([
+        { table: "books", columns: EXPECTED_COLUMNS, filters: [["id", BOOK_ID]], terminal: "maybeSingle" },
+      ]);
+    });
+
+    it("a book public_books does not show is unavailable before any entitlement check", async () => {
+      const supabase = makeFakeSupabase({ publicResult: { data: null, error: null } });
+      mockCreateClient.mockResolvedValue(supabase);
+
+      const response = await callRoute();
+
+      expect(redirectTarget(response)).toBe(FILE_UNAVAILABLE);
+      expect(supabase.__calls.map((c) => c.table)).toEqual(["public_books"]);
+      expect(supabase.__rpc).not.toHaveBeenCalled();
+      expect(mockCreateAdminClient).not.toHaveBeenCalled();
     });
 
     it("the entitlement RPC is asked about the row's own id", async () => {
@@ -306,6 +359,7 @@ describe("GET /api/books/[id]/download", () => {
     });
 
     it("an entitled reader cannot pull a manuscript filed under the reader's own id", async () => {
+      const adminClient = makeFakeAdminClient();
       mockCreateClient.mockResolvedValue(
         makeFakeSupabase({
           userId: READER_ID,
@@ -313,11 +367,12 @@ describe("GET /api/books/[id]/download", () => {
           bookResult: bookRow({ file_path: `${READER_ID}/${BOOK_ID}.epub` }),
         }),
       );
+      mockCreateAdminClient.mockReturnValue(adminClient);
 
       const response = await callRoute();
 
       expect(redirectTarget(response)).toBe(FILE_UNAVAILABLE);
-      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+      expect(adminClient.__download).not.toHaveBeenCalled();
     });
   });
 
@@ -511,7 +566,8 @@ describe("GET /api/books/[id]/download", () => {
 
       expect(response.status).toBe(307);
       expect(redirectTarget(response)).toBe(FILE_UNAVAILABLE);
-      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+      // PEN-NAMES-2: the row is read by the service role (after
+      // entitlement), but nothing reaches Storage.
       expect(adminClient.__from).not.toHaveBeenCalled();
       expect(adminClient.__download).not.toHaveBeenCalled();
       expect(mockWatermarkEpub).not.toHaveBeenCalled();
@@ -555,7 +611,7 @@ describe("GET /api/books/[id]/download", () => {
       const response = await GET(makeRequest(), { params: Promise.resolve({ id: BOOK_FIXTURE_BOOK_ID }) });
 
       expect(redirectTarget(response)).toBe(`/books/${BOOK_FIXTURE_BOOK_ID}?error=That+file+isn%27t+available`);
-      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+      expect(adminClient.__from).not.toHaveBeenCalled();
       expect(adminClient.__download).not.toHaveBeenCalled();
       expect(mockWatermarkEpub).not.toHaveBeenCalled();
       for (const spy of logSpies) expect(spy).not.toHaveBeenCalled();
@@ -583,14 +639,16 @@ describe("GET /api/books/[id]/download", () => {
     });
 
     it("refuses a row with no file_path key at all", async () => {
+      const adminClient = makeFakeAdminClient();
       mockCreateClient.mockResolvedValue(
         makeFakeSupabase({ bookResult: { data: { id: BOOK_ID, author_id: AUTHOR_ID, title: "T" }, error: null } }),
       );
+      mockCreateAdminClient.mockReturnValue(adminClient);
 
       const response = await callRoute();
 
       expect(redirectTarget(response)).toBe(FILE_UNAVAILABLE);
-      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+      expect(adminClient.__download).not.toHaveBeenCalled();
     });
   });
 
@@ -620,7 +678,7 @@ describe("GET /api/books/[id]/download", () => {
       ["a row without author_id", { data: { id: BOOK_ID, file_path: CANONICAL_PATH, title: "T" }, error: null }],
       ["a row with a non-string author_id", { data: { ...canonicalRow, author_id: 1 }, error: null }],
       ["a row with a non-string title", { data: { ...canonicalRow, title: null }, error: null }],
-    ])("%s -> file unavailable, no admin client", async (_label, bookResult) => {
+    ])("%s -> file unavailable, nothing reaches Storage", async (_label, bookResult) => {
       const adminClient = makeFakeAdminClient();
       mockCreateClient.mockResolvedValue(makeFakeSupabase({ bookResult }));
       mockCreateAdminClient.mockReturnValue(adminClient);
@@ -629,7 +687,7 @@ describe("GET /api/books/[id]/download", () => {
 
       expect(response.status).toBe(307);
       expect(redirectTarget(response)).toBe(FILE_UNAVAILABLE);
-      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+      expect(adminClient.__from).not.toHaveBeenCalled();
       expect(adminClient.__download).not.toHaveBeenCalled();
       expect(mockWatermarkEpub).not.toHaveBeenCalled();
       const exposed = `${response.headers.get("location")}${await response.text()}${allLogOutput()}`;

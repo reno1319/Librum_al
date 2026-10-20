@@ -63,6 +63,11 @@ let currentMockSupabase: ReturnType<typeof makeMockSupabase>;
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve(currentMockSupabase),
 }));
+// PEN-2 (O12): the permanent cover upload runs with the service role so
+// the stored object has no staff owner. The admin double shares the
+// session double's storage spies, and records that it was used.
+const mockCreateAdminClient = vi.fn(() => ({ storage: currentMockSupabase.storage }));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));
 
 const {
   createBlogPostAction,
@@ -90,6 +95,7 @@ beforeEach(() => {
   mockRequireStaff.mockReset();
   mockRequireStaff.mockResolvedValue({ userId: "editor-1", role: "editor" });
   currentMockSupabase = makeMockSupabase();
+  mockCreateAdminClient.mockClear();
 });
 
 describe("createBlogPostAction", () => {
@@ -121,7 +127,7 @@ describe("createBlogPostAction", () => {
 
   it("valid input with no cover: calls create_blog_post with cover_image_path null and redirects to the new edit page", async () => {
     currentMockSupabase = makeMockSupabase({
-      rpcResults: { create_blog_post: { data: "new-post-id", error: null } },
+      rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
     });
 
     await expect(createBlogPostAction(validFormData())).rejects.toBeInstanceOf(RedirectSignal);
@@ -132,12 +138,12 @@ describe("createBlogPostAction", () => {
     );
     // No direct table write anywhere in this action.
     expect(currentMockSupabase._spies.from).not.toHaveBeenCalled();
-    expect(mockRedirect).toHaveBeenCalledWith("/admin/blog/new-post-id/edit");
+    expect(mockRedirect).toHaveBeenCalledWith("/admin/blog/22222222-2222-4222-8222-222222222222/edit");
   });
 
   it("never passes status/published_at/created_by as RPC parameters -- those are not exposed at all", async () => {
     currentMockSupabase = makeMockSupabase({
-      rpcResults: { create_blog_post: { data: "new-post-id", error: null } },
+      rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
     });
 
     await expect(createBlogPostAction(validFormData())).rejects.toBeInstanceOf(RedirectSignal);
@@ -165,7 +171,7 @@ describe("createBlogPostAction", () => {
   it("with a staged cover: downloads, validates real bytes, uploads to the permanent bucket, and calls update_blog_post", async () => {
     currentMockSupabase = makeMockSupabase({
       rpcResults: {
-        create_blog_post: { data: "new-post-id", error: null },
+        create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null },
         update_blog_post: { data: null, error: null },
       },
       downloadBytes: PNG_BYTES,
@@ -177,19 +183,23 @@ describe("createBlogPostAction", () => {
     expect(currentMockSupabase._spies.download).toHaveBeenCalledWith("editor-1/tmp/blog/abc.png");
     expect(currentMockSupabase._spies.upload).toHaveBeenCalled();
     const [permanentPath] = currentMockSupabase._spies.upload.mock.calls[0];
-    expect(permanentPath).toMatch(/^covers\/new-post-id\/.+\.png$/);
+    expect(permanentPath).toMatch(/^covers\/22222222-2222-4222-8222-222222222222\/.+\.png$/);
     expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
       "update_blog_post",
-      expect.objectContaining({ p_id: "new-post-id", p_cover_image_path: permanentPath }),
+      expect.objectContaining({ p_id: "22222222-2222-4222-8222-222222222222", p_cover_image_path: permanentPath }),
     );
     // Temp object cleaned up after everything succeeds.
     expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["editor-1/tmp/blog/abc.png"]);
-    expect(mockRedirect).toHaveBeenCalledWith("/admin/blog/new-post-id/edit");
+    expect(mockRedirect).toHaveBeenCalledWith("/admin/blog/22222222-2222-4222-8222-222222222222/edit");
   });
 
   it("rejects a staged path outside the caller's own uid namespace (ownership check)", async () => {
     currentMockSupabase = makeMockSupabase({
-      rpcResults: { create_blog_post: { data: "new-post-id", error: null } },
+      rpcResults: {
+        create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null },
+        update_blog_post: { data: null, error: null },
+      },
+      downloadBytes: PNG_BYTES,
     });
     const formData = validFormData({ coverStoragePath: "someone-else/tmp/blog/abc.png" });
 
@@ -200,13 +210,13 @@ describe("createBlogPostAction", () => {
     // fails the ownership/shape check.
     expect(currentMockSupabase._spies.download).not.toHaveBeenCalled();
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
-    expect(redirectedTo).toContain("/admin/blog/new-post-id/edit");
+    expect(redirectedTo).toContain("/admin/blog/22222222-2222-4222-8222-222222222222/edit");
     expect(redirectedTo).toContain(encodeURIComponent("no longer valid"));
   });
 
   it("rejects bytes that don't match a real JPEG/PNG signature -- the draft still exists, error is cover-specific", async () => {
     currentMockSupabase = makeMockSupabase({
-      rpcResults: { create_blog_post: { data: "new-post-id", error: null } },
+      rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
       downloadBytes: NOT_AN_IMAGE_BYTES,
     });
     const formData = validFormData({ coverStoragePath: "editor-1/tmp/blog/abc.png" });
@@ -216,14 +226,14 @@ describe("createBlogPostAction", () => {
     expect(currentMockSupabase._spies.upload).not.toHaveBeenCalled();
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
     expect(redirectedTo).toBe(
-      `/admin/blog/new-post-id/edit?error=${encodeURIComponent("That doesn't look like a valid JPEG or PNG image")}`,
+      `/admin/blog/22222222-2222-4222-8222-222222222222/edit?error=${encodeURIComponent("That doesn't look like a valid JPEG or PNG image")}`,
     );
   });
 
   it("when the permanent upload succeeds but update_blog_post fails: the orphaned object is removed, draft is preserved", async () => {
     currentMockSupabase = makeMockSupabase({
       rpcResults: {
-        create_blog_post: { data: "new-post-id", error: null },
+        create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null },
         update_blog_post: { data: null, error: { message: "invalid category" } },
       },
       downloadBytes: PNG_BYTES,
@@ -235,8 +245,40 @@ describe("createBlogPostAction", () => {
     // Both the orphaned permanent object AND the temp object are cleaned up.
     expect(currentMockSupabase._spies.remove).toHaveBeenCalledTimes(2);
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
-    expect(redirectedTo).toContain("/admin/blog/new-post-id/edit");
+    expect(redirectedTo).toContain("/admin/blog/22222222-2222-4222-8222-222222222222/edit");
     expect(redirectedTo).toContain(encodeURIComponent("could not be saved"));
+  });
+});
+
+describe("uploadPermanentCover (PEN-2 O12)", () => {
+  it("uploads the permanent cover with the service role, under covers/<post uuid>/", async () => {
+    currentMockSupabase = makeMockSupabase({
+      rpcResults: {
+        create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null },
+        update_blog_post: { data: null, error: null },
+      },
+      downloadBytes: PNG_BYTES,
+    });
+    const formData = validFormData({ coverStoragePath: "editor-1/tmp/blog/abc.png" });
+
+    await expect(createBlogPostAction(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockCreateAdminClient).toHaveBeenCalledTimes(1);
+    const [path] = currentMockSupabase._spies.upload.mock.calls[0];
+    expect(path).toMatch(/^covers\/22222222-2222-4222-8222-222222222222\/[0-9a-f-]{36}\.png$/);
+  });
+
+  it("refuses a post id that is not a lowercase UUID: no service-role upload at all", async () => {
+    currentMockSupabase = makeMockSupabase({
+      rpcResults: { create_blog_post: { data: "../other", error: null } },
+      downloadBytes: PNG_BYTES,
+    });
+    const formData = validFormData({ coverStoragePath: "editor-1/tmp/blog/abc.png" });
+
+    await expect(createBlogPostAction(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+    expect(currentMockSupabase._spies.upload).not.toHaveBeenCalled();
   });
 });
 
@@ -246,7 +288,7 @@ describe("updateBlogPostAction", () => {
       throw new RedirectSignal("/admin/login");
     });
 
-    await expect(updateBlogPostAction("post-1", validFormData())).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(updateBlogPostAction("11111111-1111-4111-8111-111111111111", validFormData())).rejects.toBeInstanceOf(RedirectSignal);
     expect(mockRequireStaff).toHaveBeenCalledWith("blog.manage");
   });
 
@@ -262,24 +304,24 @@ describe("updateBlogPostAction", () => {
   });
 
   it("invalid input: redirects to the edit page with an error, no RPC called", async () => {
-    currentMockSupabase = makeMockSupabase({ existingRow: { id: "post-1", cover_image_path: null } });
+    currentMockSupabase = makeMockSupabase({ existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: null } });
     const formData = validFormData({ excerpt: "" });
 
-    await expect(updateBlogPostAction("post-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(updateBlogPostAction("11111111-1111-4111-8111-111111111111", formData)).rejects.toBeInstanceOf(RedirectSignal);
     expect(currentMockSupabase._spies.rpc).not.toHaveBeenCalled();
   });
 
   it("valid input, no new cover: preserves the existing cover_image_path in the RPC call", async () => {
     currentMockSupabase = makeMockSupabase({
-      existingRow: { id: "post-1", cover_image_path: "covers/post-1/old.jpg" },
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: "covers/11111111-1111-4111-8111-111111111111/old.jpg" },
       rpcResults: { update_blog_post: { data: null, error: null } },
     });
 
-    await expect(updateBlogPostAction("post-1", validFormData())).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(updateBlogPostAction("11111111-1111-4111-8111-111111111111", validFormData())).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
       "update_blog_post",
-      expect.objectContaining({ p_cover_image_path: "covers/post-1/old.jpg" }),
+      expect.objectContaining({ p_cover_image_path: "covers/11111111-1111-4111-8111-111111111111/old.jpg" }),
     );
     // No cover replacement happened, so nothing is removed from storage.
     expect(currentMockSupabase._spies.remove).not.toHaveBeenCalled();
@@ -287,11 +329,11 @@ describe("updateBlogPostAction", () => {
 
   it("never passes status/published_at/created_by/created_at as RPC parameters", async () => {
     currentMockSupabase = makeMockSupabase({
-      existingRow: { id: "post-1", cover_image_path: null },
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: null },
       rpcResults: { update_blog_post: { data: null, error: null } },
     });
 
-    await expect(updateBlogPostAction("post-1", validFormData())).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(updateBlogPostAction("11111111-1111-4111-8111-111111111111", validFormData())).rejects.toBeInstanceOf(RedirectSignal);
 
     const params = currentMockSupabase._spies.rpc.mock.calls[0][1] as Record<string, unknown>;
     expect(params).not.toHaveProperty("p_status");
@@ -302,21 +344,21 @@ describe("updateBlogPostAction", () => {
 
   it("cover replacement: uploads new cover, updates via RPC, THEN removes the old cover and temp object (in that order)", async () => {
     currentMockSupabase = makeMockSupabase({
-      existingRow: { id: "post-1", cover_image_path: "covers/post-1/old.jpg" },
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: "covers/11111111-1111-4111-8111-111111111111/old.jpg" },
       rpcResults: { update_blog_post: { data: null, error: null } },
       downloadBytes: PNG_BYTES,
     });
     const formData = validFormData({ coverStoragePath: "editor-1/tmp/blog/new.png" });
 
-    await expect(updateBlogPostAction("post-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(updateBlogPostAction("11111111-1111-4111-8111-111111111111", formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(currentMockSupabase._spies.upload).toHaveBeenCalled();
     expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
       "update_blog_post",
-      expect.objectContaining({ p_cover_image_path: expect.stringMatching(/^covers\/post-1\/.+\.png$/) }),
+      expect.objectContaining({ p_cover_image_path: expect.stringMatching(/^covers\/11111111-1111-4111-8111-111111111111\/.+\.png$/) }),
     );
     // Old cover removed only after the RPC call above already resolved successfully.
-    expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["covers/post-1/old.jpg"]);
+    expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["covers/11111111-1111-4111-8111-111111111111/old.jpg"]);
     expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["editor-1/tmp/blog/new.png"]);
   });
 
@@ -325,25 +367,25 @@ describe("updateBlogPostAction", () => {
     // the existing one, the old-cover removal must not fire (it would
     // delete the very object just written).
     currentMockSupabase = makeMockSupabase({
-      existingRow: { id: "post-1", cover_image_path: "covers/post-1/same.png" },
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: "covers/11111111-1111-4111-8111-111111111111/same.png" },
       rpcResults: { update_blog_post: { data: null, error: null } },
       downloadBytes: PNG_BYTES,
     });
     const formData = validFormData({ coverStoragePath: "editor-1/tmp/blog/new.png" });
 
-    await expect(updateBlogPostAction("post-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(updateBlogPostAction("11111111-1111-4111-8111-111111111111", formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     // The removal calls made are exactly: the temp object. The new
     // permanent path is randomly generated (uuid), so it can never
-    // actually equal "covers/post-1/same.png" -- this proves the
+    // actually equal "covers/11111111-1111-4111-8111-111111111111/same.png" -- this proves the
     // inequality guard is exercised on every real call, not skipped.
-    expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["covers/post-1/same.png"]);
+    expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["covers/11111111-1111-4111-8111-111111111111/same.png"]);
     expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["editor-1/tmp/blog/new.png"]);
   });
 
   it("DB update failure after a successful cover upload: removes the NEW object, keeps the OLD cover, maps the error safely", async () => {
     currentMockSupabase = makeMockSupabase({
-      existingRow: { id: "post-1", cover_image_path: "covers/post-1/old.jpg" },
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: "covers/11111111-1111-4111-8111-111111111111/old.jpg" },
       rpcResults: {
         update_blog_post: { data: null, error: { message: "slug is immutable once a post is published" } },
       },
@@ -351,13 +393,13 @@ describe("updateBlogPostAction", () => {
     });
     const formData = validFormData({ coverStoragePath: "editor-1/tmp/blog/new.png" });
 
-    await expect(updateBlogPostAction("post-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(updateBlogPostAction("11111111-1111-4111-8111-111111111111", formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     // The OLD cover is never passed to remove() at all in this failure path.
     const removedPaths = currentMockSupabase._spies.remove.mock.calls.map((c) => c[0]);
-    expect(removedPaths).not.toContainEqual(["covers/post-1/old.jpg"]);
+    expect(removedPaths).not.toContainEqual(["covers/11111111-1111-4111-8111-111111111111/old.jpg"]);
     // The new (now-orphaned) permanent object and the temp object are both cleaned up.
-    expect(removedPaths.some((p) => (p as string[])[0].startsWith("covers/post-1/"))).toBe(true);
+    expect(removedPaths.some((p) => (p as string[])[0].startsWith("covers/11111111-1111-4111-8111-111111111111/"))).toBe(true);
     expect(removedPaths).toContainEqual(["editor-1/tmp/blog/new.png"]);
 
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
@@ -368,13 +410,13 @@ describe("updateBlogPostAction", () => {
 
   it("permanent upload failure: old cover is kept entirely untouched, human-safe error shown", async () => {
     currentMockSupabase = makeMockSupabase({
-      existingRow: { id: "post-1", cover_image_path: "covers/post-1/old.jpg" },
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: "covers/11111111-1111-4111-8111-111111111111/old.jpg" },
       downloadBytes: PNG_BYTES,
       uploadError: { message: "storage backend unavailable" },
     });
     const formData = validFormData({ coverStoragePath: "editor-1/tmp/blog/new.png" });
 
-    await expect(updateBlogPostAction("post-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(updateBlogPostAction("11111111-1111-4111-8111-111111111111", formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(currentMockSupabase._spies.rpc).not.toHaveBeenCalled();
     expect(currentMockSupabase._spies.remove).not.toHaveBeenCalled();
@@ -388,19 +430,19 @@ describe("publishBlogPostAction", () => {
     mockRequireStaff.mockImplementation(() => {
       throw new RedirectSignal("/admin/login");
     });
-    await expect(publishBlogPostAction("post-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(publishBlogPostAction("11111111-1111-4111-8111-111111111111")).rejects.toBeInstanceOf(RedirectSignal);
   });
 
   it("calls publish_blog_post and only that RPC, then redirects with a success message", async () => {
     currentMockSupabase = makeMockSupabase({ rpcResults: { publish_blog_post: { data: null, error: null } } });
 
-    await expect(publishBlogPostAction("post-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(publishBlogPostAction("11111111-1111-4111-8111-111111111111")).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(currentMockSupabase._spies.rpc).toHaveBeenCalledTimes(1);
-    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith("publish_blog_post", { p_id: "post-1" });
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith("publish_blog_post", { p_id: "11111111-1111-4111-8111-111111111111" });
     expect(currentMockSupabase._spies.from).not.toHaveBeenCalled();
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/admin/blog/post-1/edit?success=${encodeURIComponent("Article published.")}`,
+      `/admin/blog/11111111-1111-4111-8111-111111111111/edit?success=${encodeURIComponent("Article published.")}`,
     );
   });
 
@@ -409,7 +451,7 @@ describe("publishBlogPostAction", () => {
       rpcResults: { publish_blog_post: { data: null, error: { message: "no publishable draft found for this id" } } },
     });
 
-    await expect(publishBlogPostAction("post-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(publishBlogPostAction("11111111-1111-4111-8111-111111111111")).rejects.toBeInstanceOf(RedirectSignal);
 
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
     expect(redirectedTo).toContain(encodeURIComponent("already be published"));
@@ -420,10 +462,10 @@ describe("unpublishBlogPostAction", () => {
   it("calls unpublish_blog_post and only that RPC", async () => {
     currentMockSupabase = makeMockSupabase({ rpcResults: { unpublish_blog_post: { data: null, error: null } } });
 
-    await expect(unpublishBlogPostAction("post-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(unpublishBlogPostAction("11111111-1111-4111-8111-111111111111")).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(currentMockSupabase._spies.rpc).toHaveBeenCalledTimes(1);
-    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith("unpublish_blog_post", { p_id: "post-1" });
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith("unpublish_blog_post", { p_id: "11111111-1111-4111-8111-111111111111" });
   });
 
   it("maps an unpublish error safely", async () => {
@@ -431,7 +473,7 @@ describe("unpublishBlogPostAction", () => {
       rpcResults: { unpublish_blog_post: { data: null, error: { message: "no published post found for this id" } } },
     });
 
-    await expect(unpublishBlogPostAction("post-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(unpublishBlogPostAction("11111111-1111-4111-8111-111111111111")).rejects.toBeInstanceOf(RedirectSignal);
 
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
     expect(redirectedTo).toContain(encodeURIComponent("already be a draft"));
@@ -443,20 +485,20 @@ describe("deleteBlogPostAction", () => {
     mockRequireStaff.mockImplementation(() => {
       throw new RedirectSignal("/admin/login");
     });
-    await expect(deleteBlogPostAction("post-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(deleteBlogPostAction("11111111-1111-4111-8111-111111111111")).rejects.toBeInstanceOf(RedirectSignal);
   });
 
   it("calls delete_blog_post and removes the returned cover path from storage after DB success", async () => {
     currentMockSupabase = makeMockSupabase({
       rpcResults: {
-        delete_blog_post: { data: [{ deleted_cover_image_path: "covers/post-1/gone.jpg" }], error: null },
+        delete_blog_post: { data: [{ deleted_cover_image_path: "covers/11111111-1111-4111-8111-111111111111/gone.jpg" }], error: null },
       },
     });
 
-    await expect(deleteBlogPostAction("post-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(deleteBlogPostAction("11111111-1111-4111-8111-111111111111")).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith("delete_blog_post", { p_id: "post-1" });
-    expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["covers/post-1/gone.jpg"]);
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith("delete_blog_post", { p_id: "11111111-1111-4111-8111-111111111111" });
+    expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["covers/11111111-1111-4111-8111-111111111111/gone.jpg"]);
     expect(mockRedirect).toHaveBeenCalledWith(`/admin/blog?success=${encodeURIComponent("Draft deleted.")}`);
   });
 
@@ -465,7 +507,7 @@ describe("deleteBlogPostAction", () => {
       rpcResults: { delete_blog_post: { data: [{ deleted_cover_image_path: null }], error: null } },
     });
 
-    await expect(deleteBlogPostAction("post-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(deleteBlogPostAction("11111111-1111-4111-8111-111111111111")).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(currentMockSupabase._spies.remove).not.toHaveBeenCalled();
   });
@@ -480,7 +522,7 @@ describe("deleteBlogPostAction", () => {
       },
     });
 
-    await expect(deleteBlogPostAction("post-1")).rejects.toBeInstanceOf(RedirectSignal);
+    await expect(deleteBlogPostAction("11111111-1111-4111-8111-111111111111")).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(currentMockSupabase._spies.remove).not.toHaveBeenCalled();
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;

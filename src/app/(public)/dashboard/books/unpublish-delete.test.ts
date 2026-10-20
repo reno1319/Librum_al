@@ -101,7 +101,7 @@ const mockCreateClient = vi.fn(() =>
           },
         };
       }
-      if (table === "purchases") {
+      if (table === "purchases" || table === "author_book_purchases") {
         return { select: () => makeChain(() => mockPurchaseCountResult()) };
       }
       throw new Error(`unexpected table in this focused test: ${table}`);

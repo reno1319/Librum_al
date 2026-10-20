@@ -122,12 +122,40 @@ function tableQuery(table: string, rows: Row[], log: QueryLog[]) {
   });
 }
 
+// PEN-NAMES-2: public reads go through definer views that carry no
+// author_id, and after the contract the base tables are own-row. The
+// double models both: a view reads its base rows through the view's own
+// visibility rule and drops author_id; a base read sees only the
+// caller's rows. A page that read a base table for public data would get
+// nothing back and the assertions below would see it.
+const VIEWS: Record<string, { base: string; visible: (r: Row, uid: string | null) => boolean }> = {
+  public_books: { base: "books", visible: (r, uid) => r.status === "published" || (!!uid && r.author_id === uid) },
+  public_bundles: { base: "bundles", visible: (r, uid) => r.status === "published" || (!!uid && r.author_id === uid) },
+  public_series: { base: "series", visible: () => true },
+};
+const OWN_ROW_TABLES = new Set(["books", "bundles", "series"]);
+
 function makeClient(tables: Record<string, Row[]>, userId: string | null, log: QueryLog[]) {
   return {
     auth: { getUser: async () => ({ data: { user: userId ? { id: userId } : null } }) },
     from: (table: string) => {
+      const view = VIEWS[table];
+      if (view) {
+        if (!(view.base in tables)) throw new Error(`stub: unexpected table ${table}`);
+        const rows = tables[view.base]
+          .filter((r) => view.visible(r, userId))
+          .map((r) => {
+            const rest = { ...r };
+            delete rest.author_id;
+            return rest;
+          });
+        return tableQuery(table, rows, log);
+      }
       if (!(table in tables)) throw new Error(`stub: unexpected table ${table}`);
-      return tableQuery(table, tables[table], log);
+      const rows = OWN_ROW_TABLES.has(table)
+        ? tables[table].filter((r) => !!userId && r.author_id === userId)
+        : tables[table];
+      return tableQuery(table, rows, log);
     },
     rpc: async (name: string) => {
       if (name === "user_owns_book") return { data: false, error: null };
@@ -297,7 +325,7 @@ describe("bookstore bundle rail (rendered)", () => {
 
   it("asks for price_all, filters on it, and never selects or filters on price_cents", async () => {
     await render(BookstorePage({ searchParams: Promise.resolve({}) }));
-    const bundleQueries = log.filter((q) => q.table === "bundles");
+    const bundleQueries = log.filter((q) => q.table === "public_bundles");
     expect(bundleQueries).toHaveLength(1);
     expect(bundleQueries[0].select).toContain("price_all");
     expect(bundleQueries[0].select).not.toContain("price_cents");
@@ -343,7 +371,7 @@ describe("author public bundle rail (rendered)", () => {
   it("asks for price_all, filters on it, and never selects price_cents", async () => {
     install(tables([PAID]));
     await render(AuthorProfilePage({ params: Promise.resolve({ id: PEN }) }));
-    const bundleQuery = log.find((q) => q.table === "bundles");
+    const bundleQuery = log.find((q) => q.table === "public_bundles");
     expect(bundleQuery?.select).toContain("price_all");
     expect(bundleQuery?.select).not.toContain("price_cents");
     expect(bundleQuery?.select).not.toBe("*");
@@ -488,7 +516,7 @@ describe("bundle detail page (rendered)", () => {
 
   it("selects price_all and never price_cents for the bundle itself", async () => {
     await detail(PAID, [A, B]);
-    const bundleQuery = log.find((q) => q.table === "bundles");
+    const bundleQuery = log.find((q) => q.table === "public_bundles");
     expect(bundleQuery?.select).toContain("price_all");
     expect(bundleQuery?.select).not.toContain("price_cents");
     expect(bundleQuery?.select).not.toMatch(/(^|,\s*)\*/);

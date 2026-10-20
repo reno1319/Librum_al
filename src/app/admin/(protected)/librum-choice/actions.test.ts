@@ -40,7 +40,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () =>
     Promise.resolve({
       from: (table: string) => {
-        if (table !== "books") throw new Error(`unexpected table ${table}`);
+        if (table !== "public_books") throw new Error(`unexpected table ${table}`);
         const read = { columns: "", filters: [] as [string, unknown][] };
         bookReads.push(read);
         const chain = {

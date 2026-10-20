@@ -159,24 +159,31 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
   // display_name through this exact join. Both are now routed through
   // the same safe public_author_profiles view every author-attribution
   // join on this page uses.
-  it("the reviews/reviewer select now reads the safe public_author_profiles view, never a raw display_name column", () => {
-    expect(source).toContain('.select("*, profiles:public_author_profiles(public_author_name)")');
+  // PEN-NAMES-2 (22a): the reviewer join moved again, to public_reviews.
+  // The view computes reviewer_name itself (the reviewer's default pen
+  // name when they are an author with a book, else null -- the same rule
+  // public_author_profiles applied) and carries no reader_id, so the page
+  // can't tie a review to an account.
+  it("reviews come from public_reviews with reviewer_name, and never select reader_id or a profiles join", () => {
+    expect(source).toContain('.from("public_reviews")');
+    expect(source).toContain('.select("id, book_id, rating, body, created_at, reviewer_name")');
     expect(source).not.toMatch(/profiles\(display_name\)/);
+    expect(source).not.toMatch(/\.from\("public_reviews"\)\s*\.select\("[^"]*reader_id/);
   });
 
-  it("review names resolve through resolvePublicAuthorName() with a generic fallback, never review.profiles?.display_name directly", () => {
-    expect(source).toContain('resolvePublicAuthorName(review.profiles) ?? "A Librum reader"');
-    expect(source).not.toContain("review.profiles?.display_name");
+  it("review names show reviewer_name with a generic fallback, never a profiles field", () => {
+    expect(source).toContain('review.reviewer_name ?? "A Librum reader"');
+    expect(source).not.toMatch(/review\.profiles[^`]/); // the one hit left is a backticked comment
   });
 
   // PEN-NAMES-1: the book's own author block and both shelves read the
-  // pen name view; only the reviewer join (above) still reads
-  // public_author_profiles.
+  // pen name view. PEN-NAMES-2: nothing on the page reads
+  // public_author_profiles any more.
   it("every author-attribution select on this page reads the pen name view, never the base profiles table", () => {
     expect(source).toContain('.select("*, pen:public_pen_names(id, name, bio, avatar_path, links)")');
     const shelfSelects = source.match(/\.select\("\*, pen:public_pen_names\(id, name\)"\)/g) ?? [];
     expect(shelfSelects.length).toBe(2); // moreByAuthor + youMightLike
-    expect(source.match(/public_author_profiles\(/g)).toHaveLength(1); // the reviewer join only
+    expect(source).not.toMatch(/public_author_profiles\(/);
     expect(source).not.toMatch(/profiles\(display_name, public_author_name/);
   });
 });

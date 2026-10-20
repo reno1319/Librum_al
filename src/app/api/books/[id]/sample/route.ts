@@ -7,7 +7,7 @@ import {
   BOOK_MANUSCRIPTS_BUCKET,
   isOwnCanonicalBookManuscriptPath,
 } from "@/lib/book-storage-path";
-import type { Book } from "@/lib/types";
+import type { Book, PublicBook } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
 
 // LIBRUM 2.0 AUTHOR-1B: the JSON response's own "author" field resolves
@@ -21,12 +21,17 @@ import type { PenNameRef } from "@/lib/pen-names";
 // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the row also returns its own `id`
 // and `author_id`, so the stored manuscript key is checked against the
 // row's own identity before the service-role client ever sees it.
-type SampleBookRow = Pick<Book, "id" | "author_id" | "title" | "status" | "file_path"> & {
+//
+// PEN-NAMES-2 (D2): the status, title and pen name come from public_books
+// (no account columns). Only for a PUBLISHED book does a service-role
+// read fetch author_id and file_path, and neither ever leaves this route.
+type SampleBookRow = Pick<PublicBook, "id" | "title" | "status"> & {
   pen: PenNameRef | null;
 };
+type SampleStorageRow = Pick<Book, "author_id"> & { file_path: unknown };
 
 // Anything but one plain row object for exactly the requested id, with
-// string author_id/title/status, is treated as no row at all.
+// string title/status, is treated as no row at all.
 function isSampleBookRow(data: unknown, requestedId: string): data is SampleBookRow {
   if (typeof data !== "object" || data === null || Array.isArray(data)) {
     return false;
@@ -35,10 +40,20 @@ function isSampleBookRow(data: unknown, requestedId: string): data is SampleBook
   return (
     typeof row.id === "string" &&
     row.id === requestedId &&
-    typeof row.author_id === "string" &&
     typeof row.title === "string" &&
     typeof row.status === "string"
   );
+}
+
+// The service-role row: one plain object with a string author_id. Its
+// file_path is checked below exactly as before: absent/empty is "no
+// manuscript on file", anything else must be the canonical key.
+function isSampleStorageRow(data: unknown): data is SampleStorageRow {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return false;
+  }
+  const row = data as Record<string, unknown>;
+  return typeof row.author_id === "string";
 }
 
 // LIBRUM 2.0 PRODUCT-1: "Read sample" -- a genuine excerpt of the
@@ -65,8 +80,8 @@ export async function GET(
 
   const supabase = await createClient();
   const { data: bookData, error: bookError } = await supabase
-    .from("books")
-    .select("id, author_id, title, status, file_path, pen:public_pen_names(id, name)")
+    .from("public_books")
+    .select("id, title, status, pen:public_pen_names(id, name)")
     .eq("id", id)
     .maybeSingle<SampleBookRow>();
 
@@ -85,7 +100,21 @@ export async function GET(
   // it does. A draft, or a book that doesn't exist at all, gets the
   // identical safe 404 -- never distinguishing the two to an anonymous
   // caller.
-  if (!book || book.status !== "published" || !book.file_path) {
+  if (!book || book.status !== "published") {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // PEN-NAMES-2: published only -- the service role reads the manuscript
+  // key and its owner. A read error or odd shape is the same 404.
+  const admin = createAdminClient();
+  const { data: storageData, error: storageError } = await admin
+    .from("books")
+    .select("author_id, file_path")
+    .eq("id", book.id)
+    .eq("status", "published")
+    .maybeSingle<SampleStorageRow>();
+  const storageRow = !storageError && isSampleStorageRow(storageData) ? storageData : null;
+  if (!storageRow || !storageRow.file_path) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
@@ -96,12 +125,11 @@ export async function GET(
   // legacy or forged value gets the same controlled answer as an
   // unreadable manuscript, before any admin client, Storage request or
   // EPUB extraction, and without echoing the value.
-  const filePath = book.file_path;
-  if (!isOwnCanonicalBookManuscriptPath(filePath, book.author_id, book.id)) {
+  const filePath = storageRow.file_path;
+  if (!isOwnCanonicalBookManuscriptPath(filePath, storageRow.author_id, book.id)) {
     return NextResponse.json({ error: "sample_unavailable" }, { status: 404 });
   }
 
-  const admin = createAdminClient();
   const { data: fileBlob, error: downloadError } = await admin.storage
     .from(BOOK_MANUSCRIPTS_BUCKET)
     .download(filePath);

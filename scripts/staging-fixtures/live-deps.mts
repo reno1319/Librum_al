@@ -141,9 +141,44 @@ async function getProfileExternalStateImpl(client: SupabaseClient, id: string): 
 }
 
 // PHASE-1C review round 3, item 6.
+// PEN-2 (D6): the account's pen names converge to "no photo" too, so no
+// fixture row is left naming a photo object reset/teardown removed (the
+// contract migration refuses a referenced object that is missing).
 async function convergeProfileAvatarBaselineImpl(client: SupabaseClient, id: string): Promise<void> {
   const { error } = await client.from("profiles").update({ avatar_path: null }).eq("id", id);
   if (error) throw error;
+  const { error: penNameError } = await client
+    .from("pen_names")
+    .update({ avatar_path: null })
+    .eq("author_id", id)
+    .not("avatar_path", "is", null);
+  if (penNameError) throw penNameError;
+}
+
+// PEN-2 (D6): read-only. The storage keys the fixture accounts' own rows
+// name: books.cover_path of the fixture author's books and
+// pen_names.avatar_path of both accounts' pen names. Validated by
+// storage-keys.mts (planRowKeyCleanup) before any use.
+async function listFixtureRowStorageKeysImpl(
+  client: SupabaseClient,
+  ctx: { authorId: string; readerId: string },
+): Promise<{ covers: string[]; avatars: string[] }> {
+  const { data: books, error: booksError } = await client
+    .from("books")
+    .select("cover_path")
+    .eq("author_id", ctx.authorId)
+    .not("cover_path", "is", null);
+  if (booksError) throw booksError;
+  const { data: penNames, error: penNamesError } = await client
+    .from("pen_names")
+    .select("avatar_path")
+    .in("author_id", [ctx.authorId, ctx.readerId])
+    .not("avatar_path", "is", null);
+  if (penNamesError) throw penNamesError;
+  return {
+    covers: (books ?? []).map((row: Record<string, unknown>) => row.cover_path as string),
+    avatars: (penNames ?? []).map((row: Record<string, unknown>) => row.avatar_path as string),
+  };
 }
 
 // ---- Small, error-propagating query helpers -- PHASE-1C review round
@@ -670,6 +705,7 @@ export function buildLiveResetDeps(): ResetDeps {
       if (error) throw error;
     },
     convergeProfileAvatarBaseline: (id) => convergeProfileAvatarBaselineImpl(client, id),
+    listFixtureRowStorageKeys: (ctx) => listFixtureRowStorageKeysImpl(client, ctx),
     readConfirmationPhrase: async () => {
       const rl = createInterface({ input: stdin, output: stdout });
       try {

@@ -33,13 +33,14 @@ import { isSchemaFeatureOffError, logSchemaFeatureOffOnce } from "@/lib/schema-f
 import {
   BOOK_COVERS_BUCKET,
   BOOK_MANUSCRIPTS_BUCKET,
-  canonicalBookCoverPath,
   canonicalBookManuscriptPath,
   classifyBookCoverPath,
   groupBookStorageRemovals,
   isOwnCanonicalBookManuscriptPath,
   isOwnTemporaryCoverUploadPath,
   isOwnTemporaryManuscriptUploadPath,
+  isNewBookCoverPath,
+  newBookCoverPath,
   type BookStorageRemoval,
 } from "@/lib/book-storage-path";
 import {
@@ -514,7 +515,9 @@ async function resolveSeriesSelection(
 // Every candidate must already be proven by src/lib/book-storage-path.ts
 // for the signed-in author (and, for a permanent key, the exact book);
 // the candidates are de-duplicated and removed with at most one call per
-// bucket, on the author's own session. A failure is an orphaned object,
+// bucket: manuscripts-bucket keys on the author's own session, covers-
+// bucket keys with the trusted catalog writer (PEN-2, C9: no user write
+// policy is left on covers). A failure is an orphaned object,
 // never a failed save or deletion, so it is logged -- caller, bucket and
 // object count only, never a key or the Storage error -- and never
 // surfaced.
@@ -524,7 +527,8 @@ async function removeProvenBookStorageObjects(
   caller: string,
 ): Promise<void> {
   for (const [bucket, paths] of groupBookStorageRemovals(removals)) {
-    const { error } = await supabase.storage.from(bucket).remove(paths);
+    const client = bucket === BOOK_COVERS_BUCKET ? createCatalogWriteClient() : supabase;
+    const { error } = await client.storage.from(bucket).remove(paths);
     if (error) {
       // Deliberately NOT the Storage error object, nor its message,
       // details, cause or response: any of them may echo a key.
@@ -533,6 +537,26 @@ async function removeProvenBookStorageObjects(
         objectCount: paths.length,
       });
     }
+  }
+}
+
+// PEN-2 (L10): removes a cover this request itself just uploaded under a
+// fresh random key, when the row write that would have referenced it
+// failed or lost its compare-and-set. The key was built by
+// newBookCoverPath in this same request, so nothing else can reference
+// it; it is re-checked for that exact shape anyway. Logged without the
+// key or the Storage error.
+async function removeNewCoverUpload(
+  writer: ReturnType<typeof createCatalogWriteClient>,
+  path: string,
+  caller: string,
+): Promise<void> {
+  if (!isNewBookCoverPath(path)) {
+    return;
+  }
+  const { error } = await writer.storage.from(BOOK_COVERS_BUCKET).remove([path]);
+  if (error) {
+    console.error(`${caller}: failed to remove an unreferenced new cover upload`, { objectCount: 1 });
   }
 }
 
@@ -699,10 +723,16 @@ export async function createBook(formData: FormData) {
   // BOOK-STORAGE-MUTATION-AUTH-1: both keys come from the shared
   // constructors (src/lib/book-storage-path.ts), from the verified
   // session user id and this server-generated book id only.
-  const coverPath = canonicalBookCoverPath(user.id, bookId, coverResult.extension);
+  // PEN-2 (L10): the cover key is a fresh random folder
+  // (newBookCoverPath), never the account or book id, and it is uploaded
+  // with the trusted catalog writer: the contract migration drops every
+  // user write policy on the covers bucket (C9), so covers are written by
+  // the server only. Every input gate has already run above.
+  const coverPath = newBookCoverPath(coverResult.extension);
   const manuscriptPath = canonicalBookManuscriptPath(user.id, bookId);
+  const catalogWriter = createCatalogWriteClient();
 
-  const { error: coverError } = await supabase.storage
+  const { error: coverError } = await catalogWriter.storage
     .from(BOOK_COVERS_BUCKET)
     .upload(coverPath, coverResult.bytes, { contentType: coverResult.contentType });
 
@@ -719,6 +749,7 @@ export async function createBook(formData: FormData) {
 
   if (manuscriptError) {
     console.error("createBook: manuscript upload failed:", manuscriptError);
+    await removeNewCoverUpload(catalogWriter, coverPath, "createBook");
     redirect(
       "/dashboard/books/new?error=Could+not+upload+your+manuscript.+Please+try+again",
     );
@@ -744,7 +775,6 @@ export async function createBook(formData: FormData) {
   // extension. No FormData id, author or path is ever read for them.
   // `.select("id")` must prove exactly this one new row, or the request
   // fails closed with the same author-facing error as an insert error.
-  const catalogWriter = createCatalogWriteClient();
   const { data: insertedRows, error: insertError } = await catalogWriter.from("books").insert({
     id: bookId,
     author_id: user.id,
@@ -793,6 +823,7 @@ export async function createBook(formData: FormData) {
 
   if (insertError) {
     console.error("createBook: book insert failed:", insertError);
+    await removeNewCoverUpload(catalogWriter, coverPath, "createBook");
     const penNameMessage = penNameErrorMessage(insertError);
     if (penNameMessage) {
       redirect(`/dashboard/books/new?error=${encodeURIComponent(penNameMessage)}`);
@@ -992,6 +1023,7 @@ export async function updateBook(bookId: string, formData: FormData) {
     .from("books")
     .select("id, cover_path, file_path, author_id, language, status, price_all, isbn")
     .eq("id", bookId)
+    .eq("author_id", user.id)
     .single();
 
   if (existingError || !existing || existing.id !== bookId || existing.author_id !== user.id) {
@@ -1219,8 +1251,9 @@ export async function updateBook(bookId: string, formData: FormData) {
   // proves it landed -- never before, so a failed update never leaves
   // books.cover_path pointing at a file that's already gone. Set only
   // when the stored value is this author's own canonical or documented
-  // legacy key for THIS book (src/lib/book-storage-path.ts); any other
-  // stored value is left untouched in Storage and only counted.
+  // legacy key for THIS book, or a new random-folder key read from this
+  // author's own row (src/lib/book-storage-path.ts); any other stored
+  // value is left untouched in Storage and only counted.
   let coverPathToRemove: string | null = null;
   let tempCoverToCleanup: string | null = null;
 
@@ -1233,10 +1266,16 @@ export async function updateBook(bookId: string, formData: FormData) {
     // documented "jpeg" form (any ASCII case of those four letters, exact
     // author/book stem) is recognised as removable -- and then removed
     // exactly as stored.
-    newCoverPath = canonicalBookCoverPath(user.id, existing.id, coverResult.extension);
+    //
+    // PEN-2 (L10): every replace gets a fresh random key
+    // (newBookCoverPath), so it never overwrites the live object in place
+    // and is always uploaded BEFORE the write, with the trusted catalog
+    // writer (C9). If the compare-and-set below misses, that new upload
+    // is removed instead of the old one.
+    newCoverPath = newBookCoverPath(coverResult.extension);
     const storedCoverClass = classifyBookCoverPath(existing.cover_path, user.id, existing.id);
 
-    (existing.cover_path === newCoverPath ? uploadsAfterWrite : uploadsBeforeWrite).push({
+    uploadsBeforeWrite.push({
       bucket: BOOK_COVERS_BUCKET,
       path: newCoverPath,
       bytes: coverResult.bytes,
@@ -1286,13 +1325,30 @@ export async function updateBook(bookId: string, formData: FormData) {
     tempManuscriptToCleanup = manuscriptResult.tempPathToCleanup;
   }
 
+  // CATALOG-WRITE-AUTH-1 / PEN-2: the trusted writer is created only now,
+  // after authentication, the ownership read, price validation, the
+  // repricing gate and both input validations. It uploads the cover
+  // (C9: covers are server-written only) and writes the row below.
+  const catalogWriter = createCatalogWriteClient();
+
   for (const upload of uploadsBeforeWrite) {
-    const { error: uploadError } = await supabase.storage
-      .from(upload.bucket)
-      .upload(upload.path, upload.bytes, { contentType: upload.contentType, upsert: true });
+    // A cover goes to a fresh random key and never overwrites anything,
+    // so it needs no upsert; a manuscript keeps its canonical key on the
+    // author's own session, as before.
+    const { error: uploadError } =
+      upload.bucket === BOOK_COVERS_BUCKET
+        ? await catalogWriter.storage
+            .from(upload.bucket)
+            .upload(upload.path, upload.bytes, { contentType: upload.contentType })
+        : await supabase.storage
+            .from(upload.bucket)
+            .upload(upload.path, upload.bytes, { contentType: upload.contentType, upsert: true });
 
     if (uploadError) {
       console.error(`updateBook: ${upload.kind} upload failed:`, uploadError);
+      if (upload.kind === "manuscript" && newCoverPath !== null) {
+        await removeNewCoverUpload(catalogWriter, newCoverPath, "updateBook");
+      }
       redirect(
         upload.kind === "cover"
           ? `/dashboard/books/${bookId}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`
@@ -1339,7 +1395,6 @@ export async function updateBook(bookId: string, formData: FormData) {
   // stale guard changes neither. The `id` and `author_id` filters are the
   // ownership boundary (that client bypasses RLS), and exactly one
   // returned row is still the only proof of success.
-  const catalogWriter = createCatalogWriteClient();
   const updateQuery = catalogWriter
     .from("books")
     .update({
@@ -1402,6 +1457,9 @@ export async function updateBook(bookId: string, formData: FormData) {
 
   if (updateError) {
     console.error("updateBook: book update failed:", updateError);
+    if (newCoverPath !== null) {
+      await removeNewCoverUpload(catalogWriter, newCoverPath, "updateBook");
+    }
     const penNameMessage = penNameErrorMessage(updateError);
     if (penNameMessage) {
       redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(penNameMessage)}`);
@@ -1415,6 +1473,12 @@ export async function updateBook(bookId: string, formData: FormData) {
       bookId,
       rowCount: Array.isArray(updatedRows) ? updatedRows.length : null,
     });
+    // PEN-2 (L10): the compare-and-set missed, so the row still names
+    // whatever cover it named before; the new upload is unreferenced and
+    // is removed, and the previous object is left alone.
+    if (newCoverPath !== null) {
+      await removeNewCoverUpload(catalogWriter, newCoverPath, "updateBook");
+    }
     redirect(
       `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`,
     );
@@ -2058,8 +2122,10 @@ export async function deleteBook(bookId: string) {
   // supabase/migrations -- so this app-level check is a UX nicety on
   // top of a real, authoritative guarantee, not the only thing standing
   // between a book and its buyers' purchase history).
+  // PEN-NAMES-2 [23b]: counted through author_book_purchases, which
+  // replaced the author policy on purchases.
   const { count: purchaseCount } = await supabase
-    .from("purchases")
+    .from("author_book_purchases")
     .select("id", { count: "exact", head: true })
     .eq("book_id", bookId);
 
@@ -2123,7 +2189,8 @@ export async function deleteBook(bookId: string) {
   // recreated to "undo" a partially-completed cleanup.
   //
   // BOOK-STORAGE-MUTATION-AUTH-1: only this author's own canonical (or
-  // documented legacy) cover key and own canonical manuscript key for
+  // documented legacy, or -- PEN-2 -- new random-folder key read from this
+  // own row) cover key and own canonical manuscript key for
   // THIS book are removed -- never merely something under the author's
   // folder. Any other stored value is left in place and only counted: an
   // orphaned object is always preferable to deleting another book's or

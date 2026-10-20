@@ -21,7 +21,7 @@ import {
   type PublicPenName,
 } from "@/lib/pen-names";
 import { Alert } from "@/components/ui/alert";
-import type { Book, Bundle, Series } from "@/lib/types";
+import type { PublicBook, PublicBundle, PublicSeries } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
@@ -36,7 +36,7 @@ import { CoverPlaceholder } from "@/components/cover-placeholder";
 // URL has no row in the view and is "not found" like any unknown id.
 // Staff with reports.resolve (13a) also see the account behind the pen
 // name and a "Remove links" button (audited in the database).
-type SeriesRow = Pick<Series, "id" | "title">;
+type SeriesRow = Pick<PublicSeries, "id" | "title">;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -159,27 +159,28 @@ export default async function AuthorProfilePage({
       // way it is from the bookstore. The author still sees every one of
       // their books, priced or not, on their own dashboard -- which is
       // where the missing price gets fixed.
+      // PEN-NAMES-2: public_books (no account columns).
       supabase
-        .from("books")
+        .from("public_books")
         .select("*")
         .eq("pen_name_id", id)
         .eq("status", "published")
         .not("price_all", "is", null)
         .order("created_at", { ascending: false })
-        .returns<Book[]>(),
+        .returns<PublicBook[]>(),
       // ALL-WIRING-5: the bundle rail is a discovery surface too, so a
       // bundle with no authored ALL price is excluded on the same terms
       // as a book -- still published, still reachable at its own
       // address, still on its author's dashboard. Only the rendered
       // columns are selected; the legacy `price_cents` is not.
       supabase
-        .from("bundles")
+        .from("public_bundles")
         .select("id, title, price_all")
         .eq("pen_name_id", id)
         .eq("status", "published")
         .not("price_all", "is", null)
         .order("created_at", { ascending: false })
-        .returns<Pick<Bundle, "id" | "title" | "price_all">[]>(),
+        .returns<Pick<PublicBundle, "id" | "title" | "price_all">[]>(),
       // PEN-NAMES-1: followers of THIS pen name (4a). pen_name_follows
       // has no public SELECT policy, so the count stays admin-only.
       admin
@@ -212,7 +213,7 @@ export default async function AuthorProfilePage({
   );
   const { data: seriesRows } =
     seriesIds.length > 0
-      ? await supabase.from("series").select("id, title").in("id", seriesIds).returns<SeriesRow[]>()
+      ? await supabase.from("public_series").select("id, title").in("id", seriesIds).returns<SeriesRow[]>()
       : { data: [] as SeriesRow[] };
 
   const seriesGroups = groupPublishedBooksBySeries(publishedBooks, seriesRows ?? []);

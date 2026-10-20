@@ -155,8 +155,10 @@ begin
     (select relrowsecurity from pg_class where oid = 'public.bundles'::regclass),
     'part1: bundles keeps RLS enabled');
   perform pg_temp.assert(
-    pg_temp.table_acl('public.bundles') = 'anon:SELECT|authenticated:DELETE,SELECT',
-    format('part1: bundles table ACL -- got %s', pg_temp.table_acl('public.bundles')));
+    -- PEN-NAMES-2 (C1): anon no longer holds SELECT on bundles (it reads
+    -- public_bundles); authenticated keeps SELECT and DELETE.
+    pg_temp.table_acl('public.bundles') = 'authenticated:DELETE,SELECT',
+    format('part1 (PEN-NAMES-2): bundles table ACL -- got %s', pg_temp.table_acl('public.bundles')));
   perform pg_temp.assert(
     pg_temp.table_acl('public.bundle_books') = 'anon:SELECT|authenticated:SELECT',
     format('part1: bundle_books stays SELECT-only for anon and authenticated -- got %s',
@@ -185,8 +187,9 @@ begin
     'e0702000-0000-4000-8000-0000000000a1', 'e0700000-0000-4000-8000-00000000000a');
   perform pg_temp.assert(v_out = '<none>', format('part2: a forged author id gets zero rows -- got %s', v_out));
 
-  -- The same two attempts on A's PUBLISHED bundle, which B can see: only
-  -- the delete policy stands between B and the row.
+  -- The same two attempts on A's PUBLISHED bundle. (Before PEN-NAMES-2 B
+  -- could SELECT it; now B reads it only through public_bundles, and the
+  -- delete policy still refuses the base row.)
   v_out := pg_temp.delete_returning('authenticated', 'e0700000-0000-4000-8000-00000000000b',
     'e0702000-0000-4000-8000-0000000000a2', 'e0700000-0000-4000-8000-00000000000b');
   perform pg_temp.assert(v_out = '<none>', format('part2: another author gets zero rows for a published bundle -- got %s', v_out));

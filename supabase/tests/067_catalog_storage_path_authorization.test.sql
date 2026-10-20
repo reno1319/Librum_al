@@ -26,6 +26,12 @@
 -- SQLSTATE 42501, so every expected failure also pins the message
 -- fragment: "permission denied for table" is the ACL, "row-level
 -- security" is the policy.
+--
+-- PEN-NAMES-2 (20261019222500/20261019222600) narrowed this further:
+-- authenticated has no INSERT on books at all (E5), anon reads
+-- public_books instead of books (C1), and cover_path must have the
+-- `<uuid>/cover.(jpg|png)` shape (C10). Every assertion below that the
+-- PEN-NAMES-2 rule changed says so and states the new rule.
 
 begin;
 
@@ -146,16 +152,18 @@ insert into public.series (id, author_id, title) values
 
 insert into public.books (id, author_id, title, status, price_all, published_at, cover_path, file_path, series_id, series_position) values
   ('e0671000-0000-0000-0000-0000000000a1', 'e0670000-0000-0000-0000-00000000000a', 'P067 A draft', 'draft', 199, null,
-   'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000a1-cover.png',
+   'e0675000-0000-0000-0000-0000000000a1/cover.png',
    'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000a1.epub',
    'e0673000-0000-0000-0000-00000000000a', 1),
   ('e0671000-0000-0000-0000-0000000000a2', 'e0670000-0000-0000-0000-00000000000a', 'P067 A published', 'published', 0, now(),
-   'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000a2-cover.jpg',
+   'e0675000-0000-0000-0000-0000000000a2/cover.jpg',
    'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000a2.epub', null, null),
   ('e0671000-0000-0000-0000-0000000000a3', 'e0670000-0000-0000-0000-00000000000a', 'P067 A legacy paths', 'published', null, now(),
-   'covers/legacy-cover.JPG', 'legacy/manuscript.epub', null, null),
+   -- PEN-NAMES-2 (C10): a legacy cover key can no longer be stored, so
+   -- the legacy row keeps only its legacy manuscript path.
+   null, 'legacy/manuscript.epub', null, null),
   ('e0671000-0000-0000-0000-0000000000b1', 'e0670000-0000-0000-0000-00000000000b', 'P067 B draft', 'draft', 0, null,
-   'e0670000-0000-0000-0000-00000000000b/e0671000-0000-0000-0000-0000000000b1-cover.png',
+   'e0675000-0000-0000-0000-0000000000b1/cover.png',
    'e0670000-0000-0000-0000-00000000000b/e0671000-0000-0000-0000-0000000000b1.epub', null, null);
 
 -- ============================================================
@@ -167,34 +175,33 @@ begin
     (select relrowsecurity and not relforcerowsecurity from pg_class where oid = 'public.books'::regclass),
     'part1: books keeps RLS enabled, not forced');
 
-  -- Table-level ACL: unchanged from Patch 7. No INSERT or UPDATE at table
-  -- level for anon or authenticated; no PUBLIC entry at all.
+  -- Table-level ACL: no INSERT or UPDATE at table level for anon or
+  -- authenticated; no PUBLIC entry at all. PEN-NAMES-2 (C1): anon holds
+  -- no SELECT either.
   perform pg_temp.assert(
     pg_temp.table_acl('public.books') =
-      'anon:SELECT'
-      || '|authenticated:DELETE,SELECT'
+      'authenticated:DELETE,SELECT'
       || '|service_role:DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part1: books table ACL -- got %s', pg_temp.table_acl('public.books')));
 
-  -- Column-level ACL: the 15 pathless draft columns, and the series link.
+  -- Column-level ACL. PEN-NAMES-2 (E5): no INSERT column at all; only
+  -- the series link remains.
   perform pg_temp.assert(
     pg_temp.column_acl('public.books') =
-      'authenticated:INSERT:author_id,description,edition,genre,id,isbn,'
-      || 'keywords,language,original_publication_date,price_all,publisher,series_id,'
-      || 'series_position,subtitle,title'
-      || '|authenticated:UPDATE:series_id,series_position',
+      'authenticated:UPDATE:series_id,series_position',
     format('part1: books column ACL -- got %s', pg_temp.column_acl('public.books')));
 
-  -- bundles keeps exactly the Patch 7 ACL.
+  -- bundles keeps the Patch 7 table ACL, minus anon SELECT (PEN-NAMES-2
+  -- C1); its column INSERT grant is gone (PEN-NAMES-2 E5b, audit PEN-2 r1
+  -- F1: createBundle inserts through the trusted writer).
   perform pg_temp.assert(
     pg_temp.table_acl('public.bundles') =
-      'anon:SELECT'
-      || '|authenticated:DELETE,SELECT'
+      'authenticated:DELETE,SELECT'
       || '|service_role:DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part1: bundles table ACL unchanged -- got %s', pg_temp.table_acl('public.bundles')));
   perform pg_temp.assert(
-    pg_temp.column_acl('public.bundles') = 'authenticated:INSERT:author_id,description,price_all,title',
-    format('part1: bundles column ACL unchanged -- got %s', pg_temp.column_acl('public.bundles')));
+    pg_temp.column_acl('public.bundles') = '',
+    format('part1 (PEN-NAMES-2 E5b): bundles has no column grant -- got %s', pg_temp.column_acl('public.bundles')));
 end $$;
 
 -- Per role and per path column, as the privilege functions resolve it
@@ -221,12 +228,13 @@ end $$;
 
 do $$
 begin
-  -- The pathless draft columns stay insertable; status is still not.
-  perform pg_temp.assert(has_column_privilege('authenticated', 'public.books', 'title', 'INSERT')
-    and has_column_privilege('authenticated', 'public.books', 'price_all', 'INSERT')
-    and has_column_privilege('authenticated', 'public.books', 'author_id', 'INSERT')
-    and has_column_privilege('authenticated', 'public.books', 'id', 'INSERT'),
-    'part1: authenticated keeps INSERT on the draft columns');
+  -- PEN-NAMES-2 (E5): the pathless draft columns are no longer
+  -- insertable by authenticated either; status is still not.
+  perform pg_temp.assert(not has_column_privilege('authenticated', 'public.books', 'title', 'INSERT')
+    and not has_column_privilege('authenticated', 'public.books', 'price_all', 'INSERT')
+    and not has_column_privilege('authenticated', 'public.books', 'author_id', 'INSERT')
+    and not has_column_privilege('authenticated', 'public.books', 'id', 'INSERT'),
+    'part1 (PEN-NAMES-2): authenticated has no INSERT on the draft columns');
   perform pg_temp.assert(not has_column_privilege('authenticated', 'public.books', 'status', 'INSERT')
     and not has_column_privilege('authenticated', 'public.books', 'published_at', 'INSERT'),
     'part1: status and published_at stay uninsertable');
@@ -235,25 +243,27 @@ begin
     'part1: PUBLIC can write nothing');
   perform pg_temp.assert(not has_any_column_privilege('anon', 'public.books', 'INSERT, UPDATE')
     and not has_table_privilege('anon', 'public.books', 'DELETE, TRUNCATE')
-    and has_table_privilege('anon', 'public.books', 'SELECT'),
-    'part1: anon stays read-only');
+    and not has_table_privilege('anon', 'public.books', 'SELECT')
+    and has_table_privilege('anon', 'public.public_books', 'SELECT'),
+    'part1 (PEN-NAMES-2): anon writes nothing and reads public_books, not books');
   perform pg_temp.assert(has_table_privilege('service_role', 'public.books', 'SELECT, INSERT, UPDATE, DELETE')
     and has_table_privilege(current_user, 'public.books', 'SELECT, INSERT, UPDATE, DELETE'),
     'part1: service_role and the owner keep full DML');
 
-  -- Policies, defaults and constraints: the migration touches none.
+  -- Policies, defaults and constraints. PEN-NAMES-2 (C1) replaced the
+  -- public/owner SELECT policies with an own-row and a staff policy.
   perform pg_temp.assert(
     (select count(*) from pg_policies where schemaname = 'public' and tablename = 'books') = 5,
-    'part1: books keeps its 5 policies');
+    'part1: books has 5 policies');
   perform pg_temp.assert(
     (select with_check from pg_policies where tablename = 'books' and policyname = 'Authors can insert their own books') = '(auth.uid() = author_id)'
-    and (select qual from pg_policies where tablename = 'books' and policyname = 'Published books are viewable by everyone, drafts by their author')
-        = '((status = ''published''::text) OR (auth.uid() = author_id))',
-    'part1: the insert and select policies are intact');
+    and (select qual from pg_policies where tablename = 'books' and policyname = 'Authors can view their own books')
+        = '(auth.uid() = author_id)',
+    'part1 (PEN-NAMES-2): the insert policy is intact and the select policy is own-row only');
   perform pg_temp.assert(
-    not exists (select 1 from pg_constraint where conrelid = 'public.books'::regclass
-                  and pg_get_constraintdef(oid) ~ '(file_path|cover_path)'),
-    'part1: no constraint mentions a path column (none was added)');
+    (select array_agg(conname::text) from pg_constraint where conrelid = 'public.books'::regclass
+                  and pg_get_constraintdef(oid) ~ '(file_path|cover_path)') = array['books_cover_path_check'],
+    'part1 (PEN-NAMES-2): the only path constraint is books_cover_path_check (C10)');
   perform pg_temp.assert(
     (select pg_get_expr(d.adbin, d.adrelid) from pg_attrdef d
        join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
@@ -266,29 +276,28 @@ begin
 end $$;
 
 -- ============================================================
--- Part 2: direct authenticated INSERT. A pathless draft succeeds; any
--- insert naming a path column is refused by the ACL, whatever the value.
+-- Part 2: direct authenticated INSERT. PEN-NAMES-2 (E5): every direct
+-- insert is refused by the ACL now, pathless or not.
 -- ============================================================
-select pg_temp.expect_ok('authenticated', 'e0670000-0000-0000-0000-00000000000a',
+select pg_temp.expect_error('authenticated', 'e0670000-0000-0000-0000-00000000000a',
   $q$insert into public.books (id, author_id, title, subtitle, description, keywords, isbn, language,
        publisher, edition, original_publication_date, genre, series_id, series_position, price_all)
      values ('e0671000-0000-0000-0000-0000000000c1', 'e0670000-0000-0000-0000-00000000000a', 'pathless draft',
        null, 'desc', '', null, 'sq', null, null, null, 'Fiction',
        'e0673000-0000-0000-0000-00000000000a', 2, 199)$q$,
-  1, 'part2: a pathless paid draft with every permitted column is directly insertable');
+  '42501', 'permission denied for table books', 'part2 (PEN-NAMES-2): a pathless paid draft is no longer directly insertable');
 
 do $$
 begin
   perform pg_temp.assert(
-    (select status = 'draft' and file_path is null and cover_path is null and published_at is null
-       from public.books where id = 'e0671000-0000-0000-0000-0000000000c1'),
-    'part2: the pathless row is a draft with null paths');
+    not exists (select 1 from public.books where id = 'e0671000-0000-0000-0000-0000000000c1'),
+    'part2 (PEN-NAMES-2): the refused pathless row did not land');
 end $$;
 
-select pg_temp.expect_ok('authenticated', 'e0670000-0000-0000-0000-00000000000a',
+select pg_temp.expect_error('authenticated', 'e0670000-0000-0000-0000-00000000000a',
   $q$insert into public.books (author_id, title, price_all)
      values ('e0670000-0000-0000-0000-00000000000a', 'pathless returning', 0) returning id$q$,
-  1, 'part2: INSERT ... RETURNING id works for a pathless draft');
+  '42501', 'permission denied for table books', 'part2 (PEN-NAMES-2): INSERT ... RETURNING id is refused too');
 
 select pg_temp.expect_error('authenticated', 'e0670000-0000-0000-0000-00000000000a',
   $q$insert into public.books (author_id, title, file_path) values ('e0670000-0000-0000-0000-00000000000a', 'f null', null)$q$,
@@ -338,10 +347,11 @@ select pg_temp.expect_error('authenticated', 'e0670000-0000-0000-0000-0000000000
       where b.id = 'e0671000-0000-0000-0000-0000000000a2'$q$,
   '42501', 'permission denied for table books', 'part2: copying a readable path through INSERT ... SELECT is refused');
 
--- RLS still isolates authors on insert.
+-- PEN-NAMES-2 (E5): an insert as another author is refused by the ACL
+-- before RLS is consulted.
 select pg_temp.expect_error('authenticated', 'e0670000-0000-0000-0000-00000000000a',
   $q$insert into public.books (author_id, title) values ('e0670000-0000-0000-0000-00000000000b', 'as someone else')$q$,
-  '42501', 'row-level security', 'part2: a pathless insert as another author is refused by RLS');
+  '42501', 'permission denied for table books', 'part2 (PEN-NAMES-2): a pathless insert as another author is refused by the ACL');
 
 -- ============================================================
 -- Part 3: direct authenticated UPDATE of a path stays refused.
@@ -359,7 +369,7 @@ select pg_temp.expect_error('authenticated', 'e0670000-0000-0000-0000-0000000000
 select pg_temp.expect_ok('authenticated', 'e0670000-0000-0000-0000-00000000000a',
   $q$update public.books set series_id = null, series_position = null
       where series_id = 'e0673000-0000-0000-0000-00000000000a' and author_id = 'e0670000-0000-0000-0000-00000000000a'$q$,
-  2, 'part3: the series unlink still works on the author''s own rows');
+  1, 'part3: the series unlink still works on the author''s own rows (PEN-NAMES-2: one row, the refused pathless draft never landed)');
 
 -- ============================================================
 -- Part 4: anon stays read-only; RLS still isolates reads.
@@ -374,8 +384,8 @@ select pg_temp.expect_error('anon', null,
   $q$update public.books set file_path = 'x' where id = 'e0671000-0000-0000-0000-0000000000a2'$q$,
   '42501', 'permission denied for table books', 'part4: anon UPDATE is refused');
 select pg_temp.expect_ok('anon', null,
-  $q$select 1 from public.books where id::text like 'e0671000-%'$q$,
-  2, 'part4: anon sees exactly the two published P067 books');
+  $q$select 1 from public.public_books where id::text like 'e0671000-%'$q$,
+  2, 'part4 (PEN-NAMES-2): anon sees exactly the two published P067 books through public_books');
 select pg_temp.expect_ok('authenticated', 'e0670000-0000-0000-0000-00000000000a',
   $q$select 1 from public.books where id = 'e0671000-0000-0000-0000-0000000000b1'$q$,
   0, 'part4: author A cannot see author B''s draft');
@@ -391,7 +401,7 @@ select pg_temp.expect_ok('service_role', null,
   $q$insert into public.books (id, author_id, title, description, keywords, genre, price_all, cover_path, file_path)
      values ('e0671000-0000-0000-0000-0000000000e1', 'e0670000-0000-0000-0000-00000000000a', 'trusted create',
        'desc', '', 'Fiction', 199,
-       'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000e1-cover.png',
+       'e0675000-0000-0000-0000-0000000000e1/cover.png',
        'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000e1.epub')
      returning id$q$,
   1, 'part5: service_role inserts the createBook row with its derived paths');
@@ -400,12 +410,12 @@ begin
   perform pg_temp.assert(
     (select status = 'draft' and published_at is null
         and file_path = author_id::text || '/' || id::text || '.epub'
-        and cover_path = author_id::text || '/' || id::text || '-cover.png'
+        and cover_path = 'e0675000-0000-0000-0000-0000000000e1/cover.png'
        from public.books where id = 'e0671000-0000-0000-0000-0000000000e1'),
-    'part5: the trusted row is a draft whose paths derive from its author and id');
+    'part5: the trusted row is a draft whose manuscript path derives from its author and id (PEN-NAMES-2: the cover key is `<random uuid>/cover.<ext>`)');
 end $$;
 select pg_temp.expect_ok('service_role', null,
-  $q$update public.books set cover_path = 'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000e1-cover.jpg'
+  $q$update public.books set cover_path = 'e0675000-0000-0000-0000-0000000000e2/cover.jpg'
       where id = 'e0671000-0000-0000-0000-0000000000e1' and author_id = 'e0670000-0000-0000-0000-00000000000a' returning id$q$,
   1, 'part5: service_role keeps path UPDATE (updateBook''s replacement upload)');
 
@@ -422,22 +432,22 @@ begin
        from public.books where id in ('e0671000-0000-0000-0000-0000000000a1', 'e0671000-0000-0000-0000-0000000000a2',
                                       'e0671000-0000-0000-0000-0000000000a3', 'e0671000-0000-0000-0000-0000000000b1'))
     = 'e0671000-0000-0000-0000-0000000000a1|e0670000-0000-0000-0000-00000000000a|draft|'
-      || 'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000a1-cover.png|'
+      || 'e0675000-0000-0000-0000-0000000000a1/cover.png|'
       || 'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000a1.epub,'
       || 'e0671000-0000-0000-0000-0000000000a2|e0670000-0000-0000-0000-00000000000a|published|'
-      || 'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000a2-cover.jpg|'
+      || 'e0675000-0000-0000-0000-0000000000a2/cover.jpg|'
       || 'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000a2.epub,'
       || 'e0671000-0000-0000-0000-0000000000a3|e0670000-0000-0000-0000-00000000000a|published|'
-      || 'covers/legacy-cover.JPG|legacy/manuscript.epub,'
+      || '<null>|legacy/manuscript.epub,'
       || 'e0671000-0000-0000-0000-0000000000b1|e0670000-0000-0000-0000-00000000000b|draft|'
-      || 'e0670000-0000-0000-0000-00000000000b/e0671000-0000-0000-0000-0000000000b1-cover.png|'
+      || 'e0675000-0000-0000-0000-0000000000b1/cover.png|'
       || 'e0670000-0000-0000-0000-00000000000b/e0671000-0000-0000-0000-0000000000b1.epub',
     'part6: every fixture row keeps its owner, status and exact paths, legacy row included');
   perform pg_temp.assert(
-    (select count(*) from public.books where id::text like 'e0671000-%') = 6
-    and (select count(*) from public.books where title = 'pathless returning') = 1
+    (select count(*) from public.books where id::text like 'e0671000-%') = 5
+    and (select count(*) from public.books where title = 'pathless returning') = 0
     and (select count(*) from public.books where file_path is not null and id::text like 'e0671000-%') = 5,
-    'part6: only the three permitted inserts added rows (pathless, pathless-returning, trusted), and no refused path landed');
+    'part6 (PEN-NAMES-2): only the trusted insert added a row, and no refused path landed');
 end $$;
 
 -- ============================================================

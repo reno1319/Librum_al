@@ -18,6 +18,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatTransactionAmount } from "@/lib/transaction-money";
 import { loadRefundRequestCurrencies, refundRequestCurrency } from "../refund-currency";
+import { loadStaffDisplayNames } from "@/lib/staff-display-names";
 import type { Metadata } from "next";
 
 // LIBRUM 2.0 SEO-1: static title, not a dynamic one built from the
@@ -120,11 +121,9 @@ export default async function AdminRefundRequestDetailPage({
   const profileIds = Array.from(
     new Set([request.reader_id, request.reviewed_by].filter((v): v is string => v !== null)),
   );
-  const { data: profiles } =
-    profileIds.length > 0
-      ? await supabase.from("profiles").select("id, display_name").in("id", profileIds)
-      : { data: [] };
-  const displayNameById = new Map((profiles ?? []).map((p) => [p.id, p.display_name]));
+  // PEN-NAMES-2 (MF3, C13): through staff_profile_display_names() --
+  // support no longer reads profiles.
+  const displayNameById = await loadStaffDisplayNames(supabase, profileIds);
 
   const readerDisplayName = resolveProfileDisplayName({
     profileId: request.reader_id,
@@ -144,7 +143,9 @@ export default async function AdminRefundRequestDetailPage({
   // purchases.book_id -> books(*) in src/app/library/page.tsx.
   const { data: items } = await supabase
     .from("refund_request_items")
-    .select("id, purchase_id, book_id, amount_cents, books(title)")
+    // PEN-NAMES-2 (MF2): the title through public_books (aliased
+    // `books`); support has no base-table read of books.
+    .select("id, purchase_id, book_id, amount_cents, books:public_books(title)")
     .eq("refund_request_id", id)
     .returns<AdminRefundRequestItem[]>();
 

@@ -36,6 +36,7 @@ import {
   FIXTURE_PURCHASE_REGIME,
   FIXTURE_PURCHASE_AMOUNT_CENTS,
   baselineTableRowIds,
+  FIXTURE_BOOKS,
 } from "./manifest.mts";
 import {
   discoverFixtureUser,
@@ -58,7 +59,11 @@ import {
   planNamespaceCleanup,
   discoverStorageObjects,
   expectedBaselineObjectKeys,
+  planRowKeyCleanup,
+  newShapeKeyFolder,
+  dedupeStoragePlan,
   FIXTURE_STORAGE_BUCKETS,
+  type FixtureRowStorageKeys,
   type StorageCleanupPlanEntry,
   type ListEntriesFn,
   type FixtureStorageBucket,
@@ -140,6 +145,10 @@ export type Deps = {
     { name: string; id: string | null; metadata: { size: number } | null }[]
   >;
   removeStorageObjects: (bucket: FixtureStorageBucket, keys: string[]) => Promise<void>;
+  // PEN-2 (D6): genuinely read-only. The cover_path of every book the
+  // fixture author owns and the avatar_path of every pen name either
+  // fixture account owns (non-null values only), read from those rows.
+  listFixtureRowStorageKeys: (ctx: FixtureContext) => Promise<FixtureRowStorageKeys>;
   // PHASE-1C review round 3, item 6: converges avatar_path back to its
   // defined safe baseline (null) for one profile, after the actual
   // storage object (if any) has already been removed.
@@ -181,6 +190,37 @@ async function discoverNamespaceObjectKeys(deps: Deps, bucket: FixtureStorageBuc
     fixtureAuthorId: namespaceId,
   });
   return objects.map((o) => o.fullKey);
+}
+
+// PEN-2 (D6): a fresh discovery of the fixtures' new-shape objects, which
+// live outside the accounts' namespaces: the fixture author's and both
+// accounts' pen names' row keys (validated by planRowKeyCleanup, which
+// refuses anything a fixture does not own), plus a recursive walk of each
+// fixture book's fixed cover folder and of every folder a row key names.
+// Only objects the walks actually find are returned, so this is a real
+// look at Storage, not a re-read of the rows.
+async function discoverRowLinkedObjects(deps: Deps, ctx: FixtureContext): Promise<StorageCleanupPlanEntry[]> {
+  const rowKeys = await deps.listFixtureRowStorageKeys(ctx);
+  const rowPlan = planRowKeyCleanup({ rowKeys, namespaceIds: [ctx.authorId, ctx.readerId] });
+  const folders: Record<"covers" | "avatars", Set<string>> = {
+    covers: new Set(FIXTURE_BOOKS.map((b) => b.id)),
+    avatars: new Set(),
+  };
+  for (const entry of rowPlan) {
+    const folder = newShapeKeyFolder(entry.key);
+    if (folder !== null && folder !== ctx.authorId && folder !== ctx.readerId) {
+      folders[entry.bucket as "covers" | "avatars"].add(folder);
+    }
+  }
+  const found: StorageCleanupPlanEntry[] = [];
+  for (const bucket of ["covers", "avatars"] as const) {
+    for (const folder of folders[bucket]) {
+      for (const key of await discoverNamespaceObjectKeys(deps, bucket, folder)) {
+        found.push({ bucket, key });
+      }
+    }
+  }
+  return dedupeStoragePlan(found);
 }
 
 function expectedSyntheticPurchase(readerId: string): ExpectedSyntheticPurchase {
@@ -345,7 +385,11 @@ export async function runPreflight(deps: Deps): Promise<ApprovedPlan> {
     );
   }
 
-  const storagePlan = [...authorStoragePlan, ...readerStoragePlan];
+  const storagePlan = dedupeStoragePlan([
+    ...authorStoragePlan,
+    ...readerStoragePlan,
+    ...(await discoverRowLinkedObjects(deps, ctx)),
+  ]);
 
   emit(deps, "preflight:recent-sign-in-check");
   const nowIso = deps.now();
@@ -492,6 +536,11 @@ export async function verifyResetToBaselinePostconditions(deps: Deps, plan: Appr
       authorActualKeys.add(`${bucket}:${key}`);
     }
   }
+  // PEN-2 (D6): the new-shape covers and pen-name photos, found from the
+  // fixture rows and the fixed cover folders (never the frozen plan).
+  for (const entry of await discoverRowLinkedObjects(deps, { authorId: plan.authorId, readerId: plan.readerId })) {
+    authorActualKeys.add(`${entry.bucket}:${entry.key}`);
+  }
   const authorExpectedKeys = new Set(expectedBaselineObjectKeys(plan.authorId).map((e) => `${e.bucket}:${e.key}`));
   const missingStorage = [...authorExpectedKeys].filter((k) => !authorActualKeys.has(k));
   const unexpectedStorage = [...authorActualKeys].filter((k) => !authorExpectedKeys.has(k));
@@ -557,6 +606,9 @@ export async function verifyTeardownPostconditions(deps: Deps, plan: ApprovedPla
     for (const key of await discoverNamespaceObjectKeys(deps, bucket, plan.authorId)) {
       authorLeftoverKeys.push(`${bucket}:${key}`);
     }
+  }
+  for (const entry of await discoverRowLinkedObjects(deps, { authorId: plan.authorId, readerId: plan.readerId })) {
+    authorLeftoverKeys.push(`${entry.bucket}:${entry.key}`);
   }
   if (authorLeftoverKeys.length > 0) {
     throw new PostconditionFailedError(

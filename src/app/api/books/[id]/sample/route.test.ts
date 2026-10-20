@@ -37,8 +37,10 @@ const BOOK_ID = "9d8c7b6a-5f4e-4d3c-9b2a-1f0e9d8c7b6a";
 const OTHER_AUTHOR_ID = "7e6d5c4b-3a29-4817-8a6b-5c4d3e2f1a0b";
 const OTHER_BOOK_ID = "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091";
 const CANONICAL_PATH = `${AUTHOR_ID}/${BOOK_ID}.epub`;
-const EXPECTED_COLUMNS =
-  "id, author_id, title, status, file_path, pen:public_pen_names(id, name)";
+// PEN-NAMES-2 (D2): the public read has no account columns; the
+// service role reads author_id/file_path for a published book only.
+const EXPECTED_COLUMNS = "id, title, status, pen:public_pen_names(id, name)";
+const EXPECTED_STORAGE_COLUMNS = "author_id, file_path";
 
 // Every value here is refused for a row whose id is BOOK_ID and whose
 // author_id is AUTHOR_ID.
@@ -112,16 +114,40 @@ function publishedBook(overrides: FakeBook = {}): FakeBook {
 }
 
 // PEN-NAMES-1: the book row embeds its pen name (public_pen_names view)
-// as `pen`, in the one read.
-function makeFakeSupabase(overrides: { book?: FakeBook | null; result?: QueryResult } = {}) {
-  const book = "book" in overrides ? overrides.book : publishedBook();
-  const result = overrides.result ?? { data: book, error: null };
+// as `pen`, in the one read. PEN-NAMES-2: that read is public_books
+// (id, title, status, pen); the service-role read of the same fake book
+// returns its author_id/file_path (or `storageResult`).
+type Call = { table: string; columns: string; filters: [string, unknown][] };
+let currentBook: FakeBook | null | undefined;
+let currentStorageResult: QueryResult | undefined;
 
-  const maybeSingle = vi.fn(() => Promise.resolve(result));
-  const eq = vi.fn(() => ({ maybeSingle }));
-  const select = vi.fn(() => ({ eq }));
-  const from = vi.fn(() => ({ select }));
-  return { from, __from: from, __select: select, __eq: eq, __maybeSingle: maybeSingle };
+function recordingFrom(calls: Call[], resolve: () => QueryResult) {
+  return vi.fn((table: string) => {
+    const call: Call = { table, columns: "", filters: [] };
+    const chain = {
+      select: (columns: string) => ((call.columns = columns), chain),
+      eq: (column: string, value: unknown) => (call.filters.push([column, value]), chain),
+      maybeSingle: () => (calls.push(call), Promise.resolve(resolve())),
+    };
+    return chain;
+  });
+}
+
+function makeFakeSupabase(overrides: { book?: FakeBook | null; result?: QueryResult; storageResult?: QueryResult } = {}) {
+  const book = "book" in overrides ? overrides.book : publishedBook();
+  currentBook = book;
+  currentStorageResult = overrides.storageResult;
+  const publicPart = (b: FakeBook | null | undefined) => {
+    if (!b) return b;
+    const rest: Partial<FakeBook> = { ...b };
+    delete rest.author_id;
+    delete rest.file_path;
+    return rest;
+  };
+  const result = overrides.result ?? { data: publicPart(book), error: null };
+  const calls: Call[] = [];
+  const from = recordingFrom(calls, () => result);
+  return { from, __from: from, __calls: calls };
 }
 
 function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: unknown } = {}) {
@@ -133,8 +159,15 @@ function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: un
         : { data: new Blob([new Uint8Array(fileBytes)]), error: null },
     ),
   );
-  const from = vi.fn((_bucket: string) => ({ download }));
-  return { storage: { from }, __from: from, __download: download };
+  const storageFrom = vi.fn((_bucket: string) => ({ download }));
+  const calls: Call[] = [];
+  const from = recordingFrom(calls, () =>
+    currentStorageResult ??
+    (currentBook
+      ? { data: { author_id: currentBook.author_id, file_path: currentBook.file_path }, error: null }
+      : { data: null, error: null }),
+  );
+  return { storage: { from: storageFrom }, from, __from: storageFrom, __download: download, __calls: calls };
 }
 
 async function buildValidEpubBytes(): Promise<Buffer> {
@@ -293,26 +326,26 @@ describe("GET /api/books/[id]/sample", () => {
 
       expect(response.status).toBe(404);
       expect(await response.json()).toEqual({ error: "not_found" });
-      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+      expect(adminClient.__from).not.toHaveBeenCalled();
       expect(adminClient.__download).not.toHaveBeenCalled();
     });
   });
 
   describe("row identity binding", () => {
-    it("selects exactly id, author_id, title, status, file_path and the pen name view for the route's own id, in one read", async () => {
+    it("reads public_books (no account columns) for the route's own id, then the service role reads only author_id and file_path of that published row", async () => {
       const supabase = makeFakeSupabase();
+      const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() });
       mockCreateClient.mockResolvedValue(supabase);
-      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() }));
+      mockCreateAdminClient.mockReturnValue(admin);
 
       await callRoute();
 
-      expect(supabase.__from).toHaveBeenCalledTimes(1);
-      expect(supabase.__from).toHaveBeenCalledWith("books");
-      expect(supabase.__select).toHaveBeenCalledTimes(1);
-      expect(supabase.__select).toHaveBeenCalledWith(EXPECTED_COLUMNS);
-      expect(supabase.__eq).toHaveBeenCalledTimes(1);
-      expect(supabase.__eq).toHaveBeenCalledWith("id", BOOK_ID);
-      expect(supabase.__maybeSingle).toHaveBeenCalledTimes(1);
+      expect(supabase.__calls).toEqual([
+        { table: "public_books", columns: EXPECTED_COLUMNS, filters: [["id", BOOK_ID]] },
+      ]);
+      expect(admin.__calls).toEqual([
+        { table: "books", columns: EXPECTED_STORAGE_COLUMNS, filters: [["id", BOOK_ID], ["status", "published"]] },
+      ]);
     });
 
     it("a published canonical book fetches exactly <author>/<book>.epub from the manuscripts bucket", async () => {
@@ -343,7 +376,6 @@ describe("GET /api/books/[id]/sample", () => {
 
       expect(response.status).toBe(404);
       expect(JSON.parse(text)).toEqual({ error: "sample_unavailable" });
-      expect(mockCreateAdminClient).not.toHaveBeenCalled();
       expect(adminClient.__from).not.toHaveBeenCalled();
       expect(adminClient.__download).not.toHaveBeenCalled();
       expect(mockExtractEpubSample).not.toHaveBeenCalled();
@@ -380,7 +412,7 @@ describe("GET /api/books/[id]/sample", () => {
 
       expect(response.status).toBe(404);
       expect(body).toEqual({ error: filePath === "" || filePath === undefined ? "not_found" : "sample_unavailable" });
-      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+      expect(adminClient.__from).not.toHaveBeenCalled();
       expect(adminClient.__download).not.toHaveBeenCalled();
       expect(mockExtractEpubSample).not.toHaveBeenCalled();
       for (const spy of logSpies) expect(spy).not.toHaveBeenCalled();
@@ -422,8 +454,6 @@ describe("GET /api/books/[id]/sample", () => {
         error: null,
       }],
       ["a row whose id differs only in case", { data: publishedBook({ id: BOOK_ID.toUpperCase() }), error: null }],
-      ["a row without author_id", { data: publishedBook({ author_id: undefined }), error: null }],
-      ["a row with a non-string author_id", { data: publishedBook({ author_id: 1 }), error: null }],
       ["a row with a non-string title", { data: publishedBook({ title: null }), error: null }],
       ["a row with a non-string status", { data: publishedBook({ status: true }), error: null }],
     ])("%s -> 404 not_found, no admin client", async (_label, result) => {
@@ -442,6 +472,32 @@ describe("GET /api/books/[id]/sample", () => {
       expect(text).not.toContain("db down");
       expect(text).not.toContain(CANONICAL_PATH);
       for (const spy of logSpies) expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
+  // PEN-NAMES-2: the service-role read of a published row fails closed
+  // the same way, and nothing reaches Storage.
+  describe("service-role storage read fails closed as not_found", () => {
+    it.each<[string, QueryResult]>([
+      ["an error", { data: null, error: { message: "db down", code: "XX000" } }],
+      ["an error with a plausible row", { data: { author_id: AUTHOR_ID, file_path: CANONICAL_PATH }, error: { message: "db down" } }],
+      ["no row", { data: null, error: null }],
+      ["an array", { data: [{ author_id: AUTHOR_ID, file_path: CANONICAL_PATH }], error: null }],
+      ["a row without author_id", { data: { file_path: CANONICAL_PATH }, error: null }],
+      ["a row with a non-string author_id", { data: { author_id: 1, file_path: CANONICAL_PATH }, error: null }],
+    ])("%s -> 404 not_found", async (_label, storageResult) => {
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ storageResult }));
+      const adminClient = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() });
+      mockCreateAdminClient.mockReturnValue(adminClient);
+
+      const response = await callRoute();
+      const text = await response.text();
+
+      expect(response.status).toBe(404);
+      expect(JSON.parse(text)).toEqual({ error: "not_found" });
+      expect(adminClient.__download).not.toHaveBeenCalled();
+      expect(text).not.toContain("db down");
+      expect(text).not.toContain(AUTHOR_ID);
     });
   });
 

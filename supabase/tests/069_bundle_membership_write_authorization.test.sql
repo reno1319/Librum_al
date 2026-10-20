@@ -219,14 +219,18 @@ begin
     has_table_privilege('service_role', 'public.bundle_books', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE'),
     'part1: service_role keeps every data privilege');
 
-  -- The three policies are byte-identical to the base (md5 measured on
-  -- the unpatched schema).
+  -- The three policies, pinned by md5. PEN-NAMES-2 (C4) recreated the
+  -- SELECT policy over public_bundles (anon no longer reads bundles), so
+  -- the md5 was re-measured on the PEN-NAMES-2 schema; the write policies
+  -- are unchanged.
   perform pg_temp.assert(
     (select md5(string_agg(policyname || '|' || permissive || '|' || array_to_string(roles, ',') || '|' || cmd
                            || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' order by policyname))
        from pg_policies where schemaname = 'public' and tablename = 'bundle_books')
-      = '1588642de5e11d02d5cf0048d27f0ba2',
-    'part1: the three bundle_books policies are unchanged');
+      = '691c75d85ebd70ef2cdebf7bec64ca48'
+    and (select qual from pg_policies where schemaname = 'public' and tablename = 'bundle_books'
+          and policyname = 'Bundle contents are viewable wherever the bundle is') like '%FROM public_bundles pb%',
+    'part1 (PEN-NAMES-2): the three bundle_books policies, the SELECT one over public_bundles');
 
   -- Function identities: exact arguments, return type, invoker, volatile,
   -- empty search_path, owned by the schema owner.

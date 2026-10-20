@@ -4,6 +4,8 @@ import {
   isWithinFixtureNamespace,
   discoverStorageObjects,
   planStorageCleanup,
+  planRowKeyCleanup,
+  isFixtureRowOwnedKey,
   toFullObjectKey,
   MalformedStorageEntryError,
   UnexpectedStorageKeyError,
@@ -27,9 +29,16 @@ describe("expectedBaselineObjectKeys", () => {
     expect(keys.length).toBe(FIXTURE_BOOKS.length * 2);
   });
 
-  it("every key begins with exactly '<authorId>/'", () => {
-    for (const { key } of expectedBaselineObjectKeys(FIXTURE_AUTHOR_ID)) {
-      expect(isWithinFixtureNamespace(key, FIXTURE_AUTHOR_ID)).toBe(true);
+  // PEN-2 (D6): manuscripts stay under '<authorId>/'; covers use the new
+  // shape '<book id>/cover.png', which never names the account.
+  it("every manuscript key begins with exactly '<authorId>/'; every cover key is '<book id>/cover.png'", () => {
+    for (const { bucket, key } of expectedBaselineObjectKeys(FIXTURE_AUTHOR_ID)) {
+      if (bucket === "manuscripts") {
+        expect(isWithinFixtureNamespace(key, FIXTURE_AUTHOR_ID)).toBe(true);
+      } else {
+        expect(key).toMatch(/^[0-9a-f-]{36}\/cover\.png$/);
+        expect(key).not.toContain(FIXTURE_AUTHOR_ID);
+      }
     }
   });
 });
@@ -203,5 +212,40 @@ describe("planStorageCleanup", () => {
         discoveredByBucket: { covers: ["fixtures/some-book-cover.png"], manuscripts: [], avatars: [] },
       }),
     ).toThrow(UnexpectedStorageKeyError);
+  });
+});
+
+// PEN-2 (D6): keys discovered from the fixture accounts' own rows.
+describe("planRowKeyCleanup", () => {
+  const READER = "99999999-2222-4333-8444-555555555555";
+  const NEW_COVER = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
+  const NEW_PHOTO = "0f0e0d0c-0b0a-4908-8706-050403020101/pen-name.jpg";
+
+  it("accepts new-shape covers and pen-name photos and old keys under a fixture namespace", () => {
+    const plan = planRowKeyCleanup({
+      rowKeys: { covers: [NEW_COVER, `${FIXTURE_AUTHOR_ID}/b-cover.png`], avatars: [NEW_PHOTO, `${READER}/avatar.png`] },
+      namespaceIds: [FIXTURE_AUTHOR_ID, READER],
+    });
+    expect(plan).toEqual([
+      { bucket: "covers", key: NEW_COVER },
+      { bucket: "covers", key: `${FIXTURE_AUTHOR_ID}/b-cover.png` },
+      { bucket: "avatars", key: NEW_PHOTO },
+      { bucket: "avatars", key: `${READER}/avatar.png` },
+    ]);
+  });
+
+  it("refuses a row key the fixtures don't own (another account's folder, wrong shape, traversal)", () => {
+    for (const bad of [
+      "some-other-author-id/x-cover.png",
+      `${FIXTURE_AUTHOR_ID}/../evil.png`,
+      "0f0e0d0c-0b0a-4908-8706-050403020100/pen-name.png",
+      "0f0e0d0c-0b0a-4908-8706-050403020100/cover.jpeg",
+      "0F0E0D0C-0B0A-4908-8706-050403020100/cover.png",
+    ]) {
+      expect(() =>
+        planRowKeyCleanup({ rowKeys: { covers: [bad], avatars: [] }, namespaceIds: [FIXTURE_AUTHOR_ID] }),
+      ).toThrow(UnexpectedStorageKeyError);
+    }
+    expect(isFixtureRowOwnedKey("avatars", NEW_COVER, [FIXTURE_AUTHOR_ID])).toBe(false);
   });
 });

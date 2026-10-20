@@ -102,8 +102,14 @@ beforeEach(() => {
     status: "draft",
     cover_path: null,
     file_path: null,
-    pen_name: null,
+    // PEN-NAMES-2 (D4): books.pen_name is gone; the page embeds the
+    // book's pen name from public_pen_names as `pen`.
+    pen: { id: "pen-default", name: "Arben Leka" },
   };
+  tableData.pen_names = [
+    { name: "Arben Leka", is_default: true },
+    { name: "Jo Pen", is_default: false },
+  ];
   tableData.series = [];
   tableData.book_contributors = [];
   tableData.profiles = { display_name: "Renato Kalemi", public_author_name: "Arben Leka" };
@@ -113,7 +119,7 @@ beforeEach(() => {
 
 describe("Edit page: Pen name (P1)", () => {
   it("is rendered with the book's pen name and the help naming the author", async () => {
-    book.pen_name = "Jo Pen";
+    book.pen = { id: "pen-jo", name: "Jo Pen" };
     const html = await render();
     expect(html).toContain("Pen name (optional)");
     const input = html.match(/<input[^>]*name="penName"[^>]*>/)![0];
@@ -123,6 +129,12 @@ describe("Edit page: Pen name (P1)", () => {
     // Directly under Title.
     expect(html.indexOf('name="penName"')).toBeGreaterThan(html.indexOf('name="title"'));
     expect(html.indexOf('name="penName"')).toBeLessThan(html.indexOf('name="subtitle"'));
+  });
+
+  it("is blank when the book is under the default pen name (blank means your author name)", async () => {
+    const html = await render();
+    const input = html.match(/<input[^>]*name="penName"[^>]*>/)![0];
+    expect(input).toContain('value=""');
   });
 
   it("is kept by the draft keeper after an error (EDIT_BOOK_DRAFT_FIELDS)", async () => {
@@ -208,13 +220,14 @@ describe("Edit page before the migration (D2/D3)", () => {
   beforeEach(() => {
     features = { penName: false, rights: false };
     rightsState = { kind: "unavailable" };
-    delete book.pen_name;
   });
 
-  it("no Pen name field and no Rights choice", async () => {
+  // PEN-NAMES-2: the Pen name field no longer depends on a schema probe
+  // (pen names exist since PEN-NAMES-1); only the Rights choice does.
+  it("the Pen name field is still shown, and there is no Rights choice", async () => {
     const html = await render();
-    expect(html).not.toContain('name="penName"');
-    expect(html).not.toContain("Pen name (optional)");
+    expect(html).toContain('name="penName"');
+    expect(html).toContain("Pen name (optional)");
     expect(html).not.toContain('name="rightsBasis"');
     expect(html).not.toContain(">Rights</legend>");
   });

@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { isSchemaFeatureOffError, logSchemaFeatureOffOnce } from "@/lib/schema-feature-off";
-import type { Book } from "@/lib/types";
+import type { PublicBook } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
 
 // BOOK-PEN-NAME-RIGHTS-CHOICE-1: the book staff picked as "Librum's
@@ -15,14 +15,15 @@ import type { PenNameRef } from "@/lib/pen-names";
 // public_pen_names view (embedded as `pen`, as the Bookstore's own
 // rows), so the Bookstore block and the homepage spine show the same
 // byline, linking to the same pen name page, as for any other book.
-export type LibrumChoiceBook = Book & {
+// PEN-NAMES-2: read from public_books (no account columns).
+export type LibrumChoiceBook = PublicBook & {
   pen: PenNameRef | null;
 };
 
 export async function getLibrumChoiceBook(): Promise<LibrumChoiceBook | null> {
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("books")
+    .from("public_books")
     .select("*, pen:public_pen_names(id, name)")
     .not("librum_choice_at", "is", null)
     .eq("status", "published")

@@ -72,6 +72,12 @@ function tableQuery(table: string, rows: Row[], log: QueryLog[]) {
   return builder;
 }
 
+function withoutAccount(row: Row): Row {
+  const rest = { ...row };
+  delete rest.author_id;
+  return rest;
+}
+
 let tables: Record<string, Row[]> = {};
 let adminTables: Record<string, Row[]> = {};
 let userId: string | null = null;
@@ -125,13 +131,16 @@ function install(overrides: { penA?: Row; user?: string | null; staff?: boolean;
     public_pen_names: [penA, { id: PEN_B, name: "Arben Leka", bio: "Other bio", avatar_path: null, links: [] }],
     // RLS: a signed-in author sees only their own pen names.
     pen_names: userId === ACCOUNT ? [{ id: PEN_A, author_id: ACCOUNT }, { id: PEN_B, author_id: ACCOUNT }] : [],
-    books: [book("book-a1", "Libri i Penës A", PEN_A), book("book-b1", "Libri i Penës B", PEN_B)],
-    bundles: [
-      { id: "bundle-a", title: "Pako A", price_all: 299, pen_name_id: PEN_A, author_id: ACCOUNT, status: "published" },
-      { id: "bundle-b", title: "Pako B", price_all: 299, pen_name_id: PEN_B, author_id: ACCOUNT, status: "published" },
+    // PEN-NAMES-2: the page reads books, bundles and series through the
+    // public views, which carry no author_id. There is no base books,
+    // bundles or series table here, so a base read would throw.
+    public_books: [book("book-a1", "Libri i Penës A", PEN_A), book("book-b1", "Libri i Penës B", PEN_B)].map(withoutAccount),
+    public_bundles: [
+      { id: "bundle-a", title: "Pako A", price_all: 299, pen_name_id: PEN_A, status: "published" },
+      { id: "bundle-b", title: "Pako B", price_all: 299, pen_name_id: PEN_B, status: "published" },
     ],
     pen_name_follows: overrides.follows ?? [],
-    series: [],
+    public_series: [],
   };
   adminTables = {
     pen_name_follows: [
@@ -161,7 +170,8 @@ describe("PEN-NAMES-1 Author Page", () => {
     expect(html).not.toContain("Arben Leka");
     expect(html).toContain("1 follower");
     expect(log.find((q) => q.table === "public_pen_names")?.select).toBe("id, name, bio, avatar_path, links");
-    expect(log.filter((q) => q.table === "books" || q.table === "bundles").every((q) => q.filters.includes("eq:pen_name_id"))).toBe(true);
+    expect(log.filter((q) => q.table === "public_books" || q.table === "public_bundles").every((q) => q.filters.includes("eq:pen_name_id"))).toBe(true);
+    expect(log.some((q) => q.table === "books" || q.table === "bundles" || q.table === "series")).toBe(false);
     expect(log.some((q) => q.filters.includes("eq:author_id") && q.table !== "pen_names")).toBe(false);
   });
 

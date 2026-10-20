@@ -2,7 +2,8 @@
 -- (profiles.public_author_name, the widened grant, search_books()'s
 -- privacy-preserving author-name match, and -- as of AUTHOR-1C -- the
 -- database-level SELECT/RLS boundary and the public_author_profiles
--- view). LIBRUM 2.0 AUTHOR-1A / AUTHOR-1C.
+-- view, which PEN-NAMES-2 replaced with public_pen_names / public_books /
+-- public_reviews). LIBRUM 2.0 AUTHOR-1A / AUTHOR-1C.
 --
 -- Not run automatically by any CI/build step in this repo (there is no
 -- existing SQL test framework or Postgres-in-CI setup here) -- run it
@@ -288,34 +289,45 @@ begin
     not has_table_privilege('anon', 'public.profiles', 'SELECT'),
     'part5: anon must have NO SELECT privilege at all on the base profiles table'
   );
+  -- PEN-NAMES-2 (C5): public_author_profiles is gone. Public reads of
+  -- an author's name go through public_books -> public_pen_names, and a
+  -- reviewer's public name through public_reviews.reviewer_name. Neither
+  -- view exposes display_name, role or any Stripe column.
   perform pg_temp.assert(
-    has_table_privilege('anon', 'public.public_author_profiles', 'SELECT'),
-    'part5: anon must still be able to SELECT from the safe public_author_profiles view'
+    to_regclass('public.public_author_profiles') is null,
+    'part5 (PEN-NAMES-2): the public_author_profiles view must no longer exist'
+  );
+  perform pg_temp.assert(
+    has_table_privilege('anon', 'public.public_pen_names', 'SELECT')
+      and has_table_privilege('anon', 'public.public_books', 'SELECT')
+      and has_table_privilege('anon', 'public.public_reviews', 'SELECT'),
+    'part5 (PEN-NAMES-2): anon must be able to SELECT public_pen_names, public_books and public_reviews'
   );
   perform pg_temp.assert(
     not exists (
       select 1 from information_schema.columns
-      where table_schema = 'public' and table_name = 'public_author_profiles' and column_name = 'display_name'
+      where table_schema = 'public'
+        and table_name in ('public_pen_names', 'public_books', 'public_reviews')
+        and column_name in ('display_name', 'stripe_account_id', 'stripe_payouts_enabled', 'role', 'author_id', 'reader_id')
     ),
-    'part5: public_author_profiles must not expose display_name as a column at all'
-  );
-  perform pg_temp.assert(
-    not exists (
-      select 1 from information_schema.columns
-      where table_schema = 'public' and table_name = 'public_author_profiles'
-        and column_name in ('stripe_account_id', 'stripe_payouts_enabled', 'role')
-    ),
-    'part5: public_author_profiles must not expose role or any Stripe column'
+    'part5 (PEN-NAMES-2): the public views must not expose display_name, role, a Stripe column, author_id or reader_id'
   );
 end $$;
+
+-- Reviews used by the reviews-shaped checks below: the pseudonymous
+-- author reviews another author's book, and a plain reader does too.
+insert into public.reviews (book_id, reader_id, rating, body) values
+  ('b0000000-0000-0000-0000-000000000005', '11111111-1111-1111-1111-111111111111', 5, 'author as reader'),
+  ('b0000000-0000-0000-0000-000000000005', '66666666-6666-6666-6666-666666666666', 4, 'plain reader');
 
 -- ANON: can read the pen name via the view, cannot read display_name at
 -- all (not merely "the row looks empty" -- the base table is
 -- unreachable to it, full stop).
 set role anon;
 select pg_temp.assert(
-  (select public_author_name from public.public_author_profiles where id = '11111111-1111-1111-1111-111111111111') = 'Arben Leka',
-  'part5 (anon): must read the pen name via public_author_profiles'
+  (select pn.name from public.public_books b join public.public_pen_names pn on pn.id = b.pen_name_id
+    where b.id = 'b0000000-0000-0000-0000-000000000001') = 'Arben Leka',
+  'part5 (anon): must read the pen name via public_books -> public_pen_names'
 );
 reset role;
 
@@ -328,8 +340,9 @@ select pg_temp.assert(
   'part5 (authenticated, other user): must see ZERO rows for another user via the base table'
 );
 select pg_temp.assert(
-  (select public_author_name from public.public_author_profiles where id = '11111111-1111-1111-1111-111111111111') = 'Arben Leka',
-  'part5 (authenticated, other user): must still read the pen name via the view'
+  (select pn.name from public.public_books b join public.public_pen_names pn on pn.id = b.pen_name_id
+    where b.id = 'b0000000-0000-0000-0000-000000000001') = 'Arben Leka',
+  'part5 (authenticated, other user): must still read the pen name via public_books -> public_pen_names'
 );
 reset role;
 
@@ -359,28 +372,26 @@ select pg_temp.assert(
 );
 reset role;
 
--- REVIEWS-SHAPED EMBED: the join pattern used by
--- src/app/(public)/books/[id]/page.tsx's reviewer-identity nested embed
--- -- a pseudonymous author reviewing elsewhere as a reader must resolve
--- to their PEN NAME, never their private display_name; a plain
--- reader-reviewer (no public surface) must resolve to NULL, never their
--- real name.
+-- REVIEWS-SHAPED READ (PEN-NAMES-2): src/app/(public)/books/[id]/page.tsx
+-- reads public_reviews.reviewer_name. A pseudonymous author reviewing
+-- elsewhere as a reader must resolve to their PEN NAME, never their
+-- private display_name; a plain reader-reviewer (no public surface)
+-- must resolve to NULL, never their real name.
 set role anon;
 select pg_temp.assert(
-  (
-    select p.public_author_name
-    from (select '11111111-1111-1111-1111-111111111111'::uuid as reader_id) r
-    left join public.public_author_profiles p on p.id = r.reader_id
-  ) = 'Arben Leka',
-  'part5 (reviews-shaped embed): a pseudonymous author reviewing as a reader must resolve to their pen name, never their real name'
+  (select reviewer_name from public.public_reviews
+    where book_id = 'b0000000-0000-0000-0000-000000000005' and body = 'author as reader') = 'Arben Leka',
+  'part5 (public_reviews): a pseudonymous author reviewing as a reader must resolve to their pen name, never their real name'
 );
 select pg_temp.assert(
-  (
-    select p.public_author_name
-    from (select '66666666-6666-6666-6666-666666666666'::uuid as reader_id) r
-    left join public.public_author_profiles p on p.id = r.reader_id
-  ) is null,
-  'part5 (reviews-shaped embed): a plain reader-reviewer must resolve to NULL, never their real display_name'
+  (select count(*) from public.public_reviews
+    where book_id = 'b0000000-0000-0000-0000-000000000005' and body = 'plain reader' and reviewer_name is null) = 1,
+  'part5 (public_reviews): a plain reader-reviewer must resolve to NULL, never their real display_name'
+);
+select pg_temp.assert(
+  not exists (select 1 from public.public_reviews
+    where reviewer_name in ('Renato Kalemi', 'Reader R2 Real Name')),
+  'part5 (public_reviews): no reviewer_name may be an account display_name'
 );
 reset role;
 

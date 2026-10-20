@@ -44,7 +44,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //      change 0 or 1 rows (0 = the book was not picked), so it does not
 //      prove a row count.
 //   4. Ordinary reads, uploads, deletes and the series unlink stay on the
-//      least-privileged session client.
+//      least-privileged session client -- except the covers bucket: since
+//      PEN-2 (L10, C9) no user write policy is left on covers, so a cover
+//      is uploaded under a fresh random key (newBookCoverPath) and removed
+//      only through this client, after every gate and, for a removal,
+//      only for a key read from the author's own row.
 //
 // `server-only` makes any import of this module from a client component
 // a build error, so the key can never reach browser code through it.

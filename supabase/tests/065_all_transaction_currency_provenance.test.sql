@@ -400,7 +400,12 @@ end $$;
 -- ============================================================
 do $$
 declare
-  v_all text := $q$select * from public.list_purchase_currencies(array(select id from public.purchases where id::text like 'e0650c00-%' order by id desc))$q$;
+  -- PEN-NAMES-2 [23b]: authors no longer SELECT purchases of their books
+  -- from the base table; they read the ids through author_book_purchases.
+  -- The caller's id list is therefore the union of both readable sources.
+  v_all text := $q$select * from public.list_purchase_currencies(array(
+    select id from (select id from public.purchases union select id from public.author_book_purchases) u
+     where id::text like 'e0650c00-%' order by id desc))$q$;
 begin
   perform pg_temp.assert_eq('part3: no JWT -> not authenticated',
     pg_temp.as_user(null, v_all), 'ERROR:P0001:not authenticated');

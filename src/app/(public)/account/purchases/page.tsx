@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Book, RefundRequest } from "@/lib/types";
+import type { PublicBook, RefundRequest } from "@/lib/types";
 import {
   calculateTotalSpentByCurrency,
   deriveTransactionRefundState,
@@ -52,7 +52,8 @@ type PurchaseRow = {
   created_at: string;
   refunded_at: string | null;
   stripe_payment_intent_id: string | null;
-  books: Book | null;
+  // PEN-NAMES-2: embedded from public_books (aliased `books`).
+  books: PublicBook | null;
 };
 
 type PurchaseWithBook = PurchaseRow & { currency: CurrencyProvenance };
@@ -96,7 +97,7 @@ export default async function AccountPurchasesPage({
 
   const { data: purchases } = await supabase
     .from("purchases")
-    .select("id, book_id, amount_cents, created_at, refunded_at, stripe_payment_intent_id, books(*)")
+    .select("id, book_id, amount_cents, created_at, refunded_at, stripe_payment_intent_id, books:public_books(*)")
     .eq("reader_id", user.id)
     .order("created_at", { ascending: false })
     .returns<PurchaseRow[]>();
@@ -111,8 +112,11 @@ export default async function AccountPurchasesPage({
   // policy itself), and a snapshot with no payment intent (a genuinely
   // free/$0 bundle) has nothing refundable, so there's no reason to fetch
   // it here.
+  // PEN-NAMES-2 (C7): read through reader_bundle_purchases -- the
+  // caller's own fulfilled snapshots, without the selling account's
+  // author_id.
   const { data: bundleSnapshots } = await supabase
-    .from("bundle_checkout_snapshots")
+    .from("reader_bundle_purchases")
     .select("id, stripe_payment_intent_id, total_amount_cents, fulfilled_at, refunded_at, items, currency")
     .eq("reader_id", user.id)
     .not("fulfilled_at", "is", null)
@@ -123,8 +127,10 @@ export default async function AccountPurchasesPage({
   // this to the caller's own rows -- the .eq below is belt-and-suspenders,
   // matching the same explicit-filter-alongside-RLS convention the
   // purchases query above already uses.
+  // PEN-NAMES-2 (O3): read through reader_refund_requests -- the caller's
+  // own requests, without the reviewing staff account (reviewed_by).
   const { data: refundRequests } = await supabase
-    .from("refund_requests")
+    .from("reader_refund_requests")
     .select("id, stripe_payment_intent_id, status, reason, requested_at")
     .eq("reader_id", user.id)
     .order("requested_at", { ascending: true })

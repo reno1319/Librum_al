@@ -7,6 +7,13 @@
 -- least one book, of any status, while its columns, owner, privileges
 -- and security_invoker setting stay exactly as they were.
 --
+-- PEN-NAMES-2 (C5, migration 20261019222600) dropped
+-- public_author_profiles. The rule this suite pinned -- an author's
+-- public name is not readable until they have a book -- now holds for
+-- the pen name: public_pen_names lists a pen name only while a book,
+-- series or bundle carries it, and an account's display name is never
+-- public. Every assertion below states that replacement rule.
+--
 -- To reproduce, from the repo root, against a disposable PostgreSQL 17
 -- instance (17 or newer: schema.sql uses the MAINTAIN privilege):
 --
@@ -72,119 +79,115 @@ begin
 end $$;
 
 -- ============================================================
--- Part 1: who is listed, as each calling role.
+-- Part 1: whose public name is listed, as each calling role.
+-- PEN-NAMES-2: through public_pen_names (pen names that carry a book).
 -- ============================================================
-create temp table expected_ids (id uuid);
-insert into expected_ids values
-  ('e0730000-0000-4000-8000-00000000000b'),
-  ('e0730000-0000-4000-8000-00000000000c');
-grant select on expected_ids to anon, authenticated;
+create temp table expected_names (name text);
+insert into expected_names values ('P073 Pen B'), ('P073 Pen C'), ('P073 R pen');
+grant select on expected_names to anon, authenticated;
 
 set role anon;
 select pg_temp.assert(
-  (select array_agg(id order by id) from public.public_author_profiles where id::text like 'e0730000-%')
-    = (select array_agg(id order by id) from expected_ids),
-  'part1 (anon): exactly the authors with a draft or a published book are listed');
+  (select array_agg(name order by name) from public.public_pen_names where name like 'P073 %')
+    = (select array_agg(name order by name) from expected_names),
+  'part1 (anon, PEN-NAMES-2): exactly the pen names that carry a draft or published book are listed');
 select pg_temp.assert(
-  not exists (select 1 from public.public_author_profiles where public_author_name = 'P073 Signup Name A'),
-  'part1 (anon): a book-less author''s signup name is not readable');
+  not exists (select 1 from public.public_pen_names where name = 'P073 Signup Name A'),
+  'part1 (anon, PEN-NAMES-2): a book-less author''s signup (default pen) name is not readable');
 select pg_temp.assert(
-  not exists (select 1 from public.public_author_profiles where id = 'e0730000-0000-4000-8000-0000000000ff'),
-  'part1 (anon): an author who never confirmed their email and has no book is not listed');
+  not exists (select 1 from public.public_pen_names where name = 'P073 Unconfirmed'),
+  'part1 (anon, PEN-NAMES-2): an author who never confirmed their email and has no book is not listed');
 select pg_temp.assert(
-  not exists (select 1 from public.public_author_profiles where id = 'e0730000-0000-4000-8000-0000000000aa'),
-  'part1 (anon): a reader is never listed, even with a book row');
+  not exists (select 1 from public.public_pen_names where name = 'P073 Reader'),
+  'part1 (anon, PEN-NAMES-2): a reader''s account display name is never listed, even with a book row (only the pen name the book carries is)');
 select pg_temp.assert(
-  (select public_author_name from public.public_author_profiles where id = 'e0730000-0000-4000-8000-00000000000b') = 'P073 Pen B',
-  'part1 (anon): a draft-only author''s pen name is readable');
+  (select count(*) from public.public_pen_names where name = 'P073 Pen B') = 1,
+  'part1 (anon, PEN-NAMES-2): a draft-only author''s pen name is readable');
 reset role;
 
 -- authenticated as a different user, and as the book-less author themself
 set role authenticated;
 select set_config('request.jwt.claim.sub', 'e0730000-0000-4000-8000-0000000000aa', true);
 select pg_temp.assert(
-  (select array_agg(id order by id) from public.public_author_profiles where id::text like 'e0730000-%')
-    = (select array_agg(id order by id) from expected_ids),
-  'part1 (authenticated reader): the same two authors are listed');
+  (select array_agg(name order by name) from public.public_pen_names where name like 'P073 %')
+    = (select array_agg(name order by name) from expected_names),
+  'part1 (authenticated reader, PEN-NAMES-2): the same pen names are listed');
 select set_config('request.jwt.claim.sub', 'e0730000-0000-4000-8000-00000000000a', true);
 select pg_temp.assert(
-  not exists (select 1 from public.public_author_profiles where id = 'e0730000-0000-4000-8000-00000000000a'),
-  'part1 (authenticated, self): a book-less author is not listed even to themself');
+  not exists (select 1 from public.public_pen_names where name = 'P073 Signup Name A'),
+  'part1 (authenticated, self, PEN-NAMES-2): a book-less author''s pen name is not listed even to themself');
 select set_config('request.jwt.claim.sub', '', true);
 reset role;
 
 -- ============================================================
--- Part 2: the row appears with the first book and goes with the last.
+-- Part 2: the name appears with the first book and goes with the last.
 -- ============================================================
 insert into public.books (id, author_id, title) values
   ('e0730001-0000-4000-8000-00000000000a', 'e0730000-0000-4000-8000-00000000000a', 'P073 A first draft');
 set role anon;
 select pg_temp.assert(
-  exists (select 1 from public.public_author_profiles where id = 'e0730000-0000-4000-8000-00000000000a'),
-  'part2: an author is listed as soon as they create a first draft');
+  exists (select 1 from public.public_pen_names where name = 'P073 Signup Name A'),
+  'part2 (PEN-NAMES-2): an author''s pen name is listed as soon as they create a first draft');
 reset role;
 
 delete from public.books where id = 'e0730001-0000-4000-8000-00000000000b';
 set role anon;
 select pg_temp.assert(
-  not exists (select 1 from public.public_author_profiles where id = 'e0730000-0000-4000-8000-00000000000b'),
-  'part2: an author whose only book is deleted is no longer listed');
+  not exists (select 1 from public.public_pen_names where name = 'P073 Pen B'),
+  'part2 (PEN-NAMES-2): an author whose only book is deleted is no longer listed');
 reset role;
 
 -- ============================================================
--- Part 3: everything else about the view is unchanged.
+-- Part 3: the old view is gone; the replacement exposes no account.
 -- ============================================================
 do $$
 begin
   perform pg_temp.assert(
+    to_regclass('public.public_author_profiles') is null,
+    'part3 (PEN-NAMES-2): public_author_profiles no longer exists');
+  perform pg_temp.assert(
     (select array_agg(column_name::text order by ordinal_position) from information_schema.columns
-      where table_schema = 'public' and table_name = 'public_author_profiles')
-      = array['id', 'public_author_name', 'bio', 'avatar_path'],
-    'part3: exactly the same four columns, in the same order');
-  perform pg_temp.assert(
-    (select reloptions from pg_class where oid = 'public.public_author_profiles'::regclass) is null,
-    'part3: no reloptions -- security_invoker stays unset (the view still runs as its owner)');
-  perform pg_temp.assert(
-    (select relowner from pg_class where oid = 'public.public_author_profiles'::regclass)
-      = (select relowner from pg_class where oid = 'public.profiles'::regclass),
-    'part3: the view is owned by the same role as public.profiles');
+      where table_schema = 'public' and table_name = 'public_pen_names')
+      = array['id', 'name', 'bio', 'avatar_path', 'links'],
+    'part3 (PEN-NAMES-2): public_pen_names has exactly id, name, bio, avatar_path, links -- no account id or display name');
   perform pg_temp.assert(
     (select array_agg(a.privilege_type::text order by a.privilege_type)
        from pg_class c cross join lateral aclexplode(c.relacl) a
-      where c.oid = 'public.public_author_profiles'::regclass and a.grantee = 'anon'::regrole) = array['SELECT']
+      where c.oid = 'public.public_pen_names'::regclass and a.grantee = 'anon'::regrole) = array['SELECT']
     and (select array_agg(a.privilege_type::text order by a.privilege_type)
        from pg_class c cross join lateral aclexplode(c.relacl) a
-      where c.oid = 'public.public_author_profiles'::regclass and a.grantee = 'authenticated'::regrole) = array['SELECT'],
-    'part3: anon and authenticated hold SELECT and nothing else on the view');
+      where c.oid = 'public.public_pen_names'::regclass and a.grantee = 'authenticated'::regrole) = array['SELECT'],
+    'part3 (PEN-NAMES-2): anon and authenticated hold SELECT and nothing else on public_pen_names');
   perform pg_temp.assert(
     not exists (select 1 from pg_class c cross join lateral aclexplode(c.relacl) a
-                 where c.oid = 'public.public_author_profiles'::regclass and a.grantee = 0),
-    'part3: PUBLIC holds nothing on the view');
+                 where c.oid = 'public.public_pen_names'::regclass and a.grantee = 0),
+    'part3 (PEN-NAMES-2): PUBLIC holds nothing on public_pen_names');
   perform pg_temp.assert(
     not has_table_privilege('anon', 'public.profiles', 'SELECT')
-    and not has_table_privilege('anon', 'public.books', 'INSERT'),
-    'part3: the base tables'' anon grants are untouched');
+    and not has_table_privilege('anon', 'public.books', 'INSERT')
+    and not has_table_privilege('anon', 'public.books', 'SELECT'),
+    'part3 (PEN-NAMES-2): anon has no SELECT on profiles or books and no INSERT on books');
 end $$;
 
 set role anon;
 do $$
 begin
   begin
-    update public.public_author_profiles set bio = bio where false;
-    perform pg_temp.assert(false, 'part3 (anon): UPDATE against the view must be permission-denied');
+    update public.public_pen_names set bio = bio where false;
+    perform pg_temp.assert(false, 'part3 (anon): UPDATE against public_pen_names must be permission-denied');
   exception when insufficient_privilege then
     null;
   end;
   begin
-    delete from public.public_author_profiles where false;
-    perform pg_temp.assert(false, 'part3 (anon): DELETE against the view must be permission-denied');
+    delete from public.public_pen_names where false;
+    perform pg_temp.assert(false, 'part3 (anon): DELETE against public_pen_names must be permission-denied');
   exception when insufficient_privilege then
     null;
   end;
 end $$;
 
--- search_books() reads the view as the calling role: an author of a
--- published book is still found by pen name.
+-- search_books() reads public_books as the calling role: a published
+-- book is still found by its pen name.
 select pg_temp.assert(
   exists (select 1 from public.search_books('P073 Pen C') s where s.book_id = 'e0730001-0000-4000-8000-00000000000c'),
   'part3 (anon): search_books() still finds a published book by its author''s pen name');

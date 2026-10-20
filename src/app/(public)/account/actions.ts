@@ -10,6 +10,7 @@ import { isPenNamePhotoPath } from "@/lib/pen-name-photo-path";
 import {
   BOOK_COVERS_BUCKET,
   BOOK_MANUSCRIPTS_BUCKET,
+  isNewBookCoverPath,
   isOwnCanonicalBookCoverPath,
   isOwnCanonicalBookManuscriptPath,
 } from "@/lib/book-storage-path";
@@ -180,8 +181,10 @@ export async function deleteAccount(formData: FormData) {
   // FK as the real guarantee. Only a head/count request -- no purchase
   // rows (amounts, reader ids, Stripe ids) are ever read here.
   if (bookIds.length > 0) {
+    // PEN-NAMES-2 [23b]: counted through author_book_purchases (purchases
+    // of the caller's own books; the base table no longer shows them).
     const { count: acquisitionCount } = await supabase
-      .from("purchases")
+      .from("author_book_purchases")
       .select("id", { count: "exact", head: true })
       .in("book_id", bookIds);
 
@@ -209,7 +212,15 @@ export async function deleteAccount(formData: FormData) {
   for (const book of authoredBooks) {
     const storedCoverPath: unknown = book.cover_path;
     if (storedCoverPath !== null) {
-      if (isOwnCanonicalBookCoverPath(storedCoverPath, user.id, book.id)) {
+      // PEN-2 (L10): a new random-folder key (`<uuid>/cover.<jpg|png>`)
+      // is accepted too. It names no owner, so it is trusted only because
+      // it came from this account's own books row, read above with the
+      // author_id filter; the old canonical shape stays accepted until
+      // the contract migration (C10) rules it out.
+      if (
+        isOwnCanonicalBookCoverPath(storedCoverPath, user.id, book.id) ||
+        isNewBookCoverPath(storedCoverPath)
+      ) {
         coverPaths.add(storedCoverPath);
       } else {
         skippedCoverCount += 1;

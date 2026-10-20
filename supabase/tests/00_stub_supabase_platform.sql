@@ -123,7 +123,11 @@ create table if not exists storage.objects (
   id uuid primary key default gen_random_uuid(),
   bucket_id text,
   name text,
-  owner uuid
+  owner uuid,
+  -- PEN-NAMES-2: the real storage.objects also carries owner_id (text,
+  -- the uploader's id; owner is its older uuid form). The contract
+  -- migration's guard reads both.
+  owner_id text
 );
 -- Same ambient-privilege pattern as `alter default privileges in schema
 -- public grant all ... to anon, authenticated, service_role` above,

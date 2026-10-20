@@ -164,14 +164,18 @@ grant select
 -- writer (src/lib/profile-write-client.ts), and deleteAccount removes
 -- only a stored value that is exactly that canonical path for the
 -- deleting user (src/lib/avatar-path.ts).
-grant update (display_name, bio, public_author_name)
+--
+-- PEN-NAMES-2 (migration 20261019222500, E3): bio is no longer in this
+-- grant either -- Dashboard > Profile has no Bio field (18a); a pen
+-- name's bio lives on pen_names.
+grant update (display_name, public_author_name)
   on public.profiles
   to authenticated;
 
--- The public_author_profiles view (migration 045) -- the reader-facing
--- replacement for direct public access to profiles -- is defined after
--- public.books below, because AUTHOR-VIEW-REQUIRE-BOOK-1 (migration
--- 20261019154308) makes it read books.
+-- PEN-NAMES-2 (migration 20261019222600, C5): the public_author_profiles
+-- view (migrations 045, 20261019154308) is gone. Readers see an author
+-- only as a pen name, through public.public_pen_names; a reviewer who is
+-- an author shows their default pen name through public.public_reviews.
 
 -- ============================================================
 -- staff_members: ADMIN-1A's staff/RBAC foundation, replacing binary
@@ -352,16 +356,17 @@ create table public.pen_names (
     constraint pen_names_name_check
     check (char_length(name) between 1 and 120
            and name = btrim(name, E' \t\r\n')),
-  bio text,
+  -- PEN-NAMES-2 (E4): the app caps a bio at 5000 characters.
+  bio text
+    constraint pen_names_bio_check
+    check (bio is null or char_length(bio) <= 5000),
+  -- PEN-NAMES-2 (C8): only the random "<uuid>/pen-name.<ext>" key; the
+  -- copied "<account id>/avatar.<ext>" profile photos were moved by the
+  -- storage script (scripts/pen-names-storage/move.mts).
   avatar_path text
     constraint pen_names_avatar_path_check
     check (avatar_path is null
-           or avatar_path ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/pen-name\.(jpg|png)$'
-           -- r4 (17a): the account's own profile photo, copied onto its
-           -- default pen name ("<account id>/avatar.<ext>", the one key
-           -- shape the profile photo writer ever used). Moved off the
-           -- account folder in PR B.
-           or avatar_path in (author_id::text || '/avatar.jpg', author_id::text || '/avatar.png')),
+           or avatar_path ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/pen-name\.(jpg|png)$'),
   links jsonb not null default '[]'::jsonb
     constraint pen_names_links_check
     check (public.pen_name_links_valid(links)),
@@ -375,6 +380,12 @@ create unique index pen_names_author_id_lower_name_key
 create unique index pen_names_one_default_per_author
   on public.pen_names (author_id)
   where is_default;
+
+-- PEN-NAMES-2 (E7): a service-role removal of one pen name's photo can
+-- never take another row's object.
+create unique index pen_names_avatar_path_key
+  on public.pen_names (avatar_path)
+  where avatar_path is not null;
 
 alter table public.pen_names enable row level security;
 
@@ -460,7 +471,6 @@ declare
   v_default_name text;
   v_clash uuid;
   v_bio text;
-  v_avatar text;
 begin
   if new.role <> 'author' then
     return null;
@@ -487,23 +497,22 @@ begin
      and pg_catalog.lower(pn.name) = pg_catalog.lower(v_name)
      and pn.id is distinct from v_default_id;
 
-  -- r4 (17a): a new default pen name starts with the profile's bio and
-  -- photo, when set (the photo only in its canonical
-  -- "<account id>/avatar.<ext>" shape); an existing pen name promoted to
-  -- default keeps its own and takes the profile's only where it has none.
+  -- 17a: a new default pen name starts with the profile's bio, when set;
+  -- an existing pen name promoted to default keeps its own. PEN-NAMES-2
+  -- (C8): the photo is no longer copied here -- a profile photo lives
+  -- under the account folder; becomeAuthor copies it server side to a
+  -- random pen-name key instead.
   v_bio := case when pg_catalog.btrim(coalesce(new.bio, ''), E' \t\r\n') = '' then null else new.bio end;
-  v_avatar := case when new.avatar_path in (new.id::text || '/avatar.jpg', new.id::text || '/avatar.png')
-                   then new.avatar_path end;
 
   if v_default_id is null then
     if v_clash is not null then
       update public.pen_names
          set is_default = true, name = v_name,
-             bio = coalesce(bio, v_bio), avatar_path = coalesce(avatar_path, v_avatar)
+             bio = coalesce(bio, v_bio)
        where id = v_clash;
     else
-      insert into public.pen_names (author_id, name, is_default, bio, avatar_path)
-      values (new.id, v_name, true, v_bio, v_avatar);
+      insert into public.pen_names (author_id, name, is_default, bio)
+      values (new.id, v_name, true, v_bio);
     end if;
   elsif v_default_name is distinct from v_name then
     if v_clash is not null then
@@ -522,25 +531,17 @@ create trigger profiles_sync_default_pen_name
   for each row
   execute function public.pen_names_sync_profile_default();
 
--- pen_names rename -> books.pen_name text, and the default's name ->
--- profiles.public_author_name (the Profile field IS the default).
+-- The default's name -> profiles.public_author_name (the Profile field
+-- IS the default). PEN-NAMES-2 (C11): no books.pen_name text any more.
 create function public.pen_names_after_update()
 returns trigger
 language plpgsql
 security definer
 set search_path = ''
 as $$
-declare
-  v_text text;
 begin
-  if new.name is distinct from old.name or new.is_default is distinct from old.is_default then
-    v_text := case when new.is_default then null else new.name end;
-    update public.books b
-       set pen_name = v_text
-     where b.pen_name_id = new.id
-       and b.pen_name is distinct from v_text;
-  end if;
-
+  -- The default pen name's name -> profiles.public_author_name (the
+  -- Profile field IS the default). books.pen_name no longer exists.
   if new.is_default and new.name is distinct from old.name then
     update public.profiles p
        set public_author_name = new.name
@@ -602,9 +603,13 @@ create table public.series (
 
 alter table public.series enable row level security;
 
-create policy "Series are viewable by everyone"
+-- PEN-NAMES-2 (migration 20261019222600, C2): authors read their own
+-- series; readers read every series through public.public_series (no
+-- author_id), defined after public.books below.
+create policy "Authors can view their own series"
   on public.series for select
-  using (true);
+  to authenticated
+  using (auth.uid() = author_id);
 
 create policy "Authors can create their own series"
   on public.series for insert
@@ -618,6 +623,16 @@ create policy "Authors can rename their own series"
 create policy "Authors can delete their own series"
   on public.series for delete
   using (auth.uid() = author_id);
+
+-- PEN-NAMES-2 (C2): reset-and-regrant. anon gets nothing; authenticated
+-- gets what createSeries (insert; pen_name_id optional, the trigger
+-- fills the default) and deleteSeries (delete) use, plus SELECT of its
+-- own rows. No rename path exists in the app, so no UPDATE.
+revoke all on public.series from public, anon, authenticated;
+grant select, delete on public.series to authenticated;
+grant insert (author_id, title, pen_name_id)
+  on public.series
+  to authenticated;
 
 -- series: default fill, ownership, and a non-empty series keeps the pen
 -- name of its books (11a).
@@ -707,7 +722,13 @@ create table public.books (
   series_id uuid references public.series(id) on delete set null,
   series_position integer check (series_position > 0),
   price_cents integer not null default 0 check (price_cents >= 0),
-  cover_path text,
+  -- PEN-NAMES-2 (C10): only a random "<uuid>/cover.<ext>" key, written
+  -- by the service-role catalog writer; the storage script moved the
+  -- old "<account id>/..." keys.
+  cover_path text
+    constraint books_cover_path_check
+    check (cover_path is null
+           or cover_path ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/cover\.(jpg|png)$'),
   file_path text,
   status text not null default 'draft' check (status in ('draft', 'published')),
   -- system-authoritative -- set exactly once by performPublish() on a
@@ -740,26 +761,16 @@ create table public.books (
     check (price_all is null or price_all = 0
            or (price_all >= 99 and price_all <= 100000)),
   -- BOOK-PEN-NAME-RIGHTS-CHOICE-1 (migration 20261018091237): declared
-  -- after price_all, in the migration's order, so attnum matches on both
-  -- build paths. pen_name: the per-book byline, null = the author's
-  -- public name; 120 = public_author_name's limit; no leading/trailing
-  -- whitespace. librum_choice_at: when staff picked this book as
-  -- "Librum's choice", null = not picked; at most one book is picked
-  -- (books_one_librum_choice below) and only set_librum_choice /
-  -- clear_librum_choice write it. Neither column is granted to anon or
-  -- authenticated for INSERT/UPDATE (the grants below name columns).
-  pen_name text
-    constraint books_pen_name_check
-    check (
-      pen_name is null
-      or (char_length(pen_name) between 1 and 120
-          and pen_name = btrim(pen_name, E' \t\r\n'))
-    ),
+  -- after price_all, in the migration's order. librum_choice_at: when
+  -- staff picked this book as "Librum's choice", null = not picked; at
+  -- most one book is picked (books_one_librum_choice below) and only
+  -- set_librum_choice / clear_librum_choice write it. Not granted to anon
+  -- or authenticated for UPDATE. PEN-NAMES-2 (migration 20261019222600,
+  -- C11): the per-book byline text books.pen_name that migration added
+  -- is dropped; the byline is the book's pen name (pen_name_id).
   librum_choice_at timestamptz,
   -- PEN-NAMES-1 (migration 20261019184512): the book's pen name, declared
-  -- last as the migration adds it. books.pen_name is kept equal to that
-  -- pen name's name (null for the author's default) by
-  -- books_enforce_pen_name below, both ways, until a later step drops it.
+  -- last as the migration adds it.
   pen_name_id uuid not null references public.pen_names(id)
 );
 
@@ -768,9 +779,15 @@ comment on column public.books.price_all is
 
 alter table public.books enable row level security;
 
-create policy "Published books are viewable by everyone, drafts by their author"
+-- PEN-NAMES-2 (migration 20261019222600, C1): authors read their own
+-- rows; readers and visitors read public.public_books (no author_id or
+-- file_path), defined after user_owns_book() below; staff with
+-- reports.resolve read every row (13a; that policy follows
+-- staff_has_permission() below).
+create policy "Authors can view their own books"
   on public.books for select
-  using (status = 'published' or auth.uid() = author_id);
+  to authenticated
+  using (auth.uid() = author_id);
 
 create policy "Authors can insert their own books"
   on public.books for insert
@@ -806,17 +823,13 @@ create policy "Authors can delete their own books"
 -- author must not be able to name one. createBook inserts the row, with
 -- server-derived paths, through the server-only writer; a direct insert
 -- naming either path column, even as null, is refused.
+--
+-- PEN-NAMES-2 (migrations 20261019222500 E5 and 20261019222600 C1):
+-- anon has no SELECT and authenticated no INSERT at all -- createBook
+-- writes through the server-only catalog writer, and a data-API INSERT
+-- could otherwise be used as an error oracle (MF1).
 revoke all on public.books from public, anon, authenticated;
-grant select on public.books to anon;
 grant select, delete on public.books to authenticated;
-
-grant insert (
-    id, author_id, title, subtitle, description, keywords, isbn, language,
-    publisher, edition, original_publication_date, genre, series_id,
-    series_position, price_all
-  )
-  on public.books
-  to authenticated;
 
 grant update (series_id, series_position)
   on public.books
@@ -828,7 +841,14 @@ create index books_genre_idx on public.books(genre);
 create index books_series_id_idx on public.books(series_id);
 create index books_pen_name_id_idx on public.books(pen_name_id);
 
--- books: default fill, ownership, two-way text sync (N1), 14a and 11a.
+-- PEN-NAMES-2 (E7): a service-role removal of one book's cover can never
+-- take another row's object.
+create unique index books_cover_path_key
+  on public.books (cover_path)
+  where cover_path is not null;
+
+-- books: default fill, ownership, 14a and 11a. PEN-NAMES-2 (C11): a
+-- data-API guard first (no error oracle), no books.pen_name text sync.
 create function public.books_enforce_pen_name()
 returns trigger
 language plpgsql
@@ -837,46 +857,28 @@ set search_path = ''
 as $$
 declare
   v_owner uuid;
-  v_name text;
-  v_is_default boolean;
   v_series_pen uuid;
 begin
-  -- The text keeps books_pen_name_check's own refusal (old code, and
-  -- any direct write) before it is resolved to a pen name.
-  if new.pen_name is not null
-     and (tg_op = 'INSERT' or new.pen_name is distinct from old.pen_name)
-     and not (pg_catalog.char_length(new.pen_name) between 1 and 120
-              and new.pen_name = pg_catalog.btrim(new.pen_name, E' \t\r\n'))
+  -- PEN-NAMES-2 (MF1): a data-API caller (anon or authenticated) writing
+  -- a book row for ANOTHER account is refused by grants or RLS anyway.
+  -- Return before any pen name lookup, so the refusal never tells
+  -- whether an account has a default pen name or whether a series' pen
+  -- name is its default -- the same guard as series_enforce_pen_name.
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated')
+     and new.author_id is distinct from auth.uid()
   then
-    raise exception 'new row for relation "books" violates check constraint "books_pen_name_check"'
-      using errcode = '23514', constraint = 'books_pen_name_check';
+    return new;
   end if;
 
-  if tg_op = 'INSERT' then
-    if new.pen_name_id is null then
-      new.pen_name_id := public.resolve_author_pen_name(new.author_id, new.pen_name);
-    end if;
-  elsif new.pen_name_id is null then
+  if new.pen_name_id is null then
     new.pen_name_id := public.resolve_author_pen_name(new.author_id, null);
-  elsif new.pen_name_id is not distinct from old.pen_name_id
-        and new.pen_name is distinct from old.pen_name
-  then
-    -- Only the text changed: a pen-name rename being synced (it already
-    -- equals the pen name's text) or old code writing books.pen_name.
-    select pn.name, pn.is_default into v_name, v_is_default
-      from public.pen_names pn where pn.id = new.pen_name_id;
-    if new.pen_name is distinct from (case when v_is_default then null else v_name end) then
-      new.pen_name_id := public.resolve_author_pen_name(new.author_id, new.pen_name);
-    end if;
   end if;
 
-  select pn.author_id, pn.name, pn.is_default into v_owner, v_name, v_is_default
+  select pn.author_id into v_owner
     from public.pen_names pn where pn.id = new.pen_name_id;
   if v_owner is null or v_owner <> new.author_id then
     raise exception 'pen names: the pen name does not belong to this book''s author' using errcode = '42501';
   end if;
-
-  new.pen_name := case when v_is_default then null else v_name end;
 
   if tg_op = 'UPDATE' and new.pen_name_id is distinct from old.pen_name_id then
     if (old.series_id is not null and new.series_id is not null)
@@ -903,71 +905,14 @@ end;
 $$;
 
 create trigger books_enforce_pen_name
-  before insert or update of pen_name_id, pen_name, author_id, series_id on public.books
+  before insert or update of pen_name_id, author_id, series_id on public.books
   for each row
   execute function public.books_enforce_pen_name();
 
 revoke all on function public.books_enforce_pen_name() from public, anon, authenticated;
 
--- LIBRUM 2.0 AUTHOR-1C (migration 045): the safe, reader-facing replacement for direct
--- public access to profiles -- exposes ONLY the columns a reader ever
--- legitimately needs for author attribution (never display_name, never
--- role, never any Stripe/internal column). Deliberately a plain view,
--- not `security_invoker` -- Postgres runs a non-security-invoker view
--- with the privileges of the view's OWNER (this migration-applying
--- role, the same owner as public.profiles itself), which is NOT subject
--- to profiles' own RLS (RLS never applies to a table's owner unless
--- FORCE ROW LEVEL SECURITY is set, which it isn't here) -- so this view
--- can see every author's row regardless of the caller's own identity,
--- while still only ever returning these four columns. Verified directly
--- against a real local Postgres instance (not merely reasoned about):
--- anon and an ordinary authenticated reader can both read another
--- author's public_author_name/bio/avatar_path through this view, while
--- neither can read one byte of that same author's display_name through
--- either this view (the column isn't in it) or the base table (RLS+grant
--- above now block it).
---
--- Filtered to role = 'author' -- mirrors public_author_name's own
--- "never populated for a reader" invariant (see the column's own
--- comment and the CHECK constraint above): a reader's row simply isn't
--- in this view at all, which is exactly the right behavior everywhere
--- this view is embedded, including reviews' reviewer-identity join
--- (src/app/(public)/books/[id]/page.tsx) -- a plain reader-reviewer
--- resolves to no public name (never their private display_name), and a
--- reviewer who is ALSO an author with a pen name resolves to that pen
--- name, through the exact same mechanism as any other author
--- attribution on the site.
---
--- AUTHOR-VIEW-REQUIRE-BOOK-1 (migration 20261019154308): and only once
--- the author has at least one book, of any status (Renato, 2026-10-19).
--- handle_new_user() creates an author's profiles row at signup, before
--- email confirmation and whether or not they ever start a book, and
--- copies the signup form's "Name" into public_author_name -- so without
--- this filter that name was publicly readable for people who never
--- wrote anything. Any status, not only published: a buyer keeps a book
--- after its author unpublishes it ("Owners can view books they've acquired"
--- below), and an author previews their own first draft, and both must
--- still show the author's name. The view runs as its owner, so books'
--- RLS does not apply inside it; books_author_id_idx serves the EXISTS.
--- An author with zero books has no row: /authors/[id] is "not found"
--- and a review they wrote shows no name, exactly as for a reader.
-create view public.public_author_profiles as
-  select p.id, p.public_author_name, p.bio, p.avatar_path
-  from public.profiles p
-  where p.role = 'author'
-    and exists (
-      select 1
-      from public.books b
-      where b.author_id = p.id
-    );
-
-revoke insert, update, delete, truncate, references, trigger, maintain
-  on table public.public_author_profiles
-  from anon, authenticated;
-
-grant select
-  on public.public_author_profiles
-  to anon, authenticated;
+-- PEN-NAMES-2 (migration 20261019222600, C5): public_author_profiles
+-- (migrations 045, 20261019154308) was dropped here.
 
 -- BOOK-PEN-NAME-RIGHTS-CHOICE-1: at most one picked book at a time.
 create unique index books_one_librum_choice
@@ -981,8 +926,8 @@ create unique index books_one_librum_choice
 create schema if not exists extensions;
 create extension if not exists unaccent with schema extensions;
 
--- search_books() is defined below public.public_pen_names, which it reads
--- (PEN-NAMES-1, migration 20261019184512).
+-- search_books() is defined below public.public_books, which it reads
+-- (PEN-NAMES-2, migration 20261019222600).
 
 -- ============================================================
 -- book_contributors: credits shown on a book's page beyond the single
@@ -1006,15 +951,8 @@ create table public.book_contributors (
 
 alter table public.book_contributors enable row level security;
 
-create policy "Contributors are viewable wherever the book is"
-  on public.book_contributors for select
-  using (
-    exists (
-      select 1 from public.books
-      where books.id = book_contributors.book_id
-      and (books.status = 'published' or books.author_id = auth.uid())
-    )
-  );
+-- The SELECT policy "Contributors are viewable wherever the book is"
+-- reads public.public_books (PEN-NAMES-2, C4) and is defined after it.
 
 create policy "Authors can add contributors to their own books"
   on public.book_contributors for insert
@@ -1038,6 +976,13 @@ create policy "Authors can remove contributors from their own books"
 
 create index book_contributors_book_id_idx on public.book_contributors(book_id);
 
+-- PEN-NAMES-2 (C4, O14): reset-and-regrant. anon reads only; authors add
+-- and remove contributors of their own books (createBook, addContributor,
+-- removeContributor).
+revoke all on public.book_contributors from public, anon, authenticated;
+grant select on public.book_contributors to anon;
+grant select, insert, delete on public.book_contributors to authenticated;
+
 -- ============================================================
 -- book_views: one row per page view of a published book, for basic
 -- author-facing analytics. Anonymous — no viewer identity is stored —
@@ -1055,8 +1000,11 @@ create table public.book_views (
 
 alter table public.book_views enable row level security;
 
+-- PEN-NAMES-2 (C4): authenticated only; it reads the author's own
+-- books rows, which authors still see.
 create policy "Authors can view the view-counts of their own books"
   on public.book_views for select
+  to authenticated
   using (
     exists (
       select 1 from public.books
@@ -1067,6 +1015,8 @@ create policy "Authors can view the view-counts of their own books"
 
 create index book_views_book_id_idx on public.book_views(book_id);
 create index book_views_created_at_idx on public.book_views(created_at);
+
+revoke all on public.book_views from anon;
 
 -- ============================================================
 -- bundles: an author packages several of their own published books
@@ -1100,9 +1050,12 @@ comment on column public.bundles.price_all is
 
 alter table public.bundles enable row level security;
 
-create policy "Published bundles are viewable by everyone, drafts by their author"
+-- PEN-NAMES-2 (C1): authors read their own rows; readers read
+-- public.public_bundles (no author_id).
+create policy "Authors can view their own bundles"
   on public.bundles for select
-  using (status = 'published' or auth.uid() = author_id);
+  to authenticated
+  using (auth.uid() = author_id);
 
 create policy "Authors can insert their own bundles"
   on public.bundles for insert
@@ -1124,13 +1077,13 @@ create policy "Authors can delete their own bundles"
 -- server path, as are publishBundle and unpublishBundle. anon keeps
 -- SELECT only; authenticated keeps SELECT and DELETE (deleteBundle);
 -- neither holds TRUNCATE, REFERENCES, TRIGGER or MAINTAIN.
+-- PEN-NAMES-2 (C1): anon no longer holds SELECT.
+-- PEN-NAMES-2 (E5b, audit PEN-2 r1 F1): authenticated no longer holds
+-- INSERT either. createBundle inserts through the service-role
+-- create_bundle_with_membership; the column grant only gave the data API
+-- an error oracle (author vs reader account) through the pen name trigger.
 revoke all on public.bundles from public, anon, authenticated;
-grant select on public.bundles to anon;
 grant select, delete on public.bundles to authenticated;
-
-grant insert (author_id, title, description, price_all)
-  on public.bundles
-  to authenticated;
 
 create index bundles_author_id_idx on public.bundles(author_id);
 create index bundles_status_idx on public.bundles(status);
@@ -1152,15 +1105,9 @@ create table public.bundle_books (
 
 alter table public.bundle_books enable row level security;
 
-create policy "Bundle contents are viewable wherever the bundle is"
-  on public.bundle_books for select
-  using (
-    exists (
-      select 1 from public.bundles
-      where bundles.id = bundle_books.bundle_id
-      and (bundles.status = 'published' or bundles.author_id = auth.uid())
-    )
-  );
+-- The SELECT policy "Bundle contents are viewable wherever the bundle
+-- is" reads public.public_bundles (PEN-NAMES-2, C4) and is defined
+-- after it.
 
 create policy "Authors can add books to their own bundles"
   on public.bundle_books for insert
@@ -1205,6 +1152,18 @@ as $$
 declare
   v_owner uuid;
 begin
+  -- r5 guard (PEN-NAMES-2 E5b, audit PEN-2 r1 F1): a data-API caller
+  -- writing a bundle row for ANOTHER account is refused by RLS anyway.
+  -- Return before any pen name lookup, so that refusal is RLS's generic
+  -- error whatever the account is. The role GUC is the caller's role
+  -- even inside SECURITY DEFINER; service_role and the owner's own rows
+  -- are checked as before.
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated')
+     and new.author_id is distinct from auth.uid()
+  then
+    return new;
+  end if;
+
   if new.pen_name_id is null then
     new.pen_name_id := public.resolve_author_pen_name(new.author_id, null);
   end if;
@@ -1641,113 +1600,8 @@ grant select
   on table public.public_pen_names
   to anon, authenticated;
 
--- Diacritic-tolerant bookstore search (see the Phase 6B search audit).
--- Matches title/description/keywords/author-display-name using
--- extensions.unaccent() on both the stored text and the search term, so
--- e.g. a search for "Kerc" matches stored "Kërc" and vice versa -- ë/e
--- and ç/c fold together (along with other accented Latin letters,
--- unaccent's normal behavior), while ILIKE keeps matching
--- case-insensitive as before.
---
--- SECURITY INVOKER (the default, stated explicitly): unlike
--- bestselling_books, this only reads books/profiles data that's already
--- publicly selectable under existing RLS ("Published books are viewable
--- by everyone" / "Profiles are viewable by everyone") -- there is no
--- privileged data to bypass, so no elevated privilege is used or
--- needed. It runs under the calling role's own RLS, same as any other
--- query the bookstore already makes.
---
--- Returns ONLY book_id -- never any profiles or purchases column -- the
--- caller re-fetches full book rows (with profiles(display_name)) the
--- same way the rest of the bookstore code already does.
---
--- SEARCH CANDIDATE LIMIT vs. VISIBLE SEARCH RESULT LIMIT: result_limit
--- here clamps to 1-500 -- this is a CANDIDATE ceiling, not the 48
--- results the bookstore actually displays. The application sorts
--- (newest / price / bestselling) over whatever this function returns,
--- then applies its own separate 48-row display cap AFTER sorting -- so
--- this limit must cover every book that could plausibly match a query,
--- not just the number shown on screen, or sorting would silently run
--- over an incomplete/arbitrary subset of the true matches (see the
--- Phase 6B-2 correction audit). 500 is a bounded ceiling judged
--- appropriate for Librum's current catalog size (low hundreds of
--- published books, per the Phase 6B-1 audit) -- it is NOT claimed to be
--- correct at arbitrary catalog size. If the catalog can plausibly grow
--- to where a single query matches more than 500 published books, this
--- architecture (push sorting into the database, or paginate, or both)
--- must be revisited before that happens -- raising this constant alone
--- would silently reintroduce the same truncate-before-sort bug this
--- fixes, just at a higher threshold.
---
--- PEN-NAMES-1 (migration 20261019184512): the author-name match reads
--- the book's OWN pen name through public.public_pen_names (5a), no
--- longer public_author_profiles -- the account's public name finds only
--- the books under its default pen name.
---
--- This still guards against an unbounded scan/result set -- 500 is a
--- hard cap, not "no limit" -- mirroring the same defensive
--- least/greatest/coalesce pattern already used by bestselling_books.
---
--- ALL-SEARCH-1 (migration 20260922162155): the price predicates read
--- `books.price_all` -- the ALL catalog column, in WHOLE LEK -- and a
--- row with no authored ALL price is excluded outright. The parameters
--- are still NAMED `min_price_cents`/`max_price_cents`, deliberately and
--- temporarily: renaming a function's parameters changes its call
--- signature for every PostgREST caller at once, so that is a separate
--- change from the one that performed the free/paid cutover. See the
--- migration's own header for the full rationale and rollout note.
-create or replace function public.search_books(
-  search_term text default null,
-  genre_filter text default null,
-  min_price_cents int default null,
-  max_price_cents int default null,
-  result_limit int default 500
-)
-returns table (book_id uuid)
-language sql
-security invoker
-set search_path = ''
-stable
-as $$
-  select books.id as book_id
-  from public.books
-  where books.status = 'published'
-    and (genre_filter is null or books.genre = genre_filter)
-    -- ALL-SEARCH-1: a row with no authored ALL price is not ALL-ready.
-    -- Unconditional, never folded into the two bound checks below: a
-    -- reader who applies no price filter at all must not be shown an
-    -- unpriced book either.
-    and books.price_all is not null
-    -- ALL-SEARCH-1: whole-ALL catalog bounds. The parameter names still
-    -- read "cents" and are deliberately not renamed here -- see the
-    -- header. `price_cents` is never consulted: it is legacy USD minor
-    -- units and its values are not lek.
-    and (min_price_cents is null or books.price_all >= min_price_cents)
-    and (max_price_cents is null or books.price_all <= max_price_cents)
-    and (
-      search_term is null
-      or extensions.unaccent(books.title) ilike extensions.unaccent('%' || search_term || '%')
-      or extensions.unaccent(books.description) ilike extensions.unaccent('%' || search_term || '%')
-      or extensions.unaccent(books.keywords) ilike extensions.unaccent('%' || search_term || '%')
-      or exists (
-        -- PEN-NAMES-1 (5a): the book's OWN pen name, through the public
-        -- view (no author_id). The account's public name finds only the
-        -- books published under it (its default pen name), never a book
-        -- under another pen name.
-        select 1
-        from public.public_pen_names pn
-        where pn.id = books.pen_name_id
-          and extensions.unaccent(pn.name)
-            ilike extensions.unaccent('%' || search_term || '%')
-      )
-    )
-  -- SEARCH CANDIDATE LIMIT (500) -- see the comment block above. NOT the
-  -- 48-row VISIBLE SEARCH RESULT LIMIT the bookstore displays.
-  limit least(greatest(coalesce(result_limit, 500), 1), 500);
-$$;
-
-revoke all on function public.search_books(text, text, int, int, int) from public;
-grant execute on function public.search_books(text, text, int, int, int) to anon, authenticated;
+-- search_books() is defined after public.public_books (PEN-NAMES-2),
+-- which it reads.
 
 -- ============================================================
 -- bundle_checkout_snapshots: one durable row per bundle checkout
@@ -1856,43 +1710,63 @@ create trigger bundle_checkout_snapshots_enforce_financial_facts_immutability
 -- UPDATE/DELETE policy exists for any role -- create_bundle_checkout_
 -- snapshot() (SECURITY DEFINER) and the Stripe webhook (service_role,
 -- untouched by this revoke) are the only writers.
-revoke all on public.bundle_checkout_snapshots from anon, authenticated;
-grant select on public.bundle_checkout_snapshots to authenticated;
-
--- No reader-facing policy is added -- nothing in the product surfaces
--- "my pending checkout" to a reader anywhere, and the Stripe webhook
--- (service role, bypasses RLS entirely) is the only writer/fulfiller.
 --
--- One SELECT policy exists, added by migration 027 once the sales
--- dashboard needed to fold a fulfilled bundle's total_amount_cents into
--- an author's own revenue reporting (see the Phase 9B-2 zero-eligible-
--- item accounting fix) using the ordinary, RLS-respecting client rather
--- than the admin client. Scoped as narrowly as that need: auth.uid() =
--- author_id (same scoping as "Authors can view purchases of their own
--- books" on purchases below -- no reader access is granted by this
--- policy at all), and fulfilled_at is not null, so an in-flight, unpaid,
--- or expired checkout attempt stays exactly as invisible to its own
--- author as it always was.
-create policy "Authors can view their own fulfilled bundle snapshot transactions"
-  on public.bundle_checkout_snapshots
-  for select
-  using (
-    auth.uid() = author_id
-    and fulfilled_at is not null
-  );
+-- PEN-NAMES-2 (migration 20261019222600, C7 and [23b]): no SELECT policy
+-- is left -- readers read public.reader_bundle_purchases (no author_id)
+-- and authors public.author_bundle_sales (no reader_id) -- so
+-- authenticated holds no SELECT either.
+revoke all on public.bundle_checkout_snapshots from anon, authenticated;
 
--- Added by migration 030 (Phase REFUND-1B Step 2 correction): the
--- reader-side counterpart to the author policy above, same shape,
--- reader_id instead of author_id. No GRANT/REVOKE accompanies this --
--- see migration 030's own comment for why the existing ambient
--- table-level SELECT privilege already covers it.
-create policy "Readers can view their own fulfilled bundle snapshot transactions"
-  on public.bundle_checkout_snapshots
-  for select
-  using (
-    auth.uid() = reader_id
-    and fulfilled_at is not null
-  );
+-- PEN-NAMES-2 (migrations 20261019222500 E1 and 20261019222600 C7,
+-- [23b]): the author and reader SELECT policies (migrations 027, 030)
+-- were replaced by two views, each without the OTHER party's account id.
+-- Every bundle_checkout_snapshots column except author_id; the
+-- reader's own fulfilled rows (today's reader policy).
+create view public.reader_bundle_purchases
+  with (security_barrier)
+as
+  select s.id, s.stripe_checkout_session_id, s.stripe_payment_intent_id,
+         s.bundle_id, s.bundle_title, s.reader_id,
+         s.bundle_price_cents_at_checkout, s.total_amount_cents, s.items,
+         s.protection_expires_at, s.fulfilled_at, s.refunded_at, s.created_at,
+         s.regime, s.currency, s.royalty_rate_bps
+  from public.bundle_checkout_snapshots s
+  where s.reader_id = auth.uid()
+    and s.fulfilled_at is not null;
+
+revoke all on table public.reader_bundle_purchases from public, anon;
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.reader_bundle_purchases
+  from authenticated;
+
+grant select
+  on table public.reader_bundle_purchases
+  to authenticated;
+
+-- Every bundle_checkout_snapshots column except reader_id; the caller's
+-- own fulfilled sales (today's author policy).
+create view public.author_bundle_sales
+  with (security_barrier)
+as
+  select s.id, s.stripe_checkout_session_id, s.stripe_payment_intent_id,
+         s.bundle_id, s.bundle_title, s.author_id,
+         s.bundle_price_cents_at_checkout, s.total_amount_cents, s.items,
+         s.protection_expires_at, s.fulfilled_at, s.refunded_at, s.created_at,
+         s.regime, s.currency, s.royalty_rate_bps
+  from public.bundle_checkout_snapshots s
+  where s.author_id = auth.uid()
+    and s.fulfilled_at is not null;
+
+revoke all on table public.author_bundle_sales from public, anon;
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.author_bundle_sales
+  from authenticated;
+
+grant select
+  on table public.author_bundle_sales
+  to authenticated;
 
 create index bundle_checkout_snapshots_bundle_id_idx on public.bundle_checkout_snapshots(bundle_id);
 create index bundle_checkout_snapshots_author_id_idx on public.bundle_checkout_snapshots(author_id);
@@ -2449,17 +2323,11 @@ on conflict (id) do nothing;
 -- Files are stored as "<owner_id>/<filename>" so ownership can be
 -- checked from the path itself via storage.foldername(name).
 
-create policy "Cover images are publicly readable"
-  on storage.objects for select
-  using (bucket_id = 'covers');
-
-create policy "Authors can upload their own cover images"
-  on storage.objects for insert
-  with check (bucket_id = 'covers' and auth.uid()::text = (storage.foldername(name))[1]);
-
-create policy "Authors can replace their own cover images"
-  on storage.objects for update
-  using (bucket_id = 'covers' and auth.uid()::text = (storage.foldername(name))[1]);
+-- PEN-NAMES-2 (migration 20261019222600, C9): covers and avatars have no
+-- SELECT policy (a public bucket's URLs work without one, and a listing
+-- would show every key) and no user write policy -- every cover and
+-- photo is written server side with the service role under a random
+-- "<uuid>/" folder, never the account's. Manuscripts are unchanged.
 
 create policy "Authors can upload their own manuscripts"
   on storage.objects for insert
@@ -2477,25 +2345,10 @@ create policy "Authors can replace their own manuscripts"
 -- author's own cover/manuscript files for a zero-acquisition book --
 -- owner-scoped the same way as the insert/update policies above, never
 -- public/anonymous. See the Phase 8 audit.
-create policy "Authors can delete their own cover images"
-  on storage.objects for delete
-  using (bucket_id = 'covers' and auth.uid()::text = (storage.foldername(name))[1]);
-
 create policy "Authors can delete their own manuscripts"
   on storage.objects for delete
   using (bucket_id = 'manuscripts' and auth.uid()::text = (storage.foldername(name))[1]);
 
-create policy "Avatars are publicly readable"
-  on storage.objects for select
-  using (bucket_id = 'avatars');
-
-create policy "Users can upload their own avatar"
-  on storage.objects for insert
-  with check (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
-
-create policy "Users can replace their own avatar"
-  on storage.objects for update
-  using (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
 
 -- ============================================================
 -- purchases: one row per completed sale, written only by the
@@ -2583,15 +2436,10 @@ create policy "Readers can view their own purchases"
   on public.purchases for select
   using (auth.uid() = reader_id);
 
-create policy "Authors can view purchases of their own books"
-  on public.purchases for select
-  using (
-    exists (
-      select 1 from public.books
-      where books.id = purchases.book_id
-      and books.author_id = auth.uid()
-    )
-  );
+-- PEN-NAMES-2 ([23b], migration 20261019222600): the author policy
+-- "Authors can view purchases of their own books" was replaced by
+-- public.author_book_purchases (no reader_id), defined after
+-- purchases.payment_id below.
 
 -- Ranks bestselling books by real, non-refunded purchase count without
 -- pulling every purchases row into the app to count in memory. security
@@ -2875,17 +2723,198 @@ revoke all on function public.user_owns_book(uuid) from anon;
 revoke all on function public.user_owns_book(uuid) from authenticated;
 grant execute on function public.user_owns_book(uuid) to authenticated;
 
--- A SEPARATE policy from the existing
--- "Published books are viewable by everyone, drafts by their author"
--- policy near the top of this file -- that policy is left completely
--- unchanged. Postgres combines multiple permissive SELECT policies on
--- the same table with OR, so the effective visibility becomes
--- "published, or own author, or legitimately acquired" without
--- touching the existing policy's own logic or its role scope.
-create policy "Owners can view books they've acquired"
-  on public.books for select
-  to authenticated
-  using (public.user_owns_book(books.id));
+-- PEN-NAMES-2 (migration 20261019222500, E1a): anon too, because
+-- public.public_books (below) calls it and a view's function calls are
+-- checked against the caller. anon has no auth.uid(), so it is always
+-- false there.
+grant execute on function public.user_owns_book(uuid) to anon;
+
+-- ============================================================
+-- PEN-NAMES-2 (migration 20261019222500, E1): the public read paths.
+-- Definer views (owner postgres, like public_pen_names) with explicit
+-- column lists and no account column; the row-filtering ones are
+-- security_barrier. public_books' rows are exactly the three SELECT
+-- policies books had before the contract: published, the caller's own,
+-- acquired by the caller (it replaces "Owners can view books they've
+-- acquired"). anon and authenticated hold SELECT only.
+-- ============================================================
+
+create view public.public_books
+  with (security_barrier)
+as
+  select b.id, b.title, b.subtitle, b.description, b.preview_text, b.keywords,
+         b.isbn, b.language, b.publisher, b.edition, b.original_publication_date,
+         b.genre, b.series_id, b.series_position, b.price_cents, b.cover_path,
+         b.status, b.published_at, b.created_at, b.updated_at, b.price_all,
+         b.librum_choice_at, b.pen_name_id
+  from public.books b
+  where b.status = 'published'
+     or b.author_id = auth.uid()
+     or public.user_owns_book(b.id);
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.public_books
+  from anon, authenticated;
+
+grant select
+  on table public.public_books
+  to anon, authenticated;
+
+-- Every series is listed, as today, without the account.
+create view public.public_series as
+  select s.id, s.title, s.pen_name_id, s.created_at
+  from public.series s;
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.public_series
+  from anon, authenticated;
+
+grant select
+  on table public.public_series
+  to anon, authenticated;
+
+-- Every bundles column except author_id.
+create view public.public_bundles
+  with (security_barrier)
+as
+  select bu.id, bu.title, bu.description, bu.price_cents, bu.status,
+         bu.created_at, bu.updated_at, bu.price_all, bu.pen_name_id
+  from public.bundles bu
+  where bu.status = 'published'
+     or bu.author_id = auth.uid();
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.public_bundles
+  from anon, authenticated;
+
+grant select
+  on table public.public_bundles
+  to anon, authenticated;
+
+-- PEN-NAMES-2 (C4): contributors and bundle contents are visible wherever
+-- the book or bundle is visible through the public views.
+create policy "Contributors are viewable wherever the book is"
+  on public.book_contributors for select
+  using (exists (select 1 from public.public_books pb where pb.id = book_contributors.book_id));
+
+create policy "Bundle contents are viewable wherever the bundle is"
+  on public.bundle_books for select
+  using (exists (select 1 from public.public_bundles pb where pb.id = bundle_books.bundle_id));
+
+-- Diacritic-tolerant bookstore search (see the Phase 6B search audit).
+-- Matches title/description/keywords/author-display-name using
+-- extensions.unaccent() on both the stored text and the search term, so
+-- e.g. a search for "Kerc" matches stored "Kërc" and vice versa -- ë/e
+-- and ç/c fold together (along with other accented Latin letters,
+-- unaccent's normal behavior), while ILIKE keeps matching
+-- case-insensitive as before.
+--
+-- SECURITY INVOKER (the default, stated explicitly): unlike
+-- bestselling_books, this only reads books/profiles data that's already
+-- publicly selectable under existing RLS ("Published books are viewable
+-- by everyone" / "Profiles are viewable by everyone") -- there is no
+-- privileged data to bypass, so no elevated privilege is used or
+-- needed. It runs under the calling role's own RLS, same as any other
+-- query the bookstore already makes.
+--
+-- Returns ONLY book_id -- never any profiles or purchases column -- the
+-- caller re-fetches full book rows (with profiles(display_name)) the
+-- same way the rest of the bookstore code already does.
+--
+-- SEARCH CANDIDATE LIMIT vs. VISIBLE SEARCH RESULT LIMIT: result_limit
+-- here clamps to 1-500 -- this is a CANDIDATE ceiling, not the 48
+-- results the bookstore actually displays. The application sorts
+-- (newest / price / bestselling) over whatever this function returns,
+-- then applies its own separate 48-row display cap AFTER sorting -- so
+-- this limit must cover every book that could plausibly match a query,
+-- not just the number shown on screen, or sorting would silently run
+-- over an incomplete/arbitrary subset of the true matches (see the
+-- Phase 6B-2 correction audit). 500 is a bounded ceiling judged
+-- appropriate for Librum's current catalog size (low hundreds of
+-- published books, per the Phase 6B-1 audit) -- it is NOT claimed to be
+-- correct at arbitrary catalog size. If the catalog can plausibly grow
+-- to where a single query matches more than 500 published books, this
+-- architecture (push sorting into the database, or paginate, or both)
+-- must be revisited before that happens -- raising this constant alone
+-- would silently reintroduce the same truncate-before-sort bug this
+-- fixes, just at a higher threshold.
+--
+-- PEN-NAMES-1 (migration 20261019184512): the author-name match reads
+-- the book's OWN pen name through public.public_pen_names (5a), no
+-- longer public_author_profiles -- the account's public name finds only
+-- the books under its default pen name.
+--
+-- PEN-NAMES-2 (migration 20261019222600, C4): it reads
+-- public.public_books, not books, so it keeps working for anon after
+-- books' public SELECT is removed (same signature, grants and invoker
+-- rights).
+--
+-- This still guards against an unbounded scan/result set -- 500 is a
+-- hard cap, not "no limit" -- mirroring the same defensive
+-- least/greatest/coalesce pattern already used by bestselling_books.
+--
+-- ALL-SEARCH-1 (migration 20260922162155): the price predicates read
+-- `books.price_all` -- the ALL catalog column, in WHOLE LEK -- and a
+-- row with no authored ALL price is excluded outright. The parameters
+-- are still NAMED `min_price_cents`/`max_price_cents`, deliberately and
+-- temporarily: renaming a function's parameters changes its call
+-- signature for every PostgREST caller at once, so that is a separate
+-- change from the one that performed the free/paid cutover. See the
+-- migration's own header for the full rationale and rollout note.
+create or replace function public.search_books(
+  search_term text default null,
+  genre_filter text default null,
+  min_price_cents int default null,
+  max_price_cents int default null,
+  result_limit int default 500
+)
+returns table (book_id uuid)
+language sql
+security invoker
+set search_path = ''
+stable
+as $$
+  -- PEN-NAMES-2: public_books (no account columns), so this keeps working
+  -- for anon after books' public SELECT is removed.
+  select books.id as book_id
+  from public.public_books books
+  where books.status = 'published'
+    and (genre_filter is null or books.genre = genre_filter)
+    -- ALL-SEARCH-1: a row with no authored ALL price is not ALL-ready.
+    -- Unconditional, never folded into the two bound checks below: a
+    -- reader who applies no price filter at all must not be shown an
+    -- unpriced book either.
+    and books.price_all is not null
+    -- ALL-SEARCH-1: whole-ALL catalog bounds. The parameter names still
+    -- read "cents" and are deliberately not renamed here -- see the
+    -- header. `price_cents` is never consulted: it is legacy USD minor
+    -- units and its values are not lek.
+    and (min_price_cents is null or books.price_all >= min_price_cents)
+    and (max_price_cents is null or books.price_all <= max_price_cents)
+    and (
+      search_term is null
+      or extensions.unaccent(books.title) ilike extensions.unaccent('%' || search_term || '%')
+      or extensions.unaccent(books.description) ilike extensions.unaccent('%' || search_term || '%')
+      or extensions.unaccent(books.keywords) ilike extensions.unaccent('%' || search_term || '%')
+      or exists (
+        -- PEN-NAMES-1 (5a): the book's OWN pen name, through the public
+        -- view (no author_id). The account's public name finds only the
+        -- books published under it (its default pen name), never a book
+        -- under another pen name.
+        select 1
+        from public.public_pen_names pn
+        where pn.id = books.pen_name_id
+          and extensions.unaccent(pn.name)
+            ilike extensions.unaccent('%' || search_term || '%')
+      )
+    )
+  -- SEARCH CANDIDATE LIMIT (500) -- see the comment block above. NOT the
+  -- 48-row VISIBLE SEARCH RESULT LIMIT the bookstore displays.
+  limit least(greatest(coalesce(result_limit, 500), 1), 500);
+$$;
+
+revoke all on function public.search_books(text, text, int, int, int) from public;
+grant execute on function public.search_books(text, text, int, int, int) to anon, authenticated;
 
 create index purchases_reader_id_idx on public.purchases(reader_id);
 create index purchases_book_id_idx on public.purchases(book_id);
@@ -2911,9 +2940,13 @@ create table public.reviews (
 
 alter table public.reviews enable row level security;
 
-create policy "Reviews are viewable by everyone"
+-- PEN-NAMES-2 (migration 20261019222600, C3): readers see their own
+-- review rows; everyone reads public.public_reviews (no reader_id),
+-- defined below.
+create policy "Readers can view their own reviews"
   on public.reviews for select
-  using (true);
+  to authenticated
+  using (auth.uid() = reader_id);
 
 -- refunded_at is null is required here (not just app-level) so a
 -- refunded reader can't write a review via a direct API call -- see the
@@ -2951,11 +2984,41 @@ create policy "Readers can update their own review"
     )
   );
 
-create policy "Readers can delete their own review"
-  on public.reviews for delete
-  using (auth.uid() = reader_id);
-
 create index reviews_book_id_idx on public.reviews(book_id);
+
+-- PEN-NAMES-2 (C3, O7): reset-and-regrant to what submitReview's upsert
+-- needs (SELECT for ON CONFLICT). The app has no review delete, so the
+-- delete policy is gone and no DELETE is granted; account deletion still
+-- cascades through the foreign key.
+revoke all on public.reviews from public, anon, authenticated;
+grant select, insert on public.reviews to authenticated;
+grant update (book_id, reader_id, rating, body)
+  on public.reviews
+  to authenticated;
+
+-- No reader_id. reviewer_name is the reviewer's default pen name when
+-- the reviewer is an author with at least one book (today's
+-- public_author_profiles rule, 20261019154308; 22a), else null.
+create view public.public_reviews
+  with (security_barrier)
+as
+  select r.id, r.book_id, r.rating, r.body, r.created_at,
+         (select pn.name
+            from public.profiles p
+            join public.pen_names pn on pn.author_id = p.id and pn.is_default
+           where p.id = r.reader_id
+             and p.role = 'author'
+             and exists (select 1 from public.books b where b.author_id = p.id)) as reviewer_name
+  from public.reviews r
+  where exists (select 1 from public.public_books pb where pb.id = r.book_id);
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.public_reviews
+  from anon, authenticated;
+
+grant select
+  on table public.public_reviews
+  to anon, authenticated;
 
 -- ============================================================
 -- wishlist_items: a reader saves a book for later, no purchase implied
@@ -2986,46 +3049,17 @@ create policy "Readers can remove from their own wishlist"
 create index wishlist_items_reader_id_idx on public.wishlist_items(reader_id);
 
 -- ============================================================
--- author_follows: a reader opts in to a "new book" email whenever an
--- author they follow publishes. No public select policy — follower
--- identities aren't exposed to the client; follower counts and
--- notification recipient lists are read server-side with the service
--- role key instead.
+-- author_follows (and its pen_name_follows mirror) was dropped by
+-- PEN-NAMES-2 (migration 20261019222600, C6; 21a). Readers follow pen
+-- names (pen_name_follows below).
 -- ============================================================
-
-create table public.author_follows (
-  id uuid primary key default gen_random_uuid(),
-  follower_id uuid not null references public.profiles(id) on delete cascade,
-  author_id uuid not null references public.profiles(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  unique (follower_id, author_id),
-  check (follower_id <> author_id)
-);
-
-alter table public.author_follows enable row level security;
-
-create policy "Readers can view their own follows"
-  on public.author_follows for select
-  using (auth.uid() = follower_id);
-
-create policy "Readers can follow an author"
-  on public.author_follows for insert
-  with check (auth.uid() = follower_id);
-
-create policy "Readers can unfollow an author"
-  on public.author_follows for delete
-  using (auth.uid() = follower_id);
-
-create index author_follows_follower_id_idx on public.author_follows(follower_id);
-create index author_follows_author_id_idx on public.author_follows(author_id);
 
 -- ============================================================
 -- PEN-NAMES-1 (migration 20261019184512): pen_name_follows -- a reader
 -- follows a pen name (4a); the new-book email names that pen name. Own
 -- rows only; follower counts are read server-side with the service
--- role. author_follows stays until PR B: its rows were copied to the
--- author's default pen name (12a) and old code's follows and unfollows
--- are mirrored there by the trigger below.
+-- role. The old author_follows rows were copied to the author's default
+-- pen name (12a); that table is gone (PEN-NAMES-2).
 -- ============================================================
 
 create table public.pen_name_follows (
@@ -3087,44 +3121,7 @@ create trigger pen_name_follows_refuse_own
   for each row
   execute function public.pen_name_follows_refuse_own();
 
--- Until PR B drops author_follows: old code's follow and unfollow land
--- on the author's default pen name.
-create function public.author_follows_mirror_pen_name_follows()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_pen uuid;
-begin
-  if tg_op = 'INSERT' then
-    select pn.id into v_pen from public.pen_names pn
-     where pn.author_id = new.author_id and pn.is_default;
-    if v_pen is not null then
-      insert into public.pen_name_follows (follower_id, pen_name_id)
-      values (new.follower_id, v_pen)
-      on conflict (follower_id, pen_name_id) do nothing;
-    end if;
-  else
-    select pn.id into v_pen from public.pen_names pn
-     where pn.author_id = old.author_id and pn.is_default;
-    if v_pen is not null then
-      delete from public.pen_name_follows f
-       where f.follower_id = old.follower_id and f.pen_name_id = v_pen;
-    end if;
-  end if;
-  return null;
-end;
-$$;
-
-create trigger author_follows_mirror_pen_name_follows
-  after insert or delete on public.author_follows
-  for each row
-  execute function public.author_follows_mirror_pen_name_follows();
-
 revoke all on function public.pen_name_follows_refuse_own() from public, anon, authenticated;
-revoke all on function public.author_follows_mirror_pen_name_follows() from public, anon, authenticated;
 
 -- ============================================================
 -- book_reports: readers flag a book for review. Write-only from an
@@ -3302,13 +3299,18 @@ create policy "Staff with staff.view can view all staff_members rows"
 -- role with none of these permissions (e.g. 'editor', which
 -- staff_has_permission() grants nothing to today) gets exactly the same
 -- zero-rows-for-another-user result as any ordinary reader.
+--
+-- PEN-NAMES-2 (migration 20261019222600, C13): refunds.view is no longer
+-- in this list -- support staff read refund readers' and staff display
+-- names through public.staff_profile_display_names() only (below), so
+-- they cannot read an author's public_author_name (the default pen
+-- name) beside the account id.
 create policy "Staff with an authorized permission can view any profile"
   on public.profiles
   for select
   using (
     public.staff_has_permission('reports.view')
     or public.staff_has_permission('staff.view')
-    or public.staff_has_permission('refunds.view')
     or public.staff_has_permission('audit.view')
   );
 
@@ -3317,6 +3319,13 @@ create policy "Staff with an authorized permission can view any profile"
 -- because CREATE POLICY resolves staff_has_permission() at creation.
 create policy "Staff with reports.resolve can view every pen name"
   on public.pen_names for select
+  to authenticated
+  using (public.staff_has_permission('reports.resolve'));
+
+-- PEN-NAMES-2 (migration 20261019222600, C1, MF2; 13a): the same staff
+-- read every book row, with its account (report pages, admin home).
+create policy "Staff with reports.resolve can view every book"
+  on public.books for select
   to authenticated
   using (public.staff_has_permission('reports.resolve'));
 
@@ -3418,11 +3427,10 @@ grant select on public.refund_requests to authenticated;
 -- of the revoke above, there is no table-level grant for those commands
 -- to fall back on in the first place. Two independent layers now agree:
 -- privilege (no grant) and RLS (no policy).
-create policy "Readers can view their own refund requests"
-  on public.refund_requests
-  for select
-  using (auth.uid() = reader_id);
-
+-- PEN-NAMES-2 (migration 20261019222600, C7b, O3): readers read their
+-- own requests through public.reader_refund_requests (no reviewed_by,
+-- the reviewing staff member's account id), defined below; the reader
+-- policy "Readers can view their own refund requests" is gone.
 create policy "Staff with refunds.view can view all refund requests"
   on public.refund_requests
   for select
@@ -3452,6 +3460,29 @@ create policy "Staff with refunds.view can view all refund requests"
 -- everywhere else a value must be trustworthy (request_refund() itself
 -- never accepts reader_id or amount_cents as arguments, for the same
 -- reason).
+
+-- Every refund_requests column except reviewed_by (O3); the reader's
+-- own rows (today's reader policy). admin_notes stays, as readers see
+-- it today (O-e).
+create view public.reader_refund_requests
+  with (security_barrier)
+as
+  select rr.id, rr.reader_id, rr.stripe_payment_intent_id,
+         rr.bundle_checkout_snapshot_id, rr.amount_cents, rr.reason, rr.status,
+         rr.requested_at, rr.reviewed_at, rr.admin_notes, rr.refunded_at,
+         rr.created_at
+  from public.refund_requests rr
+  where rr.reader_id = auth.uid();
+
+revoke all on table public.reader_refund_requests from public, anon;
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.reader_refund_requests
+  from authenticated;
+
+grant select
+  on table public.reader_refund_requests
+  to authenticated;
 
 -- ============================================================
 -- refund_request_items: the per-book line items a refund_requests row
@@ -3505,14 +3536,15 @@ grant select on public.refund_request_items to authenticated;
 -- in this design ever updates an existing line item in place. As with
 -- refund_requests, this is now doubly enforced: no table-level grant
 -- for those commands (revoke above) and no RLS policy for them either.
+-- PEN-NAMES-2 (C7b, O-a): through the reader view, since the base table
+-- no longer shows readers their own requests.
 create policy "Readers can view items on their own refund requests"
   on public.refund_request_items
   for select
   using (
     exists (
-      select 1 from public.refund_requests
-      where refund_requests.id = refund_request_items.refund_request_id
-        and refund_requests.reader_id = auth.uid()
+      select 1 from public.reader_refund_requests rr
+      where rr.id = refund_request_items.refund_request_id
     )
   );
 
@@ -3520,6 +3552,39 @@ create policy "Staff with refunds.view can view all refund request items"
   on public.refund_request_items
   for select
   using (public.staff_has_permission('refunds.view'));
+
+-- PEN-NAMES-2 (migration 20261019222500, E6, MF3). Support staff
+-- (refunds.view) read display names through this function only, and
+-- only for refund readers, refund reviewers and staff members -- never
+-- an arbitrary account. No size cap: that restriction bounds the result.
+create function public.staff_profile_display_names(p_ids uuid[])
+returns table (id uuid, display_name text)
+language plpgsql
+security definer
+set search_path = ''
+stable
+as $$
+begin
+  if not public.staff_has_permission('refunds.view') then
+    raise exception 'not authorized';
+  end if;
+
+  if p_ids is null or pg_catalog.cardinality(p_ids) = 0 then
+    return;
+  end if;
+
+  return query
+    select p.id, p.display_name
+      from public.profiles p
+     where p.id = any (p_ids)
+       and (exists (select 1 from public.refund_requests rr where rr.reader_id = p.id)
+            or exists (select 1 from public.refund_requests rr where rr.reviewed_by = p.id)
+            or exists (select 1 from public.staff_members sm where sm.user_id = p.id));
+end;
+$$;
+
+revoke all on function public.staff_profile_display_names(uuid[]) from public, anon, authenticated;
+grant execute on function public.staff_profile_display_names(uuid[]) to authenticated;
 
 -- ============================================================
 -- request_refund(): the sole path by which a refund_requests row (and
@@ -7196,7 +7261,15 @@ alter table public.blog_posts enable row level security;
 
 revoke all on public.blog_posts from anon, authenticated;
 
-grant select on public.blog_posts to anon, authenticated;
+-- PEN-NAMES-2 (migration 20261019222500, E2): every column except
+-- created_by (a staff account id).
+grant select (
+    id, title, slug, excerpt, content_markdown, cover_image_path, category,
+    status, featured, seo_title, seo_description, published_at, created_at,
+    updated_at
+  )
+  on public.blog_posts
+  to anon, authenticated;
 
 create policy "Anyone can read published blog posts"
   on public.blog_posts for select
@@ -7516,9 +7589,11 @@ insert into storage.buckets (id, name, public)
 values ('blog', 'blog', true)
 on conflict (id) do nothing;
 
-create policy "Blog images are publicly readable"
+-- PEN-NAMES-2 (C9): no public listing; Storage's remove and upsert need
+-- SELECT, so staff with blog.manage keep it.
+create policy "Staff with blog.manage can read blog images"
   on storage.objects for select
-  using (bucket_id = 'blog');
+  using (bucket_id = 'blog' and public.staff_has_permission('blog.manage'));
 
 create policy "Staff with blog.manage can upload blog images"
   on storage.objects for insert
@@ -8127,6 +8202,32 @@ alter table public.purchases
   add column payment_id uuid references public.payments(id) on delete restrict;
 
 create index purchases_payment_id_idx on public.purchases (payment_id);
+
+-- PEN-NAMES-2 ([23b], migration 20261019222500): the author's read of
+-- purchases of their own books, without the buyer's account id. Declared
+-- here, after purchases.payment_id exists.
+-- Every purchases column except reader_id; purchases of the caller's own
+-- books (today's author policy).
+create view public.author_book_purchases
+  with (security_barrier)
+as
+  select p.id, p.book_id, p.stripe_checkout_session_id,
+         p.stripe_payment_intent_id, p.amount_cents, p.discount_code_id,
+         p.bundle_id, p.refunded_at, p.created_at, p.regime, p.payment_id
+  from public.purchases p
+  where exists (select 1 from public.books b
+                 where b.id = p.book_id
+                   and b.author_id = auth.uid());
+
+revoke all on table public.author_book_purchases from public, anon;
+
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on table public.author_book_purchases
+  from authenticated;
+
+grant select
+  on table public.author_book_purchases
+  to authenticated;
 
 create table public.payment_refunds (
   id uuid primary key default gen_random_uuid(),

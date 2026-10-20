@@ -57,6 +57,36 @@ export function canonicalBookCoverPath(
   return `${authorId}/${bookId}-cover.${extension}`;
 }
 
+// PEN-2 (L10, O10): the ONLY cover key a new upload may use from this
+// release on -- a fresh server-generated folder per upload and nothing
+// that names the account or the book:
+//
+//   covers bucket: <random uuid>/cover.<jpg|png>
+//
+// Every create and every replace gets a new key (which also ends stale
+// CDN copies). The database's own check (books_cover_path_check, C10)
+// accepts only this shape after the contract migration, and E7 keeps it
+// unique across books. `canonicalBookCoverPath` above stays only so the
+// old shapes can still be recognised and removed until the contract.
+const NEW_BOOK_COVER_PATH = new RegExp(
+  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/cover\\.(?:jpg|png)$",
+);
+
+export function newBookCoverPath(extension: BookCoverExtension): string {
+  if (!(BOOK_COVER_EXTENSIONS as readonly string[]).includes(extension)) {
+    throw new Error("newBookCoverPath: unsupported cover extension");
+  }
+  return `${crypto.randomUUID()}/cover.${extension}`;
+}
+
+// True only for a value of exactly the new random-folder shape. The shape
+// names no owner, so callers with service-role Storage authority must
+// also have read the value from the author's OWN books row (server side,
+// filtered by id and author_id) before they act on it.
+export function isNewBookCoverPath(path: unknown): path is string {
+  return typeof path === "string" && NEW_BOOK_COVER_PATH.test(path);
+}
+
 // Builds the canonical manuscript key, under the same identity rules.
 export function canonicalBookManuscriptPath(authorId: string, bookId: string): string {
   assertIds("canonicalBookManuscriptPath", authorId, bookId);
@@ -129,12 +159,16 @@ const LEGACY_BOOK_COVER_EXTENSION = /^[jJ][pP][eE][gG]$/;
 //   canonical: exactly `<author id>/<book id>-cover.<jpg|png>`;
 //   legacy:    exactly `<author id>/<book id>-cover.` + "jpeg" in any
 //              ASCII case;
+//   random:    exactly `<random uuid>/cover.<jpg|png>` (PEN-2, the only
+//              shape new uploads use). It carries no owner, so it is
+//              removable only because callers take it from the author's
+//              own row, read server side;
 //   unsafe:    everything else -- null, empty, another author's or
 //              another book's key, traversal, encoding, a bucket or URL
 //              prefix, a temporary upload key, a malformed id.
 // Only "canonical" and "legacy" may ever reach a Storage call, and only
 // for the author and book they were classified against.
-export type BookCoverPathClass = "canonical" | "legacy" | "unsafe";
+export type BookCoverPathClass = "canonical" | "legacy" | "random" | "unsafe";
 
 export function classifyBookCoverPath(
   path: unknown,
@@ -143,6 +177,9 @@ export function classifyBookCoverPath(
 ): BookCoverPathClass {
   if (isOwnCanonicalBookCoverPath(path, authorId, bookId)) {
     return "canonical";
+  }
+  if (isNewBookCoverPath(path) && idsAreCanonical(authorId, bookId)) {
+    return "random";
   }
   if (typeof path !== "string" || !idsAreCanonical(authorId, bookId)) {
     return "unsafe";
@@ -153,7 +190,8 @@ export function classifyBookCoverPath(
 }
 
 // True only when `path` is a cover key this author may remove for this
-// exact book: its canonical key or its documented legacy key.
+// exact book: its canonical key, its documented legacy key, or (read from
+// its own row) a new random-folder key.
 export function isOwnRemovableBookCoverPath(
   path: unknown,
   authorId: unknown,

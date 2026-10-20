@@ -44,13 +44,30 @@ function queryStub(listResult: unknown, rowResult: unknown) {
   return chain;
 }
 
+// PEN-NAMES-2: the page reads the book from public_books (no author_id)
+// and asks "is this mine?" with an own-row books query. The fixture's
+// author_id is the hidden truth: stripped from the public row, used only
+// to answer the own-row query as RLS would.
+function bookTableStub(table: string, book: Record<string, unknown>, user: { id: string } | null | undefined) {
+  if (table === "public_books") {
+    const publicPart: Record<string, unknown> = { ...book };
+    delete publicPart.author_id;
+    return queryStub({ data: [] }, { data: publicPart });
+  }
+  if (table === "books") {
+    const mine = !!user && user.id === book.author_id;
+    return queryStub({ data: [] }, { data: mine ? { id: book.id } : null });
+  }
+  return null;
+}
+
 async function render(book: typeof BOOK): Promise<string> {
   mockCreateClient.mockImplementation(() => ({
     auth: { getUser: async () => ({ data: { user: null } }) },
     rpc: async () => ({ data: null }),
     storage: { from: () => ({ getPublicUrl: (p: string) => ({ data: { publicUrl: `https://cdn.example/${p}` } }) }) },
     from: (table: string) =>
-      table === "books" ? queryStub({ data: [] }, { data: book }) : queryStub({ data: [] }, { data: null }),
+      bookTableStub(table, book, null) ?? queryStub({ data: [] }, { data: null }),
   }));
   const element = await BookDetailPage({ params: Promise.resolve({ id: book.id }), searchParams: Promise.resolve({}) });
   return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);

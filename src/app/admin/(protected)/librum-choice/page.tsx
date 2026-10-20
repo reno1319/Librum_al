@@ -8,7 +8,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { formControlClasses } from "@/lib/form-styles";
-import type { Book } from "@/lib/types";
+import type { PublicBook } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { pickLibrumChoiceFromForm, removeLibrumChoiceFromForm } from "./actions";
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 const LIST_LIMIT = 20;
 const LOAD_ERROR = "Something went wrong. Please try again.";
 
-type ChoiceRow = Pick<Book, "id" | "title" | "cover_path"> & {
+type ChoiceRow = Pick<PublicBook, "id" | "title" | "cover_path"> & {
   pen: PenNameRef | null;
 };
 
@@ -36,8 +36,10 @@ async function fetchPickableBooks(
   supabase: SupabaseClient,
   q: string,
 ): Promise<{ ok: true; books: ChoiceRow[]; hasMore: boolean } | { ok: false }> {
+  // PEN-NAMES-2 (MF2): public_books -- this page has no reason to read
+  // the base table, and the base table's staff policy is reports.resolve.
   let query = supabase
-    .from("books")
+    .from("public_books")
     .select("id, title, cover_path, pen:public_pen_names(id, name)")
     .eq("status", "published")
     .not("price_all", "is", null);

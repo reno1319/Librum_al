@@ -40,7 +40,7 @@ describe("getLibrumChoiceBook", () => {
     result = { data: { id: "b1", status: "published", librum_choice_at: "2026-10-18T08:00:00Z" }, error: null };
     expect(await getLibrumChoiceBook()).toEqual({ id: "b1", status: "published", librum_choice_at: "2026-10-18T08:00:00Z" });
     expect(calls).toEqual([
-      { method: "from", args: ["books"] },
+      { method: "from", args: ["public_books"] },
       { method: "select", args: ["*, pen:public_pen_names(id, name)"] },
       { method: "not", args: ["librum_choice_at", "is", null] },
       { method: "eq", args: ["status", "published"] },

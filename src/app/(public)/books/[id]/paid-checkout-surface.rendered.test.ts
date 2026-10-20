@@ -79,10 +79,21 @@ async function render(opts: {
     auth: { getUser: async () => ({ data: { user: opts.user } }) },
     rpc,
     storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/x.png" } }) }) },
-    from: (table: string) =>
-      table === "books"
-        ? queryStub({ data: [] }, { data: opts.book ?? BOOK_U })
-        : queryStub({ data: [] }, { data: null }),
+    // PEN-NAMES-2: the page reads the book from public_books (no
+    // author_id) and asks "is this mine?" with an own-row books query.
+    from: (table: string) => {
+      const book = opts.book ?? BOOK_U;
+      if (table === "public_books") {
+        const publicPart: Record<string, unknown> = { ...book };
+        delete publicPart.author_id;
+        return queryStub({ data: [] }, { data: publicPart });
+      }
+      if (table === "books") {
+        const mine = !!opts.user && opts.user.id === book.author_id;
+        return queryStub({ data: [] }, { data: mine ? { id: book.id } : null });
+      }
+      return queryStub({ data: [] }, { data: null });
+    },
   }));
   const element = await BookDetailPage({
     params: Promise.resolve({ id: String((opts.book ?? BOOK_U).id) }),
