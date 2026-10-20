@@ -3,9 +3,11 @@ import {
   buildTodoItems,
   describeTileWaiting,
   formatActivityTime,
+  formatRelativeTime,
   formatTodayDate,
   formatTodayEyebrow,
   resolveTodayVisibility,
+  shortReportReason,
   TODO_LIMIT,
   type TodayRefund,
   type TodayReport,
@@ -87,22 +89,29 @@ describe("describeTileWaiting", () => {
 
 describe("buildTodoItems", () => {
   const reports: TodayReport[] = [
-    { id: "rep-new", created_at: "2026-10-18T10:00:00Z", bookTitle: "Kënga e fundit" },
-    { id: "rep-old", created_at: "2026-10-10T10:00:00Z", bookTitle: null },
+    {
+      id: "rep-new",
+      created_at: "2026-10-18T10:00:00Z",
+      reason: "Copyright infringement",
+      bookTitle: "Kënga e fundit",
+    },
+    { id: "rep-old", created_at: "2026-10-10T10:00:00Z", reason: "Other", bookTitle: null },
   ];
   const refunds: TodayRefund[] = [
     { id: "ref-mid", requested_at: "2026-10-12T10:00:00+00:00", readerName: "Arta" },
   ];
 
+  const now = new Date("2026-10-20T10:00:00Z");
+
   it("merges reports and refunds, oldest first, each linking to its detail page", () => {
-    const items = buildTodoItems(reports, refunds);
+    const items = buildTodoItems(reports, refunds, TODO_LIMIT, now);
     expect(items.map((i) => i.href)).toEqual([
       "/admin/reports/rep-old",
       "/admin/refunds/ref-mid",
       "/admin/reports/rep-new",
     ]);
     expect(items[0]).toMatchObject({
-      title: "Report on “Book unavailable”",
+      title: "Other report on “Book unavailable”, 10 days ago",
       detail: "Reported 10 Oct 2026",
       actionLabel: "Review report",
     });
@@ -111,7 +120,8 @@ describe("buildTodoItems", () => {
       detail: "Requested 12 Oct 2026",
       actionLabel: "Review request",
     });
-    expect(items[2].title).toBe("Report on “Kënga e fundit”");
+    // ADMIN-2-TAKEDOWN (E): `<Reason> report on “<Title>”, <relative time>`.
+    expect(items[2].title).toBe("Copyright report on “Kënga e fundit”, 2 days ago");
   });
 
   it("shows at most five rows", () => {
@@ -119,6 +129,7 @@ describe("buildTodoItems", () => {
     const many: TodayReport[] = Array.from({ length: 8 }, (_, n) => ({
       id: `r${n}`,
       created_at: `2026-10-0${n + 1}T00:00:00Z`,
+      reason: "Other",
       bookTitle: "B",
     }));
     const items = buildTodoItems(many, refunds);
@@ -134,5 +145,41 @@ describe("buildTodoItems", () => {
     for (const item of buildTodoItems(reports, refunds)) {
       expect(`${item.title} ${item.detail}`).not.toMatch(/ALL|€|\$|amount/i);
     }
+  });
+});
+
+// ADMIN-2-TAKEDOWN (E, S7): the To do row's reason and relative time.
+describe("shortReportReason", () => {
+  it("shortens the readers' report reasons", () => {
+    expect(shortReportReason("Copyright infringement")).toBe("Copyright");
+    expect(shortReportReason("Inappropriate or offensive content")).toBe("Content");
+    expect(shortReportReason("Spam or misleading listing")).toBe("Spam");
+    expect(shortReportReason("Other")).toBe("Other");
+  });
+
+  it("shows an unknown legacy value as is, and a missing one as Other", () => {
+    expect(shortReportReason("Wrong cover")).toBe("Wrong cover");
+    expect(shortReportReason(null)).toBe("Other");
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const now = new Date("2026-10-19T12:00:00Z");
+
+  it("reads just now under a minute, and for a time in the future", () => {
+    expect(formatRelativeTime("2026-10-19T11:59:30Z", now)).toBe("just now");
+    expect(formatRelativeTime("2026-10-19T12:05:00Z", now)).toBe("just now");
+  });
+
+  it("counts minutes under an hour and hours under a day", () => {
+    expect(formatRelativeTime("2026-10-19T11:55:00Z", now)).toBe("5 minutes ago");
+    expect(formatRelativeTime("2026-10-19T09:00:00Z", now)).toBe("3 hours ago");
+  });
+
+  it("counts calendar days on Albanian time after a day", () => {
+    expect(formatRelativeTime("2026-10-18T10:00:00Z", now)).toBe("yesterday");
+    expect(formatRelativeTime("2026-10-17T10:00:00Z", now)).toBe("2 days ago");
+    // 23:30 UTC on the 16th is already the 17th in Tirane (UTC+2).
+    expect(formatRelativeTime("2026-10-16T23:30:00Z", now)).toBe("2 days ago");
   });
 });

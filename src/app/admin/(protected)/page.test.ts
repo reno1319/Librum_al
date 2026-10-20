@@ -71,6 +71,21 @@ const mockListAudit = vi.fn(
 );
 vi.mock("./audit/actions", () => ({ listAdminAuditEvents: (p: { limit?: number }) => mockListAudit(p) }));
 
+// ADMIN-2-TAKEDOWN (M2): report titles come from the service-role read
+// (a staff session sees published books only). `bookTitles` stands in
+// for every book, drafts and taken-down ones included.
+let bookTitles: Record<string, string> = {};
+const mockReadTitles = vi.fn(
+  (ids: readonly string[]): Promise<{ ok: true; titleById: Map<string, string> } | { ok: false }> =>
+    Promise.resolve({
+      ok: true,
+      titleById: new Map(ids.filter((id) => id in bookTitles).map((id) => [id, bookTitles[id]])),
+    }),
+);
+vi.mock("./books/admin-book-reads", () => ({
+  readBookTitlesForStaff: (ids: readonly string[]) => mockReadTitles(ids),
+}));
+
 const { default: AdminPage } = await import("./page");
 
 async function renderAs(role: StaffRole): Promise<string> {
@@ -78,7 +93,12 @@ async function renderAs(role: StaffRole): Promise<string> {
   return renderToStaticMarkup((await AdminPage()) as ReactElement);
 }
 
-const OPEN_REPORT = { id: "rep-1", created_at: "2026-10-10T08:00:00Z", books: { title: "Kënga e fundit" } };
+const OPEN_REPORT = {
+  id: "rep-1",
+  created_at: "2026-10-10T08:00:00Z",
+  reason: "Copyright infringement",
+  book_id: "book-1",
+};
 const WAITING_REFUND = { id: "ref-1", reader_id: "reader-1", requested_at: "2026-10-12T08:00:00Z" };
 
 describe("AdminPage (Today)", () => {
@@ -88,6 +108,8 @@ describe("AdminPage (Today)", () => {
     queries.length = 0;
     rpcCalls.length = 0;
     tableRows = {};
+    bookTitles = { "book-1": "Kënga e fundit" };
+    mockReadTitles.mockClear();
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-19T09:00:00Z"));
   });
@@ -158,7 +180,8 @@ describe("AdminPage (Today)", () => {
     expect(html).toMatch(/href="\/admin\/reports"[^>]*>.*Open book reports.*>1<.*Oldest: 10 Oct 2026/);
     expect(html).toMatch(/href="\/admin\/refunds"[^>]*>.*Refund requests waiting.*>1<.*Oldest: 12 Oct 2026/);
 
-    const reportRow = html.indexOf("Report on “Kënga e fundit”");
+    // ADMIN-2-TAKEDOWN (E): `<Reason> report on “<Title>”, <relative time>`.
+    const reportRow = html.indexOf("Copyright report on “Kënga e fundit”, 9 days ago");
     const refundRow = html.indexOf("Refund request from Arta");
     expect(reportRow).toBeGreaterThan(-1);
     expect(refundRow).toBeGreaterThan(reportRow);
@@ -240,7 +263,8 @@ describe("AdminPage (Today)", () => {
         data: Array.from({ length: 7 }, (_, n) => ({
           id: `r${n}`,
           created_at: `2026-10-0${n + 1}T08:00:00Z`,
-          books: { title: `Book ${n}` },
+          reason: "Other",
+          book_id: `b${n}`,
         })),
         error: null,
       },
@@ -248,5 +272,30 @@ describe("AdminPage (Today)", () => {
     const html = await renderAs("moderator");
     expect(html.match(/>Review report</g)).toHaveLength(5);
     expect(html).toMatch(/Open book reports.*>7</);
+  });
+
+  // ADMIN-2-TAKEDOWN (M2): a report on a draft or taken-down book still
+  // names the book; the title read runs only for roles that see reports,
+  // and only for the rows the To do list shows.
+  it("names a report's book through the staff title read, never the books embed", async () => {
+    tableRows = { book_reports: { data: [OPEN_REPORT], error: null } };
+    const html = await renderAs("moderator");
+    expect(html).toContain("Copyright report on “Kënga e fundit”, 9 days ago");
+    expect(mockReadTitles).toHaveBeenCalledWith(["book-1"]);
+    const reportQuery = queries.find((q) => q.table === "book_reports");
+    expect(reportQuery?.select).toBe("id, created_at, reason, book_id");
+    expect(queries.some((q) => q.table === "books")).toBe(false);
+  });
+
+  it("falls back to Book unavailable when the title read fails", async () => {
+    tableRows = { book_reports: { data: [OPEN_REPORT], error: null } };
+    mockReadTitles.mockResolvedValueOnce({ ok: false });
+    const html = await renderAs("moderator");
+    expect(html).toContain("Copyright report on “Book unavailable”, 9 days ago");
+  });
+
+  it("reads no titles for a role without reports.view", async () => {
+    await renderAs("support");
+    expect(mockReadTitles).not.toHaveBeenCalledWith(expect.arrayContaining(["book-1"]));
   });
 });

@@ -30,6 +30,9 @@ import { resolvePublicAuthorName } from "@/lib/author-name";
 import { getManuscriptLabel } from "@/lib/manuscript-label";
 import { getCatalogSchemaFeatures } from "@/lib/catalog-schema-features";
 import { getRightsDeclarationState } from "@/lib/book-rights";
+import { loadAuthorTakedownNoticeForBook } from "@/lib/book-takedowns";
+import { buildAuthorTakedownNoticeLines } from "@/lib/takedown-reasons";
+import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
@@ -197,9 +200,14 @@ export default async function EditBookPage({
   // choice read three ways. `unavailable` (before the migration, or a
   // read error) hides the Rights choice, shows the generic notice and
   // disables Publish; the server's publish gate decides on its own.
-  const [schemaFeatures, rightsState, { data: penNames }] = await Promise.all([
+  // ADMIN-2-TAKEDOWN (G, M4): an active Librum takedown replaces the
+  // Publish control with its notice; an unreadable takedown state shows
+  // the generic sentence and disables Publish (the server gate refuses
+  // both on its own).
+  const [schemaFeatures, rightsState, takedown, { data: penNames }] = await Promise.all([
     getCatalogSchemaFeatures(),
     getRightsDeclarationState(book.id),
+    loadAuthorTakedownNoticeForBook(supabase, book.id),
     // PEN-NAMES-1 (10a): the author's own pen names for the box's
     // suggestions (RLS: own rows).
     supabase
@@ -724,10 +732,24 @@ export default async function EditBookPage({
           <section className="rounded-card border border-border bg-surface p-4 shadow-sm">
             <h2 className="font-serif text-lg font-normal">Publishing</h2>
             <p className="mt-2 text-sm">
-              Status: <span className="font-medium">{book.status === "draft" ? "Draft" : "Published"}</span>
+              Status:{" "}
+              <span className="font-medium">
+                {takedown.notice ? "Taken down by Librum" : book.status === "draft" ? "Draft" : "Published"}
+              </span>
             </p>
 
-            {book.status === "draft" ? (
+            {takedown.notice ? (
+              <Alert variant="error" className="mt-4">
+                {buildAuthorTakedownNoticeLines(takedown.notice, formatTimestampAsDate).map((line, index) => (
+                  <p
+                    key={index}
+                    className={index === 0 ? "font-semibold" : "mt-1 whitespace-pre-wrap break-words"}
+                  >
+                    {line}
+                  </p>
+                ))}
+              </Alert>
+            ) : book.status === "draft" ? (
               <>
                 {/* PR-G: this replaced "Finish payout setup to publish paid
                     books." above a "Manage payouts" link. Stated precisely,
@@ -776,7 +798,7 @@ export default async function EditBookPage({
                     title="Add a description before publishing."
                     className="mt-4"
                   />
-                ) : rightsState.kind === "unavailable" ? (
+                ) : rightsState.kind === "unavailable" || takedown.state.kind === "unavailable" ? (
                   // F4 (D3): the rights choice cannot be read, so
                   // Publish is refused; the existing generic sentence.
                   <Alert variant="warning" title={PUBLISH_NOT_POSSIBLE_YET_MESSAGE} className="mt-4" />
@@ -821,7 +843,8 @@ export default async function EditBookPage({
                       readiness.missingAllPrice ||
                       readiness.missingDescription ||
                       readiness.missingRights ||
-                      readiness.paidPublishingBlocked
+                      readiness.paidPublishingBlocked ||
+                      takedown.state.kind === "unavailable"
                     }
                     className={buttonClasses(
                       "primary",
