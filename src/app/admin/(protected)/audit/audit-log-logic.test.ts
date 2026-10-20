@@ -488,3 +488,33 @@ describe("pen_name.links_removed (PEN-NAMES-1)", () => {
     expect(resolveAuditTargetDisplay("pen_names", id).label).toMatch(/^Pen name · /);
   });
 });
+
+// ADMIN-2-TAKEDOWN: the two new actions and the books target.
+describe("book takedown audit events", () => {
+  it("labels the actions and links a book to its admin page", () => {
+    expect(getActionLabel("book.unpublished")).toBe("Book unpublished");
+    expect(getActionLabel("book.allowed_again")).toBe("Book allowed again");
+    expect(isValidAuditTargetType("books")).toBe(true);
+    const id = "22222222-2222-4222-8222-222222222222";
+    expect(resolveAuditTargetDisplay("books", id).href).toBe(`/admin/books/${id}`);
+    expect(resolveAuditTargetDisplay("books", id).label).toMatch(/^Book · /);
+  });
+
+  it("formats an unpublish as reason · bundles · report", () => {
+    expect(
+      formatAuditDetails("book.unpublished", {
+        reason: "copyright",
+        report_id: "11111111-1111-4111-8111-111111111111",
+        bundles_unpublished: 2,
+        librum_choice_cleared: true,
+      }),
+    ).toBe("Copyright complaint · 2 bundles unpublished · report resolved");
+    expect(
+      formatAuditDetails("book.unpublished", { reason: "broken_file", report_id: null, bundles_unpublished: 1 }),
+    ).toBe("Wrong or broken file · 1 bundle unpublished");
+    expect(formatAuditDetails("book.unpublished", { reason: "other", report_id: null, bundles_unpublished: 0 })).toBe(
+      "Other",
+    );
+    expect(formatAuditDetails("book.allowed_again", {})).toBeNull();
+  });
+});

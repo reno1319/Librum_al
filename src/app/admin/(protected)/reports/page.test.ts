@@ -19,6 +19,10 @@ vi.mock("@/lib/staff", () => ({ requireStaff: (permission: string) => mockRequir
 const mockFrom = vi.fn();
 const mockCreateClient = vi.fn(() => Promise.resolve({ from: mockFrom }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+// ADMIN-2-TAKEDOWN (R2): titles come from the service-role read, after
+// requireStaff.
+const mockReadTitles = vi.fn();
+vi.mock("../books/admin-book-reads", () => ({ readBookTitlesForStaff: (ids: string[]) => mockReadTitles(ids) }));
 
 const { default: AdminBookReportsPage } = await import("./page");
 
@@ -30,5 +34,6 @@ describe("AdminBookReportsPage", () => {
 
     expect(mockRequireStaff).toHaveBeenCalledWith("reports.view");
     expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockReadTitles).not.toHaveBeenCalled();
   });
 });

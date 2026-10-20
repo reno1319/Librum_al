@@ -50,6 +50,12 @@ export type AdminNavItem = {
 // Team -- and "Dashboard" is renamed "Today". Each item keeps the exact
 // permission above; ADMIN_NAV_ITEMS stays the flat list, read off the
 // groups in menu order.
+//
+// ADMIN-2-TAKEDOWN: Books (the catalogue list and each book's page with
+// its Unpublish panel) added first in Catalog, as on the mockup, gated by
+// reports.view -- the same permission /admin/books and /admin/books/[id]
+// require (owner, admin, moderator). The panel's own actions need
+// reports.resolve.
 export type AdminNavGroup = {
   label: string;
   items: readonly AdminNavItem[];
@@ -67,6 +73,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
   {
     label: "Catalog",
     items: [
+      { href: "/admin/books", label: "Books", permission: "reports.view" },
       { href: "/admin/librum-choice", label: "Librum's choice", permission: "catalog.feature" },
       { href: "/admin/blog", label: "Blog", permission: "blog.view" },
     ],

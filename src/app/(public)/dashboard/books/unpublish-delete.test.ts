@@ -122,7 +122,18 @@ vi.mock("@/lib/catalog-write-client", async () => {
   return { createCatalogWriteClient: () => catalogWriterReplayingOnto(() => mockCreateClient()) };
 });
 
+// ADMIN-2-TAKEDOWN (M5): deleteBook reads the book's active takedown.
+// No takedown by default; its own cases are the last describe block.
+type TakedownState = { kind: "none" } | { kind: "active"; takedown: unknown } | { kind: "unavailable" };
+const mockTakedownState = vi.fn(async (_client: unknown, _bookId: string): Promise<TakedownState> => ({
+  kind: "none",
+}));
+vi.mock("@/lib/book-takedowns", () => ({
+  getActiveTakedownState: (client: unknown, bookId: string) => mockTakedownState(client, bookId),
+}));
+
 const { unpublishBook, deleteBook } = await import("./actions");
+const { TAKEN_DOWN_DELETE_MESSAGE } = await import("@/lib/takedown-reasons");
 
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
 const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
@@ -153,6 +164,7 @@ function resetMocks() {
   mockRemove.mockReset().mockResolvedValue({ error: null });
   mockCookieStore.get.mockReset().mockImplementation(() => undefined);
   mockRevalidatePath.mockReset();
+  mockTakedownState.mockReset().mockResolvedValue({ kind: "none" });
 }
 
 describe("unpublishBook: published-bundle-membership gate (PHASE-2C)", () => {
@@ -319,5 +331,49 @@ describe("deleteBook: published-bundle-membership gate (PHASE-2C)", () => {
     expect(mockMemberQueryColumns).toHaveBeenCalledWith("bundle_id, bundles!inner(status)");
     expect(mockMemberQueryFilters).toHaveBeenCalledWith("book_id", BOOK_ID);
     expect(mockMemberQueryFilters).toHaveBeenCalledWith("bundles.status", "published");
+  });
+});
+
+// ADMIN-2-TAKEDOWN (M5, Q8 = a): a taken-down book can't be deleted
+// until Librum has reviewed it; the check follows the ownership read and
+// fails closed.
+describe("deleteBook: a book Librum took down (ADMIN-2)", () => {
+  beforeEach(resetMocks);
+
+  it("refuses with the takedown message; nothing is deleted or removed", async () => {
+    mockTakedownState.mockResolvedValue({ kind: "active", takedown: {} });
+
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(`/dashboard?error=${encodeURIComponent(TAKEN_DOWN_DELETE_MESSAGE)}`);
+    expect(mockBookDeleteResult).not.toHaveBeenCalled();
+    expect(mockRemove).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the takedown can't be read", async () => {
+    mockTakedownState.mockResolvedValue({ kind: "unavailable" });
+
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?error=Could+not+delete+that+book+right+now");
+    expect(mockBookDeleteResult).not.toHaveBeenCalled();
+  });
+
+  it("maps the database's delete lock (LB461, a takedown after the read) to the takedown message", async () => {
+    mockMemberSelectResult.mockReturnValue(notInAnyPublishedBundle());
+    mockBookDeleteResult.mockReturnValue({ data: null, error: { code: "LB461", message: "taken down" } });
+
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(`/dashboard?error=${encodeURIComponent(TAKEN_DOWN_DELETE_MESSAGE)}`);
+    expect(mockRemove).not.toHaveBeenCalled();
+  });
+
+  it("is only checked for the author's own book", async () => {
+    mockBookSelectResult.mockReturnValue({ data: null, error: null });
+
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockTakedownState).not.toHaveBeenCalled();
   });
 });

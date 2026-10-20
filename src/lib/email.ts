@@ -255,3 +255,53 @@ export async function sendNewBookEmails(
     }),
   );
 }
+
+// ADMIN-2-TAKEDOWN (S8): every author- or staff-supplied value in the
+// takedown email (the book and bundle titles, Librum's message) is
+// HTML-escaped; the message keeps its line breaks as <br>.
+export function escapeEmailHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeEmailHtmlWithBreaks(value: string): string {
+  return escapeEmailHtml(value).replace(/\r\n|\r|\n/g, "<br>");
+}
+
+// ADMIN-2-TAKEDOWN (2a): best effort, like every email here. The caller
+// (the admin Unpublish action) reads the author's address through the
+// admin auth API after the takedown has committed, never blocks on this,
+// and logs a failure. The Dashboard notice is what always works.
+export async function sendBookTakedownEmail(
+  to: string,
+  {
+    title,
+    reasonLabel,
+    message,
+    bundleTitles,
+  }: { title: string; reasonLabel: string; message: string; bundleTitles: string[] },
+) {
+  const origin = resolveSiteOrigin();
+  const bundlesLine =
+    bundleTitles.length > 0
+      ? `<p>We also unpublished: ${bundleTitles.map((t) => `<strong>${escapeEmailHtml(t)}</strong>`).join(", ")}.</p>`
+      : "";
+
+  await sendEmail(
+    to,
+    "Librum took your book down",
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">We took <strong>${escapeEmailHtml(title)}</strong> down</h1>
+        <p>Reason: ${escapeEmailHtml(reasonLabel)}</p>
+        <p>${escapeEmailHtmlWithBreaks(message)}</p>
+        ${bundlesLine}
+        <p>You can't publish it again until we review it. Readers who already bought it keep it.</p>
+        <p>Questions? Write to support@librum.al</p>
+        <p><a href="${origin}/dashboard">Open your dashboard</a></p>
+      </div>`,
+  );
+}

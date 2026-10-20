@@ -19,7 +19,7 @@ vi.mock("resend", () => ({
 
 process.env.RESEND_API_KEY = "test-key";
 
-const { sendNewBookEmails } = await import("./email");
+const { sendNewBookEmails, sendBookTakedownEmail, escapeEmailHtml } = await import("./email");
 
 // PEN-NAMES-1 (4a): the email goes to the followers of the BOOK'S pen
 // name and names that pen name; the account's names are never read.
@@ -120,5 +120,43 @@ describe("sendNewBookEmails", () => {
     for (const call of sendMock.mock.calls) {
       expect(call[0].subject).toBe("R. A. Nightingale just published a new book");
     }
+  });
+});
+
+// ADMIN-2-TAKEDOWN (S8): the takedown email escapes every supplied value.
+describe("sendBookTakedownEmail", () => {
+  beforeEach(() => sendMock.mockClear());
+
+  it("escapes HTML", () => {
+    expect(escapeEmailHtml(`<a href="x">'&'</a>`)).toBe("&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;");
+  });
+
+  it("sends the author the reason, the escaped message with its line breaks, and the bundles", async () => {
+    await sendBookTakedownEmail("ana@example.com", {
+      title: "<b>Kënga</b>",
+      reasonLabel: "Copyright complaint",
+      message: "Line one <script>x</script>\nLine two",
+      bundleTitles: ["Set & Co"],
+    });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const args = sendMock.mock.calls[0][0];
+    expect(args.to).toBe("ana@example.com");
+    expect(args.subject).toBe("Librum took your book down");
+    expect(args.html).toContain("&lt;b&gt;Kënga&lt;/b&gt;");
+    expect(args.html).toContain("Reason: Copyright complaint");
+    expect(args.html).toContain("Line one &lt;script&gt;x&lt;/script&gt;<br>Line two");
+    expect(args.html).toContain("We also unpublished: <strong>Set &amp; Co</strong>.");
+    expect(args.html).toContain("support@librum.al");
+    expect(args.html).not.toContain("<script>");
+  });
+
+  it("leaves the bundles line out when none were unpublished", async () => {
+    await sendBookTakedownEmail("ana@example.com", {
+      title: "T",
+      reasonLabel: "Other",
+      message: "M",
+      bundleTitles: [],
+    });
+    expect(sendMock.mock.calls[0][0].html).not.toContain("We also unpublished");
   });
 });

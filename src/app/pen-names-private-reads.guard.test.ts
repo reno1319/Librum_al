@@ -108,18 +108,39 @@ describe("PEN-NAMES-2 static guard: public surfaces read the views, not the base
 const ADMIN_FILES = walk(join(SRC, "app", "admin"));
 
 describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
+  // ADMIN-2-TAKEDOWN: the report pages and Today read book titles through
+  // books/admin-book-reads.ts, and the staff Books section reads books
+  // itself -- every one with the service-role client after
+  // requireStaff("reports.view" | "reports.resolve"), so drafts and
+  // taken-down books show (all of these roles hold reports.resolve, 13a).
   const BOOKS_ALLOWED = [
-    "app/admin/(protected)/page.tsx",
-    "app/admin/(protected)/reports/page.tsx",
     "app/admin/(protected)/reports/[id]/page.tsx",
+    "app/admin/(protected)/books/page.tsx",
+    "app/admin/(protected)/books/[id]/page.tsx",
+    "app/admin/(protected)/books/actions.ts",
+    "app/admin/(protected)/books/admin-book-reads.ts",
   ];
+  // The shared helper is gated by its callers; each caller is listed.
+  const BOOK_READ_HELPER = "app/admin/(protected)/books/admin-book-reads.ts";
+  const HELPER_CALLERS = ["app/admin/(protected)/page.tsx", "app/admin/(protected)/reports/page.tsx", "app/admin/(protected)/books/page.tsx"];
 
-  it("a base books read (from or embed) appears only on the three report pages", () => {
+  it("a base books read (from or embed) appears only on the report and staff Books pages", () => {
     const readers = ADMIN_FILES.filter((file) => {
       const source = code(file);
       return source.includes('.from("books")') || /\.select\(\s*"[^"]*(?<![\w:])books\(/.test(source);
     }).map(rel);
     expect(readers.sort()).toEqual([...BOOKS_ALLOWED].sort());
+  });
+
+  it("each staff books reader is gated by requireStaff, the shared helper by its callers (ADMIN-2)", () => {
+    for (const name of BOOKS_ALLOWED) {
+      if (name === BOOK_READ_HELPER) continue;
+      expect(code(join(SRC, name)), name).toMatch(/requireStaff\("(reports\.view|reports\.resolve)"\)/);
+    }
+    const callers = ADMIN_FILES.filter((file) => code(file).includes("/admin-book-reads\"")).map(rel);
+    expect(callers.sort()).toEqual([...HELPER_CALLERS].sort());
+    for (const name of callers) expect(code(join(SRC, name)), name).toMatch(/requireStaff\(/);
+    expect(readFileSync(join(SRC, BOOK_READ_HELPER), "utf8")).toMatch(/^import "server-only";/);
   });
 
   it("profiles is read only on reports.view / staff.view pages, plus admin-shell's own-row read (O-b)", () => {

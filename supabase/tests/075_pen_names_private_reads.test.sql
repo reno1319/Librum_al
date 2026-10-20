@@ -545,6 +545,11 @@ insert into pg_temp.allow values
   -- staff-gated (owner, admin, moderator only; asserted below)
   ('book_reports', 'reporter_id', 'staff', 'reports.view'),
   ('book_reports', 'reviewed_by', 'staff', 'reports.view'),
+  -- ADMIN-2-TAKEDOWN (20261020080000): authors read their own takedown
+  -- notices (author_id is in the column grant, so the dashboard filters
+  -- to the author's own rows); reports.view staff read every row.
+  -- id, report_id and the staff ids are not granted to authenticated.
+  ('book_takedowns', 'author_id', 'own+staff', 'authors read own takedowns; reports.view staff'),
   ('payments', 'buyer_id', 'staff', 'finance.view'),
   ('author_ledger_entries', 'author_id', 'staff', 'finance.view'),
   ('author_payouts', 'author_id', 'staff', 'finance.view'),

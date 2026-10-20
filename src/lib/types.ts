@@ -346,9 +346,13 @@ export type AuditAction =
   | "refund.review_rejected"
   | "refund.issuance_submitted"
   // PEN-NAMES-1 (8a): staff removed a pen name's links.
-  | "pen_name.links_removed";
+  | "pen_name.links_removed"
+  // ADMIN-2-TAKEDOWN: staff unpublished (took down) a book, or allowed
+  // its author to publish it again.
+  | "book.unpublished"
+  | "book.allowed_again";
 
-export type AuditTargetType = "staff_members" | "book_reports" | "refund_requests" | "pen_names";
+export type AuditTargetType = "staff_members" | "book_reports" | "refund_requests" | "pen_names" | "books";
 
 // Mirrors list_admin_audit_events()'s exact return shape. actor_id/
 // actor_display_name are both nullable -- admin_audit_log.actor_id is

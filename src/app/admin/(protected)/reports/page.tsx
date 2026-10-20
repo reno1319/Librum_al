@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import type { BookReportStatus } from "@/lib/types";
 import { REPORT_STATUS_LABELS, compareForTriage } from "./report-review-logic";
+import { readBookTitlesForStaff } from "../books/admin-book-reads";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -30,7 +31,7 @@ type AdminBookReportRow = {
   status: BookReportStatus;
   created_at: string;
   reviewed_at: string | null;
-  books: { title: string } | null;
+  book_id: string | null;
 };
 
 export default async function AdminBookReportsPage({
@@ -64,11 +65,20 @@ export default async function AdminBookReportsPage({
   // fetch client-side is the simplest correct approach for a V1 queue.
   const { data: reports } = await supabase
     .from("book_reports")
-    .select("id, reason, status, created_at, reviewed_at, books(title)")
+    .select("id, reason, status, created_at, reviewed_at, book_id")
     .order("created_at", { ascending: false })
     .returns<AdminBookReportRow[]>();
 
   const allReports = reports ?? [];
+  // ADMIN-2-TAKEDOWN (R2, M2): the titles are read with the service-role
+  // client after requireStaff above -- a staff session sees published
+  // books only, so a report on a draft or taken-down book would read
+  // "Book unavailable". A failed read falls back to that text.
+  const titles = await readBookTitlesForStaff(
+    allReports.map((r) => r.book_id).filter((id): id is string => id !== null),
+  );
+  const titleFor = (bookId: string | null) =>
+    titles.ok && bookId ? (titles.titleById.get(bookId) ?? null) : null;
   const openCount = allReports.filter((r) => r.status === "open").length;
   const sortedReports = [...allReports].sort(compareForTriage);
   const visibleReports =
@@ -122,7 +132,7 @@ export default async function AdminBookReportsPage({
                 className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
               >
                 <div>
-                  <p className="font-medium">{report.books?.title ?? "Book unavailable"}</p>
+                  <p className="font-medium">{titleFor(report.book_id) ?? "Book unavailable"}</p>
                   <p className="text-xs text-muted">
                     &ldquo;{report.reason}&rdquo; ·{" "}
                     {new Date(report.created_at).toLocaleDateString(undefined, {
