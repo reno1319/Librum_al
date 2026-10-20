@@ -19,7 +19,8 @@ vi.mock("resend", () => ({
 
 process.env.RESEND_API_KEY = "test-key";
 
-const { sendNewBookEmails, sendBookTakedownEmail, escapeEmailHtml } = await import("./email");
+const { sendNewBookEmails, sendBookTakedownEmail, sendBookApprovedEmail, sendBookSentBackEmail, escapeEmailHtml } =
+  await import("./email");
 
 // PEN-NAMES-1 (4a): the email goes to the followers of the BOOK'S pen
 // name and names that pen name; the account's names are never read.
@@ -158,5 +159,37 @@ describe("sendBookTakedownEmail", () => {
       bundleTitles: [],
     });
     expect(sendMock.mock.calls[0][0].html).not.toContain("We also unpublished");
+  });
+});
+
+// ADMIN-3-REVIEW (J): approve and send back -- every supplied value is
+// escaped in the HTML.
+describe("sendBookApprovedEmail / sendBookSentBackEmail", () => {
+  beforeEach(() => sendMock.mockClear());
+
+  it("tells the author the book is live, escaping the title", async () => {
+    await sendBookApprovedEmail("ana@example.com", { title: "<b>Kënga</b>", bookId: "22222222-2222-4222-8222-222222222222" });
+    const args = sendMock.mock.calls[0][0];
+    expect(args.to).toBe("ana@example.com");
+    expect(args.subject).toBe("Your book “<b>Kënga</b>” is live on Librum");
+    expect(args.html).toContain("&lt;b&gt;Kënga&lt;/b&gt;");
+    expect(args.html).not.toContain("<b>Kënga</b>");
+    expect(args.html).toContain("/books/22222222-2222-4222-8222-222222222222");
+  });
+
+  it("sends back with the reason label and the escaped message, linking to the dashboard", async () => {
+    await sendBookSentBackEmail("ana@example.com", {
+      title: "T & Co",
+      reasonLabel: "Wrong or broken file",
+      message: "Line one <script>x</script>\nLine two",
+    });
+    const args = sendMock.mock.calls[0][0];
+    expect(args.subject).toBe("Librum sent “T & Co” back");
+    expect(args.html).toContain("<strong>T &amp; Co</strong>");
+    expect(args.html).toContain("Reason: Wrong or broken file");
+    expect(args.html).toContain("Line one &lt;script&gt;x&lt;/script&gt;<br>Line two");
+    expect(args.html).not.toContain("<script>");
+    expect(args.html).toContain("/dashboard");
+    expect(args.html).toContain("support@librum.al");
   });
 });

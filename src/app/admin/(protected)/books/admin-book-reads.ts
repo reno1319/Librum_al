@@ -43,3 +43,90 @@ export async function readActiveTakedownBookIds(): Promise<Set<string> | null> {
   }
   return new Set((data ?? []).map((row) => row.book_id).filter((id): id is string => id !== null));
 }
+
+// ADMIN-3-REVIEW: the ids of every book with a PENDING review (a small
+// set: books waiting for staff), or null on a read error. Rows whose
+// book is gone (book_id null) are never counted (M3).
+export async function readPendingReviewBookIds(): Promise<Set<string> | null> {
+  const { data, error } = await createAdminClient()
+    .from("book_reviews")
+    .select("book_id")
+    .eq("status", "pending")
+    .not("book_id", "is", null)
+    .returns<{ book_id: string | null }[]>();
+  if (error) {
+    console.error("readPendingReviewBookIds: read failed", { error });
+    return null;
+  }
+  return new Set((data ?? []).map((row) => row.book_id).filter((id): id is string => id !== null));
+}
+
+export type PendingReviewForStaff = {
+  reviewId: string;
+  bookId: string;
+  title: string;
+  penName: string | null;
+  submittedAt: string;
+};
+
+// ADMIN-3-REVIEW (I): Today's "waiting for review" items, oldest first:
+// the pending reviews and the pen name each book carries now. Null on a
+// read error (the page shows its own load error).
+export async function readPendingReviewsForStaff(limit: number): Promise<{ items: PendingReviewForStaff[]; total: number } | null> {
+  const admin = createAdminClient();
+  const { data, error, count } = await admin
+    .from("book_reviews")
+    .select("id, book_id, book_title, submitted_at", { count: "exact" })
+    .eq("status", "pending")
+    .not("book_id", "is", null)
+    .order("submitted_at", { ascending: true })
+    .limit(limit)
+    .returns<{ id: string; book_id: string; book_title: string; submitted_at: string }[]>();
+  if (error) {
+    console.error("readPendingReviewsForStaff: read failed", { error });
+    return null;
+  }
+  const rows = data ?? [];
+  const penByBook = new Map<string, string>();
+  if (rows.length > 0) {
+    const { data: books, error: booksError } = await admin
+      .from("books")
+      .select("id, title, pen:pen_names(name)")
+      .in("id", rows.map((row) => row.book_id))
+      .returns<{ id: string; title: string; pen: { name: string } | null }[]>();
+    if (booksError) {
+      console.error("readPendingReviewsForStaff: books read failed", { error: booksError });
+    }
+    for (const book of books ?? []) if (book.pen?.name) penByBook.set(book.id, book.pen.name);
+  }
+  return {
+    items: rows.map((row) => ({
+      reviewId: row.id,
+      bookId: row.book_id,
+      title: row.book_title,
+      penName: penByBook.get(row.book_id) ?? null,
+      submittedAt: row.submitted_at,
+    })),
+    total: count ?? rows.length,
+  };
+}
+
+// ADMIN-3-REVIEW (M2): the rights half of the publish gate, for the
+// staff Approve action -- the same newest-declaration read as
+// getRightsDeclarationState() (src/lib/book-rights.ts), with the
+// service-role client because a staff session cannot read another
+// author's declarations. Three ways; fails closed.
+export async function readRightsStateForStaff(bookId: string): Promise<"present" | "none" | "unavailable"> {
+  const { data, error } = await createAdminClient()
+    .from("book_rights_declarations")
+    .select("book_id")
+    .eq("book_id", bookId)
+    .order("declared_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("readRightsStateForStaff: read failed", { bookId, code: error.code ?? null });
+    return "unavailable";
+  }
+  return data ? "present" : "none";
+}

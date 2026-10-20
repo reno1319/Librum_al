@@ -20,6 +20,13 @@ vi.mock("../../../actions", () => ({
   publishBook: { bind: () => async () => undefined },
   unpublishBook: { bind: () => async () => undefined },
   deleteBook: { bind: () => async () => undefined },
+  cancelBookReview: { bind: () => async () => undefined },
+}));
+// ADMIN-3-REVIEW: a draft with no approval and nothing pending -- the
+// Publish control reads "Send for review" (its own states are in
+// review-state.rendered.test.ts).
+vi.mock("@/lib/book-reviews", () => ({
+  getBookReviewState: async () => ({ kind: "ok", pending: false, approvalValid: false, latestSentBack: null }),
 }));
 
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
@@ -123,21 +130,21 @@ describe("Edit page: a book Librum took down", () => {
     expect(html).toContain("Please send proof.");
     expect(html).toContain("We also unpublished: Set A.");
     expect(html).toContain("Questions? Write to support@librum.al");
-    expect(html).not.toContain("Publish book</button>");
+    expect(html).not.toContain("Send for review</button>");
   });
 
   it("disables Publish with the generic sentence when the takedown can't be read", async () => {
     takedown = { state: { kind: "unavailable" }, notice: null };
     const html = await render();
     expect(html).not.toContain("Taken down by Librum");
-    const start = html.lastIndexOf("<button", html.indexOf("Publish book</button>"));
-    expect(html.slice(start, html.indexOf("Publish book</button>"))).toContain('disabled=""');
+    const start = html.lastIndexOf("<button", html.indexOf("Send for review</button>"));
+    expect(html.slice(start, html.indexOf("Send for review</button>"))).toContain('disabled=""');
   });
 
   it("is unchanged without a takedown", async () => {
     const html = await render();
     expect(html).not.toContain("Taken down by Librum");
-    const start = html.lastIndexOf("<button", html.indexOf("Publish book</button>"));
-    expect(html.slice(start, html.indexOf("Publish book</button>"))).not.toContain('disabled=""');
+    const start = html.lastIndexOf("<button", html.indexOf("Send for review</button>"));
+    expect(html.slice(start, html.indexOf("Send for review</button>"))).not.toContain('disabled=""');
   });
 });

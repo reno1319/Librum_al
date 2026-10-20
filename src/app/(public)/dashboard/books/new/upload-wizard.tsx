@@ -140,7 +140,8 @@ function SaveButtons() {
           disabled={pending}
           className={buttonClasses("primary", "md", "min-h-11 disabled:cursor-not-allowed disabled:opacity-60")}
         >
-          Publish book
+          {/* ADMIN-3-REVIEW (B): a new book has no approval yet. */}
+          Send for review
         </button>
       </div>
     </div>
@@ -871,7 +872,7 @@ export function UploadWizard({
                 !readiness.missingRights &&
                 !readiness.paidPublishingBlocked &&
                 readiness.recommended.every((item) => item.done) && (
-                <p className="mt-2 text-muted">Looks good — ready to publish.</p>
+                <p className="mt-2 text-muted">Looks good — ready to send for review.</p>
               )}
             </div>
 

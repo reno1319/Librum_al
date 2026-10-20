@@ -2329,9 +2329,22 @@ on conflict (id) do nothing;
 -- photo is written server side with the service role under a random
 -- "<uuid>/" folder, never the account's. Manuscripts are unchanged.
 
+-- ADMIN-3-REVIEW (migration 20261020120000): an author (or staff, for
+-- blog images) writes the private manuscripts bucket ONLY under their own
+-- "<uid>/tmp/" folder -- the browser's direct uploads (tmp/epub,
+-- tmp/docx, tmp/cover, tmp/avatar, tmp/blog), the DOCX conversion's
+-- upsert and the removal of those temporary objects. UPDATE checks the
+-- same predicate before and after, so a temporary object cannot be
+-- renamed onto a final key. Every final manuscript key is written and
+-- removed by the server with the service role (createBook, updateBook,
+-- deleteBook, account deletion), so an author cannot overwrite or delete
+-- a live or approved file behind Librum's review. Reading one's own
+-- objects is unchanged.
 create policy "Authors can upload their own manuscripts"
   on storage.objects for insert
-  with check (bucket_id = 'manuscripts' and auth.uid()::text = (storage.foldername(name))[1]);
+  with check (bucket_id = 'manuscripts'
+              and auth.uid()::text = (storage.foldername(name))[1]
+              and (storage.foldername(name))[2] = 'tmp');
 
 create policy "Authors can read their own manuscripts"
   on storage.objects for select
@@ -2339,15 +2352,18 @@ create policy "Authors can read their own manuscripts"
 
 create policy "Authors can replace their own manuscripts"
   on storage.objects for update
-  using (bucket_id = 'manuscripts' and auth.uid()::text = (storage.foldername(name))[1]);
+  using (bucket_id = 'manuscripts'
+         and auth.uid()::text = (storage.foldername(name))[1]
+         and (storage.foldername(name))[2] = 'tmp')
+  with check (bucket_id = 'manuscripts'
+              and auth.uid()::text = (storage.foldername(name))[1]
+              and (storage.foldername(name))[2] = 'tmp');
 
--- deleteBook (src/app/dashboard/books/actions.ts) needs to remove an
--- author's own cover/manuscript files for a zero-acquisition book --
--- owner-scoped the same way as the insert/update policies above, never
--- public/anonymous. See the Phase 8 audit.
 create policy "Authors can delete their own manuscripts"
   on storage.objects for delete
-  using (bucket_id = 'manuscripts' and auth.uid()::text = (storage.foldername(name))[1]);
+  using (bucket_id = 'manuscripts'
+         and auth.uid()::text = (storage.foldername(name))[1]
+         and (storage.foldername(name))[2] = 'tmp');
 
 
 -- ============================================================
@@ -7677,6 +7693,8 @@ grant execute on function public.staff_has_permission(text) to anon, authenticat
 -- (staff_remove_pen_name_links) and the 'pen_names' target type added.
 -- ADMIN-2-TAKEDOWN (migration 20261020080000): 'book.unpublished',
 -- 'book.allowed_again' and the 'books' target type added.
+-- ADMIN-3-REVIEW (migration 20261020120000): 'book.review_approved' and
+-- 'book.review_sent_back' added.
 create or replace function public.list_admin_audit_events(
   p_action text default null,
   p_actor_id uuid default null,
@@ -7720,7 +7738,8 @@ begin
     'refund.issuance_submitted',
     'blog_post.published', 'blog_post.unpublished', 'blog_post.deleted',
     'pen_name.links_removed',
-    'book.unpublished', 'book.allowed_again'
+    'book.unpublished', 'book.allowed_again',
+    'book.review_approved', 'book.review_sent_back'
   ) then
     raise exception 'invalid action filter';
   end if;
@@ -11334,6 +11353,8 @@ grant execute on function public.set_author_payout_threshold(text, bigint) to au
 -- 050 comment, were never actually wired in here or anywhere else --
 -- confirmed by reading this function's live body before writing this
 -- migration, not assumed).
+-- ADMIN-3-REVIEW (migration 20261020120000): 'books.review' (approve or
+-- send back a book waiting for review) added to the admin role's list.
 -- ============================================================
 
 create or replace function public.staff_has_permission(p_permission text)
@@ -11355,7 +11376,7 @@ as $$
             'admin.access', 'reports.view', 'reports.resolve',
             'refunds.view', 'refunds.resolve', 'staff.view', 'audit.view',
             'finance.view', 'finance.payout_export', 'finance.payout_operate',
-            'blog.view', 'blog.manage'
+            'blog.view', 'blog.manage', 'books.review'
           )
         )
         or (
@@ -13028,6 +13049,13 @@ begin
          librum_choice_at = null
    where id = p_book_id;
 
+  -- ADMIN-3-REVIEW (10): a book waiting for review stops waiting.
+  update public.book_reviews
+     set status = 'cancelled',
+         decided_at = pg_catalog.now()
+   where book_id = p_book_id
+     and status = 'pending';
+
   if pg_catalog.cardinality(v_bundle_ids) > 0 then
     update public.bundles
        set status = 'draft'
@@ -13132,3 +13160,594 @@ $$;
 revoke all on function public.admin_allow_book_again(uuid)
   from public, anon, authenticated, service_role;
 grant execute on function public.admin_allow_book_again(uuid) to authenticated;
+
+-- ============================================================
+-- ADMIN-3-REVIEW (migration 20261020120000): "In review". New books,
+-- and a new book file or cover on a live book, wait for staff approval
+-- (books.review) before they are in the Bookstore. A book in review is
+-- a draft with a pending book_reviews row; approval is bound to the
+-- exact file_path and cover_path reviewed. The review history (author
+-- reads own rows through the granted columns; no write for anyone), the
+-- approval rule, the publish gate (LB462), the live-files guard (LB463),
+-- the delete-time cancel, the author's and staff's functions. Same
+-- statements and reasoning as migrations/20261020120000_book_reviews.sql;
+-- its staff_has_permission(), admin_unpublish_book(),
+-- list_admin_audit_events() and manuscripts storage policy changes are
+-- made in place above. Its backfill (one grandfathered approval per book
+-- published at migration time, and one grandfathered buyer_file_only
+-- approval per draft with a purchase, a past publication or a takedown)
+-- has no rows to act on in a fresh build.
+-- ============================================================
+-- ------------------------------------------------------------
+-- 2. Review history
+-- ------------------------------------------------------------
+create table public.book_reviews (
+  id uuid primary key default gen_random_uuid(),
+  book_id uuid references public.books(id) on delete set null,
+  book_title text not null,
+  author_id uuid references public.profiles(id) on delete set null,
+  file_path text,
+  cover_path text,
+  status text not null
+    constraint book_reviews_status_check
+    check (status in ('pending', 'approved', 'sent_back', 'withdrawn', 'cancelled')),
+  grandfathered boolean not null default false,
+  submitted_at timestamptz not null default now(),
+  reason text
+    constraint book_reviews_reason_check
+    check (reason in ('copyright', 'content_rules', 'broken_file', 'other')),
+  message_to_author text
+    constraint book_reviews_message_to_author_check
+    check (char_length(message_to_author) between 1 and 2000
+           and message_to_author = btrim(message_to_author, E' \t\r\n')),
+  checklist jsonb
+    constraint book_reviews_checklist_check
+    check (checklist = '{"cover_is_fine": true, "file_opens": true, "not_someone_elses_work": true, "rights_declared": true}'::jsonb),
+  decided_by uuid references public.profiles(id) on delete set null,
+  decided_at timestamptz,
+  -- A1 (Q1/R1): an approval recorded by the migration backfill for a
+  -- draft that readers may already hold. It is the readers' copy (the N2a
+  -- buyer rule and the N3 keep-set count it like any approval), but it
+  -- never makes the book publishable: book_review_approval_valid() skips
+  -- it. Only the migration backfill ever writes true; no function does.
+  buyer_file_only boolean not null default false,
+  constraint book_reviews_sent_back_check
+    check ((status = 'sent_back') = (reason is not null)
+           and (status = 'sent_back') = (message_to_author is not null)),
+  constraint book_reviews_approved_checklist_check
+    check ((status = 'approved' and not grandfathered) = (checklist is not null)),
+  constraint book_reviews_grandfathered_check
+    check (not grandfathered or status = 'approved'),
+  constraint book_reviews_decided_at_check
+    check ((status = 'pending') = (decided_at is null)),
+  constraint book_reviews_buyer_file_only_check
+    check (not buyer_file_only or grandfathered)
+);
+
+create unique index book_reviews_one_pending_per_book
+  on public.book_reviews (book_id)
+  where status = 'pending';
+
+create index book_reviews_book_id_decided_at_idx
+  on public.book_reviews (book_id, decided_at desc);
+
+create index book_reviews_author_id_idx
+  on public.book_reviews (author_id);
+
+alter table public.book_reviews enable row level security;
+
+create policy "Authors can read their own reviews"
+  on public.book_reviews for select
+  to authenticated
+  using (auth.uid() = author_id);
+
+revoke all on public.book_reviews from public, anon, authenticated, service_role;
+grant select (
+    book_id, book_title, author_id, status, submitted_at, reason,
+    message_to_author, decided_at
+  )
+  on public.book_reviews
+  to authenticated;
+grant select on public.book_reviews to service_role;
+
+-- ------------------------------------------------------------
+-- 3. The approval rule, in one place
+-- ------------------------------------------------------------
+create function public.book_review_approval_valid(
+  p_book_id uuid,
+  p_file_path text,
+  p_cover_path text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+      from public.book_reviews r
+     where r.book_id = p_book_id
+       and r.status = 'approved'
+       and not r.buyer_file_only
+       and r.file_path is not distinct from p_file_path
+       and r.cover_path is not distinct from p_cover_path
+       and r.decided_at > coalesce(
+             (select max(t.taken_down_at) from public.book_takedowns t where t.book_id = p_book_id),
+             '-infinity'::timestamptz)
+  );
+$$;
+
+revoke all on function public.book_review_approval_valid(uuid, text, text)
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 4. The publish gate
+-- ------------------------------------------------------------
+create function public.books_require_review_approval()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.status = 'published'
+     and old.status is distinct from 'published'
+     and not public.book_review_approval_valid(new.id, new.file_path, new.cover_path)
+  then
+    raise exception 'This book needs Librum''s approval before it can be published.'
+      using errcode = 'LB462';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_require_review_approval
+  before update of status on public.books
+  for each row
+  execute function public.books_require_review_approval();
+
+revoke all on function public.books_require_review_approval()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 5. The live-files guard
+-- ------------------------------------------------------------
+create function public.books_refuse_live_file_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if old.status = 'published'
+     and new.status = 'published'
+     and (new.file_path is distinct from old.file_path
+          or new.cover_path is distinct from old.cover_path)
+  then
+    raise exception 'A live book''s file or cover can only change when the book goes back to draft in the same write.'
+      using errcode = 'LB463';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_refuse_live_file_change
+  before update of file_path, cover_path on public.books
+  for each row
+  execute function public.books_refuse_live_file_change();
+
+revoke all on function public.books_refuse_live_file_change()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 6. A deleted book's pending review is cancelled
+-- ------------------------------------------------------------
+-- Runs on a direct delete and on a cascade (account deletion) alike. It
+-- deletes no book, so books_refuse_delete_while_taken_down's depth test
+-- is unaffected; if that lock refuses the delete, this update rolls back
+-- with it.
+create function public.books_cancel_pending_review_on_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- In an account deletion the author's profile may already be gone when
+  -- this runs (the cascade's order is not fixed); author_id is cleared
+  -- then, as its own ON DELETE SET NULL would do, so the row never points
+  -- at a deleted profile.
+  update public.book_reviews r
+     set status = 'cancelled',
+         decided_at = pg_catalog.now(),
+         author_id = case
+           when exists (select 1 from public.profiles pr where pr.id = r.author_id) then r.author_id
+           else null
+         end
+   where r.book_id = old.id
+     and r.status = 'pending';
+  return old;
+end;
+$$;
+
+create trigger books_cancel_pending_review_on_delete
+  before delete on public.books
+  for each row
+  execute function public.books_cancel_pending_review_on_delete();
+
+revoke all on function public.books_cancel_pending_review_on_delete()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 7. The author's side
+-- ------------------------------------------------------------
+-- Sends the book's CURRENT title, file and cover for review. The app
+-- runs every publish-readiness check before calling this. A pending
+-- review whose snapshot no longer equals the book's paths (a new file
+-- or cover since) is never rewritten in place: it is cancelled and the
+-- new pending row inserted, in this one transaction.
+create function public.request_book_review(p_book_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_book record;
+  v_pending record;
+  v_review_id uuid;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  select bo.id, bo.title, bo.author_id, bo.status, bo.file_path, bo.cover_path
+    into v_book
+    from public.books bo
+   where bo.id = p_book_id
+     for update;
+
+  if not found or v_book.author_id is distinct from v_actor_id then
+    raise exception 'no book found for this id';
+  end if;
+
+  if v_book.status <> 'draft' then
+    raise exception 'this book is already published';
+  end if;
+
+  if exists (
+    select 1 from public.book_takedowns t
+     where t.book_id = p_book_id and t.lifted_at is null
+  ) then
+    raise exception 'Librum took this book down. It can''t be published again until Librum allows it.'
+      using errcode = 'LB460';
+  end if;
+
+  if public.book_review_approval_valid(p_book_id, v_book.file_path, v_book.cover_path) then
+    raise exception 'this book is already approved';
+  end if;
+
+  select r.id, r.file_path, r.cover_path
+    into v_pending
+    from public.book_reviews r
+   where r.book_id = p_book_id
+     and r.status = 'pending'
+     for update;
+
+  if found then
+    if v_pending.file_path is not distinct from v_book.file_path
+       and v_pending.cover_path is not distinct from v_book.cover_path then
+      raise exception 'this book is already waiting for review';
+    end if;
+    update public.book_reviews
+       set status = 'cancelled',
+           decided_at = pg_catalog.now()
+     where id = v_pending.id;
+  end if;
+
+  insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, status)
+  values (p_book_id, v_book.title, v_book.author_id, v_book.file_path, v_book.cover_path, 'pending')
+  returning id into v_review_id;
+
+  return v_review_id;
+end;
+$$;
+
+revoke all on function public.request_book_review(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.request_book_review(uuid) to authenticated;
+
+create function public.withdraw_book_review(p_book_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_review_id uuid;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  perform 1
+    from public.books bo
+   where bo.id = p_book_id
+     and bo.author_id = v_actor_id
+     for update;
+  if not found then
+    raise exception 'no book found for this id';
+  end if;
+
+  update public.book_reviews
+     set status = 'withdrawn',
+         decided_at = pg_catalog.now(),
+         decided_by = v_actor_id
+   where book_id = p_book_id
+     and status = 'pending'
+  returning id into v_review_id;
+
+  if v_review_id is null then
+    raise exception 'this book is not waiting for review';
+  end if;
+end;
+$$;
+
+revoke all on function public.withdraw_book_review(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.withdraw_book_review(uuid) to authenticated;
+
+-- The author's own view of one book: whether a review is pending,
+-- whether the book's CURRENT files carry a valid approval (the gate's
+-- own rule), and the latest send back -- only when the newest review
+-- row of the book is that send back.
+create function public.book_review_state(p_book_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_book record;
+  v_latest record;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  select bo.id, bo.author_id, bo.file_path, bo.cover_path
+    into v_book
+    from public.books bo
+   where bo.id = p_book_id;
+
+  if not found or v_book.author_id is distinct from v_actor_id then
+    raise exception 'no book found for this id';
+  end if;
+
+  select r.status, r.reason, r.message_to_author, r.decided_at
+    into v_latest
+    from public.book_reviews r
+   where r.book_id = p_book_id
+   order by r.submitted_at desc, coalesce(r.decided_at, 'infinity'::timestamptz) desc, r.id desc
+   limit 1;
+
+  return pg_catalog.jsonb_build_object(
+    'pending', exists (
+      select 1 from public.book_reviews r
+       where r.book_id = p_book_id and r.status = 'pending'
+    ),
+    'approval_valid', public.book_review_approval_valid(p_book_id, v_book.file_path, v_book.cover_path),
+    'latest_sent_back', case
+      when v_latest.status = 'sent_back' then pg_catalog.jsonb_build_object(
+        'reason', v_latest.reason,
+        'message', v_latest.message_to_author,
+        'decided_at', v_latest.decided_at
+      )
+      else null
+    end
+  );
+end;
+$$;
+
+revoke all on function public.book_review_state(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.book_review_state(uuid) to authenticated;
+
+-- ------------------------------------------------------------
+-- 8. Staff: approve, send back
+-- ------------------------------------------------------------
+-- Approve binds to the exact files staff looked at (the snapshot, the
+-- book's current paths and the values the page rendered must all be
+-- equal) and to the price and description the app's readiness check
+-- saw. The review becomes 'approved' FIRST, then the book is published
+-- in the same transaction (the gate sees the approval). Librum's choice
+-- is always cleared, as performPublish's draft -> published self-heal
+-- does.
+create function public.admin_approve_book_review(
+  p_review_id uuid,
+  p_file_path text,
+  p_cover_path text,
+  p_price_all integer,
+  p_checklist jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_book_id uuid;
+  v_book record;
+  v_review record;
+  v_first boolean;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('books.review') then
+    raise exception 'not authorized';
+  end if;
+
+  select r.book_id into v_book_id
+    from public.book_reviews r
+   where r.id = p_review_id;
+  if not found or v_book_id is null then
+    raise exception 'no review found for this id';
+  end if;
+
+  -- The book first, then the review (request_book_review's order).
+  select bo.id, bo.status, bo.file_path, bo.cover_path, bo.price_all, bo.description, bo.published_at
+    into v_book
+    from public.books bo
+   where bo.id = v_book_id
+     for update;
+  if not found then
+    raise exception 'no review found for this id';
+  end if;
+
+  select r.id, r.status, r.file_path, r.cover_path
+    into v_review
+    from public.book_reviews r
+   where r.id = p_review_id
+     for update;
+
+  if v_review.status <> 'pending' then
+    raise exception 'this review is no longer waiting';
+  end if;
+
+  if v_book.status <> 'draft' then
+    raise exception 'this book is already published';
+  end if;
+
+  if exists (
+    select 1 from public.book_takedowns t
+     where t.book_id = v_book_id and t.lifted_at is null
+  ) then
+    raise exception 'this book is taken down';
+  end if;
+
+  if v_book.file_path is distinct from v_review.file_path
+     or v_book.cover_path is distinct from v_review.cover_path
+     or p_file_path is distinct from v_review.file_path
+     or p_cover_path is distinct from v_review.cover_path then
+    raise exception 'the author changed the file or cover';
+  end if;
+
+  if v_book.price_all is null
+     or v_book.price_all is distinct from p_price_all
+     or pg_catalog.btrim(coalesce(v_book.description, '')) = '' then
+    raise exception 'the author changed the book';
+  end if;
+
+  if p_checklist is distinct from '{"cover_is_fine": true, "file_opens": true, "not_someone_elses_work": true, "rights_declared": true}'::jsonb then
+    raise exception 'invalid checklist';
+  end if;
+
+  update public.book_reviews
+     set status = 'approved',
+         checklist = p_checklist,
+         decided_by = v_actor_id,
+         decided_at = pg_catalog.now()
+   where id = p_review_id;
+
+  v_first := v_book.published_at is null;
+
+  update public.books
+     set status = 'published',
+         published_at = coalesce(published_at, pg_catalog.now()),
+         librum_choice_at = null
+   where id = v_book_id;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'book.review_approved', 'books', v_book_id,
+          pg_catalog.jsonb_build_object('first_publication', v_first));
+
+  return v_first;
+end;
+$$;
+
+revoke all on function public.admin_approve_book_review(uuid, text, text, integer, jsonb)
+  from public, anon, authenticated, service_role;
+grant execute on function public.admin_approve_book_review(uuid, text, text, integer, jsonb) to authenticated;
+
+-- The book stays a draft. The audit row carries the reason, never the
+-- message.
+create function public.admin_send_back_book_review(
+  p_review_id uuid,
+  p_reason text,
+  p_message text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_book_id uuid;
+  v_message text;
+  v_status text;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('books.review') then
+    raise exception 'not authorized';
+  end if;
+
+  if p_reason is null or p_reason not in ('copyright', 'content_rules', 'broken_file', 'other') then
+    raise exception 'invalid reason';
+  end if;
+
+  v_message := pg_catalog.btrim(coalesce(p_message, ''), E' \t\r\n');
+  if pg_catalog.char_length(v_message) < 1 or pg_catalog.char_length(v_message) > 2000 then
+    raise exception 'invalid message';
+  end if;
+
+  select r.book_id into v_book_id
+    from public.book_reviews r
+   where r.id = p_review_id;
+  if not found or v_book_id is null then
+    raise exception 'no review found for this id';
+  end if;
+
+  perform 1 from public.books bo where bo.id = v_book_id for update;
+
+  select r.status into v_status
+    from public.book_reviews r
+   where r.id = p_review_id
+     for update;
+  if v_status <> 'pending' then
+    raise exception 'this review is no longer waiting';
+  end if;
+
+  update public.book_reviews
+     set status = 'sent_back',
+         reason = p_reason,
+         message_to_author = v_message,
+         decided_by = v_actor_id,
+         decided_at = pg_catalog.now()
+   where id = p_review_id;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'book.review_sent_back', 'books', v_book_id,
+          pg_catalog.jsonb_build_object('reason', p_reason));
+end;
+$$;
+
+revoke all on function public.admin_send_back_book_review(uuid, text, text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.admin_send_back_book_review(uuid, text, text) to authenticated;

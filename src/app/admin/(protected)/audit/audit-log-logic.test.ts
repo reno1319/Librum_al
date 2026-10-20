@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   AUDIT_ACTIONS,
@@ -516,5 +518,31 @@ describe("book takedown audit events", () => {
       "Other",
     );
     expect(formatAuditDetails("book.allowed_again", {})).toBeNull();
+  });
+});
+
+// ADMIN-3-REVIEW: approve and send back.
+describe("book review audit events", () => {
+  it("labels the two actions, which the migration's allow-list also names", () => {
+    expect(getActionLabel("book.review_approved")).toBe("Book approved");
+    expect(getActionLabel("book.review_sent_back")).toBe("Book sent back");
+    expect(AUDIT_ACTIONS).toContain("book.review_approved");
+    expect(AUDIT_ACTIONS).toContain("book.review_sent_back");
+    const migration = readFileSync(
+      join(process.cwd(), "supabase/migrations/20261020120000_book_reviews.sql"),
+      "utf8",
+    );
+    for (const action of AUDIT_ACTIONS) {
+      expect(migration).toContain(`'${action}'`);
+    }
+  });
+
+  it("shows the send-back reason's label and whether an approval was a first publication", () => {
+    expect(formatAuditDetails("book.review_sent_back", { reason: "broken_file" })).toBe("Wrong or broken file");
+    expect(formatAuditDetails("book.review_sent_back", { reason: "content_rules" })).toBe("Breaks content rules");
+    expect(formatAuditDetails("book.review_sent_back", {})).toBeNull();
+    expect(formatAuditDetails("book.review_approved", { first_publication: true })).toBe("First publication");
+    expect(formatAuditDetails("book.review_approved", { first_publication: false })).toBe("Live again");
+    expect(formatAuditDetails("book.review_approved", {})).toBeNull();
   });
 });

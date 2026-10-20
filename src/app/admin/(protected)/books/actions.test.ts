@@ -38,9 +38,29 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 const mockSendEmail = vi.fn();
-vi.mock("@/lib/email", () => ({ sendBookTakedownEmail: (to: string, args: unknown) => mockSendEmail(to, args) }));
+// ADMIN-3-REVIEW: the review emails, the followers email, the rights
+// read, the paid permission and the retention cleanup.
+const mockApprovedEmail = vi.fn();
+const mockSentBackEmail = vi.fn();
+const mockNewBookEmails = vi.fn();
+vi.mock("@/lib/email", () => ({
+  sendBookTakedownEmail: (to: string, args: unknown) => mockSendEmail(to, args),
+  sendBookApprovedEmail: (to: string, args: unknown) => mockApprovedEmail(to, args),
+  sendBookSentBackEmail: (to: string, args: unknown) => mockSentBackEmail(to, args),
+  sendNewBookEmails: (admin: unknown, args: unknown) => mockNewBookEmails(admin, args),
+}));
+let rightsState: "present" | "none" | "unavailable" = "present";
+vi.mock("./admin-book-reads", () => ({ readRightsStateForStaff: async () => rightsState }));
+let paidAllowed = false;
+vi.mock("@/lib/paid-readiness", () => ({ canPublishPaidTitle: () => paidAllowed }));
+const mockRetention = vi.fn();
+vi.mock("@/lib/book-reviews", () => ({
+  removeUnretainedManuscripts: (...args: unknown[]) => mockRetention(...args),
+}));
 
-const { unpublishBookAsStaff, allowBookAgainAsStaff } = await import("./actions");
+const { unpublishBookAsStaff, allowBookAgainAsStaff, approveBookReviewAsStaff, sendBackBookReviewAsStaff } = await import(
+  "./actions"
+);
 
 const BOOK_ID = "22222222-2222-4222-8222-222222222222";
 const REPORT_ID = "11111111-1111-4111-8111-111111111111";
@@ -202,5 +222,196 @@ describe("allowBookAgainAsStaff", () => {
     mockRpc.mockResolvedValue({ data: null, error: { code: "P0001", message: "this book is not taken down" } });
     const target = await redirectOf(() => allowBookAgainAsStaff(BOOK_ID));
     expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent("This book is not taken down.")}`);
+  });
+});
+
+// ============================================================
+// ADMIN-3-REVIEW (H, J, M2): Approve and Send back.
+// ============================================================
+const REVIEW_ID = "55555555-5555-4555-8555-555555555555";
+const AUTHOR_ID = "66666666-6666-4666-8666-666666666666";
+const FILE = `${AUTHOR_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020100.epub`;
+const COVER = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
+const ALL_CHECKS = { cover_is_fine: "on", file_opens: "on", not_someone_elses_work: "on", rights_declared: "on" };
+
+function resetReviewMocks(): void {
+  mockRedirect.mockClear();
+  mockRevalidatePath.mockReset();
+  mockRequireStaff.mockClear();
+  mockRpc.mockReset().mockResolvedValue({ data: true, error: null });
+  mockGetUserById.mockReset().mockResolvedValue({ data: { user: { email: "ana@example.com" } } });
+  mockApprovedEmail.mockReset().mockResolvedValue(undefined);
+  mockSentBackEmail.mockReset().mockResolvedValue(undefined);
+  mockNewBookEmails.mockReset().mockResolvedValue(undefined);
+  mockRetention.mockReset().mockResolvedValue(undefined);
+  rightsState = "present";
+  paidAllowed = false;
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  adminRows = {
+    books: {
+      data: {
+        id: BOOK_ID,
+        title: "Kënga e fundit",
+        author_id: AUTHOR_ID,
+        status: "draft",
+        price_all: 0,
+        description: "A real description.",
+        pen_name_id: "pen-1",
+      },
+      error: null,
+    },
+    book_reviews: {
+      data: { book_title: "Kënga e fundit", author_id: AUTHOR_ID, reason: "broken_file", message_to_author: "Fix the file." },
+      error: null,
+    },
+  };
+}
+
+describe("approveBookReviewAsStaff", () => {
+  beforeEach(resetReviewMocks);
+  afterEach(() => vi.unstubAllEnvs());
+  const approveForm = (extra: Record<string, string> = {}) =>
+    form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: FILE, coverPath: COVER, ...ALL_CHECKS, ...extra });
+
+  it("is refused in maintenance before requireStaff", async () => {
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+    expect((await redirectOf(() => approveBookReviewAsStaff(approveForm()))).startsWith("/admin/books?error=")).toBe(true);
+    expect(mockRequireStaff).not.toHaveBeenCalled();
+  });
+
+  it("requires books.review, then every checklist box (server-side)", async () => {
+    const f = approveForm();
+    f.delete("file_opens");
+    const target = await redirectOf(() => approveBookReviewAsStaff(f));
+    expect(mockRequireStaff).toHaveBeenCalledWith("books.review");
+    expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent("Tick all four checks before you approve.")}`);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("calls the RPC with the rendered files, the price it checked and the full checklist; then emails and cleans up", async () => {
+    const target = await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(mockRpc).toHaveBeenCalledWith("admin_approve_book_review", {
+      p_review_id: REVIEW_ID,
+      p_file_path: FILE,
+      p_cover_path: COVER,
+      p_price_all: 0,
+      p_checklist: { cover_is_fine: true, file_opens: true, not_someone_elses_work: true, rights_declared: true },
+    });
+    expect(mockNewBookEmails).toHaveBeenCalledWith(expect.anything(), { bookId: BOOK_ID, authorId: AUTHOR_ID });
+    expect(mockApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID });
+    expect(mockRetention).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      authorId: AUTHOR_ID,
+      bookId: BOOK_ID,
+      caller: "approveBookReviewAsStaff",
+    });
+    for (const path of ["/", "/bookstore", `/books/${BOOK_ID}`, "/authors/pen-1", "/admin/books", `/admin/books/${BOOK_ID}`, "/dashboard"]) {
+      expect(mockRevalidatePath).toHaveBeenCalledWith(path);
+    }
+    expect(target).toBe(`/admin/books/${BOOK_ID}?success=${encodeURIComponent("Book approved. It's live in the Bookstore now.")}`);
+  });
+
+  it("a republication (not the first) emails no followers", async () => {
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(mockNewBookEmails).not.toHaveBeenCalled();
+    expect(mockApprovedEmail).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["no price", { price_all: null }, "This book has no price yet."],
+    ["no description", { description: "  " }, "This book has no description yet."],
+  ])("re-runs the author's publish gate first: %s", async (_label, overrides, text) => {
+    adminRows.books = { data: { ...(adminRows.books.data as object), ...overrides }, error: null };
+    const target = await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(decodeURIComponent(target)).toContain(text);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses without rights, or a paid title while paid publishing is closed", async () => {
+    rightsState = "none";
+    expect(decodeURIComponent(await redirectOf(() => approveBookReviewAsStaff(approveForm())))).toContain(
+      "The author hasn't chosen the rights yet",
+    );
+    rightsState = "present";
+    adminRows.books = { data: { ...(adminRows.books.data as object), price_all: 990 }, error: null };
+    expect(decodeURIComponent(await redirectOf(() => approveBookReviewAsStaff(approveForm())))).toContain(
+      "Paid publishing isn't available right now",
+    );
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the author changed the file or cover", "The author changed the file or cover. Reload and check again."],
+    ["the author changed the book", "The author changed the book. Reload and check again."],
+    ["this review is no longer waiting", "This book is no longer waiting for review. Reload to see what changed."],
+    ["permission denied for table books", "Something went wrong. Please try again."],
+  ])("maps %j and sends nothing", async (message, shown) => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: "P0001", message } });
+    const target = await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent(shown)}`);
+    expect(mockApprovedEmail).not.toHaveBeenCalled();
+    expect(mockRetention).not.toHaveBeenCalled();
+  });
+
+  it("still reports success when the emails fail afterwards", async () => {
+    mockNewBookEmails.mockRejectedValue(new Error("smtp"));
+    mockApprovedEmail.mockRejectedValue(new Error("smtp"));
+    expect(decodeURIComponent(await redirectOf(() => approveBookReviewAsStaff(approveForm())))).toContain("?success=");
+  });
+});
+
+describe("sendBackBookReviewAsStaff", () => {
+  beforeEach(resetReviewMocks);
+  const sendBackForm = (extra: Record<string, string> = {}) =>
+    form({ reviewId: REVIEW_ID, bookId: BOOK_ID, reason: "broken_file", message: " Fix the file. ", ...extra });
+
+  it("requires books.review; a reason and a message are required", async () => {
+    expect(await redirectOf(() => sendBackBookReviewAsStaff(sendBackForm({ reason: "author_asked" })))).toBe(
+      `/admin/books/${BOOK_ID}?error=${encodeURIComponent("Choose a reason.")}`,
+    );
+    expect(await redirectOf(() => sendBackBookReviewAsStaff(sendBackForm({ message: "   " })))).toBe(
+      `/admin/books/${BOOK_ID}?error=${encodeURIComponent("Write a message to the author.")}`,
+    );
+    expect(mockRequireStaff).toHaveBeenCalledWith("books.review");
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("calls the RPC with the trimmed message, emails the author, cleans up and says so", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    const target = await redirectOf(() => sendBackBookReviewAsStaff(sendBackForm()));
+    expect(mockRpc).toHaveBeenCalledWith("admin_send_back_book_review", {
+      p_review_id: REVIEW_ID,
+      p_reason: "broken_file",
+      p_message: "Fix the file.",
+    });
+    expect(mockSentBackEmail).toHaveBeenCalledWith("ana@example.com", {
+      title: "Kënga e fundit",
+      reasonLabel: "Wrong or broken file",
+      message: "Fix the file.",
+    });
+    expect(mockRetention).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      authorId: AUTHOR_ID,
+      bookId: BOOK_ID,
+      caller: "sendBackBookReviewAsStaff",
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard");
+    expect(target).toBe(
+      `/admin/books/${BOOK_ID}?success=${encodeURIComponent("Book sent back. The author sees your message on their Dashboard.")}`,
+    );
+  });
+
+  it("maps RPC errors and sends nothing", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: "P0001", message: "this review is no longer waiting" } });
+    expect(decodeURIComponent(await redirectOf(() => sendBackBookReviewAsStaff(sendBackForm())))).toContain(
+      "This book is no longer waiting for review.",
+    );
+    expect(mockSentBackEmail).not.toHaveBeenCalled();
+  });
+
+  it("an expired session goes to log in", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: "P0001", message: "not authenticated" } });
+    expect(await redirectOf(() => sendBackBookReviewAsStaff(sendBackForm()))).toBe(
+      `/login?next=${encodeURIComponent(`/admin/books/${BOOK_ID}`)}`,
+    );
   });
 });

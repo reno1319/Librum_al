@@ -115,6 +115,8 @@ type Call = { table: string; columns: string; filters: [string, unknown][]; term
 // author_id/file_path/title. `bookResult` is what that service-role read
 // returns.
 let currentBookResult: QueryResult;
+// ADMIN-3-REVIEW (N2 ★a): the service role's book_reviews read.
+let currentReviewsResult: QueryResult = { data: [], error: null };
 
 function recordingFrom(calls: Call[], resolve: (call: Call) => QueryResult) {
   return vi.fn((table: string) => {
@@ -124,6 +126,13 @@ function recordingFrom(calls: Call[], resolve: (call: Call) => QueryResult) {
       eq: (column: string, value: unknown) => (call.filters.push([column, value]), chain),
       maybeSingle: () => ((call.terminal = "maybeSingle"), calls.push(call), Promise.resolve(resolve(call))),
       single: () => ((call.terminal = "single"), calls.push(call), Promise.resolve(resolve(call))),
+      // ADMIN-3-REVIEW: the review snapshot read is `.in(...).returns()`,
+      // awaited directly.
+      in: (column: string, value: unknown) => (call.filters.push([column, value]), chain),
+      returns: () => chain,
+      then: (f: (v: unknown) => unknown, r?: (e: unknown) => unknown) => (
+        (call.terminal = "await"), calls.push(call), Promise.resolve(resolve(call)).then(f, r)
+      ),
     };
     return chain;
   });
@@ -200,6 +209,7 @@ function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: un
   const storageFrom = vi.fn((_bucket: string) => ({ download }));
   const calls: Call[] = [];
   const from = recordingFrom(calls, (call) => {
+    if (call.table === "book_reviews") return currentReviewsResult;
     if (call.table !== "books") throw new Error(`unexpected admin table ${call.table}`);
     return currentBookResult;
   });
@@ -232,6 +242,7 @@ describe("GET /api/books/[id]/download", () => {
 
   beforeEach(() => {
     recoveryActive = false;
+    currentReviewsResult = { data: [], error: null };
     mockCreateClient.mockReset();
     mockCreateAdminClient.mockReset();
     mockWatermarkEpub.mockReset();
@@ -372,6 +383,91 @@ describe("GET /api/books/[id]/download", () => {
       const response = await callRoute();
 
       expect(redirectTarget(response)).toBe(FILE_UNAVAILABLE);
+      expect(adminClient.__download).not.toHaveBeenCalled();
+    });
+  });
+
+  // ADMIN-3-REVIEW (N2 ★a, P3): the author gets the current file; a
+  // buyer gets the latest APPROVED review's file, or the current file
+  // when the book has never had an approval; a failed read fails closed.
+  describe("which file a buyer receives (N2 ★a)", () => {
+    const VERSIONED_APPROVED = `${AUTHOR_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020100.epub`;
+    const VERSIONED_PENDING = `${AUTHOR_ID}/${BOOK_ID}/1a2b3c4d-5e6f-4a0b-9c1d-2e3f4a5b6c7d.epub`;
+    const review = (status: string, filePath: string, decidedAt: string | null) => ({
+      id: `r-${status}-${decidedAt ?? "open"}`,
+      book_id: BOOK_ID,
+      status,
+      file_path: filePath,
+      cover_path: null,
+      submitted_at: "2026-10-01T00:00:00Z",
+      decided_at: decidedAt,
+    });
+
+    function setUp(userId: string, current: string) {
+      const adminClient = makeFakeAdminClient();
+      mockCreateClient.mockResolvedValue(
+        makeFakeSupabase({ userId, ownsBookRpcResult: userId === READER_ID, bookResult: bookRow({ file_path: current }) }),
+      );
+      mockCreateAdminClient.mockReturnValue(adminClient);
+      mockWatermarkEpub.mockResolvedValue({ watermarked: true, bytes: Buffer.from("w") });
+      return adminClient;
+    }
+
+    it("a buyer gets the latest approved file while a new one waits for review", async () => {
+      currentReviewsResult = {
+        data: [
+          review("approved", CANONICAL_PATH, "2026-10-02T00:00:00Z"),
+          review("approved", VERSIONED_APPROVED, "2026-10-05T00:00:00Z"),
+          review("pending", VERSIONED_PENDING, null),
+        ],
+        error: null,
+      };
+      const adminClient = setUp(READER_ID, VERSIONED_PENDING);
+      const response = await callRoute();
+      expect(response.status).toBe(200);
+      expect(adminClient.__download).toHaveBeenCalledWith(VERSIONED_APPROVED);
+      expect(adminClient.__calls).toContainEqual({
+        table: "book_reviews",
+        columns: "id, book_id, status, file_path, cover_path, submitted_at, decided_at",
+        filters: [["book_id", [BOOK_ID]]],
+        terminal: "await",
+      });
+    });
+
+    it("the author always gets the current file, without reading reviews", async () => {
+      currentReviewsResult = { data: [review("approved", CANONICAL_PATH, "2026-10-02T00:00:00Z")], error: null };
+      const adminClient = setUp(AUTHOR_ID, VERSIONED_PENDING);
+      const response = await callRoute();
+      expect(response.status).toBe(200);
+      expect(adminClient.__download).toHaveBeenCalledWith(VERSIONED_PENDING);
+      expect(adminClient.__calls.map((c) => c.table)).toEqual(["books"]);
+    });
+
+    it("a book that was never approved gives a buyer the current file", async () => {
+      currentReviewsResult = {
+        data: [review("sent_back", CANONICAL_PATH, "2026-10-02T00:00:00Z"), review("pending", VERSIONED_PENDING, null)],
+        error: null,
+      };
+      const adminClient = setUp(READER_ID, VERSIONED_PENDING);
+      expect((await callRoute()).status).toBe(200);
+      expect(adminClient.__download).toHaveBeenCalledWith(VERSIONED_PENDING);
+    });
+
+    it("a failed review read fails closed: no download, no fallback to the current file", async () => {
+      currentReviewsResult = { data: null, error: { code: "42501", message: "denied" } };
+      const adminClient = setUp(READER_ID, CANONICAL_PATH);
+      const response = await callRoute();
+      expect(redirectTarget(response)).toBe(FILE_UNAVAILABLE);
+      expect(adminClient.__download).not.toHaveBeenCalled();
+    });
+
+    it("an approved snapshot that is not this book's own key is never handed to Storage", async () => {
+      currentReviewsResult = {
+        data: [review("approved", `${OTHER_AUTHOR_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020100.epub`, "2026-10-05T00:00:00Z")],
+        error: null,
+      };
+      const adminClient = setUp(READER_ID, CANONICAL_PATH);
+      expect(redirectTarget(await callRoute())).toBe(FILE_UNAVAILABLE);
       expect(adminClient.__download).not.toHaveBeenCalled();
     });
   });

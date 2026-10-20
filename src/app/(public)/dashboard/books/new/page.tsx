@@ -84,7 +84,7 @@ export default async function NewBookPage({
           a draft was kept from the start; nothing is saved until a
           final button is pressed (no autosave, his D2). */}
       <p className="mt-2 text-muted">
-        Nothing is saved until you press Save as draft or Publish book.
+        Nothing is saved until you press Save as draft or Send for review.
       </p>
 
       {error && (

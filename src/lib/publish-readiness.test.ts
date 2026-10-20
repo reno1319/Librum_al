@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { resolvePublishReadiness } from "./publish-readiness";
+import { describe, expect, it, vi } from "vitest";
+import { checkPublishGate, resolvePublishReadiness } from "./publish-readiness";
 
 const book = (overrides: Partial<Parameters<typeof resolvePublishReadiness>[0]["book"]> = {}) => ({
   description: "",
@@ -207,5 +207,54 @@ describe("resolvePublishReadiness: the rights choice (F4, P4)", () => {
       hasRightsDeclaration: false,
     });
     expect(result).toMatchObject({ missingAllPrice: true, missingDescription: true, missingRights: true });
+  });
+});
+
+// ADMIN-3-REVIEW (M2): the shared publish gate, used by performPublish
+// and the staff Approve action -- four checks in one order, and no read
+// after an earlier refusal.
+describe("checkPublishGate", () => {
+  const gate = (overrides: Partial<Parameters<typeof checkPublishGate>[0]> = {}) => {
+    const readRights = vi.fn(async () => "present" as const);
+    const paid = vi.fn(() => true);
+    return {
+      readRights,
+      paid,
+      run: () =>
+        checkPublishGate({ priceAll: 0, description: "A description.", readRights, paidPublishingAvailable: paid, ...overrides }),
+    };
+  };
+
+  it("a free book with a description and rights passes, without asking about paid publishing", async () => {
+    const g = gate();
+    expect(await g.run()).toEqual({ ok: true });
+    expect(g.paid).not.toHaveBeenCalled();
+  });
+
+  it("refuses a missing price first, before any read", async () => {
+    const g = gate({ priceAll: null, description: "" });
+    expect(await g.run()).toEqual({ ok: false, reason: "missing_all_price" });
+    expect(g.readRights).not.toHaveBeenCalled();
+  });
+
+  it("then a blank description, before the rights read", async () => {
+    for (const description of ["", "   \n", null]) {
+      const g = gate({ description });
+      expect(await g.run()).toEqual({ ok: false, reason: "missing_description" });
+      expect(g.readRights).not.toHaveBeenCalled();
+    }
+  });
+
+  it("then the rights choice: none, or unreadable", async () => {
+    expect(await gate({ readRights: async () => "none" }).run()).toEqual({ ok: false, reason: "missing_rights" });
+    expect(await gate({ readRights: async () => "unavailable" }).run()).toEqual({ ok: false, reason: "rights_unavailable" });
+  });
+
+  it("then, for a paid title only, paid publishing", async () => {
+    expect(await gate({ priceAll: 990, paidPublishingAvailable: () => false }).run()).toEqual({
+      ok: false,
+      reason: "paid_mode_required",
+    });
+    expect(await gate({ priceAll: 990, paidPublishingAvailable: () => true }).run()).toEqual({ ok: true });
   });
 });

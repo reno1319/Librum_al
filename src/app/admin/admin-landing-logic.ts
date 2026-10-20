@@ -14,15 +14,19 @@
 // Counts only: no amount is ever shown here (money figures arrive with
 // the live POK build).
 
+// ADMIN-3-REVIEW (I): books waiting for review need books.review, the
+// permission the review panel and its actions enforce.
 export function resolveTodayVisibility(permissions: {
   reportsView: boolean;
   refundsView: boolean;
   auditView: boolean;
-}): { showReports: boolean; showRefunds: boolean; showActivity: boolean } {
+  booksReview?: boolean;
+}): { showReports: boolean; showRefunds: boolean; showActivity: boolean; showReviews: boolean } {
   return {
     showReports: permissions.reportsView,
     showRefunds: permissions.refundsView,
     showActivity: permissions.auditView,
+    showReviews: permissions.booksReview === true,
   };
 }
 
@@ -117,6 +121,8 @@ export function shortReportReason(reason: string | null | undefined): string {
 
 export type TodayReport = { id: string; created_at: string; reason: string | null; bookTitle: string | null };
 export type TodayRefund = { id: string; requested_at: string; readerName: string };
+// ADMIN-3-REVIEW (I): a book waiting for review.
+export type TodayReview = { reviewId: string; bookId: string; title: string; penName: string | null; submittedAt: string };
 
 export type TodoItem = {
   key: string;
@@ -138,14 +144,28 @@ export const TODO_LIMIT = 5;
  * ADMIN-2-TAKEDOWN (E, ADMIN-1 "1. a"): a report row reads
  * `<Reason> report on “<Title>”, <relative time>`, e.g. "Copyright report
  * on “Kënga e fundit”, 2 days ago". Refund rows are unchanged.
+ *
+ * ADMIN-3-REVIEW (I): books waiting for review join the same oldest-first
+ * list: `“<Title>” by <pen name> is waiting for review, <relative time>`,
+ * detail "Sent <date>", action "Review book", opening the book's admin
+ * page.
  */
 export function buildTodoItems(
   reports: readonly TodayReport[],
   refunds: readonly TodayRefund[],
   limit: number = TODO_LIMIT,
   now: Date = new Date(),
+  reviews: readonly TodayReview[] = [],
 ): TodoItem[] {
   const items: TodoItem[] = [
+    ...reviews.map((review) => ({
+      key: `review-${review.reviewId}`,
+      href: `/admin/books/${review.bookId}`,
+      title: `“${review.title}” by ${review.penName ?? "an unknown author"} is waiting for review, ${formatRelativeTime(review.submittedAt, now)}`,
+      detail: `Sent ${formatTodayDate(review.submittedAt)}`,
+      actionLabel: "Review book",
+      at: review.submittedAt,
+    })),
     ...reports.map((report) => ({
       key: `report-${report.id}`,
       href: `/admin/reports/${report.id}`,

@@ -7,6 +7,12 @@ import {
   MESSAGE_TOO_LONG_MESSAGE,
   WRITE_MESSAGE_MESSAGE,
   bookStateLabel,
+  CHECKLIST_INCOMPLETE_MESSAGE,
+  GENERIC_REVIEW_ERROR_MESSAGE,
+  approveReadinessMessage,
+  mapReviewRpcError,
+  validateApproveForm,
+  validateSendBackForm,
   booksListHref,
   booksSearchPattern,
   buildBooksSearchOrFilter,
@@ -28,8 +34,10 @@ const AUTHOR = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const REPORT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 describe("books list filters (B)", () => {
-  it("offers All, Live, Draft and Taken down", () => {
-    expect(BOOKS_FILTERS.map((f) => f.label)).toEqual(["All", "Live", "Draft", "Taken down"]);
+  // ADMIN-3-REVIEW (G): "In review" joins the filters.
+  it("offers All, Live, In review, Draft and Taken down", () => {
+    expect(BOOKS_FILTERS.map((f) => f.label)).toEqual(["All", "Live", "In review", "Draft", "Taken down"]);
+    expect(parseBooksFilter("in_review")).toBe("in_review");
   });
 
   it("reads a known filter and falls back to All", () => {
@@ -170,4 +178,89 @@ it("isUuid", () => {
   expect(isUuid("x")).toBe(false);
   expect(isUuid(null)).toBe(false);
   expect(ALLOWED_AGAIN_SUCCESS_MESSAGE).toBe("The author can publish this book again.");
+});
+
+// ADMIN-3-REVIEW (G, H)
+describe("in review: labels, the approve and send-back forms, RPC errors", () => {
+  const REVIEW = "44444444-4444-4444-8444-444444444444";
+  const BOOK = "22222222-2222-4222-8222-222222222222";
+
+  it("labels a draft with a pending review In review; a takedown still wins", () => {
+    expect(bookStateLabel("draft", false, true)).toBe("In review");
+    expect(bookStateLabel("draft", true, true)).toBe("Taken down");
+    expect(bookStateLabel("published", false, true)).toBe("Live");
+    expect(describeBookEyebrow({ status: "draft", price_all: 0 }, false, true)).toBe("In review");
+    expect(describeBookEyebrow({ status: "draft", price_all: 0 }, true, true)).toBe("Taken down");
+  });
+
+  function approveForm(checks: string[], extra: Record<string, string> = {}): FormData {
+    const fd = new FormData();
+    fd.set("reviewId", REVIEW);
+    fd.set("bookId", BOOK);
+    fd.set("filePath", "a/b/c.epub");
+    fd.set("coverPath", "");
+    for (const key of checks) fd.set(key, "on");
+    for (const [k, v] of Object.entries(extra)) fd.set(k, v);
+    return fd;
+  }
+  const ALL = ["cover_is_fine", "file_opens", "not_someone_elses_work", "rights_declared"];
+
+  it("approve needs all four checks and returns the canonical checklist and the rendered paths", () => {
+    const ok = validateApproveForm(approveForm(ALL));
+    expect(ok).toEqual({
+      ok: true,
+      reviewId: REVIEW,
+      bookId: BOOK,
+      filePath: "a/b/c.epub",
+      coverPath: null,
+      checklist: { cover_is_fine: true, file_opens: true, not_someone_elses_work: true, rights_declared: true },
+    });
+    for (const missing of ALL) {
+      expect(validateApproveForm(approveForm(ALL.filter((k) => k !== missing)))).toEqual({
+        ok: false,
+        error: CHECKLIST_INCOMPLETE_MESSAGE,
+      });
+    }
+    expect(validateApproveForm(approveForm(ALL, { reviewId: "nope" })).ok).toBe(false);
+  });
+
+  it("send back takes a send-back reason (never Author asked) and a trimmed message of at most 2000", () => {
+    const fd = (reason: string, message: string) => {
+      const f = new FormData();
+      f.set("reviewId", REVIEW);
+      f.set("bookId", BOOK);
+      f.set("reason", reason);
+      f.set("message", message);
+      return f;
+    };
+    expect(validateSendBackForm(fd("broken_file", "  Fix it.  "))).toEqual({
+      ok: true,
+      reviewId: REVIEW,
+      bookId: BOOK,
+      reason: "broken_file",
+      message: "Fix it.",
+    });
+    expect(validateSendBackForm(fd("author_asked", "x"))).toEqual({ ok: false, error: "Choose a reason." });
+    expect(validateSendBackForm(fd("other", "   "))).toEqual({ ok: false, error: "Write a message to the author." });
+    expect(validateSendBackForm(fd("other", "x".repeat(2001))).ok).toBe(false);
+    expect(validateSendBackForm(fd("other", "x".repeat(2000))).ok).toBe(true);
+  });
+
+  it("maps the RPC's refusals and never shows raw text", () => {
+    expect(mapReviewRpcError({ message: "the author changed the file or cover" })).toBe(
+      "The author changed the file or cover. Reload and check again.",
+    );
+    expect(mapReviewRpcError({ message: "the author changed the book" })).toBe(
+      "The author changed the book. Reload and check again.",
+    );
+    expect(mapReviewRpcError({ message: "not authorized" })).toBe("You don't have permission to review books.");
+    expect(mapReviewRpcError({ message: "relation x does not exist" })).toBe(GENERIC_REVIEW_ERROR_MESSAGE);
+    expect(mapReviewRpcError({ code: "40P01", message: "deadlock" })).toBe("Please try again.");
+  });
+
+  it("names every publish-gate refusal to staff", () => {
+    for (const reason of ["missing_all_price", "missing_description", "missing_rights", "rights_unavailable", "paid_mode_required"] as const) {
+      expect(approveReadinessMessage(reason).length).toBeGreaterThan(10);
+    }
+  });
 });

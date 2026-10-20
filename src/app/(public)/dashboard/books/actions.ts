@@ -15,6 +15,7 @@ import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-val
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import { checkPublishGate } from "@/lib/publish-readiness";
 import { INVALID_ISBN_MESSAGE, isValidIsbn } from "@/lib/book-identifiers";
 import { getRightsDeclarationState, recordRightsDeclaration } from "@/lib/book-rights";
 import { resolveOwnPenNameId } from "@/lib/pen-name-write-client";
@@ -35,21 +36,39 @@ import { isSchemaFeatureOffError, logSchemaFeatureOffOnce } from "@/lib/schema-f
 import {
   BOOK_COVERS_BUCKET,
   BOOK_MANUSCRIPTS_BUCKET,
-  canonicalBookManuscriptPath,
   classifyBookCoverPath,
   groupBookStorageRemovals,
-  isOwnCanonicalBookManuscriptPath,
+  isOwnBookManuscriptPath,
   isOwnTemporaryCoverUploadPath,
   isOwnTemporaryManuscriptUploadPath,
+  isOwnVersionedBookManuscriptPath,
   isNewBookCoverPath,
   newBookCoverPath,
+  newBookManuscriptPath,
   type BookStorageRemoval,
 } from "@/lib/book-storage-path";
+import {
+  deletedBookManuscriptKeys,
+  getBookReviewState,
+  readReviewSnapshots,
+  removeUnretainedManuscripts,
+  requestBookReview,
+  withdrawBookReview,
+} from "@/lib/book-reviews";
+import {
+  ALREADY_IN_REVIEW_MESSAGE,
+  BOOK_CHANGED_WHILE_EDITING_MESSAGE,
+  LIVE_FILES_IN_BUNDLE_MESSAGE,
+  LIVE_FILES_REQUEST_FAILED_MESSAGE,
+  LIVE_FILES_SAVED_MESSAGE,
+  NOT_IN_REVIEW_MESSAGE,
+  REVIEW_CANCELLED_MESSAGE,
+  SENT_FOR_REVIEW_MESSAGE,
+} from "@/lib/book-review-copy";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
   parseCatalogPriceAll,
-  resolveCatalogPriceState,
 } from "@/lib/catalog-price";
 
 // ALL-WIRING-2: one message for every rejected catalog price, built
@@ -517,28 +536,62 @@ async function resolveSeriesSelection(
 // Every candidate must already be proven by src/lib/book-storage-path.ts
 // for the signed-in author (and, for a permanent key, the exact book);
 // the candidates are de-duplicated and removed with at most one call per
-// bucket: manuscripts-bucket keys on the author's own session, covers-
-// bucket keys with the trusted catalog writer (PEN-2, C9: no user write
-// policy is left on covers). A failure is an orphaned object,
-// never a failed save or deletion, so it is logged -- caller, bucket and
-// object count only, never a key or the Storage error -- and never
-// surfaced.
+// bucket and client: the author's own temporary uploads ("<uid>/tmp/...",
+// manuscripts bucket) on the author's own session, every permanent key
+// with the trusted catalog writer -- covers since PEN-2 (C9: no user
+// write policy is left on covers), final manuscripts since ADMIN-3 (M1:
+// authors may write and delete only under their own "<uid>/tmp/"). A
+// failure is an orphaned object, never a failed save or deletion, so it
+// is logged -- caller, bucket and object count only, never a key or the
+// Storage error -- and never surfaced.
+function isTemporaryUploadKey(path: string): boolean {
+  return path.split("/")[1] === "tmp";
+}
+
 async function removeProvenBookStorageObjects(
   supabase: Awaited<ReturnType<typeof createClient>>,
   removals: readonly BookStorageRemoval[],
   caller: string,
 ): Promise<void> {
   for (const [bucket, paths] of groupBookStorageRemovals(removals)) {
-    const client = bucket === BOOK_COVERS_BUCKET ? createCatalogWriteClient() : supabase;
-    const { error } = await client.storage.from(bucket).remove(paths);
-    if (error) {
-      // Deliberately NOT the Storage error object, nor its message,
-      // details, cause or response: any of them may echo a key.
-      console.error(`${caller}: failed to remove superseded storage objects`, {
-        bucket,
-        objectCount: paths.length,
-      });
+    const onSession = bucket === BOOK_MANUSCRIPTS_BUCKET ? paths.filter(isTemporaryUploadKey) : [];
+    const onWriter = paths.filter((path) => !onSession.includes(path));
+    for (const [client, group] of [
+      [supabase, onSession],
+      [onWriter.length > 0 ? createCatalogWriteClient() : null, onWriter],
+    ] as const) {
+      if (client === null || group.length === 0) continue;
+      const { error } = await client.storage.from(bucket).remove(group);
+      if (error) {
+        // Deliberately NOT the Storage error object, nor its message,
+        // details, cause or response: any of them may echo a key.
+        console.error(`${caller}: failed to remove superseded storage objects`, {
+          bucket,
+          objectCount: group.length,
+        });
+      }
     }
+  }
+}
+
+// ADMIN-3-REVIEW: the manuscript twin of removeNewCoverUpload below -- a
+// manuscript this request itself just uploaded under a fresh versioned
+// key, when the row write that would have referenced it failed or lost
+// its compare-and-set. Re-checked for that exact own shape. Logged
+// without the key or the Storage error.
+async function removeNewManuscriptUpload(
+  writer: ReturnType<typeof createCatalogWriteClient>,
+  path: string,
+  authorId: string,
+  bookId: string,
+  caller: string,
+): Promise<void> {
+  if (!isOwnVersionedBookManuscriptPath(path, authorId, bookId)) {
+    return;
+  }
+  const { error } = await writer.storage.from(BOOK_MANUSCRIPTS_BUCKET).remove([path]);
+  if (error) {
+    console.error(`${caller}: failed to remove an unreferenced new manuscript upload`, { objectCount: 1 });
   }
 }
 
@@ -730,8 +783,12 @@ export async function createBook(formData: FormData) {
   // with the trusted catalog writer: the contract migration drops every
   // user write policy on the covers bucket (C9), so covers are written by
   // the server only. Every input gate has already run above.
+  //
+  // ADMIN-3-REVIEW (M1): the manuscript, too, gets a fresh versioned key
+  // (newBookManuscriptPath) and is uploaded with the trusted catalog
+  // writer: authors may write only under their own "<uid>/tmp/" folder.
   const coverPath = newBookCoverPath(coverResult.extension);
-  const manuscriptPath = canonicalBookManuscriptPath(user.id, bookId);
+  const manuscriptPath = newBookManuscriptPath(user.id, bookId);
   const catalogWriter = createCatalogWriteClient();
 
   const { error: coverError } = await catalogWriter.storage
@@ -745,7 +802,7 @@ export async function createBook(formData: FormData) {
     );
   }
 
-  const { error: manuscriptError } = await supabase.storage
+  const { error: manuscriptError } = await catalogWriter.storage
     .from(BOOK_MANUSCRIPTS_BUCKET)
     .upload(manuscriptPath, manuscriptResult.bytes, { contentType: "application/epub+zip" });
 
@@ -826,6 +883,7 @@ export async function createBook(formData: FormData) {
   if (insertError) {
     console.error("createBook: book insert failed:", insertError);
     await removeNewCoverUpload(catalogWriter, coverPath, "createBook");
+    await removeNewManuscriptUpload(catalogWriter, manuscriptPath, user.id, bookId, "createBook");
     const penNameMessage = penNameErrorMessage(insertError);
     if (penNameMessage) {
       redirect(`/dashboard/books/new?error=${encodeURIComponent(penNameMessage)}`);
@@ -923,6 +981,16 @@ export async function createBook(formData: FormData) {
   // doesn't succeed (see performPublish()'s own comment).
   const publishResult = await performPublish(supabase, bookId, user.id);
 
+  // ADMIN-3-REVIEW (A): a new book always goes to review first -- it has
+  // no approval yet. The draft is saved and waiting; nothing else to do.
+  if (publishResult.ok && publishResult.outcome === "sent_for_review") {
+    redirect(
+      translatorErrorQuery
+        ? `/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}&${translatorErrorQuery}`
+        : `/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`,
+    );
+  }
+
   if (publishResult.ok) {
     // Same reasoning as publishBook()'s own post-mutation block -- the
     // status="published" mutation above already committed inside
@@ -990,8 +1058,16 @@ export async function createBook(formData: FormData) {
       "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
     );
   }
-  // "rights_unavailable" (F4, D3) and "takedown_unavailable" (ADMIN-2)
-  // land here too: the existing sentence.
+  // ADMIN-3-REVIEW: not reachable for a book this request just inserted
+  // (no review can exist yet); handled for completeness.
+  if (publishResult.reason === "already_in_review") {
+    redirect(`/dashboard?success=Saved+as+draft&error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
+  }
+  if (publishResult.reason === "book_changed") {
+    redirect(`/dashboard?success=Saved+as+draft&error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
+  }
+  // "rights_unavailable" (F4, D3), "takedown_unavailable" (ADMIN-2) and
+  // "review_unavailable" (ADMIN-3) land here too: the existing sentence.
   redirect(`/dashboard?success=Saved+as+draft&error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
 }
 
@@ -1236,14 +1312,10 @@ export async function updateBook(bookId: string, formData: FormData) {
   );
 
   // QA-FIX-3: the live files are never overwritten before the row update
-  // below has succeeded. A replacement whose key differs from the stored
-  // one (first cover, jpg<->png, or a non-canonical stored manuscript)
-  // touches no live object, so it is uploaded BEFORE the write, as the
-  // row must never point at a missing object. A replacement at the SAME
-  // key as the stored one would overwrite the live file in place, so it
-  // is uploaded only AFTER the write has been proven; if that upload
-  // then fails, the old file is still intact and the author is told
-  // exactly that.
+  // below has succeeded. Since PEN-2 (covers) and ADMIN-3 (manuscripts)
+  // every replacement goes to a FRESH key, so it touches no live object
+  // and is uploaded BEFORE the write, as the row must never point at a
+  // missing object; nothing is ever overwritten in place.
   type PendingUpload = {
     bucket: typeof BOOK_COVERS_BUCKET | typeof BOOK_MANUSCRIPTS_BUCKET;
     path: string;
@@ -1252,7 +1324,6 @@ export async function updateBook(bookId: string, formData: FormData) {
     kind: "cover" | "manuscript";
   };
   const uploadsBeforeWrite: PendingUpload[] = [];
-  const uploadsAfterWrite: PendingUpload[] = [];
 
   let newCoverPath: string | null = null;
   // The superseded cover, removed only AFTER the guarded update below
@@ -1307,22 +1378,21 @@ export async function updateBook(bookId: string, formData: FormData) {
   let tempManuscriptToCleanup: string | null = null;
 
   if (manuscriptResult.present) {
-    // Manuscripts always live at the same "<author>/<bookId>.epub" path.
-    // A stored file_path that is not this key is never removed or
-    // otherwise passed to Storage (this action has never removed a
-    // superseded manuscript); it is only counted.
-    newManuscriptPath = canonicalBookManuscriptPath(user.id, existing.id);
-    if (
-      existing.file_path !== null &&
-      !isOwnCanonicalBookManuscriptPath(existing.file_path, user.id, existing.id)
-    ) {
+    // ADMIN-3-REVIEW (M1, Design): every replacement gets a FRESH
+    // versioned key (newBookManuscriptPath), so books.file_path changes
+    // whenever the bytes change and an approval of the old file can never
+    // cover the new one. The superseded key is never removed here
+    // directly: the retention rule below decides (N3/P1), after the write
+    // is proven -- under N2 ★a buyers keep the last approved file.
+    newManuscriptPath = newBookManuscriptPath(user.id, existing.id);
+    if (existing.file_path !== null && !isOwnBookManuscriptPath(existing.file_path, user.id, existing.id)) {
       console.warn("updateBook: stored manuscript path is not this book's own key; left untouched", {
         bookId: existing.id,
         manuscriptPathClass: "unsafe",
       });
     }
 
-    (existing.file_path === newManuscriptPath ? uploadsAfterWrite : uploadsBeforeWrite).push({
+    uploadsBeforeWrite.push({
       bucket: BOOK_MANUSCRIPTS_BUCKET,
       path: newManuscriptPath,
       bytes: manuscriptResult.bytes,
@@ -1333,29 +1403,56 @@ export async function updateBook(bookId: string, formData: FormData) {
     tempManuscriptToCleanup = manuscriptResult.tempPathToCleanup;
   }
 
+  // ADMIN-3-REVIEW (C, 2b): a new file or cover takes a LIVE book out of
+  // the Bookstore until Librum approves it, so a book a published bundle
+  // sells cannot change them (the bundle would sell a book that is no
+  // longer available). Refused here, before any upload. Fails closed.
+  const filesChanged = newCoverPath !== null || newManuscriptPath !== null;
+  const wasLive = existing.status === "published";
+  if (filesChanged && wasLive) {
+    const membership = await bookBelongsToPublishedBundle(supabase, existing.id);
+    if (!membership.ok) {
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=Something+went+wrong+saving+your+changes.+Please+try+again`,
+      );
+    }
+    if (membership.inPublishedBundle) {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(LIVE_FILES_IN_BUNDLE_MESSAGE)}`);
+    }
+  }
+  // D: a draft already waiting for review gets its pending snapshot
+  // replaced (request_book_review cancels the stale row and inserts a new
+  // one, P1) when its file or cover changes. Read only when they change;
+  // an unreadable state leaves the stale row for the approve RPC to
+  // refuse (it binds to the current files) and the author can send it
+  // again.
+  let wasPending = false;
+  if (filesChanged && !wasLive) {
+    const reviewState = await getBookReviewState(supabase, existing.id);
+    wasPending = reviewState.kind === "ok" && reviewState.pending;
+  }
+
   // CATALOG-WRITE-AUTH-1 / PEN-2: the trusted writer is created only now,
   // after authentication, the ownership read, price validation, the
   // repricing gate and both input validations. It uploads the cover
-  // (C9: covers are server-written only) and writes the row below.
+  // (C9: covers are server-written only) and, since ADMIN-3 (M1), the
+  // manuscript, and writes the row below.
   const catalogWriter = createCatalogWriteClient();
 
   for (const upload of uploadsBeforeWrite) {
-    // A cover goes to a fresh random key and never overwrites anything,
-    // so it needs no upsert; a manuscript keeps its canonical key on the
-    // author's own session, as before.
-    const { error: uploadError } =
-      upload.bucket === BOOK_COVERS_BUCKET
-        ? await catalogWriter.storage
-            .from(upload.bucket)
-            .upload(upload.path, upload.bytes, { contentType: upload.contentType })
-        : await supabase.storage
-            .from(upload.bucket)
-            .upload(upload.path, upload.bytes, { contentType: upload.contentType, upsert: true });
+    // Both go to a fresh key and never overwrite anything, so neither
+    // needs an upsert.
+    const { error: uploadError } = await catalogWriter.storage
+      .from(upload.bucket)
+      .upload(upload.path, upload.bytes, { contentType: upload.contentType });
 
     if (uploadError) {
       console.error(`updateBook: ${upload.kind} upload failed:`, uploadError);
       if (upload.kind === "manuscript" && newCoverPath !== null) {
         await removeNewCoverUpload(catalogWriter, newCoverPath, "updateBook");
+      }
+      if (upload.kind === "cover" && newManuscriptPath !== null) {
+        await removeNewManuscriptUpload(catalogWriter, newManuscriptPath, user.id, existing.id, "updateBook");
       }
       redirect(
         upload.kind === "cover"
@@ -1422,6 +1519,12 @@ export async function updateBook(bookId: string, formData: FormData) {
       // and the stored value is not re-written.
       ...(newCoverPath !== null ? { cover_path: newCoverPath } : {}),
       ...(newManuscriptPath !== null ? { file_path: newManuscriptPath } : {}),
+      // ADMIN-3-REVIEW (C, S5): a new file or cover ALWAYS writes the
+      // book as a draft and clears Librum's choice (as unpublish does),
+      // in this same row write and whatever status was read -- so a
+      // publish that lands in between can never leave unapproved files
+      // live (the live-files trigger refuses that, LB463).
+      ...(filesChanged ? { status: "draft" as const, librum_choice_at: null } : {}),
       ...(subtitleResolved.present ? { subtitle: subtitleResolved.value } : {}),
       // "omit" (absent) and "preserve" (unchanged unsupported value)
       // both spread in nothing -- see resolveLanguageForUpdate()'s own
@@ -1454,10 +1557,19 @@ export async function updateBook(bookId: string, formData: FormData) {
       : existing.cover_path === null
         ? updateQuery.is("cover_path", null)
         : updateQuery.eq("cover_path", existing.cover_path);
+  // ADMIN-3-REVIEW (N3): the same compare-and-set for a manuscript
+  // replacement, so the key the retention cleanup below treats as
+  // superseded is provably the one this write replaced.
+  const fileGuardedQuery =
+    newManuscriptPath === null
+      ? coverGuardedQuery
+      : existing.file_path === null
+        ? coverGuardedQuery.is("file_path", null)
+        : coverGuardedQuery.eq("file_path", existing.file_path);
   // F4 (P6): see the published-description check above.
   const descriptionGuardedQuery = clearsDescription
-    ? coverGuardedQuery.eq("status", "draft")
-    : coverGuardedQuery;
+    ? fileGuardedQuery.eq("status", "draft")
+    : fileGuardedQuery;
   const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
     descriptionGuardedQuery,
     priceGuard,
@@ -1467,6 +1579,14 @@ export async function updateBook(bookId: string, formData: FormData) {
     console.error("updateBook: book update failed:", updateError);
     if (newCoverPath !== null) {
       await removeNewCoverUpload(catalogWriter, newCoverPath, "updateBook");
+    }
+    if (newManuscriptPath !== null) {
+      await removeNewManuscriptUpload(catalogWriter, newManuscriptPath, user.id, existing.id, "updateBook");
+    }
+    // ADMIN-3-REVIEW (S3): the live-files trigger (LB463) or the publish
+    // gate (LB462) caught a change that landed after the read above.
+    if (updateError.code === "LB463" || updateError.code === "LB462") {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
     }
     const penNameMessage = penNameErrorMessage(updateError);
     if (penNameMessage) {
@@ -1486,6 +1606,9 @@ export async function updateBook(bookId: string, formData: FormData) {
     // is removed, and the previous object is left alone.
     if (newCoverPath !== null) {
       await removeNewCoverUpload(catalogWriter, newCoverPath, "updateBook");
+    }
+    if (newManuscriptPath !== null) {
+      await removeNewManuscriptUpload(catalogWriter, newManuscriptPath, user.id, existing.id, "updateBook");
     }
     redirect(
       `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`,
@@ -1515,18 +1638,29 @@ export async function updateBook(bookId: string, formData: FormData) {
     }
   }
 
-  // QA-FIX-3: the row update is proven, so an in-place replacement may
-  // now overwrite the live file. A failure here leaves the old file in
-  // place and the saved details standing; it is reported, not undone.
-  const failedAfterWrite: PendingUpload["kind"][] = [];
-  for (const upload of uploadsAfterWrite) {
-    const { error: uploadError } = await supabase.storage
-      .from(upload.bucket)
-      .upload(upload.path, upload.bytes, { contentType: upload.contentType, upsert: true });
-    if (uploadError) {
-      console.error(`updateBook: in-place ${upload.kind} upload failed after the save:`, uploadError);
-      failedAfterWrite.push(upload.kind);
-    }
+  // ADMIN-3-REVIEW (C, D): the row is proven a draft with the new files.
+  // A book that was live, or was waiting for review, is sent for review
+  // with them now (a stale pending snapshot is replaced, P1). If the
+  // request fails, the book stays a draft and the author can press Send
+  // for review (S5).
+  let reviewRequestFailed = false;
+  if (filesChanged && (wasLive || wasPending)) {
+    const request = await requestBookReview(supabase, existing.id);
+    reviewRequestFailed = !request.ok && request.reason !== "already_pending";
+  }
+
+  // ADMIN-3-REVIEW (N3, P1): after the review request -- whether it
+  // succeeded or failed -- remove this book's own manuscript keys the
+  // retention rule no longer keeps (the key this write superseded, and
+  // any stale snapshot). Trusted read and removal (authors can read no
+  // review paths and delete no final key); best effort.
+  if (newManuscriptPath !== null) {
+    await removeUnretainedManuscripts(catalogWriter, catalogWriter, {
+      authorId: user.id,
+      bookId: existing.id,
+      superseded: [existing.file_path],
+      caller: "updateBook",
+    });
   }
 
   // Only now that the DB row correctly points at the new cover is it
@@ -1546,15 +1680,47 @@ export async function updateBook(bookId: string, formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath(`/books/${bookId}`);
   revalidatePath("/");
-  if (failedAfterWrite.length > 0) {
-    const files = failedAfterWrite.length === 2 ? "cover and manuscript" : failedAfterWrite[0];
+  if (filesChanged && (wasLive || wasPending)) {
+    if (reviewRequestFailed) {
+      redirect(`/dashboard/books/${bookId}/edit?success=${encodeURIComponent(LIVE_FILES_REQUEST_FAILED_MESSAGE)}`);
+    }
+    if (wasLive) {
+      revalidatePath("/bookstore");
+      redirect(`/dashboard?success=${encodeURIComponent(LIVE_FILES_SAVED_MESSAGE)}`);
+    }
+  }
+  redirect("/dashboard?success=Book+updated");
+}
+
+// ADMIN-3-REVIEW (E): the author's "Cancel review" -- the pending review
+// becomes 'withdrawn' (withdraw_book_review checks the caller owns the
+// book) and the book simply stays a draft. Nothing is removed: the last
+// approved file stays the buyers' file (N2 ★a), and the withdrawn
+// snapshot is the book's current file.
+export async function cancelBookReview(bookId: string) {
+  await redirectIfRecoverySessionActive();
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const result = await withdrawBookReview(supabase, bookId);
+  if (!result.ok) {
     redirect(
       `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
-        `Your changes were saved, but the new ${files} could not be uploaded. The previous file is still in place. Please choose the file again.`,
+        result.reason === "not_pending" ? NOT_IN_REVIEW_MESSAGE : "Something went wrong. Please try again",
       )}`,
     );
   }
-  redirect("/dashboard?success=Book+updated");
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/books/${bookId}/edit`);
+  redirect(`/dashboard/books/${bookId}/edit?success=${encodeURIComponent(REVIEW_CANCELLED_MESSAGE)}`);
 }
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART B: the ONE authoritative, non-
@@ -1587,8 +1753,16 @@ export async function updateBook(bookId: string, formData: FormData) {
 // simply omits the key whenever published_at is already set, and a
 // Supabase `.update()` never touches a key that isn't present in the
 // payload object it's given.
+//
+// ADMIN-3-REVIEW (A): after every existing check, a draft goes live only
+// when Librum has approved its CURRENT file and cover (and after its
+// latest takedown, if any) -- book_review_state() says so, and the
+// books_require_review_approval trigger refuses the write otherwise
+// (LB462). Without that approval the book is sent for review instead
+// (request_book_review) and stays a draft: outcome "sent_for_review".
 type PerformPublishResult =
-  | { ok: true; wasNewlyPublished: boolean }
+  | { ok: true; outcome: "published"; wasNewlyPublished: boolean }
+  | { ok: true; outcome: "sent_for_review" }
   // ALL-WIRING-2: `missing_all_price` is a DISTINCT reason, never folded
   // into paid_mode_required. The two refusals have opposite remedies --
   // the author fixes the first themselves in one edit and can do nothing
@@ -1619,6 +1793,14 @@ type PerformPublishResult =
         // the migration, or a read error). Fails closed, with the generic
         // message, like rights_unavailable.
         | "takedown_unavailable"
+        // ADMIN-3-REVIEW: the book is already waiting for review.
+        | "already_in_review"
+        // ADMIN-3-REVIEW: the review state could not be read, or the
+        // review request failed. Fails closed, with the generic message.
+        | "review_unavailable"
+        // ADMIN-3-REVIEW (S3): the write met LB462/LB463 -- the book's
+        // files changed after the read above.
+        | "book_changed"
         | "paid_mode_required"
         | "update_failed";
     };
@@ -1659,72 +1841,93 @@ async function performPublish(
     return { ok: false, reason: "takedown_unavailable" };
   }
 
-  // ALL-WIRING-2: the catalog price is read fresh from the book's own
-  // row -- never trusted from the client -- and classified three ways.
-  const catalogPriceState = resolveCatalogPriceState(book.price_all);
-
-  // A book with no authored ALL price cannot be published at any
-  // permission level: there is no price for a reader to be shown and
-  // none for a checkout to freeze. This is a refusal to publish, NOT an
-  // unpublish -- an already-published legacy row with a null price stays
-  // published and stays reachable; nothing in this function or anywhere
-  // else in this patch moves a row back to draft.
-  if (catalogPriceState === "unavailable") {
-    return { ok: false, reason: "missing_all_price" };
+  // ADMIN-3-REVIEW (M2): the gate itself now lives in ONE shared helper,
+  // checkPublishGate() (src/lib/publish-readiness.ts), so the staff
+  // Approve action re-runs exactly these checks in exactly this order.
+  // The history of each rule, unchanged:
+  //
+  //   ALL-WIRING-2: the catalog price is read fresh from the book's own
+  //   row -- never trusted from the client -- and classified three ways.
+  //   A book with no authored ALL price cannot be published at any
+  //   permission level: there is no price for a reader to be shown and
+  //   none for a checkout to freeze. This is a refusal to publish, NOT an
+  //   unpublish -- an already-published legacy row with a null price stays
+  //   published and stays reachable; nothing in this function or anywhere
+  //   else in this patch moves a row back to draft.
+  //   FIX1 (X16): Renato's rule, a description before Publish. A refusal
+  //   only: an already-published book without one is never moved back to
+  //   draft, and saving a draft without one is untouched (createBook
+  //   inserts the draft before calling this).
+  //   F4 (P4): Renato's rule, a rights choice before Publish -- read with
+  //   the author's own session, three ways (book-rights.ts). A refusal
+  //   only: an already-published book is never moved back to draft.
+  //   Only a book that will actually be sold needs paid-publishing
+  //   authorization at all -- so a FREE (price_all = 0) title publishes
+  //   here exactly as it always has, with no paid-mode permission
+  //   involved.
+  //   PAID-MODE-1 / PR-G: whether Librum may publish a PAID title at all
+  //   is a product permission, decided HERE -- after the book's own
+  //   server-read `price_all` proves this title is paid. Since PR G this
+  //   is the SOLE authorization for paid publishing, and while
+  //   PAID_PUBLISHING_MODE is absent it denies everywhere.
+  //
+  //   The legacy profiles.stripe_payouts_enabled prerequisite that used
+  //   to sit below it is gone. Stated precisely, because the looser
+  //   version of this claim is wrong: connectStripeAccount()
+  //   (dashboard/payouts/actions.ts) fails closed under every
+  //   configuration since STRIPE-DISABLE-1, so no author can CREATE a
+  //   Connect account or finish onboarding one. That is not the same as
+  //   the flag being unsettable -- processAccountUpdatedEvent()
+  //   (api/webhooks/stripe/route.ts) writes it from Stripe's own
+  //   account.updated event, so a pre-existing connected account could
+  //   still flip it to true. The prerequisite was removed for a
+  //   different reason: it is provider-specific author-payout state, and
+  //   provider-specific payout state is not a valid permission to
+  //   publish a priced title. Removing it does not weaken this gate:
+  //   canPublishPaidTitle() still denies in every environment where
+  //   PAID_PUBLISHING_MODE is unset, which is everywhere today.
+  //
+  //   Consequence worth stating plainly: performPublish() now reads no
+  //   `profiles` row at ANY price. A denial costs no database query and
+  //   cannot be used to probe another author's state -- the property the
+  //   old ordering bought, now unconditional.
+  const gate = await checkPublishGate({
+    priceAll: book.price_all,
+    description: book.description,
+    readRights: async () => (await getRightsDeclarationState(bookId)).kind,
+    paidPublishingAvailable: canPublishPaidTitle,
+  });
+  if (!gate.ok) {
+    return { ok: false, reason: gate.reason };
   }
 
-  // FIX1 (X16): Renato's rule, a description before Publish. A refusal
-  // only: an already-published book without one is never moved back to
-  // draft, and saving a draft without one is untouched (createBook
-  // inserts the draft before calling this).
-  if (typeof book.description !== "string" || book.description.trim().length === 0) {
-    return { ok: false, reason: "missing_description" };
-  }
-
-  // F4 (P4): Renato's rule, a rights choice before Publish -- read with
-  // the author's own session, three ways (book-rights.ts). A refusal
-  // only: an already-published book is never moved back to draft.
-  const rightsState = await getRightsDeclarationState(bookId);
-  if (rightsState.kind === "none") {
-    return { ok: false, reason: "missing_rights" };
-  }
-  if (rightsState.kind === "unavailable") {
-    return { ok: false, reason: "rights_unavailable" };
-  }
-
-  // Only a book that will actually be sold needs paid-publishing
-  // authorization at all -- so a FREE (price_all = 0) title publishes
-  // here exactly as it always has, with no paid-mode permission
-  // involved.
-  if (catalogPriceState === "paid") {
-    // PAID-MODE-1 / PR-G: whether Librum may publish a PAID title at all
-    // is a product permission, decided HERE -- after the book's own
-    // server-read `price_all` proves this title is paid. Since PR G this
-    // is the SOLE authorization for paid publishing, and while
-    // PAID_PUBLISHING_MODE is absent it denies everywhere.
-    //
-    // The legacy profiles.stripe_payouts_enabled prerequisite that used
-    // to sit below it is gone. Stated precisely, because the looser
-    // version of this claim is wrong: connectStripeAccount()
-    // (dashboard/payouts/actions.ts) fails closed under every
-    // configuration since STRIPE-DISABLE-1, so no author can CREATE a
-    // Connect account or finish onboarding one. That is not the same as
-    // the flag being unsettable -- processAccountUpdatedEvent()
-    // (api/webhooks/stripe/route.ts) writes it from Stripe's own
-    // account.updated event, so a pre-existing connected account could
-    // still flip it to true. The prerequisite was removed for a
-    // different reason: it is provider-specific author-payout state, and
-    // provider-specific payout state is not a valid permission to
-    // publish a priced title. Removing it does not weaken this gate:
-    // canPublishPaidTitle() still denies in every environment where
-    // PAID_PUBLISHING_MODE is unset, which is everywhere today.
-    //
-    // Consequence worth stating plainly: performPublish() now reads no
-    // `profiles` row at ANY price. A denial costs no database query and
-    // cannot be used to probe another author's state -- the property the
-    // old ordering bought, now unconditional.
-    if (!canPublishPaidTitle()) {
-      return { ok: false, reason: "paid_mode_required" };
+  // ADMIN-3-REVIEW (A, M5): every author-fixable and permission gate has
+  // passed. A draft whose current files Librum has not approved is sent
+  // for review instead of published; a draft with a valid approval (3a)
+  // and an already-published book continue below exactly as before.
+  // Read with the author's own session (book_review_state checks the
+  // caller owns the book); fails closed.
+  if (book.status !== "published") {
+    const reviewState = await getBookReviewState(supabase, bookId);
+    if (reviewState.kind === "unavailable") {
+      return { ok: false, reason: "review_unavailable" };
+    }
+    if (!reviewState.approvalValid) {
+      const request = await requestBookReview(supabase, bookId);
+      if (request.ok) {
+        return { ok: true, outcome: "sent_for_review" };
+      }
+      if (request.reason === "already_pending") {
+        return { ok: false, reason: "already_in_review" };
+      }
+      if (request.reason === "taken_down") {
+        return { ok: false, reason: "taken_down" };
+      }
+      // "already_approved": an approval landed after the read above, so
+      // the publish below goes ahead (the trigger re-checks it).
+      if (request.reason !== "already_approved") {
+        return { ok: false, reason: "review_unavailable" };
+      }
     }
   }
 
@@ -1777,6 +1980,11 @@ async function performPublish(
     if (error.code === "LB460") {
       return { ok: false, reason: "taken_down" };
     }
+    // ADMIN-3-REVIEW (S3): the approval no longer matches the files
+    // (LB462), or the live files changed (LB463), after the reads above.
+    if (error.code === "LB462" || error.code === "LB463") {
+      return { ok: false, reason: "book_changed" };
+    }
     return { ok: false, reason: "update_failed" };
   }
   if (!isExactlyOneRowWritten(publishedRows)) {
@@ -1794,7 +2002,7 @@ async function performPublish(
     await clearOwnBookLibrumChoice(catalogWriter, bookId, userId, "performPublish");
   }
 
-  return { ok: true, wasNewlyPublished: isFirstPublication };
+  return { ok: true, outcome: "published", wasNewlyPublished: isFirstPublication };
 }
 
 // F5 (C5, Renato 10:25Z): an unpublished book loses its "Librum's choice"
@@ -1888,7 +2096,18 @@ export async function publishBook(bookId: string) {
     }
     // F4 (D3): the existing generic sentence, on the dashboard. ADMIN-2:
     // an unreadable takedown state is answered the same way.
-    if (result.reason === "rights_unavailable" || result.reason === "takedown_unavailable") {
+    // ADMIN-3-REVIEW: already waiting, or changed under the author.
+    if (result.reason === "already_in_review") {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
+    }
+    if (result.reason === "book_changed") {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
+    }
+    if (
+      result.reason === "rights_unavailable" ||
+      result.reason === "takedown_unavailable" ||
+      result.reason === "review_unavailable"
+    ) {
       redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
     }
     if (result.reason === "paid_mode_required") {
@@ -1902,6 +2121,13 @@ export async function publishBook(bookId: string) {
     // checked for an error before this extraction) getting the same
     // safe fallback rather than being silently ignored.
     redirect("/dashboard");
+  }
+
+  // ADMIN-3-REVIEW (A): sent for review -- nothing went live, so there is
+  // nothing to notify or refresh but the author's own Dashboard.
+  if (result.outcome === "sent_for_review") {
+    revalidatePath("/dashboard");
+    redirect(`/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`);
   }
 
   // The books.status="published" mutation above has already committed
@@ -2187,6 +2413,18 @@ export async function deleteBook(bookId: string) {
     );
   }
 
+  // ADMIN-3-REVIEW (N3, P5): every manuscript key this book's review
+  // history names (a superseded approved file, a stale snapshot) is read
+  // NOW, with the trusted client -- authors cannot read review paths, and
+  // the rows lose their book_id once the book is gone. A failed read
+  // stops the deletion (fail closed), so nothing is ever orphaned
+  // silently.
+  const catalogWriter = createCatalogWriteClient();
+  const snapshots = await readReviewSnapshots(catalogWriter, [book.id]);
+  if (!snapshots.ok) {
+    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+  }
+
   // The books row is deleted BEFORE any storage cleanup is attempted --
   // deliberately, not incidentally. The count check above is only an
   // advisory, point-in-time snapshot: a reader could acquire this book
@@ -2261,12 +2499,19 @@ export async function deleteBook(bookId: string) {
       unsafeStoredPathCount += 1;
     }
   }
-  if (book.file_path !== null) {
-    if (isOwnCanonicalBookManuscriptPath(book.file_path, user.id, book.id)) {
-      removals.push({ bucket: BOOK_MANUSCRIPTS_BUCKET, path: book.file_path });
-    } else {
-      unsafeStoredPathCount += 1;
-    }
+  if (book.file_path !== null && !isOwnBookManuscriptPath(book.file_path, user.id, book.id)) {
+    unsafeStoredPathCount += 1;
+  }
+  // ADMIN-3-REVIEW: the current manuscript (canonical or versioned key)
+  // and every own key the review snapshots name; removed with the
+  // trusted catalog writer (M1: no author delete outside "<uid>/tmp/").
+  for (const path of deletedBookManuscriptKeys({
+    authorId: user.id,
+    bookId: book.id,
+    currentFilePath: book.file_path,
+    reviews: snapshots.byBook.get(book.id) ?? [],
+  })) {
+    removals.push({ bucket: BOOK_MANUSCRIPTS_BUCKET, path });
   }
   if (unsafeStoredPathCount > 0) {
     console.warn("deleteBook: stored paths that are not this book's own keys were left untouched", {

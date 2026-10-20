@@ -12,8 +12,9 @@ import {
   BOOK_MANUSCRIPTS_BUCKET,
   isNewBookCoverPath,
   isOwnCanonicalBookCoverPath,
-  isOwnCanonicalBookManuscriptPath,
+  isOwnBookManuscriptPath,
 } from "@/lib/book-storage-path";
+import { deletedBookManuscriptKeys, readReviewSnapshots } from "@/lib/book-reviews";
 
 export async function deleteAccount(formData: FormData) {
   // AUTH-1C: defense-in-depth -- Proxy already blocks /account itself
@@ -228,7 +229,9 @@ export async function deleteAccount(formData: FormData) {
     }
     const storedManuscriptPath: unknown = book.file_path;
     if (storedManuscriptPath !== null) {
-      if (isOwnCanonicalBookManuscriptPath(storedManuscriptPath, user.id, book.id)) {
+      // ADMIN-3-REVIEW: the canonical key or a versioned one
+      // (`<uid>/<book id>/<uuid>.epub`), both bound to this user and book.
+      if (isOwnBookManuscriptPath(storedManuscriptPath, user.id, book.id)) {
         manuscriptPaths.add(storedManuscriptPath);
       } else {
         skippedManuscriptCount += 1;
@@ -249,6 +252,30 @@ export async function deleteAccount(formData: FormData) {
   }
 
   const admin = createAdminClient();
+
+  // ADMIN-3-REVIEW (N3, P5): a book's review history may name more of its
+  // own manuscript keys (the last approved file kept for buyers, a stale
+  // snapshot). They are read NOW, before deleteUser -- the cascade sets
+  // the rows' book_id to null -- with the service-role client; a failed
+  // read stops the deletion before anything is touched. Every key is
+  // classified against this user and that book (own-key rule only).
+  if (bookIds.length > 0) {
+    const snapshots = await readReviewSnapshots(admin, bookIds);
+    if (!snapshots.ok) {
+      console.error("deleteAccount: review snapshots read failed; nothing was deleted");
+      redirect("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+    }
+    for (const book of authoredBooks) {
+      for (const path of deletedBookManuscriptKeys({
+        authorId: user.id,
+        bookId: book.id,
+        currentFilePath: null,
+        reviews: snapshots.byBook.get(book.id) ?? [],
+      })) {
+        manuscriptPaths.add(path);
+      }
+    }
+  }
 
   // The account/database row is authoritative -- storage cleanup is
   // secondary. deleteUser runs (and its result is checked) BEFORE any

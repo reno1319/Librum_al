@@ -12,6 +12,10 @@ import {
   isTakedownReason,
   takedownReasonForReport,
   takedownReasonLabel,
+  SEND_BACK_MESSAGE_MAX_LENGTH,
+  SEND_BACK_PREFILL_MESSAGES,
+  SEND_BACK_REASONS,
+  isSendBackReason,
 } from "./takedown-reasons";
 
 // ADMIN-2-TAKEDOWN: the shared words, and their agreement with the
@@ -105,5 +109,52 @@ describe("AUTHOR_TAKEDOWN_COLUMNS (R1)", () => {
     expect(AUTHOR_TAKEDOWN_COLUMNS.split(",").map((c) => c.trim())).toEqual(granted);
     expect(granted).not.toContain("id");
     expect(AUTHOR_TAKEDOWN_COLUMNS).not.toContain("*");
+  });
+});
+
+// ADMIN-3-REVIEW (S7, N7): Send back reuses the takedown list without
+// "Author asked"; its codes are exactly what book_reviews.reason accepts.
+describe("send-back reasons (ADMIN-3)", () => {
+  const reviewMigration = readFileSync(
+    path.join(__dirname, "../../supabase/migrations/20261020120000_book_reviews.sql"),
+    "utf8",
+  );
+
+  it("are the takedown reasons without author_asked, in the same order", () => {
+    expect([...SEND_BACK_REASONS]).toEqual(TAKEDOWN_REASONS.filter((r) => r !== "author_asked"));
+    expect(SEND_BACK_REASONS.map((r) => TAKEDOWN_REASON_LABELS[r])).toEqual([
+      "Copyright complaint",
+      "Breaks content rules",
+      "Wrong or broken file",
+      "Other",
+    ]);
+  });
+
+  it("match book_reviews_reason_check", () => {
+    const check = reviewMigration.match(/book_reviews_reason_check\s+check\s*\(\s*reason in \(([^)]+)\)/i);
+    expect(check).not.toBeNull();
+    expect(check![1].split(",").map((c) => c.trim().replace(/'/g, ""))).toEqual([...SEND_BACK_REASONS]);
+  });
+
+  it("isSendBackReason accepts exactly those codes", () => {
+    for (const r of SEND_BACK_REASONS) expect(isSendBackReason(r)).toBe(true);
+    for (const v of ["author_asked", "Copyright", "", null, undefined, 1]) expect(isSendBackReason(v)).toBe(false);
+  });
+
+  it("prefills every reason but Other, within the message limit, with no review-time promise", () => {
+    expect(SEND_BACK_PREFILL_MESSAGES.other).toBe("");
+    for (const r of SEND_BACK_REASONS.filter((x) => x !== "other")) {
+      const text = SEND_BACK_PREFILL_MESSAGES[r];
+      expect(text.length).toBeGreaterThan(0);
+      expect(text.length).toBeLessThanOrEqual(SEND_BACK_MESSAGE_MAX_LENGTH);
+      expect(text).toBe(text.trim());
+      expect(text).not.toMatch(/\b(hours?|days?|within)\b/i);
+    }
+  });
+
+  it("the message limit mirrors book_reviews_message_to_author_check", () => {
+    expect(reviewMigration).toMatch(
+      new RegExp(`book_reviews_message_to_author_check\\s+check \\(char_length\\(message_to_author\\) between 1 and ${SEND_BACK_MESSAGE_MAX_LENGTH}`),
+    );
   });
 });

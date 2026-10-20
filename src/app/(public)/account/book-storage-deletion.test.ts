@@ -8,6 +8,7 @@ import {
   UNSAFE_COVER_PATHS,
   UNSAFE_MANUSCRIPT_PATHS,
 } from "@/lib/book-storage-path-test-fixtures";
+import { bookReviewsDoubleState, resetBookReviewsDouble } from "@/lib/book-reviews-test-double";
 
 // ACCOUNT-DELETION-BOOK-STORAGE-AUTH-1 (Patch 10): the REAL deleteAccount
 // Server Action hands a stored books.cover_path / books.file_path to
@@ -27,6 +28,13 @@ class RedirectSignal extends Error {
     super(`REDIRECT:${target}`);
   }
 }
+// ADMIN-3-REVIEW: book_reviews reads/writes replaced by a settable
+// double (default: nothing pending, approval valid); see
+// src/lib/book-reviews-test-double.ts.
+vi.mock("@/lib/book-reviews", async (importOriginal) => {
+  const { bookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+  return bookReviewsDouble(await importOriginal<object>());
+});
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
     throw new RedirectSignal(url);
@@ -206,6 +214,7 @@ beforeEach(() => {
     avatars: new Set([`${USER_ID}/avatar.png`, ...VICTIM_OBJECTS.avatars]),
   };
   cookieStore.get.mockReset().mockImplementation(() => undefined);
+  resetBookReviewsDouble();
   for (const m of ["error", "warn", "log", "info", "debug"] as const) vi.spyOn(console, m).mockImplementation(() => {});
 });
 
@@ -639,5 +648,57 @@ describe("17, 18: existing gates stay ahead of the books read", () => {
     expect(await run()).toContain("/account?error=Your+account+can%27t+be+deleted");
     expect(purchaseBookIds).toEqual([BOOK_ID, OTHER_BOOK_ID]);
     expectNothingIrreversible();
+  });
+});
+
+// ============================================================
+// ADMIN-3-REVIEW (N3, P5): a book's review history may name more of its
+// own manuscript keys (the last approved file kept for buyers, a stale
+// snapshot). They are read with the service role BEFORE deleteUser and
+// classified by the same own-key rule; a failed read stops everything.
+describe("review snapshots (ADMIN-3, N3/P5)", () => {
+  const VERSIONED_OLD = `${USER_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020100.epub`;
+  const VERSIONED_CURRENT = `${USER_ID}/${BOOK_ID}/1a2b3c4d-5e6f-4a0b-9c1d-2e3f4a5b6c7d.epub`;
+
+  it("a versioned current file and every own snapshot key are removed, once, after deleteUser", async () => {
+    objects.manuscripts.add(VERSIONED_OLD).add(VERSIONED_CURRENT);
+    setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: VERSIONED_CURRENT }]);
+    bookReviewsDoubleState.snapshots = [
+      { book_id: BOOK_ID, file_path: OWN_MANUSCRIPT, status: "approved" },
+      { book_id: BOOK_ID, file_path: VERSIONED_OLD, status: "cancelled" },
+      { book_id: BOOK_ID, file_path: VERSIONED_CURRENT, status: "pending" },
+    ];
+    expect(await run()).toBe("/?account=deleted");
+    expect(bookReviewsDoubleState.calls).toContainEqual({ fn: "readReviewSnapshots", bookId: BOOK_ID });
+    const [manuscripts] = removalsFor("manuscripts");
+    expect(new Set(manuscripts.paths as string[])).toEqual(new Set([VERSIONED_CURRENT, OWN_MANUSCRIPT, VERSIONED_OLD]));
+    expect((manuscripts.paths as string[]).length).toBe(3);
+    expect(events.indexOf(`deleteUser:${USER_ID}`)).toBeLessThan(events.indexOf("remove:manuscripts"));
+  });
+
+  it("a snapshot key that is not this user's own key for that book is never removed", async () => {
+    setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
+    bookReviewsDoubleState.snapshots = [
+      { book_id: BOOK_ID, file_path: VICTIM_MANUSCRIPT, status: "approved" },
+      { book_id: BOOK_ID, file_path: OWN_BOOK_2_MANUSCRIPT, status: "approved" },
+      { book_id: BOOK_ID, file_path: `${USER_ID}/${BOOK_ID}/../x.epub`, status: "cancelled" },
+    ];
+    expect(await run()).toBe("/?account=deleted");
+    expect(removalsFor("manuscripts")).toEqual([{ via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] }]);
+  });
+
+  it("a failed snapshot read stops before deleteUser and before any removal", async () => {
+    setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
+    bookReviewsDoubleState.snapshotsOk = false;
+    expect(await run()).toBe(PREPARE_ERROR);
+    expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
+    expect(storageCalls).toEqual([]);
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("no authored books: no snapshot read", async () => {
+    setBooks([]);
+    expect(await run()).toBe("/?account=deleted");
+    expect(bookReviewsDoubleState.calls).toEqual([]);
   });
 });

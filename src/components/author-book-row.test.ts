@@ -52,3 +52,53 @@ describe("AuthorBookRow: a book Librum took down", () => {
     expect(html).not.toContain("TAKEN DOWN");
   });
 });
+
+// ADMIN-3-REVIEW (F, 4a): the IN REVIEW tag (no timing promise, no
+// "Continue setup"), and the send-back notice while it is the newest
+// review. The takedown notice keeps priority.
+describe("AuthorBookRow: In review and sent back (ADMIN-3)", () => {
+  const SENT_BACK = { sentBackAt: "2026-10-19T10:00:00Z", reason: "broken_file", message: "The file does not open" };
+  const TAKEDOWN = { takenDownAt: "2026-10-19T10:00:00Z", reason: "copyright", message: "Proof please", bundleTitles: [] };
+
+  it("in review: the IN REVIEW tag instead of DRAFT, no missing list, no Continue setup", () => {
+    const html = render({ review: { inReview: true, sentBack: null } });
+    expect(html).toContain(">IN REVIEW<");
+    expect(html).not.toContain(">DRAFT<");
+    expect(html).not.toContain("Missing:");
+    expect(html).not.toContain("Continue setup");
+    expect(html).not.toMatch(/\b(hours?|days?|within|soon)\b/i);
+  });
+
+  it("sent back: the notice, in reading order, and the draft's own controls", () => {
+    const html = render({ review: { inReview: false, sentBack: SENT_BACK } });
+    expect(html).toContain(">DRAFT<");
+    expect(html).toMatch(/Librum sent this book back on [^<]+\. Reason: Wrong or broken file\./);
+    const order = ["Librum sent this book back", "The file does not open.", "Fix it and send it for review again.", "Questions? Write to support@librum.al"];
+    const at = order.map((text) => html.indexOf(text));
+    expect(at.every((i) => i > -1)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(html).toContain("Continue setup");
+  });
+
+  it("a takedown replaces both", () => {
+    for (const review of [{ inReview: true, sentBack: null }, { inReview: false, sentBack: SENT_BACK }]) {
+      const html = render({ takedown: TAKEDOWN, review });
+      expect(html).toContain(">TAKEN DOWN<");
+      expect(html).not.toContain(">IN REVIEW<");
+      expect(html).not.toContain("Librum sent this book back");
+    }
+  });
+
+  it("a live book shows neither", () => {
+    const html = render({ book: { ...BOOK, status: "published" }, review: { inReview: true, sentBack: SENT_BACK } });
+    expect(html).toContain(">LIVE<");
+    expect(html).not.toContain(">IN REVIEW<");
+    expect(html).not.toContain("Librum sent this book back");
+  });
+
+  it("the notice escapes Librum's message", () => {
+    const html = render({ review: { inReview: false, sentBack: { ...SENT_BACK, message: "<b>x</b>" } } });
+    expect(html).not.toContain("<b>x</b>");
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
+  });
+});
