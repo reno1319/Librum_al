@@ -18,11 +18,13 @@ import {
 export const FIXTURE_STORAGE_BUCKETS = ["covers", "manuscripts", "avatars"] as const;
 export type FixtureStorageBucket = (typeof FIXTURE_STORAGE_BUCKETS)[number];
 
-// The 10 baseline keys (5 books x cover+manuscript).
+// The 10 baseline keys (5 books x cover+manuscript). PEN-2: the covers
+// are at `<book id>/cover.png` (the new shape), the manuscripts stay
+// under the author's own namespace.
 export function expectedBaselineObjectKeys(authorId: string): readonly { bucket: "covers" | "manuscripts"; key: string }[] {
   const keys: { bucket: "covers" | "manuscripts"; key: string }[] = [];
   for (const book of FIXTURE_BOOKS) {
-    keys.push({ bucket: "covers", key: fixtureCoverPath(authorId, book.id) });
+    keys.push({ bucket: "covers", key: fixtureCoverPath(book.id) });
     keys.push({ bucket: "manuscripts", key: fixtureManuscriptPath(authorId, book.id) });
   }
   return keys;
@@ -247,4 +249,77 @@ export function planNamespaceCleanup(params: {
     plan.push({ bucket: params.bucket, key: fullKey });
   }
   return plan;
+}
+
+// ============================================================
+// PEN-2 (D6): covers and pen-name photos no longer live under the
+// account's own folder -- a new cover is `<random uuid>/cover.<jpg|png>`
+// and a pen-name photo `<random uuid>/pen-name.<jpg|png>` -- so walking
+// `<account id>/` can no longer find them. They are discovered from the
+// fixture accounts' OWN database rows instead (books.cover_path of the
+// fixture author's books, pen_names.avatar_path of both fixture
+// accounts), plus a walk of each fixture book's fixed cover folder. The
+// manuscripts bucket (and its tmp/ staging folders) is still walked under
+// each account's namespace, as before.
+//
+// A key read from a fixture row is accepted only when it is under one of
+// the fixture accounts' own namespaces (an old-shape key) or has exactly
+// the new shape for its bucket. Anything else is refused -- never
+// deleted -- exactly like an unexpected namespace key above.
+// ============================================================
+
+const UUID_SEGMENT = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const NEW_COVER_KEY = new RegExp(`^${UUID_SEGMENT}/cover\\.(?:jpg|png)$`);
+const PEN_NAME_PHOTO_KEY = new RegExp(`^${UUID_SEGMENT}/pen-name\\.(?:jpg|png)$`);
+const UUID_ONLY = new RegExp(`^${UUID_SEGMENT}$`);
+
+export type FixtureRowStorageKeys = { covers: readonly string[]; avatars: readonly string[] };
+
+export function isFixtureRowOwnedKey(
+  bucket: "covers" | "avatars",
+  key: string,
+  namespaceIds: readonly string[],
+): boolean {
+  if (namespaceIds.some((id) => isWithinFixtureNamespace(key, id))) return true;
+  return bucket === "covers" ? NEW_COVER_KEY.test(key) : PEN_NAME_PHOTO_KEY.test(key);
+}
+
+export function planRowKeyCleanup(params: {
+  rowKeys: FixtureRowStorageKeys;
+  namespaceIds: readonly string[];
+}): StorageCleanupPlanEntry[] {
+  const plan: StorageCleanupPlanEntry[] = [];
+  for (const bucket of ["covers", "avatars"] as const) {
+    for (const key of params.rowKeys[bucket]) {
+      if (!isFixtureRowOwnedKey(bucket, key, params.namespaceIds)) {
+        throw new UnexpectedStorageKeyError(
+          `A fixture row in bucket "${bucket}" names a key that is neither under a fixture ` +
+            "account's own namespace nor of the new random-folder shape. Refusing to include it in " +
+            "any deletion plan.",
+        );
+      }
+      plan.push({ bucket, key });
+    }
+  }
+  return plan;
+}
+
+// The single top-level folder of a new-shape key (`<uuid>/…`), or null.
+export function newShapeKeyFolder(key: string): string | null {
+  const slash = key.indexOf("/");
+  if (slash === -1) return null;
+  const folder = key.slice(0, slash);
+  return UUID_ONLY.test(folder) ? folder : null;
+}
+
+export function dedupeStoragePlan(entries: readonly StorageCleanupPlanEntry[]): StorageCleanupPlanEntry[] {
+  const seen = new Set<string>();
+  const out: StorageCleanupPlanEntry[] = [];
+  for (const entry of entries) {
+    const k = `${entry.bucket}:${entry.key}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(entry);
+  }
+  return out;
 }

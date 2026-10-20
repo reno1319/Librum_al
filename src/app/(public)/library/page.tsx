@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Book } from "@/lib/types";
+import type { PublicBook } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -28,9 +28,11 @@ export const metadata: Metadata = {
 // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
 // PEN-NAMES-1: the byline is the book's pen name, embedded from the
 // public_pen_names view as `pen` (no account columns).
+// PEN-NAMES-2: the book is embedded from public_books (aliased `books`),
+// which shows a buyer the books they own with no account column.
 type PurchaseWithBook = {
   book_id: string;
-  books: (Book & { pen: PenNameRef | null }) | null;
+  books: (PublicBook & { pen: PenNameRef | null }) | null;
 };
 
 export default async function LibraryPage({
@@ -50,7 +52,7 @@ export default async function LibraryPage({
 
   const { data: purchases } = await supabase
     .from("purchases")
-    .select("book_id, books(*, pen:public_pen_names(id, name))")
+    .select("book_id, books:public_books(*, pen:public_pen_names(id, name))")
     .eq("reader_id", user.id)
     .returns<PurchaseWithBook[]>();
 

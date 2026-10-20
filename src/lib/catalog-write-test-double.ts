@@ -17,13 +17,43 @@
 // concern: that boundary is pinned against two distinct doubles in
 // src/app/(public)/dashboard/catalog-write-authorization.test.ts.
 
-type Queryable = { from(table: string): unknown; rpc?(fn: string, args?: unknown): unknown };
+type StorageBucketLike = Record<string, (...args: unknown[]) => unknown>;
+type Queryable = {
+  from(table: string): unknown;
+  rpc?(fn: string, args?: unknown): unknown;
+  storage?: { from(bucket: string): unknown };
+};
 type Recorded = { method: string | symbol; args: unknown[] };
 
+// PEN-2 (L10): covers are uploaded and removed with the catalog writer,
+// so the double also forwards `storage.from(bucket).<op>(...)` to the same
+// client's storage. `onStorage`, when given, is told about every such call
+// first, so a suite can prove a Storage call went through the writer.
 export function catalogWriterReplayingOnto(
   resolveClient: () => Queryable | Promise<Queryable>,
+  onStorage?: (op: string, bucket: string, args: unknown[]) => void,
 ): Required<Queryable> {
   return {
+    storage: {
+      from(bucket: string) {
+        return new Proxy(
+          {},
+          {
+            get(_target, op) {
+              return async (...args: unknown[]) => {
+                onStorage?.(String(op), bucket, args);
+                const client = await resolveClient();
+                if (!client.storage) {
+                  throw new Error("catalog writer double: storage is not supported by this client double");
+                }
+                const api = client.storage.from(bucket) as StorageBucketLike;
+                return api[String(op)](...args);
+              };
+            },
+          },
+        );
+      },
+    },
     // BUNDLE-MEMBERSHIP-AUTH-1: the trusted membership writers are RPCs
     // (create_bundle_with_membership / update_bundle_with_membership). The
     // call is forwarded to the same double only when awaited, like `from`.

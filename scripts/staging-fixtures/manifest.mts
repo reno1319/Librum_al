@@ -221,14 +221,18 @@ export function baselineTableRowIds(): Readonly<Record<string, readonly string[]
 }
 
 // ============================================================
-// Storage: deterministic paths, matching createBook()'s own convention
-// exactly (src/app/(public)/dashboard/books/actions.ts:529-530):
-//   covers/<author_id>/<book_id>-cover.<ext>
-//   manuscripts/<author_id>/<book_id>.epub
+// Storage: deterministic paths.
+//   covers/<book_id>/cover.png         (PEN-2: the new cover shape,
+//                                       `<uuid>/cover.<jpg|png>`, never
+//                                       the account id; createBook uses a
+//                                       random folder, the fixtures use
+//                                       the fixed book id so a reset can
+//                                       find the object again)
+//   manuscripts/<author_id>/<book_id>.epub   (unchanged, private bucket)
 // ============================================================
 
-export function fixtureCoverPath(authorId: string, bookId: string): string {
-  return `${authorId}/${bookId}-cover.png`;
+export function fixtureCoverPath(bookId: string): string {
+  return `${bookId}/cover.png`;
 }
 
 export function fixtureManuscriptPath(authorId: string, bookId: string): string {

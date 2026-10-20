@@ -19,7 +19,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { getLibrumChoiceBook } from "@/lib/librum-choice";
 import { resolveBookstoreFeature } from "@/lib/librum-choice-logic";
-import type { Book, Bundle } from "@/lib/types";
+import type { PublicBook, PublicBundle } from "@/lib/types";
 import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
@@ -53,13 +53,14 @@ export const dynamic = "force-dynamic";
 // the book's (or bundle's) pen name, embedded from the public_pen_names
 // view as `pen` -- no account columns -- and links to /authors/<pen
 // name id>.
-type BookWithAuthor = Book & {
+// PEN-NAMES-2: every read on this page goes through the public views.
+type BookWithAuthor = PublicBook & {
   pen: PenNameRef | null;
 };
-type BundleWithAuthor = Pick<Bundle, "id" | "title" | "price_all"> & {
+type BundleWithAuthor = Pick<PublicBundle, "id" | "title" | "price_all"> & {
   pen: PenNameRef | null;
   // REDESIGN STEP 3: member rows, for the stacked covers and the count.
-  bundle_books?: { books: Pick<Book, "cover_path"> | null }[] | null;
+  bundle_books?: { books: Pick<PublicBook, "cover_path"> | null }[] | null;
 };
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -117,7 +118,7 @@ async function fetchSearchResults(
   // unsearched paths can never disagree about which books exist.
   const baseQuery = () => {
     let query = supabase
-      .from("books")
+      .from("public_books")
       .select("*, pen:public_pen_names(id, name)")
       .eq("status", "published")
       .not("price_all", "is", null);
@@ -183,7 +184,7 @@ async function fetchSearchResults(
         // every other book listing on this page already does -- the
         // RPC only ever hands back ids, never book/profile data itself.
         const { data: fetchedBooks, error: fetchError } = await supabase
-          .from("books")
+          .from("public_books")
           .select("*, pen:public_pen_names(id, name)")
           .eq("status", "published")
           .not("price_all", "is", null)
@@ -281,9 +282,9 @@ async function fetchPublishedBundles(
   supabase: SupabaseClient,
 ): Promise<BundleWithAuthor[]> {
   const { data, error } = await supabase
-    .from("bundles")
+    .from("public_bundles")
     .select(
-      "id, title, price_all, pen:public_pen_names(id, name), bundle_books(books(cover_path))",
+      "id, title, price_all, pen:public_pen_names(id, name), bundle_books(books:public_books(cover_path))",
     )
     .eq("status", "published")
     .not("price_all", "is", null)
@@ -309,7 +310,7 @@ async function fetchPublishedBundles(
 // error just hides the shelf.
 async function fetchFreeBooks(supabase: SupabaseClient): Promise<BookWithAuthor[]> {
   const { data, error } = await supabase
-    .from("books")
+    .from("public_books")
     .select("*, pen:public_pen_names(id, name)")
     .eq("status", "published")
     .eq("price_all", 0)

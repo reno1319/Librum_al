@@ -16,6 +16,7 @@ import { resolveProfileDisplayName } from "./refunds/refund-review-logic";
 import { listAdminAuditEvents } from "./audit/actions";
 import { getActionLabel, resolveAuditActorDisplay } from "./audit/audit-log-logic";
 import type { AuditEventRow } from "@/lib/types";
+import { loadStaffDisplayNames } from "@/lib/staff-display-names";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -98,19 +99,13 @@ export default async function AdminPage() {
   const reportsFailed = Boolean(reportsResult?.error);
   const refundsFailed = Boolean(refundsResult?.error);
 
-  // Reader names for the refund rows the To do list can show, through
-  // the same "Staff with an authorized permission can view any profile"
-  // policy the Refund requests page relies on.
+  // Reader names for the refund rows the To do list can show.
+  // PEN-NAMES-2 (MF3): through staff_profile_display_names(), as the
+  // Refund requests page does -- support no longer reads profiles.
   const readerIds = Array.from(
     new Set(waitingRefunds.map((r) => r.reader_id).filter((id): id is string => id !== null)),
   );
-  const { data: profiles } =
-    readerIds.length > 0
-      ? await supabase.from("profiles").select("id, display_name").in("id", readerIds)
-      : { data: [] };
-  const displayNameById = new Map(
-    (profiles ?? []).map((p: { id: string; display_name: string }) => [p.id, p.display_name]),
-  );
+  const displayNameById = await loadStaffDisplayNames(supabase, readerIds);
 
   const todoReports: TodayReport[] = openReports.map((r) => ({
     id: r.id,

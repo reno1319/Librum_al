@@ -83,6 +83,52 @@ vi.mock("@/lib/pok-checkout", () => ({
 vi.mock("@/lib/pok-repository", () => ({ createPokRepository: () => mockPokRepository() }));
 const { buyBook, getFreeBook } = await import("./actions");
 
+// PEN-NAMES-2: buyBook and getFreeBook read the book's public part from
+// public_books (no author_id) and ask "did this reader write it?" with an
+// own-row query on books (.eq("id").eq("author_id", user).maybeSingle()).
+// Fixtures keep author_id as the hidden truth; the public read strips it
+// and the own-row read answers from it, as RLS would.
+type BookRead = () => Promise<{ data: unknown; error?: unknown }>;
+function bookTables(read: BookRead, userId: string, label = "book tests") {
+  return (table: string) => {
+    if (table === "public_books") {
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => {
+              const result = await read();
+              if (!result.data || typeof result.data !== "object") return result;
+              const rest: Record<string, unknown> = { ...(result.data as Record<string, unknown>) };
+              delete rest.author_id;
+              return { ...result, data: rest };
+            },
+          }),
+        }),
+      };
+    }
+    if (table === "books") {
+      return {
+        select: (columns: string) => ({
+          eq: (idColumn: string, bookId: string) => ({
+            eq: (ownerColumn: string, owner: string) => ({
+              maybeSingle: async () => {
+                if (columns !== "id" || idColumn !== "id" || ownerColumn !== "author_id") {
+                  throw new Error(`${label}: unexpected own-row books query`);
+                }
+                const { data } = await read();
+                const row = data as { author_id?: unknown } | null;
+                const mine = !!row && owner === userId && row.author_id === userId;
+                return { data: mine ? { id: bookId } : null, error: null };
+              },
+            }),
+          }),
+        }),
+      };
+    }
+    throw new Error(`${label}: unexpected table "${table}"`);
+  };
+}
+
 describe("buyBook: POK provider selection", () => {
   const rpc = vi.fn();
   beforeEach(() => {
@@ -97,7 +143,7 @@ describe("buyBook: POK provider selection", () => {
     rpc.mockReset().mockImplementation(async (name: string) => name === "user_owns_book"
       ? { data: false } : { data: mintedQuote(499) });
     mockCreateClient.mockResolvedValue({ auth: { getUser: async () => ({ data: { user: { id: "reader" } } }) }, rpc,
-      from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { id: "book", title: "Test", price_all: 499, author_id: "author", status: "published", profiles: null } }) }) }) }) });
+      from: bookTables(async () => ({ data: { id: "book", title: "Test", price_all: 499, author_id: "author", status: "published", profiles: null } }), "reader") });
   });
   afterEach(() => vi.unstubAllEnvs());
   it("starts POK with a frozen ALL intent and no Stripe key/account dependency", async () => {
@@ -125,6 +171,15 @@ describe("buyBook: POK provider selection", () => {
       expect(intentCall[1]).not.toHaveProperty(removed);
     }
     expect(mockStartPok).toHaveBeenCalled(); expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled(); expect(mockAccountsRetrieve).not.toHaveBeenCalled();
+  });
+  // PEN-NAMES-2: the author is found by an own-row books query, not by an
+  // author_id on the public row. The author is sent back with no intent.
+  it("the author can't buy their own book: no intent, no provider", async () => {
+    mockCreateClient.mockResolvedValue({ auth: { getUser: async () => ({ data: { user: { id: "author" } } }) }, rpc,
+      from: bookTables(async () => ({ data: { id: "book", title: "Test", price_all: 499, author_id: "author", status: "published" } }), "author") });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book" });
+    expect(rpc).not.toHaveBeenCalledWith("create_book_checkout_intent", expect.anything());
+    expect(mockStartPok).not.toHaveBeenCalled();
   });
   it("POK failure never falls back to Stripe", async () => {
     mockStartPok.mockRejectedValue(new Error("timeout"));
@@ -224,15 +279,9 @@ describe("buyBook / getFreeBook: maintenance-mode gate", () => {
     mockCreateClient.mockResolvedValue({
       auth: { getUser: async () => ({ data: { user: { id: "reader" } } }) },
       rpc,
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            single: async () => ({
-              data: { id: "book", title: "Test", price_all: 499, author_id: "author", status: "published" },
-            }),
-          }),
-        }),
-      }),
+      from: bookTables(async () => ({
+        data: { id: "book", title: "Test", price_all: 499, author_id: "author", status: "published" },
+      }), "reader"),
     });
     mockPokConfig.mockReturnValue({ merchantId: "merchant", keyId: "key", keySecret: "secret" });
     mockStartPok.mockResolvedValue(checkoutUrlResult);
@@ -302,12 +351,7 @@ describe("buyBook: fail-closed provider resolution (STRIPE-DISABLE-1)", () => {
     mockRpc = vi.fn().mockResolvedValue({ data: null, error: null });
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: () => Promise.resolve({ data: { user: { id: READER_ID } } }) },
-      from: (table: string) => {
-        if (table !== "books") {
-          throw new Error(`buyBook fail-closed tests: unexpected table "${table}"`);
-        }
-        return { select: () => ({ eq: () => ({ single: () => mockBookSingle() }) }) };
-      },
+      from: bookTables(() => mockBookSingle(), READER_ID, "buyBook fail-closed tests"),
       rpc: (...args: unknown[]) => mockRpc(...args),
     });
   });
@@ -404,12 +448,7 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
 
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: () => Promise.resolve({ data: { user: { id: READER_ID } } }) },
-      from: (table: string) => {
-        if (table !== "books") {
-          throw new Error(`getFreeBook tests: unexpected table "${table}"`);
-        }
-        return { select: () => ({ eq: () => ({ single: () => mockBookSingle() }) }) };
-      },
+      from: bookTables(() => mockBookSingle(), READER_ID, "getFreeBook tests"),
       rpc: (...args: unknown[]) => mockRpc(...args),
     });
     mockCreateAdminClient.mockReturnValue({
@@ -442,6 +481,20 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
     await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/books/${BOOK_ID}?free=success` });
 
     expect(mockPurchasesUpsert).not.toHaveBeenCalled();
+  });
+
+  // PEN-NAMES-2: authorship is asked of books by an own-row query now
+  // that public_books has no author_id. The author still can't claim it.
+  it("the author can't claim their own free book, and nothing is written", async () => {
+    mockBookSingle.mockResolvedValue({
+      data: { id: BOOK_ID, price_all: 0, status: "published", author_id: READER_ID },
+      error: null,
+    });
+
+    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/books/${BOOK_ID}` });
+
+    expect(mockPurchasesUpsert).not.toHaveBeenCalled();
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
   });
 
   it("a priced (non-free) book is refused, regardless of the checkout-provider configuration", async () => {
@@ -598,20 +651,15 @@ describe("buyBook: paid-checkout mode gate (PAID-MODE-1)", () => {
     mockRpc = vi.fn().mockResolvedValue({ data: false, error: null });
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: () => Promise.resolve({ data: { user: { id: READER_ID } } }) },
-      from: (table: string) => {
-        if (table !== "books") throw new Error(`paid-mode tests: unexpected table "${table}"`);
-        return {
-          select: () => ({
-            eq: () => ({
-              single: () =>
-                Promise.resolve({
-                  data: { id: BOOK_ID, title: "T", price_all: 999, status: "published", author_id: AUTHOR_ID },
-                  error: null,
-                }),
-            }),
+      from: bookTables(
+        () =>
+          Promise.resolve({
+            data: { id: BOOK_ID, title: "T", price_all: 999, status: "published", author_id: AUTHOR_ID },
+            error: null,
           }),
-        };
-      },
+        READER_ID,
+        "paid-mode tests",
+      ),
       rpc: (...args: unknown[]) => mockRpc(...args),
     });
     arrangeConfiguredProvider();
@@ -737,9 +785,9 @@ describe("buyBook: stale-checkout quote statuses", () => {
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: async () => ({ data: { user: { id: READER } } }) },
       rpc,
-      from: () => ({ select: () => ({ eq: () => ({ single: async () => ({
+      from: bookTables(async () => ({
         data: { id: "book", title: "Test", price_all: 499, author_id: "author", status: "published", profiles: null },
-      }) }) }) }),
+      }), READER),
     });
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -972,7 +1020,7 @@ describe("buyBook: the catalog price decides, and null is neither free nor paid"
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: async () => ({ data: { user: { id: READER } } }) },
       rpc,
-      from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: bookRow }) }) }) }),
+      from: bookTables(async () => ({ data: bookRow }), READER),
     });
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -1025,7 +1073,7 @@ describe("buyBook: the catalog price decides, and null is neither free nor paid"
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: async () => ({ data: { user: { id: READER } } }) },
       rpc,
-      from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: bookRow }) }) }) }),
+      from: bookTables(async () => ({ data: bookRow }), READER),
     });
 
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: CHECKOUT_URL });
@@ -1036,8 +1084,10 @@ describe("buyBook: the catalog price decides, and null is neither free nor paid"
 
   it("the row the action reads carries price_all and not price_cents", async () => {
     const source = readFileSync(fileURLToPath(new URL("./actions.ts", import.meta.url)), "utf8");
-    expect(source).toContain('.select("id, title, price_all, status, author_id")');
-    expect(source).toContain('.select("id, price_all, status, author_id")');
+    expect(source).toContain('.select("id, title, price_all, status")');
+    expect(source).toContain('.select("id, price_all, status")');
+    // PEN-NAMES-2: the book comes from public_books, never with author_id.
+    expect(source).not.toMatch(/\.from\("public_books"\)\s*\.select\("[^"]*\bauthor_id\b/);
     expect(source).not.toMatch(/\.select\("[^"]*\bprice_cents\b[^"]*"\)/);
   });
 });
@@ -1066,9 +1116,9 @@ describe("buyBook: the two new discount rejections are honest and charge nothing
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: async () => ({ data: { user: { id: READER } } }) },
       rpc,
-      from: () => ({ select: () => ({ eq: () => ({ single: async () => ({
+      from: bookTables(async () => ({
         data: { id: "book", title: "Test", price_all: 499, author_id: "author", status: "published", profiles: null },
-      }) }) }) }),
+      }), READER),
     });
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -1238,9 +1288,9 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: async () => ({ data: { user: { id: READER } } }) },
       rpc,
-      from: () => ({ select: () => ({ eq: () => ({ single: async () => ({
+      from: bookTables(async () => ({
         data: { id: "book", title: "Test", price_all: 499, author_id: "author", status: "published", profiles: null },
-      }) }) }) }),
+      }), READER),
     });
   });
   afterEach(() => vi.unstubAllEnvs());

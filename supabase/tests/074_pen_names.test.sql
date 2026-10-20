@@ -4,6 +4,13 @@
 -- Committed SQL regression suite for PEN-NAMES-1
 -- (supabase/migrations/20261019184512_pen_names.sql):
 --
+-- PEN-NAMES-2 (20261019222500/20261019222600) changed some of these
+-- rules: books.pen_name and its sync are gone (C11), author_follows and
+-- its mirror are gone (C6), pen_names.avatar_path accepts only the random
+-- "<uuid>/pen-name.<ext>" key and a new default pen name no longer copies
+-- the profile photo (C8), anon reads books only through public_books
+-- (C1). Each assertion the PEN-NAMES-2 rule changed says so.
+--
 -- * pen_names is owner-only: anon reads nothing, authenticated reads its
 --   own rows (staff with reports.resolve every row) and may update only
 --   name, bio and links; author_id, avatar_path, is_default, INSERT and
@@ -166,9 +173,9 @@ begin
   perform pg_temp.assert(
     (select pen_name_id from public.books where id = 'e0740001-0000-4000-8000-0000000000a1')
       = pg_temp.dflt('e0740000-0000-4000-8000-00000000000a')
-    and (select pen_name from public.books where id = 'e0740001-0000-4000-8000-0000000000a1') is null
-    and (select pen_name from public.books where id = 'e0740001-0000-4000-8000-0000000000a2') = 'P074 Owl',
-    'part0: a book without pen_name_id gets the default (text null); with one, the text is its name');
+    and (select pen_name_id from public.books where id = 'e0740001-0000-4000-8000-0000000000a2') = 'e0740002-0000-4000-8000-000000000001'
+    and not exists (select 1 from pg_attribute where attrelid = 'public.books'::regclass and attname = 'pen_name' and not attisdropped),
+    'part0 (PEN-NAMES-2): a book without pen_name_id gets the default; with one, it keeps it (books.pen_name is gone, C11)');
 end $$;
 
 -- ============================================================
@@ -322,9 +329,9 @@ begin
   perform pg_temp.assert(pg_temp.dflt('e0740000-0000-4000-8000-0000000000ee') is not null,
     'part3: becoming an author creates the default pen name');
   perform pg_temp.assert(
-    (select bio = 'Becomes bio' and avatar_path = 'e0740000-0000-4000-8000-0000000000ee/avatar.png'
+    (select bio = 'Becomes bio' and avatar_path is null
        from public.pen_names where id = pg_temp.dflt('e0740000-0000-4000-8000-0000000000ee')),
-    'part3 (17a): the new default pen name takes the profile bio and photo');
+    'part3 (17a, PEN-NAMES-2 C8): the new default pen name takes the profile bio; the photo is copied to a new key by becomeAuthor, not by the trigger');
   -- A blank bio stays null; a photo outside "<id>/avatar.<ext>" is not copied.
   update public.profiles set bio = '   ', avatar_path = 'legacy/old-photo.png'
    where id = 'e0740000-0000-4000-8000-0000000000ef';
@@ -334,7 +341,8 @@ begin
     (select bio is null and avatar_path is null
        from public.pen_names where id = pg_temp.dflt('e0740000-0000-4000-8000-0000000000ef')),
     'part3 (17a): a blank bio and a non-canonical photo are not copied');
-  -- avatar_path: a pen name key or the account's OWN profile key only.
+  -- avatar_path: PEN-NAMES-2 (C8) -- only the random pen name key; the
+  -- account's own profile key is refused now too.
   v := pg_temp.run_as('service_role', null,
     $q$update public.pen_names set avatar_path = 'e0740000-0000-4000-8000-00000000000b/avatar.png'
         where id = 'e0740002-0000-4000-8000-000000000002'$q$);
@@ -342,7 +350,7 @@ begin
   v := pg_temp.run_as('service_role', null,
     $q$update public.pen_names set avatar_path = 'e0740000-0000-4000-8000-00000000000a/avatar.jpg'
         where id = 'e0740002-0000-4000-8000-000000000002'$q$);
-  perform pg_temp.assert(v = 'OK:1', format('part3 (17a): the account''s own profile key is accepted -- got %s', v));
+  perform pg_temp.assert(v like '23514:%pen_names_avatar_path_check%', format('part3 (PEN-NAMES-2 C8): the account''s own profile key is refused -- got %s', v));
   v := pg_temp.run_as('service_role', null,
     $q$update public.pen_names set avatar_path = 'e0740000-0000-4000-8000-00000000000a/other.png'
         where id = 'e0740002-0000-4000-8000-000000000002'$q$);
@@ -376,35 +384,36 @@ do $$
 declare
   v text;
 begin
-  -- Old code writes only the text: it finds the existing pen name (any case)...
-  update public.books set pen_name = 'p074 owl' where id = 'e0740001-0000-4000-8000-0000000000a4';
+  -- PEN-NAMES-2 (C11): books.pen_name and its two-way sync are gone. A
+  -- text-only write (old code after the contract) fails loudly instead
+  -- of creating or resolving a pen name.
+  v := pg_temp.run_as('service_role', null,
+    $q$update public.books set pen_name = 'P074 Brand New' where id = 'e0740001-0000-4000-8000-0000000000a4'$q$);
+  perform pg_temp.assert(v like '42703:%', format('part4 (PEN-NAMES-2): a text-only pen_name write fails (no column) -- got %s', v));
+  perform pg_temp.assert(not exists (select 1 from public.pen_names where name = 'P074 Brand New'),
+    'part4 (PEN-NAMES-2): no pen name is created from text any more');
   perform pg_temp.assert(
-    (select pen_name_id = 'e0740002-0000-4000-8000-000000000001' and pen_name = 'P074 Owl'
-       from public.books where id = 'e0740001-0000-4000-8000-0000000000a4'),
-    'part4: text-only write resolves to the existing pen name, text normalised');
-  -- ...or creates one, and null / the default's name means the default.
-  update public.books set pen_name = 'P074 Brand New' where id = 'e0740001-0000-4000-8000-0000000000a4';
+    (select prosrc !~* '(new|old)\.pen_name[^_]' from pg_proc where oid = 'public.books_enforce_pen_name()'::regprocedure),
+    'part4 (PEN-NAMES-2): the books trigger no longer reads or writes a pen_name text');
+  -- pen_name_id is the only way to set a book's pen name.
+  update public.books set pen_name_id = 'e0740002-0000-4000-8000-000000000002'
+   where id = 'e0740001-0000-4000-8000-0000000000a4';
   perform pg_temp.assert(
     (select pn.name from public.books b join public.pen_names pn on pn.id = b.pen_name_id
-      where b.id = 'e0740001-0000-4000-8000-0000000000a4') = 'P074 Brand New',
-    'part4: text-only write creates a new pen name');
-  update public.books set pen_name = 'P074 ANA' where id = 'e0740001-0000-4000-8000-0000000000a4';
-  perform pg_temp.assert(
-    (select pen_name_id = pg_temp.dflt(author_id) and pen_name is null from public.books where id = 'e0740001-0000-4000-8000-0000000000a4'),
-    'part4: the default''s own name (any case) is the default, text null');
-  -- id wins over text
-  update public.books set pen_name_id = 'e0740002-0000-4000-8000-000000000002', pen_name = 'Ignored'
-   where id = 'e0740001-0000-4000-8000-0000000000a4';
-  perform pg_temp.assert((select pen_name from public.books where id = 'e0740001-0000-4000-8000-0000000000a4') = 'P074 Unused',
-    'part4: when pen_name_id is written, the text follows it');
+      where b.id = 'e0740001-0000-4000-8000-0000000000a4') = 'P074 Unused',
+    'part4 (PEN-NAMES-2): writing pen_name_id sets the book''s pen name');
   update public.books set pen_name_id = null where id = 'e0740001-0000-4000-8000-0000000000a4';
   perform pg_temp.assert((select pen_name_id = pg_temp.dflt(author_id) from public.books where id = 'e0740001-0000-4000-8000-0000000000a4'),
     'part4: a null pen_name_id means the default');
 
-  -- Renaming a pen name updates its books' text.
+  -- Renaming a pen name: every book shows the new name through the join
+  -- (there is no copied text to update any more).
   update public.pen_names set name = 'P074 Night Owl' where id = 'e0740002-0000-4000-8000-000000000001';
-  perform pg_temp.assert((select string_agg(distinct pen_name, ',') from public.books where pen_name_id = 'e0740002-0000-4000-8000-000000000001') = 'P074 Night Owl',
-    'part4: a rename reaches every book''s text');
+  perform pg_temp.assert(
+    pg_temp.value_as('anon', null,
+      $q$select string_agg(distinct pn.name, ',') from public.public_books b join public.public_pen_names pn on pn.id = b.pen_name_id
+          where b.pen_name_id = 'e0740002-0000-4000-8000-000000000001'$q$) = 'P074 Night Owl',
+    'part4 (PEN-NAMES-2): a rename reaches every book through public_books -> public_pen_names');
 
   -- Another author's pen name is refused.
   v := pg_temp.run_as('service_role', null,
@@ -438,7 +447,12 @@ begin
    where id = 'e0740001-0000-4000-8000-0000000000a2';
 
   -- A series cannot change pen name while it holds books of the old one.
+  -- PEN-NAMES-2 (C2): authenticated holds no UPDATE on series at all now
+  -- (no code updates a series); the trigger still guards the server path.
   v := pg_temp.run_as('authenticated', 'e0740000-0000-4000-8000-00000000000a',
+    format('update public.series set pen_name_id = %L where id = %L', pg_temp.dflt('e0740000-0000-4000-8000-00000000000a'), 'e0740003-0000-4000-8000-000000000001'));
+  perform pg_temp.assert(v like '42501:permission denied for table series%', format('part4 (PEN-NAMES-2 C2): authenticated cannot update a series -- got %s', v));
+  v := pg_temp.run_as('service_role', null,
     format('update public.series set pen_name_id = %L where id = %L', pg_temp.dflt('e0740000-0000-4000-8000-00000000000a'), 'e0740003-0000-4000-8000-000000000001'));
   perform pg_temp.assert(v like 'LB451:%', format('part4 (11a): a non-empty series keeps its pen name -- got %s', v));
   -- A series with another account's pen name is refused.
@@ -529,21 +543,29 @@ begin
     $q$select count(*)::text from public.pen_name_follows$q$);
   perform pg_temp.assert(v = '0', format('part6: follows are visible only to the follower -- got %s', v));
 
-  -- Mirror: old code's follow and unfollow land on the default pen name.
+  -- PEN-NAMES-2 (C6): author_follows and its mirror are gone. Old
+  -- code's account follow fails loudly; a follow of the default pen name
+  -- is made (and removed) on pen_name_follows itself.
   v := pg_temp.run_as('authenticated', 'e0740000-0000-4000-8000-0000000000aa',
     $q$insert into public.author_follows (follower_id, author_id) values ('e0740000-0000-4000-8000-0000000000aa', 'e0740000-0000-4000-8000-00000000000a')$q$);
-  perform pg_temp.assert(v = 'OK:1', format('part6: old code follows an author -- got %s', v));
-  perform pg_temp.assert(exists (select 1 from public.pen_name_follows where follower_id = 'e0740000-0000-4000-8000-0000000000aa'
-                                   and pen_name_id = pg_temp.dflt('e0740000-0000-4000-8000-00000000000a')),
-    'part6: mirrored onto the default pen name');
-  v := pg_temp.run_as('authenticated', 'e0740000-0000-4000-8000-0000000000aa',
-    $q$delete from public.author_follows where follower_id = 'e0740000-0000-4000-8000-0000000000aa'$q$);
+  perform pg_temp.assert(v like '42P01:%', format('part6 (PEN-NAMES-2): author_follows no longer exists -- got %s', v));
   perform pg_temp.assert(
-    not exists (select 1 from public.pen_name_follows where follower_id = 'e0740000-0000-4000-8000-0000000000aa'
+    to_regclass('public.author_follows') is null
+    and not exists (select 1 from pg_proc where proname like '%author_follow%' and pronamespace = 'public'::regnamespace),
+    'part6 (PEN-NAMES-2): neither author_follows nor its mirror function remains');
+  v := pg_temp.run_as('authenticated', 'e0740000-0000-4000-8000-0000000000aa',
+    format('insert into public.pen_name_follows (follower_id, pen_name_id) values (%L, %L)',
+           'e0740000-0000-4000-8000-0000000000aa', pg_temp.dflt('e0740000-0000-4000-8000-00000000000a')));
+  v := pg_temp.run_as('authenticated', 'e0740000-0000-4000-8000-0000000000aa',
+    format('delete from public.pen_name_follows where follower_id = %L and pen_name_id = %L',
+           'e0740000-0000-4000-8000-0000000000aa', pg_temp.dflt('e0740000-0000-4000-8000-00000000000a')));
+  perform pg_temp.assert(
+    v = 'OK:1'
+    and not exists (select 1 from public.pen_name_follows where follower_id = 'e0740000-0000-4000-8000-0000000000aa'
                   and pen_name_id = pg_temp.dflt('e0740000-0000-4000-8000-00000000000a'))
     and exists (select 1 from public.pen_name_follows where follower_id = 'e0740000-0000-4000-8000-0000000000aa'
                   and pen_name_id = 'e0740002-0000-4000-8000-000000000001'),
-    'part6: old unfollow removes only the default pen name follow');
+    'part6 (PEN-NAMES-2): unfollowing the default pen name removes only that follow');
 end $$;
 
 -- ============================================================
@@ -646,7 +668,8 @@ begin
     format('part10 (F1): series insert, same error whatever the pen name -- own=%s other=%s null=%s nodefault=%s',
            v_own, v_other, v_null, v_nodefault));
 
-  -- The same as anon (anon holds INSERT on series; RLS refuses it).
+  -- The same as anon. (Before PEN-NAMES-2 anon held INSERT on series and
+  -- RLS refused it; since C2 the ACL refuses it -- still one error.)
   v_own := pg_temp.run_as('anon', null,
     format($q$insert into public.series (author_id, title, pen_name_id) values (%L, 'probe', %L)$q$, a, owl));
   v_other := pg_temp.run_as('anon', null,
@@ -657,14 +680,15 @@ begin
     format('part10 (F1): anon series insert, same error whatever the pen name -- own=%s other=%s null=%s', v_own, v_other, v_null));
 
   -- Series UPDATE: B moves B's own series to account A, with A's pen
-  -- name or with B's -- the same refusal.
+  -- name or with B's -- the same refusal. PEN-NAMES-2 (C2): authenticated
+  -- holds no UPDATE on series, so the ACL refuses both identically.
   insert into public.series (author_id, title) values (b::uuid, 'P074 B series') returning id into v_sid;
   v_own := pg_temp.run_as('authenticated', b,
     format($q$update public.series set author_id = %L, pen_name_id = %L where id = %L$q$, a, owl, v_sid));
   v_other := pg_temp.run_as('authenticated', b,
     format($q$update public.series set author_id = %L, pen_name_id = %L where id = %L$q$, a, pg_temp.dflt(b::uuid), v_sid));
-  perform pg_temp.assert(v_own like '42501:new row violates row-level security policy%' and v_other = v_own,
-    format('part10 (F1): series update to another account, same error whatever the pen name -- own=%s other=%s', v_own, v_other));
+  perform pg_temp.assert(v_own like '42501:permission denied for table series%' and v_other = v_own,
+    format('part10 (F1, PEN-NAMES-2 C2): series update to another account, same error whatever the pen name -- own=%s other=%s', v_own, v_other));
 
   -- pen_name_follows INSERT by R for follower B: B's own pen name or A's.
   v_own := pg_temp.run_as('authenticated', r,

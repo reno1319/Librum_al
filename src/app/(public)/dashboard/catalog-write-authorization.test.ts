@@ -475,9 +475,28 @@ function membershipRpc(fn: string, args: MembershipArgs) {
   return { data: null, error: { code: "42501", message: `permission denied for function ${fn}` } };
 };
 
+// PEN-2 (L10, C9): covers are uploaded and removed with the catalog
+// writer (service role). Its storage double records the same
+// "upload:<bucket>:<key>" events as the session's, plus a "writer-"
+// marker so a test can tell which client made the call.
+let failWriterCoverUpload = false;
+const writerRemoved: string[] = [];
 const catalogWriter = {
   from: (table: string) => builder(table, "catalog-writer"),
   rpc: async (fn: string, args: MembershipArgs) => membershipRpc(fn, args),
+  storage: {
+    from: (bucket: string) => ({
+      upload: async (p: string): Promise<{ error: { message: string } | null }> => {
+        events.push(`upload:${bucket}:${p}`, `writer-upload:${bucket}`);
+        return failWriterCoverUpload ? { error: { message: "boom" } } : { error: null };
+      },
+      remove: async (paths: string[]) => {
+        events.push(`writer-remove:${bucket}`);
+        writerRemoved.push(...paths);
+        return { error: null };
+      },
+    }),
+  },
 };
 const mockCreateCatalogWriteClient = vi.fn(() => {
   events.push("createCatalogWriteClient");
@@ -634,6 +653,8 @@ beforeEach(() => {
   forcedRpcResult = null;
   forcedPickClearError = null;
   storedObjects = {};
+  failWriterCoverUpload = false;
+  writerRemoved.length = 0;
   mockRedirect.mockClear();
   mockCreateCatalogWriteClient.mockClear();
   seed();
@@ -667,7 +688,11 @@ describe("the migration's grants are exactly the inventoried columns", () => {
     }
   });
 
-  it("table-level grants are exactly SELECT to anon and SELECT, DELETE to authenticated", () => {
+  // PEN-2 (E1, 20261019222500): anon no longer reads books or bundles at
+  // all (public reads go through public_books/public_bundles), so
+  // schema.sql keeps only authenticated's SELECT, DELETE; the historical
+  // migration is unchanged.
+  it("table-level grants are exactly SELECT, DELETE to authenticated (plus SELECT to anon in the historical migration only)", () => {
     for (const sql of [migrationSql, schemaSql]) {
       const statements = catalogAclStatements(sql);
       for (const table of ["books", "bundles"]) {
@@ -678,7 +703,7 @@ describe("the migration's grants are exactly the inventoried columns", () => {
             s.includes(` on public.${table} `),
         );
         expect(tableLevelGrants).toEqual([
-          `grant select on public.${table} to anon`,
+          ...(sql === migrationSql ? [`grant select on public.${table} to anon`] : []),
           `grant select, delete on public.${table} to authenticated`,
         ]);
       }
@@ -725,10 +750,23 @@ describe("the migration's grants are exactly the inventoried columns", () => {
     // Patch 8 rewrite (section 7), which supersedes Patch 7's for books.
     const onTable = (sql: string, table: string) =>
       catalogAclStatements(sql).filter((s) => new RegExp(`\\bon public\\.${table}\\b`).test(s));
-    expect(onTable(schemaSql, "bundles")).toEqual(onTable(migrationSql, "bundles"));
-    expect(onTable(schemaSql, "books")).toEqual(onTable(storagePathMigrationSql, "books"));
+    // PEN-2 (20261019222500): schema.sql drops the anon SELECT grant on
+    // both tables (E1) and authenticated's INSERT on books (MF1: every new
+    // book is inserted by the trusted writer) and on bundles (E5b, audit
+    // PEN-2 r1 F1: createBundle calls create_bundle_with_membership on the
+    // trusted writer), and nothing else.
+    const pen2 = (list: string[]) =>
+      list.filter(
+        (x) =>
+          !/^grant select on public\.\w+ to anon$/.test(x) &&
+          !/^grant insert \(.*\) on public\.(books|bundles) to authenticated$/.test(x),
+      );
+    expect(onTable(schemaSql, "bundles")).toEqual(pen2(onTable(migrationSql, "bundles")));
+    expect(onTable(schemaSql, "books")).toEqual(pen2(onTable(storagePathMigrationSql, "books")));
+    expect(catalogAclStatements(schemaSql).some((x) => / to anon$/.test(x))).toBe(false);
+    expect(catalogAclStatements(schemaSql).some((x) => /^grant insert .* on public\.(books|bundles) /.test(x))).toBe(false);
     expect(catalogAclStatements(schemaSql)).toHaveLength(
-      onTable(storagePathMigrationSql, "books").length + onTable(migrationSql, "bundles").length,
+      pen2(onTable(storagePathMigrationSql, "books")).length + pen2(onTable(migrationSql, "bundles")).length,
     );
   });
 
@@ -1226,6 +1264,7 @@ describe("the privileged client stays server-only", () => {
 //    with paths the server derived, through the trusted writer only.
 // ============================================================
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const NEW_COVER_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.(?:jpg|png)$/;
 const STORAGE_PATH_COLUMNS = ["cover_path", "file_path"];
 const NEW_BOOK_ERROR = "/dashboard/books/new?error=Something+went+wrong+saving+your+book.+Please+try+again";
 
@@ -1334,7 +1373,9 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
       expect(row.author_id).toBe(USER_ID);
       expect(row.id).toMatch(UUID);
       expect(row.file_path).toBe(`${USER_ID}/${row.id}.epub`);
-      expect(row.cover_path).toBe(`${USER_ID}/${row.id}-cover.png`);
+      // PEN-2 (L10): a fresh random cover folder, never the account or book.
+      expect(row.cover_path).toMatch(NEW_COVER_KEY);
+      expect(String(row.cover_path)).not.toContain(USER_ID);
       expect(row).not.toHaveProperty("status");
       // The permanent objects uploaded are exactly the paths persisted.
       expect(events).toContain(`upload:covers:${row.cover_path}`);
@@ -1356,7 +1397,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
       expect(row.author_id).toBe(USER_ID);
       expect(row.id).toMatch(UUID);
       expect(row.file_path).toBe(`${USER_ID}/${row.id}.epub`);
-      expect(row.cover_path).toBe(`${USER_ID}/${row.id}-cover.png`);
+      expect(row.cover_path).toMatch(NEW_COVER_KEY);
       expect(JSON.stringify(row)).not.toContain("forged");
       expect(JSON.stringify(row)).not.toContain(OTHER_AUTHOR);
       expect(JSON.stringify(row)).not.toContain("victim");
@@ -1377,7 +1418,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
       expect(await redirectOf(createBook(fd))).toBe("/dashboard");
       const row = bookInserts()[0].payload as Row;
       expect(row.file_path).toBe(`${USER_ID}/${row.id}.epub`);
-      expect(row.cover_path).toBe(`${USER_ID}/${row.id}-cover.png`);
+      expect(row.cover_path).toMatch(NEW_COVER_KEY);
       expect(events).toContain(`download:manuscripts:${tempEpub}`);
       expect(events).toContain(`download:manuscripts:${tempCover}`);
     });
@@ -1436,31 +1477,46 @@ describe("Patch 8: createBook never creates the trusted writer for a refused req
     expect(bookInserts()).toEqual([]);
   });
 
-  it.each(["covers", "manuscripts"])("a failed %s upload never reaches the trusted insert", async (bucket) => {
+  // PEN-2 (L10, C9): the cover is uploaded with the writer, so a failed
+  // cover upload happens after the writer exists; neither failure ever
+  // reaches the insert, and a failed manuscript upload removes the new
+  // cover it left behind.
+  it("a failed covers upload (writer) never reaches the trusted insert", async () => {
+    failWriterCoverUpload = true;
+    expect(await redirectOf(createBook(await createBookForm("199")))).toMatch(/^\/dashboard\/books\/new\?error=Could\+not\+upload/);
+    expect(bookInserts()).toEqual([]);
+    expect(events.filter((e) => e.startsWith("upload:manuscripts:"))).toEqual([]);
+  });
+
+  it("a failed manuscripts upload never reaches the trusted insert, and the new cover is removed", async () => {
     const original = sessionClient.storage.from;
     sessionClient.storage.from = (b: string) => {
       const real = original(b);
-      return b === bucket ? { ...real, upload: async () => ({ error: { message: "boom" } }) } : real;
+      return b === "manuscripts" ? { ...real, upload: async () => ({ error: { message: "boom" } }) } : real;
     };
     try {
       expect(await redirectOf(createBook(await createBookForm("199")))).toMatch(/^\/dashboard\/books\/new\?error=Could\+not\+upload/);
     } finally {
       sessionClient.storage.from = original;
     }
-    expect(mockCreateCatalogWriteClient).not.toHaveBeenCalled();
     expect(bookInserts()).toEqual([]);
+    expect(writerRemoved).toHaveLength(1);
+    expect(writerRemoved[0]).toMatch(NEW_COVER_KEY);
   });
 
-  it("authenticates on the session, then uploads, and only then creates the writer, once", async () => {
+  it("authenticates on the session, creates the writer once after every gate, uploads the cover with it, then inserts", async () => {
     await redirectOf(createBook(await createBookForm("199")));
     const auth = events.indexOf("session:getUser");
     const created = events.indexOf("createCatalogWriteClient");
-    const uploads = events.flatMap((e, i) => (e.startsWith("upload:") ? [i] : []));
+    const coverUpload = events.findIndex((e) => e.startsWith("upload:covers:"));
+    const manuscriptUpload = events.findIndex((e) => e.startsWith("upload:manuscripts:"));
     expect(auth).toBe(0);
-    expect(uploads).toHaveLength(2);
-    for (const i of uploads) expect(i).toBeGreaterThan(auth);
-    for (const i of uploads) expect(i).toBeLessThan(created);
+    expect(created).toBeGreaterThan(auth);
+    expect(coverUpload).toBeGreaterThan(created);
+    expect(events[coverUpload + 1]).toBe("writer-upload:covers");
+    expect(manuscriptUpload).toBeGreaterThan(coverUpload);
     expect(events.filter((e) => e === "createCatalogWriteClient")).toHaveLength(1);
+    expect(bookInserts()).toHaveLength(1);
   });
 });
 
@@ -1524,9 +1580,10 @@ describe("Patch 8: book edits and replacement uploads stay protected", () => {
       const [update] = catalogWrites();
       expect(update.op).toBe("update");
       expect(update.payload).toMatchObject({
-        cover_path: `${USER_ID}/${BOOK_ID}-cover.png`,
+        cover_path: expect.stringMatching(NEW_COVER_KEY),
         file_path: `${USER_ID}/${BOOK_ID}.epub`,
       });
+      expect(events).toContain("writer-upload:covers");
       expect(update.payload).not.toHaveProperty("author_id");
       expect(update.payload).not.toHaveProperty("id");
       expect(update.payload).not.toHaveProperty("status");
@@ -1582,8 +1639,9 @@ describe("Patch 8: the trusted insert is the only one, and stays in createBook",
     expect(createBookBody).toMatch(/\bcover_path: coverPath,/);
     expect(createBookBody).toMatch(/\bfile_path: manuscriptPath,/);
     expect(createBookBody).toMatch(/const bookId = randomUUID\(\);/);
-    // BOOK-STORAGE-MUTATION-AUTH-1: through the shared constructors.
-    expect(createBookBody).toMatch(/const coverPath = canonicalBookCoverPath\(user\.id, bookId, coverResult\.extension\);/);
+    // BOOK-STORAGE-MUTATION-AUTH-1 / PEN-2 (L10): through the shared
+    // constructors; the cover key is a fresh random folder.
+    expect(createBookBody).toMatch(/const coverPath = newBookCoverPath\(coverResult\.extension\);/);
     expect(createBookBody).toMatch(/const manuscriptPath = canonicalBookManuscriptPath\(user\.id, bookId\);/);
   });
 });

@@ -2,9 +2,11 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { isSchemaFeatureOffError, logSchemaFeatureOffOnce } from "@/lib/schema-feature-off";
 
-// F4 (D1): whether migration 20261018091237's pen name column and rights
-// table exist yet, so Add a book and the Edit page render the Pen name
-// field and the Rights choice only when they can be saved. RENDERING
+// F4 (D1): whether migration 20261018091237's rights table exists yet, so
+// Add a book and the Edit page render the Rights choice only when it can
+// be saved. PEN-NAMES-2 (D4): the books.pen_name probe is gone -- that
+// column is dropped by the contract, and the Pen name field now writes
+// pen_name_id, which exists since PEN-NAMES-1. RENDERING
 // ONLY: no server write is ever skipped or chosen because of these
 // answers (createBook/updateBook write a submitted pen name whenever the
 // key is present, and the publish gate reads the declaration itself).
@@ -22,11 +24,10 @@ import { isSchemaFeatureOffError, logSchemaFeatureOffOnce } from "@/lib/schema-f
 // migration is never undone); an off answer is never cached, so the
 // first request after the migration lands sees the fields.
 
-export type CatalogSchemaFeatures = { penName: boolean; rights: boolean };
+export type CatalogSchemaFeatures = { rights: boolean };
 
 type ProbeResponse = { data: unknown; error: { code?: string | null } | null; status: number };
 
-let penNamePresent = false;
 let rightsPresent = false;
 
 async function probe(feature: string, run: () => PromiseLike<ProbeResponse>): Promise<boolean> {
@@ -49,24 +50,17 @@ async function probe(feature: string, run: () => PromiseLike<ProbeResponse>): Pr
 }
 
 export async function getCatalogSchemaFeatures(): Promise<CatalogSchemaFeatures> {
-  if (penNamePresent && rightsPresent) return { penName: true, rights: true };
+  if (rightsPresent) return { rights: true };
 
   const supabase = await createClient();
-  const [penName, rights] = await Promise.all([
-    penNamePresent ||
-      probe("book pen name", () => supabase.from("books").select("pen_name").limit(0)),
-    rightsPresent ||
-      probe("book rights declarations", () =>
-        supabase.from("book_rights_declarations").select("id").limit(0),
-      ),
-  ]);
-  if (penName) penNamePresent = true;
+  const rights = await probe("book rights declarations", () =>
+    supabase.from("book_rights_declarations").select("id").limit(0),
+  );
   if (rights) rightsPresent = true;
-  return { penName, rights };
+  return { rights };
 }
 
 // Tests only: forget the cached answers.
 export function resetCatalogSchemaFeaturesForTests(): void {
-  penNamePresent = false;
   rightsPresent = false;
 }

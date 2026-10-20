@@ -107,18 +107,23 @@ select pg_temp.assert(
 reset role;
 
 -- public view works, for anon and for an ordinary authenticated reader.
+-- PEN-NAMES-2 (C5): public_author_profiles is gone; the public name is
+-- read as the book's pen name (public_books -> public_pen_names), never
+-- keyed by the account id.
 set role anon;
 select pg_temp.assert(
-  (select public_author_name from public.public_author_profiles where id = '11111111-1111-1111-1111-111111111111') = 'Arben Leka',
-  'STATE D: anon must still read the pen name via public_author_profiles'
+  (select pn.name from public.public_books b join public.public_pen_names pn on pn.id = b.pen_name_id
+    where b.id = 'b0000000-0000-0000-0000-000000000001') = 'Arben Leka',
+  'STATE D: anon must still read the pen name via public_pen_names'
 );
 reset role;
 
 set role authenticated;
 select set_config('request.jwt.claim.sub', '22222222-2222-2222-2222-222222222222', true);
 select pg_temp.assert(
-  (select public_author_name from public.public_author_profiles where id = '11111111-1111-1111-1111-111111111111') = 'Arben Leka',
-  'STATE D: an ordinary authenticated reader must still read the pen name via public_author_profiles'
+  (select pn.name from public.public_books b join public.public_pen_names pn on pn.id = b.pen_name_id
+    where b.id = 'b0000000-0000-0000-0000-000000000001') = 'Arben Leka',
+  'STATE D: an ordinary authenticated reader must still read the pen name via public_pen_names'
 );
 reset role;
 

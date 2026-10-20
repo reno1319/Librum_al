@@ -294,7 +294,8 @@ describe("book detail: an unpriced book offers no way to acquire it", () => {
     // the link an owner follows to their own download.
     const detailQuery = stripped.slice(0, stripped.indexOf("function PurchasePanel("));
     // `.single<BookWithAuthorBio>()`, not a bare `.single()`.
-    const bookFetch = detailQuery.match(/from\("books"\)[\s\S]{0,400}?\.single[<(]/);
+    // PEN-NAMES-2: the book is read through public_books.
+    const bookFetch = detailQuery.match(/from\("public_books"\)[\s\S]{0,400}?\.single[<(]/);
     expect(bookFetch).not.toBeNull();
     expect(bookFetch?.[0]).not.toContain("price_all");
   });

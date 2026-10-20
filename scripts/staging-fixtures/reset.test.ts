@@ -24,7 +24,7 @@ import {
   FIXTURE_BOOK_IDS,
   baselineTableRowIds,
 } from "./manifest.mts";
-import { expectedBaselineObjectKeys } from "./storage-keys.mts";
+import { expectedBaselineObjectKeys, UnexpectedStorageKeyError } from "./storage-keys.mts";
 import type { ListUsersFn } from "./auth-ownership.mts";
 
 const AUTHOR_ID = "author-1";
@@ -175,6 +175,7 @@ function baseDeps(overrides: Partial<Deps> = {}): Deps {
     listStorageEntries: storage.listStorageEntries,
     removeStorageObjects: storage.removeStorageObjects,
     convergeProfileAvatarBaseline: vi.fn().mockResolvedValue(undefined),
+    listFixtureRowStorageKeys: vi.fn().mockResolvedValue({ covers: [], avatars: [] }),
     readConfirmationPhrase: vi.fn().mockResolvedValue(""),
     reseedBaseline: vi.fn().mockImplementation(async (ctx: { authorId: string; readerId: string }) => {
       // Simulate a real seed run: every baseline table AND every
@@ -451,6 +452,52 @@ describe("runPreflight", () => {
       });
       await expect(runReset("teardown", deps)).rejects.toBeInstanceOf(PostconditionFailedError);
     });
+  });
+});
+
+// PEN-2 (D6): covers and pen-name photos live at new-shape keys outside
+// the accounts' namespaces; they are found from the fixture rows.
+describe("PEN-2: row-linked Storage discovery (D6)", () => {
+  const NEW_COVER = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
+  const NEW_PHOTO = "0f0e0d0c-0b0a-4908-8706-050403020101/pen-name.jpg";
+
+  it("plans removal of a new-shape cover and pen-name photo named by fixture rows", async () => {
+    const deps = baseDeps({
+      listFixtureRowStorageKeys: vi.fn().mockResolvedValue({ covers: [NEW_COVER], avatars: [NEW_PHOTO] }),
+      listStorageEntries: vi.fn().mockImplementation(async (bucket: string, path: string) => {
+        if (bucket === "covers" && path === NEW_COVER.split("/")[0]) return [{ name: "cover.png", id: "c", metadata: { size: 1 } }];
+        if (bucket === "avatars" && path === NEW_PHOTO.split("/")[0]) return [{ name: "pen-name.jpg", id: "p", metadata: { size: 1 } }];
+        return [];
+      }),
+    });
+    const plan = await runPreflight(deps);
+    expect(plan.storagePlan).toContainEqual({ bucket: "covers", key: NEW_COVER });
+    expect(plan.storagePlan).toContainEqual({ bucket: "avatars", key: NEW_PHOTO });
+  });
+
+  it("includes the baseline covers at '<book id>/cover.png' in the plan", async () => {
+    const plan = await runPreflight(baseDeps());
+    for (const { bucket, key } of expectedBaselineObjectKeys(AUTHOR_ID)) {
+      expect(plan.storagePlan).toContainEqual({ bucket, key });
+    }
+  });
+
+  it("refuses a fixture row key the fixtures don't own, before any mutation", async () => {
+    const deps = baseDeps({
+      listFixtureRowStorageKeys: vi.fn().mockResolvedValue({ covers: ["another-account/x-cover.png"], avatars: [] }),
+    });
+    await expect(runPreflight(deps)).rejects.toBeInstanceOf(UnexpectedStorageKeyError);
+    expect(deps.removeStorageObjects).not.toHaveBeenCalled();
+  });
+
+  it("teardown fails its postcondition if a baseline cover folder still holds an object", async () => {
+    const deps = baseDeps({
+      readConfirmationPhrase: vi.fn().mockResolvedValue(`${STAGING_SUPABASE_PROJECT_REF} TEARDOWN`),
+      listStorageEntries: vi.fn().mockImplementation(async (bucket: string, path: string) =>
+        bucket === "covers" && path === FIXTURE_BOOK_IDS[0] ? [{ name: "cover.png", id: "c", metadata: { size: 1 } }] : [],
+      ),
+    });
+    await expect(runReset("teardown", deps)).rejects.toBeInstanceOf(PostconditionFailedError);
   });
 });
 

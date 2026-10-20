@@ -250,10 +250,11 @@ end $$;
 
 -- ============================================================
 -- Part 9: author-side accounting -- the author still sees BOTH
--- detached rows through the author-scoped RLS policy, which joins
--- through books.author_id and never references reader_id at all. This
--- is the mechanism that actually preserves the retained accounting
--- history this migration exists to protect.
+-- detached rows. PEN-NAMES-2 ([23b]): through author_book_purchases,
+-- which joins through books.author_id and has no reader_id column at all
+-- (it replaced the author-scoped RLS policy). This is the mechanism that
+-- actually preserves the retained accounting history this migration
+-- exists to protect.
 -- ============================================================
 do $$
 declare
@@ -263,7 +264,7 @@ begin
   perform set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000101', true);
   set local role authenticated;
   select count(*), coalesce(sum(amount_cents), 0) into v_count, v_total
-  from public.purchases
+  from public.author_book_purchases
   where id in ('c0000000-0000-0000-0000-000000000101', 'c0000000-0000-0000-0000-000000000102');
   reset role;
 

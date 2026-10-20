@@ -11,7 +11,7 @@ import {
   formatBundleSavingsAll,
   resolveBundleSavingsAll,
 } from "@/lib/bundle-catalog";
-import type { Book, Bundle } from "@/lib/types";
+import type { PublicBook, PublicBundle } from "@/lib/types";
 import type { Metadata } from "next";
 
 // LIBRUM 2.0 SEO-1: static title, not "<bundle title> | Librum" -- same
@@ -36,13 +36,16 @@ export const dynamic = "force-dynamic";
 // ALL-WIRING-5: the bundle's own columns are selected by name, and the
 // legacy `price_cents` is not among them -- this page's price, its
 // savings line and its checkout notice all come from `price_all`.
+//
+// PEN-NAMES-2: the bundle and its books come from public_bundles and
+// public_books (no account columns); the author check is an own-row query.
 type BundleWithAuthor = Pick<
-  Bundle,
-  "id" | "author_id" | "title" | "description" | "status" | "price_all"
+  PublicBundle,
+  "id" | "title" | "description" | "status" | "price_all"
 > & {
   pen: PenNameRef | null;
 };
-type BundleBookRow = { book_id: string; books: Book | null };
+type BundleBookRow = { book_id: string; books: PublicBook | null };
 
 export default async function BundleDetailPage({
   params,
@@ -66,18 +69,30 @@ export default async function BundleDetailPage({
   } = await supabase.auth.getUser();
 
   const { data: bundle } = await supabase
-    .from("bundles")
+    .from("public_bundles")
     .select(
-      "id, author_id, title, description, status, price_all, pen:public_pen_names(id, name)",
+      "id, title, description, status, price_all, pen:public_pen_names(id, name)",
     )
     .eq("id", id)
     .single<BundleWithAuthor>();
+
+  // An own-row query: true only for the bundle's author.
+  let isAuthor = false;
+  if (user && bundle) {
+    const { data: ownRow } = await supabase
+      .from("bundles")
+      .select("id")
+      .eq("id", id)
+      .eq("author_id", user.id)
+      .maybeSingle();
+    isAuthor = !!ownRow;
+  }
 
   // ALL-WIRING-5: visibility is UNCHANGED and deliberately not keyed on
   // price. A published bundle with no ALL price stays reachable at its
   // own address -- it says "Price unavailable" and offers nothing -- and
   // is only dropped from the discovery rails (bookstore, author page).
-  if (!bundle || (bundle.status !== "published" && bundle.author_id !== user?.id)) {
+  if (!bundle || (bundle.status !== "published" && !isAuthor)) {
     notFound();
   }
 
@@ -90,15 +105,14 @@ export default async function BundleDetailPage({
     // not a presentation one. Each card renders "Price unavailable" for
     // such a member, and bundle checkout is unconditionally closed
     // anyway, so nothing here offers an unpriced book for sale.
-    .select("book_id, books(*)")
+    .select("book_id, books:public_books(*)")
     .eq("bundle_id", id)
     .returns<BundleBookRow[]>();
 
   const books = (bundleBookRows ?? [])
     .map((row) => row.books)
-    .filter((b): b is Book => !!b);
+    .filter((b): b is PublicBook => !!b);
 
-  const isAuthor = user?.id === bundle.author_id;
   // ALL-WIRING-5: "bought separately" in whole lek, from `price_all`
   // only -- the bundle's and every member's. It is fed the UNFILTERED
   // membership rows, so a member this viewer cannot resolve counts as

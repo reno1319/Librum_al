@@ -85,7 +85,8 @@ describe("DashboardPage: step 4 dashboard", () => {
   ];
   const TABLES = {
     books: { data: BOOKS, error: null },
-    purchases: {
+    // PEN-NAMES-2 [23b]: the author-only sales views.
+    author_book_purchases: {
       data: [
         {
           id: "p1",
@@ -98,7 +99,7 @@ describe("DashboardPage: step 4 dashboard", () => {
       ],
       error: null,
     },
-    bundle_checkout_snapshots: { data: [], error: null },
+    author_bundle_sales: { data: [], error: null },
   };
   const RPCS = {
     list_purchase_currencies: {

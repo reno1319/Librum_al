@@ -36,8 +36,24 @@ type BookForCheckout = {
   // its `0` default is not a price.
   price_all: number | null;
   status: string;
-  author_id: string;
 };
+
+// PEN-NAMES-2: whether the signed-in user wrote this book, by an own-row
+// query on the base table (true only for the author). The book itself is
+// read from public_books, which has no author_id.
+async function isOwnBook(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  bookId: string,
+  userId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("books")
+    .select("id")
+    .eq("id", bookId)
+    .eq("author_id", userId)
+    .maybeSingle();
+  return !!data;
+}
 
 // The shape create_book_checkout_intent (migration 032) returns.
 //
@@ -176,12 +192,12 @@ export async function buyBook(bookId: string, formData: FormData) {
   }
 
   const { data: book } = await supabase
-    .from("books")
-    .select("id, title, price_all, status, author_id")
+    .from("public_books")
+    .select("id, title, price_all, status")
     .eq("id", bookId)
     .single<BookForCheckout>();
 
-  if (!book || book.status !== "published" || book.author_id === user.id) {
+  if (!book || book.status !== "published" || (await isOwnBook(supabase, bookId, user.id))) {
     redirect(`/books/${bookId}`);
   }
 
@@ -604,7 +620,6 @@ type BookForFreeAcquisition = {
   id: string;
   price_all: number | null;
   status: string;
-  author_id: string;
 };
 
 export async function getFreeBook(bookId: string) {
@@ -626,8 +641,8 @@ export async function getFreeBook(bookId: string) {
   }
 
   const { data: book } = await supabase
-    .from("books")
-    .select("id, price_all, status, author_id")
+    .from("public_books")
+    .select("id, price_all, status")
     .eq("id", bookId)
     .single<BookForFreeAcquisition>();
 
@@ -648,7 +663,7 @@ export async function getFreeBook(bookId: string) {
     !book ||
     book.status !== "published" ||
     book.price_all !== 0 ||
-    book.author_id === user.id
+    (await isOwnBook(supabase, bookId, user.id))
   ) {
     redirect(`/books/${bookId}`);
   }

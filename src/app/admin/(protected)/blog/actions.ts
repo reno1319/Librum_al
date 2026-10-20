@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff } from "@/lib/staff";
 import { ADMIN_LOGIN_PATH } from "@/lib/admin-safe-redirect";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
@@ -88,15 +89,29 @@ async function resolveStagedCoverInput(
 // covers/<blog-post-id>/<uuid>.<ext>, inside the public "blog" bucket.
 // Returns null (never throws) on upload failure so callers can decide
 // their own fallback behavior per BLOG-1C's own failure-mode rules.
+//
+// PEN-2 (O12): the upload runs with the service role, so the stored
+// object's `owner`/`owner_id` is null instead of the staff member's
+// account id. Whether the public object-info endpoint returns `owner`
+// could not be confirmed without a real Storage project, so this takes
+// the safe side. Callers have already passed requireStaff("blog.manage");
+// the post id must be a lowercase UUID, so the service-role key can only
+// ever name `covers/<uuid>/<fresh uuid>.<jpg|png>`.
+const POST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 async function uploadPermanentCover(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  _supabase: Awaited<ReturnType<typeof createClient>>,
   postId: string,
   bytes: Buffer,
   extension: "jpg" | "png",
   contentType: "image/jpeg" | "image/png",
 ): Promise<string | null> {
+  if (!POST_ID_PATTERN.test(postId)) {
+    console.error("uploadPermanentCover: post id is not a lowercase UUID");
+    return null;
+  }
   const permanentPath = `covers/${postId}/${randomUUID()}.${extension}`;
-  const { error } = await supabase.storage
+  const { error } = await createAdminClient().storage
     .from(BLOG_BUCKET)
     .upload(permanentPath, bytes, { contentType });
   if (error) {

@@ -85,7 +85,7 @@ function sessionFrom(table: string) {
       }),
     };
   }
-  if (table === "purchases") {
+  if (table === "purchases" || table === "author_book_purchases") {
     return { select: () => ({ in: async () => ({ count: purchaseCount, error: null }) }) };
   }
   throw new Error(`unexpected table ${table}`);

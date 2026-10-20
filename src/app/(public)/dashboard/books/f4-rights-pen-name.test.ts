@@ -94,7 +94,8 @@ const sessionClient = {
   },
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
-const writerClient = recordingClient("writer");
+// PEN-2 (L10): covers are uploaded and removed through the writer.
+const writerClient = { ...recordingClient("writer"), storage: sessionClient.storage };
 vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => writerClient }));
 // PEN-NAMES-1: the box resolves through the server-only pen name writer
 // (src/lib/pen-name-write-client.ts, find-or-create by name).

@@ -99,7 +99,9 @@ export default async function SalesPage() {
   const { data: purchases } =
     bookIds.length > 0
       ? await supabase
-          .from("purchases")
+          // PEN-NAMES-2 [23b]: author_book_purchases -- purchases of the
+          // caller's own books, without the buyer's reader_id.
+          .from("author_book_purchases")
           .select(
             "id, book_id, amount_cents, created_at, stripe_checkout_session_id, stripe_payment_intent_id",
           )
@@ -116,8 +118,11 @@ export default async function SalesPage() {
   // this query's own filters. refunded_at is filtered explicitly anyway,
   // matching this page's existing purchases query style, rather than
   // relying solely on the RLS policy (which doesn't cover refund state).
+  // PEN-NAMES-2 [23b]: author_bundle_sales -- the caller's own fulfilled
+  // bundle sales, without the buyer's reader_id (same rows as the old
+  // author policy).
   const { data: snapshots } = await supabase
-    .from("bundle_checkout_snapshots")
+    .from("author_bundle_sales")
     .select(
       "stripe_checkout_session_id, stripe_payment_intent_id, total_amount_cents, fulfilled_at, currency",
     )

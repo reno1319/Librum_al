@@ -48,8 +48,19 @@ function makeQuery(table: string) {
   };
   return chain;
 }
+// PEN-NAMES-2 (MF3): reader names come from staff_profile_display_names(),
+// never from a profiles read. The rpc double answers from
+// tableRows.staff_profile_display_names and records each call.
+const rpcCalls: { name: string; args: unknown }[] = [];
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: () => Promise.resolve({ from: (table: string) => makeQuery(table) }),
+  createClient: () =>
+    Promise.resolve({
+      from: (table: string) => makeQuery(table),
+      rpc: (name: string, args: unknown) => {
+        rpcCalls.push({ name, args });
+        return Promise.resolve(tableRows[name] ?? { data: [], error: null });
+      },
+    }),
 }));
 
 const mockListAudit = vi.fn(
@@ -75,6 +86,7 @@ describe("AdminPage (Today)", () => {
     mockRequireStaff.mockClear();
     mockListAudit.mockClear();
     queries.length = 0;
+    rpcCalls.length = 0;
     tableRows = {};
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-19T09:00:00Z"));
@@ -124,7 +136,7 @@ describe("AdminPage (Today)", () => {
     tableRows = {
       book_reports: { data: [OPEN_REPORT], error: null },
       refund_requests: { data: [WAITING_REFUND], error: null },
-      profiles: { data: [{ id: "reader-1", display_name: "Arta" }], error: null },
+      staff_profile_display_names: { data: [{ id: "reader-1", display_name: "Arta" }], error: null },
     };
     mockListAudit.mockResolvedValueOnce({
       ok: true,
@@ -184,9 +196,11 @@ describe("AdminPage (Today)", () => {
   it("support: only the refunds tile; no reports query, no activity", async () => {
     tableRows = {
       refund_requests: { data: [WAITING_REFUND], error: null },
-      profiles: { data: [], error: null },
+      staff_profile_display_names: { data: [], error: null },
     };
     const html = await renderAs("support");
+    expect(queries.map((q) => q.table)).not.toContain("profiles");
+    expect(rpcCalls).toEqual([{ name: "staff_profile_display_names", args: { p_ids: ["reader-1"] } }]);
     expect(html).toContain("Refund requests waiting");
     expect(html).toContain("Refund request from an unknown reader");
     expect(html).not.toContain("Open book reports");

@@ -12,6 +12,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatTransactionAmount } from "@/lib/transaction-money";
 import { loadRefundRequestCurrencies, refundRequestCurrency } from "./refund-currency";
+import { loadStaffDisplayNames } from "@/lib/staff-display-names";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -93,11 +94,9 @@ export default async function AdminRefundsPage() {
   const readerIds = Array.from(
     new Set(allRequests.map((r) => r.reader_id).filter((id): id is string => id !== null)),
   );
-  const { data: profiles } =
-    readerIds.length > 0
-      ? await supabase.from("profiles").select("id, display_name").in("id", readerIds)
-      : { data: [] };
-  const displayNameById = new Map((profiles ?? []).map((p) => [p.id, p.display_name]));
+  // PEN-NAMES-2 (MF3, C13): through staff_profile_display_names() --
+  // support no longer reads profiles (no size cap: MF-A).
+  const displayNameById = await loadStaffDisplayNames(supabase, readerIds);
 
   const sortedRequests = [...allRequests].sort(compareForTriage);
 

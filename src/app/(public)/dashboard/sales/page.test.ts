@@ -90,9 +90,9 @@ async function renderSales(fixture: SalesFixture) {
         data:
           table === "books"
             ? fixture.books
-            : table === "purchases"
+            : table === "author_book_purchases" // PEN-NAMES-2 [23b]
               ? fixture.purchases
-              : table === "bundle_checkout_snapshots"
+              : table === "author_bundle_sales"
                 ? (fixture.snapshots ?? [])
                 : [],
       }),

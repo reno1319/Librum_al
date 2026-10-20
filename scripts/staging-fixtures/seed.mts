@@ -302,7 +302,7 @@ export async function runSeed(deps: SeedDeps): Promise<{ authorId: string; reade
   // PHASE-1C mandatory correction, item 8: verify the EXACT expected
   // byte length, not just existence. ----
   for (const book of FIXTURE_BOOKS) {
-    const coverPath = fixtureCoverPath(authorId, book.id);
+    const coverPath = fixtureCoverPath(book.id);
     const manuscriptPath = fixtureManuscriptPath(authorId, book.id);
 
     const coverBytes = buildFixtureCoverBytes();

@@ -113,12 +113,11 @@ export type Book = {
   updated_at: string;
   // BOOK-PEN-NAME-RIGHTS-CHOICE-1 (migration 20261018091237). Optional
   // because a `select *` before that migration is applied returns rows
-  // without them -- same precedent as `display_name?` in author-name.ts.
-  // pen_name: the per-book byline, null/undefined = the author's public
-  // name (resolveBookByline in src/lib/book-byline.ts).
+  // without it -- same precedent as `display_name?` in author-name.ts.
   // librum_choice_at: when staff picked this book as "Librum's choice",
   // null/undefined = not picked; at most one book at a time.
-  pen_name?: string | null;
+  // PEN-NAMES-2 (D4): books.pen_name is gone; the byline is the pen name
+  // (pen_name_id, embedded as `pen`).
   librum_choice_at?: string | null;
   // PEN-NAMES-1 (migration 20261019184512): the book's pen name
   // (NOT NULL in the database; optional here only so older fixtures and
@@ -147,6 +146,13 @@ export type BookRightsDeclaration = {
   pen_name?: string | null;
 };
 
+// PEN-NAMES-2: the rows readers and signed-out visitors get, from the
+// public views (public_books, public_series, public_bundles,
+// public_reviews). None has an account column, so a public page typed
+// with them cannot read or render one: TypeScript rejects author_id,
+// file_path or reader_id there.
+export type PublicBook = Omit<Book, "author_id" | "file_path">;
+
 export type Review = {
   id: string;
   book_id: string;
@@ -163,6 +169,26 @@ export type Series = {
   created_at: string;
   // PEN-NAMES-1: every book in a series carries this pen name (11a).
   pen_name_id?: string;
+};
+
+// PEN-NAMES-2: public_series -- every series, without the account.
+export type PublicSeries = {
+  id: string;
+  title: string;
+  pen_name_id: string;
+  created_at: string;
+};
+
+// PEN-NAMES-2: public_reviews -- no reader_id. reviewer_name is the
+// reviewer's default pen name when they are an author with a book (22a),
+// otherwise null ("A Librum reader").
+export type PublicReview = {
+  id: string;
+  book_id: string;
+  rating: number;
+  body: string;
+  created_at: string;
+  reviewer_name: string | null;
 };
 
 export type Contributor = {
@@ -197,12 +223,9 @@ export type Bundle = {
   pen_name_id?: string;
 };
 
-export type AuthorFollow = {
-  id: string;
-  follower_id: string;
-  author_id: string;
-  created_at: string;
-};
+// PEN-NAMES-2: public_bundles -- published bundles (and the caller's own
+// drafts), without the account.
+export type PublicBundle = Omit<Bundle, "author_id">;
 
 export type DiscountCode = {
   id: string;

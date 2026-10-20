@@ -184,16 +184,16 @@ begin
   -- and DELETE only -- no INSERT, UPDATE, TRUNCATE, REFERENCES, TRIGGER or
   -- MAINTAIN at table level. service_role: all, unchanged. PUBLIC:
   -- nothing (table_acl would list a PUBLIC entry).
+  -- PEN-NAMES-2 (C1): anon no longer holds SELECT on either table; public
+  -- reads go through public_books / public_bundles.
   perform pg_temp.assert(
     pg_temp.table_acl('public.books') =
-      'anon:SELECT'
-      || '|authenticated:DELETE,SELECT'
+      'authenticated:DELETE,SELECT'
       || '|service_role:DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part1: books table ACL -- got %s', pg_temp.table_acl('public.books')));
   perform pg_temp.assert(
     pg_temp.table_acl('public.bundles') =
-      'anon:SELECT'
-      || '|authenticated:DELETE,SELECT'
+      'authenticated:DELETE,SELECT'
       || '|service_role:DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part1: bundles table ACL -- got %s', pg_temp.table_acl('public.bundles')));
 
@@ -206,16 +206,20 @@ begin
   -- written. The pin follows the current state, as 061 part 8 did for
   -- Patch 7; 067_catalog_storage_path_authorization.test.sql pins Patch 8
   -- itself. Every other assertion here is unchanged.
+  -- PEN-NAMES-2 (E5): authenticated has no INSERT on books at all any
+  -- more (createBook inserts through the trusted writer); only the
+  -- series-link UPDATE remains.
   perform pg_temp.assert(
     pg_temp.column_acl('public.books') =
-      'authenticated:INSERT:author_id,description,edition,genre,id,isbn,'
-      || 'keywords,language,original_publication_date,price_all,publisher,series_id,'
-      || 'series_position,subtitle,title'
-      || '|authenticated:UPDATE:series_id,series_position',
+      'authenticated:UPDATE:series_id,series_position',
     format('part1: books column ACL -- got %s', pg_temp.column_acl('public.books')));
+  -- PEN-NAMES-2 (E5b, audit PEN-2 r1 F1): authenticated has no INSERT on
+  -- bundles either (createBundle inserts through the trusted writer's
+  -- create_bundle_with_membership), so bundles has no column grant left.
   perform pg_temp.assert(
-    pg_temp.column_acl('public.bundles') = 'authenticated:INSERT:author_id,description,price_all,title',
+    pg_temp.column_acl('public.bundles') = '',
     format('part1: bundles column ACL -- got %s', pg_temp.column_acl('public.bundles')));
+  perform pg_temp.assert(not has_any_column_privilege('authenticated', 'public.bundles', 'INSERT'), 'part1 (PEN-NAMES-2): authenticated has no INSERT on any bundles column');
 
   -- Effective privilege, as the privilege functions see it.
   perform pg_temp.assert(not has_table_privilege('authenticated', 'public.books', 'INSERT'), 'part1: authenticated has no table INSERT on books');
@@ -225,7 +229,10 @@ begin
   perform pg_temp.assert(not has_any_column_privilege('authenticated', 'public.bundles', 'UPDATE'), 'part1: authenticated has no column UPDATE on bundles at all');
   perform pg_temp.assert(not has_any_column_privilege('anon', 'public.books', 'INSERT, UPDATE'), 'part1: anon can write no column of books');
   perform pg_temp.assert(not has_any_column_privilege('anon', 'public.bundles', 'INSERT, UPDATE'), 'part1: anon can write no column of bundles');
-  perform pg_temp.assert(has_table_privilege('anon', 'public.books', 'SELECT') and has_table_privilege('anon', 'public.bundles', 'SELECT'), 'part1: anon keeps SELECT');
+  perform pg_temp.assert(not has_table_privilege('anon', 'public.books', 'SELECT') and not has_table_privilege('anon', 'public.bundles', 'SELECT')
+    and has_table_privilege('anon', 'public.public_books', 'SELECT') and has_table_privilege('anon', 'public.public_bundles', 'SELECT'),
+    'part1 (PEN-NAMES-2): anon has no SELECT on books/bundles and reads public_books/public_bundles instead');
+  perform pg_temp.assert(not has_any_column_privilege('authenticated', 'public.books', 'INSERT'), 'part1 (PEN-NAMES-2): authenticated has no INSERT on any books column');
   perform pg_temp.assert(has_table_privilege('authenticated', 'public.books', 'SELECT, DELETE') and has_table_privilege('authenticated', 'public.bundles', 'SELECT, DELETE'), 'part1: authenticated keeps SELECT and DELETE');
   perform pg_temp.assert(has_table_privilege('service_role', 'public.books', 'SELECT, INSERT, UPDATE, DELETE') and has_table_privilege('service_role', 'public.bundles', 'SELECT, INSERT, UPDATE, DELETE'), 'part1: service_role keeps full DML');
 end $$;
@@ -341,16 +348,26 @@ select pg_temp.expect_error('authenticated', 'e0660000-0000-0000-0000-0000000000
      values ('e0661000-0000-0000-0000-0000000000c5', 'e0660000-0000-0000-0000-00000000000a', 'direct', now())$q$,
   '42501', 'permission denied for table books', 'part2: INSERT naming created_at is denied');
 
--- Every column a draft may still carry, with a paid price: succeeds.
--- (Patch 8: the storage paths are no longer among them -- createBook now
--- inserts through the trusted writer, pinned by suite 067.)
-select pg_temp.expect_ok('authenticated', 'e0660000-0000-0000-0000-00000000000a',
+-- PEN-NAMES-2 (E5): even the draft columns are refused now --
+-- authenticated holds no INSERT on books at all (createBook inserts
+-- through the trusted writer, pinned by suite 067 and 075).
+select pg_temp.expect_error('authenticated', 'e0660000-0000-0000-0000-00000000000a',
   $q$insert into public.books (id, author_id, title, subtitle, description, keywords, isbn, language,
        publisher, edition, original_publication_date, genre, series_id, series_position, price_all)
      values ('e0661000-0000-0000-0000-0000000000c6', 'e0660000-0000-0000-0000-00000000000a', 'createBook paid draft',
        null, 'desc', '', null, 'sq', null, null, null, 'Fiction',
        'e0663000-0000-0000-0000-00000000000a', 3, 199)$q$,
-  1, 'part2: a direct paid draft insert, omitting status, succeeds');
+  '42501', 'permission denied for table books', 'part2 (PEN-NAMES-2): a direct paid draft insert by authenticated is denied by the ACL');
+
+-- The same draft through the trusted writer (service_role), omitting
+-- status, lands as a paid draft by default.
+select pg_temp.expect_ok('service_role', null,
+  $q$insert into public.books (id, author_id, title, subtitle, description, keywords, isbn, language,
+       publisher, edition, original_publication_date, genre, series_id, series_position, price_all)
+     values ('e0661000-0000-0000-0000-0000000000c6', 'e0660000-0000-0000-0000-00000000000a', 'createBook paid draft',
+       null, 'desc', '', null, 'sq', null, null, null, 'Fiction',
+       'e0663000-0000-0000-0000-00000000000a', 3, 199)$q$,
+  1, 'part2 (PEN-NAMES-2): the trusted writer''s paid draft insert, omitting status, succeeds');
 
 do $$
 begin
@@ -360,11 +377,12 @@ begin
     'part2: the new book is a paid DRAFT by default, with no published_at and legacy price_cents 0');
 end $$;
 
--- Ownership still enforced on insert: RLS, not the ACL, refuses this.
+-- PEN-NAMES-2 (E5): inserting a book for another author is refused by
+-- the ACL now (before RLS is ever consulted).
 select pg_temp.expect_error('authenticated', 'e0660000-0000-0000-0000-00000000000a',
   $q$insert into public.books (id, author_id, title, price_all)
      values ('e0661000-0000-0000-0000-0000000000c7', 'e0660000-0000-0000-0000-00000000000b', 'as someone else', 0)$q$,
-  '42501', 'row-level security', 'part2: inserting a book for another author is refused by RLS');
+  '42501', 'permission denied for table books', 'part2 (PEN-NAMES-2): inserting a book for another author is refused by the ACL');
 
 -- Bundles: the same shape.
 select pg_temp.expect_error('authenticated', 'e0660000-0000-0000-0000-00000000000a',
@@ -382,17 +400,25 @@ select pg_temp.expect_error('authenticated', 'e0660000-0000-0000-0000-0000000000
      values ('e0660000-0000-0000-0000-00000000000a', 'direct', 999)$q$,
   '42501', 'permission denied for table bundles', 'part2: bundle INSERT naming legacy price_cents is denied');
 
-select pg_temp.expect_ok('authenticated', 'e0660000-0000-0000-0000-00000000000a',
+-- PEN-NAMES-2 (E5b, audit PEN-2 r1 F1): even the createBundle columns
+-- are refused now -- authenticated holds no INSERT on bundles at all
+-- (createBundle calls create_bundle_with_membership on the trusted
+-- writer). The same drafts through the trusted writer (service_role),
+-- omitting status, land as drafts by default.
+select pg_temp.expect_error('authenticated', 'e0660000-0000-0000-0000-00000000000a',
   $q$insert into public.bundles (author_id, title, description, price_all)
      values ('e0660000-0000-0000-0000-00000000000a', 'P066 createBundle paid draft', 'two books', 299)$q$,
-  1, 'part2: createBundle''s paid draft insert, omitting status, succeeds');
+  '42501', 'permission denied for table bundles', 'part2 (PEN-NAMES-2): a direct paid draft bundle insert by authenticated is denied by the ACL');
 
--- createBundle reads back the new id through `.select("id")`: INSERT ...
--- RETURNING id must also work under the new ACL.
-select pg_temp.expect_ok('authenticated', 'e0660000-0000-0000-0000-00000000000a',
+select pg_temp.expect_ok('service_role', null,
+  $q$insert into public.bundles (author_id, title, description, price_all)
+     values ('e0660000-0000-0000-0000-00000000000a', 'P066 createBundle paid draft', 'two books', 299)$q$,
+  1, 'part2 (PEN-NAMES-2): the trusted writer''s paid draft bundle insert, omitting status, succeeds');
+
+select pg_temp.expect_ok('service_role', null,
   $q$insert into public.bundles (author_id, title, description, price_all)
      values ('e0660000-0000-0000-0000-00000000000a', 'P066 createBundle returning', '', 0) returning id$q$,
-  1, 'part2: INSERT ... RETURNING id works for the author');
+  1, 'part2 (PEN-NAMES-2): INSERT ... RETURNING id works for the trusted writer');
 
 do $$
 begin
@@ -404,7 +430,7 @@ end $$;
 select pg_temp.expect_error('authenticated', 'e0660000-0000-0000-0000-00000000000a',
   $q$insert into public.bundles (author_id, title, price_all)
      values ('e0660000-0000-0000-0000-00000000000b', 'as someone else', 0)$q$,
-  '42501', 'row-level security', 'part2: inserting a bundle for another author is refused by RLS');
+  '42501', 'permission denied for table bundles', 'part2 (PEN-NAMES-2): inserting a bundle for another author is refused by the ACL');
 
 -- ============================================================
 -- Part 3: authenticated UPDATE. Every protected column is refused by
@@ -533,15 +559,22 @@ select pg_temp.expect_error('anon', null,
   '42501', 'permission denied for table bundles', 'part4: anon cannot create a trigger on bundles');
 
 -- ============================================================
--- Part 5: reads are unchanged. anon sees published rows only; the author
--- sees published rows plus their own drafts.
+-- Part 5: reads. PEN-NAMES-2 (C1): anon reads published rows only,
+-- through public_books / public_bundles, and is refused the base tables;
+-- the author reads exactly their own rows from the base table.
 -- ============================================================
 select pg_temp.expect_ok('anon', null,
-  $q$select 1 from public.books where id::text like 'e0661000-%'$q$,
-  2, 'part5: anon sees exactly the two published P066 books');
+  $q$select 1 from public.public_books where id::text like 'e0661000-%'$q$,
+  2, 'part5 (PEN-NAMES-2): anon sees exactly the two published P066 books through public_books');
 select pg_temp.expect_ok('anon', null,
-  $q$select 1 from public.bundles where id::text like 'e0662000-%'$q$,
-  2, 'part5: anon sees exactly the two published P066 bundles');
+  $q$select 1 from public.public_bundles where id::text like 'e0662000-%'$q$,
+  2, 'part5 (PEN-NAMES-2): anon sees exactly the two published P066 bundles through public_bundles');
+select pg_temp.expect_error('anon', null,
+  $q$select 1 from public.books$q$,
+  '42501', 'permission denied for table books', 'part5 (PEN-NAMES-2): anon is refused the base books table');
+select pg_temp.expect_error('anon', null,
+  $q$select 1 from public.bundles$q$,
+  '42501', 'permission denied for table bundles', 'part5 (PEN-NAMES-2): anon is refused the base bundles table');
 select pg_temp.expect_ok('authenticated', 'e0660000-0000-0000-0000-00000000000a',
   $q$select 1 from public.books where id::text like 'e0661000-%'$q$,
   4, 'part5: author A sees their three books, the new draft, and none of B''s drafts');
@@ -615,8 +648,10 @@ declare
   v_n integer;
 begin
   select n into v_n from pg_temp.assertions_run;
-  if v_n <> 133 then
-    raise exception 'FAIL: expected 133 assertions to run, found %', v_n;
+  -- PEN-NAMES-2: 133 + 4 (no books column INSERT; the trusted-writer
+  -- draft insert; anon refused books and bundles).
+  if v_n <> 139 then
+    raise exception 'FAIL: expected 139 assertions to run, found %', v_n;
   end if;
 end $$;
 

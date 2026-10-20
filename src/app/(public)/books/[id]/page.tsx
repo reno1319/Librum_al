@@ -31,7 +31,6 @@ import {
   type BookPurchaseState,
 } from "@/lib/book-purchase";
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
-import { resolvePublicAuthorName } from "@/lib/author-name";
 import { getAuthorInitials } from "@/lib/author-initials";
 import { resolveBookByline } from "@/lib/book-byline";
 import {
@@ -44,7 +43,7 @@ import {
 import { buttonClasses } from "@/components/ui/button";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
-import type { Book, Profile, Review, Series, Contributor } from "@/lib/types";
+import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
@@ -97,10 +96,15 @@ import { CoverPlaceholder } from "@/components/cover-placeholder";
 // embedded from the public_pen_names view as `pen` (no account
 // columns); the shelves embed it too. Only the reviews join still reads
 // public_author_profiles (out of scope here; PR B).
-type BookWithAuthorBio = Book & {
+//
+// PEN-NAMES-2: every public read on this page goes through the views
+// (public_books, public_series, public_reviews), whose types carry no
+// account column, so nothing here can render or serialise an account id.
+// The author check is an own-row query on the base table.
+type BookWithAuthorBio = PublicBook & {
   pen: PublicPenName | null;
 };
-type BookWithAuthor = Book & {
+type BookWithAuthor = PublicBook & {
   pen: PenNameRef | null;
 };
 // LIBRUM 2.0 PRODUCT-3: `created_at` added to what this already-existing
@@ -109,10 +113,9 @@ type BookWithAuthor = Book & {
 // same deterministic tie-break data here that it has there. The `.order()`
 // call below stays as a DB-level head start; orderSeriesBooks() is the
 // actual authoritative order both surfaces agree on.
-type SeriesEntry = Pick<Book, "id" | "title" | "series_position" | "created_at">;
-type ReviewWithReader = Review & {
-  profiles: Pick<Profile, "public_author_name"> | null;
-};
+type SeriesEntry = Pick<PublicBook, "id" | "title" | "series_position" | "created_at">;
+// The caller's own review, read from the base table (own-row policy).
+type MyReview = { id: string; rating: number; body: string | null };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see V3 §3.
@@ -146,7 +149,7 @@ function truncateForMetadata(text: string, max: number) {
 const getBookForDetail = cache(async (id: string) => {
   const supabase = await createClient();
   const { data: book } = await supabase
-    .from("books")
+    .from("public_books")
     .select("*, pen:public_pen_names(id, name, bio, avatar_path, links)")
     .eq("id", id)
     .single<BookWithAuthorBio>();
@@ -293,7 +296,19 @@ export default async function BookDetailPage({
     notFound();
   }
 
-  const isAuthor = user?.id === book.author_id;
+  // PEN-NAMES-2: an own-row query, so the page never needs the book's
+  // author_id (public_books has none). Works before and after the
+  // contract: the base table only ever returns the caller's own row here.
+  let isAuthor = false;
+  if (user) {
+    const { data: ownRow } = await supabase
+      .from("books")
+      .select("id")
+      .eq("id", id)
+      .eq("author_id", user.id)
+      .maybeSingle();
+    isAuthor = !!ownRow;
+  }
 
   // LAUNCH-1 P1-7A: routed through user_owns_book() (also excludes a
   // purchase whose payment intent has a dispute at status 'lost', see
@@ -359,6 +374,7 @@ export default async function BookDetailPage({
   // never a real query run just to fill a slot.
   const [
     { data: reviews },
+    { data: myReviewRow },
     { data: contributors },
     { data: seriesRow },
     { data: seriesEntriesData },
@@ -366,12 +382,24 @@ export default async function BookDetailPage({
     { data: youMightLikeData },
     { data: followRow },
   ] = await Promise.all([
+    // PEN-NAMES-2 (22a): reviews come from public_reviews -- no reader_id;
+    // reviewer_name is the reviewer's default pen name when they are an
+    // author with a book, otherwise null.
     supabase
-      .from("reviews")
-      .select("*, profiles:public_author_profiles(public_author_name)")
+      .from("public_reviews")
+      .select("id, book_id, rating, body, created_at, reviewer_name")
       .eq("book_id", id)
       .order("created_at", { ascending: false })
-      .returns<ReviewWithReader[]>(),
+      .returns<PublicReview[]>(),
+    // The caller's own review, for the form's defaults: an own-row read.
+    user
+      ? supabase
+          .from("reviews")
+          .select("id, rating, body")
+          .eq("book_id", id)
+          .eq("reader_id", user.id)
+          .maybeSingle<MyReview>()
+      : Promise.resolve({ data: null }),
     supabase
       .from("book_contributors")
       .select("*")
@@ -379,7 +407,11 @@ export default async function BookDetailPage({
       .order("created_at")
       .returns<Contributor[]>(),
     book.series_id
-      ? supabase.from("series").select("*").eq("id", book.series_id).maybeSingle<Series>()
+      ? supabase
+          .from("public_series")
+          .select("id, title, pen_name_id, created_at")
+          .eq("id", book.series_id)
+          .maybeSingle<PublicSeries>()
       : Promise.resolve({ data: null }),
     // ALL-WIRING-2: all three of these lists are navigation/discovery --
     // "the rest of this series", "more by this author", "you might
@@ -389,7 +421,7 @@ export default async function BookDetailPage({
     // storefront cannot honour. Its own detail page stays reachable.
     book.series_id
       ? supabase
-          .from("books")
+          .from("public_books")
           .select("id, title, series_position, created_at")
           .eq("series_id", book.series_id)
           .eq("status", "published")
@@ -399,7 +431,7 @@ export default async function BookDetailPage({
       : Promise.resolve({ data: null }),
     // 3a: "More by" = only books under this book's pen name.
     supabase
-      .from("books")
+      .from("public_books")
       .select("*, pen:public_pen_names(id, name)")
       .eq("status", "published")
       .not("price_all", "is", null)
@@ -410,13 +442,16 @@ export default async function BookDetailPage({
       .returns<BookWithAuthor[]>(),
     book.genre
       ? supabase
-          .from("books")
+          .from("public_books")
           .select("*, pen:public_pen_names(id, name)")
           .eq("status", "published")
           .not("price_all", "is", null)
           .eq("genre", book.genre)
           .neq("id", id)
-          .neq("author_id", book.author_id)
+          // PEN-NAMES-2 (L15): leave out the same pen name only. Leaving
+          // out the whole account would let two shelves be compared to
+          // tell which pen names share an account.
+          .neq("pen_name_id", book.pen_name_id)
           .order("created_at", { ascending: false })
           .limit(8)
           .returns<BookWithAuthor[]>()
@@ -451,11 +486,9 @@ export default async function BookDetailPage({
     reviewCount > 0
       ? allReviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount
       : 0;
-  const myReview = user
-    ? (allReviews.find((r) => r.reader_id === user.id) ?? null)
-    : null;
+  const myReview: MyReview | null = myReviewRow ?? null;
 
-  const seriesInfo: Series | null = seriesRow ?? null;
+  const seriesInfo: PublicSeries | null = seriesRow ?? null;
   // LIBRUM 2.0 PRODUCT-3: orderSeriesBooks() is the same canonical
   // ordering the public Series page uses -- see src/lib/series-order.ts.
   // No extra query: this re-sorts the exact PERF-1 Group B rows already
@@ -1158,7 +1191,7 @@ export default async function BookDetailPage({
                 <div className="flex items-center gap-2">
                   <StarRating rating={review.rating} />
                   <span className="text-sm font-medium">
-                    {resolvePublicAuthorName(review.profiles) ?? "A Librum reader"}
+                    {review.reviewer_name ?? "A Librum reader"}
                   </span>
                 </div>
                 {review.body && (

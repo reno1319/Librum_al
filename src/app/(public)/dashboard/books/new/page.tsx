@@ -51,8 +51,9 @@ export default async function NewBookPage({
       .select("display_name, public_author_name")
       .eq("id", user.id)
       .single(),
-    // F4 (D1): whether the Pen name field and the Rights choice can be
-    // shown yet (rendering only; see catalog-schema-features.ts).
+    // F4 (D1): whether the Rights choice can be shown yet (rendering
+    // only; see catalog-schema-features.ts). PEN-NAMES-2: the Pen name
+    // field is always available.
     getCatalogSchemaFeatures(),
     // PEN-NAMES-1 (10a): the author's own pen names (RLS: own rows; the
     // author_id filter also keeps a staff account to its own) for the
@@ -104,7 +105,7 @@ export default async function NewBookPage({
         authorName={resolvePublicAuthorName(profile) ?? ""}
         authorId={user.id}
         paidPublishingAvailable={canPublishPaidTitle()}
-        penNameAvailable={schemaFeatures.penName}
+        penNameAvailable
         penNameSuggestions={(penNames ?? []).filter((p) => !p.is_default).map((p) => p.name)}
         rightsAvailable={schemaFeatures.rights}
       />
