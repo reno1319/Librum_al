@@ -8,7 +8,7 @@ import { orderSeriesBooks } from "@/lib/series-order";
 import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
-import type { Book } from "@/lib/types";
+import type { PublicBook } from "@/lib/types";
 
 // LIBRUM 2.0 PRODUCT-3: the public series page didn't exist before this
 // pass -- see the PRODUCT-3 audit (no /series/[id] route, no series
@@ -30,7 +30,7 @@ type PublicSeries = {
 
 type PublicSeriesPageData = {
   series: PublicSeries;
-  books: Book[];
+  books: PublicBook[];
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -68,8 +68,9 @@ const getPublicSeriesPageData = cache(
   async (id: string): Promise<PublicSeriesPageData | null> => {
     const supabase = await createClient();
 
+    // PEN-NAMES-2: public_series (no account column).
     const { data: series } = await supabase
-      .from("series")
+      .from("public_series")
       .select("id, title, pen:public_pen_names(id, name)")
       .eq("id", id)
       .single<PublicSeries>();
@@ -90,12 +91,12 @@ const getPublicSeriesPageData = cache(
     // not-found, exactly as a series with zero published books already
     // did.
     const { data: booksRaw } = await supabase
-      .from("books")
+      .from("public_books")
       .select("*")
       .eq("series_id", id)
       .eq("status", "published")
       .not("price_all", "is", null)
-      .returns<Book[]>();
+      .returns<PublicBook[]>();
 
     const books = orderSeriesBooks(booksRaw ?? []);
 

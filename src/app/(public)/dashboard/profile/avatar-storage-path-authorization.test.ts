@@ -280,8 +280,13 @@ describe("the ACLs this suite models come from the real SQL", () => {
     expect([...PATCH9_UPDATE].sort()).toEqual(["bio", "display_name", "public_author_name"]);
   });
 
-  it("schema.sql grants exactly what the migration grants", () => {
-    expect(authenticatedProfileUpdateColumns(readFileSync(SCHEMA_PATH, "utf8")).sort()).toEqual([...PATCH9_UPDATE].sort());
+  // PEN-NAMES-2 (E3, migration 20261019222500): bio left the grant too
+  // (a pen name's bio lives on pen_names), so schema.sql grants the Patch 9
+  // columns minus bio.
+  it("schema.sql grants exactly what the migrations grant (Patch 9, then E3 drops bio)", () => {
+    expect(authenticatedProfileUpdateColumns(readFileSync(SCHEMA_PATH, "utf8")).sort()).toEqual(
+      [...PATCH9_UPDATE].filter((c) => c !== "bio").sort(),
+    );
   });
 
   it("the migration rebuilds the profiles ACL from a reset of PUBLIC, anon and authenticated, and names no other table", () => {
@@ -387,14 +392,23 @@ describe("no profile photo writer remains", () => {
     expect(files.filter((file) => /profile-write-client/.test(readFileSync(file, "utf8")))).toEqual([]);
   });
 
-  it("the only avatar_path write in the application is the pen name photo, through the pen name writer", () => {
+  // PEN-2 (17a after C8): becomeAuthor also sets the default pen name's
+  // photo (a server-side copy of the legacy account photo), through the
+  // same pen name writer; still no profile photo writer.
+  it("the only avatar_path writes in the application are pen name photos, through the pen name writer", () => {
     const writers = sourceFiles(path.join(REPO_ROOT, "src")).filter((file) => {
       const source = readFileSync(file, "utf8");
       return /avatar_path\s*:/.test(source) && /\.(update|insert|upsert)\(/.test(source);
     });
     expect(writers.map((file) => path.relative(REPO_ROOT, file))).toEqual([
+      "src/app/(public)/account/become-author.ts",
       "src/app/(public)/dashboard/pen-names/actions.ts",
     ]);
+    const becomeAuthor = readFileSync(path.join(REPO_ROOT, "src/app/(public)/account/become-author.ts"), "utf8");
+    expect(becomeAuthor).toMatch(/createPenNameWriteClient\(\)/);
+    expect(becomeAuthor.match(/\.update\(\{[^}]*avatar_path/g)).toEqual([".update({ avatar_path"]);
+    expect(becomeAuthor).toMatch(/\.from\("pen_names"\)\s*\.update\(\{ avatar_path: newPath \}\)/);
+    expect(becomeAuthor).not.toMatch(/\.from\("profiles"\)\s*\.update\(\{[^}]*avatar_path/);
     const penNameActions = readFileSync(path.join(REPO_ROOT, "src/app/(public)/dashboard/pen-names/actions.ts"), "utf8");
     expect(penNameActions.match(/\.(update|insert|upsert)\(\{[^}]*avatar_path/g)).toHaveLength(1);
     expect(penNameActions).toMatch(/\.from\("pen_names"\)\s*\.update\(\{ avatar_path: newPhotoPath \}\)/);

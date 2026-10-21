@@ -139,8 +139,10 @@ export async function loadDashboardSales(params: {
 
   let purchaseRows: PurchaseRow[] = [];
   if (bookIds.length > 0) {
+    // PEN-NAMES-2 [23b]: purchases of the author's own books, without the
+    // buyer's reader_id.
     const { data, error } = await supabase
-      .from("purchases")
+      .from("author_book_purchases")
       .select(
         "id, book_id, amount_cents, created_at, stripe_checkout_session_id, stripe_payment_intent_id",
       )
@@ -154,8 +156,10 @@ export async function loadDashboardSales(params: {
     purchaseRows = data ?? [];
   }
 
+  // PEN-NAMES-2 [23b]: the author's own fulfilled bundle sales, without
+  // the buyer's reader_id.
   const { data: snapshotRows, error: snapshotError } = await supabase
-    .from("bundle_checkout_snapshots")
+    .from("author_bundle_sales")
     .select(
       "stripe_checkout_session_id, stripe_payment_intent_id, total_amount_cents, fulfilled_at, currency",
     )

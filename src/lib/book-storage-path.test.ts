@@ -14,6 +14,8 @@ import {
   isOwnRemovableBookCoverPath,
   isOwnTemporaryCoverUploadPath,
   isOwnTemporaryManuscriptUploadPath,
+  isNewBookCoverPath,
+  newBookCoverPath,
 } from "./book-storage-path";
 import {
   BOOK_FIXTURE_AUTHOR_ID as AUTHOR,
@@ -139,13 +141,17 @@ describe("writers use the shared constructors, never an inline key template", ()
     expect(source).not.toMatch(/`\$\{[^}]+\}\/\$\{[^}]+\}\.epub`/);
   });
 
-  it("createBook and updateBook each build both keys with the constructors", () => {
+  // PEN-2 (L10): a cover key is a fresh random folder on every create and
+  // every replace (newBookCoverPath); the old account-named constructor is
+  // no longer used by any writer. Manuscripts keep their canonical key.
+  it("createBook and updateBook build the cover with newBookCoverPath and the manuscript with its constructor", () => {
     const create = source.slice(source.indexOf("export async function createBook("), source.indexOf("export async function updateBook("));
     const update = source.slice(source.indexOf("export async function updateBook("), source.indexOf("async function performPublish("));
-    expect(create).toMatch(/canonicalBookCoverPath\(user\.id, bookId, coverResult\.extension\)/);
+    expect(create).toMatch(/newBookCoverPath\(coverResult\.extension\)/);
     expect(create).toMatch(/canonicalBookManuscriptPath\(user\.id, bookId\)/);
-    expect(update).toMatch(/canonicalBookCoverPath\(user\.id, existing\.id, coverResult\.extension\)/);
+    expect(update).toMatch(/newBookCoverPath\(coverResult\.extension\)/);
     expect(update).toMatch(/canonicalBookManuscriptPath\(user\.id, existing\.id\)/);
+    expect(source).not.toMatch(/canonicalBookCoverPath\(/);
   });
 });
 
@@ -309,5 +315,45 @@ describe("groupBookStorageRemovals", () => {
 
   it("produces nothing for no candidates", () => {
     expect(groupBookStorageRemovals([])).toEqual([]);
+  });
+});
+
+// PEN-2 (L10, O10): the new random-folder cover key.
+describe("newBookCoverPath / isNewBookCoverPath", () => {
+  it("builds <random uuid>/cover.<jpg|png>, fresh on every call, naming no account or book", () => {
+    const a = newBookCoverPath("png");
+    const b = newBookCoverPath("png");
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.png$/);
+    expect(newBookCoverPath("jpg")).toMatch(/\/cover\.jpg$/);
+    expect(a).not.toBe(b);
+    expect(a).not.toContain(AUTHOR);
+    expect(a).not.toContain(BOOK);
+    expect(isNewBookCoverPath(a)).toBe(true);
+  });
+
+  it.each(["jpeg", "gif", "PNG", ""])("refuses the extension %j", (ext) => {
+    expect(() => newBookCoverPath(ext as never)).toThrow();
+  });
+
+  it("is classified as random (removable) for a canonical author and book, and only in its exact shape", () => {
+    const key = newBookCoverPath("jpg");
+    expect(classifyBookCoverPath(key, AUTHOR, BOOK)).toBe("random");
+    expect(isOwnRemovableBookCoverPath(key, AUTHOR, BOOK)).toBe(true);
+    expect(isOwnCanonicalBookCoverPath(key, AUTHOR, BOOK)).toBe(false);
+    for (const bad of [
+      `${key} `,
+      `/${key}`,
+      `covers/${key}`,
+      key.toUpperCase(),
+      key.replace("cover.jpg", "cover.jpeg"),
+      key.replace("/cover.", "/x/cover."),
+      key.replace("/", "%2F"),
+      `${AUTHOR}/cover.png/x`,
+      "../cover.png",
+    ]) {
+      expect(isNewBookCoverPath(bad)).toBe(false);
+      expect(classifyBookCoverPath(bad, AUTHOR, BOOK)).toBe("unsafe");
+    }
+    expect(classifyBookCoverPath(key, "not-a-uuid", BOOK)).toBe("unsafe");
   });
 });

@@ -126,8 +126,10 @@ function fakeSupabase(tables: Record<string, Result>, rpcs: Record<string, Resul
   } as unknown as Parameters<typeof loadDashboardSales>[0]["supabase"];
 }
 
+// PEN-NAMES-2 [23b]: the author's sales come from author_book_purchases
+// and author_bundle_sales (no buyer reader_id), not the base tables.
 const OK_TABLES = {
-  purchases: {
+  author_book_purchases: {
     data: [
       {
         id: "p1",
@@ -148,7 +150,7 @@ const OK_TABLES = {
     ],
     error: null,
   },
-  bundle_checkout_snapshots: { data: [], error: null },
+  author_bundle_sales: { data: [], error: null },
 };
 const OK_RPCS = {
   author_lost_disputed_payment_intents: { data: [{ stripe_payment_intent_id: "pi_lost" }], error: null },
@@ -175,8 +177,8 @@ describe("loadDashboardSales", () => {
 
   const FAILURE = { data: null, error: { message: "boom" } };
   it.each([
-    ["purchases read", { ...OK_TABLES, purchases: FAILURE }, OK_RPCS],
-    ["snapshots read", { ...OK_TABLES, bundle_checkout_snapshots: FAILURE }, OK_RPCS],
+    ["purchases read", { ...OK_TABLES, author_book_purchases: FAILURE }, OK_RPCS],
+    ["snapshots read", { ...OK_TABLES, author_bundle_sales: FAILURE }, OK_RPCS],
     ["lost-dispute RPC", OK_TABLES, { ...OK_RPCS, author_lost_disputed_payment_intents: FAILURE }],
     ["currency RPC", OK_TABLES, { ...OK_RPCS, list_purchase_currencies: FAILURE }],
   ])("fails safe (ok: false, no figures) when the %s fails", async (_name, tables, rpcs) => {

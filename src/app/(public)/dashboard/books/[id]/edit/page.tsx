@@ -36,6 +36,7 @@ import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { FormDraftKeeper } from "@/components/form-draft-keeper";
 import { CheckedBookField } from "@/components/checked-book-field";
 import type { Book, Series, Contributor } from "@/lib/types";
+import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 
 // LIBRUM 2.0 SEO-1: a static title, not "Edit <book title>" -- getting
@@ -145,11 +146,14 @@ export default async function EditBookPage({
     redirect("/login");
   }
 
+  // PEN-NAMES-2 (D4): books.pen_name is gone; the book's pen name is
+  // embedded from public_pen_names. An own-row read of the base table.
   const { data: book } = await supabase
     .from("books")
-    .select("*")
+    .select("*, pen:public_pen_names(id, name)")
     .eq("id", id)
-    .single<Book>();
+    .eq("author_id", user.id)
+    .single<Book & { pen: PenNameRef | null }>();
 
   if (!book || book.author_id !== user.id) {
     notFound();
@@ -206,6 +210,10 @@ export default async function EditBookPage({
       .returns<{ name: string; is_default: boolean }[]>(),
   ]);
   const penNameSuggestions = (penNames ?? []).filter((p) => !p.is_default).map((p) => p.name);
+  // The box shows the book's pen name, blank for the default one (blank
+  // means "your author name", as before).
+  const defaultPenName = (penNames ?? []).find((p) => p.is_default)?.name ?? null;
+  const bookPenName = book.pen?.name && book.pen.name !== defaultPenName ? book.pen.name : "";
   const currentRightsBasis = rightsState.kind === "present" ? rightsState.declaration.basis : null;
   const authorPublicName = resolvePublicAuthorName(profile);
 
@@ -264,15 +272,16 @@ export default async function EditBookPage({
                   />
                 </label>
 
-                {/* F4 (P1, Q1 = a): directly under Title, only once the
-                    database can store it. Cleared to none when emptied. */}
-                {schemaFeatures.penName && (
+                {/* F4 (P1, Q1 = a): directly under Title. Cleared to the
+                    default pen name when emptied. PEN-NAMES-2: always
+                    shown (pen names exist since PEN-NAMES-1). */}
+                {(
                   <label className="flex flex-col gap-1 text-sm">
                     Pen name (optional)
                     <input
                       name="penName"
                       type="text"
-                      defaultValue={book.pen_name ?? ""}
+                      defaultValue={bookPenName}
                       maxLength={PEN_NAME_MAX_LENGTH}
                       list={penNameSuggestions.length > 0 ? "edit-pen-name-suggestions" : undefined}
                       autoComplete="off"

@@ -138,16 +138,27 @@ describe("bundle prices are parsed, classified and labelled only by the catalog 
   it("both public discovery rails exclude unpriced bundles in the query", () => {
     for (const file of ["bookstore/page.tsx", "authors/[id]/page.tsx"]) {
       const source = code(read(file));
-      const bundleQuery = source.slice(source.indexOf('from("bundles")'));
+      // PEN-NAMES-2: public rails read the public_bundles view.
+      expect(source).not.toContain('from("bundles")');
+      const bundleQuery = source.slice(source.indexOf('from("public_bundles")'));
       const end = bundleQuery.indexOf(".order(");
       expect(bundleQuery.slice(0, end)).toContain('.not("price_all", "is", null)');
     }
   });
 
   it("the author's own list and the detail page deliberately do NOT exclude unpriced bundles", () => {
-    for (const file of ["dashboard/bundles/page.tsx", "bundles/[id]/page.tsx", "dashboard/bundles/[id]/edit/page.tsx"]) {
+    // PEN-NAMES-2: the detail page reads public_bundles (its base-table
+    // read is only the own-row "is this mine?" check); the dashboard
+    // pages read the author's own rows from the base table.
+    const files: [string, string][] = [
+      ["dashboard/bundles/page.tsx", 'from("bundles")'],
+      ["bundles/[id]/page.tsx", 'from("public_bundles")'],
+      ["dashboard/bundles/[id]/edit/page.tsx", 'from("bundles")'],
+    ];
+    for (const [file, table] of files) {
       const source = code(read(file));
-      const bundleQuery = source.slice(source.indexOf('from("bundles")'), source.indexOf('from("bundles")') + 400);
+      expect(source.indexOf(table)).toBeGreaterThan(-1);
+      const bundleQuery = source.slice(source.indexOf(table), source.indexOf(table) + 400);
       expect(bundleQuery).not.toContain('.not("price_all"');
     }
   });

@@ -130,6 +130,23 @@ function queryStub(listResult: unknown, rowResult?: unknown) {
   return chain;
 }
 
+// PEN-NAMES-2: the page reads the book from public_books (no author_id)
+// and asks "is this mine?" with an own-row books query. The fixture's
+// author_id is the hidden truth: stripped from the public row, used only
+// to answer the own-row query as RLS would.
+function bookTableStub(table: string, book: Record<string, unknown>, user: { id: string } | null | undefined) {
+  if (table === "public_books") {
+    const publicPart: Record<string, unknown> = { ...book };
+    delete publicPart.author_id;
+    return queryStub({ data: [] }, { data: publicPart });
+  }
+  if (table === "books") {
+    const mine = !!user && user.id === book.author_id;
+    return queryStub({ data: [] }, { data: mine ? { id: book.id } : null });
+  }
+  return null;
+}
+
 function stubSupabase(
   options: {
     user?: { id: string } | null;
@@ -148,9 +165,9 @@ function stubSupabase(
     rpc,
     storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/x.png" } }) }) },
     from: (table: string) => {
-      if (table === "books") {
-        return queryStub({ data: [] }, { data: options.book ?? BOOK_ROW });
-      }
+      const user = options.user === undefined ? { id: "reader" } : options.user;
+      const books = bookTableStub(table, options.book ?? BOOK_ROW, user);
+      if (books) return books;
       return queryStub({ data: [] }, { data: null });
     },
   };
@@ -478,7 +495,8 @@ describe("BookDetailPage: redesign step 3", () => {
       rpc: vi.fn(async () => ({ data: false })),
       storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/x.png" } }) }) },
       from: (table: string) => {
-        if (table === "books") return queryStub({ data: [] }, { data: options.book ?? BOOK_ROW });
+        const books = bookTableStub(table, options.book ?? BOOK_ROW, options.user);
+        if (books) return books;
         if (table === "pen_name_follows") {
           return queryStub({ data: [] }, { data: options.following ? { pen_name_id: "pen-an-author" } : null });
         }

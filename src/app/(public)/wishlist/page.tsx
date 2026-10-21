@@ -9,7 +9,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
-import type { Book } from "@/lib/types";
+import type { PublicBook } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 
@@ -26,9 +26,10 @@ export const dynamic = "force-dynamic";
 // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: resolved via resolvePublicAuthorName().
 // PEN-NAMES-1: the byline is the book's pen name, embedded from the
 // public_pen_names view as `pen` (no account columns).
+// PEN-NAMES-2: the book is embedded from public_books (aliased `books`).
 type WishlistItemWithBook = {
   book_id: string;
-  books: (Book & { pen: PenNameRef | null }) | null;
+  books: (PublicBook & { pen: PenNameRef | null }) | null;
 };
 
 export default async function WishlistPage() {
@@ -59,7 +60,7 @@ export default async function WishlistPage() {
   // excluded; see the patch report.
   const { data: items } = await supabase
     .from("wishlist_items")
-    .select("book_id, books(*, pen:public_pen_names(id, name))")
+    .select("book_id, books:public_books(*, pen:public_pen_names(id, name))")
     .eq("reader_id", user.id)
     .order("created_at", { ascending: false })
     .returns<WishlistItemWithBook[]>();

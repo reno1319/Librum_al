@@ -98,8 +98,9 @@ export async function pickLibrumChoiceFromForm(formData: FormData): Promise<void
     // book exists and is published). Read with the request client:
     // published books are public, so a draft reads as not found.
     const supabase = await createClient();
+    // PEN-NAMES-2 (MF2): through public_books.
     const { data: book, error } = await supabase
-      .from("books")
+      .from("public_books")
       .select("id, price_all")
       .eq("id", bookId)
       .maybeSingle();

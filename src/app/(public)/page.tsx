@@ -8,7 +8,7 @@ import { resolveBookByline } from "@/lib/book-byline";
 import type { PenNameRef } from "@/lib/pen-names";
 import { getLibrumChoiceBook, type LibrumChoiceBook } from "@/lib/librum-choice";
 import { orderHomepageBooks, qualifiesForHomepage } from "@/lib/librum-choice-logic";
-import type { Book } from "@/lib/types";
+import type { PublicBook } from "@/lib/types";
 import {
   BRASS_CTA_CLASSES,
   ClosingCtaBand,
@@ -94,7 +94,8 @@ const MAX_HOMEPAGE_COVERS = 8;
 // published book is unpriced, this section renders nothing at all.
 async function fetchPublishedCovers(supabase: SupabaseClient) {
   const { data } = await supabase
-    .from("books")
+    // PEN-NAMES-2: public_books (no account columns).
+    .from("public_books")
     // REDESIGN STEP 2 / PEN-NAMES-1: the hero shelf writes each book's
     // pen name on its spine, embedded from the public_pen_names view,
     // as the bookstore does.
@@ -107,7 +108,7 @@ async function fetchPublishedCovers(supabase: SupabaseClient) {
     .order("created_at", { ascending: false })
     .limit(MAX_HOMEPAGE_COVERS)
     .returns<
-      (Pick<Book, "id" | "title" | "cover_path" | "genre" | "description"> & {
+      (Pick<PublicBook, "id" | "title" | "cover_path" | "genre" | "description"> & {
         pen: PenNameRef | null;
       })[]
     >();

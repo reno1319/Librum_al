@@ -28,8 +28,9 @@ export default async function ReportBookPage({
     redirect(`/login?next=/books/${id}/report`);
   }
 
+  // PEN-NAMES-2: public_books, like every public read of a book.
   const { data: book } = await supabase
-    .from("books")
+    .from("public_books")
     .select("title")
     .eq("id", id)
     .single();

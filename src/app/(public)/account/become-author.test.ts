@@ -34,6 +34,9 @@ vi.mock("next/headers", () => ({
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_ID = "22222222-2222-4222-8222-222222222222";
+const PEN_ID = "33333333-3333-4333-8333-333333333333";
+const LEGACY_PNG = `${USER_ID}/avatar.png`;
+const NEW_PEN_PHOTO = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/pen-name\.(jpg|png)$/;
 
 let authUser: { id: string } | null;
 let profileResult: { data: unknown; error: unknown };
@@ -99,6 +102,68 @@ vi.mock("@/lib/author-role-write-client", () => ({
   },
 }));
 
+// PEN-2 (17a after C8): the pen-name writer copies a legacy account photo
+// to a fresh pen-name key and compares-and-sets it on the default pen
+// name. It is a separate fake so each test sees exactly what it did.
+type PenOp =
+  | { op: "read"; filters: Array<[string, unknown]> }
+  | { op: "copy"; bucket: string; from: string; to: string }
+  | { op: "update"; values: unknown; filters: Array<[string, unknown]>; nullCheck: string | null }
+  | { op: "remove"; bucket: string; paths: string[] };
+let penWriterCreated: number;
+let penOps: PenOp[];
+let defaultPenName: { data: unknown; error: unknown };
+let copyResult: { error: unknown };
+let penUpdateResult: { data: unknown; error: unknown };
+
+vi.mock("@/lib/pen-name-write-client", () => ({
+  createPenNameWriteClient: () => {
+    penWriterCreated += 1;
+    return {
+      from: (table: string) => {
+        if (table !== "pen_names") throw new Error(`unexpected pen writer table ${table}`);
+        return {
+          select: () => {
+            const read = { op: "read" as const, filters: [] as Array<[string, unknown]> };
+            penOps.push(read);
+            const chain = {
+              eq: (column: string, value: unknown) => (read.filters.push([column, value]), chain),
+              maybeSingle: async () => defaultPenName,
+            };
+            return chain;
+          },
+          update: (values: unknown) => {
+            const write = { op: "update" as const, values, filters: [] as Array<[string, unknown]>, nullCheck: null as string | null };
+            penOps.push(write);
+            const chain = {
+              eq: (column: string, value: unknown) => (write.filters.push([column, value]), chain),
+              is: (column: string, value: unknown) => {
+                if (value !== null) throw new Error("only .is(col, null) is expected");
+                write.nullCheck = column;
+                return chain;
+              },
+              select: async () => penUpdateResult,
+            };
+            return chain;
+          },
+        };
+      },
+      storage: {
+        from: (bucket: string) => ({
+          copy: async (from: string, to: string) => {
+            penOps.push({ op: "copy", bucket, from, to });
+            return copyResult;
+          },
+          remove: async (paths: string[]) => {
+            penOps.push({ op: "remove", bucket, paths });
+            return { error: null };
+          },
+        }),
+      },
+    };
+  },
+}));
+
 const { becomeAuthor } = await import("./become-author");
 
 async function run(): Promise<string> {
@@ -126,6 +191,12 @@ beforeEach(() => {
   writes = [];
   revalidatePath.mockClear();
   vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  penWriterCreated = 0;
+  penOps = [];
+  defaultPenName = { data: { id: PEN_ID, avatar_path: null }, error: null };
+  copyResult = { error: null };
+  penUpdateResult = { data: [{ id: PEN_ID }], error: null };
 });
 
 describe("becomeAuthor", () => {
@@ -224,6 +295,140 @@ describe("becomeAuthor", () => {
     const target = await run();
     expect(target.startsWith("/account?error=")).toBe(true);
     expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("becomeAuthor: N3 name trim", () => {
+  it("trims the stored display name before it becomes the public author name", async () => {
+    profileResult = readerProfile({ display_name: "  Ana Reader \t" });
+    const target = await run();
+    expect(target.startsWith("/dashboard?success=")).toBe(true);
+    expect(writes[0]?.values).toEqual({ role: "author", public_author_name: "Ana Reader" });
+  });
+
+  it.each(["", "   ", "\t\n"])("refuses a name that is empty after trimming (%j), with the profile page's message", async (name) => {
+    profileResult = readerProfile({ display_name: name });
+    const target = await run();
+    expect(target).toBe(`/account?error=${encodeURIComponent("Public author name can't be empty")}`);
+    expect(writerCreated).toBe(0);
+    expect(penWriterCreated).toBe(0);
+  });
+});
+
+describe("becomeAuthor: legacy photo copied to the default pen name (17a after C8)", () => {
+  function logged(): string {
+    const spies = [console.error, console.warn] as unknown as Array<{ mock: { calls: unknown[][] } }>;
+    return JSON.stringify(spies.flatMap((spy) => spy.mock.calls));
+  }
+
+  it("copies the account photo to a fresh pen-name key and sets it with a CAS on an empty photo", async () => {
+    profileResult = readerProfile({ avatar_path: LEGACY_PNG });
+    const target = await run();
+
+    expect(target.startsWith("/dashboard?success=")).toBe(true);
+    expect(penWriterCreated).toBe(1);
+    const [read, copy, update, ...rest] = penOps;
+    expect(read).toEqual({ op: "read", filters: [["author_id", USER_ID], ["is_default", true]] });
+    expect(copy).toMatchObject({ op: "copy", bucket: "avatars", from: LEGACY_PNG });
+    const to = (copy as { to: string }).to;
+    expect(to).toMatch(NEW_PEN_PHOTO);
+    expect(to.endsWith(".png")).toBe(true);
+    expect(to).not.toContain(USER_ID);
+    expect(update).toEqual({
+      op: "update",
+      values: { avatar_path: to },
+      filters: [["id", PEN_ID], ["author_id", USER_ID]],
+      nullCheck: "avatar_path",
+    });
+    expect(rest).toEqual([]);
+  });
+
+  it("a .jpg photo keeps its extension", async () => {
+    profileResult = readerProfile({ avatar_path: `${USER_ID}/avatar.jpg` });
+    await run();
+    const copy = penOps.find((op) => op.op === "copy") as { to: string };
+    expect(copy.to.endsWith("/pen-name.jpg")).toBe(true);
+  });
+
+  it("when the database already copied the legacy key to the pen name, the CAS is on that key", async () => {
+    profileResult = readerProfile({ avatar_path: LEGACY_PNG });
+    defaultPenName = { data: { id: PEN_ID, avatar_path: LEGACY_PNG }, error: null };
+    await run();
+    const update = penOps.find((op) => op.op === "update") as { filters: Array<[string, unknown]>; nullCheck: string | null };
+    expect(update.nullCheck).toBeNull();
+    expect(update.filters).toEqual([["id", PEN_ID], ["author_id", USER_ID], ["avatar_path", LEGACY_PNG]]);
+  });
+
+  it("a CAS miss (the author changed the photo meanwhile) removes its own copy and nothing else", async () => {
+    profileResult = readerProfile({ avatar_path: LEGACY_PNG });
+    penUpdateResult = { data: [], error: null };
+    const target = await run();
+    expect(target.startsWith("/dashboard?success=")).toBe(true);
+    const copy = penOps.find((op) => op.op === "copy") as { to: string };
+    expect(penOps.at(-1)).toEqual({ op: "remove", bucket: "avatars", paths: [copy.to] });
+    expect(penOps.filter((op) => op.op === "remove")).toHaveLength(1);
+  });
+
+  it("an update error also removes the copy; the switch still succeeds", async () => {
+    profileResult = readerProfile({ avatar_path: LEGACY_PNG });
+    penUpdateResult = { data: null, error: { code: "23505" } };
+    expect((await run()).startsWith("/dashboard?success=")).toBe(true);
+    expect(penOps.at(-1)?.op).toBe("remove");
+  });
+
+  it("a missing legacy object (copy fails) writes nothing and the switch still succeeds", async () => {
+    profileResult = readerProfile({ avatar_path: LEGACY_PNG });
+    copyResult = { error: { statusCode: "404", message: "Object not found" } };
+    expect((await run()).startsWith("/dashboard?success=")).toBe(true);
+    expect(penOps.map((op) => op.op)).toEqual(["read", "copy"]);
+  });
+
+  it("a pen name that already has its own photo is left alone: no copy", async () => {
+    profileResult = readerProfile({ avatar_path: LEGACY_PNG });
+    defaultPenName = { data: { id: PEN_ID, avatar_path: "44444444-4444-4444-8444-444444444444/pen-name.png" }, error: null };
+    await run();
+    expect(penOps.map((op) => op.op)).toEqual(["read"]);
+  });
+
+  it("no default pen name found: nothing copied", async () => {
+    profileResult = readerProfile({ avatar_path: LEGACY_PNG });
+    defaultPenName = { data: null, error: null };
+    expect((await run()).startsWith("/dashboard?success=")).toBe(true);
+    expect(penOps.map((op) => op.op)).toEqual(["read"]);
+  });
+
+  it.each([
+    ["no photo", null],
+    ["someone else's canonical photo", `${OTHER_ID}/avatar.png`],
+    ["a non-canonical key", `${USER_ID}/selfie.png`],
+    ["a traversal", `${USER_ID}/../${OTHER_ID}/avatar.png`],
+    ["a .jpeg key", `${USER_ID}/avatar.jpeg`],
+  ])("%s: the pen-name writer is never created", async (_label, avatarPath) => {
+    profileResult = readerProfile({ avatar_path: avatarPath });
+    expect((await run()).startsWith("/dashboard?success=")).toBe(true);
+    expect(penWriterCreated).toBe(0);
+  });
+
+  it("the photo is only copied after the role write succeeded", async () => {
+    profileResult = readerProfile({ avatar_path: LEGACY_PNG });
+    updateResult = { data: [], error: null };
+    expect((await run()).startsWith("/account?error=")).toBe(true);
+    expect(penWriterCreated).toBe(0);
+  });
+
+  it("no log line carries a storage key or the account id", async () => {
+    profileResult = readerProfile({ avatar_path: LEGACY_PNG });
+    penUpdateResult = { data: [], error: null };
+    await run();
+    copyResult = { error: { message: "not found" } };
+    await run();
+    defaultPenName = { data: null, error: { message: "db" } };
+    await run();
+    const text = logged();
+    expect(text.length).toBeGreaterThan(2);
+    expect(text).not.toContain(USER_ID);
+    expect(text).not.toContain("avatar.png");
+    expect(text).not.toContain("pen-name.");
   });
 });
 

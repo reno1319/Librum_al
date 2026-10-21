@@ -89,8 +89,11 @@ begin
   perform pg_temp.assert(not has_table_privilege('anon', 'public.bundle_checkout_snapshots', 'INSERT'),
     'part2: anon must not have INSERT on bundle_checkout_snapshots');
 
-  perform pg_temp.assert(has_table_privilege('authenticated', 'public.bundle_checkout_snapshots', 'SELECT'),
-    'part2: authenticated must have SELECT on bundle_checkout_snapshots');
+  -- PEN-NAMES-2 (C7, [23b]): no SELECT policy is left on the base table
+  -- (readers read reader_bundle_purchases, authors author_bundle_sales),
+  -- so authenticated no longer holds SELECT either.
+  perform pg_temp.assert(not has_table_privilege('authenticated', 'public.bundle_checkout_snapshots', 'SELECT'),
+    'part2: authenticated must not have SELECT on bundle_checkout_snapshots (PEN-NAMES-2: the reader and author views replace it)');
   perform pg_temp.assert(not has_table_privilege('authenticated', 'public.bundle_checkout_snapshots', 'INSERT'),
     'part2: authenticated must not have INSERT on bundle_checkout_snapshots');
   perform pg_temp.assert(not has_table_privilege('authenticated', 'public.bundle_checkout_snapshots', 'UPDATE'),
@@ -259,12 +262,18 @@ begin
   reset role;
   perform pg_temp.assert(n = 1, 'part6a: reader must be able to SELECT their own purchase');
 
-  -- Author can see a purchase of their own book.
+  -- PEN-NAMES-2 ([23b]): the author reads a purchase of their own book
+  -- through author_book_purchases (no reader_id), not the base table.
+  perform set_config('request.jwt.claim.sub', '77777777-7777-7777-7777-777777777777', true);
+  set local role authenticated;
+  select count(*) into n from public.author_book_purchases where id = '22222222-2222-2222-2222-222222222222';
+  reset role;
+  perform pg_temp.assert(n = 1, 'part6a: author must be able to SELECT a purchase of their own book through author_book_purchases');
   perform set_config('request.jwt.claim.sub', '77777777-7777-7777-7777-777777777777', true);
   set local role authenticated;
   select count(*) into n from public.purchases where id = '22222222-2222-2222-2222-222222222222';
   reset role;
-  perform pg_temp.assert(n = 1, 'part6a: author must be able to SELECT a purchase of their own book');
+  perform pg_temp.assert(n = 0, 'part6a: the author no longer reads the base purchases row (its reader_id)');
 end $$;
 
 do $$
@@ -316,23 +325,25 @@ do $$
 declare
   n integer;
 begin
+  -- PEN-NAMES-2 (C7, [23b]): each party reads its own fulfilled snapshot
+  -- through its view, without the other party's account id.
   perform set_config('request.jwt.claim.sub', '77777777-7777-7777-7777-777777777777', true);
   set local role authenticated;
-  select count(*) into n from public.bundle_checkout_snapshots where id = '33333333-3333-3333-3333-333333333333';
+  select count(*) into n from public.author_bundle_sales where id = '33333333-3333-3333-3333-333333333333';
   reset role;
-  perform pg_temp.assert(n = 1, 'part6b: author must be able to SELECT their own fulfilled snapshot');
+  perform pg_temp.assert(n = 1, 'part6b: author must be able to SELECT their own fulfilled snapshot through author_bundle_sales');
 
   perform set_config('request.jwt.claim.sub', '88888888-8888-8888-8888-888888888888', true);
   set local role authenticated;
-  select count(*) into n from public.bundle_checkout_snapshots where id = '33333333-3333-3333-3333-333333333333';
+  select count(*) into n from public.reader_bundle_purchases where id = '33333333-3333-3333-3333-333333333333';
   reset role;
-  perform pg_temp.assert(n = 1, 'part6b: reader must be able to SELECT their own fulfilled snapshot');
+  perform pg_temp.assert(n = 1, 'part6b: reader must be able to SELECT their own fulfilled snapshot through reader_bundle_purchases');
 
-  -- A third, unrelated authenticated user still has the table grant but
-  -- must match zero rows via RLS.
+  -- A third, unrelated authenticated user matches zero rows in either view.
   perform set_config('request.jwt.claim.sub', '99999999-9999-9999-9999-999999999999', true);
   set local role authenticated;
-  select count(*) into n from public.bundle_checkout_snapshots where id = '33333333-3333-3333-3333-333333333333';
+  select (select count(*) from public.author_bundle_sales where id = '33333333-3333-3333-3333-333333333333')
+       + (select count(*) from public.reader_bundle_purchases where id = '33333333-3333-3333-3333-333333333333') into n;
   reset role;
   perform pg_temp.assert(n = 0, 'part6b: an unrelated user must see zero rows for someone else''s snapshot');
 end $$;

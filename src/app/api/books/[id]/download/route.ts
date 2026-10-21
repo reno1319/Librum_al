@@ -15,6 +15,11 @@ import {
 // against the URL parameter alone and never against anything parsed out
 // of the stored path. `file_path` stays `unknown` here on purpose: it is
 // data, not authority, until isOwnCanonicalBookManuscriptPath() accepts it.
+//
+// PEN-NAMES-2 (D2): entitlement is decided first (own book by an own-row
+// query, or user_owns_book), from the public row (public_books: id and
+// title only). Only then does a service-role read fetch author_id and
+// file_path; neither ever leaves this route.
 type DownloadBookRow = {
   id: string;
   author_id: string;
@@ -81,14 +86,12 @@ export async function GET(
   // inspected here -- that happens only after the entitlement decision
   // below, so a caller who may not download this book learns nothing
   // about whether its manuscript path is valid, present or absent.
-  const { data: bookData, error: bookError } = await supabase
-    .from("books")
-    .select("id, author_id, file_path, title")
+  const { data: publicData, error: publicError } = await supabase
+    .from("public_books")
+    .select("id")
     .eq("id", id)
-    .single();
-
-  const book = bookError ? null : toDownloadBookRow(bookData, id);
-  if (!book) {
+    .maybeSingle<{ id: string }>();
+  if (publicError || !publicData || publicData.id !== id) {
     return fileUnavailable();
   }
 
@@ -98,10 +101,16 @@ export async function GET(
   // public.payment_disputes is fully closed to the request-scoped
   // client and this SECURITY DEFINER function already encapsulates the
   // complete, correct ownership predicate.
-  let owned = book.author_id === user.id;
+  const { data: ownRow, error: ownRowError } = await supabase
+    .from("books")
+    .select("id")
+    .eq("id", id)
+    .eq("author_id", user.id)
+    .maybeSingle();
+  let owned = !ownRowError && !!ownRow;
   if (!owned) {
     const { data: ownsBook, error: ownsBookError } = await supabase.rpc("user_owns_book", {
-      target_book_id: book.id,
+      target_book_id: id,
     });
     owned = !ownsBookError && ownsBook === true;
   }
@@ -110,6 +119,19 @@ export async function GET(
     return NextResponse.redirect(
       new URL(`/books/${id}?error=Buy+this+book+to+download+it`, request.url),
     );
+  }
+
+  // Entitled: the service role reads the manuscript key and its owner.
+  const admin = createAdminClient();
+  const { data: bookData, error: bookError } = await admin
+    .from("books")
+    .select("id, author_id, file_path, title")
+    .eq("id", id)
+    .maybeSingle();
+
+  const book = bookError ? null : toDownloadBookRow(bookData, id);
+  if (!book) {
+    return fileUnavailable();
   }
 
   // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the service-role client bypasses
@@ -123,7 +145,6 @@ export async function GET(
     return fileUnavailable();
   }
 
-  const admin = createAdminClient();
   const { data: fileBlob, error: downloadError } = await admin.storage
     .from(BOOK_MANUSCRIPTS_BUCKET)
     .download(filePath);

@@ -108,7 +108,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     mockCreateClient.mockReset();
     mockCreateClient.mockImplementation(() => ({
       auth: { getUser: () => Promise.resolve({ data: { user: signedInUser } }) },
-      from: (table: string) => tableStub(table === "books" ? bookRows : []),
+      from: (table: string) => tableStub(table === "public_books" ? bookRows : []),
       storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/c.png" } }) }) },
     }));
   });

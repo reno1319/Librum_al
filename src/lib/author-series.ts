@@ -1,4 +1,4 @@
-import type { Book, Series } from "@/lib/types";
+import type { PublicBook, PublicSeries } from "@/lib/types";
 
 // LIBRUM 2.0 PRODUCT-2: the public author page needs a compact "Series"
 // section without turning it into N series queries (one per series) or
@@ -17,9 +17,9 @@ export type AuthorSeriesGroup = {
   bookCount: number;
   // Capped, ordered subset used for the small cover strip -- never the
   // full member list, so a long series can't blow up the section.
-  // F4: pen_name rides along (the rows are `select *`), for the cover
-  // placeholder's byline on the author page.
-  covers: Pick<Book, "id" | "title" | "cover_path" | "pen_name">[];
+  // PEN-NAMES-2 (D4): books.pen_name is gone; the author page's cover
+  // placeholder uses the page's own pen name. Public rows only.
+  covers: Pick<PublicBook, "id" | "title" | "cover_path">[];
 };
 
 const MAX_COVERS_PER_SERIES = 4;
@@ -31,8 +31,8 @@ const MAX_COVERS_PER_SERIES = 4;
 // cascade` so this shouldn't happen in practice, but this function
 // never assumes its inputs are already consistent with each other.
 export function groupPublishedBooksBySeries(
-  books: Pick<Book, "id" | "title" | "cover_path" | "series_id" | "series_position">[],
-  series: Pick<Series, "id" | "title">[],
+  books: Pick<PublicBook, "id" | "title" | "cover_path" | "series_id" | "series_position">[],
+  series: Pick<PublicSeries, "id" | "title">[],
 ): AuthorSeriesGroup[] {
   const seriesById = new Map(series.map((s) => [s.id, s]));
   const membersBySeriesId = new Map<string, typeof books>();

@@ -4,6 +4,11 @@
 -- * books.pen_name and books.librum_choice_at are readable like the
 --   title and neither insertable nor updatable by anon or authenticated;
 --   the pen_name check refuses blank and untrimmed values;
+--   PEN-NAMES-2 (C11) dropped books.pen_name: a book's public name is its
+--   pen name (books.pen_name_id -> pen_names.name, read by anon through
+--   public_books -> public_pen_names), pen_names_name_check refuses blank
+--   and untrimmed names, and anon reads librum_choice_at through
+--   public_books (C1);
 -- * book_rights_declarations: no write privilege for anon or
 --   authenticated, service_role (the application's key) may only read
 --   and insert -- no UPDATE, DELETE or TRUNCATE -- an author reads only
@@ -136,7 +141,10 @@ insert into public.books (id, author_id, title, status, price_all, published_at)
   ('e0721000-0000-4000-8000-0000000000a4', 'e0720000-0000-4000-8000-00000000000a', 'P072 A4', 'published', 0,   now()),
   ('e0721000-0000-4000-8000-0000000000b1', 'e0720000-0000-4000-8000-00000000000b', 'P072 B1', 'published', 0,   now());
 
-update public.books set pen_name = 'Jo Pen' where id = 'e0721000-0000-4000-8000-0000000000a1';
+-- PEN-NAMES-2: a1 is published under A's second pen name, 'Jo Pen'.
+insert into public.pen_names (id, author_id, name) values
+  ('e0723000-0000-4000-8000-0000000000a1', 'e0720000-0000-4000-8000-00000000000a', 'Jo Pen');
+update public.books set pen_name_id = 'e0723000-0000-4000-8000-0000000000a1' where id = 'e0721000-0000-4000-8000-0000000000a1';
 
 insert into public.book_rights_declarations
   (id, book_id, book_title, author_id, author_public_name, basis, statement_version, statement_text) values
@@ -159,15 +167,27 @@ declare
   c text;
   p text;
 begin
+  -- PEN-NAMES-2 (C11): books.pen_name is gone.
+  perform pg_temp.assert(
+    not exists (select 1 from pg_attribute where attrelid = 'public.books'::regclass
+                  and attname = 'pen_name' and not attisdropped),
+    'part1 (PEN-NAMES-2): books.pen_name no longer exists');
   foreach r in array array['anon', 'authenticated'] loop
-    foreach c in array array['pen_name', 'librum_choice_at'] loop
+    foreach c in array array['pen_name_id', 'librum_choice_at'] loop
       foreach p in array array['INSERT', 'UPDATE'] loop
         perform pg_temp.assert(not has_column_privilege(r, 'public.books', c, p),
           format('part1: %s must not hold %s on books.%s', r, p, c));
       end loop;
-      perform pg_temp.assert(has_column_privilege(r, 'public.books', c, 'SELECT'),
-        format('part1: %s reads books.%s', r, c));
     end loop;
+  end loop;
+  -- PEN-NAMES-2 (C1): anon reads both through public_books, never books;
+  -- authenticated keeps SELECT on books (own rows by policy).
+  foreach c in array array['pen_name_id', 'librum_choice_at'] loop
+    perform pg_temp.assert(not has_column_privilege('anon', 'public.books', c, 'SELECT')
+      and has_column_privilege('anon', 'public.public_books', c, 'SELECT'),
+      format('part1 (PEN-NAMES-2): anon reads %s through public_books, not books', c));
+    perform pg_temp.assert(has_column_privilege('authenticated', 'public.books', c, 'SELECT'),
+      format('part1: authenticated reads books.%s', c));
   end loop;
 
   perform pg_temp.assert(
@@ -202,7 +222,8 @@ begin
 end $$;
 
 -- ============================================================
--- Part 2: pen_name is public and checked.
+-- Part 2: the book's public name is public and checked. PEN-NAMES-2:
+-- it is the pen name (pen_names.name), read through the public views.
 -- ============================================================
 do $$
 declare
@@ -210,27 +231,29 @@ declare
   bad text;
 begin
   v := pg_temp.value_as('anon', null,
-    $q$select pen_name || '|' || coalesce(librum_choice_at::text, '<null>') from public.books where id = 'e0721000-0000-4000-8000-0000000000a1'$q$);
-  perform pg_temp.assert(v = 'Jo Pen|<null>', format('part2: anon reads pen_name and librum_choice_at -- got %s', v));
+    $q$select pn.name || '|' || coalesce(b.librum_choice_at::text, '<null>')
+         from public.public_books b join public.public_pen_names pn on pn.id = b.pen_name_id
+        where b.id = 'e0721000-0000-4000-8000-0000000000a1'$q$);
+  perform pg_temp.assert(v = 'Jo Pen|<null>', format('part2 (PEN-NAMES-2): anon reads the pen name and librum_choice_at through the public views -- got %s', v));
 
   foreach bad in array array['', ' x', E'\tx', E'x\n', 'x ', repeat('x', 121)] loop
     v := pg_temp.run_as('service_role', null,
-      format('update public.books set pen_name = %L where id = %L', bad, 'e0721000-0000-4000-8000-0000000000a2'));
-    perform pg_temp.assert(v like '23514:%books_pen_name_check%',
-      format('part2: pen_name %L must be refused -- got %s', bad, v));
+      format('update public.pen_names set name = %L where id = %L', bad, 'e0723000-0000-4000-8000-0000000000a1'));
+    perform pg_temp.assert(v like '23514:%pen_names_name_check%',
+      format('part2 (PEN-NAMES-2): pen name %L must be refused -- got %s', bad, v));
   end loop;
 
   v := pg_temp.run_as('service_role', null,
-    format('update public.books set pen_name = %L where id = %L', repeat('x', 120), 'e0721000-0000-4000-8000-0000000000a2'));
-  perform pg_temp.assert(v = 'OK:1', format('part2: a 120-character pen_name is accepted -- got %s', v));
-  update public.books set pen_name = null where id = 'e0721000-0000-4000-8000-0000000000a2';
+    format('update public.pen_names set name = %L where id = %L', repeat('x', 120), 'e0723000-0000-4000-8000-0000000000a1'));
+  perform pg_temp.assert(v = 'OK:1', format('part2 (PEN-NAMES-2): a 120-character pen name is accepted -- got %s', v));
+  update public.pen_names set name = 'Jo Pen' where id = 'e0723000-0000-4000-8000-0000000000a1';
 
+  v := pg_temp.run_as('authenticated', 'e0720000-0000-4000-8000-00000000000b',
+    $q$update public.books set pen_name_id = 'e0723000-0000-4000-8000-0000000000a1' where id = 'e0721000-0000-4000-8000-0000000000b1'$q$);
+  perform pg_temp.assert(v like '42501:%', format('part2 (PEN-NAMES-2): an author cannot point a book at a pen name directly -- got %s', v));
   v := pg_temp.run_as('authenticated', 'e0720000-0000-4000-8000-00000000000a',
-    $q$update public.books set pen_name = 'Forged' where id = 'e0721000-0000-4000-8000-0000000000a1'$q$);
-  perform pg_temp.assert(v like '42501:%', format('part2: an author cannot write pen_name directly -- got %s', v));
-  v := pg_temp.run_as('authenticated', 'e0720000-0000-4000-8000-00000000000a',
-    $q$insert into public.books (author_id, title, pen_name) values ('e0720000-0000-4000-8000-00000000000a', 'x', 'Forged')$q$);
-  perform pg_temp.assert(v like '42501:%', format('part2: an author cannot insert pen_name -- got %s', v));
+    $q$insert into public.books (author_id, title, pen_name_id) values ('e0720000-0000-4000-8000-00000000000a', 'x', 'e0723000-0000-4000-8000-0000000000a1')$q$);
+  perform pg_temp.assert(v like '42501:%', format('part2 (PEN-NAMES-2): an author cannot insert a book at all -- got %s', v));
   v := pg_temp.run_as('authenticated', 'e0720000-0000-4000-8000-00000000000a',
     $q$update public.books set librum_choice_at = now() where id = 'e0721000-0000-4000-8000-0000000000a1'$q$);
   perform pg_temp.assert(v like '42501:%', format('part2: an author cannot pick a book directly -- got %s', v));

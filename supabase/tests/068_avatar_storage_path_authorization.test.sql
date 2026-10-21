@@ -25,6 +25,13 @@
 -- this migration): a signed-in user cannot create, overwrite, move or
 -- delete an object under another user's avatar prefix.
 --
+-- PEN-NAMES-2 (20261019222500/20261019222600) narrowed this further:
+-- bio is no longer writable by authenticated (E3, 18a), the
+-- public_author_profiles view is gone (C5), support no longer reads
+-- profiles directly (C13), and signed-in users have no write policy on
+-- the avatars bucket at all (C9) -- photos go through the service-role
+-- writer. Each assertion the PEN-NAMES-2 rule changed says so.
+--
 -- Everything runs in one transaction and is rolled back; every probe runs
 -- in its own subtransaction. Privilege errors and RLS errors share
 -- SQLSTATE 42501, so every expected failure also pins the message
@@ -167,8 +174,9 @@ insert into storage.objects (bucket_id, name) values
   ('avatars', 'e0680000-0000-4000-8000-00000000000b/avatar.png');
 
 -- B has a draft book: since AUTHOR-VIEW-REQUIRE-BOOK-1 (migration
--- 20261019154308) public_author_profiles lists an author only once they
--- have a book, and part 4 reads B's avatar_path through that view.
+-- 20261019154308) public_author_profiles listed an author only once they
+-- had a book. PEN-NAMES-2 removed that view; the book stays so part 4's
+-- "no public read of avatar_path" check covers an author with a book.
 insert into public.books (id, author_id, title) values
   ('e0680001-0000-4000-8000-00000000000b', 'e0680000-0000-4000-8000-00000000000b', 'P068 B draft');
 
@@ -190,10 +198,10 @@ begin
       || '|service_role:DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
     format('part1: profiles table ACL -- got %s', pg_temp.table_acl('public.profiles')));
 
-  -- Column level: exactly display_name, bio and public_author_name --
-  -- avatar_path is gone.
+  -- Column level: exactly display_name and public_author_name --
+  -- avatar_path is gone, and (PEN-NAMES-2 E3) so is bio.
   perform pg_temp.assert(
-    pg_temp.column_acl('public.profiles') = 'authenticated:UPDATE:bio,display_name,public_author_name',
+    pg_temp.column_acl('public.profiles') = 'authenticated:UPDATE:display_name,public_author_name',
     format('part1: profiles column ACL -- got %s', pg_temp.column_acl('public.profiles')));
 
   -- Policies: the same three, with the same definitions.
@@ -203,10 +211,10 @@ begin
        from pg_policies where schemaname = 'public' and tablename = 'profiles')
     = 'Staff with an authorized permission can view any profile|SELECT|PERMISSIVE|public|'
       || '(staff_has_permission(''reports.view''::text) OR staff_has_permission(''staff.view''::text) OR '
-      || 'staff_has_permission(''refunds.view''::text) OR staff_has_permission(''audit.view''::text))|' || E'\n'
+      || 'staff_has_permission(''audit.view''::text))|' || E'\n'
       || 'Users can update their own profile|UPDATE|PERMISSIVE|public|(auth.uid() = id)|(auth.uid() = id)' || E'\n'
       || 'Users can view their own full profile|SELECT|PERMISSIVE|public|(auth.uid() = id)|',
-    'part1: the three profiles policies are unchanged');
+    'part1: the three profiles policies (PEN-NAMES-2 C13: refunds.view no longer in the staff policy)');
 
   -- Triggers on profiles: the BEFORE DELETE reader-hold cleanup and,
   -- since PEN-NAMES-1 (migration 20261019184512), the AFTER trigger that
@@ -217,11 +225,10 @@ begin
       = 'clear_expired_reader_holds_trigger,profiles_sync_default_pen_name',
     'part1: profiles triggers unchanged');
 
-  -- The public view keeps exactly its SELECT grant to anon and authenticated.
+  -- PEN-NAMES-2 (C5): the public_author_profiles view is gone.
   perform pg_temp.assert(
-    pg_temp.table_acl('public.public_author_profiles') =
-      'anon:SELECT|authenticated:SELECT|service_role:DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE',
-    format('part1: public_author_profiles ACL unchanged -- got %s', pg_temp.table_acl('public.public_author_profiles')));
+    to_regclass('public.public_author_profiles') is null,
+    'part1 (PEN-NAMES-2): public_author_profiles no longer exists');
 end $$;
 
 -- ============================================================
@@ -244,9 +251,9 @@ begin
     'part2: authenticated has no table-level UPDATE on profiles');
   perform pg_temp.assert(
     has_column_privilege('authenticated', 'public.profiles', 'display_name', 'UPDATE')
-    and has_column_privilege('authenticated', 'public.profiles', 'bio', 'UPDATE')
+    and not has_column_privilege('authenticated', 'public.profiles', 'bio', 'UPDATE')
     and has_column_privilege('authenticated', 'public.profiles', 'public_author_name', 'UPDATE'),
-    'part2: authenticated keeps UPDATE on display_name, bio and public_author_name');
+    'part2: authenticated keeps UPDATE on display_name and public_author_name (PEN-NAMES-2 E3: not bio)');
   foreach v_col in array array['id', 'role', 'avatar_path', 'stripe_account_id', 'stripe_payouts_enabled', 'created_at'] loop
     perform pg_temp.assert(not has_column_privilege('authenticated', 'public.profiles', v_col, 'UPDATE'),
       format('part2: authenticated has no UPDATE on %s', v_col));
@@ -292,8 +299,8 @@ select pg_temp.expect_error('authenticated', 'e0680000-0000-4000-8000-0000000000
   $q$update public.profiles set display_name = 'P068 A2', bio = 'b', avatar_path = 'e0680000-0000-4000-8000-00000000000b/avatar.png' where id = 'e0680000-0000-4000-8000-00000000000a'$q$,
   '42501', 'permission denied for table profiles', 'part3: the pre-Patch-9 updateProfile payload (name + bio + avatar_path) is refused as a whole');
 select pg_temp.expect_error('authenticated', 'e0680000-0000-4000-8000-00000000000a',
-  $q$update public.profiles p set avatar_path = v.avatar_path from public.public_author_profiles v where v.id = 'e0680000-0000-4000-8000-00000000000b' and p.id = 'e0680000-0000-4000-8000-00000000000a'$q$,
-  '42501', 'permission denied for table profiles', 'part3: UPDATE ... FROM copying a readable foreign path is refused');
+  $q$update public.profiles p set avatar_path = v.avatar_path from public.public_pen_names v where p.id = 'e0680000-0000-4000-8000-00000000000a'$q$,
+  '42501', 'permission denied for table profiles', 'part3: UPDATE ... FROM copying a readable foreign path (PEN-NAMES-2: from public_pen_names, public_author_profiles is gone) is refused');
 select pg_temp.expect_error('authenticated', 'e0680000-0000-4000-8000-00000000000a',
   $q$with c as (select 'e0680000-0000-4000-8000-00000000000b/avatar.png'::text as p) update public.profiles set avatar_path = (select p from c) where id = 'e0680000-0000-4000-8000-00000000000a'$q$,
   '42501', 'permission denied for table profiles', 'part3: a CTE/subquery-fed avatar_path UPDATE is refused');
@@ -328,13 +335,15 @@ end $$;
 -- ============================================================
 -- Part 4: what must keep working.
 -- ============================================================
--- The exact session payloads the Patch 9 updateProfile sends.
+-- The exact session payloads updateProfile sends. PEN-NAMES-2 (E3):
+-- bio is no longer among them (the pen name carries the public bio), and
+-- a payload that names bio is refused as a whole.
 select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000b',
-  $q$update public.profiles set display_name = 'P068 B2', bio = 'bio B', public_author_name = 'Pen B2' where id = 'e0680000-0000-4000-8000-00000000000b'$q$,
-  1, 'part4: an author updates name, bio and pen name on their own row');
-select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000a',
+  $q$update public.profiles set display_name = 'P068 B2', public_author_name = 'Pen B2' where id = 'e0680000-0000-4000-8000-00000000000b'$q$,
+  1, 'part4 (PEN-NAMES-2): an author updates name and pen name on their own row');
+select pg_temp.expect_error('authenticated', 'e0680000-0000-4000-8000-00000000000a',
   $q$update public.profiles set display_name = 'P068 A2', bio = 'bio A' where id = 'e0680000-0000-4000-8000-00000000000a'$q$,
-  1, 'part4: a reader updates name and bio on their own row');
+  '42501', 'permission denied for table profiles', 'part4 (PEN-NAMES-2): a payload naming bio is refused');
 select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000a',
   $q$update public.profiles set display_name = 'Hijacked' where id = 'e0680000-0000-4000-8000-00000000000b'$q$,
   0, 'part4: RLS still matches zero rows for another user''s profile');
@@ -344,9 +353,9 @@ select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000a'
 select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000a',
   $q$select avatar_path from public.profiles where id = 'e0680000-0000-4000-8000-00000000000a'$q$,
   1, 'part4: a user can still read their own avatar_path');
-select pg_temp.expect_ok('anon', null,
+select pg_temp.expect_error('anon', null,
   $q$select avatar_path from public.public_author_profiles where id = 'e0680000-0000-4000-8000-00000000000b'$q$,
-  1, 'part4: anon still reads an author''s avatar_path through the public view');
+  '42P01', 'does not exist', 'part4 (PEN-NAMES-2): anon has no public view of a profile''s avatar_path any more');
 -- The trusted writer's exact statement shape: filtered by id, returning.
 select pg_temp.expect_ok('service_role', null,
   $q$update public.profiles set avatar_path = 'e0680000-0000-4000-8000-00000000000a/avatar.png' where id = 'e0680000-0000-4000-8000-00000000000a' returning id, avatar_path$q$,
@@ -360,8 +369,8 @@ begin
   perform pg_temp.assert(
     (select display_name || '|' || coalesce(bio, '') || '|' || coalesce(public_author_name, '') || '|' || coalesce(avatar_path, '<null>')
        from public.profiles where id = 'e0680000-0000-4000-8000-00000000000b')
-      = 'P068 B2|bio B|Pen B2|e0680000-0000-4000-8000-00000000000b/avatar.png',
-    'part4: the author''s permitted fields persisted and the avatar_path did not move');
+      = 'P068 B2||Pen B2|e0680000-0000-4000-8000-00000000000b/avatar.png',
+    'part4: the author''s permitted fields persisted, bio stayed unset and the avatar_path did not move');
   perform pg_temp.assert(
     (select display_name from public.profiles where id = 'e0680000-0000-4000-8000-00000000000b') <> 'Hijacked',
     'part4: the cross-user update took no effect');
@@ -371,41 +380,41 @@ begin
 end $$;
 
 -- ============================================================
--- Part 5: the avatars bucket's own Storage policies (unchanged): no
--- cross-prefix create, overwrite, move or delete by a signed-in user.
+-- Part 5: the avatars bucket's own Storage policies: no cross-prefix
+-- create, overwrite, move or delete by a signed-in user. PEN-NAMES-2
+-- (C9): no own-prefix write either -- signed-in users have no write
+-- policy on avatars at all.
 -- ============================================================
 select pg_temp.expect_error('authenticated', 'e0680000-0000-4000-8000-00000000000a',
   $q$insert into storage.objects (bucket_id, name) values ('avatars', 'e0680000-0000-4000-8000-00000000000b/avatar.png')$q$,
   '42501', 'row-level security', 'part5: uploading into another user''s avatar prefix is refused');
--- A traversal-SHAPED key whose first folder is the caller's own passes the
--- policy: object keys are literal strings, not filesystem paths, so this
--- creates a distinct object under the caller's prefix and cannot reach
--- the victim's key (checked below). The application never accepts such a
--- key as an avatar_path (src/lib/avatar-path.ts).
-select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000a',
+-- A traversal-SHAPED key whose first folder is the caller's own: before
+-- PEN-NAMES-2 this created a separate literal object; now every user
+-- insert into avatars is refused.
+select pg_temp.expect_error('authenticated', 'e0680000-0000-4000-8000-00000000000a',
   $q$insert into storage.objects (bucket_id, name) values ('avatars', 'e0680000-0000-4000-8000-00000000000a/../e0680000-0000-4000-8000-00000000000b/avatar.png')$q$,
-  1, 'part5: a traversal-shaped key under the caller''s own first folder is a separate literal object');
+  '42501', 'row-level security', 'part5 (PEN-NAMES-2): a traversal-shaped key under the caller''s own first folder is refused');
 select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000a',
   $q$update storage.objects set name = name where bucket_id = 'avatars' and name = 'e0680000-0000-4000-8000-00000000000b/avatar.png'$q$,
   0, 'part5: another user''s avatar object cannot be overwritten (the UPDATE sees no row)');
 select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000a',
   $q$delete from storage.objects where bucket_id = 'avatars'$q$,
   0, 'part5: no avatar object can be deleted by a signed-in user (the bucket has no DELETE policy)');
-select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000a',
-  $q$insert into storage.objects (bucket_id, name) values ('avatars', 'e0680000-0000-4000-8000-00000000000a/avatar.png')$q$,
-  1, 'part5: a user can still upload under their own prefix');
 select pg_temp.expect_error('authenticated', 'e0680000-0000-4000-8000-00000000000a',
-  $q$update storage.objects set name = 'e0680000-0000-4000-8000-00000000000b/moved.png' where bucket_id = 'avatars' and name = 'e0680000-0000-4000-8000-00000000000a/avatar.png'$q$,
-  '42501', 'row-level security', 'part5: moving one''s own object into another user''s prefix is refused');
+  $q$insert into storage.objects (bucket_id, name) values ('avatars', 'e0680000-0000-4000-8000-00000000000a/avatar.png')$q$,
+  '42501', 'row-level security', 'part5 (PEN-NAMES-2): a user can no longer upload under their own prefix (service-role writer only)');
+select pg_temp.expect_ok('authenticated', 'e0680000-0000-4000-8000-00000000000a',
+  $q$update storage.objects set name = 'e0680000-0000-4000-8000-00000000000b/moved.png' where bucket_id = 'avatars' and name = 'e0680000-0000-4000-8000-00000000000b/avatar.png'$q$,
+  0, 'part5 (PEN-NAMES-2): a user cannot move any avatar object (the UPDATE sees no row)');
 
 do $$
 begin
   perform pg_temp.assert(
     (select count(*) from storage.objects where bucket_id = 'avatars' and name = 'e0680000-0000-4000-8000-00000000000b/avatar.png') = 1
-    and (select count(*) from storage.objects where bucket_id = 'avatars') = 3
+    and (select count(*) from storage.objects where bucket_id = 'avatars') = 1
     and (select count(*) from storage.objects where bucket_id = 'avatars'
-          and split_part(name, '/', 1) = 'e0680000-0000-4000-8000-00000000000a') = 2,
-    'part5: the victim''s object survives unchanged and only the caller''s own two keys were added');
+          and split_part(name, '/', 1) = 'e0680000-0000-4000-8000-00000000000a') = 0,
+    'part5 (PEN-NAMES-2): the victim''s object survives unchanged and no user key was added');
 end $$;
 
 -- ============================================================
