@@ -2,90 +2,104 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-// F4 (P5, Q4 = a): every place a BOOK's author name shows uses
-// resolveBookByline (its pen name, else the author's public name), and
-// the places that name the AUTHOR keep resolvePublicAuthorName.
+// F4 (P5, Q4 = a), as superseded by PEN-NAMES-1 (owner decisions 1a-4a,
+// 2026-10-19): every place a BOOK's author name shows uses
+// resolveBookByline -- the book's pen name, embedded from the
+// public_pen_names view as `pen` -- and links to that pen name's page.
+// The places that named the AUTHOR (book page "About the author" and
+// "More by", the author page, Following, the follower email) now name
+// the pen name too (3a, 4a).
 
 function readSrc(relativePath: string): string {
   return readFileSync(path.join(process.cwd(), "src", relativePath), "utf8");
 }
 
 const BYLINE_SITES: [file: string, expected: string[]][] = [
-  ["components/book-shelf.tsx", ["authorName={resolveBookByline(book, book.profiles)}"]],
+  ["components/book-shelf.tsx", ["authorName={resolveBookByline(book)}"]],
   [
     "app/(public)/bookstore/page.tsx",
     [
       // FeaturedBook (its "by" line and no-cover placeholder) and both card shelves.
-      "const authorName = resolveBookByline(book, book.profiles);",
-      "authorName={resolveBookByline(book, book.profiles)}",
+      "const authorName = resolveBookByline(book);",
+      "authorName={resolveBookByline(book)}",
     ],
   ],
-  ["app/(public)/library/page.tsx", ["authorName={resolveBookByline(book, book.profiles)}"]],
-  ["app/(public)/wishlist/page.tsx", ["authorName={resolveBookByline(book, book.profiles)}"]],
-  ["app/(public)/authors/[id]/page.tsx", ["authorName={resolveBookByline(book, author) ?? authorPublicName}"]],
-  [
-    "app/(public)/page.tsx",
-    ["const books = await attachPenNames(supabase, data ?? []);", "author: resolveBookByline(b, b.profiles),"],
-  ],
+  ["app/(public)/library/page.tsx", ["authorName={resolveBookByline(book)}", "penNameId={book.pen?.id ?? null}"]],
+  ["app/(public)/wishlist/page.tsx", ["authorName={resolveBookByline(book)}"]],
+  ["app/(public)/page.tsx", ["author: resolveBookByline(b),", "author: resolveBookByline(pick),"]],
   [
     "app/(public)/books/[id]/page.tsx",
-    ["const bookByline = resolveBookByline(book, book.profiles);", "authorName={bookByline}", "{bookByline}"],
+    ["const bookByline = resolveBookByline(book);", "authorName={bookByline}", "{bookByline}"],
   ],
-  [
-    "app/api/books/[id]/sample/route.ts",
-    ["const [bylineBook] = await attachPenNames(supabase, [{ id: book.id }]);", "author: resolveBookByline(bylineBook, book.profiles),"],
-  ],
+  ["app/api/books/[id]/sample/route.ts", ["author: resolveBookByline(book),"]],
+  ["app/admin/(protected)/librum-choice/page.tsx", ["resolveBookByline(pick)", "resolveBookByline(book)"]],
   ["app/(public)/dashboard/books/new/upload-wizard.tsx", ["authorName={byline}"]],
 ];
 
-describe("F4: book bylines", () => {
+describe("F4 / PEN-NAMES-1: book bylines", () => {
   it.each(BYLINE_SITES)("%s uses the book byline", (file, expected) => {
     const source = readSrc(file);
     for (const snippet of expected) expect(source).toContain(snippet);
   });
 
-  it("the bookstore resolves every book name through the byline (three sites), the bundle line through the author", () => {
+  it("the bookstore resolves every book name through the byline (three sites), the bundle line through the bundle's pen name", () => {
     const source = readSrc("app/(public)/bookstore/page.tsx");
-    expect(source.match(/resolveBookByline\(book, book\.profiles\)/g)).toHaveLength(3);
-    expect(source).toContain("const authorName = resolvePublicAuthorName(bundle.profiles);");
-    expect(source).not.toContain("resolvePublicAuthorName(book.profiles)");
+    expect(source.match(/resolveBookByline\(book\)/g)).toHaveLength(3);
+    expect(source).toContain("const authorName = bundle.pen?.name ?? null;");
+    expect(source).not.toContain("resolvePublicAuthorName");
   });
 
-  it("explicit select lists never name pen_name (they would fail before the migration)", () => {
-    for (const file of ["app/(public)/page.tsx", "app/api/books/[id]/sample/route.ts"]) {
-      const selects = readSrc(file).match(/\.select\("[^"]*"\)/g) ?? [];
-      for (const select of selects) {
-        if (select === '.select("id, pen_name")') continue;
-        expect(select).not.toContain("pen_name");
-      }
+  it("every byline query embeds the pen name view, never the account's public name", () => {
+    for (const file of [
+      "app/(public)/page.tsx",
+      "app/api/books/[id]/sample/route.ts",
+      "app/(public)/bookstore/page.tsx",
+      "app/(public)/library/page.tsx",
+      "app/(public)/wishlist/page.tsx",
+      "lib/librum-choice.ts",
+      "app/admin/(protected)/librum-choice/page.tsx",
+    ]) {
+      const source = readSrc(file);
+      expect(source).toContain("pen:public_pen_names(id, name)");
+      expect(source).not.toContain("public_author_profiles(public_author_name)");
     }
   });
 });
 
-describe("F4: places that name the author keep the author's name", () => {
-  it("book page: About the author and More by ... use authorName (resolvePublicAuthorName)", () => {
+describe("PEN-NAMES-1: places that named the author now name the pen name", () => {
+  it("book page: About the author and More by ... use the pen name and link to its page (3a)", () => {
     const source = readSrc("app/(public)/books/[id]/page.tsx");
-    expect(source).toContain("const authorName = resolvePublicAuthorName(book.profiles);");
+    expect(source).toContain("const authorName = bookByline;");
     expect(source).toContain('<p className="font-serif text-[1.375rem] text-primary">{authorName}</p>');
     expect(source).toContain("title={authorName ? `More by ${authorName}` : \"More by this author\"}");
-    // The by-line still links to the author's page.
-    expect(source).toMatch(/href=\{`\/authors\/\$\{book\.author_id\}`\} className=\{INLINE_LINK_CLASSES\}>\s*\{bookByline\}/);
+    expect(source).toContain('.eq("pen_name_id", book.pen_name_id)');
+    expect(source).toMatch(/<Link href=\{penNamePath\} className=\{INLINE_LINK_CLASSES\}>\s*\{bookByline\}/);
+    expect(source).not.toMatch(/\/authors\/\$\{book\.author_id\}/);
   });
 
-  it.each([
-    "lib/email.ts",
-    "app/(public)/following/page.tsx",
-    "app/(public)/authors/[id]/page.tsx",
-    "app/admin/(protected)/reports/[id]/page.tsx",
-  ])("%s does not use the book byline for the author's own name", (file) => {
-    const source = readSrc(file);
-    expect(source).toContain("resolvePublicAuthorName(");
+  it("the author page names its pen name and lists only that pen name's books and bundles (1a)", () => {
+    const source = readSrc("app/(public)/authors/[id]/page.tsx");
+    expect(source).toContain("const authorPublicName = author.name;");
+    expect(source.match(/\.eq\("pen_name_id", id\)/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(source).not.toMatch(/\.eq\("author_id", id\)/);
+    expect(source).not.toContain("No biography added yet.");
   });
 
-  it("the follower email keeps the author's name (Q7 = a)", () => {
+  it("Following lists followed pen names", () => {
+    const source = readSrc("app/(public)/following/page.tsx");
+    expect(source).toContain('.from("pen_name_follows")');
+    expect(source).toContain('.from("public_pen_names")');
+    expect(source).toContain("{author.name}");
+  });
+
+  it("the follower email names the book's pen name (4a)", () => {
     const source = readSrc("lib/email.ts");
     expect(source).not.toContain("resolveBookByline");
-    expect(source).not.toContain("pen_name");
+    expect(source).toContain("const authorName = penName.name;");
+  });
+
+  it("the staff report page still shows the account's names (staff-only)", () => {
+    expect(readSrc("app/admin/(protected)/reports/[id]/page.tsx")).toContain("resolvePublicAuthorName(");
   });
 
   it("dashboard lists are unchanged", () => {

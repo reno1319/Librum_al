@@ -78,7 +78,7 @@ beforeEach(() => {
   adminCreated = 0;
   sessionUser = { id: AUTHOR };
   sessionResults = {
-    books: { data: { id: BOOK, title: "Libri im" }, error: null },
+    books: { data: { id: BOOK, title: "Libri im", pen: { name: "Jo Pen" } }, error: null },
     profiles: { data: { display_name: "Renato Kalemi", public_author_name: "Arben Leka" }, error: null },
   };
   adminResults = { book_rights_declarations: { data: STORED, error: null } };
@@ -103,12 +103,26 @@ describe("recordRightsDeclaration", () => {
         book_title: "Libri im",
         author_id: AUTHOR,
         author_public_name: "Arben Leka",
+        // PEN-NAMES-1 (16a): the book's pen name beside the account's name.
+        pen_name: "Jo Pen",
         basis: "own_rights",
         statement_version: "rights-v1",
         statement_text: RIGHTS_STATEMENTS.own_rights.text,
       },
     ]);
     expect(adminCalls[0].table).toBe("book_rights_declarations");
+  });
+
+  it("16a: the book's pen name is read with the session client through its own pen_names row", async () => {
+    await recordRightsDeclaration(BOOK, "own_rights");
+    const bookSelect = sessionCalls.find((c) => c.table === "books" && c.method === "select");
+    expect(bookSelect?.args[0]).toBe("id, title, pen:pen_names(name)");
+  });
+
+  it("16a: no pen name embed -> null, still recorded", async () => {
+    sessionResults.books = { data: { id: BOOK, title: "Libri im", pen: null }, error: null };
+    await recordRightsDeclaration(BOOK, "own_rights");
+    expect(inserted()[0].pen_name).toBeNull();
   });
 
   it("checks ownership with the session client, by book id AND the signed-in author", async () => {

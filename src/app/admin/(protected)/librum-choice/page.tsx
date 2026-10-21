@@ -3,12 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
 import { getLibrumChoiceBook } from "@/lib/librum-choice";
 import { escapeIlikePattern, parseLibrumChoiceSearch } from "@/lib/librum-choice-logic";
-import { attachPenNames, resolveBookByline } from "@/lib/book-byline";
+import { resolveBookByline } from "@/lib/book-byline";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { formControlClasses } from "@/lib/form-styles";
-import type { Book, Profile } from "@/lib/types";
+import type { Book } from "@/lib/types";
+import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { pickLibrumChoiceFromForm, removeLibrumChoiceFromForm } from "./actions";
 
@@ -26,8 +27,7 @@ const LIST_LIMIT = 20;
 const LOAD_ERROR = "Something went wrong. Please try again.";
 
 type ChoiceRow = Pick<Book, "id" | "title" | "cover_path"> & {
-  pen_name?: string | null;
-  profiles: Pick<Profile, "public_author_name"> | null;
+  pen: PenNameRef | null;
 };
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -38,7 +38,7 @@ async function fetchPickableBooks(
 ): Promise<{ ok: true; books: ChoiceRow[]; hasMore: boolean } | { ok: false }> {
   let query = supabase
     .from("books")
-    .select("id, title, cover_path, profiles:public_author_profiles(public_author_name)")
+    .select("id, title, cover_path, pen:public_pen_names(id, name)")
     .eq("status", "published")
     .not("price_all", "is", null);
   // `%`, `_` and `\` in the search match themselves (never `.or()` with
@@ -54,9 +54,8 @@ async function fetchPickableBooks(
     return { ok: false };
   }
   const rows = data ?? [];
-  // Pen names come from one extra read (attachPenNames), as on the
-  // homepage, so the list still loads before the migration.
-  const books = await attachPenNames(supabase, rows.slice(0, LIST_LIMIT));
+  // PEN-NAMES-1: each row's byline is its pen name (embedded above).
+  const books = rows.slice(0, LIST_LIMIT);
   return { ok: true, books, hasMore: rows.length > LIST_LIMIT };
 }
 
@@ -87,7 +86,7 @@ export default async function AdminLibrumChoicePage({
   const supabase = await createClient();
 
   const [pick, list] = await Promise.all([getLibrumChoiceBook(), fetchPickableBooks(supabase, q)]);
-  const pickAuthor = pick ? resolveBookByline(pick, pick.profiles) : null;
+  const pickAuthor = pick ? resolveBookByline(pick) : null;
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
@@ -164,7 +163,7 @@ export default async function AdminLibrumChoicePage({
         <>
           <ul className="mt-6 flex flex-col gap-3">
             {list.books.map((book) => {
-              const author = resolveBookByline(book, book.profiles);
+              const author = resolveBookByline(book);
               const isPicked = pick?.id === book.id;
               return (
                 <li

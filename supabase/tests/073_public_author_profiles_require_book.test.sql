@@ -51,6 +51,12 @@ insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data) value
 insert into auth.users (id, email, raw_user_meta_data) values
   ('e0730000-0000-4000-8000-0000000000ff', 'p073-u@test', '{"role":"author","display_name":"P073 Unconfirmed"}');
 
+-- PEN-NAMES-1 (migration 20261019184512): every book carries a pen
+-- name, and a reader has no default one, so R (as the table owner) is
+-- given one first; the view must still hide R.
+insert into public.pen_names (author_id, name, is_default) values
+  ('e0730000-0000-4000-8000-0000000000aa', 'P073 R pen', true);
+
 insert into public.books (id, author_id, title, status, price_cents, price_all, published_at) values
   ('e0730001-0000-4000-8000-00000000000b', 'e0730000-0000-4000-8000-00000000000b', 'P073 B draft', 'draft', 0, 199, null),
   ('e0730001-0000-4000-8000-00000000000c', 'e0730000-0000-4000-8000-00000000000c', 'P073 Zgjuar', 'published', 0, 199, now()),

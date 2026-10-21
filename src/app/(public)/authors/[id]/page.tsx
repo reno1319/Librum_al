@@ -7,42 +7,38 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { BookCard } from "@/components/book-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
-import { followAuthor, unfollowAuthor } from "./actions";
+import { followPenName, removePenNameLinks, unfollowPenName } from "./actions";
 import { groupPublishedBooksBySeries } from "@/lib/author-series";
 import { getAuthorInitials } from "@/lib/author-initials";
-import { resolvePublicAuthorName } from "@/lib/author-name";
-import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
-import type { Book, Bundle, Profile, Series } from "@/lib/types";
+import { hasPermission } from "@/lib/staff";
+import {
+  authorPagePath,
+  penNameLinkLabel,
+  readPenNameLinks,
+  type PublicPenName,
+} from "@/lib/pen-names";
+import { Alert } from "@/components/ui/alert";
+import type { Book, Bundle, Series } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
-// dashboard or a social profile -- see the PRODUCT-2 audit. It shows
-// only what the product already treats as public and trustworthy:
-// public_author_name/bio/avatar_path (AUTHOR-1C: via the safe
-// public_author_profiles view, which guarantees public_author_name is
-// never null for an author row), published books, and public series
-// grouping derived from those same books. Following stays exactly the
-// system PRODUCT-2 was told to reuse, not redesign: same followAuthor/
-// unfollowAuthor actions, same self-follow exclusion, same
-// admin-client-only follower count (author_follows has no public
-// SELECT policy -- see schema.sql).
+// dashboard or a social profile -- see the PRODUCT-2 audit.
 //
-// LIBRUM 2.0 AUTHOR-1C: reads the safe public_author_profiles VIEW
-// (migration 045), not the base profiles table -- that view physically
-// has no display_name column (and is already filtered to role='author'
-// internally, so the explicit .eq("role", "author") this query used to
-// need is gone too -- a reader id simply has no row in the view at
-// all, same "not found" outcome as before). There is no display_name to
-// accidentally fall back to or leak here any more; the resolved public
-// name is computed exactly once, right after this fetch resolves (see
-// authorPublicName in the page component below), and every render site
-// (H1, initials, metadata, "Books by", series/bundle copy) reads that
-// one resolved string.
-type PublicAuthor = Pick<Profile, "id" | "public_author_name" | "bio" | "avatar_path">;
+// PEN-NAMES-1 (migration 20261019184512): the page is keyed by a PEN
+// NAME id (1a) and reads the public_pen_names view, which has no
+// author_id: the name, the books, series and bundles under that pen
+// name only, and the follower count of that pen name. Bio, photo and
+// links show only when the author added them (2a, 7a, 8a); nothing
+// links to the author's other pen names. An old /authors/<account id>
+// URL has no row in the view and is "not found" like any unknown id.
+// Staff with reports.resolve (13a) also see the account behind the pen
+// name and a "Remove links" button (audited in the database).
 type SeriesRow = Pick<Series, "id" | "title">;
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see V3 §3.
@@ -56,14 +52,15 @@ export const dynamic = "force-dynamic";
 // even the safe view could in principle grow columns later that this
 // page has no reason to pull into a request just because they're on
 // the same row.
-const getPublicAuthor = cache(async (id: string) => {
+const getPublicPenName = cache(async (id: string) => {
+  if (!UUID_PATTERN.test(id)) return null;
   const supabase = await createClient();
-  const { data: author } = await supabase
-    .from("public_author_profiles")
-    .select("id, public_author_name, bio, avatar_path")
+  const { data: penName } = await supabase
+    .from("public_pen_names")
+    .select("id, name, bio, avatar_path, links")
     .eq("id", id)
-    .single<PublicAuthor>();
-  return author;
+    .maybeSingle<PublicPenName>();
+  return penName ?? null;
 });
 
 export async function generateMetadata({
@@ -72,23 +69,22 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   // ALL-CUTOVER APP-A: no author-specific metadata (and no Supabase
-  // call via getPublicAuthor) while maintenance is active -- the same
+  // call via getPublicPenName) while maintenance is active -- the same
   // {} fallback this function already uses for a missing/non-author id.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
     return {};
   }
 
   const { id } = await params;
-  const author = await getPublicAuthor(id);
+  const penName = await getPublicPenName(id);
 
-  // No private-profile leak: a missing/non-author id gets the same
-  // generic root-layout metadata a 404 gets anywhere else in this app,
-  // never an author-shaped title/description for an id that isn't one.
-  if (!author) {
+  // A missing id gets the same generic root-layout metadata a 404 gets
+  // anywhere else in this app.
+  if (!penName) {
     return {};
   }
 
-  const authorPublicName = resolvePublicAuthorName(author);
+  const authorPublicName = penName.name;
 
   return {
     title: authorPublicName,
@@ -98,8 +94,10 @@ export async function generateMetadata({
 
 export default async function AuthorProfilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ success?: string; error?: string }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive public author profile page
   // (V3 §3) -- checked as the first statement, before any Supabase call.
@@ -108,9 +106,10 @@ export default async function AuthorProfilePage({
   }
 
   const { id } = await params;
+  const { success, error } = (await searchParams) ?? {};
   const supabase = await createClient();
 
-  // LIBRUM 2.0 PRODUCT-2: getUser() and the author fetch are
+  // LIBRUM 2.0 PRODUCT-2: getUser() and the pen name fetch are
   // independent of each other (same reasoning as Book Detail's own
   // PERF-1 pass) -- dispatched together rather than one after another.
   const [
@@ -118,17 +117,32 @@ export default async function AuthorProfilePage({
       data: { user },
     },
     author,
-  ] = await Promise.all([supabase.auth.getUser(), getPublicAuthor(id)]);
+  ] = await Promise.all([supabase.auth.getUser(), getPublicPenName(id)]);
 
-  // Covers both "no profile with this id" and "profile exists but
-  // isn't role='author'" -- a reader/admin id (or any invalid id) 404s
-  // exactly like a nonexistent one, never exposing which case it was.
+  // Covers "no pen name with this id", "pen name not used by any book,
+  // series or bundle" and every old /authors/<account id> URL alike.
   if (!author) {
     notFound();
   }
 
-  const isSelf = user?.id === id;
   const admin = createAdminClient();
+
+  // "Is this one of my own pen names?" -- pen_names RLS shows a
+  // signed-in author their own rows (and staff every row, hence the
+  // author_id filter). Hides the Follow button; the database refuses a
+  // self-follow anyway (LB457).
+  const [ownPenNameResult, isStaffReviewer] = await Promise.all([
+    user
+      ? supabase
+          .from("pen_names")
+          .select("id")
+          .eq("id", id)
+          .eq("author_id", user.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    user ? hasPermission("reports.resolve") : Promise.resolve(false),
+  ]);
+  const isSelf = !!ownPenNameResult.data;
 
   // LIBRUM 2.0 PRODUCT-2: everything below depends only on `id` (known
   // before this point), never on each other -- dispatched as one
@@ -148,7 +162,7 @@ export default async function AuthorProfilePage({
       supabase
         .from("books")
         .select("*")
-        .eq("author_id", id)
+        .eq("pen_name_id", id)
         .eq("status", "published")
         .not("price_all", "is", null)
         .order("created_at", { ascending: false })
@@ -161,18 +175,23 @@ export default async function AuthorProfilePage({
       supabase
         .from("bundles")
         .select("id, title, price_all")
-        .eq("author_id", id)
+        .eq("pen_name_id", id)
         .eq("status", "published")
         .not("price_all", "is", null)
         .order("created_at", { ascending: false })
         .returns<Pick<Bundle, "id" | "title" | "price_all">[]>(),
-      admin.from("author_follows").select("id", { count: "exact", head: true }).eq("author_id", id),
+      // PEN-NAMES-1: followers of THIS pen name (4a). pen_name_follows
+      // has no public SELECT policy, so the count stays admin-only.
+      admin
+        .from("pen_name_follows")
+        .select("pen_name_id", { count: "exact", head: true })
+        .eq("pen_name_id", id),
       user && !isSelf
         ? supabase
-            .from("author_follows")
-            .select("id")
+            .from("pen_name_follows")
+            .select("pen_name_id")
             .eq("follower_id", user.id)
-            .eq("author_id", id)
+            .eq("pen_name_id", id)
             .maybeSingle()
         : Promise.resolve({ data: null }),
     ]);
@@ -198,20 +217,71 @@ export default async function AuthorProfilePage({
 
   const seriesGroups = groupPublishedBooksBySeries(publishedBooks, seriesRows ?? []);
 
+  // 13a: the account behind this pen name, for staff with reports.resolve
+  // only (service-role read, rendered for them alone).
+  let staffAccount: { id: string; label: string } | null = null;
+  if (isStaffReviewer) {
+    const { data: penRow } = await admin
+      .from("pen_names")
+      .select("author_id")
+      .eq("id", id)
+      .maybeSingle<{ author_id: string }>();
+    if (penRow) {
+      const { data: account } = await admin
+        .from("profiles")
+        .select("public_author_name")
+        .eq("id", penRow.author_id)
+        .maybeSingle<{ public_author_name: string | null }>();
+      staffAccount = {
+        id: penRow.author_id,
+        label: account?.public_author_name ?? "Account without an author name",
+      };
+    }
+  }
+  const links = readPenNameLinks(author.links);
+
   const avatarUrl = author.avatar_path
     ? supabase.storage.from("avatars").getPublicUrl(author.avatar_path).data.publicUrl
     : null;
-  // LIBRUM 2.0 AUTHOR-1B / AUTHOR-1C: the one resolved public name every
-  // render site below reads from. `author` no longer even HAS a
-  // display_name field to fall back to (see PublicAuthor's own comment
-  // above) -- the "Unknown author" fallback here is purely a defensive
-  // placeholder for the CHECK-constraint-guaranteed-impossible case of a
-  // null public_author_name, never a path back to a private name.
-  const authorPublicName = resolvePublicAuthorName(author) ?? "Unknown author";
+  const authorPublicName = author.name;
   const authorInitials = getAuthorInitials(authorPublicName);
 
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
+      {error && (
+        <Alert variant="error" className="mb-6">
+          {error}
+        </Alert>
+      )}
+      {success && (
+        <Alert variant="success" className="mb-6">
+          {success}
+        </Alert>
+      )}
+
+      {/* 13a / 8a / 15a: staff only. */}
+      {staffAccount && (
+        <section
+          aria-label="Staff"
+          className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 text-sm"
+        >
+          <p className="min-w-0">
+            <span className="font-semibold">Staff:</span> pen name of account{" "}
+            <span className="font-medium">{staffAccount.label}</span>{" "}
+            <span className="break-all text-muted">({staffAccount.id})</span>
+          </p>
+          {links.length > 0 ? (
+            <form action={removePenNameLinks.bind(null, id)}>
+              <button type="submit" className={buttonClasses("outline", "sm")}>
+                Remove links
+              </button>
+            </form>
+          ) : (
+            <span className="text-muted">No links</span>
+          )}
+        </section>
+      )}
+
       {/* ============================================================
           Author hero -- identity, bio, follow. Restrained on purpose:
           no cover photo, no stat dashboard, no social-profile framing.
@@ -255,16 +325,35 @@ export default async function AuthorProfilePage({
             {followerCount} follower{followerCount === 1 ? "" : "s"}
           </p>
 
-          {author.bio ? (
-            <p className="mt-3 max-w-[42.5rem] text-sm text-foreground/90 sm:text-base">{author.bio}</p>
-          ) : (
-            <p className="mt-3 text-sm text-muted">No biography added yet.</p>
+          {/* 7a: bio and links only when the author added them -- no
+              placeholder line for a missing bio. */}
+          {author.bio && (
+            <p className="mt-3 max-w-[42.5rem] whitespace-pre-line text-sm text-foreground/90 sm:text-base">
+              {author.bio}
+            </p>
+          )}
+
+          {links.length > 0 && (
+            <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              {links.map((link) => (
+                <li key={link} className="min-w-0 max-w-full">
+                  <a
+                    href={link}
+                    rel="nofollow ugc noopener noreferrer"
+                    target="_blank"
+                    className="focus-ring break-all rounded-sm text-primary underline underline-offset-2 hover:decoration-2"
+                  >
+                    {penNameLinkLabel(link)}
+                  </a>
+                </li>
+              ))}
+            </ul>
           )}
 
           {!isSelf &&
             (user ? (
               <form
-                action={(isFollowing ? unfollowAuthor : followAuthor).bind(null, id)}
+                action={(isFollowing ? unfollowPenName : followPenName).bind(null, id)}
                 className="mt-4"
               >
                 <button
@@ -276,7 +365,7 @@ export default async function AuthorProfilePage({
               </form>
             ) : (
               <Link
-                href={`/login?next=/authors/${id}`}
+                href={`/login?next=${authorPagePath(id)}`}
                 className={`${buttonClasses("outline", "md")} mt-4`}
               >
                 Log in to follow
@@ -383,7 +472,7 @@ export default async function AuthorProfilePage({
                         ) : (
                           <CoverPlaceholder
                             title={book.title}
-                            authorName={resolveBookByline(book, author) ?? authorPublicName}
+                            authorName={authorPublicName}
                             className="aspect-[2/3] w-full rounded-[2px]"
                           />
                         )}

@@ -153,6 +153,7 @@ export function UploadWizard({
   authorId,
   paidPublishingAvailable,
   penNameAvailable,
+  penNameSuggestions = [],
   rightsAvailable,
 }: {
   series: Series[];
@@ -163,6 +164,9 @@ export function UploadWizard({
   // Rendering only: without them the Pen name field and the Rights
   // choice are not shown, and the server refuses Publish on its own.
   penNameAvailable: boolean;
+  // PEN-NAMES-1 (10a): the author's other pen names, suggested under the
+  // box (the default is the blank box itself).
+  penNameSuggestions?: string[];
   rightsAvailable: boolean;
   // LIBRUM 2.0 PUBLISHING-UX-1 PART C / PR-G: display-only context for
   // the Price step's readiness section -- never a pre-submit gate.
@@ -447,13 +451,28 @@ export function UploadWizard({
                   maxLength={PEN_NAME_MAX_LENGTH}
                   value={penName}
                   onChange={(e) => setPenName(e.target.value)}
+                  list={penNameSuggestions.length > 0 ? "wizard-pen-name-suggestions" : undefined}
+                  autoComplete="off"
                   className={formControlClassesFor(false)}
                 />
+                {penNameSuggestions.length > 0 && (
+                  <datalist id="wizard-pen-name-suggestions">
+                    {penNameSuggestions.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                )}
                 {authorName && (
                   <span className="text-sm text-muted">
                     Leave blank to use your author name, {authorName}.
                   </span>
                 )}
+                {/* PEN-NAMES-1 (10a): a new name creates a pen name with
+                    its own Author Page. */}
+                <span className="text-sm text-muted">
+                  A new name becomes a new pen name with its own author page.
+                  {penNameSuggestions.length > 0 && " Your pen names are suggested as you type."}
+                </span>
               </label>
             )}
 

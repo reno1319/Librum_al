@@ -55,21 +55,21 @@ export default async function EditBundlePage({
   // price field and saved back as if it were lek.
   const { data: bundle } = await supabase
     .from("bundles")
-    .select("id, author_id, title, description, price_all")
+    .select("id, author_id, title, description, price_all, pen_name_id")
     .eq("id", id)
-    .single<Pick<Bundle, "id" | "author_id" | "title" | "description" | "price_all">>();
+    .single<Pick<Bundle, "id" | "author_id" | "title" | "description" | "price_all" | "pen_name_id">>();
 
   if (!bundle || bundle.author_id !== user.id) {
     notFound();
   }
 
-  const { data: books } = await supabase
+  const { data: publishedBooks } = await supabase
     .from("books")
-    .select("id, title")
+    .select("id, title, pen_name_id")
     .eq("author_id", user.id)
     .eq("status", "published")
     .order("title")
-    .returns<Pick<Book, "id" | "title">[]>();
+    .returns<Pick<Book, "id" | "title" | "pen_name_id">[]>();
 
   const { data: currentBookRows } = await supabase
     .from("bundle_books")
@@ -77,6 +77,21 @@ export default async function EditBundlePage({
     .eq("bundle_id", id);
 
   const currentBookIds = new Set((currentBookRows ?? []).map((r) => r.book_id));
+
+  // PEN-NAMES-1 (11a): only books of the bundle's pen name are offered
+  // (plus any current member, so an older mixed bundle can be fixed by
+  // unticking; saving a mixed set is refused with a clear message).
+  const books = (publishedBooks ?? []).filter(
+    (book) => !bundle.pen_name_id || book.pen_name_id === bundle.pen_name_id || currentBookIds.has(book.id),
+  );
+  const { data: bundlePenName } = bundle.pen_name_id
+    ? await supabase
+        .from("pen_names")
+        .select("name")
+        .eq("id", bundle.pen_name_id)
+        .eq("author_id", user.id)
+        .maybeSingle<{ name: string }>()
+    : { data: null };
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
@@ -140,9 +155,11 @@ export default async function EditBundlePage({
         </label>
 
         <fieldset>
-          <legend className="text-sm">Books in this bundle</legend>
+          <legend className="text-sm">
+            Books in this bundle{bundlePenName ? ` (${bundlePenName.name})` : ""}
+          </legend>
           <div className="mt-2 flex flex-col gap-2 rounded-card border border-border p-3">
-            {(books ?? []).map((book) => (
+            {books.map((book) => (
               <label key={book.id} className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -155,7 +172,9 @@ export default async function EditBundlePage({
               </label>
             ))}
           </div>
-          <span className="text-sm text-muted">Choose at least 2.</span>
+          <span className="text-sm text-muted">
+            Choose at least 2. A bundle holds books of one pen name only.
+          </span>
         </fieldset>
 
         <button type="submit" className={buttonClasses("primary", "md", "mt-2 w-fit")}>

@@ -35,7 +35,7 @@ describe("Dashboard Profile: Account name / Public author name split", () => {
     );
     const publicNameBlock = source.slice(
       source.indexOf("Public author name"),
-      source.indexOf("Bio"),
+      source.indexOf("<button"),
     );
     expect(accountBlock).not.toContain("readers will see");
     expect(publicNameBlock).toContain("This is the name readers will see on your books and author page.");
@@ -44,10 +44,17 @@ describe("Dashboard Profile: Account name / Public author name split", () => {
   it("includes the EPUB pen-name timing note near the Public author name field, concise and non-alarmist", () => {
     const publicNameBlock = source.slice(
       source.indexOf("Public author name"),
-      source.indexOf("Bio"),
+      source.indexOf("<button"),
     );
     expect(publicNameBlock).toContain("If you publish under a pen name, set it before publishing.");
     expect(publicNameBlock).toContain("embedded in your EPUB file");
+  });
+
+  it("PEN-NAMES-1 r4 (18a): no Bio box and no photo field -- both are edited per pen name", () => {
+    expect(source).not.toContain('name="bio"');
+    expect(source).not.toContain("AvatarField");
+    expect(source).not.toContain("avatar_path");
+    expect(source).toContain('href="/dashboard/pen-names"');
   });
 
   it("the public author name input is required when rendered (an author's form never submits it blank by omission)", () => {

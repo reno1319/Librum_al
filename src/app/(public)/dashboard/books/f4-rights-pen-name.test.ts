@@ -96,6 +96,15 @@ const sessionClient = {
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
 const writerClient = recordingClient("writer");
 vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => writerClient }));
+// PEN-NAMES-1: the box resolves through the server-only pen name writer
+// (src/lib/pen-name-write-client.ts, find-or-create by name).
+const DEFAULT_PEN_ID = "f0000000-0000-4000-8000-000000000001";
+const JO_PEN_ID = "f0000000-0000-4000-8000-000000000002";
+type PenResolution = { ok: true; penNameId: string } | { ok: false; reason: "invalid"; message: string } | { ok: false; reason: "failed" };
+const mockResolvePenName = vi.fn<(authorId: string, name: string | null) => Promise<PenResolution>>();
+vi.mock("@/lib/pen-name-write-client", () => ({
+  resolveOwnPenNameId: (authorId: string, name: string | null) => mockResolvePenName(authorId, name),
+}));
 
 const { createBook, updateBook, publishBook } = await import("./actions");
 
@@ -212,6 +221,10 @@ beforeEach(async () => {
   mockRightsState.mockReset().mockResolvedValue({ kind: "present", declaration: { basis: "own_rights" } });
   mockRecordRights.mockReset().mockResolvedValue({ ok: true });
   mockFeatures.mockClear();
+  mockResolvePenName.mockReset().mockImplementation(async (_authorId, name) => ({
+    ok: true,
+    penNameId: name ? JO_PEN_ID : DEFAULT_PEN_ID,
+  }));
 });
 
 describe("performPublish: order price -> description -> rights -> paid (P4)", () => {
@@ -382,66 +395,93 @@ describe("updateBook: the rights choice is recorded only when it changes (P3)", 
   });
 });
 
-describe("pen name (P1)", () => {
+describe("pen name (P1, PEN-NAMES-1 10a/14a/11a)", () => {
   const insertPayload = () => method(writerInserts()[0], "insert")!.args[0] as Record<string, unknown>;
   const updatePayload = () => method(writerUpdates()[0], "update")!.args[0] as Record<string, unknown>;
 
-  it("createBook: absent -> the column is not named", async () => {
+  it("createBook: absent -> the author's default pen name, by id; the legacy text is never written", async () => {
     await redirectOf(createBook(createForm({ intent: "draft" })));
+    expect(mockResolvePenName).toHaveBeenCalledWith(USER_ID, null);
+    expect(insertPayload().pen_name_id).toBe(DEFAULT_PEN_ID);
     expect(insertPayload()).not.toHaveProperty("pen_name");
   });
 
-  it("createBook: empty after trimming -> not named (the column's own null)", async () => {
+  it("createBook: empty after trimming -> the default", async () => {
     await redirectOf(createBook(createForm({ intent: "draft", penName: "   " })));
-    expect(insertPayload()).not.toHaveProperty("pen_name");
+    expect(mockResolvePenName).toHaveBeenCalledWith(USER_ID, null);
+    expect(insertPayload().pen_name_id).toBe(DEFAULT_PEN_ID);
   });
 
-  it("createBook: trimmed, through the trusted writer", async () => {
-    await redirectOf(createBook(createForm({ intent: "draft", penName: "  Jo Pen \t" })));
-    expect(insertPayload().pen_name).toBe("Jo Pen");
+  it("createBook: trimmed name, resolved for the SESSION user, written by id through the trusted writer, before any upload", async () => {
+    await redirectOf(createBook(createForm({ intent: "draft", penName: "  Jo Pen \t", authorId: "someone-else" })));
+    expect(mockResolvePenName).toHaveBeenCalledTimes(1);
+    expect(mockResolvePenName).toHaveBeenCalledWith(USER_ID, "Jo Pen");
+    expect(insertPayload().pen_name_id).toBe(JO_PEN_ID);
     expect(writerInserts()[0].client).toBe("writer");
-  });
-
-  it("createBook: written even though the probe says the feature is off (D1 is rendering only)", async () => {
-    await redirectOf(createBook(createForm({ intent: "draft", penName: "Jo Pen" })));
-    expect(insertPayload().pen_name).toBe("Jo Pen");
     expect(mockFeatures).not.toHaveBeenCalled();
   });
 
-  it("createBook: 121 characters are sent as typed, and the database's refusal ends in the existing save-failure message", async () => {
-    writerError = { code: "23514", message: "violates check constraint books_pen_name_check" };
-    const long = "x".repeat(121);
-    expect(await redirectOf(createBook(createForm({ intent: "draft", penName: long })))).toBe(
-      "/dashboard/books/new?error=Something went wrong saving your book. Please try again",
+  it("createBook: an invalid name is refused with its own message, before any upload or insert", async () => {
+    mockResolvePenName.mockResolvedValue({ ok: false, reason: "invalid", message: "A pen name must be 120 characters or fewer." });
+    expect(await redirectOf(createBook(createForm({ intent: "draft", penName: "x".repeat(121) })))).toBe(
+      "/dashboard/books/new?error=A pen name must be 120 characters or fewer.",
     );
-    expect(insertPayload().pen_name).toBe(long);
+    expect(uploads).toEqual([]);
+    expect(writerInserts()).toEqual([]);
   });
 
-  it("createBook: a feature-off write error ends in the same message", async () => {
-    writerError = { code: "PGRST204", message: "Could not find the 'pen_name' column" };
+  it("createBook: a failed resolution -> the existing save-failure message, nothing uploaded", async () => {
+    mockResolvePenName.mockResolvedValue({ ok: false, reason: "failed" });
+    expect(await redirectOf(createBook(createForm({ intent: "draft", penName: "Jo Pen" })))).toBe(
+      "/dashboard/books/new?error=Something went wrong saving your book. Please try again",
+    );
+    expect(uploads).toEqual([]);
+  });
+
+  it("createBook: 11a -- the database refuses a series of another pen name (LB451) with a clear message", async () => {
+    writerError = { code: "LB451", message: "pen names: a series holds books of one pen name only" };
+    expect(await redirectOf(createBook(createForm({ intent: "draft", penName: "Jo Pen" })))).toBe(
+      "/dashboard/books/new?error=A series or bundle holds books of one pen name only. Choose books under the same pen name.",
+    );
+  });
+
+  it("createBook: any other write error -> the existing save-failure message", async () => {
+    writerError = { code: "PGRST204", message: "Could not find the 'pen_name_id' column" };
     expect(await redirectOf(createBook(createForm({ intent: "draft", penName: "Jo Pen" })))).toBe(
       "/dashboard/books/new?error=Something went wrong saving your book. Please try again",
     );
   });
 
-  it("updateBook: absent -> untouched", async () => {
+  it("updateBook: absent -> untouched (no resolution, no pen key)", async () => {
     await redirectOf(updateBook(BOOK_ID, editForm()));
+    expect(mockResolvePenName).not.toHaveBeenCalled();
+    expect(updatePayload()).not.toHaveProperty("pen_name_id");
     expect(updatePayload()).not.toHaveProperty("pen_name");
   });
 
-  it("updateBook: present and empty -> null", async () => {
+  it("updateBook: present and empty -> the default pen name", async () => {
     await redirectOf(updateBook(BOOK_ID, editForm({ penName: "  " })));
-    expect(updatePayload().pen_name).toBeNull();
+    expect(mockResolvePenName).toHaveBeenCalledWith(USER_ID, null);
+    expect(updatePayload().pen_name_id).toBe(DEFAULT_PEN_ID);
+    expect(updatePayload()).not.toHaveProperty("pen_name");
   });
 
-  it("updateBook: trimmed", async () => {
+  it("updateBook: trimmed name -> that pen name by id", async () => {
     await redirectOf(updateBook(BOOK_ID, editForm({ penName: " Jo Pen " })));
-    expect(updatePayload().pen_name).toBe("Jo Pen");
+    expect(mockResolvePenName).toHaveBeenCalledWith(USER_ID, "Jo Pen");
+    expect(updatePayload().pen_name_id).toBe(JO_PEN_ID);
   });
 
-  it("updateBook: a write error (121 characters, or the column missing) -> the existing save-failure message", async () => {
-    writerError = { code: "23514", message: "violates check constraint books_pen_name_check" };
-    expect(await redirectOf(updateBook(BOOK_ID, editForm({ penName: "x".repeat(121) })))).toBe(
+  it("updateBook: 14a -- a book in a series or bundle keeps its pen name (LB452): take it out first", async () => {
+    writerError = { code: "LB452", message: "pen names: the book is in a series or bundle" };
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ penName: "Jo Pen" })))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=This book is in a series or bundle. Take it out first, then change its pen name.`,
+    );
+  });
+
+  it("updateBook: any other write error -> the existing save-failure message", async () => {
+    writerError = { code: "23514", message: "violates check constraint" };
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ penName: "Jo Pen" })))).toBe(
       `/dashboard/books/${BOOK_ID}/edit?error=Something went wrong saving your changes. Please try again`,
     );
   });

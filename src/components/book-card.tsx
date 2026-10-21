@@ -2,6 +2,7 @@ import Link from "next/link";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import type { Book } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
+import { authorPagePath } from "@/lib/pen-names";
 
 // LIBRUM 2.0 UI-4: the shared reader-commerce card, used by the
 // Bookstore grid, the author profile page, the wishlist page, and
@@ -27,7 +28,9 @@ export function BookCard({
   coverUrl,
   authorName,
 }: {
-  book: Pick<Book, "id" | "title" | "genre" | "price_all" | "author_id">;
+  // PEN-NAMES-1: the byline links to the book's pen name page, never to
+  // the account (no author_id here).
+  book: Pick<Book, "id" | "title" | "genre" | "price_all" | "pen_name_id">;
   coverUrl: string | null;
   authorName?: string | null;
 }) {
@@ -63,14 +66,17 @@ export function BookCard({
         </div>
       </Link>
 
-      {authorName && (
-        <Link
-          href={`/authors/${book.author_id}`}
-          className="focus-ring w-fit rounded-sm text-[0.8125rem] text-muted hover:underline"
-        >
-          {authorName}
-        </Link>
-      )}
+      {authorName &&
+        (book.pen_name_id ? (
+          <Link
+            href={authorPagePath(book.pen_name_id)}
+            className="focus-ring w-fit rounded-sm text-[0.8125rem] text-muted hover:underline"
+          >
+            {authorName}
+          </Link>
+        ) : (
+          <span className="w-fit text-[0.8125rem] text-muted">{authorName}</span>
+        ))}
 
       <span
         className={`text-sm font-bold ${book.price_all === 0 ? "text-[#2f6b4f]" : "text-primary"}`}

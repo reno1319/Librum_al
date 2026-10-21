@@ -66,7 +66,7 @@ function book(n: number, extra: Row = {}): Row {
   const day = String(n).padStart(2, "0");
   return {
     id: `b${day}`, title: `Book ${day}`, status: "published", price_all: 199, cover_path: `c/${day}.png`,
-    created_at: `2026-09-${day}T00:00:00Z`, pen_name: null, profiles: { public_author_name: "An Author" }, ...extra,
+    created_at: `2026-09-${day}T00:00:00Z`, pen_name: null, pen: { id: "pen-an-author", name: "An Author" }, ...extra,
   };
 }
 
@@ -97,7 +97,7 @@ describe("/admin/librum-choice", () => {
   it("lists only published, priced books, newest first, first 21 asked", async () => {
     const html = await render();
     expect(listQuery()).toEqual([
-      { method: "select", args: ["id, title, cover_path, profiles:public_author_profiles(public_author_name)"] },
+      { method: "select", args: ["id, title, cover_path, pen:public_pen_names(id, name)"] },
       { method: "eq", args: ["status", "published"] },
       { method: "not", args: ["price_all", "is", null] },
       { method: "order", args: ["created_at", { ascending: false }] },
@@ -119,7 +119,7 @@ describe("/admin/librum-choice", () => {
   });
 
   it("with a pick: the current pick with Remove, its row says Picked", async () => {
-    rows[1] = book(2, { librum_choice_at: "2026-10-18T09:00:00Z", pen_name: "Pena" });
+    rows[1] = book(2, { librum_choice_at: "2026-10-18T09:00:00Z", pen: { id: "pen-pena", name: "Pena" } });
     const html = await render();
     expect(html).not.toContain("Nothing picked");
     expect(html).toContain(">Remove<");

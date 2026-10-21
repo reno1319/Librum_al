@@ -140,7 +140,14 @@ function makeClient(tables: Record<string, Row[]>, userId: string | null, log: Q
 let currentClient: ReturnType<typeof makeClient>;
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => currentClient }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => currentClient }));
-vi.mock("./authors/[id]/actions", () => ({ followAuthor: vi.fn(), unfollowAuthor: vi.fn() }));
+vi.mock("./authors/[id]/actions", () => ({
+  followPenName: vi.fn(),
+  unfollowPenName: vi.fn(),
+  removePenNameLinks: vi.fn(),
+}));
+// PEN-NAMES-1: the author page asks whether a signed-in viewer is staff
+// with reports.resolve; nobody is here.
+vi.mock("@/lib/staff", () => ({ hasPermission: async () => false }));
 vi.mock("./bundles/[id]/actions", () => ({ buyBundle: vi.fn() }));
 vi.mock("./dashboard/bundles/actions", () => ({
   createBundle: vi.fn(),
@@ -163,7 +170,11 @@ async function render(element: Promise<unknown>): Promise<string> {
 const AUTHOR = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OTHER_AUTHOR = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const READER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-const AUTHOR_PROFILE = { public_author_name: "Arta Autore" };
+// PEN-NAMES-1: every fixture bundle and book is under the author's
+// default pen name, embedded from public_pen_names as `pen`.
+const PEN = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const OTHER_PEN = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const AUTHOR_PEN = { id: PEN, name: "Arta Autore" };
 
 function bundle(id: string, title: string, priceAll: number | null, priceCents: number, extra: Row = {}): Row {
   return {
@@ -175,7 +186,8 @@ function bundle(id: string, title: string, priceAll: number | null, priceCents: 
     price_all: priceAll,
     price_cents: priceCents,
     created_at: `2026-09-${id.slice(-2)}T00:00:00Z`,
-    profiles: AUTHOR_PROFILE,
+    pen_name_id: PEN,
+    pen: AUTHOR_PEN,
     ...extra,
   };
 }
@@ -185,7 +197,11 @@ const PAID = bundle("bundle-paid-21", "Paid Collection", 199, 0);
 const UNPRICED = bundle("bundle-null-22", "Unpriced Collection", null, 2500);
 const FREE = bundle("bundle-free-23", "Free Collection", 0, 1500);
 const DRAFT = bundle("bundle-draft-24", "Draft Collection", 299, 0, { status: "draft" });
-const FOREIGN = bundle("bundle-foreign-25", "Someone Else's Collection", 499, 0, { author_id: OTHER_AUTHOR });
+const FOREIGN = bundle("bundle-foreign-25", "Someone Else's Collection", 499, 0, {
+  author_id: OTHER_AUTHOR,
+  pen_name_id: OTHER_PEN,
+  pen: { id: OTHER_PEN, name: "Someone Else" },
+});
 
 function book(id: string, title: string, priceAll: number | null, priceCents: number): Row {
   return {
@@ -199,6 +215,7 @@ function book(id: string, title: string, priceAll: number | null, priceCents: nu
     cover_path: null,
     series_id: null,
     created_at: "2026-09-01T00:00:00Z",
+    pen_name_id: PEN,
   };
 }
 
@@ -299,17 +316,18 @@ describe("bookstore bundle rail (rendered)", () => {
 describe("author public bundle rail (rendered)", () => {
   function tables(bundles: Row[]) {
     return {
-      public_author_profiles: [{ id: AUTHOR, public_author_name: "Arta Autore", bio: null, avatar_path: null }],
+      public_pen_names: [{ id: PEN, name: "Arta Autore", bio: null, avatar_path: null, links: [] }],
+      pen_names: [],
       books: [],
       bundles,
-      author_follows: [],
+      pen_name_follows: [],
       series: [],
     };
   }
 
   it("excludes the null-priced bundle and prices the rest from price_all", async () => {
     install(tables([PAID, UNPRICED, FREE, DRAFT, FOREIGN]));
-    const html = await render(AuthorProfilePage({ params: Promise.resolve({ id: AUTHOR }) }));
+    const html = await render(AuthorProfilePage({ params: Promise.resolve({ id: PEN }) }));
 
     expect(html).toContain("Paid Collection");
     expect(html).toContain("199 ALL");
@@ -324,7 +342,7 @@ describe("author public bundle rail (rendered)", () => {
 
   it("asks for price_all, filters on it, and never selects price_cents", async () => {
     install(tables([PAID]));
-    await render(AuthorProfilePage({ params: Promise.resolve({ id: AUTHOR }) }));
+    await render(AuthorProfilePage({ params: Promise.resolve({ id: PEN }) }));
     const bundleQuery = log.find((q) => q.table === "bundles");
     expect(bundleQuery?.select).toContain("price_all");
     expect(bundleQuery?.select).not.toContain("price_cents");
@@ -334,7 +352,7 @@ describe("author public bundle rail (rendered)", () => {
 
   it("an author whose only bundle is unpriced shows no Bundles section", async () => {
     install(tables([UNPRICED]));
-    const html = await render(AuthorProfilePage({ params: Promise.resolve({ id: AUTHOR }) }));
+    const html = await render(AuthorProfilePage({ params: Promise.resolve({ id: PEN }) }));
     expect(html).not.toContain(">Bundles<");
     expect(html).not.toContain("Unpriced Collection");
   });
@@ -497,7 +515,7 @@ describe("author bundle dashboard and edit form (rendered)", () => {
   const OWN_BOOKS = [book("book-a", "Libri A", 150, 1), book("book-b", "Libri B", 120, 1)];
 
   it("keeps the author's null-priced bundle listed, labelled Price unavailable, so it can be repaired", async () => {
-    install({ books: OWN_BOOKS, bundles: [PAID, UNPRICED, FREE, DRAFT], bundle_books: [] }, AUTHOR);
+    install({ books: OWN_BOOKS, bundles: [PAID, UNPRICED, FREE, DRAFT], bundle_books: [], pen_names: [{ id: PEN, name: "Arta Autore", is_default: true, author_id: AUTHOR }] }, AUTHOR);
     const html = await render(BundlesDashboardPage({ searchParams: Promise.resolve({}) }));
 
     expect(html).toContain("Unpriced Collection");
@@ -512,7 +530,7 @@ describe("author bundle dashboard and edit form (rendered)", () => {
   });
 
   it("the create form takes whole lek in a decimal text field labelled ALL", async () => {
-    install({ books: OWN_BOOKS, bundles: [], bundle_books: [] }, AUTHOR);
+    install({ books: OWN_BOOKS, bundles: [], bundle_books: [], pen_names: [{ id: PEN, name: "Arta Autore", is_default: true, author_id: AUTHOR }] }, AUTHOR);
     const html = await render(BundlesDashboardPage({ searchParams: Promise.resolve({}) }));
 
     expect(html).toContain("Bundle price (ALL)");
@@ -525,7 +543,7 @@ describe("author bundle dashboard and edit form (rendered)", () => {
   });
 
   it("the dashboard never selects price_cents", async () => {
-    install({ books: OWN_BOOKS, bundles: [PAID], bundle_books: [] }, AUTHOR);
+    install({ books: OWN_BOOKS, bundles: [PAID], bundle_books: [], pen_names: [{ id: PEN, name: "Arta Autore", is_default: true, author_id: AUTHOR }] }, AUTHOR);
     await render(BundlesDashboardPage({ searchParams: Promise.resolve({}) }));
     const bundleQuery = log.find((q) => q.table === "bundles");
     expect(bundleQuery?.select).toContain("price_all");
@@ -534,7 +552,7 @@ describe("author bundle dashboard and edit form (rendered)", () => {
   });
 
   it("editing a null-priced bundle opens an EMPTY price field -- never its legacy 2500 cents", async () => {
-    install({ books: OWN_BOOKS, bundles: [UNPRICED], bundle_books: [] }, AUTHOR);
+    install({ books: OWN_BOOKS, bundles: [UNPRICED], bundle_books: [], pen_names: [{ id: PEN, name: "Arta Autore", is_default: true, author_id: AUTHOR }] }, AUTHOR);
     const html = await render(
       EditBundlePage({ params: Promise.resolve({ id: String(UNPRICED.id) }), searchParams: Promise.resolve({}) }),
     );
@@ -549,7 +567,7 @@ describe("author bundle dashboard and edit form (rendered)", () => {
   });
 
   it("editing a priced bundle prefills its whole-lek price_all", async () => {
-    install({ books: OWN_BOOKS, bundles: [PAID], bundle_books: [] }, AUTHOR);
+    install({ books: OWN_BOOKS, bundles: [PAID], bundle_books: [], pen_names: [{ id: PEN, name: "Arta Autore", is_default: true, author_id: AUTHOR }] }, AUTHOR);
     const html = await render(
       EditBundlePage({ params: Promise.resolve({ id: String(PAID.id) }), searchParams: Promise.resolve({}) }),
     );
@@ -558,7 +576,7 @@ describe("author bundle dashboard and edit form (rendered)", () => {
   });
 
   it("the edit page never selects price_cents", async () => {
-    install({ books: OWN_BOOKS, bundles: [PAID], bundle_books: [] }, AUTHOR);
+    install({ books: OWN_BOOKS, bundles: [PAID], bundle_books: [], pen_names: [{ id: PEN, name: "Arta Autore", is_default: true, author_id: AUTHOR }] }, AUTHOR);
     await render(
       EditBundlePage({ params: Promise.resolve({ id: String(PAID.id) }), searchParams: Promise.resolve({}) }),
     );
@@ -584,7 +602,7 @@ describe("bundle catalog pages: first-statement maintenance gate (ALL-WIRING-5)"
 
   it.each([
     ["the bookstore", () => BookstorePage({ searchParams: Promise.resolve({}) })],
-    ["an author page", () => AuthorProfilePage({ params: Promise.resolve({ id: AUTHOR }) })],
+    ["an author page", () => AuthorProfilePage({ params: Promise.resolve({ id: PEN }) })],
     [
       "bundle detail",
       () => BundleDetailPage({ params: Promise.resolve({ id: "x" }), searchParams: Promise.resolve({}) }),

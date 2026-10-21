@@ -39,6 +39,11 @@ export default async function SignupPage({
             required
             className={formControlClasses}
           />
+          {/* PEN-NAMES-1 (6a). */}
+          <span className="text-sm text-muted">
+            If you sign up as an author, readers see this as your author name. You can set a pen
+            name later.
+          </span>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">

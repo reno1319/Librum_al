@@ -1,7 +1,6 @@
 import { Resend } from "resend";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { resolveSiteOrigin } from "@/lib/site-url";
-import { resolvePublicAuthorName } from "@/lib/author-name";
 import { formatTransactionMinorUnits, type TransactionCurrency } from "@/lib/transaction-money";
 
 const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
@@ -214,22 +213,29 @@ export async function sendNewBookEmails(
 ) {
   const origin = resolveSiteOrigin();
 
-  const [{ data: book }, { data: author }, { data: follows }] = await Promise.all([
-    admin.from("books").select("title").eq("id", bookId).single(),
+  // PEN-NAMES-1 (migration 20261019184512, 4a): readers follow a pen
+  // name, so the email goes to the followers of THIS BOOK'S pen name and
+  // names that pen name -- never the account, never its other pen names.
+  const { data: book } = await admin
+    .from("books")
+    .select("title, author_id, pen_name_id")
+    .eq("id", bookId)
+    .single<{ title: string; author_id: string; pen_name_id: string | null }>();
+
+  if (!book || book.author_id !== authorId || !book.pen_name_id) return;
+
+  const [{ data: penName }, { data: follows }] = await Promise.all([
     admin
-      .from("profiles")
-      .select("display_name, public_author_name")
-      .eq("id", authorId)
-      .single(),
-    admin.from("author_follows").select("follower_id").eq("author_id", authorId),
+      .from("pen_names")
+      .select("name")
+      .eq("id", book.pen_name_id)
+      .single<{ name: string }>(),
+    admin.from("pen_name_follows").select("follower_id").eq("pen_name_id", book.pen_name_id),
   ]);
 
-  if (!book || !author || !follows || follows.length === 0) return;
+  if (!penName || !follows || follows.length === 0) return;
 
-  // LIBRUM 2.0 AUTHOR-1B: never the private/account display_name here --
-  // this email is reader-facing, so it uses the same public identity a
-  // reader sees everywhere else (book byline, author page, EPUB dc:creator).
-  const authorName = resolvePublicAuthorName(author);
+  const authorName = penName.name;
   const bookUrl = `${origin}/books/${bookId}`;
 
   await Promise.all(

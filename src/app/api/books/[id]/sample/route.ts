@@ -2,27 +2,27 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractEpubSample } from "@/lib/epub-sample";
-import { attachPenNames, resolveBookByline } from "@/lib/book-byline";
+import { resolveBookByline } from "@/lib/book-byline";
 import {
   BOOK_MANUSCRIPTS_BUCKET,
   isOwnCanonicalBookManuscriptPath,
 } from "@/lib/book-storage-path";
-import type { Book, Profile } from "@/lib/types";
+import type { Book } from "@/lib/types";
+import type { PenNameRef } from "@/lib/pen-names";
 
 // LIBRUM 2.0 AUTHOR-1B: the JSON response's own "author" field resolves
 // through resolvePublicAuthorName(). Only the resolved string ever
 // leaves this route; the profile object itself never rides along in the
 // response.
 //
-// LIBRUM 2.0 AUTHOR-1C: reads the safe public_author_profiles VIEW
-// (migration 045, aliased back to `profiles`), not the base profiles
-// table -- physically has no display_name column.
+// PEN-NAMES-1: the "author" field is the book's pen name, embedded from
+// the public_pen_names view as `pen` (no account columns).
 //
 // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the row also returns its own `id`
 // and `author_id`, so the stored manuscript key is checked against the
 // row's own identity before the service-role client ever sees it.
 type SampleBookRow = Pick<Book, "id" | "author_id" | "title" | "status" | "file_path"> & {
-  profiles: Pick<Profile, "public_author_name"> | null;
+  pen: PenNameRef | null;
 };
 
 // Anything but one plain row object for exactly the requested id, with
@@ -66,7 +66,7 @@ export async function GET(
   const supabase = await createClient();
   const { data: bookData, error: bookError } = await supabase
     .from("books")
-    .select("id, author_id, title, status, file_path, profiles:public_author_profiles(public_author_name)")
+    .select("id, author_id, title, status, file_path, pen:public_pen_names(id, name)")
     .eq("id", id)
     .maybeSingle<SampleBookRow>();
 
@@ -120,14 +120,11 @@ export async function GET(
     return NextResponse.json({ error: "sample_unavailable" }, { status: 404 });
   }
 
-  // F4 (P5): the sample's author line is the book's byline. The select
-  // above names its columns, so the pen name comes from one extra read
-  // that leaves the book unchanged before the migration.
-  const [bylineBook] = await attachPenNames(supabase, [{ id: book.id }]);
+  // F4 (P5): the sample's author line is the book's byline (pen name).
   return NextResponse.json({
     bookId: id,
     title: book.title,
-    author: resolveBookByline(bylineBook, book.profiles),
+    author: resolveBookByline(book),
     sections: sample.sections,
     approximatePercent: sample.approximatePercent,
   });

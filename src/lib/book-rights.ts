@@ -49,10 +49,12 @@ export async function recordRightsDeclaration(
 
   const { data: book, error: bookError } = await supabase
     .from("books")
-    .select("id, title")
+    // PEN-NAMES-1 (16a): the book's pen name too, through the author's
+    // own pen_names rows (RLS).
+    .select("id, title, pen:pen_names(name)")
     .eq("id", bookId)
     .eq("author_id", user.id)
-    .maybeSingle();
+    .maybeSingle<{ id: string; title: string; pen: { name: string } | null }>();
   if (bookError) {
     console.error("recordRightsDeclaration: book lookup failed:", bookError);
     return { ok: false, reason: "error" };
@@ -80,6 +82,9 @@ export async function recordRightsDeclaration(
       book_title: book.title,
       author_id: user.id,
       author_public_name: authorPublicName,
+      // 16a: the pen name the book is published under, beside the
+      // account's author name (as today).
+      pen_name: book.pen?.name ?? null,
       basis,
       statement_version: RIGHTS_STATEMENT_VERSION,
       statement_text: RIGHTS_STATEMENTS[basis].text,

@@ -74,23 +74,6 @@ const mockCreateClient = vi.fn(() =>
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
-// AVATAR-STORAGE-PATH-AUTH-1: avatar_path is written through the trusted
-// profile writer, not the session. Its full contract is pinned by
-// avatar-storage-path-authorization.test.ts; here it only answers the one
-// update with the caller's own row.
-const mockTrustedAvatarUpdate = vi.fn((payload: { avatar_path: string }) =>
-  Promise.resolve({ data: [{ id: USER_ID, avatar_path: payload.avatar_path }], error: null }),
-);
-vi.mock("@/lib/profile-write-client", () => ({
-  createProfileWriteClient: () => ({
-    from: () => ({
-      update: (payload: { avatar_path: string }) => ({
-        eq: () => ({ select: () => mockTrustedAvatarUpdate(payload) }),
-      }),
-    }),
-  }),
-}));
-
 const { updateProfile } = await import("./actions");
 
 function formDataWith(fields: Record<string, string>) {
@@ -99,103 +82,43 @@ function formDataWith(fields: Record<string, string>) {
   return fd;
 }
 
-describe("updateProfile / resolveAvatarInput: AVATAR-1 direct-Storage transport", () => {
+// PEN-NAMES-1 r4 (owner decision 18a): Dashboard > Profile edits no
+// photo and no bio; both moved to Dashboard > Pen names. A request that
+// still carries them is saved without them.
+describe("updateProfile: no photo, no bio (PEN-NAMES-1 r4, 18a)", () => {
   beforeEach(() => {
     mockRedirect.mockClear();
     mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID } } });
-    mockDownload.mockReset();
+    mockDownload.mockReset().mockResolvedValue({ data: makeFakeBlob(REAL_PNG_BYTES), error: null });
     mockRemove.mockReset().mockResolvedValue({ error: null });
     mockUploadAvatar.mockReset().mockResolvedValue({ error: null });
     mockUpdateProfile.mockReset().mockResolvedValue({ data: [{ id: USER_ID }], error: null });
     mockCurrentProfileSingle.mockReset().mockResolvedValue({ data: { role: "author" }, error: null });
   });
 
-  it("resolves a valid temp reference: downloads, uploads to the canonical avatars path, updates the profile, and cleans up the temp object", async () => {
-    const tempPath = `${USER_ID}/tmp/avatar/some-uuid.png`;
-    mockDownload.mockResolvedValue({ data: makeFakeBlob(REAL_PNG_BYTES), error: null });
-
+  it("a photo reference and a bio in the request are ignored: no Storage call, only the account name is written", async () => {
     const formData = formDataWith({
       displayName: "Jane Author",
       bio: "Writes things.",
-      avatarStoragePath: tempPath,
+      avatarStoragePath: `${USER_ID}/tmp/avatar/some-uuid.png`,
     });
 
     await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockDownload).toHaveBeenCalledWith(tempPath);
-    expect(mockUploadAvatar).toHaveBeenCalledWith(
-      `${USER_ID}/avatar.png`,
-      expect.any(Buffer),
-      expect.objectContaining({ contentType: "image/png", upsert: true }),
-    );
-    expect(mockTrustedAvatarUpdate).toHaveBeenCalledWith({ avatar_path: `${USER_ID}/avatar.png` });
-    expect(mockUpdateProfile).toHaveBeenCalledWith({ display_name: "Jane Author", bio: "Writes things." });
-    // Cleanup only after the canonical write is confirmed -- same
-    // ordering as createBook/updateBook's own temp cleanup.
-    expect(mockRemove).toHaveBeenCalledWith([tempPath]);
+    expect(mockDownload).not.toHaveBeenCalled();
+    expect(mockUploadAvatar).not.toHaveBeenCalled();
+    expect(mockRemove).not.toHaveBeenCalled();
+    expect(mockUpdateProfile).toHaveBeenCalledWith({ display_name: "Jane Author" });
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/profile?success=1");
   });
 
-  it("rejects a temp reference outside the caller's own owner-scoped namespace, without ever downloading it", async () => {
-    const someoneElsesPath = "22222222-2222-2222-2222-222222222222/tmp/avatar/x.png";
-    const formData = formDataWith({
-      displayName: "Jane Author",
-      avatarStoragePath: someoneElsesPath,
-    });
-
-    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining(encodeURIComponent("no longer valid")),
-    );
-    expect(mockDownload).not.toHaveBeenCalled();
-  });
-
-  it("rejects bytes over the 5MB limit even when the temp reference itself looks valid", async () => {
-    const tempPath = `${USER_ID}/tmp/avatar/big.png`;
-    const oversized = Buffer.concat([REAL_PNG_BYTES, Buffer.alloc(5 * 1024 * 1024)]);
-    mockDownload.mockResolvedValue({ data: makeFakeBlob(oversized), error: null });
-
-    const formData = formDataWith({
-      displayName: "Jane Author",
-      avatarStoragePath: tempPath,
-    });
-
-    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining(encodeURIComponent("larger than the 5 MB limit")),
-    );
-    expect(mockUploadAvatar).not.toHaveBeenCalled();
-  });
-
-  it("rejects bytes that don't carry a real JPEG/PNG signature, regardless of the temp path's own extension", async () => {
-    const tempPath = `${USER_ID}/tmp/avatar/fake.png`;
+  it("bytes that are not an image change nothing either: the photo field is simply not read", async () => {
     mockDownload.mockResolvedValue({ data: makeFakeBlob(NOT_AN_IMAGE_BYTES), error: null });
-
-    const formData = formDataWith({
-      displayName: "Jane Author",
-      avatarStoragePath: tempPath,
-    });
-
-    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
-
-    expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining(encodeURIComponent("doesn't look like a valid JPEG or PNG image")),
-    );
-    expect(mockUploadAvatar).not.toHaveBeenCalled();
-  });
-
-  it("updates name/bio only, with no Storage calls at all, when no avatar reference is submitted", async () => {
-    const formData = formDataWith({ displayName: "Jane Author", bio: "Writes things." });
+    const formData = formDataWith({ displayName: "Jane Author", avatarStoragePath: "someone-else/tmp/avatar/x.png" });
 
     await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockDownload).not.toHaveBeenCalled();
-    expect(mockUploadAvatar).not.toHaveBeenCalled();
-    expect(mockUpdateProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ display_name: "Jane Author", bio: "Writes things." }),
-    );
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/profile?success=1");
   });
 });
@@ -228,7 +151,6 @@ describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
     expect(mockUpdateProfile).toHaveBeenCalledWith(
       expect.objectContaining({
         display_name: "Renato Kalemi",
-        bio: "Writes things.",
         public_author_name: "R. Kalemi",
       }),
     );
@@ -332,7 +254,7 @@ describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
     await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockUpdateProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ display_name: "A Reader", bio: "I like reading." }),
+      { display_name: "A Reader" },
     );
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/profile?success=1");
   });
@@ -358,7 +280,7 @@ describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
 
     const payload = mockUpdateProfile.mock.calls[0][0] as Record<string, unknown>;
     expect(Object.keys(payload).sort()).toEqual(
-      ["bio", "display_name", "public_author_name"].sort(),
+      ["display_name", "public_author_name"].sort(),
     );
   });
 });

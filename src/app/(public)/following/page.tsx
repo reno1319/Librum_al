@@ -1,24 +1,19 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { unfollowAuthor } from "@/app/(public)/authors/[id]/actions";
+import { unfollowPenName } from "@/app/(public)/authors/[id]/actions";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
-import { resolvePublicAuthorName } from "@/lib/author-name";
-import type { Profile } from "@/lib/types";
+import { authorPagePath, type PublicPenName } from "@/lib/pen-names";
 import type { Metadata } from "next";
 
-// LIBRUM 2.0 AUTHOR-1B: narrowed from the profile's full row (which also
-// carries stripe_account_id/stripe_payouts_enabled -- see schema.sql) to
-// exactly the public-safe columns this page actually renders. Author
-// attribution resolves through resolvePublicAuthorName().
-//
-// LIBRUM 2.0 AUTHOR-1C: reads the safe public_author_profiles VIEW
-// (migration 045), not the base profiles table -- physically has no
-// display_name/Stripe column to even accidentally select, so
-// "display_name" is dropped from this type entirely.
-type FollowedAuthor = Pick<Profile, "id" | "public_author_name" | "avatar_path">;
+// PEN-NAMES-1 (migration 20261019184512, 4a): readers follow pen names.
+// The list reads the caller's own pen_name_follows rows (RLS: own rows
+// only), then the pen names through the public_pen_names view -- no
+// account columns. A followed pen name with no public book, series or
+// bundle (not in the view) is left out.
+type FollowedPenName = Pick<PublicPenName, "id" | "name" | "avatar_path">;
 
 export const metadata: Metadata = {
   title: "Following",
@@ -36,28 +31,28 @@ export default async function FollowingPage() {
   }
 
   const { data: follows } = await supabase
-    .from("author_follows")
-    .select("author_id")
+    .from("pen_name_follows")
+    .select("pen_name_id")
     .eq("follower_id", user.id)
     .order("created_at", { ascending: false });
 
-  const authorIds = (follows ?? []).map((f) => f.author_id);
+  const penNameIds = (follows ?? []).map((f) => f.pen_name_id as string);
 
   const { data: authors } =
-    authorIds.length > 0
+    penNameIds.length > 0
       ? await supabase
-          .from("public_author_profiles")
-          .select("id, public_author_name, avatar_path")
-          .in("id", authorIds)
-          .returns<FollowedAuthor[]>()
-      : { data: [] as FollowedAuthor[] };
+          .from("public_pen_names")
+          .select("id, name, avatar_path")
+          .in("id", penNameIds)
+          .returns<FollowedPenName[]>()
+      : { data: [] as FollowedPenName[] };
 
   // Re-order to match the follow list (most recently followed first) —
   // the .in() query above doesn't preserve that order on its own.
   const byId = new Map((authors ?? []).map((a) => [a.id, a]));
-  const orderedAuthors = authorIds
+  const orderedAuthors = penNameIds
     .map((id) => byId.get(id))
-    .filter((a): a is FollowedAuthor => !!a);
+    .filter((a): a is FollowedPenName => !!a);
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
@@ -95,12 +90,12 @@ export default async function FollowingPage() {
                   <div className="size-12 shrink-0 rounded-full bg-border" />
                 )}
                 <Link
-                  href={`/authors/${author.id}`}
+                  href={authorPagePath(author.id)}
                   className="focus-ring flex-1 rounded-sm font-serif font-medium hover:underline"
                 >
-                  {resolvePublicAuthorName(author)}
+                  {author.name}
                 </Link>
-                <form action={unfollowAuthor.bind(null, author.id)}>
+                <form action={unfollowPenName.bind(null, author.id)}>
                   <button type="submit" className={buttonClasses("outline", "sm")}>
                     Unfollow
                   </button>

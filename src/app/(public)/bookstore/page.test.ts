@@ -87,7 +87,7 @@ function book(n: number, priceAll: number): Row {
   return {
     id: `book-${day}`, title: `Book ${day}`, author_id: "author", status: "published",
     price_all: priceAll, genre: "Fiction", cover_path: null, description: `About ${day}.`,
-    created_at: `2026-10-${day}T00:00:00Z`, profiles: { public_author_name: "An Author" },
+    created_at: `2026-10-${day}T00:00:00Z`, pen: { id: "pen-an-author", name: "An Author" },
   };
 }
 

@@ -101,7 +101,9 @@ const BOOK_ROW = {
   id: BOOK_ID, title: "Test Book", price_cents: 799, price_all: 250, author_id: "author",
   status: "published", cover_path: null, series_id: null, genre: null,
   description: null, language: null, created_at: "2026-09-01T00:00:00Z",
-  profiles: { public_author_name: "An Author", bio: null, avatar_path: null },
+  // PEN-NAMES-1: the book's pen name, embedded from public_pen_names.
+  pen_name_id: "pen-an-author",
+  pen: { id: "pen-an-author", name: "An Author", bio: null, avatar_path: null, links: [] },
 };
 const INTENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
@@ -477,8 +479,8 @@ describe("BookDetailPage: redesign step 3", () => {
       storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/x.png" } }) }) },
       from: (table: string) => {
         if (table === "books") return queryStub({ data: [] }, { data: options.book ?? BOOK_ROW });
-        if (table === "author_follows") {
-          return queryStub({ data: [] }, { data: options.following ? { id: "follow-row" } : null });
+        if (table === "pen_name_follows") {
+          return queryStub({ data: [] }, { data: options.following ? { pen_name_id: "pen-an-author" } : null });
         }
         return queryStub({ data: [] }, { data: null });
       },
@@ -536,7 +538,7 @@ describe("BookDetailPage: redesign step 3", () => {
   it("a visitor gets the author page's own Log in to follow link; the author gets no follow control", async () => {
     const anon = await render({ user: null });
     expect(anon).toContain("Log in to follow");
-    expect(anon).toContain('href="/login?next=/authors/author"');
+    expect(anon).toContain('href="/login?next=/authors/pen-an-author"');
     const author = await render({ user: { id: "author" } });
     expect(author).not.toContain("Follow");
   });
