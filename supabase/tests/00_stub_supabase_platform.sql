@@ -46,24 +46,36 @@ end $$;
 
 grant anon, authenticated, service_role to current_user;
 
--- Real Supabase provisions service_role, anon, AND authenticated with
--- broad default table-level privileges (SELECT/INSERT/UPDATE/DELETE/
--- TRUNCATE/REFERENCES/TRIGGER) on every table created under public,
--- until explicitly revoked (see schema.sql's own comment on the
--- profiles table, and the LAUNCH-1 P1-6 audit, which is entirely about
--- this ambient grant). All three roles are stubbed identically here so
--- that a table with no explicit ACL of its own -- most tables in this
--- schema -- behaves exactly as it does in production: readable/
--- writable by anon/authenticated except where RLS independently blocks
--- it, not silently privilege-denied the way an under-stubbed anon/
--- authenticated would be. No migration in this repo ever revokes from
--- service_role, since the Stripe webhook's admin client relies on that
--- ambient grant to write directly to purchases, bundle_checkout_
--- snapshots, and book_checkout_intents' own link-back column. ALTER
--- DEFAULT PRIVILEGES applies to tables schema.sql and the migrations
--- create AFTER this stub runs, not just ones that exist now.
+-- Models the platform's default privileges in public AFTER Supabase's
+-- 2026-10-30 change ("tables not exposed to the Data API automatically").
+--
+-- Before that date a real Supabase project gave anon, authenticated AND
+-- service_role every table privilege (SELECT/INSERT/UPDATE/DELETE/
+-- TRUNCATE/REFERENCES/TRIGGER/MAINTAIN) on each new table or view in
+-- public, and USAGE/SELECT/UPDATE on each new sequence. From 2026-10-30
+-- new tables and views no longer get SELECT/INSERT/UPDATE/DELETE, and new
+-- sequences no longer get USAGE/SELECT, for those three roles. Tables
+-- that already existed keep their grants, so live staging and Production
+-- are unchanged; a rebuild from schema.sql is not.
+--
+-- The `grant all` lines stand for what the platform still grants; the
+-- `revoke` lines right after them are the exact statements Supabase
+-- published for the change. A new table or view therefore gets NO Data
+-- API access for any role here until its migration grants it
+-- explicitly: `revoke all on <rel> from public, anon, authenticated,
+-- service_role;` then the grants it needs (the book_reviews pattern),
+-- and an updated 078_data_api_grant_contract snapshot. That includes
+-- service_role: the server-side admin client (webhooks, checkout
+-- fulfilment, admin pages) only reaches a table it is granted. schema.sql
+-- ends with an explicit grant section that reproduces the privileges
+-- staging and Production held under the old default.
+--
+-- ALTER DEFAULT PRIVILEGES applies to tables schema.sql and the
+-- migrations create AFTER this stub runs, not just ones that exist now.
 alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
 alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+alter default privileges in schema public revoke select, insert, update, delete on tables from anon, authenticated, service_role;
+alter default privileges in schema public revoke usage, select on sequences from anon, authenticated, service_role;
 
 -- email/raw_user_meta_data exist because supabase/schema.sql's own
 -- handle_new_user() trigger (fired after insert on auth.users) reads
