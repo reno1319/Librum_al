@@ -34,6 +34,8 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   "pen_name.links_removed",
   "book.unpublished",
   "book.allowed_again",
+  "book.review_approved",
+  "book.review_sent_back",
 ];
 
 export function isValidAuditAction(value: string): value is AuditAction {
@@ -199,6 +201,8 @@ export const ACTION_LABELS: Record<AuditAction, string> = {
   "pen_name.links_removed": "Pen name links removed",
   "book.unpublished": "Book unpublished",
   "book.allowed_again": "Book allowed again",
+  "book.review_approved": "Book approved",
+  "book.review_sent_back": "Book sent back",
 };
 
 const UNKNOWN_ACTION_LABEL = "Admin action";
@@ -399,6 +403,13 @@ export function formatAuditDetails(action: string, metadata: unknown): string | 
       if (typeof data.report_id === "string" && data.report_id) parts.push("report resolved");
       return parts.length > 0 ? parts.join(" · ") : null;
     }
+    // ADMIN-3-REVIEW: whether the approval was the book's first
+    // publication; a send back shows its reason's label, never the
+    // message (the RPC does not store it here).
+    case "book.review_approved":
+      return data.first_publication === true ? "First publication" : data.first_publication === false ? "Live again" : null;
+    case "book.review_sent_back":
+      return typeof data.reason === "string" ? takedownReasonLabel(data.reason) : null;
     default:
       return null;
   }

@@ -8,6 +8,8 @@
 //
 //   covers bucket:      <author id>/<book id>-cover.<jpg|png>
 //   manuscripts bucket: <author id>/<book id>.epub
+//                       (ADMIN-3: new writes use the versioned
+//                       <author id>/<book id>/<uuid>.epub, see below)
 //
 // -- the lowercase UUID the Supabase session verified, then the book's
 // own lowercase UUID, then either "-cover." plus the extension taken from
@@ -131,6 +133,55 @@ export function isOwnCanonicalBookManuscriptPath(
     return false;
   }
   return path === canonicalBookManuscriptPath(authorId, bookId as string);
+}
+
+// ADMIN-3-REVIEW: every manuscript written from this release on gets a
+// FRESH key, so books.file_path changes whenever the bytes change and a
+// staff approval (bound to the reviewed file_path) can never be carried
+// over to different bytes:
+//
+//   manuscripts bucket: <author id>/<book id>/<random uuid>.epub
+//
+// Written and removed only by the server (service role); authors may
+// write nothing outside their own "<uid>/tmp/" folder. The canonical
+// `<author id>/<book id>.epub` key above stays valid for existing books.
+const VERSIONED_MANUSCRIPT_FILE = new RegExp(
+  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.epub$",
+);
+
+export function newBookManuscriptPath(authorId: string, bookId: string): string {
+  assertIds("newBookManuscriptPath", authorId, bookId);
+  return `${authorId}/${bookId}/${crypto.randomUUID()}.epub`;
+}
+
+// True only when `path` is exactly `<author id>/<book id>/<uuid>.epub`
+// for this author's own `bookId`: an exact prefix built from the ids,
+// then one lowercase UUID and ".epub" -- no other depth, case or suffix.
+export function isOwnVersionedBookManuscriptPath(
+  path: unknown,
+  authorId: unknown,
+  bookId: unknown,
+): path is string {
+  if (typeof path !== "string" || !idsAreCanonical(authorId, bookId)) {
+    return false;
+  }
+  const prefix = `${authorId}/${bookId as string}/`;
+  return path.startsWith(prefix) && VERSIONED_MANUSCRIPT_FILE.test(path.slice(prefix.length));
+}
+
+// True for either manuscript form this author's own book may hold: the
+// canonical key or a versioned one. Every reader and remover of a stored
+// file_path (download and sample routes, deleteBook, account deletion,
+// the retention cleanup) classifies with this.
+export function isOwnBookManuscriptPath(
+  path: unknown,
+  authorId: unknown,
+  bookId: unknown,
+): path is string {
+  return (
+    isOwnCanonicalBookManuscriptPath(path, authorId, bookId) ||
+    isOwnVersionedBookManuscriptPath(path, authorId, bookId)
+  );
 }
 
 // BOOK-STORAGE-MUTATION-AUTH-1: the documented legacy cover form. Before

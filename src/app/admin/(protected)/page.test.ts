@@ -82,8 +82,18 @@ const mockReadTitles = vi.fn(
       titleById: new Map(ids.filter((id) => id in bookTitles).map((id) => [id, bookTitles[id]])),
     }),
 );
+// ADMIN-3-REVIEW (I): books waiting for review (books.review only).
+let pendingReviews: {
+  items: { reviewId: string; bookId: string; title: string; penName: string | null; submittedAt: string }[];
+  total: number;
+} | null = { items: [], total: 0 };
+const mockReadPendingReviews = vi.fn((limit: number) => {
+  void limit;
+  return Promise.resolve(pendingReviews);
+});
 vi.mock("./books/admin-book-reads", () => ({
   readBookTitlesForStaff: (ids: readonly string[]) => mockReadTitles(ids),
+  readPendingReviewsForStaff: (limit: number) => mockReadPendingReviews(limit),
 }));
 
 const { default: AdminPage } = await import("./page");
@@ -110,6 +120,8 @@ describe("AdminPage (Today)", () => {
     tableRows = {};
     bookTitles = { "book-1": "Kënga e fundit" };
     mockReadTitles.mockClear();
+    pendingReviews = { items: [], total: 0 };
+    mockReadPendingReviews.mockClear();
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-19T09:00:00Z"));
   });
@@ -297,5 +309,47 @@ describe("AdminPage (Today)", () => {
   it("reads no titles for a role without reports.view", async () => {
     await renderAs("support");
     expect(mockReadTitles).not.toHaveBeenCalledWith(expect.arrayContaining(["book-1"]));
+  });
+
+  // ADMIN-3-REVIEW (I)
+  it("owner: books waiting for review get a tile and merge into To do oldest first", async () => {
+    tableRows = {
+      book_reports: { data: [OPEN_REPORT], error: null },
+      refund_requests: { data: [], error: null },
+    };
+    pendingReviews = {
+      items: [
+        {
+          reviewId: "rev-1",
+          bookId: "22222222-2222-4222-8222-222222222222",
+          title: "Dita e parë",
+          penName: "Ana Pena",
+          submittedAt: "2026-10-09T08:00:00Z",
+        },
+      ],
+      total: 3,
+    };
+    const html = await renderAs("owner");
+    expect(mockReadPendingReviews).toHaveBeenCalledWith(5);
+    expect(html).toMatch(/href="\/admin\/books\?status=in_review"[^>]*>.*Books waiting for review.*>3<.*Oldest: 9 Oct 2026/);
+    const reviewRow = html.indexOf("“Dita e parë” by Ana Pena is waiting for review, 10 days ago");
+    const reportRow = html.indexOf("Copyright report on “Kënga e fundit”, 9 days ago");
+    expect(reviewRow).toBeGreaterThan(-1);
+    expect(reportRow).toBeGreaterThan(reviewRow);
+    expect(html).toContain("Sent 9 Oct 2026");
+    expect(html).toContain('href="/admin/books/22222222-2222-4222-8222-222222222222"');
+    expect(html).toContain(">Review book<");
+  });
+
+  it("only books.review reads or shows reviews; a failed read says so", async () => {
+    tableRows = { book_reports: { data: [], error: null } };
+    const moderator = await renderAs("moderator");
+    expect(mockReadPendingReviews).not.toHaveBeenCalled();
+    expect(moderator).not.toContain("Books waiting for review");
+
+    pendingReviews = null;
+    const admin = await renderAs("admin");
+    expect(admin).toMatch(/Books waiting for review.*—/);
+    expect(admin).toContain("Some items couldn’t be loaded.");
   });
 });

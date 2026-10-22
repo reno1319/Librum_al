@@ -11,6 +11,7 @@ import {
   TODO_LIMIT,
   type TodayRefund,
   type TodayReport,
+  type TodayReview,
 } from "./admin-landing-logic";
 import { roleHasPermission } from "@/lib/staff-permissions";
 import type { StaffRole } from "@/lib/types";
@@ -24,37 +25,41 @@ function visibilityFor(role: StaffRole) {
     reportsView: roleHasPermission(role, "reports.view"),
     refundsView: roleHasPermission(role, "refunds.view"),
     auditView: roleHasPermission(role, "audit.view"),
+    booksReview: roleHasPermission(role, "books.review"),
   });
 }
 
 describe("resolveTodayVisibility", () => {
   it("owner and admin: both tiles and recent activity", () => {
     for (const role of ["owner", "admin"] as StaffRole[]) {
-      expect(visibilityFor(role)).toEqual({ showReports: true, showRefunds: true, showActivity: true });
+      expect(visibilityFor(role)).toEqual({ showReports: true, showRefunds: true, showActivity: true, showReviews: true });
     }
   });
 
   it("moderator: the reports tile only", () => {
-    expect(visibilityFor("moderator")).toEqual({ showReports: true, showRefunds: false, showActivity: false });
+    expect(visibilityFor("moderator")).toEqual({ showReports: true, showRefunds: false, showActivity: false, showReviews: false });
   });
 
   it("support: the refunds tile only", () => {
-    expect(visibilityFor("support")).toEqual({ showReports: false, showRefunds: true, showActivity: false });
+    expect(visibilityFor("support")).toEqual({ showReports: false, showRefunds: true, showActivity: false, showReviews: false });
   });
 
   it("editor: no tiles and no activity", () => {
-    expect(visibilityFor("editor")).toEqual({ showReports: false, showRefunds: false, showActivity: false });
+    expect(visibilityFor("editor")).toEqual({ showReports: false, showRefunds: false, showActivity: false, showReviews: false });
   });
 
   it("each flag follows exactly its own permission", () => {
     for (const reportsView of [true, false]) {
       for (const refundsView of [true, false]) {
         for (const auditView of [true, false]) {
-          expect(resolveTodayVisibility({ reportsView, refundsView, auditView })).toEqual({
-            showReports: reportsView,
-            showRefunds: refundsView,
-            showActivity: auditView,
-          });
+          for (const booksReview of [true, false]) {
+            expect(resolveTodayVisibility({ reportsView, refundsView, auditView, booksReview })).toEqual({
+              showReports: reportsView,
+              showRefunds: refundsView,
+              showActivity: auditView,
+              showReviews: booksReview,
+            });
+          }
         }
       }
     }
@@ -181,5 +186,43 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime("2026-10-17T10:00:00Z", now)).toBe("2 days ago");
     // 23:30 UTC on the 16th is already the 17th in Tirane (UTC+2).
     expect(formatRelativeTime("2026-10-16T23:30:00Z", now)).toBe("2 days ago");
+  });
+});
+
+// ADMIN-3-REVIEW (I): books waiting for review in the To do list.
+describe("buildTodoItems: books waiting for review", () => {
+  const now = new Date("2026-10-20T12:00:00Z");
+  const review: TodayReview = {
+    reviewId: "rev-1",
+    bookId: "22222222-2222-4222-8222-222222222222",
+    title: "Kënga e fundit",
+    penName: "Ana Pena",
+    submittedAt: "2026-10-18T09:00:00Z",
+  };
+
+  it("reads “<Title>” by <pen name> is waiting for review, <relative time>, and opens the book page", () => {
+    const [item] = buildTodoItems([], [], TODO_LIMIT, now, [review]);
+    expect(item).toEqual({
+      key: "review-rev-1",
+      href: "/admin/books/22222222-2222-4222-8222-222222222222",
+      title: "“Kënga e fundit” by Ana Pena is waiting for review, 2 days ago",
+      detail: "Sent 18 Oct 2026",
+      actionLabel: "Review book",
+      at: "2026-10-18T09:00:00Z",
+    });
+  });
+
+  it("merges oldest first with reports and refunds, and respects the limit", () => {
+    const reports: TodayReport[] = [
+      { id: "r1", created_at: "2026-10-17T09:00:00Z", reason: "Other", bookTitle: "B" },
+    ];
+    const refunds: TodayRefund[] = [{ id: "f1", requested_at: "2026-10-19T09:00:00Z", readerName: "Reader" }];
+    const items = buildTodoItems(reports, refunds, TODO_LIMIT, now, [
+      review,
+      { ...review, reviewId: "rev-2", submittedAt: "2026-10-20T11:00:00Z", penName: null },
+    ]);
+    expect(items.map((i) => i.key)).toEqual(["report-r1", "review-rev-1", "refund-f1", "review-rev-2"]);
+    expect(items[3].title).toBe("“Kënga e fundit” by an unknown author is waiting for review, 1 hour ago");
+    expect(buildTodoItems(reports, refunds, 2, now, [review]).map((i) => i.key)).toEqual(["report-r1", "review-rev-1"]);
   });
 });

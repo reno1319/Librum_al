@@ -5,11 +5,22 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff } from "@/lib/staff";
-import { sendBookTakedownEmail } from "@/lib/email";
+import { sendBookApprovedEmail, sendBookSentBackEmail, sendBookTakedownEmail, sendNewBookEmails } from "@/lib/email";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
 import { takedownReasonLabel } from "@/lib/takedown-reasons";
+import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import { checkPublishGate } from "@/lib/publish-readiness";
+import { removeUnretainedManuscripts } from "@/lib/book-reviews";
+import { readRightsStateForStaff } from "./admin-book-reads";
 import {
+  APPROVED_SUCCESS_MESSAGE,
+  GENERIC_REVIEW_ERROR_MESSAGE,
+  SENT_BACK_SUCCESS_MESSAGE,
+  approveReadinessMessage,
+  mapReviewRpcError,
+  validateApproveForm,
+  validateSendBackForm,
   ALLOWED_AGAIN_SUCCESS_MESSAGE,
   GENERIC_TAKEDOWN_ERROR_MESSAGE,
   TAKEDOWN_RPC_NOT_AUTHENTICATED_MESSAGE,
@@ -204,4 +215,211 @@ export async function allowBookAgainAsStaff(bookId: string) {
   }
 
   redirect(withQuery(`/admin/books/${bookId}`, "success", ALLOWED_AGAIN_SUCCESS_MESSAGE));
+}
+
+// ------------------------------------------------------------
+// ADMIN-3-REVIEW (H, J): Approve and Send back.
+// ------------------------------------------------------------
+// Same shape as the takedown actions: the maintenance gate, then
+// requireStaff("books.review") as defense in depth, then the RPC through
+// the staff member's OWN session client (auth.uid() is that staff
+// member; the RPC re-checks books.review, locks, and binds the approval
+// to the files the page rendered). Approve first re-runs the author's
+// publish gate (M2, the shared checkPublishGate -- price, description,
+// rights and, for a paid title, canPublishPaidTitle()) from the book as
+// the service-role client reads it now, and passes that price to the
+// RPC, which refuses if it changed. Everything after a successful RPC
+// (emails, the retention cleanup, cache revalidation) is best effort.
+
+type ReviewedBook = {
+  id: string;
+  title: string;
+  author_id: string;
+  status: string;
+  price_all: number | null;
+  description: string | null;
+  pen_name_id: string | null;
+};
+
+export async function approveBookReviewAsStaff(formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/admin/books");
+  }
+
+  await requireStaff("books.review");
+
+  const validation = validateApproveForm(formData);
+  if (!validation.ok) {
+    const rawBook = formData.get("bookId");
+    redirect(withQuery(isUuid(rawBook) ? `/admin/books/${rawBook}` : "/admin/books", "error", validation.error));
+  }
+  const bookPath = `/admin/books/${validation.bookId}`;
+
+  const admin = createAdminClient();
+  const { data: book, error: bookError } = await admin
+    .from("books")
+    .select("id, title, author_id, status, price_all, description, pen_name_id")
+    .eq("id", validation.bookId)
+    .maybeSingle<ReviewedBook>();
+  if (bookError || !book) {
+    redirect(withQuery(bookPath, "error", GENERIC_REVIEW_ERROR_MESSAGE));
+  }
+
+  const gate = await checkPublishGate({
+    priceAll: book.price_all,
+    description: book.description,
+    readRights: () => readRightsStateForStaff(book.id),
+    paidPublishingAvailable: canPublishPaidTitle,
+  });
+  if (!gate.ok) {
+    redirect(withQuery(bookPath, "error", approveReadinessMessage(gate.reason)));
+  }
+
+  const supabase = await createClient();
+  const { data: firstPublication, error } = await supabase.rpc("admin_approve_book_review", {
+    p_review_id: validation.reviewId,
+    p_file_path: validation.filePath,
+    p_cover_path: validation.coverPath,
+    p_price_all: book.price_all,
+    p_checklist: validation.checklist,
+  });
+
+  if (error) {
+    if (error.message === TAKEDOWN_RPC_NOT_AUTHENTICATED_MESSAGE) {
+      redirect(`/login?next=${encodeURIComponent(bookPath)}`);
+    }
+    if (error.code !== "40P01") {
+      console.error("approveBookReviewAsStaff: admin_approve_book_review failed", {
+        bookId: book.id,
+        code: error.code,
+      });
+    }
+    redirect(withQuery(bookPath, "error", mapReviewRpcError(error)));
+  }
+
+  try {
+    // J: followers hear only about a FIRST publication (unchanged rule).
+    if (firstPublication === true) {
+      await sendNewBookEmails(admin, { bookId: book.id, authorId: book.author_id });
+    }
+  } catch (followUpError) {
+    console.error("approveBookReviewAsStaff: the followers email failed after a successful approval", {
+      bookId: book.id,
+      error: followUpError,
+    });
+  }
+  try {
+    const { data: author } = await admin.auth.admin.getUserById(book.author_id);
+    const email = author?.user?.email;
+    if (email) await sendBookApprovedEmail(email, { title: book.title, bookId: book.id });
+  } catch (followUpError) {
+    console.error("approveBookReviewAsStaff: the author email failed after a successful approval", {
+      bookId: book.id,
+      error: followUpError,
+    });
+  }
+
+  // N3: the previously approved file is no longer the buyers' file.
+  await removeUnretainedManuscripts(admin, admin, {
+    authorId: book.author_id,
+    bookId: book.id,
+    caller: "approveBookReviewAsStaff",
+  });
+
+  revalidateAll(
+    [
+      "/",
+      "/bookstore",
+      `/books/${book.id}`,
+      ...(book.pen_name_id ? [`/authors/${book.pen_name_id}`] : []),
+      "/admin",
+      "/admin/books",
+      bookPath,
+      "/dashboard",
+    ],
+    "approveBookReviewAsStaff",
+  );
+
+  redirect(withQuery(bookPath, "success", APPROVED_SUCCESS_MESSAGE));
+}
+
+export async function sendBackBookReviewAsStaff(formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/admin/books");
+  }
+
+  await requireStaff("books.review");
+
+  const validation = validateSendBackForm(formData);
+  if (!validation.ok) {
+    const rawBook = formData.get("bookId");
+    redirect(withQuery(isUuid(rawBook) ? `/admin/books/${rawBook}` : "/admin/books", "error", validation.error));
+  }
+  const bookPath = `/admin/books/${validation.bookId}`;
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("admin_send_back_book_review", {
+    p_review_id: validation.reviewId,
+    p_reason: validation.reason,
+    p_message: validation.message,
+  });
+
+  if (error) {
+    if (error.message === TAKEDOWN_RPC_NOT_AUTHENTICATED_MESSAGE) {
+      redirect(`/login?next=${encodeURIComponent(bookPath)}`);
+    }
+    if (error.code !== "40P01") {
+      console.error("sendBackBookReviewAsStaff: admin_send_back_book_review failed", {
+        bookId: validation.bookId,
+        code: error.code,
+      });
+    }
+    redirect(withQuery(bookPath, "error", mapReviewRpcError(error)));
+  }
+
+  const admin = createAdminClient();
+  try {
+    const { data: review } = await admin
+      .from("book_reviews")
+      .select("book_title, author_id, reason, message_to_author")
+      .eq("id", validation.reviewId)
+      .maybeSingle<{ book_title: string; author_id: string | null; reason: string; message_to_author: string }>();
+    if (review?.author_id) {
+      const { data: author } = await admin.auth.admin.getUserById(review.author_id);
+      const email = author?.user?.email;
+      if (email) {
+        await sendBookSentBackEmail(email, {
+          title: review.book_title,
+          reasonLabel: takedownReasonLabel(review.reason),
+          message: review.message_to_author,
+        });
+      }
+      // N3: nothing the rule keeps is removed (the book's current file
+      // and its last approved file stay); a stale snapshot may go.
+      await removeUnretainedManuscripts(admin, admin, {
+        authorId: review.author_id,
+        bookId: validation.bookId,
+        caller: "sendBackBookReviewAsStaff",
+      });
+    }
+  } catch (followUpError) {
+    console.error("sendBackBookReviewAsStaff: the author email failed after a successful send back", {
+      bookId: validation.bookId,
+      error: followUpError,
+    });
+  }
+
+  revalidateAll(["/admin", "/admin/books", bookPath, "/dashboard"], "sendBackBookReviewAsStaff");
+
+  redirect(withQuery(bookPath, "success", SENT_BACK_SUCCESS_MESSAGE));
+}
+
+function revalidateAll(paths: string[], caller: string): void {
+  for (const path of new Set(paths)) {
+    try {
+      revalidatePath(path);
+    } catch (revalidateError) {
+      console.error(`${caller}: revalidatePath failed`, { path, error: revalidateError });
+    }
+  }
 }

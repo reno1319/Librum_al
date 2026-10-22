@@ -105,3 +105,30 @@ export function buildAuthorTakedownNoticeLines(
   lines.push(QUESTIONS_LINE);
   return lines;
 }
+
+// ADMIN-3-REVIEW (S7, N7): "Send back" reuses this list with "Author
+// asked" left out -- the same labels as Unpublish. The codes are what
+// public.book_reviews.reason stores (book_reviews_reason_check), which
+// takedown-reasons.test.ts checks against the migration.
+export const SEND_BACK_REASONS = ["copyright", "content_rules", "broken_file", "other"] as const satisfies readonly TakedownReason[];
+
+export type SendBackReason = (typeof SEND_BACK_REASONS)[number];
+
+export function isSendBackReason(value: unknown): value is SendBackReason {
+  return typeof value === "string" && (SEND_BACK_REASONS as readonly string[]).includes(value);
+}
+
+// N7: the message box is prefilled per reason; "Other" starts empty, so
+// staff must write it.
+export const SEND_BACK_PREFILL_MESSAGES: Record<SendBackReason, string> = {
+  copyright:
+    "We couldn't confirm you hold the rights to this book. Please reply with proof that you do, then send it for review again.",
+  content_rules:
+    "This book breaks Librum's content rules, so we can't publish it. Please read the rules, change the book and send it again.",
+  broken_file:
+    "The book file is wrong or doesn't open properly. Please upload a corrected file and send it for review again.",
+  other: "",
+};
+
+// Mirrors book_reviews_message_to_author_check; the RPC is the authority.
+export const SEND_BACK_MESSAGE_MAX_LENGTH = 2000;

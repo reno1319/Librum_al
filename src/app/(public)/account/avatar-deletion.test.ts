@@ -23,6 +23,13 @@ class RedirectSignal extends Error {
     super(`REDIRECT:${target}`);
   }
 }
+// ADMIN-3-REVIEW: book_reviews reads/writes replaced by a settable
+// double (default: nothing pending, approval valid); see
+// src/lib/book-reviews-test-double.ts.
+vi.mock("@/lib/book-reviews", async (importOriginal) => {
+  const { bookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+  return bookReviewsDouble(await importOriginal<object>());
+});
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
     throw new RedirectSignal(url);

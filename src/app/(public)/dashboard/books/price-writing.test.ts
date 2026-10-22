@@ -34,6 +34,13 @@ class RedirectSignal extends Error {
 const mockRedirect = vi.fn((url: string) => {
   throw new RedirectSignal(url);
 });
+// ADMIN-3-REVIEW: book_reviews reads/writes replaced by a settable
+// double (default: nothing pending, approval valid); see
+// src/lib/book-reviews-test-double.ts.
+vi.mock("@/lib/book-reviews", async (importOriginal) => {
+  const { bookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+  return bookReviewsDouble(await importOriginal<object>());
+});
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 
 const mockRevalidatePath = vi.fn();
@@ -75,6 +82,11 @@ const mockCreateClient = vi.fn(() => {
   return Promise.resolve({
     auth: { getUser: mockGetUser },
     from: (table: string) => {
+      // ADMIN-3-REVIEW (C): a new file or cover on a LIVE book first
+      // checks published-bundle membership; none here.
+      if (table === "bundle_books") {
+        return { select: () => makeChain(() => ({ data: [], error: null })) };
+      }
       if (table === "books") {
         return {
           select: () => makeChain(() => mockBookSelectResult()),

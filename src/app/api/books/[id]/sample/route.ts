@@ -5,7 +5,7 @@ import { extractEpubSample } from "@/lib/epub-sample";
 import { resolveBookByline } from "@/lib/book-byline";
 import {
   BOOK_MANUSCRIPTS_BUCKET,
-  isOwnCanonicalBookManuscriptPath,
+  isOwnBookManuscriptPath,
 } from "@/lib/book-storage-path";
 import type { Book, PublicBook } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
@@ -121,12 +121,13 @@ export async function GET(
   // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: this response is public, and the
   // service-role client bypasses Storage RLS (storage-js also puts the key
   // into the request URL unencoded, so "../" would leave the bucket). Only
-  // the exact key `<row author_id>/<row id>.epub` may be fetched; a
+  // the exact key `<row author_id>/<row id>.epub` (or, ADMIN-3, the
+  // versioned `<row author_id>/<row id>/<uuid>.epub`) may be fetched; a
   // legacy or forged value gets the same controlled answer as an
   // unreadable manuscript, before any admin client, Storage request or
   // EPUB extraction, and without echoing the value.
   const filePath = storageRow.file_path;
-  if (!isOwnCanonicalBookManuscriptPath(filePath, storageRow.author_id, book.id)) {
+  if (!isOwnBookManuscriptPath(filePath, storageRow.author_id, book.id)) {
     return NextResponse.json({ error: "sample_unavailable" }, { status: 404 });
   }
 

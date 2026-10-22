@@ -70,6 +70,15 @@ const PUBLIC_BASE_READS: Record<string, string[]> = {
   "app/(public)/account/actions.ts": ["books"],
   // The author's own book for the rights declaration (16a).
   "lib/book-rights.ts": ["books"],
+  // ADMIN-3-REVIEW (N3): the retention cleanup re-reads the book's
+  // current file_path, filtered by id AND the author id its callers pass
+  // (always the authenticated user's own id, or the review's author on
+  // the staff side).
+  "lib/book-reviews.ts": ["books"],
+};
+// A helper that takes the author id as a parameter names it so.
+const OWN_ROW_EQ_BY_FILE: Record<string, RegExp> = {
+  "lib/book-reviews.ts": /\.eq\("author_id",\s*params\.authorId\)/,
 };
 
 describe("PEN-NAMES-2 static guard: public surfaces read the views, not the base tables", () => {
@@ -89,7 +98,7 @@ describe("PEN-NAMES-2 static guard: public surfaces read the views, not the base
         const reads = chains(source, table).filter((c) => c.includes(".select("));
         if (reads.length === 0) continue;
         expect(PUBLIC_BASE_READS[name] ?? [], `${name} reads base ${table}`).toContain(table);
-        for (const chain of reads) expect(chain).toMatch(OWN_ROW_EQ);
+        for (const chain of reads) expect(chain).toMatch(OWN_ROW_EQ_BY_FILE[name] ?? OWN_ROW_EQ);
       }
     },
   );
@@ -119,10 +128,19 @@ describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
     "app/admin/(protected)/books/[id]/page.tsx",
     "app/admin/(protected)/books/actions.ts",
     "app/admin/(protected)/books/admin-book-reads.ts",
+    // ADMIN-3-REVIEW (H): the staff file link checks the book's current
+    // file against the pending snapshot, after requireStaff("books.review").
+    "app/admin/(protected)/books/[id]/file/route.ts",
   ];
   // The shared helper is gated by its callers; each caller is listed.
   const BOOK_READ_HELPER = "app/admin/(protected)/books/admin-book-reads.ts";
-  const HELPER_CALLERS = ["app/admin/(protected)/page.tsx", "app/admin/(protected)/reports/page.tsx", "app/admin/(protected)/books/page.tsx"];
+  // ADMIN-3-REVIEW: the review actions read the rights state through it.
+  const HELPER_CALLERS = [
+    "app/admin/(protected)/page.tsx",
+    "app/admin/(protected)/reports/page.tsx",
+    "app/admin/(protected)/books/page.tsx",
+    "app/admin/(protected)/books/actions.ts",
+  ];
 
   it("a base books read (from or embed) appears only on the report and staff Books pages", () => {
     const readers = ADMIN_FILES.filter((file) => {
@@ -135,7 +153,7 @@ describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
   it("each staff books reader is gated by requireStaff, the shared helper by its callers (ADMIN-2)", () => {
     for (const name of BOOKS_ALLOWED) {
       if (name === BOOK_READ_HELPER) continue;
-      expect(code(join(SRC, name)), name).toMatch(/requireStaff\("(reports\.view|reports\.resolve)"\)/);
+      expect(code(join(SRC, name)), name).toMatch(/requireStaff\("(reports\.view|reports\.resolve|books\.review)"\)/);
     }
     const callers = ADMIN_FILES.filter((file) => code(file).includes("/admin-book-reads\"")).map(rel);
     expect(callers.sort()).toEqual([...HELPER_CALLERS].sort());

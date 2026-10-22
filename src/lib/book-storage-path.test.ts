@@ -15,7 +15,10 @@ import {
   isOwnTemporaryCoverUploadPath,
   isOwnTemporaryManuscriptUploadPath,
   isNewBookCoverPath,
+  isOwnBookManuscriptPath,
+  isOwnVersionedBookManuscriptPath,
   newBookCoverPath,
+  newBookManuscriptPath,
 } from "./book-storage-path";
 import {
   BOOK_FIXTURE_AUTHOR_ID as AUTHOR,
@@ -143,15 +146,18 @@ describe("writers use the shared constructors, never an inline key template", ()
 
   // PEN-2 (L10): a cover key is a fresh random folder on every create and
   // every replace (newBookCoverPath); the old account-named constructor is
-  // no longer used by any writer. Manuscripts keep their canonical key.
-  it("createBook and updateBook build the cover with newBookCoverPath and the manuscript with its constructor", () => {
+  // no longer used by any writer. ADMIN-3-REVIEW (M5): a manuscript gets a
+  // fresh versioned key on every create and replace too
+  // (newBookManuscriptPath); the canonical constructor writes nothing.
+  it("createBook and updateBook build the cover with newBookCoverPath and the manuscript with newBookManuscriptPath", () => {
     const create = source.slice(source.indexOf("export async function createBook("), source.indexOf("export async function updateBook("));
     const update = source.slice(source.indexOf("export async function updateBook("), source.indexOf("async function performPublish("));
     expect(create).toMatch(/newBookCoverPath\(coverResult\.extension\)/);
-    expect(create).toMatch(/canonicalBookManuscriptPath\(user\.id, bookId\)/);
+    expect(create).toMatch(/newBookManuscriptPath\(user\.id, bookId\)/);
     expect(update).toMatch(/newBookCoverPath\(coverResult\.extension\)/);
-    expect(update).toMatch(/canonicalBookManuscriptPath\(user\.id, existing\.id\)/);
+    expect(update).toMatch(/newBookManuscriptPath\(user\.id, existing\.id\)/);
     expect(source).not.toMatch(/canonicalBookCoverPath\(/);
+    expect(source).not.toMatch(/canonicalBookManuscriptPath\(/);
   });
 });
 
@@ -355,5 +361,72 @@ describe("newBookCoverPath / isNewBookCoverPath", () => {
       expect(classifyBookCoverPath(bad, AUTHOR, BOOK)).toBe("unsafe");
     }
     expect(classifyBookCoverPath(key, "not-a-uuid", BOOK)).toBe("unsafe");
+  });
+});
+
+// ============================================================
+// ADMIN-3-REVIEW (M5): the versioned manuscript key and the combined
+// own-manuscript classifier every reader and remover uses.
+describe("newBookManuscriptPath / isOwnVersionedBookManuscriptPath / isOwnBookManuscriptPath", () => {
+  const VERSIONED = new RegExp(
+    `^${AUTHOR}/${BOOK}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.epub$`,
+  );
+
+  it("builds <author>/<book>/<random uuid>.epub, a new key every call", () => {
+    const first = newBookManuscriptPath(AUTHOR, BOOK);
+    const second = newBookManuscriptPath(AUTHOR, BOOK);
+    expect(first).toMatch(VERSIONED);
+    expect(second).toMatch(VERSIONED);
+    expect(first).not.toBe(second);
+    expect(first).not.toBe(canonicalBookManuscriptPath(AUTHOR, BOOK));
+  });
+
+  it.each(MALFORMED_IDS)("refuses a malformed author or book id %j", (id) => {
+    expect(() => newBookManuscriptPath(id, BOOK)).toThrow();
+    expect(() => newBookManuscriptPath(AUTHOR, id)).toThrow();
+  });
+
+  it("accepts a versioned key only for this author's own book", () => {
+    const key = newBookManuscriptPath(AUTHOR, BOOK);
+    expect(isOwnVersionedBookManuscriptPath(key, AUTHOR, BOOK)).toBe(true);
+    expect(isOwnVersionedBookManuscriptPath(key, OTHER_AUTHOR, BOOK)).toBe(false);
+    expect(isOwnVersionedBookManuscriptPath(key, AUTHOR, OTHER_BOOK)).toBe(false);
+    expect(isOwnVersionedBookManuscriptPath(canonicalBookManuscriptPath(AUTHOR, BOOK), AUTHOR, BOOK)).toBe(false);
+  });
+
+  const uuid = "0f0e0d0c-0b0a-4908-8706-050403020100";
+  it.each([
+    ["upper-case uuid", `${AUTHOR}/${BOOK}/${uuid.toUpperCase()}.epub`],
+    ["upper-case extension", `${AUTHOR}/${BOOK}/${uuid}.EPUB`],
+    ["extra depth", `${AUTHOR}/${BOOK}/x/${uuid}.epub`],
+    ["traversal", `${AUTHOR}/${BOOK}/../${uuid}.epub`],
+    ["not a uuid", `${AUTHOR}/${BOOK}/book.epub`],
+    ["temporary upload", `${AUTHOR}/tmp/epub/${uuid}.epub`],
+    ["trailing space", `${AUTHOR}/${BOOK}/${uuid}.epub `],
+    ["leading slash", `/${AUTHOR}/${BOOK}/${uuid}.epub`],
+    ["docx", `${AUTHOR}/${BOOK}/${uuid}.docx`],
+    ["query suffix", `${AUTHOR}/${BOOK}/${uuid}.epub?x=1`],
+  ])("refuses a near-miss versioned key: %s", (_label, key) => {
+    expect(isOwnVersionedBookManuscriptPath(key, AUTHOR, BOOK)).toBe(false);
+    expect(isOwnBookManuscriptPath(key, AUTHOR, BOOK)).toBe(false);
+  });
+
+  it("the combined classifier accepts the canonical key and a versioned key, nothing else", () => {
+    expect(isOwnBookManuscriptPath(canonicalBookManuscriptPath(AUTHOR, BOOK), AUTHOR, BOOK)).toBe(true);
+    expect(isOwnBookManuscriptPath(newBookManuscriptPath(AUTHOR, BOOK), AUTHOR, BOOK)).toBe(true);
+    for (const [, value] of UNSAFE_MANUSCRIPT_PATHS) {
+      expect(isOwnBookManuscriptPath(value, AUTHOR, BOOK)).toBe(false);
+    }
+    for (const value of [null, undefined, 1, {}, []]) {
+      expect(isOwnBookManuscriptPath(value, AUTHOR, BOOK)).toBe(false);
+    }
+  });
+
+  it("malformed ids classify nothing", () => {
+    const key = newBookManuscriptPath(AUTHOR, BOOK);
+    for (const id of MALFORMED_IDS) {
+      expect(isOwnBookManuscriptPath(key, id, BOOK)).toBe(false);
+      expect(isOwnBookManuscriptPath(key, AUTHOR, id)).toBe(false);
+    }
   });
 });

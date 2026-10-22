@@ -305,7 +305,10 @@ export type Permission =
   | "blog.manage"
   // BOOK-PEN-NAME-RIGHTS-CHOICE-1: pick or clear the bookstore's
   // "Librum's choice" book (owner and admin only).
-  | "catalog.feature";
+  | "catalog.feature"
+  // ADMIN-3-REVIEW: approve or send back a book waiting for review
+  // (owner and admin only; SQL staff_has_permission knows it too).
+  | "books.review";
 
 // Mirrors list_staff_members()'s exact return shape (migration 041,
 // ADMIN-1B Part B) -- the ONLY place a staff member's email is ever
@@ -350,7 +353,11 @@ export type AuditAction =
   // ADMIN-2-TAKEDOWN: staff unpublished (took down) a book, or allowed
   // its author to publish it again.
   | "book.unpublished"
-  | "book.allowed_again";
+  | "book.allowed_again"
+  // ADMIN-3-REVIEW: staff approved a book waiting for review (it went
+  // live), or sent it back to its author.
+  | "book.review_approved"
+  | "book.review_sent_back";
 
 export type AuditTargetType = "staff_members" | "book_reports" | "refund_requests" | "pen_names" | "books";
 

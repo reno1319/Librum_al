@@ -18,7 +18,12 @@ const mockRequireStaff = vi.fn((permission: string): Promise<{ userId: string; r
 vi.mock("@/lib/staff", () => ({ requireStaff: (permission: string) => mockRequireStaff(permission) }));
 
 let takenDown: Set<string> | null = new Set();
-vi.mock("./admin-book-reads", () => ({ readActiveTakedownBookIds: () => Promise.resolve(takenDown) }));
+// ADMIN-3-REVIEW: books with a pending review.
+let inReview: Set<string> | null = new Set();
+vi.mock("./admin-book-reads", () => ({
+  readActiveTakedownBookIds: () => Promise.resolve(takenDown),
+  readPendingReviewBookIds: () => Promise.resolve(inReview),
+}));
 
 type Result = { data: unknown; error: { message: string } | null; count?: number };
 let rows: Record<string, Result> = {};
@@ -59,6 +64,7 @@ describe("AdminBooksPage", () => {
     calls.length = 0;
     mockAdminFrom.mockClear();
     takenDown = new Set([BOOK_B]);
+    inReview = new Set();
     rows = {
       books: {
         data: [
@@ -127,5 +133,43 @@ describe("AdminBooksPage", () => {
     const html = await render();
     expect(html).toContain("Couldn&#x27;t load the books. Please try again.");
     expect(html).not.toContain("No books match.");
+  });
+
+  // ADMIN-3-REVIEW (G)
+  it("In review is the drafts with a pending review; Draft leaves them out too; the row shows the chip", async () => {
+    const BOOK_C = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    inReview = new Set([BOOK_C]);
+    rows.books = {
+      data: [{ id: BOOK_C, title: "Waiting one", status: "draft", published_at: null, created_at: "x", pen: { name: "Ana Pena" } }],
+      error: null,
+      count: 1,
+    };
+    const html = await render({ status: "in_review" });
+    expect(booksCall()?.ops).toContainEqual(["eq", "status", "draft"]);
+    expect(booksCall()?.ops).toContainEqual(["in", "id", [BOOK_C]]);
+    expect(html).toMatch(/>In review</);
+    expect(html).toContain('aria-current="true"');
+
+    calls.length = 0;
+    await render({ status: "draft" });
+    expect(booksCall()?.ops).toContainEqual(["not", "id", "in", `(${BOOK_B},${BOOK_C})`]);
+  });
+
+  it("In review with none reads no books, and a failed review read is an error", async () => {
+    inReview = new Set();
+    const html = await render({ status: "in_review" });
+    expect(booksCall()).toBeUndefined();
+    expect(html).toContain("No books match.");
+
+    inReview = null;
+    const failed = await render();
+    expect(failed).toContain("Couldn&#x27;t load the books. Please try again.");
+  });
+
+  it("offers the In review filter between Live and Draft", async () => {
+    const html = await render();
+    const order = ["All", "Live", "In review", "Draft", "Taken down"].map((label) => html.indexOf(`>${label}</a>`));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 });

@@ -498,6 +498,15 @@ begin
     $q$select public.admin_allow_book_again('e0760001-0000-4000-8000-0000000000a1')$q$);
   perform pg_temp.assert(v = 'P0001:this book is not taken down', format('part9: nothing active to lift -- got %s', v));
 
+  -- ADMIN-3-REVIEW fixture: publishing now needs an approval decided after
+  -- the latest takedown. The file is one transaction (now() is fixed), so
+  -- the takedown is moved an hour back and an approval of the current
+  -- files is seeded.
+  update public.book_takedowns set taken_down_at = taken_down_at - interval '1 hour',
+                                   lifted_at = lifted_at - interval '1 hour'
+   where book_id = 'e0760001-0000-4000-8000-0000000000a1';
+  insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, status, grandfathered, decided_at)
+  select id, title, author_id, file_path, cover_path, 'approved', true, now() from public.books where id = 'e0760001-0000-4000-8000-0000000000a1';
   v := pg_temp.run_as('service_role', null,
     $q$update public.books set status = 'published' where id = 'e0760001-0000-4000-8000-0000000000a1'$q$);
   perform pg_temp.assert(v = 'OK:1', format('part9: the author''s publish works again -- got %s', v));

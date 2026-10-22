@@ -103,9 +103,12 @@ describe("UploadWizard: native intent controls (critical)", () => {
     expect(saveButtonsBlock).toContain("Save as draft");
   });
 
-  it("Publish book submits name=\"intent\" value=\"publish\"", () => {
+  // ADMIN-3-REVIEW (B): a new book has no approval, so the publish
+  // intent's button reads "Send for review" (the intent value is kept).
+  it("Send for review submits name=\"intent\" value=\"publish\"", () => {
     expect(saveButtonsBlock).toMatch(/name="intent"\s*\n\s*value="publish"/);
-    expect(saveButtonsBlock).toContain("Publish book");
+    expect(saveButtonsBlock).toContain("Send for review");
+    expect(saveButtonsBlock).not.toContain("Publish book");
   });
 
   it("there is no hidden mutable intent field anywhere in the form", () => {
@@ -370,7 +373,8 @@ describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
   it("renders the readiness block, without the unreachable missing-price line, and no Review summary", () => {
     expect(priceBlock).toContain("Readiness");
     expect(priceBlock).toContain("readiness.paidPublishingBlocked");
-    expect(priceBlock).toContain("Looks good — ready to publish.");
+    expect(priceBlock).toContain("Looks good — ready to send for review.");
+    expect(source).not.toContain("ready to publish");
     expect(source).not.toContain("Set a price in lek on the previous step");
     expect(source).not.toContain("Double check the basics below");
     expect(source).not.toContain("Review & Publish");
@@ -457,6 +461,7 @@ describe("UploadWizard: FIX1 per-field messages and wording", () => {
 
   it("replaces the false 'saved as a draft first' sentence with W-A", () => {
     expect(pageSource).not.toContain("saved as a draft first");
-    expect(pageSource).toContain("Nothing is saved until you press Save as draft or Publish book.");
+    // ADMIN-3-REVIEW (B): the final button's new label.
+    expect(pageSource).toContain("Nothing is saved until you press Save as draft or Send for review.");
   });
 });

@@ -101,3 +101,47 @@ export function resolvePublishReadiness(params: {
     recommended,
   };
 }
+
+// ADMIN-3-REVIEW (M2): the publish gate itself, shared by
+// performPublish() (dashboard/books/actions.ts) and the staff Approve
+// action (admin/(protected)/books/actions.ts), so an approval can never
+// publish a book the author could not: the same four checks in the same
+// ORDER -- an ALL price, a description (non-empty after trimming), a
+// rights choice, and, for a PAID title only, paid publishing being
+// available (canPublishPaidTitle()). The rights read and the paid
+// permission are passed in as functions so each caller keeps its own
+// client and no read happens after an earlier refusal.
+export type PublishGateRefusal =
+  | "missing_all_price"
+  | "missing_description"
+  | "missing_rights"
+  | "rights_unavailable"
+  | "paid_mode_required";
+
+export type PublishGateResult = { ok: true } | { ok: false; reason: PublishGateRefusal };
+
+export async function checkPublishGate(params: {
+  priceAll: number | null;
+  description: string | null;
+  readRights: () => Promise<"present" | "none" | "unavailable">;
+  paidPublishingAvailable: () => boolean;
+}): Promise<PublishGateResult> {
+  const priceState = resolveCatalogPriceState(params.priceAll);
+  if (priceState === "unavailable") {
+    return { ok: false, reason: "missing_all_price" };
+  }
+  if (typeof params.description !== "string" || params.description.trim().length === 0) {
+    return { ok: false, reason: "missing_description" };
+  }
+  const rights = await params.readRights();
+  if (rights === "none") {
+    return { ok: false, reason: "missing_rights" };
+  }
+  if (rights === "unavailable") {
+    return { ok: false, reason: "rights_unavailable" };
+  }
+  if (priceState === "paid" && !params.paidPublishingAvailable()) {
+    return { ok: false, reason: "paid_mode_required" };
+  }
+  return { ok: true };
+}

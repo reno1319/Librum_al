@@ -9,6 +9,7 @@ import { computeNextPayoutCycleDate, formatPayoutCycleDate } from "@/lib/payout-
 import { formatTransactionMinorUnits, type CurrencyTotals } from "@/lib/transaction-money";
 import { AuthorBookRow } from "@/components/author-book-row";
 import { loadAuthorTakedownNotices } from "@/lib/book-takedowns";
+import { loadAuthorReviewNotices } from "@/lib/book-reviews";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
@@ -181,6 +182,8 @@ export default async function DashboardPage({
   // ADMIN-2-TAKEDOWN (G): the notices for books Librum took down, read
   // with the author's own session (RLS: own rows; named columns only).
   const takedownNotices = await loadAuthorTakedownNotices(supabase, user.id);
+  // ADMIN-3-REVIEW (F, N9): the author's review rows, one read.
+  const reviewNotices = await loadAuthorReviewNotices(supabase, user.id);
   const schedulerEnabled = isSchedulerEnabled(process.env.PAYOUT_SCHEDULER_ENABLED);
 
   const publishedCount = allBooks.filter((book) => book.status === "published").length;
@@ -304,6 +307,7 @@ export default async function DashboardPage({
                     coverUrl={coverUrl}
                     recentCopies={sales.ok ? (sales.summary.recentCopiesByBookId.get(book.id) ?? 0) : null}
                     takedown={takedownNotices.get(book.id) ?? null}
+                    review={reviewNotices.get(book.id) ?? null}
                     missing={
                       book.status === "draft"
                         ? getPublishChecklist(book)

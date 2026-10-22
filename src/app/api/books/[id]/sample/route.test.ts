@@ -363,6 +363,35 @@ describe("GET /api/books/[id]/sample", () => {
       expect(adminClient.__download).toHaveBeenCalledWith(CANONICAL_PATH);
       expect(mockExtractEpubSample).toHaveBeenCalledTimes(1);
     });
+
+    // ADMIN-3-REVIEW (M5): a manuscript written since "In review" has a
+    // versioned key, `<author>/<book>/<uuid>.epub`; a published book's
+    // current file is always an approved one.
+    it("a published book with a versioned manuscript key fetches exactly that key", async () => {
+      const versioned = `${AUTHOR_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020100.epub`;
+      const adminClient = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() });
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ file_path: versioned }) }));
+      mockCreateAdminClient.mockReturnValue(adminClient);
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      expect(adminClient.__download).toHaveBeenCalledWith(versioned);
+    });
+
+    it("a versioned key under another book or author is refused", async () => {
+      for (const filePath of [
+        `${AUTHOR_ID}/${AUTHOR_ID}/0f0e0d0c-0b0a-4908-8706-050403020100.epub`,
+        `${BOOK_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020100.epub`,
+        `${AUTHOR_ID}/${BOOK_ID}/../0f0e0d0c-0b0a-4908-8706-050403020100.epub`,
+      ]) {
+        const adminClient = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() });
+        mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ file_path: filePath }) }));
+        mockCreateAdminClient.mockReturnValue(adminClient);
+        expect((await callRoute()).status).toBe(404);
+        expect(adminClient.__download).not.toHaveBeenCalled();
+      }
+    });
   });
 
   describe("invalid stored manuscript path on a published book", () => {
