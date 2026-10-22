@@ -19,7 +19,8 @@ describe("Admin book report detail: public author name vs. account name", () => 
 
   it("resolves the author's public name through the shared resolvePublicAuthorName() helper, not a raw .display_name read", () => {
     expect(source).toContain("import { resolvePublicAuthorName } from \"@/lib/author-name\";");
-    expect(source).toContain("resolvePublicAuthorName(profileById.get(report.books.author_id))");
+    // ADMIN-2-TAKEDOWN (M2): the book now comes from the staff read.
+    expect(source).toContain("resolvePublicAuthorName(profileById.get(book.author_id))");
   });
 
   it("renders both labels distinctly: 'Public author name:' and 'Account name:'", () => {
@@ -32,7 +33,7 @@ describe("Admin book report detail: public author name vs. account name", () => 
   });
 
   it("never resolves the author's public name from a hardcoded fallback string alone -- falls back to the already-resolved account name/unknown-author copy", () => {
-    const publicNameLine = source.match(/const authorPublicName = report\.books[\s\S]*?: null;/)![0];
+    const publicNameLine = source.match(/const authorPublicName = book[\s\S]*?: null;/)![0];
     expect(publicNameLine).toContain("?? authorAccountName");
   });
 });

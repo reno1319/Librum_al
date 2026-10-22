@@ -1,4 +1,5 @@
 import type { AuditAction, AuditTargetType } from "@/lib/types";
+import { takedownReasonLabel } from "@/lib/takedown-reasons";
 
 // LIBRUM 2.0 ADMIN-1C PART B: pure, DB/Next.js-free helpers backing the
 // audit-list Server primitive in ./actions.ts -- same "extract the
@@ -31,6 +32,8 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   "refund.review_rejected",
   "refund.issuance_submitted",
   "pen_name.links_removed",
+  "book.unpublished",
+  "book.allowed_again",
 ];
 
 export function isValidAuditAction(value: string): value is AuditAction {
@@ -42,6 +45,7 @@ export const AUDIT_TARGET_TYPES: readonly AuditTargetType[] = [
   "book_reports",
   "refund_requests",
   "pen_names",
+  "books",
 ];
 
 export function isValidAuditTargetType(value: string): value is AuditTargetType {
@@ -193,6 +197,8 @@ export const ACTION_LABELS: Record<AuditAction, string> = {
   "refund.review_rejected": "Refund request denied",
   "refund.issuance_submitted": "Refund submitted to Stripe",
   "pen_name.links_removed": "Pen name links removed",
+  "book.unpublished": "Book unpublished",
+  "book.allowed_again": "Book allowed again",
 };
 
 const UNKNOWN_ACTION_LABEL = "Admin action";
@@ -274,6 +280,7 @@ const AUDIT_TARGET_TYPE_LABELS: Record<AuditTargetType, string> = {
   book_reports: "Book report",
   refund_requests: "Refund request",
   pen_names: "Pen name",
+  books: "Book",
 };
 
 export type AuditTargetDisplay = { label: string; href: string | null };
@@ -351,6 +358,11 @@ export function resolveAuditTargetDisplay(targetType: string, targetId: string |
   if (targetId && targetType === "pen_names") {
     return { label, href: `/authors/${targetId}` };
   }
+  // ADMIN-2-TAKEDOWN: the admin book page (src/app/admin/(protected)/
+  // books/[id]/page.tsx).
+  if (targetId && targetType === "books") {
+    return { label, href: `/admin/books/${targetId}` };
+  }
   return { label, href: null };
 }
 
@@ -375,6 +387,17 @@ export function formatAuditDetails(action: string, metadata: unknown): string | 
       // Only the count -- the removed addresses themselves are not shown.
       const count = Array.isArray(data.removed_links) ? data.removed_links.length : null;
       return count === null ? null : `${count} ${count === 1 ? "link" : "links"} removed`;
+    }
+    case "book.unpublished": {
+      // The reason's label, the bundles it also unpublished and whether
+      // it resolved a report -- never the message (the RPC does not
+      // store it here).
+      const parts: string[] = [];
+      if (typeof data.reason === "string") parts.push(takedownReasonLabel(data.reason));
+      const bundles = typeof data.bundles_unpublished === "number" ? data.bundles_unpublished : 0;
+      if (bundles > 0) parts.push(`${bundles} ${bundles === 1 ? "bundle" : "bundles"} unpublished`);
+      if (typeof data.report_id === "string" && data.report_id) parts.push("report resolved");
+      return parts.length > 0 ? parts.join(" · ") : null;
     }
     default:
       return null;

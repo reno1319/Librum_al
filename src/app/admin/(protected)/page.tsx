@@ -9,12 +9,14 @@ import {
   formatActivityTime,
   formatTodayEyebrow,
   resolveTodayVisibility,
+  TODO_LIMIT,
   type TodayRefund,
   type TodayReport,
 } from "../admin-landing-logic";
 import { resolveProfileDisplayName } from "./refunds/refund-review-logic";
 import { listAdminAuditEvents } from "./audit/actions";
 import { getActionLabel, resolveAuditActorDisplay } from "./audit/audit-log-logic";
+import { readBookTitlesForStaff } from "./books/admin-book-reads";
 import type { AuditEventRow } from "@/lib/types";
 import { loadStaffDisplayNames } from "@/lib/staff-display-names";
 import type { Metadata } from "next";
@@ -30,7 +32,8 @@ export const dynamic = "force-dynamic";
 type OpenReportRow = {
   id: string;
   created_at: string;
-  books: { title: string } | null;
+  reason: string | null;
+  book_id: string | null;
 };
 
 type WaitingRefundRow = {
@@ -76,7 +79,7 @@ export default async function AdminPage() {
   const reportsResult = showReports
     ? await supabase
         .from("book_reports")
-        .select("id, created_at, books(title)")
+        .select("id, created_at, reason, book_id")
         .eq("status", "open")
         .order("created_at", { ascending: true })
         .returns<OpenReportRow[]>()
@@ -107,10 +110,21 @@ export default async function AdminPage() {
   );
   const displayNameById = await loadStaffDisplayNames(supabase, readerIds);
 
-  const todoReports: TodayReport[] = openReports.map((r) => ({
+  // ADMIN-2-TAKEDOWN (M2): the titles come from the service-role client
+  // (requireStaff has passed above, and these rows exist only for
+  // reports.view), so a report on a draft or taken-down book never reads
+  // "Book unavailable" -- whether or not PEN-NAMES-2's contract step
+  // (staff books policy, 13a) has run yet. Only the rows the To do list
+  // can show are looked up; a failed read falls back to that text.
+  const todoReportRows = openReports.slice(0, TODO_LIMIT);
+  const reportTitles = await readBookTitlesForStaff(
+    todoReportRows.map((r) => r.book_id).filter((id): id is string => id !== null),
+  );
+  const todoReports: TodayReport[] = todoReportRows.map((r) => ({
     id: r.id,
     created_at: r.created_at,
-    bookTitle: r.books?.title ?? null,
+    reason: r.reason,
+    bookTitle: reportTitles.ok && r.book_id ? (reportTitles.titleById.get(r.book_id) ?? null) : null,
   }));
   const todoRefunds: TodayRefund[] = waitingRefunds.map((r) => ({
     id: r.id,

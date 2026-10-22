@@ -5,6 +5,7 @@ import { deleteBook } from "@/app/(public)/dashboard/books/actions";
 import { DeleteBookButton } from "@/app/(public)/dashboard/delete-book-button";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book } from "@/lib/types";
+import { buildAuthorTakedownNoticeLines, type AuthorTakedownNotice } from "@/lib/takedown-reasons";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 
 // LIBRUM 2.0 UI-6: the operational (not reader-facing) book row shared
@@ -39,6 +40,14 @@ import { CoverPlaceholder } from "@/components/cover-placeholder";
 // `missing` (a draft's unfinished publish-checklist items, by the
 // checklist's own labels). A draft's Edit link reads "Continue setup",
 // as on the mockup; it goes to the same Edit page.
+//
+// ADMIN-2-TAKEDOWN (G, M4): `takedown` is the book's active Librum
+// takedown, if any (read by the caller with the author's own session).
+// A taken-down book shows a TAKEN DOWN tag and the notice -- date,
+// reason, Librum's message, the bundles also unpublished, where to ask --
+// instead of the draft's missing-items list, and its link reads "Edit"
+// rather than "Continue setup": it can't be published until Librum
+// allows it again.
 const TAG_CLASSES = "rounded-[3px] px-2 py-1 text-xs font-bold tracking-wide";
 
 export function AuthorBookRow({
@@ -46,13 +55,16 @@ export function AuthorBookRow({
   coverUrl,
   recentCopies = null,
   missing = [],
+  takedown = null,
 }: {
   book: Pick<Book, "id" | "title" | "status" | "price_all" | "genre" | "published_at">;
   coverUrl: string | null;
   recentCopies?: number | null;
   missing?: string[];
+  takedown?: AuthorTakedownNotice | null;
 }) {
   const isDraft = book.status === "draft";
+  const isTakenDown = takedown !== null;
   const priceLabel = formatCatalogPriceLabel(book.price_all);
   const isFree = resolveCatalogPriceState(book.price_all) === "free";
 
@@ -101,15 +113,26 @@ export function AuthorBookRow({
           {showRecent && ` · ${recentCopies} ${recentNoun} (30 days)`}
         </p>
         <div className="mt-1 flex flex-wrap items-center gap-2">
-          {isDraft ? (
+          {isTakenDown ? (
+            <span className={`${TAG_CLASSES} bg-[#f6e3df] text-[#8e2a1e]`}>TAKEN DOWN</span>
+          ) : isDraft ? (
             <span className={`${TAG_CLASSES} bg-reader-tint text-[#7a5a00]`}>DRAFT</span>
           ) : (
             <span className={`${TAG_CLASSES} bg-[#e1f0e7] text-[#1e5c3e]`}>LIVE</span>
           )}
-          {isDraft && missing.length > 0 && (
+          {!isTakenDown && isDraft && missing.length > 0 && (
             <span className="text-[0.8125rem] text-muted">Missing: {missing.join(" · ")}</span>
           )}
         </div>
+        {takedown && (
+          <div role="status" className="mt-2 flex flex-col gap-1 rounded-[3px] border-l-4 border-[#8e2a1e] bg-[#fbf3f1] px-3 py-2 text-sm text-foreground">
+            {buildAuthorTakedownNoticeLines(takedown, formatTimestampAsDate).map((line, index) => (
+              <p key={index} className={index === 0 ? "font-semibold" : "whitespace-pre-wrap break-words"}>
+                {line}
+              </p>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="hidden w-36 shrink-0 flex-col gap-0.5 sm:flex">
@@ -129,7 +152,7 @@ export function AuthorBookRow({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {isDraft ? (
+        {isDraft && !isTakenDown ? (
           <Link
             href={`/dashboard/books/${book.id}/edit`}
             className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] bg-accent px-4 text-sm font-bold text-accent-foreground transition-colors hover:bg-[#c9a42c]"

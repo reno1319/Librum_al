@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AuthorBookRow } from "@/components/author-book-row";
+import { loadAuthorTakedownNotices } from "@/lib/book-takedowns";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
@@ -50,6 +51,8 @@ export default async function AllBooksPage() {
     .returns<Book[]>();
 
   const allBooks = books ?? [];
+  // ADMIN-2-TAKEDOWN (G): the takedown notices, as on the Dashboard.
+  const takedownNotices = allBooks.length > 0 ? await loadAuthorTakedownNotices(supabase, user.id) : new Map();
 
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-8">
@@ -85,7 +88,14 @@ export default async function AllBooksPage() {
             const coverUrl = book.cover_path
               ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
               : null;
-            return <AuthorBookRow key={book.id} book={book} coverUrl={coverUrl} />;
+            return (
+              <AuthorBookRow
+                key={book.id}
+                book={book}
+                coverUrl={coverUrl}
+                takedown={takedownNotices.get(book.id) ?? null}
+              />
+            );
           })}
         </ul>
       )}

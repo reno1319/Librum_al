@@ -39,6 +39,9 @@ vi.mock("@/lib/book-rights", () => ({
 // D1: the probes decide rendering only. They say "off" here, and no
 // action may consult them (P1: a submitted pen name is always written).
 const mockFeatures = vi.fn(async () => ({ penName: false, rights: false }));
+// ADMIN-2-TAKEDOWN: performPublish reads the book's active takedown;
+// none here (its own cases are in publish.test.ts).
+vi.mock("@/lib/book-takedowns", () => ({ getActiveTakedownState: async () => ({ kind: "none" }) }));
 vi.mock("@/lib/catalog-schema-features", () => ({ getCatalogSchemaFeatures: () => mockFeatures() }));
 
 type Op = { method: string; args: unknown[] };

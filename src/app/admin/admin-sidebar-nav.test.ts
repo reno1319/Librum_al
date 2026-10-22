@@ -43,7 +43,7 @@ describe("AdminSidebarNav", () => {
   });
 
   it("hides groups with nothing visible for the role", () => {
-    const html = render("moderator", "/admin");
+    const html = render("support", "/admin");
     expect(html).toContain(">Daily<");
     for (const label of ["Catalog", "Money", "Team"]) expect(html).not.toContain(`>${label}<`);
   });

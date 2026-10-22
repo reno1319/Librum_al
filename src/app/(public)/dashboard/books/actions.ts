@@ -20,6 +20,8 @@ import { getRightsDeclarationState, recordRightsDeclaration } from "@/lib/book-r
 import { resolveOwnPenNameId } from "@/lib/pen-name-write-client";
 import { penNameErrorMessage } from "@/lib/pen-names";
 import { isRightsBasis } from "@/lib/rights-statements";
+import { getActiveTakedownState } from "@/lib/book-takedowns";
+import { TAKEN_DOWN_DELETE_MESSAGE, TAKEN_DOWN_PUBLISH_MESSAGE } from "@/lib/takedown-reasons";
 import {
   CATALOG_ROW_CHANGED_MESSAGE,
   PAID_REPRICING_UNAVAILABLE_MESSAGE,
@@ -973,6 +975,11 @@ export async function createBook(formData: FormData) {
       `/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_DESCRIPTION_MESSAGE)}`,
     );
   }
+  // ADMIN-2-TAKEDOWN: not reachable for a book this request just
+  // inserted (no takedown can exist yet); handled for completeness.
+  if (publishResult.reason === "taken_down") {
+    redirect(`/dashboard?success=Saved+as+draft&error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
+  }
   // F4 (P4): a publish refusal always takes the one error slot; a
   // translator failure is then only logged (above).
   if (publishResult.reason === "missing_rights") {
@@ -983,7 +990,8 @@ export async function createBook(formData: FormData) {
       "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
     );
   }
-  // "rights_unavailable" (F4, D3) lands here too: the existing sentence.
+  // "rights_unavailable" (F4, D3) and "takedown_unavailable" (ADMIN-2)
+  // land here too: the existing sentence.
   redirect(`/dashboard?success=Saved+as+draft&error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
 }
 
@@ -1603,6 +1611,14 @@ type PerformPublishResult =
         // migration, or a read error). Fails closed, with the generic
         // message, because no choice can be shown to exist.
         | "rights_unavailable"
+        // ADMIN-2-TAKEDOWN (G, S4): Librum took this book down and has
+        // not allowed it again. Checked right after the ownership read,
+        // before every other gate: nothing the author fixes changes it.
+        | "taken_down"
+        // ADMIN-2-TAKEDOWN (S4): the takedown could not be read (before
+        // the migration, or a read error). Fails closed, with the generic
+        // message, like rights_unavailable.
+        | "takedown_unavailable"
         | "paid_mode_required"
         | "update_failed";
     };
@@ -1630,6 +1646,17 @@ async function performPublish(
 
   if (!book) {
     return { ok: false, reason: "not_found" };
+  }
+
+  // ADMIN-2-TAKEDOWN (G, S4): a taken-down book stays locked until staff
+  // allow it again -- read with the author's own session (RLS: own rows),
+  // and fail closed. The books trigger refuses the write below as well.
+  const takedown = await getActiveTakedownState(supabase, bookId);
+  if (takedown.kind === "active") {
+    return { ok: false, reason: "taken_down" };
+  }
+  if (takedown.kind === "unavailable") {
+    return { ok: false, reason: "takedown_unavailable" };
   }
 
   // ALL-WIRING-2: the catalog price is read fresh from the book's own
@@ -1745,6 +1772,11 @@ async function performPublish(
     .select("id");
 
   if (error) {
+    // ADMIN-2-TAKEDOWN: the lock trigger (LB460) caught a takedown that
+    // landed after the read above.
+    if (error.code === "LB460") {
+      return { ok: false, reason: "taken_down" };
+    }
     return { ok: false, reason: "update_failed" };
   }
   if (!isExactlyOneRowWritten(publishedRows)) {
@@ -1849,8 +1881,14 @@ export async function publishBook(bookId: string) {
     if (result.reason === "missing_rights") {
       redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_RIGHTS_MESSAGE)}`);
     }
-    // F4 (D3): the existing generic sentence, on the dashboard.
-    if (result.reason === "rights_unavailable") {
+    // ADMIN-2-TAKEDOWN (G): the book stays locked; named on its own
+    // Edit page, where the takedown notice is shown.
+    if (result.reason === "taken_down") {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
+    }
+    // F4 (D3): the existing generic sentence, on the dashboard. ADMIN-2:
+    // an unreadable takedown state is answered the same way.
+    if (result.reason === "rights_unavailable" || result.reason === "takedown_unavailable") {
       redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
     }
     if (result.reason === "paid_mode_required") {
@@ -2089,6 +2127,20 @@ export async function deleteBook(bookId: string) {
     redirect("/dashboard");
   }
 
+  // ADMIN-2-TAKEDOWN (M5, Renato's Q8 = a): a taken-down book can't be
+  // deleted until Librum has reviewed it. This is the friendly answer;
+  // the database refuses a direct delete as well (LB461, audit A1 = a),
+  // while account deletion's cascade still goes through. The takedown
+  // record survives a deletion (book_id set null, title kept). Read with
+  // the author's own session, after the ownership check; fails closed.
+  const takedown = await getActiveTakedownState(supabase, bookId);
+  if (takedown.kind === "active") {
+    redirect(`/dashboard?error=${encodeURIComponent(TAKEN_DOWN_DELETE_MESSAGE)}`);
+  }
+  if (takedown.kind === "unavailable") {
+    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+  }
+
   // PHASE-2C: a book that's a member of a currently published bundle
   // can't be deleted out from under it, for the same reason it can't be
   // unpublished (see unpublishBook()'s own comment) -- deleting the
@@ -2170,6 +2222,11 @@ export async function deleteBook(bookId: string) {
       redirect(
         "/dashboard?error=This+book+has+been+acquired+by+readers+and+can%27t+be+deleted+-+unpublish+it+instead",
       );
+    }
+    // ADMIN-2-TAKEDOWN: the delete-lock trigger (LB461) caught a
+    // takedown that landed after the read above.
+    if (deleteError.code === "LB461") {
+      redirect(`/dashboard?error=${encodeURIComponent(TAKEN_DOWN_DELETE_MESSAGE)}`);
     }
     redirect("/dashboard?error=Could+not+delete+that+book+right+now");
   }

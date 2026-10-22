@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff } from "@/lib/staff";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import type { BookReportStatus } from "@/lib/types";
@@ -12,6 +13,7 @@ import {
 } from "../report-review-logic";
 import { reviewBookReport } from "../actions";
 import { ReportReviewButtons } from "./report-review-buttons";
+import { buttonClasses } from "@/components/ui/button";
 import type { Metadata } from "next";
 
 // LIBRUM 2.0 LAUNCH-FIX-1B MOD-1: static title, not a dynamic one built
@@ -31,6 +33,12 @@ export const metadata: Metadata = {
 // already handles; see that page's own comment and section 13 of the
 // MOD-1 brief, which explicitly asks for this precedent to be followed
 // rather than bypassed.
+//
+// ADMIN-2-TAKEDOWN (M2, D): that precedent is now bypassed on purpose.
+// A report on a draft or taken-down book must still show the book, and
+// staff need to see whether it was taken down, so the book and its
+// active takedown are read with the service-role client after
+// requireStaff below -- no longer through the books embed.
 type AdminBookReportDetail = {
   id: string;
   book_id: string;
@@ -42,8 +50,9 @@ type AdminBookReportDetail = {
   reviewed_at: string | null;
   reviewed_by: string | null;
   admin_notes: string | null;
-  books: { title: string; author_id: string; status: "draft" | "published" } | null;
 };
+
+type ReportedBook = { title: string; author_id: string; status: "draft" | "published" };
 
 export default async function AdminBookReportDetailPage({
   params,
@@ -67,7 +76,7 @@ export default async function AdminBookReportDetailPage({
   const { data: report } = await supabase
     .from("book_reports")
     .select(
-      "id, book_id, reporter_id, reason, details, status, created_at, reviewed_at, reviewed_by, admin_notes, books(title, author_id, status)",
+      "id, book_id, reporter_id, reason, details, status, created_at, reviewed_at, reviewed_by, admin_notes",
     )
     .eq("id", id)
     .maybeSingle<AdminBookReportDetail>();
@@ -80,6 +89,31 @@ export default async function AdminBookReportDetailPage({
     notFound();
   }
 
+  // ADMIN-2-TAKEDOWN (M2): service-role reads, after requireStaff above.
+  // A failed book read shows "Book unavailable" as before; a failed
+  // takedown read falls back to "Not currently published".
+  const admin = createAdminClient();
+  const [{ data: reportedBook, error: bookError }, { data: activeTakedown, error: takedownError }] =
+    await Promise.all([
+      admin
+        .from("books")
+        .select("title, author_id, status")
+        .eq("id", report.book_id)
+        .maybeSingle<ReportedBook>(),
+      admin
+        .from("book_takedowns")
+        .select("id")
+        .eq("book_id", report.book_id)
+        .is("lifted_at", null)
+        .maybeSingle<{ id: string }>(),
+    ]);
+  if (bookError) console.error("admin report: book read failed", { reportId: report.id, error: bookError });
+  if (takedownError) {
+    console.error("admin report: takedown read failed", { reportId: report.id, error: takedownError });
+  }
+  const book = reportedBook ?? null;
+  const takenDown = Boolean(activeTakedown) && !takedownError;
+
   // book_reports has THREE separate foreign keys into profiles
   // (reporter_id, reviewed_by, and the reported book's own author_id)
   // -- one flat, explicit lookup for all three ids at once, same
@@ -88,7 +122,7 @@ export default async function AdminBookReportDetailPage({
   // book's author_id is only available when the books embed resolved).
   const profileIds = Array.from(
     new Set(
-      [report.reporter_id, report.reviewed_by, report.books?.author_id ?? null].filter(
+      [report.reporter_id, report.reviewed_by, book?.author_id ?? null].filter(
         (v): v is string => v !== null,
       ),
     ),
@@ -124,9 +158,9 @@ export default async function AdminBookReportDetailPage({
     whenNull: "Not yet reviewed",
     whenMissing: "Unknown reviewer (account no longer available)",
   });
-  const authorAccountName = report.books
+  const authorAccountName = book
     ? resolveProfileDisplayName({
-        profileId: report.books.author_id,
+        profileId: book.author_id,
         displayNameById,
         whenNull: "Unknown author",
         whenMissing: "Unknown author (account no longer available)",
@@ -139,8 +173,8 @@ export default async function AdminBookReportDetailPage({
   // separate resolution here. Falls back to authorAccountName's own
   // already-resolved missing/unknown copy when there's no profile row at
   // all, so the two lines never contradict each other.
-  const authorPublicName = report.books
-    ? (resolvePublicAuthorName(profileById.get(report.books.author_id)) ?? authorAccountName)
+  const authorPublicName = book
+    ? (resolvePublicAuthorName(profileById.get(book.author_id)) ?? authorAccountName)
     : null;
 
   const reviewable = canReview(report.status);
@@ -162,7 +196,7 @@ export default async function AdminBookReportDetailPage({
       <div className="mt-6 rounded-card border border-border bg-surface p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="font-medium">{report.books?.title ?? "Book unavailable"}</p>
+            <p className="font-medium">{book?.title ?? "Book unavailable"}</p>
             {/* LIBRUM 2.0 AUTHOR-1A: both shown, explicitly labeled --
                 staff-only surface, never rendered on any reader-facing
                 page. Collapses to one line when the two values are
@@ -180,16 +214,31 @@ export default async function AdminBookReportDetailPage({
           <span className="text-sm font-semibold">{REPORT_STATUS_LABELS[report.status]}</span>
         </div>
 
-        {report.books && (
+        {book && (
           <p className="mt-2 text-xs text-muted">
-            {report.books.status === "published" ? (
+            {book.status === "published" ? (
               <Link href={`/books/${report.book_id}`} className="text-primary underline">
                 View public book page
               </Link>
+            ) : takenDown ? (
+              "Taken down"
             ) : (
               "Not currently published"
             )}
           </p>
+        )}
+
+        {/* ADMIN-2-TAKEDOWN (D): from an open report straight to the
+            book's Unpublish panel, with this report preselected (the
+            takedown then resolves it). Not offered once the book is
+            already taken down. */}
+        {book && reviewable && !takenDown && (
+          <Link
+            href={`/admin/books/${report.book_id}?report=${report.id}`}
+            className={buttonClasses("outline", "md", "mt-3 min-h-11 rounded-[3px]")}
+          >
+            Unpublish this book
+          </Link>
         )}
 
         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">

@@ -5,6 +5,7 @@ import JSZip from "jszip";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 import { STAGING_SUPABASE_URL } from "@/lib/protected-staging";
 import { PRODUCTION_SUPABASE_PROJECT_REF } from "@/lib/supabase/env-guard";
+import { TAKEN_DOWN_PUBLISH_MESSAGE } from "@/lib/takedown-reasons";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART B: dedicated coverage for the ONE
 // authoritative publish gate (performPublish(), exercised here only
@@ -159,6 +160,16 @@ vi.mock("@/lib/book-rights", () => ({
   getRightsDeclarationState: async () => ({ kind: "present", declaration: { basis: "own_rights" } }),
   recordRightsDeclaration: async () => ({ ok: true }),
 }));
+// ADMIN-2-TAKEDOWN: performPublish reads the book's active takedown.
+// No takedown by default; the gate's own cases are the last describe
+// block in this file.
+type TakedownState = { kind: "none" } | { kind: "active"; takedown: unknown } | { kind: "unavailable" };
+const mockTakedownState = vi.fn(async (_client: unknown, _bookId: string): Promise<TakedownState> => ({
+  kind: "none",
+}));
+vi.mock("@/lib/book-takedowns", () => ({
+  getActiveTakedownState: (client: unknown, bookId: string) => mockTakedownState(client, bookId),
+}));
 vi.mock("@/lib/email", () => ({
   sendNewBookEmails: (admin: unknown, args: unknown) => mockSendNewBookEmails(admin, args),
 }));
@@ -254,6 +265,7 @@ function resetMocks() {
   mockSendNewBookEmails.mockClear().mockResolvedValue(undefined);
   mockCookieStore.get.mockReset().mockImplementation(() => undefined);
   mockRevalidatePath.mockReset();
+  mockTakedownState.mockReset().mockResolvedValue({ kind: "none" });
 }
 
 describe("publishBook: draft -> published", () => {
@@ -1076,5 +1088,61 @@ describe("createBook: ISBN check (FIX1 X9)", () => {
       await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
       expect(mockBookInsert).toHaveBeenCalledOnce();
     }
+  });
+});
+
+// ADMIN-2-TAKEDOWN (G, S4): a book Librum took down stays a draft until
+// staff allow it again -- whatever the author does. Checked right after
+// the ownership read, and again by the database trigger (LB460) on the
+// guarded write.
+describe("performPublish: a book Librum took down (ADMIN-2)", () => {
+  beforeEach(resetMocks);
+
+  it("refuses publishBook and names the takedown on the Edit page, never writing", async () => {
+    mockTakedownState.mockResolvedValue({ kind: "active", takedown: {} });
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`,
+    );
+    expect(mockTakedownState).toHaveBeenCalledWith(expect.anything(), BOOK_ID);
+    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with the generic sentence when the takedown can't be read", async () => {
+    mockTakedownState.mockResolvedValue({ kind: "unavailable" });
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    const target = String(mockRedirect.mock.calls[0][0]);
+    expect(target.startsWith("/dashboard?error=")).toBe(true);
+    expect(decodeURIComponent(target)).not.toContain("took this book down");
+    expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("maps the lock trigger (LB460) on the guarded write to the takedown message", async () => {
+    mockBookUpdateResult.mockReturnValue({
+      error: { code: "LB460", message: "Librum took this book down." },
+    });
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(String(mockRedirect.mock.calls[0][0])).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`,
+    );
+    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+  });
+
+  it("is checked before every other gate (a missing description is not named)", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ description: null }));
+    mockTakedownState.mockResolvedValue({ kind: "active", takedown: {} });
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(String(mockRedirect.mock.calls[0][0])).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`,
+    );
   });
 });

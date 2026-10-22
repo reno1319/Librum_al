@@ -28,6 +28,9 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/recovery-guard", () => ({ redirectIfRecoverySessionActive: vi.fn() }));
+// ADMIN-2-TAKEDOWN: deleteBook reads the book's active takedown; none
+// here (its own cases are in unpublish-delete.test.ts).
+vi.mock("@/lib/book-takedowns", () => ({ getActiveTakedownState: async () => ({ kind: "none" }) }));
 
 type Filter = { kind: string; column: string; value: unknown };
 type DbWrite = { table: string; op: string; payload: unknown; filters: Filter[] };

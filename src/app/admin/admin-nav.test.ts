@@ -23,7 +23,7 @@ describe("ADMIN_NAV_GROUPS", () => {
   it("lists the existing pages in the agreed groups and order", () => {
     expect(ADMIN_NAV_GROUPS.map((g) => ({ label: g.label, items: g.items.map((i) => i.label) }))).toEqual([
       { label: "Daily", items: ["Today", "Book reports", "Refund requests"] },
-      { label: "Catalog", items: ["Librum's choice", "Blog"] },
+      { label: "Catalog", items: ["Books", "Librum's choice", "Blog"] },
       { label: "Money", items: ["Finance"] },
       { label: "Team", items: ["Staff", "Audit log"] },
     ]);
@@ -47,6 +47,8 @@ describe("ADMIN_NAV_GROUPS", () => {
     const expected: Record<string, string> = {
       "/admin": "admin.access",
       "/admin/reports": "reports.view",
+      // ADMIN-2-TAKEDOWN: the books list's own gate.
+      "/admin/books": "reports.view",
       "/admin/refunds": "refunds.view",
       "/admin/staff": "staff.view",
       "/admin/audit": "audit.view",
@@ -65,7 +67,7 @@ describe("resolveVisibleAdminNavGroups", () => {
   it("owner sees every group and page", () => {
     expect(groupsFor("owner")).toEqual([
       { label: "Daily", hrefs: ["/admin", "/admin/reports", "/admin/refunds"] },
-      { label: "Catalog", hrefs: ["/admin/librum-choice", "/admin/blog"] },
+      { label: "Catalog", hrefs: ["/admin/books", "/admin/librum-choice", "/admin/blog"] },
       { label: "Money", hrefs: ["/admin/finance"] },
       { label: "Team", hrefs: ["/admin/staff", "/admin/audit"] },
     ]);
@@ -82,8 +84,13 @@ describe("resolveVisibleAdminNavGroups", () => {
     ]);
   });
 
-  it("moderator sees Today and Book reports only, in Daily", () => {
-    expect(groupsFor("moderator")).toEqual([{ label: "Daily", hrefs: ["/admin", "/admin/reports"] }]);
+  // ADMIN-2-TAKEDOWN: Books is gated on reports.view, so a moderator now
+  // also sees Catalog, with Books only.
+  it("moderator sees Today and Book reports in Daily, and Books in Catalog", () => {
+    expect(groupsFor("moderator")).toEqual([
+      { label: "Daily", hrefs: ["/admin", "/admin/reports"] },
+      { label: "Catalog", hrefs: ["/admin/books"] },
+    ]);
   });
 
   it("support sees Today and Refund requests only, in Daily", () => {
@@ -106,10 +113,11 @@ describe("resolveVisibleAdminNavItems", () => {
     }
   });
 
-  it("editor does not gain any unrelated admin link (reports, refunds, staff, audit, finance, Librum's choice)", () => {
+  it("editor does not gain any unrelated admin link (reports, books, refunds, staff, audit, finance, Librum's choice)", () => {
     const hrefs = resolveVisibleAdminNavItems("editor").map((i) => i.href);
     for (const unrelated of [
       "/admin/reports",
+      "/admin/books",
       "/admin/refunds",
       "/admin/staff",
       "/admin/audit",

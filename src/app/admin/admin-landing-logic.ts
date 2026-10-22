@@ -70,7 +70,52 @@ export function describeTileWaiting(count: number, oldestAt: string | null): str
   return `Oldest: ${formatTodayDate(oldestAt)}`;
 }
 
-export type TodayReport = { id: string; created_at: string; bookTitle: string | null };
+// ADMIN-2-TAKEDOWN (E, S7): "2 days ago" -- how long a report has been
+// waiting, in plain English. Under a minute "just now"; under an hour in
+// minutes; under a day in hours; then in calendar days on Albanian time
+// ("yesterday", "2 days ago"). A time in the future (clock skew) reads
+// "just now".
+const RELATIVE_TIME = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+function tiraneDayNumber(date: Date): number {
+  const [year, month, day] = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: TODAY_TIME_ZONE,
+  })
+    .format(date)
+    .split("-")
+    .map(Number);
+  return Math.round(Date.UTC(year, month - 1, day) / 86_400_000);
+}
+
+export function formatRelativeTime(iso: string, now: Date): string {
+  const then = new Date(iso);
+  const elapsedMs = now.getTime() - then.getTime();
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 60_000) return "just now";
+  if (elapsedMs < 3_600_000) return RELATIVE_TIME.format(-Math.floor(elapsedMs / 60_000), "minute");
+  if (elapsedMs < 86_400_000) return RELATIVE_TIME.format(-Math.floor(elapsedMs / 3_600_000), "hour");
+  const days = Math.max(1, tiraneDayNumber(now) - tiraneDayNumber(then));
+  return RELATIVE_TIME.format(-days, "day");
+}
+
+// ADMIN-2-TAKEDOWN (E, S7): a report's own reason, shortened for the To
+// do row ("Copyright report on ..."). The readers' reasons are
+// src/lib/report-reasons.ts; any other (legacy) value is shown as is.
+const SHORT_REPORT_REASONS: Record<string, string> = {
+  "Copyright infringement": "Copyright",
+  "Inappropriate or offensive content": "Content",
+  "Spam or misleading listing": "Spam",
+  Other: "Other",
+};
+
+export function shortReportReason(reason: string | null | undefined): string {
+  if (!reason) return "Other";
+  return SHORT_REPORT_REASONS[reason] ?? reason;
+}
+
+export type TodayReport = { id: string; created_at: string; reason: string | null; bookTitle: string | null };
 export type TodayRefund = { id: string; requested_at: string; readerName: string };
 
 export type TodoItem = {
@@ -89,17 +134,22 @@ export const TODO_LIMIT = 5;
  * oldest first (reports by created_at, refunds by requested_at), at
  * most TODO_LIMIT rows. Each row opens the detail page where the staff
  * member acts on it. No amounts.
+ *
+ * ADMIN-2-TAKEDOWN (E, ADMIN-1 "1. a"): a report row reads
+ * `<Reason> report on “<Title>”, <relative time>`, e.g. "Copyright report
+ * on “Kënga e fundit”, 2 days ago". Refund rows are unchanged.
  */
 export function buildTodoItems(
   reports: readonly TodayReport[],
   refunds: readonly TodayRefund[],
   limit: number = TODO_LIMIT,
+  now: Date = new Date(),
 ): TodoItem[] {
   const items: TodoItem[] = [
     ...reports.map((report) => ({
       key: `report-${report.id}`,
       href: `/admin/reports/${report.id}`,
-      title: `Report on “${report.bookTitle ?? "Book unavailable"}”`,
+      title: `${shortReportReason(report.reason)} report on “${report.bookTitle ?? "Book unavailable"}”, ${formatRelativeTime(report.created_at, now)}`,
       detail: `Reported ${formatTodayDate(report.created_at)}`,
       actionLabel: "Review report",
       at: report.created_at,
