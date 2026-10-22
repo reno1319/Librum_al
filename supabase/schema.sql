@@ -13751,3 +13751,100 @@ $$;
 revoke all on function public.admin_send_back_book_review(uuid, text, text)
   from public, anon, authenticated, service_role;
 grant execute on function public.admin_send_back_book_review(uuid, text, text) to authenticated;
+
+-- ============================================================
+-- SUPABASE 2026-10-30 DATA API GRANTS: explicit grants for what the
+-- platform's old default privileges used to give.
+--
+-- Until 2026-10-30 Supabase's default privileges in public gave anon,
+-- authenticated and service_role every privilege on each new table and
+-- view. From that date new tables and views no longer get SELECT,
+-- INSERT, UPDATE or DELETE for those roles (new sequences no longer get
+-- USAGE or SELECT). Staging and Production keep the grants they already
+-- have, but a rebuild from this file would lose every grant that came
+-- only from the old default. The statements below restore exactly those
+-- grants, so a rebuild reproduces staging's privileges (checked
+-- 2026-10-22: staging equals the old-default rebuild of this file, 213
+-- rows) and test 078_data_api_grant_contract pins the result.
+--
+-- Mirror only: nothing here adds or removes a privilege compared with
+-- staging. Every relation and role below held the full set before the
+-- change, so `grant all` reproduces it. anon's existing grants on
+-- book_reports, bundle_checkout_reader_holds,
+-- bundle_checkout_reservations and wishlist_items are kept as they are
+-- today (RLS guards their rows); narrowing them is a separate change.
+-- Default privileges are never used to grant anything: grants are
+-- explicit per relation, and anon must keep NO grant on base tables such
+-- as pen_names, books, profiles, purchases and payments.
+--
+-- Rule for every migration from now on: a new table or view does
+--   revoke all on <rel> from public, anon, authenticated, service_role;
+-- then grants exactly what each role needs (the book_reviews pattern,
+-- service_role included: the server-side admin client only reaches what
+-- it is granted), and updates the 078_data_api_grant_contract snapshot
+-- in the same change.
+-- ============================================================
+
+-- service_role: the server-side admin client (webhooks, checkout
+-- fulfilment, admin pages).
+grant all on table
+  public.admin_audit_log,
+  public.author_ledger_entries,
+  public.author_payout_settings,
+  public.blog_posts,
+  public.book_checkout_intents,
+  public.book_contributors,
+  public.book_reports,
+  public.book_views,
+  public.books,
+  public.bundle_checkout_reader_holds,
+  public.bundle_checkout_reservations,
+  public.bundle_checkout_snapshots,
+  public.bundles,
+  public.discount_codes,
+  public.payment_disputes,
+  public.payment_events,
+  public.payment_refunds,
+  public.payments,
+  public.pen_name_follows,
+  public.pen_names,
+  public.profiles,
+  public.purchases,
+  public.refund_issuance_attempts,
+  public.refund_request_items,
+  public.refund_requests,
+  public.reviews,
+  public.series,
+  public.staff_members,
+  public.wishlist_items
+  to service_role;
+
+grant all on table
+  public.author_book_purchases,
+  public.author_bundle_sales,
+  public.public_books,
+  public.public_bundles,
+  public.public_pen_names,
+  public.public_reviews,
+  public.public_series,
+  public.reader_bundle_purchases,
+  public.reader_refund_requests
+  to service_role;
+
+-- authenticated: RLS is on for all five and decides which rows.
+grant all on table
+  public.book_reports,
+  public.book_views,
+  public.bundle_checkout_reader_holds,
+  public.bundle_checkout_reservations,
+  public.wishlist_items
+  to authenticated;
+
+-- anon: kept exactly as today; RLS is on for all four and decides
+-- which rows.
+grant all on table
+  public.book_reports,
+  public.bundle_checkout_reader_holds,
+  public.bundle_checkout_reservations,
+  public.wishlist_items
+  to anon;
