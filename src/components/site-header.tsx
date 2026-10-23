@@ -6,6 +6,7 @@ import { isRecoverySessionActive } from "@/lib/recovery-session";
 import { IconPerson } from "@/components/icons";
 import { NavLinks, type NavItem } from "@/components/nav-links";
 import { MobileNav } from "@/components/mobile-nav";
+import { accountFirstName } from "@/lib/account-first-name";
 
 // LAUNCH-1 P2-5: the render-state decision, extracted as a pure function
 // so it's directly unit-testable (src/components/site-header.test.ts)
@@ -28,7 +29,10 @@ import { MobileNav } from "@/components/mobile-nav";
 // member any more, not merely an unused one.
 export type SiteHeaderNavState = {
   primaryLinks: NavItem[];
-  showDisplayName: boolean;
+  // HEADER NAME (Renato 1a 2a 3a): the account's first name, shown
+  // beside the person icon on every page and width; null when there is
+  // no real name (see accountFirstName) or no ordinary session.
+  headerName: string | null;
   showAccountLink: boolean;
   showLogout: boolean;
   recoveryLabel: string | null;
@@ -37,7 +41,7 @@ export type SiteHeaderNavState = {
 };
 
 export function buildSiteHeaderNav(params: {
-  user: { id: string } | null;
+  user: { id: string; email?: string | null } | null;
   displayName: string | null;
   role: string | null;
   recoveryActive: boolean;
@@ -50,7 +54,7 @@ export function buildSiteHeaderNav(params: {
   if (recoveryActive) {
     return {
       primaryLinks: [],
-      showDisplayName: false,
+      headerName: null,
       showAccountLink: false,
       showLogout: true,
       recoveryLabel: "Password recovery",
@@ -86,9 +90,11 @@ export function buildSiteHeaderNav(params: {
     );
   }
 
+  const headerName = user ? accountFirstName(displayName, user.email) : null;
+
   return {
     primaryLinks,
-    showDisplayName: !!user && !!displayName,
+    headerName,
     showAccountLink: true,
     showLogout: !!user,
     recoveryLabel: null,
@@ -132,7 +138,7 @@ export async function SiteHeader() {
   const recoveryActive = isRecoverySessionActive(cookieStore);
 
   const nav = buildSiteHeaderNav({
-    user: user ? { id: user.id } : null,
+    user: user ? { id: user.id, email: user.email } : null,
     displayName,
     role,
     recoveryActive,
@@ -142,8 +148,11 @@ export async function SiteHeader() {
     <header className="relative bg-primary text-primary-foreground">
       {/* FIX1 (X12): one row from 1024px up -- no wrapping at lg, and
           tighter gaps there; the roomier gaps return at xl. */}
-      <div className="page-container flex flex-wrap items-center justify-between gap-x-8 gap-y-3 py-3 lg:flex-nowrap lg:gap-x-6 xl:gap-x-8">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-2 lg:flex-nowrap lg:gap-x-6 xl:gap-x-8">
+      {/* HEADER NAME: one row at every width now (below lg it only ever
+          held the logo and the right-hand icons); on phones the name in
+          the right group shrinks first, never the logo. */}
+      <div className="page-container flex flex-nowrap items-center justify-between gap-x-4 py-3 sm:gap-x-8 lg:gap-x-6 xl:gap-x-8">
+        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-8 gap-y-2 lg:shrink lg:flex-nowrap lg:gap-x-6 xl:gap-x-8">
           <Link
             href="/"
             className="focus-ring rounded-sm font-serif text-[1.75rem] font-bold text-primary-foreground"
@@ -159,21 +168,10 @@ export async function SiteHeader() {
           </nav>
         </div>
 
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <nav className="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap">
             {nav.recoveryLabel && (
               <span className="text-primary-foreground/80">{nav.recoveryLabel}</span>
-            )}
-            {/* FIX1 (X12): the name joins the row from 1280px, where it
-                fits beside the links; a long one is cut with an ellipsis
-                (its full text stays in the title tooltip). */}
-            {nav.showDisplayName && displayName && (
-              <span
-                title={displayName}
-                className="hidden max-w-[12rem] truncate text-primary-foreground/80 xl:inline"
-              >
-                {displayName}
-              </span>
             )}
             {/* LIBRUM 2.0 UI-3 final polish: logged-out desktop gets an
                 explicit "Log in" text link rather than relying solely on
@@ -207,17 +205,42 @@ export async function SiteHeader() {
             )}
           </nav>
 
-          {nav.showAccountLink && (
-            <Link
-              href={nav.accountHref}
-              aria-label={nav.accountLabel}
-              className={`focus-ring flex size-11 items-center justify-center rounded-sm text-primary-foreground ${!user ? "lg:hidden" : ""}`}
-            >
-              <span aria-hidden="true">
-                <IconPerson className="size-5" />
-              </span>
-            </Link>
-          )}
+          {/* HEADER NAME (Renato 1a 2a 3a; r2 "Hello, " before it): the
+              greeting with the first name and the person
+              icon are one Account link, on every page and width. It
+              replaces FIX1's full name (1280px+ only). A long name ends in
+              an ellipsis at about 12 letters, and shrinks further rather
+              than wrap the bar on a narrow phone. The accessible name
+              starts with the visible text. */}
+          {nav.showAccountLink &&
+            (nav.headerName ? (
+              <Link
+                href={nav.accountHref}
+                aria-label={`Hello, ${nav.headerName}, ${nav.accountLabel}`}
+                title={`Hello, ${nav.headerName}`}
+                className="focus-ring flex min-h-11 min-w-0 items-center gap-2 rounded-sm px-1.5 text-base font-medium text-primary-foreground"
+              >
+                {/* r2 (Renato 11:52Z): "Hello, " stays whole; only the name
+                    is shortened. */}
+                <span className="flex min-w-0 items-baseline">
+                  <span className="shrink-0 whitespace-pre">Hello, </span>
+                  <span className="min-w-0 max-w-[12ch] truncate">{nav.headerName}</span>
+                </span>
+                <span aria-hidden="true" className="shrink-0">
+                  <IconPerson className="size-5" />
+                </span>
+              </Link>
+            ) : (
+              <Link
+                href={nav.accountHref}
+                aria-label={nav.accountLabel}
+                className={`focus-ring flex size-11 shrink-0 items-center justify-center rounded-sm text-primary-foreground ${!user ? "lg:hidden" : ""}`}
+              >
+                <span aria-hidden="true">
+                  <IconPerson className="size-5" />
+                </span>
+              </Link>
+            ))}
 
           <MobileNav
             items={nav.primaryLinks}
