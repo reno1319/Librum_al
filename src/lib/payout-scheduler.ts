@@ -116,11 +116,15 @@ export type DryRunEligibilityRow = {
     | "active_reservation"
     | "below_threshold"
     | "no_destination"
+    // PEOPLE-1 (migration 20261023090000): checked first; a suspended
+    // author is never paid out until the suspension is lifted.
+    | "account_suspended"
     | null;
 };
 
-// The exact six ineligible_reason values migration 055's
-// author_payout_eligibility() can produce (BANK-PAYOUT-1C.1). Kept as
+// The exact seven ineligible_reason values author_payout_eligibility()
+// can produce (BANK-PAYOUT-1C.1's six, plus PEOPLE-1's
+// account_suspended). Kept as
 // its own named type so reasonCounts can never silently drift out of
 // sync with DryRunEligibilityRow['ineligible_reason'] again.
 export type DryRunReasonCounts = {
@@ -130,6 +134,7 @@ export type DryRunReasonCounts = {
   active_reservation: number;
   below_threshold: number;
   no_destination: number;
+  account_suspended: number;
 };
 
 const KNOWN_INELIGIBLE_REASONS: ReadonlySet<string> = new Set<keyof DryRunReasonCounts>([
@@ -139,6 +144,7 @@ const KNOWN_INELIGIBLE_REASONS: ReadonlySet<string> = new Set<keyof DryRunReason
   "active_reservation",
   "below_threshold",
   "no_destination",
+  "account_suspended",
 ]);
 
 export type DryRunSummary = {
@@ -153,12 +159,12 @@ export type DryRunSummary = {
   totalsByCurrency: Record<string, number>;
   reasonCounts: DryRunReasonCounts;
   // A defensive, always-present counter for a row whose
-  // ineligible_reason is a non-null string outside the six known DB
-  // reasons above -- e.g. a future migration adds a seventh reason
+  // ineligible_reason is a non-null string outside the seven known DB
+  // reasons above -- e.g. a future migration adds an eighth reason
   // before this module is updated for it. Kept as its own separately-
   // typed field rather than folded into reasonCounts (BANK-PAYOUT-1C.1
   // Section 5), so an unrecognized reason can never produce a NaN or
-  // undefined entry in the typed six-reason contract or in the JSON
+  // undefined entry in the typed seven-reason contract or in the JSON
   // this summary is serialized into.
   unknownReasonCount: number;
 };
@@ -178,6 +184,7 @@ export function summarizeDryRunRows(rows: DryRunEligibilityRow[]): DryRunSummary
     active_reservation: 0,
     below_threshold: 0,
     no_destination: 0,
+    account_suspended: 0,
   };
   let eligibleCount = 0;
   let unknownReasonCount = 0;

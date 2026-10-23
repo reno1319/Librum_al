@@ -9,10 +9,11 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 213 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 216 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
---   the old-default rebuild of schema.sql. A relation with no privilege
---   for a role is a row with '-'.
+--   the old-default rebuild of schema.sql, plus PEOPLE-1's three
+--   account_suspensions rows (migration 20261023090000). A relation with
+--   no privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
 --   pen_names, books, profiles, purchases or payments.
@@ -107,6 +108,9 @@ insert into grant_contract_expected (kind, line) values
 ('col','series.author_id | authenticated | INSERT'),
 ('col','series.pen_name_id | authenticated | INSERT'),
 ('col','series.title | authenticated | INSERT'),
+('rel','r account_suspensions | anon | -'),
+('rel','r account_suspensions | authenticated | -'),
+('rel','r account_suspensions | service_role | SELECT'),
 ('rel','r admin_audit_log | anon | -'),
 ('rel','r admin_audit_log | authenticated | -'),
 ('rel','r admin_audit_log | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
@@ -285,8 +289,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 213 then
-    raise exception 'FAIL: part1: the snapshot must hold 213 rows, holds %', v_expected;
+  if v_expected <> 216 then
+    raise exception 'FAIL: part1: the snapshot must hold 216 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

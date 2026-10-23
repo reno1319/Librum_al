@@ -573,13 +573,16 @@ insert into pg_temp.allow_fn values
   ('list_finance_refund_entitlement_mismatches', 'finance.view'),
   ('list_refund_reconciliation_states', 'finance.view'),
   ('list_staff_members', 'staff.view'),
-  ('staff_profile_display_names', 'refunds.view');
+  ('staff_profile_display_names', 'refunds.view'),
+  -- PEOPLE-1 (20261023090000): the People list, owner and admin only.
+  ('admin_list_people', 'people.view');
 
 do $$
 declare
   v_pattern text := '(author_id|^reader_id|^follower_id|^created_by|^reviewed_by|^reporter_id|^actor_id|^user_id|^buyer_id)$';
   v_staff_perms text[] := array['reports.view', 'reports.resolve', 'staff.view', 'audit.view',
-                                'finance.view', 'finance.payout_export', 'finance.payout_operate'];
+                                'finance.view', 'finance.payout_export', 'finance.payout_operate',
+                                'people.view'];
   v_role text;
   v_perm text;
   v_bad text;

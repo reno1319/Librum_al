@@ -308,7 +308,12 @@ export type Permission =
   | "catalog.feature"
   // ADMIN-3-REVIEW: approve or send back a book waiting for review
   // (owner and admin only; SQL staff_has_permission knows it too).
-  | "books.review";
+  | "books.review"
+  // PEOPLE-1: list and search every account (people.view) and suspend
+  // or lift a suspension (people.manage); owner and admin only, and SQL
+  // staff_has_permission knows both (migration 20261023090000).
+  | "people.view"
+  | "people.manage";
 
 // Mirrors list_staff_members()'s exact return shape (migration 041,
 // ADMIN-1B Part B) -- the ONLY place a staff member's email is ever
