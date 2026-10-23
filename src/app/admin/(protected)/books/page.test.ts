@@ -20,9 +20,12 @@ vi.mock("@/lib/staff", () => ({ requireStaff: (permission: string) => mockRequir
 let takenDown: Set<string> | null = new Set();
 // ADMIN-3-REVIEW: books with a pending review.
 let inReview: Set<string> | null = new Set();
+// PEOPLE-2 (N3): accounts with an active suspension.
+let suspendedAuthors: Set<string> | null = new Set();
 vi.mock("./admin-book-reads", () => ({
   readActiveTakedownBookIds: () => Promise.resolve(takenDown),
   readPendingReviewBookIds: () => Promise.resolve(inReview),
+  readSuspendedAuthorIds: () => Promise.resolve(suspendedAuthors),
 }));
 
 type Result = { data: unknown; error: { message: string } | null; count?: number };
@@ -65,11 +68,12 @@ describe("AdminBooksPage", () => {
     mockAdminFrom.mockClear();
     takenDown = new Set([BOOK_B]);
     inReview = new Set();
+    suspendedAuthors = new Set();
     rows = {
       books: {
         data: [
-          { id: BOOK_A, title: "Kënga e fundit", status: "published", published_at: "2026-09-01T10:00:00Z", created_at: "x", pen: { name: "Ana Pena" } },
-          { id: BOOK_B, title: "Draft one", status: "draft", published_at: null, created_at: "x", pen: null },
+          { id: BOOK_A, title: "Kënga e fundit", status: "published", author_id: "author-a", published_at: "2026-09-01T10:00:00Z", created_at: "x", pen: { name: "Ana Pena" } },
+          { id: BOOK_B, title: "Draft one", status: "draft", author_id: "author-b", published_at: null, created_at: "x", pen: null },
         ],
         error: null,
         count: 2,
@@ -171,5 +175,16 @@ describe("AdminBooksPage", () => {
     const order = ["All", "Live", "In review", "Draft", "Taken down"].map((label) => html.indexOf(`>${label}</a>`));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("badges a suspended author's books (N3), and still lists when that read fails", async () => {
+    suspendedAuthors = new Set(["author-b"]);
+    let html = await render();
+    expect(html.split(">Suspended</span>")).toHaveLength(2);
+    expect(html.indexOf(">Suspended</span>")).toBeGreaterThan(html.indexOf("Draft one"));
+    suspendedAuthors = null;
+    html = await render();
+    expect(html).not.toContain(">Suspended</span>");
+    expect(html).toContain("Draft one");
   });
 });

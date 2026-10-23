@@ -166,7 +166,8 @@ describe("addStaffMemberByEmail", () => {
 
   it("a verified-account-not-found RPC failure maps to a stable message", async () => {
     mockRequireStaff.mockResolvedValue({ userId: "owner-1", role: "owner" });
-    mockRpc.mockResolvedValue({
+    // PEOPLE-2 (N4): the suspended-account check runs first and passes.
+    mockRpc.mockResolvedValueOnce({ data: [], error: null }).mockResolvedValue({
       error: { message: "no verified Librum account was found for that email" },
     });
 
@@ -185,6 +186,53 @@ describe("addStaffMemberByEmail", () => {
     const result = await addStaffMemberByEmail("a@test.com", "support");
 
     expect(result).toEqual({ ok: true });
+  });
+});
+
+// PEOPLE-1 audit N4: a suspended account can't be added to Staff.
+describe("addStaffMemberByEmail: refuses a suspended account (N4)", () => {
+  beforeEach(() => {
+    mockRequireStaff.mockReset().mockResolvedValue({ userId: "owner-1", role: "owner" });
+    mockRpc.mockReset();
+  });
+
+  function suspendedList(rows: unknown[], error: unknown = null) {
+    mockRpc.mockImplementation((fn: string) =>
+      Promise.resolve(fn === "admin_list_people" ? { data: rows, error } : { error: null }),
+    );
+  }
+
+  it("checks admin_list_people for suspended accounts first, on the staff session", async () => {
+    suspendedList([]);
+    expect(await addStaffMemberByEmail(" Ana@Example.com ", "support")).toEqual({ ok: true });
+    expect(mockRpc.mock.calls[0]).toEqual([
+      "admin_list_people",
+      { p_query: "ana@example.com", p_kind: "suspended", p_limit: 100 },
+    ]);
+    expect(mockRpc.mock.calls[1][0]).toBe("add_staff_member_by_email");
+  });
+
+  it("refuses an exact, case-insensitive email match without adding", async () => {
+    suspendedList([{ email: "ANA@example.com", suspended: true }]);
+    expect(await addStaffMemberByEmail("ana@example.com", "support")).toEqual({
+      ok: false,
+      error: "This account is suspended. Lift the suspension before adding it to Staff.",
+    });
+    expect(mockRpc.mock.calls.map((c) => c[0])).not.toContain("add_staff_member_by_email");
+  });
+
+  it("a substring match on another account does not refuse", async () => {
+    suspendedList([{ email: "joana@example.com", suspended: true }]);
+    expect(await addStaffMemberByEmail("ana@example.com", "support")).toEqual({ ok: true });
+  });
+
+  it("adds nothing when the check fails", async () => {
+    suspendedList([], { message: "boom" });
+    expect(await addStaffMemberByEmail("ana@example.com", "support")).toEqual({
+      ok: false,
+      error: "Couldn't check this account. Nothing was changed. Please try again.",
+    });
+    expect(mockRpc.mock.calls.map((c) => c[0])).not.toContain("add_staff_member_by_email");
   });
 });
 

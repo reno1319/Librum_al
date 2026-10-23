@@ -118,7 +118,7 @@ export default async function AdminBookPage({
     .maybeSingle<AdminBook>();
   if (!book) notFound();
 
-  const [profileResult, reportsResult, rightsResult, takedownResult, bundlesResult, reviewsResult] = await Promise.all([
+  const [profileResult, reportsResult, rightsResult, takedownResult, bundlesResult, reviewsResult, suspensionResult] = await Promise.all([
     admin
       .from("profiles")
       .select("display_name, public_author_name")
@@ -155,7 +155,19 @@ export default async function AdminBookPage({
       .eq("book_id", book.id)
       .order("submitted_at", { ascending: false })
       .returns<ReviewRow[]>(),
+    // PEOPLE-2 (N3, Renato's 4b): the "Suspended" badge. Information
+    // only: Approve is refused by the database (LB464) either way.
+    admin
+      .from("account_suspensions")
+      .select("id")
+      .eq("user_id", book.author_id)
+      .is("lifted_at", null)
+      .maybeSingle<{ id: string }>(),
   ]);
+  if (suspensionResult.error) {
+    console.error("admin book: the author suspension read failed", { error: suspensionResult.error });
+  }
+  const authorSuspended = Boolean(suspensionResult.data);
 
   const openReports = reportsResult.data ?? [];
   const rights = rightsResult.data ?? [];
@@ -232,6 +244,19 @@ export default async function AdminBookPage({
             <p className="text-xs font-semibold tracking-[0.14em] text-[#806510] uppercase md:text-[0.8125rem]">
               {describeBookEyebrow(book, Boolean(takedown), pendingReview !== null)}
             </p>
+            {authorSuspended && (
+              <p className="mt-1.5 flex flex-wrap items-center gap-x-3">
+                <span className="rounded-[3px] bg-[#f6e3df] px-2 py-1 text-xs font-bold tracking-wide text-[#8e2a1e] uppercase">
+                  Suspended
+                </span>
+                <Link
+                  href={`/admin/people/${book.author_id}`}
+                  className="focus-ring inline-flex min-h-11 items-center text-sm underline underline-offset-2"
+                >
+                  Open the author&apos;s account
+                </Link>
+              </p>
+            )}
             <h1 className="mt-1.5 mb-1 font-serif text-[1.75rem] leading-tight font-bold break-words text-primary md:text-[2.125rem]">
               {book.title}
             </h1>
@@ -341,6 +366,12 @@ export default async function AdminBookPage({
             <p className="text-[0.9375rem]">
               Sent {formatRelativeTime(pendingReview.submitted_at, now)} by {publicName}.
             </p>
+            {authorSuspended && (
+              <p className="text-sm text-red-700">
+                This author&apos;s account is suspended. Approving is refused until the suspension is lifted. Send back
+                still works.
+              </p>
+            )}
             {!canReview ? (
               <p className="text-sm text-muted">Only owners and admins can approve or send back a book.</p>
             ) : !pendingIsCurrent ? (

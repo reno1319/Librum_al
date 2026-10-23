@@ -255,6 +255,10 @@ describe("in review: labels, the approve and send-back forms, RPC errors", () =>
     );
     expect(mapReviewRpcError({ message: "not authorized" })).toBe("You don't have permission to review books.");
     expect(mapReviewRpcError({ message: "relation x does not exist" })).toBe(GENERIC_REVIEW_ERROR_MESSAGE);
+    // PEOPLE-1 audit N3: the suspended-author trigger, matched by code.
+    expect(mapReviewRpcError({ code: "LB464", message: "This account is suspended. Its books can't be published..." })).toBe(
+      "This author's account is suspended. Lift the suspension before approving.",
+    );
     expect(mapReviewRpcError({ code: "40P01", message: "deadlock" })).toBe("Please try again.");
   });
 

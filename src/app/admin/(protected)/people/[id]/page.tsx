@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaff } from "@/lib/staff";
+import { roleHasPermission } from "@/lib/staff-permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
@@ -16,6 +17,9 @@ import {
   personTypeLabel,
   type PersonRow,
 } from "../people-logic";
+import { accessFixNeeded, type AccessFix } from "../suspension-logic";
+import { liftSuspensionAsStaff, retryAccountAccessAsStaff, suspendAccountAsStaff } from "./actions";
+import { SuspensionPanel } from "./suspension-panel";
 
 export const metadata: Metadata = {
   title: "Person",
@@ -35,7 +39,10 @@ export const dynamic = "force-dynamic";
 // cannot see another author's drafts (as /admin/books/[id] does). The
 // staff names in the history come from staff_profile_display_names, so
 // no profiles row is read here.
-// Suspend and Lift arrive with PEOPLE-2.
+// PEOPLE-2: people.manage holders also get the Suspend / Lift panel,
+// except on a staff row or their own row. The panel compares the
+// account_suspensions row with the Supabase Auth ban (read through the
+// admin auth API) and offers "Try again" when they disagree.
 
 type PenNameRow = { id: string; name: string; is_default: boolean };
 type BookRow = { id: string; title: string; status: string; pen: { name: string } | null };
@@ -63,10 +70,40 @@ function unpublishedLabel(row: SuspensionRow): string {
   return `Took ${parts.join(" and ")} out of the Bookstore`;
 }
 
-export default async function AdminPersonPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireStaff("people.view");
+// A failed read shows no "Try again": the actions and the middleware
+// check still work from the suspension row, and the next load retries.
+async function readAccessFix(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  suspensions: SuspensionRow[],
+): Promise<AccessFix> {
+  try {
+    const { data, error } = await admin.auth.admin.getUserById(userId);
+    if (error || !data?.user) {
+      console.error("admin person: the auth user read failed", { code: error?.code ?? null });
+      return null;
+    }
+    return accessFixNeeded({
+      activeSuspension: suspensions.some((s) => s.lifted_at === null),
+      bannedUntil: data.user.banned_until,
+    });
+  } catch (readError) {
+    console.error("admin person: the auth user read threw", { error: readError });
+    return null;
+  }
+}
+
+export default async function AdminPersonPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string; success?: string }>;
+}) {
+  const viewer = await requireStaff("people.view");
 
   const { id } = await params;
+  const { error: errorMessage, success } = await searchParams;
   if (!isUuid(id)) notFound();
 
   const supabase = await createClient();
@@ -116,7 +153,10 @@ export default async function AdminPersonPage({ params }: { params: Promise<{ id
     new Set(suspensions.flatMap((s) => [s.suspended_by, s.lifted_by]).filter((v): v is string => typeof v === "string")),
   );
 
-  const [reviewsResult, takedownsResult, staffNames] = await Promise.all([
+  const canManage =
+    roleHasPermission(viewer.role, "people.manage") && !person.is_staff && viewer.userId !== id;
+
+  const [reviewsResult, takedownsResult, staffNames, accessFix] = await Promise.all([
     bookIds.length > 0
       ? admin.from("book_reviews").select("book_id").eq("status", "pending").in("book_id", bookIds).returns<{ book_id: string }[]>()
       : Promise.resolve({ data: [] as { book_id: string }[], error: null }),
@@ -124,6 +164,7 @@ export default async function AdminPersonPage({ params }: { params: Promise<{ id
       ? admin.from("book_takedowns").select("book_id").is("lifted_at", null).in("book_id", bookIds).returns<{ book_id: string }[]>()
       : Promise.resolve({ data: [] as { book_id: string }[], error: null }),
     loadStaffDisplayNames(supabase, staffIds),
+    canManage && !suspensionsResult.error ? readAccessFix(admin, id, suspensions) : Promise.resolve(null),
   ]);
 
   const loadFailed = Boolean(
@@ -167,6 +208,8 @@ export default async function AdminPersonPage({ params }: { params: Promise<{ id
         <h1 className="mt-1 font-serif text-[2rem] font-bold break-words text-primary md:text-[2.5rem]">{person.display_name}</h1>
       </div>
 
+      {success && <Alert variant="success">{success}</Alert>}
+      {errorMessage && <Alert variant="error">{errorMessage}</Alert>}
       {loadFailed && <Alert variant="error">{LOAD_ERROR}</Alert>}
 
       {person.is_staff && (
@@ -188,6 +231,17 @@ export default async function AdminPersonPage({ params }: { params: Promise<{ id
           ))}
         </dl>
       </section>
+
+      {canManage && !suspensionsResult.error && (
+        <SuspensionPanel
+          userId={id}
+          suspended={suspensions.some((s) => s.lifted_at === null)}
+          accessFix={accessFix}
+          suspendAction={suspendAccountAsStaff}
+          liftAction={liftSuspensionAsStaff}
+          retryAction={retryAccountAccessAsStaff}
+        />
+      )}
 
       <section aria-labelledby="person-pen-names" className={SECTION_CLASSES}>
         <h2 id="person-pen-names" className={SECTION_HEADING_CLASSES}>

@@ -39,10 +39,31 @@ vi.mock("@/lib/supabase/server", () => ({
     }),
 }));
 
+// PEOPLE-2: the page passes the actions to the panel; they are tested
+// in [id]/actions.test.ts.
+vi.mock("./[id]/actions", () => ({
+  suspendAccountAsStaff: async () => {},
+  liftSuspensionAsStaff: async () => {},
+  retryAccountAccessAsStaff: async () => {},
+}));
+
 let tables: Record<string, { data: unknown; error: { message: string } | null }> = {};
 const adminTables: string[] = [];
+let authUserResult: { data: { user: { banned_until?: string } | null }; error: { code?: string } | null } = {
+  data: { user: {} },
+  error: null,
+};
+const authUserReads: string[] = [];
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
+    auth: {
+      admin: {
+        getUserById: (id: string) => {
+          authUserReads.push(id);
+          return Promise.resolve(authUserResult);
+        },
+      },
+    },
     from: (table: string) => {
       adminTables.push(table);
       const chain: Record<string, unknown> = {};
@@ -84,8 +105,8 @@ async function renderList(search: Record<string, string> = {}): Promise<string> 
   return renderToStaticMarkup(element as ReactElement);
 }
 
-async function renderPerson(id: string): Promise<string> {
-  const element = await AdminPersonPage({ params: Promise.resolve({ id }) });
+async function renderPerson(id: string, search: { error?: string; success?: string } = {}): Promise<string> {
+  const element = await AdminPersonPage({ params: Promise.resolve({ id }), searchParams: Promise.resolve(search) });
   return renderToStaticMarkup(element as ReactElement);
 }
 
@@ -95,6 +116,8 @@ beforeEach(() => {
   rpcCalls.length = 0;
   adminTables.length = 0;
   tables = {};
+  authUserResult = { data: { user: {} }, error: null };
+  authUserReads.length = 0;
   staffNamesResult = { data: [], error: null };
   rpcResult = (args) => {
     if (args.p_kind === "authors") return { data: [person({ total_count: 38 })], error: null };
@@ -163,8 +186,8 @@ describe("/admin/people", () => {
     expect(html.split(`href="/admin/people/${ANA}"`)).toHaveLength(4);
     expect(html).toContain("Author · Books 4 live · Sales 63 · Bank added · Joined");
     expect(html).toContain(">Reader · Joined");
-    // Suspend arrives with PEOPLE-2.
-    expect(html).not.toContain(">Suspend<");
+    // Suspend lives on the person's page, not on the list.
+    expect(html).not.toContain("Suspend account");
   });
 
   it("says so when the read fails", async () => {
@@ -252,5 +275,107 @@ describe("/admin/people/[id]", () => {
     const html = await renderPerson(ANA);
     expect(html).toContain("Couldn&#x27;t load everything about this person.");
     errorSpy.mockRestore();
+  });
+
+  describe("the Suspend / Lift panel (PEOPLE-2)", () => {
+    const ACTIVE_ROW = {
+      id: "s1",
+      reason: "Spam books",
+      book_ids: [],
+      bundle_ids: [],
+      suspended_by: "staff-1",
+      suspended_at: "2026-10-23T08:00:00Z",
+      lifted_at: null,
+      lifted_by: null,
+    };
+    const FUTURE = "2126-10-23T08:00:00Z";
+
+    it("offers Suspend with a required reason (up to 2000) and a red button to people.manage holders", async () => {
+      rpcResult = () => ({ data: [person()], error: null });
+      const html = await renderPerson(ANA);
+      expect(html).toContain("Suspend account</summary>");
+      expect(html).toContain('name="reason"');
+      expect(html).toMatch(/<textarea[^>]*required=""/);
+      expect(html).toContain('maxLength="2000"');
+      expect(html).toContain(`name="userId" value="${ANA}"`);
+      expect(html).toContain("bg-[#8E2A1E]");
+      expect(html).toContain("It doesn&#x27;t include the reason.");
+      expect(html).not.toContain("Lift suspension");
+      expect(html).not.toContain("Try again");
+      expect(authUserReads).toEqual([ANA]);
+    });
+
+    it("offers Lift, with one more click, on a suspended account", async () => {
+      rpcResult = () => ({ data: [person({ suspended: true })], error: null });
+      tables = { account_suspensions: { data: [ACTIVE_ROW], error: null } };
+      authUserResult = { data: { user: { banned_until: FUTURE } }, error: null };
+      const html = await renderPerson(ANA);
+      expect(html).toContain("Lift suspension</summary>");
+      expect(html).toContain("Yes, lift the suspension");
+      expect(html).not.toContain("Suspend account</summary>");
+      expect(html).not.toContain("Try again");
+    });
+
+    it("offers Try again when the row is active but sign-in is not blocked", async () => {
+      rpcResult = () => ({ data: [person({ suspended: true })], error: null });
+      tables = { account_suspensions: { data: [ACTIVE_ROW], error: null } };
+      const html = await renderPerson(ANA);
+      expect(html).toContain("Try again");
+      expect(html).toContain("but it can still sign in");
+    });
+
+    it("offers Try again when no row is active but sign-in is still blocked", async () => {
+      rpcResult = () => ({ data: [person()], error: null });
+      tables = { account_suspensions: { data: [{ ...ACTIVE_ROW, lifted_at: "2026-10-23T09:00:00Z" }], error: null } };
+      authUserResult = { data: { user: { banned_until: FUTURE } }, error: null };
+      const html = await renderPerson(ANA);
+      expect(html).toContain("Try again");
+      expect(html).toContain("but it still can&#x27;t sign in");
+      expect(html).toContain("Suspend account</summary>");
+    });
+
+    it("shows no Try again when the auth read fails", async () => {
+      rpcResult = () => ({ data: [person({ suspended: true })], error: null });
+      tables = { account_suspensions: { data: [ACTIVE_ROW], error: null } };
+      authUserResult = { data: { user: null }, error: { code: "unexpected_failure" } };
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const html = await renderPerson(ANA);
+      expect(html).not.toContain("Try again");
+      expect(html).toContain("Lift suspension</summary>");
+      errorSpy.mockRestore();
+    });
+
+    it("hides the panel on a staff row, on the viewer's own row, and from people.view-only roles", async () => {
+      rpcResult = () => ({ data: [person({ is_staff: true })], error: null });
+      expect(await renderPerson(ANA)).not.toContain('id="person-suspension"');
+
+      rpcResult = () => ({ data: [person()], error: null });
+      mockRequireStaff.mockImplementation(() => Promise.resolve({ userId: ANA, role: "owner" }));
+      expect(await renderPerson(ANA)).not.toContain('id="person-suspension"');
+
+      mockRequireStaff.mockImplementation(() => Promise.resolve({ userId: "staff-1", role: "support" }));
+      expect(await renderPerson(ANA)).not.toContain('id="person-suspension"');
+      expect(authUserReads).toEqual([]);
+    });
+
+    it("hides the panel when the suspension history can't be read", async () => {
+      rpcResult = () => ({ data: [person()], error: null });
+      tables = { account_suspensions: { data: null, error: { message: "boom" } } };
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const html = await renderPerson(ANA);
+      expect(html).not.toContain('id="person-suspension"');
+      expect(html).toContain("Couldn&#x27;t load everything about this person.");
+      errorSpy.mockRestore();
+    });
+
+    it("shows the action's success or error line", async () => {
+      rpcResult = () => ({ data: [person()], error: null });
+      expect(await renderPerson(ANA, { success: "Suspension lifted. They can sign in again." })).toContain(
+        "Suspension lifted. They can sign in again.",
+      );
+      expect(await renderPerson(ANA, { error: "This account is already suspended." })).toContain(
+        "This account is already suspended.",
+      );
+    });
   });
 });

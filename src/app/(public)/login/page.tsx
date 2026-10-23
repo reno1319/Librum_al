@@ -2,6 +2,7 @@ import Link from "next/link";
 import { login } from "@/app/(public)/auth/actions";
 import { translateAuthErrorMessage } from "@/lib/auth-error";
 import { Alert } from "@/components/ui/alert";
+import { SUSPENDED_MESSAGE } from "@/lib/suspension-gate";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
@@ -14,15 +15,23 @@ export const metadata: Metadata = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string; next?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; next?: string; suspended?: string }>;
 }) {
-  const { error, success, next } = await searchParams;
+  const { error, success, next, suspended } = await searchParams;
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
       <h1 className="font-serif text-3xl font-normal">Log in</h1>
       <p className="mt-1 text-sm text-muted">Welcome back to Librum.</p>
 
+      {/* PEOPLE-2: set only by Proxy when it cuts off a suspended
+          session. A banned sign-in gets the wrong-password message
+          instead (login(), option a). */}
+      {suspended === "1" && (
+        <Alert variant="error" className="mt-4">
+          {SUSPENDED_MESSAGE}
+        </Alert>
+      )}
       {error && (
         <Alert variant="error" className="mt-4">
           {translateAuthErrorMessage(error)}

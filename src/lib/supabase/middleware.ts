@@ -7,6 +7,14 @@ import {
 } from "@/lib/recovery-session";
 import { INTERNAL_PATHNAME_HEADER } from "@/lib/internal-headers";
 import { assertSupabaseEnvSafeForExecution } from "@/lib/supabase/env-guard";
+import {
+  SUSPENDED_LOGIN_PATH,
+  SUSPENDED_MESSAGE,
+  SUSPENSION_CHECK_FAILED_MESSAGE,
+  decideSuspension,
+  isUserBannedError,
+  wantsStatusInsteadOfRedirect,
+} from "@/lib/suspension-gate";
 
 // LIBRUM 2.0 AUTH-2: the only reliable way for a Server Component/Layout
 // to learn the current request's pathname in this Next.js version --
@@ -26,6 +34,27 @@ import { assertSupabaseEnvSafeForExecution } from "@/lib/supabase/env-guard";
 // value is only ever this request's own real, Next.js-parsed pathname,
 // never attacker input. No query string is included (see the AUTH-2
 // audit's query-string decision) and no secrets are ever placed on it.
+// PEOPLE-2: the response that ends a suspended session -- a redirect to
+// /login?suspended=1 for a page, a plain 403 for a Server Action or
+// /api (they can't follow a page redirect). Carries any cookie the
+// client already set (signOut's removal) and expires every Supabase
+// auth cookie the request carried, so the session is gone from this
+// browser whatever signOut did.
+function cutOffSuspendedSession(request: NextRequest, supabaseResponse: NextResponse): NextResponse {
+  const cutOff = wantsStatusInsteadOfRedirect(request)
+    ? new NextResponse(SUSPENDED_MESSAGE, {
+        status: 403,
+        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+      })
+    : NextResponse.redirect(new URL(SUSPENDED_LOGIN_PATH, request.url));
+  supabaseResponse.cookies.getAll().forEach((cookie) => cutOff.cookies.set(cookie));
+  request.cookies
+    .getAll()
+    .filter((cookie) => cookie.name.startsWith("sb-"))
+    .forEach((cookie) => cutOff.cookies.set(cookie.name, "", { path: "/", maxAge: 0 }));
+  return cutOff;
+}
+
 export async function updateSession(request: NextRequest) {
   // AUTH-STAGE-1A: see env-guard.ts. Proxy defaults to the Node.js
   // runtime in this Next.js version (not Edge -- confirmed against
@@ -64,7 +93,70 @@ export async function updateSession(request: NextRequest) {
 
   // Refreshes the auth token if it's expired. Required for server components
   // to see a valid session, since they can't write cookies themselves.
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  // PEOPLE-2 audit F1: current Supabase Auth refuses a banned user's
+  // access token with 403 user_banned, so getUser() returns no user and
+  // the normal path below never sees them. That refusal IS the
+  // suspension signal: end the session here. No signOut() -- its
+  // /logout call is refused the same way, so it revokes nothing. The
+  // account's refresh tokens are refused while banned; a device that
+  // never makes a request during the suspension keeps its cookie and
+  // its session resumes after Lift (accepted, PEOPLE-2 r2 report).
+  if (!user && isUserBannedError(userError)) {
+    return cutOffSuspendedSession(request, supabaseResponse);
+  }
+
+  // PEOPLE-2: a suspended account is cut off on its next request, not
+  // when its access token happens to expire. Signed-in requests only;
+  // see src/lib/suspension-gate.ts for the decision and why an RPC
+  // failure fails closed. If getUser() failed for any other reason,
+  // user is null and nothing changes: every page and action calls
+  // getUser() again and treats the caller as signed out.
+  if (user) {
+    let rpc: { data: unknown; error: unknown };
+    try {
+      rpc = await supabase.rpc("my_account_is_suspended");
+    } catch (rpcError) {
+      rpc = { data: null, error: rpcError };
+    }
+    const decision = decideSuspension({ bannedUntil: user.banned_until, rpc });
+
+    if (decision === "check_failed") {
+      console.error("updateSession: the suspension check failed for a signed-in request", {
+        code: (rpc.error as { code?: string } | null)?.code ?? null,
+      });
+      const failed = new NextResponse(SUSPENSION_CHECK_FAILED_MESSAGE, {
+        status: 503,
+        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+      });
+      supabaseResponse.cookies.getAll().forEach((cookie) => failed.cookies.set(cookie));
+      return failed;
+    }
+
+    if (decision === "suspended") {
+      // Reached when the account is suspended but its token is still
+      // accepted (the ban step failed, or an older Supabase Auth).
+      // Global scope: revokes every refresh token of the account, then
+      // clears this browser's session cookies through the same setAll
+      // above. auth-js 2.112 removes the local session even when the
+      // revoke call errors (GoTrueClient _signOut), and the cookies are
+      // also expired by hand in cutOffSuspendedSession. An
+      // access token already issued keeps working against the Data API
+      // until it expires (up to 1 hour, within RLS); publishing and
+      // deleting stay blocked by the LB464/LB465 triggers
+      // (BRIEF-PEOPLE-r4 residual).
+      try {
+        await supabase.auth.signOut({ scope: "global" });
+      } catch (signOutError) {
+        console.error("updateSession: signOut threw while cutting off a suspended session", { error: signOutError });
+      }
+      return cutOffSuspendedSession(request, supabaseResponse);
+    }
+  }
 
   // LAUNCH-1 P1-11: centralized password-recovery-session containment --
   // see the P1-11 audit for the full rationale. This runs on
