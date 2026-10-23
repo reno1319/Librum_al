@@ -3,7 +3,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
-import { mapStaffRpcError, normalizeEmail, isValidStaffRole } from "./staff-management-logic";
+import {
+  SUSPENDED_CHECK_FAILED_ERROR,
+  SUSPENDED_STAFF_ERROR,
+  isSuspendedEmailMatch,
+  mapStaffRpcError,
+  normalizeEmail,
+  isValidStaffRole,
+} from "./staff-management-logic";
 import type { StaffListRow, StaffRole } from "@/lib/types";
 
 // LIBRUM 2.0 ADMIN-1B PART B: server-side primitives for staff
@@ -80,6 +87,26 @@ export async function addStaffMemberByEmail(
   }
 
   const supabase = await createClient();
+
+  // PEOPLE-1 audit N4: a suspended account can't be added to Staff.
+  // Staff can't be suspended, so a staff row on a suspended account
+  // would leave a suspension nobody can manage cleanly. App-side, before
+  // the add RPC, which doesn't know about suspensions. admin_list_people() checks people.view, which
+  // every staff.manage holder has; its search is a substring match, so
+  // only an exact, case-insensitive email match refuses. If the check
+  // can't run, nothing is added.
+  const { data: suspendedMatches, error: suspendedCheckError } = await supabase.rpc("admin_list_people", {
+    p_query: normalizedEmail,
+    p_kind: "suspended",
+    p_limit: 100,
+  });
+  if (suspendedCheckError) {
+    return { ok: false, error: SUSPENDED_CHECK_FAILED_ERROR };
+  }
+  if (isSuspendedEmailMatch(suspendedMatches, normalizedEmail)) {
+    return { ok: false, error: SUSPENDED_STAFF_ERROR };
+  }
+
   const { error } = await supabase.rpc("add_staff_member_by_email", {
     target_email: normalizedEmail,
     new_role: role,

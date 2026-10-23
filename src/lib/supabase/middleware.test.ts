@@ -32,6 +32,15 @@ const mockGetUser = vi.fn(() => Promise.resolve({ data: { user: null }, error: n
 // Supabase-side refresh.
 let simulateAuthCookieRefresh = false;
 
+// PEOPLE-2: the suspension check's two calls. By default the account is
+// not suspended; signOut() clears the session cookie through setAll, as
+// the real client does.
+const mockRpc = vi.fn((_fn: string): Promise<{ data: unknown; error: unknown }> =>
+  Promise.resolve({ data: false, error: null }),
+);
+const mockSignOut = vi.fn((_options: unknown): Promise<{ error: unknown }> => Promise.resolve({ error: null }));
+let signOutClearsCookie = true;
+
 vi.mock("@supabase/ssr", () => ({
   createServerClient: (_url: string, _key: string, options: { cookies: { setAll: (c: unknown[]) => void } }) => ({
     auth: {
@@ -47,7 +56,14 @@ vi.mock("@supabase/ssr", () => ({
         }
         return mockGetUser();
       },
+      signOut: async (signOutOptions: unknown) => {
+        if (signOutClearsCookie) {
+          options.cookies.setAll([{ name: "sb-project-auth-token", value: "", options: { path: "/", maxAge: 0 } }]);
+        }
+        return mockSignOut(signOutOptions);
+      },
     },
+    rpc: (fn: string) => mockRpc(fn),
   }),
 }));
 
@@ -296,5 +312,144 @@ describe("updateSession: internal pathname forwarding (AUTH-2)", () => {
     const response = await updateSession(makeRequest("/dashboard/series"));
     expect(response.cookies.get("sb-project-auth-token")).toBeDefined();
     expect(forwardedPathname(response)).toBe("/dashboard/series");
+  });
+});
+
+describe("updateSession: the suspension check (PEOPLE-2)", () => {
+  const USER = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+  const SESSION = { "sb-project-auth-token": "session-value", "sb-project-auth-token.1": "chunk" };
+
+  beforeEach(() => {
+    simulateAuthCookieRefresh = false;
+    signOutClearsCookie = true;
+    mockGetUser.mockReset().mockResolvedValue({ data: { user: USER }, error: null } as never);
+    mockRpc.mockReset().mockResolvedValue({ data: false, error: null });
+    mockSignOut.mockReset().mockResolvedValue({ error: null });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+
+  function expectSessionCleared(response: Response & { cookies: { get(name: string): { value: string; maxAge?: number } | undefined } }) {
+    for (const name of Object.keys(SESSION)) {
+      const cookie = response.cookies.get(name);
+      expect(cookie?.value).toBe("");
+      expect(cookie?.maxAge).toBe(0);
+    }
+  }
+
+  it("anonymous requests are never checked", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null }, error: null } as never);
+    const response = await updateSession(makeRequest("/dashboard"));
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.status).toBe(200);
+  });
+
+  it("a user_banned getUser() error ends the session without signOut (F1; real shape in middleware.banned.test.ts)", async () => {
+    mockGetUser.mockResolvedValue({
+      data: { user: null },
+      error: { name: "AuthApiError", status: 403, code: "user_banned", message: "User is banned" },
+    } as never);
+    const response = await updateSession(makeRequest("/dashboard", SESSION));
+    expect(new URL(response.headers.get("location")!).search).toBe("?suspended=1");
+    expectSessionCleared(response);
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("a getUser() error other than user_banned changes nothing (the user is null)", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null }, error: { message: "boom" } } as never);
+    const response = await updateSession(makeRequest("/dashboard", SESSION));
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+  });
+
+  it("a signed-in, not suspended account passes through", async () => {
+    const response = await updateSession(makeRequest("/dashboard", SESSION));
+    expect(mockRpc).toHaveBeenCalledWith("my_account_is_suspended");
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("a suspended account is signed out globally, its cookies cleared, and sent to /login?suspended=1", async () => {
+    mockRpc.mockResolvedValue({ data: true, error: null });
+    const response = await updateSession(makeRequest("/dashboard", SESSION));
+    expect(mockSignOut).toHaveBeenCalledWith({ scope: "global" });
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("suspended")).toBe("1");
+    expectSessionCleared(response);
+  });
+
+  it("a ban in banned_until is enough on its own (older Supabase Auth)", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { ...USER, banned_until: "2126-01-01T00:00:00Z" } }, error: null } as never);
+    const response = await updateSession(makeRequest("/library", SESSION));
+    expect(mockSignOut).toHaveBeenCalledWith({ scope: "global" });
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
+  });
+
+  it("clears the cookies even when signOut() throws or never clears them", async () => {
+    mockRpc.mockResolvedValue({ data: true, error: null });
+    signOutClearsCookie = false;
+    mockSignOut.mockRejectedValue(new Error("network"));
+    const response = await updateSession(makeRequest("/dashboard", SESSION));
+    expectSessionCleared(response);
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
+  });
+
+  it("a server action gets a 403, not a redirect", async () => {
+    mockRpc.mockResolvedValue({ data: true, error: null });
+    const request = new NextRequest("https://librumal.vercel.app/dashboard", {
+      method: "POST",
+      headers: { "next-action": "abc123" },
+    });
+    for (const [name, value] of Object.entries(SESSION)) request.cookies.set(name, value);
+    const response = await updateSession(request);
+    expect(response.status).toBe(403);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe("This account is suspended. Contact support@librum.al.");
+    expectSessionCleared(response);
+  });
+
+  it("an /api request gets a 403, not a redirect", async () => {
+    mockRpc.mockResolvedValue({ data: true, error: null });
+    const response = await updateSession(makeRequest("/api/downloads/abc", SESSION));
+    expect(response.status).toBe(403);
+    expect(response.headers.get("location")).toBeNull();
+    expectSessionCleared(response);
+  });
+
+  it("fails closed with a 503 when the RPC errors, without signing out", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: "PGRST000", message: "boom" } });
+    const response = await updateSession(makeRequest("/dashboard", SESSION));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe("Something went wrong, try again.");
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(response.cookies.get("sb-project-auth-token")).toBeUndefined();
+  });
+
+  it("fails closed with a 503 when the RPC throws or returns a non-boolean", async () => {
+    mockRpc.mockRejectedValueOnce(new Error("fetch failed"));
+    expect((await updateSession(makeRequest("/dashboard", SESSION))).status).toBe(503);
+    mockRpc.mockResolvedValueOnce({ data: null, error: null });
+    expect((await updateSession(makeRequest("/dashboard", SESSION))).status).toBe(503);
+    expect(mockSignOut).not.toHaveBeenCalled();
+  });
+
+  it("keeps a token refresh from this request on the 503", async () => {
+    simulateAuthCookieRefresh = true;
+    mockRpc.mockResolvedValue({ data: null, error: { code: "PGRST000" } });
+    const response = await updateSession(makeRequest("/dashboard", SESSION));
+    expect(response.status).toBe(503);
+    expect(response.cookies.get("sb-project-auth-token")?.value).toBe("refreshed-session-value");
+  });
+
+  it("runs before the recovery redirect: a suspended recovery session goes to /login", async () => {
+    mockRpc.mockResolvedValue({ data: true, error: null });
+    const response = await updateSession(makeRequest("/library", { ...SESSION, [RECOVERY_COOKIE_NAME]: "1" }));
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
   });
 });

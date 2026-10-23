@@ -230,3 +230,23 @@ export function formatStaffAddedDate(iso: string): string {
     day: "numeric",
   });
 }
+
+// PEOPLE-1 audit N4 (actions.ts addStaffMemberByEmail).
+export const SUSPENDED_STAFF_ERROR = "This account is suspended. Lift the suspension before adding it to Staff.";
+export const SUSPENDED_CHECK_FAILED_ERROR = "Couldn't check this account. Nothing was changed. Please try again.";
+
+// admin_list_people()'s search is a substring match on name, pen name
+// and email, so "ana@x.al" also finds "joana@x.al": only an exact,
+// case-insensitive email match counts.
+export function isSuspendedEmailMatch(rows: unknown, normalizedEmail: string): boolean {
+  if (!Array.isArray(rows)) return false;
+  const target = normalizedEmail.toLowerCase();
+  return rows.some(
+    (row) =>
+      typeof row === "object" &&
+      row !== null &&
+      (row as { suspended?: unknown }).suspended === true &&
+      typeof (row as { email?: unknown }).email === "string" &&
+      ((row as { email: string }).email.trim().toLowerCase() === target),
+  );
+}

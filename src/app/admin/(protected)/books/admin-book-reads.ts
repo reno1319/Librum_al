@@ -61,6 +61,23 @@ export async function readPendingReviewBookIds(): Promise<Set<string> | null> {
   return new Set((data ?? []).map((row) => row.book_id).filter((id): id is string => id !== null));
 }
 
+// PEOPLE-2 (N3, Renato's 4b): the ids of every account with an active
+// suspension (a small set), for the "Suspended" badge on the books list
+// and book page. Null on a read error: the badge is information only --
+// Approve is refused by the database (LB464) either way.
+export async function readSuspendedAuthorIds(): Promise<Set<string> | null> {
+  const { data, error } = await createAdminClient()
+    .from("account_suspensions")
+    .select("user_id")
+    .is("lifted_at", null)
+    .returns<{ user_id: string }[]>();
+  if (error) {
+    console.error("readSuspendedAuthorIds: read failed", { error });
+    return null;
+  }
+  return new Set((data ?? []).map((row) => row.user_id));
+}
+
 export type PendingReviewForStaff = {
   reviewId: string;
   bookId: string;

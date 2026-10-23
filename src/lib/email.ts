@@ -340,3 +340,35 @@ export async function sendBookSentBackEmail(
       </div>`,
   );
 }
+
+// PEOPLE-2 (7b, F2a): best effort, like every email here. The caller (the
+// admin Suspend / Lift action) reads the address through the admin auth
+// API after the RPC has committed, never blocks on this, and logs a
+// failure. No reason is ever included: the reason is for staff only (6a).
+export async function sendAccountSuspendedEmail(to: string) {
+  await sendEmail(
+    to,
+    "Your Librum account is suspended",
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Your Librum account is suspended</h1>
+        <p>You can't sign in to Librum for now.</p>
+        <p>If you publish books on Librum, they are out of the Bookstore while your account is suspended. Readers who already bought them keep them.</p>
+        <p>Questions? Write to support@librum.al</p>
+      </div>`,
+  );
+}
+
+export async function sendAccountSuspensionLiftedEmail(to: string) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    "Your Librum account is active again",
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Your Librum account is active again</h1>
+        <p>You can sign in again.</p>
+        <p>If you publish books on Librum, they are back in the Bookstore, except any that need review or were taken down.</p>
+        <p>Questions? Write to support@librum.al</p>
+        <p><a href="${origin}/login">Log in</a></p>
+      </div>`,
+  );
+}

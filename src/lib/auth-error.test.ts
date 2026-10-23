@@ -20,6 +20,11 @@ describe("translateAuthErrorMessage", () => {
     );
   });
 
+  // PEOPLE-2: a ban is reported before the password is checked.
+  it("translates User is banned to the same generic message as invalid credentials", () => {
+    expect(translateAuthErrorMessage("User is banned")).toBe(translateAuthErrorMessage("Invalid login credentials"));
+  });
+
   it("translates User already registered", () => {
     expect(translateAuthErrorMessage("User already registered")).toBe(
       "An account with that email already exists. Try logging in instead.",

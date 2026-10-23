@@ -6,7 +6,7 @@ import { formControlClasses } from "@/lib/form-styles";
 import { buttonClasses } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import type { Metadata } from "next";
-import { readActiveTakedownBookIds, readPendingReviewBookIds } from "./admin-book-reads";
+import { readActiveTakedownBookIds, readPendingReviewBookIds, readSuspendedAuthorIds } from "./admin-book-reads";
 import {
   BOOKS_FILTERS,
   BOOKS_PAGE_SIZE,
@@ -45,6 +45,7 @@ type BookListRow = {
   id: string;
   title: string;
   status: string;
+  author_id: string;
   published_at: string | null;
   created_at: string;
   pen: { name: string } | null;
@@ -57,17 +58,32 @@ const CHIP_CLASSES: Record<BookStateLabel, string> = {
   "Taken down": "bg-[#f6e3df] text-[#8e2a1e]",
 };
 
+// PEOPLE-2 (N3): the author's account is suspended.
+const SUSPENDED_CHIP_CLASSES = "bg-[#f6e3df] text-[#8e2a1e]";
+
 type ListResult =
-  | { ok: true; rows: BookListRow[]; total: number; takenDownIds: Set<string>; inReviewIds: Set<string> }
+  | {
+      ok: true;
+      rows: BookListRow[];
+      total: number;
+      takenDownIds: Set<string>;
+      inReviewIds: Set<string>;
+      suspendedAuthorIds: Set<string>;
+    }
   | { ok: false };
 
 async function loadBooks(filter: ReturnType<typeof parseBooksFilter>, q: string, page: number): Promise<ListResult> {
   const admin = createAdminClient();
-  const [takenDownIds, inReviewIds] = await Promise.all([readActiveTakedownBookIds(), readPendingReviewBookIds()]);
+  const [takenDownIds, inReviewIds, suspendedRead] = await Promise.all([
+    readActiveTakedownBookIds(),
+    readPendingReviewBookIds(),
+    readSuspendedAuthorIds(),
+  ]);
   if (!takenDownIds || !inReviewIds) return { ok: false };
+  const suspendedAuthorIds = suspendedRead ?? new Set<string>();
 
   if ((filter === "taken_down" && takenDownIds.size === 0) || (filter === "in_review" && inReviewIds.size === 0)) {
-    return { ok: true, rows: [], total: 0, takenDownIds, inReviewIds };
+    return { ok: true, rows: [], total: 0, takenDownIds, inReviewIds, suspendedAuthorIds };
   }
 
   let orFilter: string | null = null;
@@ -95,7 +111,7 @@ async function loadBooks(filter: ReturnType<typeof parseBooksFilter>, q: string,
 
   let query = admin
     .from("books")
-    .select("id, title, status, published_at, created_at, pen:pen_names(name)", { count: "exact" });
+    .select("id, title, status, author_id, published_at, created_at, pen:pen_names(name)", { count: "exact" });
   if (filter === "live") query = query.eq("status", "published");
   if (filter === "draft") {
     query = query.eq("status", "draft");
@@ -116,7 +132,7 @@ async function loadBooks(filter: ReturnType<typeof parseBooksFilter>, q: string,
     console.error("admin books: list read failed", { error });
     return { ok: false };
   }
-  return { ok: true, rows: data ?? [], total: count ?? 0, takenDownIds, inReviewIds };
+  return { ok: true, rows: data ?? [], total: count ?? 0, takenDownIds, inReviewIds, suspendedAuthorIds };
 }
 
 export default async function AdminBooksPage({
@@ -213,6 +229,11 @@ export default async function AdminBooksPage({
                       <span className={`rounded-[3px] px-2 py-1 text-xs font-bold tracking-wide uppercase ${CHIP_CLASSES[state]}`}>
                         {state}
                       </span>
+                      {result.suspendedAuthorIds.has(book.author_id) && (
+                        <span className={`rounded-[3px] px-2 py-1 text-xs font-bold tracking-wide uppercase ${SUSPENDED_CHIP_CLASSES}`}>
+                          Suspended
+                        </span>
+                      )}
                       <span className="text-muted sm:w-36 sm:text-right">
                         {book.published_at ? `Published ${formatTimestampAsDate(book.published_at)}` : "Never published"}
                       </span>

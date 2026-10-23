@@ -270,8 +270,15 @@ const KNOWN_REVIEW_RPC_ERRORS: Record<string, string> = {
   "the author changed the book": AUTHOR_CHANGED_BOOK_MESSAGE,
 };
 
+// PEOPLE-1 audit N3 (Renato's 4b): the books trigger refuses publishing
+// a suspended author's book with SQLSTATE LB464, which the approve RPC
+// does not catch; matched by code, as its message is the author-facing one.
+export const AUTHOR_SUSPENDED_APPROVE_MESSAGE =
+  "This author's account is suspended. Lift the suspension before approving.";
+
 export function mapReviewRpcError(error: { code?: string | null; message?: string | null } | null | undefined): string {
   if (error?.code === "40P01") return "Please try again.";
+  if (error?.code === "LB464") return AUTHOR_SUSPENDED_APPROVE_MESSAGE;
   const message = error?.message?.trim();
   if (!message) return GENERIC_REVIEW_ERROR_MESSAGE;
   return KNOWN_REVIEW_RPC_ERRORS[message] ?? GENERIC_REVIEW_ERROR_MESSAGE;

@@ -274,6 +274,28 @@ describe("AdminBookPage", () => {
       expect(html).toContain(">Send back</summary>");
     });
 
+    // PEOPLE-2 (N3, Renato's 4b): the book stays in the queue, badged;
+    // Approve is still offered (the database refuses it, with a clear line).
+    it("a suspended author's book: a Suspended badge linking to the person, a note, Approve still there", async () => {
+      rows.account_suspensions = { data: { id: "s1" }, error: null };
+      const html = await render("admin");
+      expect(html).toContain(">Suspended</span>");
+      expect(html).toMatch(/href="\/admin\/people\/author-1"[^>]*>Open the author&#x27;s account<\/a>/);
+      expect(html).toContain("Approving is refused until the suspension is lifted. Send back still works.");
+      expect(html).toContain("Approve and publish");
+      expect(html).toContain(">Send back</summary>");
+    });
+
+    it("no badge when the author isn't suspended, or the read fails", async () => {
+      expect(await render("admin")).not.toContain(">Suspended</span>");
+      rows.account_suspensions = { data: null, error: { message: "boom" } };
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const html = await render("admin");
+      expect(html).not.toContain(">Suspended</span>");
+      expect(html).toContain("Approve and publish");
+      errorSpy.mockRestore();
+    });
+
     it("staff without books.review see that it is in review, read-only", async () => {
       const html = await render("moderator");
       expect(html).toMatch(/>In review<\/h2>/);
