@@ -20,7 +20,6 @@ import {
   loadDashboardSales,
   type DashboardSalesResult,
 } from "./dashboard-sales";
-import { buildDashboardGreeting } from "./dashboard-greeting";
 import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -58,9 +57,10 @@ export const dynamic = "force-dynamic";
 // under "Your books" (Sales & earnings, Financial balance, Payouts) is
 // gone -- the dashboard menu already links each page -- and with it the
 // payout-status label and the profiles read of stripe_account_id /
-// stripe_payouts_enabled it alone needed. PHONE PASS (D2): the page
-// reads the author's own profiles row again, display_name only, for the
-// greeting line above the heading. Paid publishing is decided by
+// stripe_payouts_enabled it alone needed. This page reads no
+// profiles row (HEADER-NAME r2, Renato 11:52Z: the greeting moved to the
+// site header, so PHONE PASS's Dashboard greeting and its read are gone
+// again). Paid publishing is decided by
 // canPublishPaidTitle() alone (see performPublish() in
 // dashboard/books/actions.ts). The live POK build
 // adds one "Bank account" box here.
@@ -116,14 +116,6 @@ export default async function DashboardPage({
 
   const allBooks = books ?? [];
 
-  // PHONE PASS (D2): a failed read just greets without a name.
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("display_name")
-    .eq("id", user.id)
-    .single<{ display_name: string | null }>();
-  const greeting = buildDashboardGreeting(profile?.display_name, user.email);
-
   const attention = resolveDashboardAttention({
     books: allBooks,
     paidPublishingAvailable: canPublishPaidTitle(),
@@ -131,11 +123,10 @@ export default async function DashboardPage({
 
   const heading = (
     <div className="mt-5 flex items-start justify-between gap-4 sm:mt-8 sm:items-end">
-      {/* PHONE PASS (D2, D3 / Renato 2a 3a): the mockup's greeting line
-          above the heading, in place of the old grey description. */}
+      {/* PHONE PASS (Renato 3a) dropped the grey description; HEADER-NAME
+          r2 moved the greeting to the site header ("Hello, <name>"). */}
       <div className="min-w-0">
-        <p className="break-words text-muted">{greeting}</p>
-        <h1 className="mt-1.5 font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
+        <h1 className="font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
           Your dashboard
         </h1>
       </div>

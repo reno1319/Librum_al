@@ -215,48 +215,33 @@ describe("DashboardPage: step 4 dashboard", () => {
   });
 });
 
-// PHONE PASS (D2 / Renato 2a 3a): the greeting line above the heading,
-// by the account name's first word; the old grey line is gone.
-describe("DashboardPage: greeting (PHONE PASS)", () => {
-  type Result = { data: unknown; error: unknown };
-  function fakeClient(profile: Result) {
-    const chain = (result: Result) => {
+// HEADER-NAME r2 (Renato 11:52Z): the greeting lives in the site header
+// only; the Dashboard shows neither a greeting nor the old grey line, and
+// reads no profiles row.
+describe("DashboardPage: no greeting line (HEADER-NAME r2)", () => {
+  it("renders the heading alone and never reads profiles", async () => {
+    const tablesRead: string[] = [];
+    const chain = () => {
       const builder: Record<string, unknown> = {};
       for (const method of ["select", "in", "is", "eq", "not", "order"]) builder[method] = () => builder;
-      builder.returns = () => Promise.resolve(result);
-      builder.single = () => Promise.resolve(result);
+      builder.returns = () => Promise.resolve({ data: [], error: null });
+      builder.single = () => Promise.resolve({ data: { display_name: "Renato Kalemi" }, error: null });
       return builder;
     };
-    return {
-      auth: { getUser: () => Promise.resolve({ data: { user: { id: "author-1", email: "nameless+x@example.com" } } }) },
-      from: (table: string) => chain(table === "profiles" ? profile : { data: [], error: null }),
+    mockCreateClient.mockImplementation((() => ({
+      auth: { getUser: () => Promise.resolve({ data: { user: { id: "author-1", email: "r@example.com" } } }) },
+      from: (table: string) => {
+        tablesRead.push(table);
+        return chain();
+      },
       rpc: () => Promise.resolve({ data: [], error: null }),
       storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://x/c.jpg" } }) }) },
-    };
-  }
-  async function render(profile: Result) {
-    mockCreateClient.mockImplementation((() => fakeClient(profile)) as never);
+    })) as never);
     const element = await DashboardPage({ searchParams: Promise.resolve({}) });
-    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-  }
-
-  it("greets by the first word of the account name, above the heading", async () => {
-    const html = await render({ data: { display_name: "Renato Kalemi" }, error: null });
-    expect(html).toContain(">Hello, Renato<");
-    expect(html).not.toContain("Kalemi");
-    expect(html.indexOf("Hello, Renato")).toBeLessThan(html.indexOf("Your dashboard"));
-    expect(html).not.toContain("Manage your books, sales, and earnings.");
-  });
-
-  it("r2 (audit N4): the signup fallback name (email local part) greets with just Hello", async () => {
-    const html = await render({ data: { display_name: "nameless+x" }, error: null });
-    expect(html).toContain(">Hello<");
-    expect(html).not.toContain("nameless");
-  });
-
-  it("a failed profile read greets without a name", async () => {
-    const html = await render({ data: null, error: { message: "boom" } });
-    expect(html).toContain(">Hello<");
+    const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
     expect(html).toContain("Your dashboard");
+    expect(html).not.toMatch(/>Hello\b/);
+    expect(html).not.toContain("Manage your books, sales, and earnings.");
+    expect(tablesRead).not.toContain("profiles");
   });
 });
