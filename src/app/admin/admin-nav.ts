@@ -56,6 +56,10 @@ export type AdminNavItem = {
 // reports.view -- the same permission /admin/books and /admin/books/[id]
 // require (owner, admin, moderator). The panel's own actions need
 // reports.resolve.
+//
+// PEOPLE-1: People (every account, searchable, and each person's page)
+// added first in Team, gated by people.view -- the same permission
+// /admin/people and /admin/people/[id] require (owner and admin only).
 export type AdminNavGroup = {
   label: string;
   items: readonly AdminNavItem[];
@@ -85,6 +89,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
   {
     label: "Team",
     items: [
+      { href: "/admin/people", label: "People", permission: "people.view" },
       { href: "/admin/staff", label: "Staff", permission: "staff.view" },
       { href: "/admin/audit", label: "Audit log", permission: "audit.view" },
     ],

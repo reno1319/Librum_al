@@ -25,7 +25,7 @@ describe("ADMIN_NAV_GROUPS", () => {
       { label: "Daily", items: ["Today", "Book reports", "Refund requests"] },
       { label: "Catalog", items: ["Books", "Librum's choice", "Blog"] },
       { label: "Money", items: ["Finance"] },
-      { label: "Team", items: ["Staff", "Audit log"] },
+      { label: "Team", items: ["People", "Staff", "Audit log"] },
     ]);
   });
 
@@ -51,6 +51,8 @@ describe("ADMIN_NAV_GROUPS", () => {
       "/admin/books": "reports.view",
       "/admin/refunds": "refunds.view",
       "/admin/staff": "staff.view",
+      // PEOPLE-1: the People list's own gate.
+      "/admin/people": "people.view",
       "/admin/audit": "audit.view",
       "/admin/finance": "finance.view",
       "/admin/blog": "blog.view",
@@ -69,7 +71,7 @@ describe("resolveVisibleAdminNavGroups", () => {
       { label: "Daily", hrefs: ["/admin", "/admin/reports", "/admin/refunds"] },
       { label: "Catalog", hrefs: ["/admin/books", "/admin/librum-choice", "/admin/blog"] },
       { label: "Money", hrefs: ["/admin/finance"] },
-      { label: "Team", hrefs: ["/admin/staff", "/admin/audit"] },
+      { label: "Team", hrefs: ["/admin/people", "/admin/staff", "/admin/audit"] },
     ]);
   });
 

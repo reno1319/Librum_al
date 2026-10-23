@@ -131,6 +131,9 @@ describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
     // ADMIN-3-REVIEW (H): the staff file link checks the book's current
     // file against the pending snapshot, after requireStaff("books.review").
     "app/admin/(protected)/books/[id]/file/route.ts",
+    // PEOPLE-1 (10a): a person's page lists their books, after
+    // requireStaff("people.view").
+    "app/admin/(protected)/people/[id]/page.tsx",
   ];
   // The shared helper is gated by its callers; each caller is listed.
   const BOOK_READ_HELPER = "app/admin/(protected)/books/admin-book-reads.ts";
@@ -153,7 +156,7 @@ describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
   it("each staff books reader is gated by requireStaff, the shared helper by its callers (ADMIN-2)", () => {
     for (const name of BOOKS_ALLOWED) {
       if (name === BOOK_READ_HELPER) continue;
-      expect(code(join(SRC, name)), name).toMatch(/requireStaff\("(reports\.view|reports\.resolve|books\.review)"\)/);
+      expect(code(join(SRC, name)), name).toMatch(/requireStaff\("(reports\.view|reports\.resolve|books\.review|people\.view)"\)/);
     }
     const callers = ADMIN_FILES.filter((file) => code(file).includes("/admin-book-reads\"")).map(rel);
     expect(callers.sort()).toEqual([...HELPER_CALLERS].sort());

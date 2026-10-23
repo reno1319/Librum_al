@@ -173,10 +173,10 @@ function ineligibleRow(
 }
 
 describe("summarizeDryRunRows", () => {
-  // A: empty summary contains all six zero counters (BANK-PAYOUT-1C.1
+  // A: empty summary contains all seven zero counters (BANK-PAYOUT-1C.1
   // Section 6A) -- migration 055 added no_minimum_policy/no_destination
   // alongside the original four.
-  it("empty input yields all-zero summary, all six reason counters present", () => {
+  it("empty input yields all-zero summary, all seven reason counters present", () => {
     expect(summarizeDryRunRows([])).toEqual({
       candidateCount: 0,
       eligibleCount: 0,
@@ -189,6 +189,7 @@ describe("summarizeDryRunRows", () => {
         active_reservation: 0,
         below_threshold: 0,
         no_destination: 0,
+        account_suspended: 0,
       },
       unknownReasonCount: 0,
     });
@@ -231,6 +232,7 @@ describe("summarizeDryRunRows", () => {
       active_reservation: 1,
       below_threshold: 2,
       no_destination: 0,
+      account_suspended: 0,
     });
     expect(summary.ineligibleCount).toBe(4);
   });
@@ -254,6 +256,16 @@ describe("summarizeDryRunRows", () => {
   // C: no_destination increments correctly (BANK-PAYOUT-1C.1 Section
   // 6C) -- migration 055's new gate: settings+policy+balance all
   // satisfied, but no saved payout destination.
+  // PEOPLE-1: a suspended author is counted under its own key, never as
+  // an unknown reason.
+  it("counts account_suspended rows under their own key", () => {
+    const summary = summarizeDryRunRows([ineligibleRow("account_suspended"), ineligibleRow("no_destination")]);
+    expect(summary.reasonCounts.account_suspended).toBe(1);
+    expect(summary.reasonCounts.no_destination).toBe(1);
+    expect(summary.unknownReasonCount).toBe(0);
+    expect(summary.ineligibleCount).toBe(2);
+  });
+
   it("counts no_destination rows correctly, with no NaN/undefined corruption", () => {
     const rows = [ineligibleRow("no_destination")];
     const summary = summarizeDryRunRows(rows);
@@ -262,7 +274,7 @@ describe("summarizeDryRunRows", () => {
   });
 
   // D: mixed old/new reasons count correctly (BANK-PAYOUT-1C.1 Section
-  // 6D) -- every one of the six reasons in a single batch, each
+  // 6D) -- every one of the six original reasons in a single batch, each
   // counted independently and exactly once.
   it("counts a mix of pre-055 and migration-055 reasons independently and correctly", () => {
     const rows = [
@@ -282,6 +294,7 @@ describe("summarizeDryRunRows", () => {
       active_reservation: 1,
       below_threshold: 1,
       no_destination: 1,
+      account_suspended: 0,
     });
     expect(summary.eligibleCount).toBe(1);
     expect(summary.ineligibleCount).toBe(6);
@@ -292,7 +305,7 @@ describe("summarizeDryRunRows", () => {
   // string this module hasn't been updated for yet) cannot produce
   // NaN/null numeric corruption anywhere in the summary
   // (BANK-PAYOUT-1C.1 Section 6F/5) -- it is bucketed into
-  // unknownReasonCount instead, and every one of the six typed
+  // unknownReasonCount instead, and every one of the seven typed
   // counters stays a clean, defined number.
   it("an unrecognized future ineligible_reason is bucketed safely, never corrupts the typed counters", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -314,6 +327,7 @@ describe("summarizeDryRunRows", () => {
       active_reservation: 0,
       below_threshold: 0,
       no_destination: 0,
+      account_suspended: 0,
     });
     expect(consoleErrorSpy).toHaveBeenCalledOnce();
     consoleErrorSpy.mockRestore();
@@ -356,6 +370,7 @@ describe("runDryRunPass", () => {
           active_reservation: 0,
           below_threshold: 0,
           no_destination: 0,
+          account_suspended: 0,
         },
         unknownReasonCount: 0,
       },
