@@ -61,9 +61,10 @@ export const metadata: Metadata = {
 // the closing band live in @/components/page-bands (AUTHOR PAGES
 // REDESIGN), shared with the inner author pages.
 
-// Outline button on the green hero, beside the brass one.
+// Outline button on the green hero, beside the brass one. PHONE PASS
+// (D1): 48px tall on phones, like BRASS_CTA_CLASSES.
 const OUTLINE_ON_DARK_CTA_CLASSES =
-  "focus-ring inline-flex items-center justify-center gap-2 rounded-[3px] border border-primary-foreground/40 px-7 py-4 text-base font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover";
+  "focus-ring inline-flex min-h-12 items-center justify-center gap-2 rounded-[3px] border border-primary-foreground/40 px-7 py-2.5 text-base font-semibold sm:py-4 text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover";
 
 // Lower-case roman numerals for the three "Why Librum" pillars.
 const PILLAR_NUMERALS = ["i.", "ii.", "iii."];

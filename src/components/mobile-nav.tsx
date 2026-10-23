@@ -1,10 +1,31 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { IconMenu, IconClose } from "@/components/icons";
 import type { NavItem } from "@/components/nav-links";
+
+// PHONE PASS (D5): the parts of a document attachOutsideTap uses (a
+// fake in tests; vitest runs in node with no DOM).
+export type OutsideTapDocument = Pick<Document, "addEventListener" | "removeEventListener">;
+
+/**
+ * While the menu is open: a pointerdown outside `root` (the ☰ button and
+ * its panel) calls `close`. A tap on the button itself is inside, so its
+ * own click still toggles. Returns the cleanup that removes the listener.
+ */
+export function attachOutsideTap(
+  root: Pick<Node, "contains">,
+  doc: OutsideTapDocument,
+  close: () => void,
+): () => void {
+  function onPointerDown(event: Event) {
+    if (!root.contains(event.target as Node | null)) close();
+  }
+  doc.addEventListener("pointerdown", onPointerDown);
+  return () => doc.removeEventListener("pointerdown", onPointerDown);
+}
 
 // Mobile hamburger + collapsible panel. Isolated as its own client
 // component (state: open/closed) so SiteHeader stays a server component.
@@ -31,6 +52,7 @@ export function MobileNav({
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const panelId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Close whenever a navigation actually happens. Adjusting state during
   // render (comparing against the last-seen pathname) rather than in a
@@ -47,17 +69,25 @@ export function MobileNav({
       if (e.key === "Escape") setOpen(false);
     }
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    const detachOutsideTap = rootRef.current
+      ? attachOutsideTap(rootRef.current, document, () => setOpen(false))
+      : () => {};
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      detachOutsideTap();
+    };
   }, [open]);
 
   // REDESIGN STEP 2: the open panel continues the header's dark green
   // bar, so links are cream (11.1:1 on green). Menu items, not inline
   // text links, so they underline on hover only.
+  // PHONE PASS r2 (audit N2): each link and button is a 44px tap
+  // target; the lists lose their gap, so the spacing stays about the same.
   const linkClassName =
-    "focus-ring rounded-sm py-1 text-base font-medium text-primary-foreground hover:underline";
+    "focus-ring flex min-h-11 items-center rounded-sm text-base font-medium text-primary-foreground hover:underline";
 
   return (
-    <div className="lg:hidden">
+    <div ref={rootRef} className="lg:hidden">
       <button
         type="button"
         aria-expanded={open}
@@ -77,7 +107,7 @@ export function MobileNav({
           className="absolute inset-x-0 top-full z-20 border-t border-primary-foreground/15 bg-primary px-4 py-4 shadow-md sm:px-6"
         >
           {recoveryActive ? (
-            <div className="flex flex-col gap-3.5">
+            <div className="flex flex-col">
               <span className="text-sm text-primary-foreground/80">Password recovery</span>
               <form action={logoutAction}>
                 <button type="submit" className={linkClassName}>
@@ -87,7 +117,7 @@ export function MobileNav({
             </div>
           ) : (
             <>
-              <nav className="flex flex-col gap-3.5">
+              <nav className="flex flex-col">
                 {items.map((item) => (
                   <Link key={item.href} href={item.href} className={linkClassName}>
                     {item.label}
@@ -95,7 +125,7 @@ export function MobileNav({
                 ))}
               </nav>
 
-              <div className="mt-4 flex flex-col gap-3.5 border-t border-primary-foreground/15 pt-4">
+              <div className="mt-4 flex flex-col border-t border-primary-foreground/15 pt-4">
                 {loggedIn ? (
                   <>
                     <Link href={accountHref} className={linkClassName}>
