@@ -214,3 +214,49 @@ describe("DashboardPage: step 4 dashboard", () => {
     expect(none).toContain("No books match your search.");
   });
 });
+
+// PHONE PASS (D2 / Renato 2a 3a): the greeting line above the heading,
+// by the account name's first word; the old grey line is gone.
+describe("DashboardPage: greeting (PHONE PASS)", () => {
+  type Result = { data: unknown; error: unknown };
+  function fakeClient(profile: Result) {
+    const chain = (result: Result) => {
+      const builder: Record<string, unknown> = {};
+      for (const method of ["select", "in", "is", "eq", "not", "order"]) builder[method] = () => builder;
+      builder.returns = () => Promise.resolve(result);
+      builder.single = () => Promise.resolve(result);
+      return builder;
+    };
+    return {
+      auth: { getUser: () => Promise.resolve({ data: { user: { id: "author-1", email: "nameless+x@example.com" } } }) },
+      from: (table: string) => chain(table === "profiles" ? profile : { data: [], error: null }),
+      rpc: () => Promise.resolve({ data: [], error: null }),
+      storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://x/c.jpg" } }) }) },
+    };
+  }
+  async function render(profile: Result) {
+    mockCreateClient.mockImplementation((() => fakeClient(profile)) as never);
+    const element = await DashboardPage({ searchParams: Promise.resolve({}) });
+    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+
+  it("greets by the first word of the account name, above the heading", async () => {
+    const html = await render({ data: { display_name: "Renato Kalemi" }, error: null });
+    expect(html).toContain(">Hello, Renato<");
+    expect(html).not.toContain("Kalemi");
+    expect(html.indexOf("Hello, Renato")).toBeLessThan(html.indexOf("Your dashboard"));
+    expect(html).not.toContain("Manage your books, sales, and earnings.");
+  });
+
+  it("r2 (audit N4): the signup fallback name (email local part) greets with just Hello", async () => {
+    const html = await render({ data: { display_name: "nameless+x" }, error: null });
+    expect(html).toContain(">Hello<");
+    expect(html).not.toContain("nameless");
+  });
+
+  it("a failed profile read greets without a name", async () => {
+    const html = await render({ data: null, error: { message: "boom" } });
+    expect(html).toContain(">Hello<");
+    expect(html).toContain("Your dashboard");
+  });
+});

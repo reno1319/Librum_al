@@ -19,11 +19,20 @@ export type DismissDetails = Pick<HTMLDetailsElement, "open" | "contains" | "que
  * While `details` is open: a pointerdown outside it closes it, and
  * Escape closes it. Escape moves focus to its <summary> only when focus
  * was inside the <details> or on <body>, so Escape pressed in some other
- * field never pulls focus away. Returns the cleanup that removes both
- * listeners.
+ * field never pulls focus away. With `closeOnFocusOut` (PHONE PASS r2,
+ * audit N3: the Dashboard book row's ··· menu), focus moving to anything
+ * outside it -- Tab past the last item -- closes it too. Returns the
+ * cleanup that removes the listeners.
  */
-export function attachDismiss(details: DismissDetails, doc: DismissDocument): () => void {
+export function attachDismiss(
+  details: DismissDetails,
+  doc: DismissDocument,
+  { closeOnFocusOut = false }: { closeOnFocusOut?: boolean } = {},
+): () => void {
   function onPointerDown(event: Event) {
+    if (!details.contains(event.target as Node | null)) details.open = false;
+  }
+  function onFocusIn(event: Event) {
     if (!details.contains(event.target as Node | null)) details.open = false;
   }
   function onKeyDown(event: Event) {
@@ -35,20 +44,30 @@ export function attachDismiss(details: DismissDetails, doc: DismissDocument): ()
   }
   doc.addEventListener("pointerdown", onPointerDown);
   doc.addEventListener("keydown", onKeyDown);
+  if (closeOnFocusOut) doc.addEventListener("focusin", onFocusIn);
   return () => {
     doc.removeEventListener("pointerdown", onPointerDown);
     doc.removeEventListener("keydown", onKeyDown);
+    if (closeOnFocusOut) doc.removeEventListener("focusin", onFocusIn);
   };
 }
 
-export function DismissableDetails({ className, children }: { className?: string; children: ReactNode }) {
+export function DismissableDetails({
+  className,
+  closeOnFocusOut = false,
+  children,
+}: {
+  className?: string;
+  closeOnFocusOut?: boolean;
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDetailsElement>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!open || !ref.current) return;
-    return attachDismiss(ref.current, document);
-  }, [open]);
+    return attachDismiss(ref.current, document, { closeOnFocusOut });
+  }, [open, closeOnFocusOut]);
 
   return (
     <details ref={ref} className={className} onToggle={(e) => setOpen(e.currentTarget.open)}>

@@ -9,9 +9,9 @@ import type { HomepageCta } from "@/lib/homepage";
 
 // Brass call-to-action button (square-cornered, like the mockup) for the
 // green bands: brass fill with green text (5.85:1), cream fill on hover
-// (11.1:1).
+// (11.1:1). PHONE PASS (D1): 48px tall on phones, as before from sm up.
 export const BRASS_CTA_CLASSES =
-  "focus-ring inline-flex items-center justify-center gap-2 rounded-[3px] bg-accent px-7 py-4 text-base font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground";
+  "focus-ring inline-flex min-h-12 items-center justify-center gap-2 rounded-[3px] bg-accent px-7 py-2.5 text-base font-semibold sm:py-4 text-accent-foreground transition-colors hover:bg-primary-foreground";
 
 // Underlined at rest, thicker underline on hover (C1).
 export const TEXT_LINK_CLASSES =
