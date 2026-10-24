@@ -58,6 +58,15 @@ describe("POLICY PAGES: /privacy", () => {
     expect(text).toContain("Stripe — handled earlier test payments and author payout accounts; we still hold some of those old records, which will be deleted.");
   });
 
+  it("explains the cookieless visit counts (VISITOR STATS, item 6, 3. a)", () => {
+    expect(text).toContain(
+      "We count page visits with Vercel Web Analytics. It uses no cookies, doesn't follow you across other websites, and doesn't tell us who you are.",
+    );
+    expect(text).toContain("Vercel — hosting the website and counting anonymous page visits.");
+    expect(text).toContain("We don't use advertising or tracking cookies.");
+    expect(text).toContain("Last updated: October 2026");
+  });
+
   it("is a lawyer-review draft in the code only, with no blank slots", () => {
     expect(source).toContain("LAWYER-REVIEW DRAFT");
     expect(text).not.toMatch(/\bdraft\b|\[/i);

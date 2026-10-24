@@ -19,7 +19,8 @@ export const metadata: Metadata = {
 // 10) deletes the Stripe data, and must go in that same change. The
 // date must match the month this goes live. TRUST PACK (item 5, 6. a):
 // the WhatsApp line shows only while src/lib/contact.ts holds a number,
-// the same value that shows the link on Contact.
+// the same value that shows the link on Contact. VISITOR STATS (item 6,
+// 3. a): the Vercel Web Analytics lines; the date stays October 2026.
 export default function PrivacyPage() {
   return (
     <main className="flex-1">
@@ -87,8 +88,11 @@ export default function PrivacyPage() {
                 the ordinary server and request logs (such as IP address,
                 browser type and time of request) that our hosting provider
                 generates to run the platform. We count how often each book
-                page is viewed without linking the count to you. We
-                don&apos;t do device fingerprinting or advertising tracking.
+                page is viewed without linking the count to you. We count
+                page visits with Vercel Web Analytics. It uses no cookies,
+                doesn&apos;t follow you across other websites, and
+                doesn&apos;t tell us who you are. We don&apos;t do device
+                fingerprinting or advertising tracking.
               </p>
               <p className="mt-2">
                 <strong>Safety:</strong> records of moderation decisions,
@@ -171,7 +175,8 @@ export default function PrivacyPage() {
                   and file storage for covers and manuscripts.
                 </li>
                 <li>
-                  <strong>Vercel</strong> — hosting the website.
+                  <strong>Vercel</strong> — hosting the website and counting
+                  anonymous page visits.
                 </li>
                 <li>
                   <strong>Resend</strong> — sending emails, such as purchase
