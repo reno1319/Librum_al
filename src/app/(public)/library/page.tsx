@@ -9,6 +9,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { LibraryBookCard } from "@/components/library-book-card";
 import { resolveBookByline } from "@/lib/book-byline";
+import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -77,6 +78,10 @@ export default async function LibraryPage({
   );
   const ownedByBookId = new Map(ownershipEntries);
 
+  // DOWNLOADS-1 (3a, 4a): the buyer's own download state, for the line
+  // under each Download button.
+  const downloadStates = await readMyDownloadStates(supabase);
+
   // The Library grid: every currently-owned book, as a flat list --
   // never grouped by bundle/transaction (that grouping lives entirely
   // at /account/purchases now). A refunded or lost-disputed purchase's
@@ -114,6 +119,15 @@ export default async function LibraryPage({
           }
         />
       ) : (
+        <>
+        {/* TRUST PACK (item 5, 1. a): one link above the grid, not one per card. */}
+        <p className="mt-4 text-sm text-muted">
+          Not sure how to open a book on your phone or Kindle?{" "}
+          <Link href="/help/reading" className="text-primary underline">
+            How to read your book
+          </Link>
+          .
+        </p>
         <ul className="mt-8 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
           {ownedBooks.map((book) => {
             const coverUrl = book.cover_path
@@ -130,10 +144,12 @@ export default async function LibraryPage({
                 authorName={resolveBookByline(book)}
                 isPublished={book.status === "published"}
                 downloadable={ownedByBookId.get(book.id) ?? false}
+                downloadNote={buyerDownloadNote(downloadStates.get(book.id))}
               />
             );
           })}
         </ul>
+        </>
       )}
     </main>
   );

@@ -41,7 +41,7 @@ vi.mock("@/lib/watermark", () => ({
   watermarkEpub: (...args: unknown[]) => mockWatermarkEpub(...args),
 }));
 
-const { GET } = await import("./route");
+const { GET, HEAD } = await import("./route");
 
 const AUTHOR_ID = "3f2a8c1e-5b7d-4e9a-8c6f-1a2b3c4d5e6f";
 const BOOK_ID = "9d8c7b6a-5f4e-4d3c-9b2a-1f0e9d8c7b6a";
@@ -197,8 +197,14 @@ function bookRow(overrides: Record<string, unknown> = {}): QueryResult {
   };
 }
 
-function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: unknown } = {}) {
-  const { fileBytes = Buffer.from("fake epub bytes"), downloadError = null } = overrides;
+// DOWNLOADS-1: `recordError` is what record_book_download returns.
+function makeFakeAdminClient(
+  overrides: { fileBytes?: Buffer; downloadError?: unknown; recordError?: unknown } = {},
+) {
+  const { fileBytes = Buffer.from("fake epub bytes"), downloadError = null, recordError = null } = overrides;
+  const rpc = vi.fn((_name: string, _args: Record<string, unknown>) =>
+    Promise.resolve({ data: recordError ? null : "0e1d2c3b-4a59-4687-9a6b-5c4d3e2f1a00", error: recordError }),
+  );
   const download = vi.fn((_path: string) =>
     Promise.resolve(
       downloadError
@@ -213,7 +219,7 @@ function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: un
     if (call.table !== "books") throw new Error(`unexpected admin table ${call.table}`);
     return currentBookResult;
   });
-  return { storage: { from: storageFrom }, from, __from: storageFrom, __download: download, __calls: calls };
+  return { storage: { from: storageFrom }, from, rpc, __from: storageFrom, __download: download, __calls: calls, __rpc: rpc };
 }
 
 function makeRequest() {
@@ -469,6 +475,107 @@ describe("GET /api/books/[id]/download", () => {
       const adminClient = setUp(READER_ID, CANONICAL_PATH);
       expect(redirectTarget(await callRoute())).toBe(FILE_UNAVAILABLE);
       expect(adminClient.__download).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("download log (DOWNLOADS-1, 1a)", () => {
+    const RECORD_FAILED = `/books/${BOOK_ID}?error=Could+not+download+that+file.+Please+try+again`;
+
+    function setUpReader(adminOverrides: Parameters<typeof makeFakeAdminClient>[0] = {}) {
+      const adminClient = makeFakeAdminClient(adminOverrides);
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: true }));
+      mockCreateAdminClient.mockReturnValue(adminClient);
+      mockWatermarkEpub.mockResolvedValue({ watermarked: true, bytes: Buffer.from("w") });
+      return adminClient;
+    }
+
+    it("records a buyer's download with the served key before sending the file", async () => {
+      const adminClient = setUpReader();
+      const response = await callRoute();
+      expect(response.status).toBe(200);
+      expect(adminClient.__rpc).toHaveBeenCalledTimes(1);
+      expect(adminClient.__rpc).toHaveBeenCalledWith("record_book_download", {
+        p_reader_id: READER_ID,
+        p_book_id: BOOK_ID,
+        p_file_path: CANONICAL_PATH,
+      });
+      // The file was fetched and watermarked before the row was written,
+      // so a missing file is never recorded as a download.
+      expect(adminClient.__download.mock.invocationCallOrder[0]).toBeLessThan(
+        adminClient.__rpc.mock.invocationCallOrder[0],
+      );
+      expect(mockWatermarkEpub.mock.invocationCallOrder[0]).toBeLessThan(
+        adminClient.__rpc.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("records the approved version a buyer is actually served", async () => {
+      const approved = `${AUTHOR_ID}/${BOOK_ID}/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d.epub`;
+      currentReviewsResult = {
+        data: [
+          {
+            id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+            book_id: BOOK_ID,
+            status: "approved",
+            file_path: approved,
+            cover_path: null,
+            submitted_at: "2026-10-01T00:00:00Z",
+            decided_at: "2026-10-02T00:00:00Z",
+          },
+        ],
+        error: null,
+      };
+      const adminClient = setUpReader();
+      expect((await callRoute()).status).toBe(200);
+      expect(adminClient.__rpc).toHaveBeenCalledWith("record_book_download", {
+        p_reader_id: READER_ID,
+        p_book_id: BOOK_ID,
+        p_file_path: approved,
+      });
+    });
+
+    it("a failed record sends no file and says try again, logging ids and the code only", async () => {
+      setUpReader({ recordError: { code: "LB472", message: "record_book_download: no active purchase of this book" } });
+      const response = await callRoute();
+      expect(response.status).not.toBe(200);
+      expect(response.headers.get("content-disposition")).toBeNull();
+      expect(redirectTarget(response)).toBe(RECORD_FAILED);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0][1]).toEqual({ bookId: BOOK_ID, readerId: READER_ID, code: "LB472" });
+      expect(allLogOutput()).not.toContain(CANONICAL_PATH);
+      expect(allLogOutput()).not.toContain(READER_EMAIL);
+    });
+
+    it("the author's own download is not recorded", async () => {
+      const adminClient = makeFakeAdminClient();
+      mockCreateClient.mockResolvedValue(makeFakeSupabase());
+      mockCreateAdminClient.mockReturnValue(adminClient);
+      mockWatermarkEpub.mockResolvedValue({ watermarked: true, bytes: Buffer.from("w") });
+      expect((await callRoute()).status).toBe(200);
+      expect(adminClient.__rpc).not.toHaveBeenCalled();
+    });
+
+    it("nothing is recorded when the file can't be fetched", async () => {
+      const adminClient = setUpReader({ downloadError: { message: "not found" } });
+      const response = await callRoute();
+      expect(response.status).not.toBe(200);
+      expect(adminClient.__rpc).not.toHaveBeenCalled();
+    });
+
+    it("HEAD is refused and touches nothing (Next.js would otherwise run GET for it)", async () => {
+      const response = HEAD();
+      expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("GET");
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+    });
+
+    it("nothing is recorded for a caller who may not download", async () => {
+      const adminClient = makeFakeAdminClient();
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: false }));
+      mockCreateAdminClient.mockReturnValue(adminClient);
+      expect(redirectTarget(await callRoute())).toBe(BUY_FIRST);
+      expect(adminClient.__rpc).not.toHaveBeenCalled();
     });
   });
 

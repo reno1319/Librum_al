@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 
 // Instagram/Facebook icon links were removed from render below (not
 // deleted from src/components/icons.tsx, which stays reusable) because
@@ -37,7 +38,6 @@ export const FOOTER_GROUPS = {
   ],
 };
 
-const SUPPORT_EMAIL = "support@librum.al";
 // Preserved exactly -- a real, working partner destination, not a
 // placeholder. Styled below as a secondary/external link, distinct
 // from Librum's own product links.
@@ -68,6 +68,8 @@ export function SiteFooter() {
               {SUPPORT_EMAIL}
             </a>
           </p>
+          {/* TRUST PACK (item 5, 5. a): the reply promise under the email. */}
+          <p className="mt-1 text-[0.9375rem] text-primary-foreground/80">{REPLY_PROMISE}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-x-10 gap-y-6 sm:grid-cols-4">

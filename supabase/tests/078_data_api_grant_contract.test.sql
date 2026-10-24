@@ -9,11 +9,12 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 216 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 219 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
---   account_suspensions rows (migration 20261023090000). A relation with
---   no privilege for a role is a row with '-'.
+--   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
+--   three book_downloads rows (migration 20261024090000). A relation
+--   with no privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
 --   pen_names, books, profiles, purchases or payments.
@@ -129,6 +130,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r blog_posts | anon | -'),
 ('rel','r blog_posts | authenticated | -'),
 ('rel','r blog_posts | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
+('rel','r book_downloads | anon | -'),
+('rel','r book_downloads | authenticated | -'),
+('rel','r book_downloads | service_role | SELECT'),
 ('rel','r book_checkout_intents | anon | -'),
 ('rel','r book_checkout_intents | authenticated | -'),
 ('rel','r book_checkout_intents | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
@@ -289,8 +293,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 216 then
-    raise exception 'FAIL: part1: the snapshot must hold 216 rows, holds %', v_expected;
+  if v_expected <> 219 then
+    raise exception 'FAIL: part1: the snapshot must hold 219 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

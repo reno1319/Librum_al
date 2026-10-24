@@ -46,6 +46,14 @@ function toDownloadBookRow(data: unknown, requestedId: string): DownloadBookRow 
   return { id: row.id, author_id: row.author_id, title: row.title, file_path: row.file_path };
 }
 
+// DOWNLOADS-1: Next.js answers HEAD by running GET when a route has no
+// HEAD of its own -- here that would write a download row (ending the
+// buyer's 14-day cancel right) for a request that receives no file. So
+// HEAD is refused outright and touches nothing.
+export function HEAD() {
+  return new NextResponse(null, { status: 405, headers: { Allow: "GET" } });
+}
+
 // Manuscripts live in a private storage bucket. Nobody gets a permanent
 // link to them — this route checks ownership on every request, then
 // streams back a copy watermarked with the downloader's email.
@@ -207,6 +215,32 @@ export async function GET(
       });
     }
     fileBytes = watermarkResult.bytes;
+  }
+
+  // DOWNLOADS-1 (1a): a buyer's download is recorded BEFORE the file is
+  // sent, with the exact key served (which version), and a failed
+  // record sends no file -- the 14-day cancel right ends at the first
+  // download, so there is never a download without its row.
+  // record_book_download() re-checks the active purchase itself (under
+  // a lock on the purchase row). The author's own download is not a
+  // purchase and is not recorded. The log line carries opaque ids and
+  // the error code only.
+  if (book.author_id !== user.id) {
+    const { error: recordError } = await admin.rpc("record_book_download", {
+      p_reader_id: user.id,
+      p_book_id: book.id,
+      p_file_path: filePath,
+    });
+    if (recordError) {
+      console.error("Download: the download record failed, no file sent", {
+        bookId: id,
+        readerId: user.id,
+        code: recordError.code ?? null,
+      });
+      return NextResponse.redirect(
+        new URL(`/books/${id}?error=Could+not+download+that+file.+Please+try+again`, request.url),
+      );
+    }
   }
 
   const fileName = `${book.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.epub`;

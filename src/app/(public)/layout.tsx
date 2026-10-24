@@ -1,5 +1,7 @@
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { VisitorStats } from "@/components/visitor-stats";
+import { isVisitorStatsEnabled } from "@/lib/visitor-stats";
 
 // ADMIN-1A.5 FINAL PRE-COMMIT ADMIN LAYOUT CORRECTION: SiteHeader/
 // SiteFooter used to live directly in the true root layout
@@ -30,6 +32,10 @@ import { SiteFooter } from "@/components/site-footer";
 // group's own src/app/(public)/error.tsx, matching the not-found.tsx
 // treatment applied below for the identical structural reason -- see
 // that file's own comment.
+//
+// VISITOR STATS (pipeline item 6): the Vercel Web Analytics script loads
+// here, so /admin/* (outside this group) never loads it; on Production
+// only, and src/lib/visitor-stats.ts decides which of these pages count.
 export default function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
@@ -44,6 +50,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
         {children}
       </div>
       <SiteFooter />
+      {isVisitorStatsEnabled(process.env) && <VisitorStats />}
     </>
   );
 }

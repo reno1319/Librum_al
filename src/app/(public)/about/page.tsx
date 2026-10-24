@@ -3,6 +3,7 @@ import { ClosingCtaBand, PageBand, SECTION_CONTAINER } from "@/components/page-b
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { getAuthorPageCta } from "@/lib/author-page-cta";
+import { visibleTeam } from "@/lib/team";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -24,9 +25,13 @@ export const metadata: Metadata = {
 // AUTHOR PAGES REDESIGN: the green header band and the home page's
 // closing band (button by visitor, so this page reads auth per request);
 // the words are unchanged.
+//
+// TRUST PACK (pipeline item 5, 3. a and 4. a): "Who we are" renders only
+// once src/lib/team.ts holds the team's own words.
 
 export default async function AboutPage() {
   const cta = await getAuthorPageCta();
+  const team = visibleTeam();
 
   return (
     <main className="flex-1">
@@ -64,6 +69,23 @@ export default async function AboutPage() {
               for the full walkthrough.
             </p>
           </section>
+
+          {team.length > 0 && (
+            <section className="mt-12" aria-labelledby="team-heading">
+              <h2 id="team-heading" className="font-serif text-2xl font-normal text-primary">
+                Who we are
+              </h2>
+              <ul className="mt-4 flex flex-col gap-6">
+                {team.map((member) => (
+                  <li key={member.name}>
+                    <p className="font-semibold text-foreground">{member.name}</p>
+                    <p className="text-sm text-muted">{member.role}</p>
+                    <p className="mt-1.5 text-foreground/90">{member.bio}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <section className="mt-12">
             <SurfaceCard className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

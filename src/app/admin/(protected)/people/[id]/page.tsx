@@ -7,6 +7,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { loadStaffDisplayNames } from "@/lib/staff-display-names";
 import { Alert } from "@/components/ui/alert";
+import {
+  readPurchaseDownloadStates,
+  staffAmountLabel,
+  staffCancelLabel,
+  staffDownloadLabel,
+  type PurchaseDownloadState,
+} from "@/lib/book-downloads";
 import type { Metadata } from "next";
 import { bookStateLabel } from "../../books/book-admin-logic";
 import {
@@ -43,6 +50,12 @@ export const dynamic = "force-dynamic";
 // except on a staff row or their own row. The panel compares the
 // account_suspensions row with the Supabase Auth ban (read through the
 // admin auth API) and offers "Try again" when they disagree.
+// DOWNLOADS-1 (3a, 5): a Purchases box -- each book this account
+// bought, its amount, when it was downloaded (the download log) and
+// whether the 14-day cancel window is still open. purchase_download_
+// states() is service-role only and runs after the people.view gate; the
+// titles come from the same service-role client. There is no cancel
+// button: cancelling ships with the live POK build.
 
 type PenNameRow = { id: string; name: string; is_default: boolean };
 type BookRow = { id: string; title: string; status: string; pen: { name: string } | null };
@@ -156,7 +169,7 @@ export default async function AdminPersonPage({
   const canManage =
     roleHasPermission(viewer.role, "people.manage") && !person.is_staff && viewer.userId !== id;
 
-  const [reviewsResult, takedownsResult, staffNames, accessFix] = await Promise.all([
+  const [reviewsResult, takedownsResult, staffNames, accessFix, purchaseStates] = await Promise.all([
     bookIds.length > 0
       ? admin.from("book_reviews").select("book_id").eq("status", "pending").in("book_id", bookIds).returns<{ book_id: string }[]>()
       : Promise.resolve({ data: [] as { book_id: string }[], error: null }),
@@ -165,10 +178,25 @@ export default async function AdminPersonPage({
       : Promise.resolve({ data: [] as { book_id: string }[], error: null }),
     loadStaffDisplayNames(supabase, staffIds),
     canManage && !suspensionsResult.error ? readAccessFix(admin, id, suspensions) : Promise.resolve(null),
+    readPurchaseDownloadStates(admin, id),
   ]);
 
+  const purchases: PurchaseDownloadState[] = purchaseStates ?? [];
+  const purchaseBookIds = Array.from(new Set(purchases.map((p) => p.bookId)));
+  const purchaseTitlesResult =
+    purchaseBookIds.length > 0
+      ? await admin.from("books").select("id, title").in("id", purchaseBookIds).returns<{ id: string; title: string }[]>()
+      : { data: [] as { id: string; title: string }[], error: null };
+  const purchaseTitles = new Map((purchaseTitlesResult.data ?? []).map((b) => [b.id, b.title]));
+
   const loadFailed = Boolean(
-    pensResult.error || booksResult.error || suspensionsResult.error || reviewsResult.error || takedownsResult.error,
+    pensResult.error ||
+      booksResult.error ||
+      suspensionsResult.error ||
+      reviewsResult.error ||
+      takedownsResult.error ||
+      purchaseStates === null ||
+      purchaseTitlesResult.error,
   );
   if (loadFailed) {
     console.error("admin person: detail read failed", {
@@ -177,6 +205,8 @@ export default async function AdminPersonPage({
       suspensions: suspensionsResult.error,
       reviews: reviewsResult.error,
       takedowns: takedownsResult.error,
+      purchases: purchaseStates === null,
+      purchaseTitles: purchaseTitlesResult.error,
     });
   }
 
@@ -286,6 +316,30 @@ export default async function AdminPersonPage({
           </ul>
         )}
         {books.length === BOOKS_SHOWN && <p className="mt-2 text-sm text-muted">Showing the newest {BOOKS_SHOWN} books.</p>}
+      </section>
+
+      <section aria-labelledby="person-purchases" className={SECTION_CLASSES}>
+        <h2 id="person-purchases" className={SECTION_HEADING_CLASSES}>
+          Purchases
+        </h2>
+        {purchases.length === 0 ? (
+          <p className="text-sm text-muted">{purchaseStates === null ? "Couldn't load purchases." : "No purchases."}</p>
+        ) : (
+          <ul className="flex flex-col">
+            {purchases.map((purchase) => (
+              <li key={purchase.purchaseId} className="border-t border-border py-2 text-sm first:border-t-0">
+                <p className="font-semibold break-words text-primary">
+                  {purchaseTitles.get(purchase.bookId) ?? "Unknown book"}
+                </p>
+                <p className="text-muted">
+                  Bought {formatTimestampAsDate(purchase.boughtAt)} · {staffAmountLabel(purchase)}
+                </p>
+                <p>{staffDownloadLabel(purchase)}</p>
+                <p>{staffCancelLabel(purchase)}</p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section aria-labelledby="person-history" className={SECTION_CLASSES}>
