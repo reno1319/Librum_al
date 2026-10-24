@@ -75,6 +75,12 @@ import type { Permission, StaffRole } from "@/lib/types";
 // catalog.feature it IS in SQL staff_has_permission() (migration
 // 20261020120000): admin_approve_book_review and
 // admin_send_back_book_review check it themselves.
+//
+// PEOPLE-1 adds people.view (the People list and each person's page)
+// and people.manage (suspend, lift), owner and admin only (Renato's 1a).
+// Both are in SQL staff_has_permission() (migration 20261023090000):
+// admin_list_people, admin_suspend_account and admin_lift_suspension
+// check them themselves.
 export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>> = {
   owner: [
     "admin.access",
@@ -90,6 +96,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "blog.manage",
     "catalog.feature",
     "books.review",
+    "people.view",
+    "people.manage",
   ],
   admin: [
     "admin.access",
@@ -104,6 +112,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>
     "blog.manage",
     "catalog.feature",
     "books.review",
+    "people.view",
+    "people.manage",
   ],
   moderator: ["admin.access", "reports.view", "reports.resolve"],
   support: ["admin.access", "refunds.view"],

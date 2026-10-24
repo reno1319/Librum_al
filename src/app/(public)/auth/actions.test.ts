@@ -324,6 +324,21 @@ describe("login: never marked as a recovery session", () => {
     expect(mockCookieStore.delete).not.toHaveBeenCalled();
   });
 
+  // PEOPLE-2: Supabase checks a ban before the password, so a banned
+  // account must look exactly like a wrong password, URL included.
+  it("a banned account gets the wrong-password redirect, never the ban message", async () => {
+    mockSupabaseAuth.signInWithPassword.mockResolvedValue({
+      error: { code: "user_banned", message: "User is banned" },
+    });
+    const resume = "/library";
+    await expectRedirectTo(
+      login(formData({ email: "reader@example.com", password: "anything", next: resume })),
+      `/login?error=Invalid%20login%20credentials&next=${encodeURIComponent(resume)}`,
+    );
+    expect(String(mockRedirect.mock.calls.at(-1)?.[0])).not.toMatch(/banned|suspended/i);
+    expect(mockCookieStore.delete).not.toHaveBeenCalled();
+  });
+
   // QA-FIX-1: a mistyped password must not lose the POK resume link.
   it("invalid credentials keep a safe next and drop an unsafe one", async () => {
     mockSupabaseAuth.signInWithPassword.mockResolvedValue({

@@ -17,6 +17,8 @@ const ALL_PERMISSIONS: Permission[] = [
   "blog.manage",
   "catalog.feature",
   "books.review",
+  "people.view",
+  "people.manage",
 ];
 
 // Exhaustive stress test of the full role x permission matrix -- every
@@ -41,6 +43,8 @@ const EXPECTED: Record<StaffRole, Permission[]> = {
     "blog.manage",
     "catalog.feature",
     "books.review",
+    "people.view",
+    "people.manage",
   ],
   admin: [
     "admin.access",
@@ -55,6 +59,8 @@ const EXPECTED: Record<StaffRole, Permission[]> = {
     "blog.manage",
     "catalog.feature",
     "books.review",
+    "people.view",
+    "people.manage",
   ],
   moderator: ["admin.access", "reports.view", "reports.resolve"],
   support: ["admin.access", "refunds.view"],

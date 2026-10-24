@@ -287,7 +287,7 @@ export default async function EditBookPage({
             action={updateBook.bind(null, book.id)}
             className="flex flex-col gap-10"
           >
-            <section>
+            <section id="details" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal">Book details</h2>
               <div className="mt-4 flex flex-col gap-4">
                 <label className="flex flex-col gap-1 text-sm">
@@ -603,7 +603,7 @@ export default async function EditBookPage({
               </div>
             </section>
 
-            <section>
+            <section id="files" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal">Files</h2>
               <div className="mt-4 flex flex-col gap-6">
                 {/* ADMIN-3-REVIEW (C): a live book's new file or cover
@@ -630,7 +630,7 @@ export default async function EditBookPage({
               </div>
             </section>
 
-            <section>
+            <section id="pricing" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal">Pricing</h2>
               <div className="mt-4">
                 {/* ALL-WIRING-2: an ALL text field, not a USD number
@@ -753,7 +753,9 @@ export default async function EditBookPage({
         </div>
 
         <div className="flex flex-col gap-6">
-          <section className="rounded-card border border-border bg-surface p-4 shadow-sm">
+          {/* PHONE PASS (D3): the Dashboard row menu's Unpublish (and the
+              other menu items above) jump to these section ids. */}
+          <section id="publishing" className="scroll-mt-6 rounded-card border border-border bg-surface p-4 shadow-sm">
             <h2 className="font-serif text-lg font-normal">Publishing</h2>
             <p className="mt-2 text-sm">
               Status:{" "}

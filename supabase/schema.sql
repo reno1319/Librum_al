@@ -1585,6 +1585,8 @@ grant execute on function public.update_bundle_with_membership(uuid, uuid, text,
 -- at signup is not public until something is published under it.
 -- ============================================================
 
+-- PEOPLE-1 restates this view near the end of this file (a suspended
+-- account is hidden); account_suspensions is defined there.
 create view public.public_pen_names as
   select pn.id, pn.name, pn.bio, pn.avatar_path, pn.links
   from public.pen_names pn
@@ -2777,6 +2779,8 @@ grant select
   to anon, authenticated;
 
 -- Every series is listed, as today, without the account.
+-- PEOPLE-1 restates this view near the end of this file (a suspended
+-- account is hidden); account_suspensions is defined there.
 create view public.public_series as
   select s.id, s.title, s.pen_name_id, s.created_at
   from public.series s;
@@ -3015,6 +3019,8 @@ grant update (book_id, reader_id, rating, body)
 -- No reader_id. reviewer_name is the reviewer's default pen name when
 -- the reviewer is an author with at least one book (today's
 -- public_author_profiles rule, 20261019154308; 22a), else null.
+-- PEOPLE-1 restates this view near the end of this file (a suspended
+-- account is hidden); account_suspensions is defined there.
 create view public.public_reviews
   with (security_barrier)
 as
@@ -7739,14 +7745,15 @@ begin
     'blog_post.published', 'blog_post.unpublished', 'blog_post.deleted',
     'pen_name.links_removed',
     'book.unpublished', 'book.allowed_again',
-    'book.review_approved', 'book.review_sent_back'
+    'book.review_approved', 'book.review_sent_back',
+    'account.suspended', 'account.suspension_lifted'
   ) then
     raise exception 'invalid action filter';
   end if;
 
   if p_target_type is not null and p_target_type not in (
     'staff_members', 'book_reports', 'refund_requests', 'blog_posts',
-    'pen_names', 'books'
+    'pen_names', 'books', 'profiles'
   ) then
     raise exception 'invalid target_type filter';
   end if;
@@ -10790,6 +10797,7 @@ declare
   v_payoutable bigint;
   v_active_reservation boolean;
   v_has_destination boolean;
+  v_suspended boolean;
 begin
   select balance.available_minor into v_available
   from public.author_ledger_balance(p_author_id) balance
@@ -10823,6 +10831,13 @@ begin
     where apd.author_id = p_author_id and apd.currency = p_currency
   );
 
+  -- PEOPLE-1 (11a): a suspended author is held, checked first.
+  v_suspended := exists (
+    select 1
+    from public.account_suspensions s
+    where s.user_id = p_author_id and s.lifted_at is null
+  );
+
   if v_available is null then
     v_payoutable := null;
   else
@@ -10838,7 +10853,10 @@ begin
   threshold_minor := v_threshold;
   active_reservation := v_active_reservation;
 
-  if v_threshold is null then
+  if v_suspended then
+    eligible := false;
+    ineligible_reason := 'account_suspended';
+  elsif v_threshold is null then
     eligible := false;
     ineligible_reason := 'no_settings';
   elsif v_minimum_policy is null then
@@ -11376,7 +11394,8 @@ as $$
             'admin.access', 'reports.view', 'reports.resolve',
             'refunds.view', 'refunds.resolve', 'staff.view', 'audit.view',
             'finance.view', 'finance.payout_export', 'finance.payout_operate',
-            'blog.view', 'blog.manage', 'books.review'
+            'blog.view', 'blog.manage', 'books.review',
+            'people.view', 'people.manage'
           )
         )
         or (
@@ -13751,3 +13770,704 @@ $$;
 revoke all on function public.admin_send_back_book_review(uuid, text, text)
   from public, anon, authenticated, service_role;
 grant execute on function public.admin_send_back_book_review(uuid, text, text) to authenticated;
+
+-- ============================================================
+-- PEOPLE-1 (migration 20261023090000): the admin People list and account
+-- suspension. Suspension history (read only through the service role;
+-- no write for anyone), the publish and direct-delete locks on a suspended
+-- author's books and bundles (LB464, LB465), the caller's own
+-- my_account_is_suspended(), admin_list_people(), admin_suspend_account()
+-- and admin_lift_suspension(), and the three public views restated so a
+-- suspended account's pen names, series and reviews are hidden. Same
+-- statements and reasoning as
+-- migrations/20261023090000_account_suspensions.sql; its
+-- staff_has_permission(), author_payout_eligibility() and
+-- list_admin_audit_events() changes are made in place above.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 2. Suspension history
+-- ------------------------------------------------------------
+create table public.account_suspensions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles(id) on delete set null,
+  reason text not null
+    constraint account_suspensions_reason_check
+    check (char_length(reason) between 1 and 2000
+           and reason = btrim(reason, E' \t\r\n')),
+  book_ids uuid[] not null default '{}',
+  bundle_ids uuid[] not null default '{}',
+  suspended_by uuid references public.profiles(id) on delete set null,
+  suspended_at timestamptz not null default now(),
+  lifted_at timestamptz,
+  lifted_by uuid references public.profiles(id) on delete set null,
+  constraint account_suspensions_lifted_by_check check (lifted_at is not null or lifted_by is null)
+);
+
+create unique index account_suspensions_one_active_per_user
+  on public.account_suspensions (user_id)
+  where lifted_at is null;
+
+create index account_suspensions_user_id_suspended_at_idx
+  on public.account_suspensions (user_id, suspended_at desc);
+
+-- RLS on and no policy: no client session reads a row. Staff read the
+-- history through the service-role client, after requireStaff
+-- ("people.view") on /admin/people/[id], as book_reviews is read.
+alter table public.account_suspensions enable row level security;
+
+revoke all on public.account_suspensions from public, anon, authenticated, service_role;
+grant select on public.account_suspensions to service_role;
+
+-- ------------------------------------------------------------
+-- 6. The lock: no publish, no direct delete while suspended
+-- ------------------------------------------------------------
+create function public.books_refuse_publish_while_author_suspended()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.status = 'published'
+     and exists (
+       select 1
+         from public.account_suspensions s
+        where s.user_id = new.author_id
+          and s.lifted_at is null
+     )
+  then
+    raise exception 'This account is suspended. Its books can''t be published until Librum lifts the suspension.'
+      using errcode = 'LB464';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_refuse_publish_while_author_suspended
+  before insert or update of status on public.books
+  for each row
+  execute function public.books_refuse_publish_while_author_suspended();
+
+revoke all on function public.books_refuse_publish_while_author_suspended()
+  from public, anon, authenticated, service_role;
+
+create function public.bundles_refuse_publish_while_author_suspended()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.status = 'published'
+     and exists (
+       select 1
+         from public.account_suspensions s
+        where s.user_id = new.author_id
+          and s.lifted_at is null
+     )
+  then
+    raise exception 'This account is suspended. Its bundles can''t be published until Librum lifts the suspension.'
+      using errcode = 'LB464';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger bundles_refuse_publish_while_author_suspended
+  before insert or update of status on public.bundles
+  for each row
+  execute function public.bundles_refuse_publish_while_author_suspended();
+
+revoke all on function public.bundles_refuse_publish_while_author_suspended()
+  from public, anon, authenticated, service_role;
+
+-- authenticated holds DELETE on books and bundles (their own rows), so a
+-- still-valid access token could delete through the data API. A cascade
+-- from deleting the account still goes through (pg_trigger_depth() > 1),
+-- as in books_refuse_delete_while_taken_down.
+create function public.books_refuse_delete_while_author_suspended()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if pg_catalog.pg_trigger_depth() <= 1
+     and exists (
+       select 1
+         from public.account_suspensions s
+        where s.user_id = old.author_id
+          and s.lifted_at is null
+     )
+  then
+    raise exception 'This account is suspended. Its books can''t be deleted until Librum lifts the suspension.'
+      using errcode = 'LB465';
+  end if;
+  return old;
+end;
+$$;
+
+create trigger books_refuse_delete_while_author_suspended
+  before delete on public.books
+  for each row
+  execute function public.books_refuse_delete_while_author_suspended();
+
+revoke all on function public.books_refuse_delete_while_author_suspended()
+  from public, anon, authenticated, service_role;
+
+create function public.bundles_refuse_delete_while_author_suspended()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if pg_catalog.pg_trigger_depth() <= 1
+     and exists (
+       select 1
+         from public.account_suspensions s
+        where s.user_id = old.author_id
+          and s.lifted_at is null
+     )
+  then
+    raise exception 'This account is suspended. Its bundles can''t be deleted until Librum lifts the suspension.'
+      using errcode = 'LB465';
+  end if;
+  return old;
+end;
+$$;
+
+create trigger bundles_refuse_delete_while_author_suspended
+  before delete on public.bundles
+  for each row
+  execute function public.bundles_refuse_delete_while_author_suspended();
+
+revoke all on function public.bundles_refuse_delete_while_author_suspended()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 7. The caller's own suspension state
+-- ------------------------------------------------------------
+create function public.my_account_is_suspended()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select auth.uid() is not null
+     and exists (
+       select 1
+         from public.account_suspensions s
+        where s.user_id = auth.uid()
+          and s.lifted_at is null
+     );
+$$;
+
+revoke all on function public.my_account_is_suspended()
+  from public, anon, authenticated, service_role;
+grant execute on function public.my_account_is_suspended() to authenticated;
+
+-- ------------------------------------------------------------
+-- 3. The People list
+-- ------------------------------------------------------------
+create function public.admin_list_people(
+  p_query text default null,
+  p_kind text default 'everyone',
+  p_limit integer default 50,
+  p_offset integer default 0,
+  p_user_id uuid default null
+)
+returns table (
+  user_id uuid,
+  display_name text,
+  email text,
+  account_type text,
+  is_staff boolean,
+  live_books integer,
+  in_review_books integer,
+  draft_books integer,
+  paid_sales integer,
+  owned_books integer,
+  has_bank_account boolean,
+  joined_at timestamptz,
+  suspended boolean,
+  total_count bigint
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_query text;
+  v_pattern text;
+  v_limit integer;
+  v_offset integer;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('people.view') then
+    raise exception 'not authorized';
+  end if;
+
+  if coalesce(p_kind, 'everyone') not in ('everyone', 'authors', 'readers', 'suspended') then
+    raise exception 'invalid kind';
+  end if;
+
+  v_query := pg_catalog.btrim(coalesce(p_query, ''), E' \t\r\n');
+  if pg_catalog.char_length(v_query) > 200 then
+    raise exception 'invalid query';
+  end if;
+  if v_query = '' then
+    v_pattern := null;
+  else
+    v_pattern := '%'
+      || pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(v_query, '\', '\\'), '%', '\%'), '_', '\_')
+      || '%';
+  end if;
+
+  v_limit := least(greatest(coalesce(p_limit, 50), 1), 100);
+  v_offset := greatest(coalesce(p_offset, 0), 0);
+
+  return query
+    with matched as (
+      select p.id, p.display_name, p.role, p.created_at, au.email
+        from public.profiles p
+        left join auth.users au on au.id = p.id
+       where (p_user_id is null or p.id = p_user_id)
+         and (
+           coalesce(p_kind, 'everyone') = 'everyone'
+           or (p_kind = 'authors' and p.role = 'author')
+           or (p_kind = 'readers' and p.role = 'reader')
+           or (p_kind = 'suspended' and exists (
+                 select 1 from public.account_suspensions s
+                  where s.user_id = p.id and s.lifted_at is null))
+         )
+         and (
+           v_pattern is null
+           or p.display_name ilike v_pattern
+           or au.email ilike v_pattern
+           or exists (
+                select 1 from public.pen_names pn
+                 where pn.author_id = p.id and pn.name ilike v_pattern)
+         )
+    ),
+    page as (
+      select m.*, pg_catalog.count(*) over () as total
+        from matched m
+       order by m.created_at desc, m.id desc
+       limit v_limit offset v_offset
+    )
+    select
+      pg.id,
+      pg.display_name,
+      pg.email::text,
+      pg.role,
+      exists (select 1 from public.staff_members sm where sm.user_id = pg.id),
+      (select pg_catalog.count(*)::integer from public.books b
+        where b.author_id = pg.id and b.status = 'published'),
+      (select pg_catalog.count(*)::integer from public.books b
+        where b.author_id = pg.id and b.status = 'draft'
+          and exists (select 1 from public.book_reviews br
+                       where br.book_id = b.id and br.status = 'pending')),
+      (select pg_catalog.count(*)::integer from public.books b
+        where b.author_id = pg.id and b.status = 'draft'
+          and not exists (select 1 from public.book_reviews br
+                           where br.book_id = b.id and br.status = 'pending')),
+      (select pg_catalog.count(*)::integer
+         from public.purchases pu
+         join public.books b on b.id = pu.book_id
+        where b.author_id = pg.id
+          and pu.amount_cents > 0
+          and pu.refunded_at is null),
+      (select pg_catalog.count(*)::integer from public.purchases pu
+        where pu.reader_id = pg.id and pu.refunded_at is null),
+      exists (select 1 from public.author_payout_destinations apd where apd.author_id = pg.id),
+      pg.created_at,
+      exists (select 1 from public.account_suspensions s
+               where s.user_id = pg.id and s.lifted_at is null),
+      pg.total
+    from page pg
+    order by pg.created_at desc, pg.id desc;
+end;
+$$;
+
+revoke all on function public.admin_list_people(text, text, integer, integer, uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.admin_list_people(text, text, integer, integer, uuid) to authenticated;
+
+-- ------------------------------------------------------------
+-- 4. Suspend
+-- ------------------------------------------------------------
+create function public.admin_suspend_account(p_user_id uuid, p_reason text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_reason text;
+  v_book_ids uuid[];
+  v_bundle_ids uuid[];
+  v_choice_cleared boolean;
+  v_suspension_id uuid;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('people.manage') then
+    raise exception 'not authorized';
+  end if;
+
+  if p_user_id is null then
+    raise exception 'no account found for this id';
+  end if;
+
+  if p_user_id = v_actor_id then
+    raise exception 'you cannot suspend yourself';
+  end if;
+
+  v_reason := pg_catalog.btrim(coalesce(p_reason, ''), E' \t\r\n');
+  if pg_catalog.char_length(v_reason) < 1 or pg_catalog.char_length(v_reason) > 2000 then
+    raise exception 'invalid reason';
+  end if;
+
+  -- The profile first: two staff suspending at once queue here.
+  perform 1 from public.profiles p where p.id = p_user_id for update;
+  if not found then
+    raise exception 'no account found for this id';
+  end if;
+
+  if exists (select 1 from public.staff_members sm where sm.user_id = p_user_id) then
+    raise exception 'staff cannot be suspended';
+  end if;
+
+  if exists (
+    select 1 from public.account_suspensions s
+     where s.user_id = p_user_id and s.lifted_at is null
+  ) then
+    raise exception 'this account is already suspended';
+  end if;
+
+  -- Every bundle, then every book, of every status: a publish racing
+  -- this waits on the row lock and is then refused by the LB464 trigger.
+  perform 1 from public.bundles bu where bu.author_id = p_user_id order by bu.id for update;
+  perform 1 from public.books bo where bo.author_id = p_user_id order by bo.id for update;
+
+  select coalesce(pg_catalog.array_agg(bu.id order by bu.id), '{}'::uuid[])
+    into v_bundle_ids
+    from public.bundles bu
+   where bu.author_id = p_user_id and bu.status = 'published';
+
+  select coalesce(pg_catalog.array_agg(bo.id order by bo.id), '{}'::uuid[]),
+         coalesce(pg_catalog.bool_or(bo.librum_choice_at is not null), false)
+    into v_book_ids, v_choice_cleared
+    from public.books bo
+   where bo.author_id = p_user_id and bo.status = 'published';
+
+  if pg_catalog.cardinality(v_bundle_ids) > 0 then
+    update public.bundles
+       set status = 'draft'
+     where id = any (v_bundle_ids);
+  end if;
+
+  if pg_catalog.cardinality(v_book_ids) > 0 then
+    update public.books
+       set status = 'draft',
+           librum_choice_at = null
+     where id = any (v_book_ids);
+  end if;
+
+  insert into public.account_suspensions (user_id, reason, book_ids, bundle_ids, suspended_by)
+  values (p_user_id, v_reason, v_book_ids, v_bundle_ids, v_actor_id)
+  returning id into v_suspension_id;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (
+    v_actor_id,
+    'account.suspended',
+    'profiles',
+    p_user_id,
+    pg_catalog.jsonb_build_object(
+      'reason', v_reason,
+      'books_unpublished', pg_catalog.cardinality(v_book_ids),
+      'bundles_unpublished', pg_catalog.cardinality(v_bundle_ids),
+      'librum_choice_cleared', v_choice_cleared
+    )
+  );
+
+  return v_suspension_id;
+end;
+$$;
+
+revoke all on function public.admin_suspend_account(uuid, text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.admin_suspend_account(uuid, text) to authenticated;
+
+-- ------------------------------------------------------------
+-- 5. Lift
+-- ------------------------------------------------------------
+create function public.admin_lift_suspension(p_user_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_suspension public.account_suspensions%rowtype;
+  v_book_id uuid;
+  v_bundle_id uuid;
+  v_restored_books uuid[] := '{}';
+  v_draft_books uuid[] := '{}';
+  v_restored_bundles uuid[] := '{}';
+  v_draft_bundles uuid[] := '{}';
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('people.manage') then
+    raise exception 'not authorized';
+  end if;
+
+  -- The profile first, as admin_suspend_account locks it.
+  perform 1 from public.profiles p where p.id = p_user_id for update;
+
+  select * into v_suspension
+    from public.account_suspensions s
+   where s.user_id = p_user_id and s.lifted_at is null
+     for update;
+
+  if v_suspension.id is null then
+    raise exception 'this account is not suspended';
+  end if;
+
+  update public.account_suspensions
+     set lifted_at = pg_catalog.now(),
+         lifted_by = v_actor_id
+   where id = v_suspension.id;
+
+  perform 1 from public.bundles bu where bu.author_id = p_user_id order by bu.id for update;
+  perform 1 from public.books bo where bo.author_id = p_user_id order by bo.id for update;
+
+  foreach v_book_id in array v_suspension.book_ids loop
+    if exists (
+         select 1 from public.books bo
+          where bo.id = v_book_id
+            and bo.author_id = p_user_id
+            and bo.status = 'draft'
+       )
+       and not exists (
+         select 1 from public.book_takedowns t
+          where t.book_id = v_book_id and t.lifted_at is null
+       )
+    then
+      begin
+        update public.books set status = 'published' where id = v_book_id;
+        v_restored_books := v_restored_books || v_book_id;
+      exception when sqlstate 'LB462' then
+        v_draft_books := v_draft_books || v_book_id;
+      end;
+    else
+      v_draft_books := v_draft_books || v_book_id;
+    end if;
+  end loop;
+
+  foreach v_bundle_id in array v_suspension.bundle_ids loop
+    if exists (
+         select 1 from public.bundles bu
+          where bu.id = v_bundle_id
+            and bu.author_id = p_user_id
+            and bu.status = 'draft'
+       )
+       and exists (select 1 from public.bundle_books bb where bb.bundle_id = v_bundle_id)
+       and not exists (
+         select 1
+           from public.bundle_books bb
+           join public.books bo on bo.id = bb.book_id
+          where bb.bundle_id = v_bundle_id
+            and bo.status <> 'published'
+       )
+    then
+      update public.bundles set status = 'published' where id = v_bundle_id;
+      v_restored_bundles := v_restored_bundles || v_bundle_id;
+    else
+      v_draft_bundles := v_draft_bundles || v_bundle_id;
+    end if;
+  end loop;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (
+    v_actor_id,
+    'account.suspension_lifted',
+    'profiles',
+    p_user_id,
+    pg_catalog.jsonb_build_object(
+      'books_restored', pg_catalog.cardinality(v_restored_books),
+      'books_kept_draft', pg_catalog.cardinality(v_draft_books),
+      'bundles_restored', pg_catalog.cardinality(v_restored_bundles),
+      'bundles_kept_draft', pg_catalog.cardinality(v_draft_bundles)
+    )
+  );
+
+  return pg_catalog.jsonb_build_object(
+    'restored_book_ids', pg_catalog.to_jsonb(v_restored_books),
+    'draft_book_ids', pg_catalog.to_jsonb(v_draft_books),
+    'restored_bundle_ids', pg_catalog.to_jsonb(v_restored_bundles),
+    'draft_bundle_ids', pg_catalog.to_jsonb(v_draft_bundles)
+  );
+end;
+$$;
+
+revoke all on function public.admin_lift_suspension(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.admin_lift_suspension(uuid) to authenticated;
+
+-- ------------------------------------------------------------
+-- 9. Public views: a suspended account's reviews (F1a), pen names and
+-- series (F3a) are hidden. Same columns, so CREATE OR REPLACE keeps
+-- every existing grant.
+-- ------------------------------------------------------------
+create or replace view public.public_pen_names as
+  select pn.id, pn.name, pn.bio, pn.avatar_path, pn.links
+  from public.pen_names pn
+  where (
+       exists (select 1 from public.books b where b.pen_name_id = pn.id)
+    or exists (select 1 from public.series s where s.pen_name_id = pn.id)
+    or exists (select 1 from public.bundles bu where bu.pen_name_id = pn.id)
+  )
+    and not exists (
+      select 1 from public.account_suspensions sus
+       where sus.user_id = pn.author_id and sus.lifted_at is null
+    );
+
+create or replace view public.public_series as
+  select s.id, s.title, s.pen_name_id, s.created_at
+  from public.series s
+  where not exists (
+    select 1 from public.account_suspensions sus
+     where sus.user_id = s.author_id and sus.lifted_at is null
+  );
+
+create or replace view public.public_reviews
+  with (security_barrier)
+as
+  select r.id, r.book_id, r.rating, r.body, r.created_at,
+         (select pn.name
+            from public.profiles p
+            join public.pen_names pn on pn.author_id = p.id and pn.is_default
+           where p.id = r.reader_id
+             and p.role = 'author'
+             and exists (select 1 from public.books b where b.author_id = p.id)) as reviewer_name
+  from public.reviews r
+  where exists (select 1 from public.public_books pb where pb.id = r.book_id)
+    and not exists (
+      select 1 from public.account_suspensions sus
+       where sus.user_id = r.reader_id and sus.lifted_at is null
+    );
+
+-- ============================================================
+-- SUPABASE 2026-10-30 DATA API GRANTS: explicit grants for what the
+-- platform's old default privileges used to give.
+--
+-- Until 2026-10-30 Supabase's default privileges in public gave anon,
+-- authenticated and service_role every privilege on each new table and
+-- view. From that date new tables and views no longer get SELECT,
+-- INSERT, UPDATE or DELETE for those roles (new sequences no longer get
+-- USAGE or SELECT). Staging and Production keep the grants they already
+-- have, but a rebuild from this file would lose every grant that came
+-- only from the old default. The statements below restore exactly those
+-- grants, so a rebuild reproduces staging's privileges (checked
+-- 2026-10-22: staging equals the old-default rebuild of this file, 213
+-- rows) and test 078_data_api_grant_contract pins the result.
+--
+-- Mirror only: nothing here adds or removes a privilege compared with
+-- staging. Every relation and role below held the full set before the
+-- change, so `grant all` reproduces it. anon's existing grants on
+-- book_reports, bundle_checkout_reader_holds,
+-- bundle_checkout_reservations and wishlist_items are kept as they are
+-- today (RLS guards their rows); narrowing them is a separate change.
+-- Default privileges are never used to grant anything: grants are
+-- explicit per relation, and anon must keep NO grant on base tables such
+-- as pen_names, books, profiles, purchases and payments.
+--
+-- Rule for every migration from now on: a new table or view does
+--   revoke all on <rel> from public, anon, authenticated, service_role;
+-- then grants exactly what each role needs (the book_reviews pattern,
+-- service_role included: the server-side admin client only reaches what
+-- it is granted), and updates the 078_data_api_grant_contract snapshot
+-- in the same change.
+-- ============================================================
+
+-- service_role: the server-side admin client (webhooks, checkout
+-- fulfilment, admin pages).
+grant all on table
+  public.admin_audit_log,
+  public.author_ledger_entries,
+  public.author_payout_settings,
+  public.blog_posts,
+  public.book_checkout_intents,
+  public.book_contributors,
+  public.book_reports,
+  public.book_views,
+  public.books,
+  public.bundle_checkout_reader_holds,
+  public.bundle_checkout_reservations,
+  public.bundle_checkout_snapshots,
+  public.bundles,
+  public.discount_codes,
+  public.payment_disputes,
+  public.payment_events,
+  public.payment_refunds,
+  public.payments,
+  public.pen_name_follows,
+  public.pen_names,
+  public.profiles,
+  public.purchases,
+  public.refund_issuance_attempts,
+  public.refund_request_items,
+  public.refund_requests,
+  public.reviews,
+  public.series,
+  public.staff_members,
+  public.wishlist_items
+  to service_role;
+
+grant all on table
+  public.author_book_purchases,
+  public.author_bundle_sales,
+  public.public_books,
+  public.public_bundles,
+  public.public_pen_names,
+  public.public_reviews,
+  public.public_series,
+  public.reader_bundle_purchases,
+  public.reader_refund_requests
+  to service_role;
+
+-- authenticated: RLS is on for all five and decides which rows.
+grant all on table
+  public.book_reports,
+  public.book_views,
+  public.bundle_checkout_reader_holds,
+  public.bundle_checkout_reservations,
+  public.wishlist_items
+  to authenticated;
+
+-- anon: kept exactly as today; RLS is on for all four and decides
+-- which rows.
+grant all on table
+  public.book_reports,
+  public.bundle_checkout_reader_holds,
+  public.bundle_checkout_reservations,
+  public.wishlist_items
+  to anon;

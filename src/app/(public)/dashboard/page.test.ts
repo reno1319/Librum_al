@@ -214,3 +214,34 @@ describe("DashboardPage: step 4 dashboard", () => {
     expect(none).toContain("No books match your search.");
   });
 });
+
+// HEADER-NAME r2 (Renato 11:52Z): the greeting lives in the site header
+// only; the Dashboard shows neither a greeting nor the old grey line, and
+// reads no profiles row.
+describe("DashboardPage: no greeting line (HEADER-NAME r2)", () => {
+  it("renders the heading alone and never reads profiles", async () => {
+    const tablesRead: string[] = [];
+    const chain = () => {
+      const builder: Record<string, unknown> = {};
+      for (const method of ["select", "in", "is", "eq", "not", "order"]) builder[method] = () => builder;
+      builder.returns = () => Promise.resolve({ data: [], error: null });
+      builder.single = () => Promise.resolve({ data: { display_name: "Renato Kalemi" }, error: null });
+      return builder;
+    };
+    mockCreateClient.mockImplementation((() => ({
+      auth: { getUser: () => Promise.resolve({ data: { user: { id: "author-1", email: "r@example.com" } } }) },
+      from: (table: string) => {
+        tablesRead.push(table);
+        return chain();
+      },
+      rpc: () => Promise.resolve({ data: [], error: null }),
+      storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://x/c.jpg" } }) }) },
+    })) as never);
+    const element = await DashboardPage({ searchParams: Promise.resolve({}) });
+    const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+    expect(html).toContain("Your dashboard");
+    expect(html).not.toMatch(/>Hello\b/);
+    expect(html).not.toContain("Manage your books, sales, and earnings.");
+    expect(tablesRead).not.toContain("profiles");
+  });
+});

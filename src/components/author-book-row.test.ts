@@ -102,3 +102,64 @@ describe("AuthorBookRow: In review and sent back (ADMIN-3)", () => {
     expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
   });
 });
+
+// PHONE PASS (D3, D4 / Renato 4a 5a): Edit (or Continue setup) plus a
+// "···" menu on every row; the menu's items, by book state.
+describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
+  const LIVE = { ...BOOK, status: "published" as const, price_all: 499 };
+  const editBase = `/dashboard/books/${BOOK.id}/edit`;
+
+  it("a live book: Edit plus ···, and every menu item including View and Unpublish", () => {
+    const html = render({ book: LIVE, missing: [] });
+    expect(html).toContain(">Edit<");
+    expect(html).toContain(`aria-label="More actions for ${BOOK.title}"`);
+    expect(html).toContain(">···<");
+    expect(html).not.toContain(">More actions<");
+    for (const [label, href] of [
+      ["Edit details", `${editBase}#details`],
+      ["Change manuscript or cover", `${editBase}#files`],
+      ["Change price", `${editBase}#pricing`],
+      ["View in Bookstore", `/books/${BOOK.id}`],
+      ["Unpublish", `${editBase}#publishing`],
+    ]) {
+      expect(html).toContain(`href="${href}"`);
+      expect(html).toContain(`>${label}<`);
+    }
+    expect(html).toContain(">Delete<");
+  });
+
+  it("the separate View button is gone: /books/<id> appears once, inside the menu", () => {
+    const html = render({ book: LIVE, missing: [] });
+    expect(html.split(`href="/books/${BOOK.id}"`).length - 1).toBe(1);
+    expect(html.indexOf(`href="/books/${BOOK.id}"`)).toBeGreaterThan(html.indexOf("<summary"));
+  });
+
+  it("a draft: Continue setup plus ···, no View or Unpublish, Delete kept", () => {
+    const html = render();
+    expect(html).toContain("Continue setup");
+    expect(html).toContain(`aria-label="More actions for ${BOOK.title}"`);
+    expect(html).toContain(">Edit details<");
+    expect(html).not.toContain("View in Bookstore");
+    expect(html).not.toContain(">Unpublish<");
+    expect(html).toContain(">Delete<");
+  });
+
+  it("Unpublish is only a link to the Edit page, never a form of its own", () => {
+    const html = render({ book: LIVE, missing: [] });
+    expect(html.match(/<form/g)?.length).toBe(1);
+  });
+
+  it("the menu is a floating panel inside a <details>, the summary 44px square", () => {
+    const html = render({ book: LIVE, missing: [] });
+    expect(html).toMatch(/<div class="relative flex w-full[^"]*sm:w-auto"/);
+    expect(html).toMatch(/<details class="sm:relative"><summary[^>]*\bsize-11\b/);
+    expect(html).toMatch(/<div class="absolute left-0 top-full z-10[^"]*sm:right-0/);
+  });
+
+  it("r2 (audit N3): the row menu asks DismissableDetails to close when focus leaves it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const source = readFileSync(fileURLToPath(new URL("./author-book-row.tsx", import.meta.url)), "utf8");
+    expect(source).toContain('<DismissableDetails className="sm:relative" closeOnFocusOut>');
+  });
+});

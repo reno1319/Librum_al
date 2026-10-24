@@ -19,8 +19,15 @@ vi.mock("resend", () => ({
 
 process.env.RESEND_API_KEY = "test-key";
 
-const { sendNewBookEmails, sendBookTakedownEmail, sendBookApprovedEmail, sendBookSentBackEmail, escapeEmailHtml } =
-  await import("./email");
+const {
+  sendNewBookEmails,
+  sendBookTakedownEmail,
+  sendBookApprovedEmail,
+  sendBookSentBackEmail,
+  sendAccountSuspendedEmail,
+  sendAccountSuspensionLiftedEmail,
+  escapeEmailHtml,
+} = await import("./email");
 
 // PEN-NAMES-1 (4a): the email goes to the followers of the BOOK'S pen
 // name and names that pen name; the account's names are never read.
@@ -190,6 +197,34 @@ describe("sendBookApprovedEmail / sendBookSentBackEmail", () => {
     expect(args.html).toContain("Line one &lt;script&gt;x&lt;/script&gt;<br>Line two");
     expect(args.html).not.toContain("<script>");
     expect(args.html).toContain("/dashboard");
+    expect(args.html).toContain("support@librum.al");
+  });
+});
+
+// PEOPLE-2: the suspend and lift emails. No reason is ever included.
+describe("sendAccountSuspendedEmail / sendAccountSuspensionLiftedEmail", () => {
+  beforeEach(() => sendMock.mockClear());
+
+  it("tells the person the account is suspended, without a reason", async () => {
+    await sendAccountSuspendedEmail("ana@example.com");
+    const args = sendMock.mock.calls[0][0];
+    expect(args.to).toBe("ana@example.com");
+    expect(args.subject).toBe("Your Librum account is suspended");
+    expect(args.html).toContain("You can't sign in to Librum for now.");
+    // Readers get this email too, so the books line is conditional in wording (audit N5).
+    expect(args.html).toContain("If you publish books on Librum, they are out of the Bookstore while your account is suspended.");
+    expect(args.html).toContain("Readers who already bought them keep them.");
+    expect(args.html).toContain("support@librum.al");
+    expect(args.html).not.toMatch(/reason/i);
+  });
+
+  it("tells the person the account is active again, with a log in link", async () => {
+    await sendAccountSuspensionLiftedEmail("ana@example.com");
+    const args = sendMock.mock.calls[0][0];
+    expect(args.subject).toBe("Your Librum account is active again");
+    expect(args.html).toContain("You can sign in again.");
+    expect(args.html).toContain("If you publish books on Librum, they are back in the Bookstore, except any that need review or were taken down.");
+    expect(args.html).toMatch(/href="[^"]*\/login"/);
     expect(args.html).toContain("support@librum.al");
   });
 });

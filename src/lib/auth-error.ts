@@ -29,6 +29,9 @@ const KNOWN_AUTH_ERROR_MESSAGES: Record<string, string> = {
   "Email not confirmed": "That email or password isn't right. Please try again.",
   "User already registered": "An account with that email already exists. Try logging in instead.",
   "Password should be at least 6 characters": "Password must be at least 6 characters.",
+  // PEOPLE-2: Supabase checks a ban before the password, so its ban
+  // message must read exactly like a wrong password (no enumeration).
+  "User is banned": "That email or password isn't right. Please try again.",
 };
 
 export function translateAuthErrorMessage(message: string | null | undefined): string | null {

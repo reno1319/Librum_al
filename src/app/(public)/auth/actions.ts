@@ -9,6 +9,9 @@ import { clearRecoverySession } from "@/lib/recovery-session";
 import { loginErrorPath, resolveSafeInternalPath } from "@/lib/safe-redirect";
 import type { SignupRole } from "@/lib/types";
 
+// Supabase's own wrong-password message, which auth-error.ts translates.
+const INVALID_CREDENTIALS_MESSAGE = "Invalid login credentials";
+
 // Never widen this beyond "author"/"reader" -- signup must never be
 // able to produce an "admin" profile. handle_new_user() (migration 028)
 // enforces the same whitelist again, independently, at the database
@@ -121,6 +124,17 @@ export async function login(formData: FormData) {
     // recovery marker exactly as it was -- a failed login attempt is
     // not evidence that recovery is actually over, and must never
     // downgrade that restriction.
+    //
+    // PEOPLE-2: Supabase Auth checks the ban BEFORE the password
+    // (supabase/auth internal/api/token.go, ResourceOwnerPasswordGrant),
+    // so "User is banned" would tell anyone typing any password that
+    // the address has a suspended account. It gets the same generic
+    // wrong-password message instead, in the URL too. The person
+    // themselves learns of the suspension from the email, and a session
+    // Proxy cuts off lands on /login?suspended=1.
+    if (error.code === "user_banned") {
+      redirect(loginErrorPath(INVALID_CREDENTIALS_MESSAGE, next));
+    }
     redirect(loginErrorPath(error.message, next));
   }
 

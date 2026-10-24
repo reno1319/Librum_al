@@ -57,9 +57,12 @@ export const dynamic = "force-dynamic";
 // under "Your books" (Sales & earnings, Financial balance, Payouts) is
 // gone -- the dashboard menu already links each page -- and with it the
 // payout-status label and the profiles read of stripe_account_id /
-// stripe_payouts_enabled it alone needed. This page reads no profiles
-// row. Paid publishing is decided by canPublishPaidTitle() alone (see
-// performPublish() in dashboard/books/actions.ts). The live POK build
+// stripe_payouts_enabled it alone needed. This page reads no
+// profiles row (HEADER-NAME r2, Renato 11:52Z: the greeting moved to the
+// site header, so PHONE PASS's Dashboard greeting and its read are gone
+// again). Paid publishing is decided by
+// canPublishPaidTitle() alone (see performPublish() in
+// dashboard/books/actions.ts). The live POK build
 // adds one "Bank account" box here.
 
 type BookTab = "all" | "published" | "drafts";
@@ -120,11 +123,12 @@ export default async function DashboardPage({
 
   const heading = (
     <div className="mt-5 flex items-start justify-between gap-4 sm:mt-8 sm:items-end">
-      <div>
+      {/* PHONE PASS (Renato 3a) dropped the grey description; HEADER-NAME
+          r2 moved the greeting to the site header ("Hello, <name>"). */}
+      <div className="min-w-0">
         <h1 className="font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
           Your dashboard
         </h1>
-        <p className="mt-2 text-muted">Manage your books, sales, and earnings.</p>
       </div>
       <Link
         href="/dashboard/books/new"

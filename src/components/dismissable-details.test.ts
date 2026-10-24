@@ -8,7 +8,7 @@ import { attachDismiss, type DismissDetails, type DismissDocument } from "./dism
 
 type Listener = (event: Event) => void;
 
-function setup(activeElement: "inside" | "body" | "outside" | null = "body") {
+function setup(activeElement: "inside" | "body" | "outside" | null = "body", options?: { closeOnFocusOut?: boolean }) {
   const summary = { focus: vi.fn() };
   const insideNodes = new Set<unknown>();
   const link = { tag: "a" };
@@ -36,7 +36,7 @@ function setup(activeElement: "inside" | "body" | "outside" | null = "body") {
     }),
   };
 
-  const cleanup = attachDismiss(details as unknown as DismissDetails, doc as unknown as DismissDocument);
+  const cleanup = attachDismiss(details as unknown as DismissDetails, doc as unknown as DismissDocument, options);
   const fire = (type: string, event: object) => listeners.get(type)?.(event as Event);
   return { details, summary, link, minPrice, maxPrice, outside, doc, listeners, cleanup, fire };
 }
@@ -98,6 +98,39 @@ describe("attachDismiss", () => {
     const added = doc.addEventListener.mock.calls.map(([type, fn]) => [type, fn]);
     cleanup();
     expect(doc.removeEventListener.mock.calls.map(([type, fn]) => [type, fn])).toEqual(added);
+    expect(listeners.size).toBe(0);
+  });
+});
+
+// PHONE PASS r2 (audit N3): opt-in close when focus leaves the menu
+// (the Dashboard book row's ··· menu). Off by default, so the Bookstore
+// filters and the Section menu are unchanged.
+describe("attachDismiss closeOnFocusOut", () => {
+  it("off by default: no focusin listener, focus moving out keeps it open", () => {
+    const { details, outside, listeners, fire } = setup();
+    expect(listeners.has("focusin")).toBe(false);
+    fire("focusin", { target: outside });
+    expect(details.open).toBe(true);
+  });
+
+  it("on: focus moving outside closes it", () => {
+    const { details, outside, listeners, fire } = setup("inside", { closeOnFocusOut: true });
+    expect([...listeners.keys()].sort()).toEqual(["focusin", "keydown", "pointerdown"]);
+    fire("focusin", { target: outside });
+    expect(details.open).toBe(false);
+  });
+
+  it("on: focus moving between the summary and the items keeps it open", () => {
+    const { details, summary, link, minPrice, fire } = setup("inside", { closeOnFocusOut: true });
+    for (const target of [summary, link, minPrice]) {
+      fire("focusin", { target });
+      expect(details.open).toBe(true);
+    }
+  });
+
+  it("on: cleanup removes all three listeners", () => {
+    const { listeners, cleanup } = setup("inside", { closeOnFocusOut: true });
+    cleanup();
     expect(listeners.size).toBe(0);
   });
 });

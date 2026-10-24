@@ -8,6 +8,7 @@ import type { Book } from "@/lib/types";
 import { buildAuthorTakedownNoticeLines, type AuthorTakedownNotice } from "@/lib/takedown-reasons";
 import { IN_REVIEW_LABEL, buildAuthorSentBackNoticeLines, type AuthorReviewNotice } from "@/lib/book-review-copy";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
+import { DismissableDetails } from "@/components/dismissable-details";
 
 // LIBRUM 2.0 UI-6: the operational (not reader-facing) book row shared
 // between the Dashboard overview's book list and /dashboard/books'
@@ -56,7 +57,23 @@ import { CoverPlaceholder } from "@/components/cover-placeholder";
 // DRAFT; a book Librum sent back shows the send-back notice -- date,
 // reason, Librum's message, what to do, where to ask. The takedown
 // notice keeps priority when both apply.
+//
+// PHONE PASS (D3, D4 / Renato 4a 5a): KDP-style, as on the A2 mockup.
+// Every row, phone and desktop alike, shows Edit (or "Continue setup")
+// and a 44px "···" button. The ··· opens a floating menu that closes on
+// an outside tap, on Escape and (r2, audit N3) when focus leaves it
+// (DismissableDetails closeOnFocusOut): Edit details,
+// Change manuscript or cover, Change price (each a jump to that section
+// of the Edit page), View in Bookstore and Unpublish (published books
+// only), and Delete. Unpublish only links to the Edit page's Publishing
+// box, where the existing button and its explanation are -- the
+// CLEANUP-1 reasoning above still holds. The separate View button is
+// gone: it is in the menu.
 const TAG_CLASSES = "rounded-[3px] px-2 py-1 text-xs font-bold tracking-wide";
+const MENU_ITEM_BASE = "focus-ring flex min-h-11 w-full items-center px-4 text-left text-sm font-medium hover:bg-surface-hover";
+const MENU_ITEM_CLASSES = `${MENU_ITEM_BASE} text-foreground`;
+// Red text on white, 6.6:1.
+const MENU_DELETE_CLASSES = `${MENU_ITEM_BASE} text-[#b42318]`;
 
 export function AuthorBookRow({
   book,
@@ -174,7 +191,7 @@ export function AuthorBookRow({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="relative flex w-full flex-wrap items-center gap-2 sm:w-auto">
         {isDraft && !isTakenDown && !isInReview ? (
           <Link
             href={`/dashboard/books/${book.id}/edit`}
@@ -191,25 +208,56 @@ export function AuthorBookRow({
           </Link>
         )}
 
-        {book.status === "published" && (
-          <Link
-            href={`/books/${book.id}`}
-            className={buttonClasses("outline", "sm", "min-h-11 rounded-[3px] border-[#c9c0ae] px-4 font-semibold")}
+        <DismissableDetails className="sm:relative" closeOnFocusOut>
+          <summary
+            aria-label={`More actions for ${book.title}`}
+            className="focus-ring flex size-11 cursor-pointer list-none items-center justify-center rounded-[3px] border border-[#c9c0ae] bg-surface text-base font-bold text-foreground select-none hover:bg-surface-hover [&::-webkit-details-marker]:hidden"
           >
-            View
-          </Link>
-        )}
-
-        <details className="relative">
-          <summary className="focus-ring flex min-h-11 cursor-pointer list-none items-center rounded-[3px] border border-[#c9c0ae] bg-surface px-3 text-sm font-semibold text-foreground select-none hover:bg-surface-hover [&::-webkit-details-marker]:hidden">
-            More actions
+            <span aria-hidden="true">···</span>
           </summary>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <form action={deleteBook.bind(null, book.id)}>
-              <DeleteBookButton title={book.title} />
-            </form>
+          {/* Phone: the buttons have a full-width line of their own, and
+              the menu opens under it from the left edge, so it never runs
+              off the screen however wide "Continue setup" is. From sm up
+              they end the row and it opens leftwards under the ···. */}
+          <div className="absolute left-0 top-full z-10 mt-1 w-60 sm:left-auto sm:right-0 rounded-[3px] border border-border bg-surface py-1 shadow-md">
+            <ul>
+              <li>
+                <Link href={`/dashboard/books/${book.id}/edit#details`} className={MENU_ITEM_CLASSES}>
+                  Edit details
+                </Link>
+              </li>
+              <li>
+                <Link href={`/dashboard/books/${book.id}/edit#files`} className={MENU_ITEM_CLASSES}>
+                  Change manuscript or cover
+                </Link>
+              </li>
+              <li>
+                <Link href={`/dashboard/books/${book.id}/edit#pricing`} className={MENU_ITEM_CLASSES}>
+                  Change price
+                </Link>
+              </li>
+              {book.status === "published" && (
+                <>
+                  <li>
+                    <Link href={`/books/${book.id}`} className={MENU_ITEM_CLASSES}>
+                      View in Bookstore
+                    </Link>
+                  </li>
+                  <li>
+                    <Link href={`/dashboard/books/${book.id}/edit#publishing`} className={MENU_ITEM_CLASSES}>
+                      Unpublish
+                    </Link>
+                  </li>
+                </>
+              )}
+              <li className="mt-1 border-t border-border pt-1">
+                <form action={deleteBook.bind(null, book.id)}>
+                  <DeleteBookButton title={book.title} className={MENU_DELETE_CLASSES} />
+                </form>
+              </li>
+            </ul>
           </div>
-        </details>
+        </DismissableDetails>
       </div>
     </li>
   );
