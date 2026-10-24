@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { PublicBook, RefundRequest } from "@/lib/types";
@@ -199,6 +200,10 @@ export default async function AccountPurchasesPage({
   );
   const ownedByBookId = new Map(ownershipEntries);
 
+  // DOWNLOADS-1 (3a, 4a): the buyer's own download state, for the line
+  // under each Download button.
+  const downloadStates = await readMyDownloadStates(supabase);
+
   // Merges purchases rows AND fulfilled bundle snapshots into one entry
   // per actual paid transaction -- including a transaction with zero
   // purchases rows (every bundle item was already owned elsewhere), which
@@ -334,12 +339,18 @@ export default async function AccountPurchasesPage({
                               </p>
                             </div>
                             {ownedByBookId.get(purchase.book_id) ? (
-                              <a
-                                href={`/api/books/${purchase.book_id}/download`}
-                                className="rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-                              >
-                                Download EPUB
-                              </a>
+                              <div className="flex flex-col items-end gap-1">
+                                <a
+                                  href={`/api/books/${purchase.book_id}/download`}
+                                  className="rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+                                >
+                                  Download EPUB
+                                </a>
+                                {(() => {
+                                  const note = buyerDownloadNote(downloadStates.get(purchase.book_id));
+                                  return note ? <p className="text-xs text-muted">{note}</p> : null;
+                                })()}
+                              </div>
                             ) : (
                               <span className="text-xs text-muted">No longer available</span>
                             )}
