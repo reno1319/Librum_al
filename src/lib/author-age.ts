@@ -1,9 +1,5 @@
 import "server-only";
-import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  AUTHOR_AGE_FIELD,
-  AUTHOR_AGE_STATEMENT_VERSION,
-} from "@/lib/author-age-statement";
+import { AUTHOR_AGE_FIELD } from "@/lib/author-age-statement";
 
 // AUTHOR-AGE-1 (pipeline item 7, Renato 10-24 "4. a"): the Terms say an
 // author must be 18 or older. Becoming an author -- at sign-up with
@@ -14,28 +10,11 @@ import {
 // table and no migration. Accounts that were authors before this
 // change were skipped on purpose (Renato, "5. a").
 //
-// The one write goes through the service role, only for the caller's
-// own id, which the caller has already proved (auth.getUser() for
-// "Become an author"; the user signUp() just created at sign-up).
-// GoTrue merges app_metadata keys, so provider/providers stay as they
-// are.
+// SECURITY-9A: the record is written together with the Terms record by
+// recordAgreements() (src/lib/agreement-records.ts).
 
 export function hasAuthorAgeTick(formData: FormData): boolean {
   // An unticked checkbox is absent from FormData; "on" is the browser's
   // value for a ticked box without a value attribute.
   return formData.get(AUTHOR_AGE_FIELD) === "on";
-}
-
-export async function recordAuthorAgeConfirmation(userId: string): Promise<boolean> {
-  const { error } = await createAdminClient().auth.admin.updateUserById(userId, {
-    app_metadata: {
-      author_age_confirmed_at: new Date().toISOString(),
-      author_age_statement_version: AUTHOR_AGE_STATEMENT_VERSION,
-    },
-  });
-  if (error) {
-    console.error("recordAuthorAgeConfirmation: not recorded", { status: error.status ?? null });
-    return false;
-  }
-  return true;
 }

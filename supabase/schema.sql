@@ -11,8 +11,9 @@ create table public.profiles (
   -- 'admin' (added by migration 028) is a durable, server-enforced
   -- marketplace-operator role -- see requireAdmin() in src/lib/auth.ts
   -- and the Phase REFUND-1A audit. Never settable by the user: signup
-  -- (handle_new_user() below) only ever writes 'author' or 'reader',
-  -- and UPDATE on this column is revoked from authenticated entirely
+  -- (handle_new_user() below) only ever writes 'reader' (SECURITY-9A;
+  -- before it, 'author' or 'reader'), only the server switches a reader
+  -- to author, and UPDATE on this column is revoked from authenticated entirely
   -- (see below) -- promotion to admin is only ever a direct,
   -- privileged database operation.
   role text not null check (role in ('author', 'reader', 'admin')),
@@ -280,25 +281,25 @@ on conflict (user_id) do nothing;
 -- the public_author_profiles view) and never fall back to the private
 -- display_name at all. A reader gets null, exactly as before -- they
 -- have no public attribution surface.
+-- SECURITY-9A (migration 20261024190000): handle_new_user() now makes
+-- every new account a reader; an author gets public_author_name from
+-- the server-side switch to author instead (see the function).
 create or replace function public.handle_new_user()
 returns trigger as $$
 declare
-  v_role text;
   v_display_name text;
 begin
-  v_role := case
-    when new.raw_user_meta_data->>'role' = 'author' then 'author'
-    else 'reader'
-  end;
+  -- SECURITY-9A: every new account is a reader. The role a sign-up
+  -- sends in its metadata is ignored, because anyone can call Supabase
+  -- Auth's signUp directly with the public key and send anything there.
+  -- An author is made only on the server: the site's sign-up switches
+  -- the new account to author after its "I'm 18 or older" tick is
+  -- recorded, and "Become an author" does the same for an existing
+  -- reader (both through src/lib/author-role-write-client.ts).
   v_display_name := coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email, '@', 1));
 
   insert into public.profiles (id, role, display_name, public_author_name)
-  values (
-    new.id,
-    v_role,
-    v_display_name,
-    case when v_role = 'author' then v_display_name else null end
-  );
+  values (new.id, 'reader', v_display_name, null);
   return new;
 end;
 $$ language plpgsql security definer set search_path = '';
@@ -14229,6 +14230,8 @@ declare
   v_draft_books uuid[] := '{}';
   v_restored_bundles uuid[] := '{}';
   v_draft_bundles uuid[] := '{}';
+  v_sessions_deleted integer;
+  v_refresh_tokens_deleted integer;
 begin
   v_actor_id := auth.uid();
   if v_actor_id is null then
@@ -14255,6 +14258,24 @@ begin
      set lifted_at = pg_catalog.now(),
          lifted_by = v_actor_id
    where id = v_suspension.id;
+
+  -- SECURITY-9A: sign the account out everywhere before it can sign in
+  -- again (r2 audit F3, Renato "1. a"). While suspended nothing is
+  -- deleted: the ban makes Supabase Auth answer "user is banned" to
+  -- every refresh and Auth call, for active and idle devices alike, so
+  -- the site's "This account is suspended" cut-off always shows. Here,
+  -- in the same transaction as the lift and before the site removes the
+  -- ban (src/app/admin/(protected)/people/[id]/actions.ts), every
+  -- refresh token of the account goes (by user, so tokens without a
+  -- session go too) and then every session (which also ends refresh
+  -- tokens kept on the session row itself), so no device resumes after
+  -- Lift; an old device finds itself signed out. An access token
+  -- already issued stays valid until it expires (at most the JWT
+  -- lifetime). auth.refresh_tokens.user_id is text in Supabase Auth.
+  delete from auth.refresh_tokens rt where rt.user_id = p_user_id::text;
+  get diagnostics v_refresh_tokens_deleted = row_count;
+  delete from auth.sessions se where se.user_id = p_user_id;
+  get diagnostics v_sessions_deleted = row_count;
 
   perform 1 from public.bundles bu where bu.author_id = p_user_id order by bu.id for update;
   perform 1 from public.books bo where bo.author_id = p_user_id order by bo.id for update;
@@ -14315,7 +14336,9 @@ begin
       'books_restored', pg_catalog.cardinality(v_restored_books),
       'books_kept_draft', pg_catalog.cardinality(v_draft_books),
       'bundles_restored', pg_catalog.cardinality(v_restored_bundles),
-      'bundles_kept_draft', pg_catalog.cardinality(v_draft_bundles)
+      'bundles_kept_draft', pg_catalog.cardinality(v_draft_bundles),
+      'sessions_deleted', v_sessions_deleted,
+      'refresh_tokens_deleted', v_refresh_tokens_deleted
     )
   );
 

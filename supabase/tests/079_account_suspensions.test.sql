@@ -555,7 +555,9 @@ select pg_temp.assert((select lifted_at is not null and lifted_by = 'e0790000-00
                          from public.account_suspensions where user_id = 'e0790000-0000-4000-8000-00000000000a'),
   'part4: the row is lifted, by the admin');
 select pg_temp.assert((select metadata = jsonb_build_object('books_restored', 1, 'books_kept_draft', 2,
-                                                            'bundles_restored', 1, 'bundles_kept_draft', 1)
+                                                            'bundles_restored', 1, 'bundles_kept_draft', 1,
+                                                            -- SECURITY-9A: 081 tests the sign-out itself.
+                                                            'sessions_deleted', 0, 'refresh_tokens_deleted', 0)
                          from public.admin_audit_log
                         where action = 'account.suspension_lifted' and target_id = 'e0790000-0000-4000-8000-00000000000a'),
   'part4: one account.suspension_lifted audit row');
