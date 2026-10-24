@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import { SellerDetailsBlock } from "@/components/seller-details";
+import { isWhatsappContactLive } from "@/lib/contact";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -16,7 +17,9 @@ export const metadata: Metadata = {
 // pipeline item 3 (2. a: published before it ships; buying is off until
 // then). The one Stripe line stays until the Stripe removal step (item
 // 10) deletes the Stripe data, and must go in that same change. The
-// date must match the month this goes live.
+// date must match the month this goes live. TRUST PACK (item 5, 6. a):
+// the WhatsApp line shows only while src/lib/contact.ts holds a number,
+// the same value that shows the link on Contact.
 export default function PrivacyPage() {
   return (
     <main className="flex-1">
@@ -75,8 +78,9 @@ export default function PrivacyPage() {
                 your card details.
               </p>
               <p className="mt-2">
-                <strong>Messages:</strong> the emails you send us and our
-                replies.
+                <strong>Messages:</strong> the emails
+                {isWhatsappContactLive() && " and WhatsApp messages"} you send
+                us and our replies.
               </p>
               <p className="mt-2">
                 <strong>Technical:</strong> the cookies described below, and
@@ -185,6 +189,13 @@ export default function PrivacyPage() {
                   <strong>Google (Gmail)</strong> — the inbox where we read
                   and answer your emails.
                 </li>
+                {isWhatsappContactLive() && (
+                  <li>
+                    <strong>WhatsApp (Meta)</strong> — if you message us on
+                    WhatsApp, WhatsApp handles that chat, and we see your
+                    phone number and WhatsApp name.
+                  </li>
+                )}
                 <li>
                   <strong>Stripe</strong> — handled earlier test payments and
                   author payout accounts; we still hold some of those old
@@ -232,8 +243,10 @@ export default function PrivacyPage() {
                   record they belong to.
                 </li>
                 <li>
-                  <strong>Emails with us:</strong> up to 2 years after your
-                  last message.
+                  <strong>
+                    {isWhatsappContactLive() ? "Emails and WhatsApp chats with us:" : "Emails with us:"}
+                  </strong>{" "}
+                  up to 2 years after your last message.
                 </li>
                 <li>
                   <strong>Moderation records:</strong> as long as needed to
