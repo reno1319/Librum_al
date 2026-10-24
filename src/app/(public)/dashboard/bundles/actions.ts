@@ -29,6 +29,11 @@ import {
   parseCatalogPriceAll,
   resolveCatalogPriceState,
 } from "@/lib/catalog-price";
+import {
+  isLivePriceChange,
+  isPriceChangeConfirmed,
+  PRICE_CHANGE_CONFIRM_MESSAGE,
+} from "@/lib/price-change-confirm";
 import { PEN_NAME_MIXED_MESSAGE, penNameErrorMessage } from "@/lib/pen-names";
 
 // ALL-WIRING-5: one message for every rejected bundle price, built from
@@ -281,6 +286,24 @@ export async function updateBundle(bundleId: string, formData: FormData) {
   ) {
     redirect(
       `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`,
+    );
+  }
+  // LIVE-PRICE-CONFIRM-1 (Renato 10-24): a new price on a LIVE bundle
+  // needs the tick under the price, carrying exactly this new price.
+  // Decided from the row read above and refused before any write. A
+  // publish or price change landing between that read and the save is
+  // not re-checked for the tick: priceGuard below conditions only the
+  // paid-repricing cases (a confirm step, not an authorization).
+  if (
+    isLivePriceChange({
+      status: existing.status,
+      currentPriceAll: existing.price_all,
+      submittedPriceAll: parsedPrice.priceAll,
+    }) &&
+    !isPriceChangeConfirmed(formData, parsedPrice.priceAll)
+  ) {
+    redirect(
+      `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(PRICE_CHANGE_CONFIRM_MESSAGE)}`,
     );
   }
   const priceGuard = catalogRowGuard(priceAuthorization, {

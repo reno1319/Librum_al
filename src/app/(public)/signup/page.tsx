@@ -4,6 +4,7 @@ import { translateAuthErrorMessage } from "@/lib/auth-error";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
+import { AUTHOR_AGE_FIELD, AUTHOR_AGE_STATEMENT } from "@/lib/author-age-statement";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -29,7 +30,7 @@ export default async function SignupPage({
         </Alert>
       )}
 
-      <form action={signup} className="mt-6 flex flex-col gap-4">
+      <form action={signup} className="group mt-6 flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">
           Name
           <input
@@ -90,6 +91,19 @@ export default async function SignupPage({
             />
             Author — I want to publish and sell ebooks
           </label>
+          {/* AUTHOR-AGE-1: shown only while "Author" is chosen (CSS
+              :has(), no script). Not `required`: a hidden required box
+              would block a reader's sign-up, so signup() checks it on the
+              server and refuses an author sign-up without it. */}
+          <div className="ml-6 hidden items-start gap-2 group-has-[[value=author]:checked]:flex">
+            <input
+              id={AUTHOR_AGE_FIELD}
+              name={AUTHOR_AGE_FIELD}
+              type="checkbox"
+              className="focus-ring mt-1 size-4"
+            />
+            <label htmlFor={AUTHOR_AGE_FIELD}>{AUTHOR_AGE_STATEMENT}</label>
+          </div>
         </fieldset>
 
         <div className="flex items-start gap-2 text-sm">

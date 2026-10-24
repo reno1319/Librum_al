@@ -281,6 +281,10 @@ function seedBundle(overrides: Row) {
 const book = () => tables.books.find((b) => b.id === BOOK_ID)!;
 const bundle = () => tables.bundles.find((b) => b.id === BUNDLE_ID)!;
 
+// LIVE-PRICE-CONFIRM-1: both forms carry the live-price tick for the
+// price they submit (as an author who ticked it would), so the tables
+// below keep testing the paid-repricing rule; the tick rule itself is
+// tested on its own further down, with `noTick`.
 function bookForm(price: string, extra: Record<string, string | File> = {}): FormData {
   const fd = new FormData();
   fd.set("title", "Book, edited");
@@ -289,6 +293,7 @@ function bookForm(price: string, extra: Record<string, string | File> = {}): For
   fd.set("isbn", "");
   fd.set("genre", "Fiction");
   fd.set("price", price);
+  fd.set("confirmPriceChange", price);
   for (const [k, v] of Object.entries(extra)) fd.set(k, v);
   return fd;
 }
@@ -297,8 +302,14 @@ function bundleForm(price: string): FormData {
   fd.set("title", "Bundle, edited");
   fd.set("description", "Two books");
   fd.set("price", price);
+  fd.set("confirmPriceChange", price);
   fd.append("bookIds", "book-a");
   fd.append("bookIds", "book-b");
+  return fd;
+}
+
+function noTick(fd: FormData): FormData {
+  fd.delete("confirmPriceChange");
   return fd;
 }
 
@@ -534,6 +545,110 @@ describe("updateBundle while paid publishing is OPEN on protected staging", () =
     seedBundle({ status: "published", price_all: 0 });
     expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("199")))).toBe(BUNDLE_SAVED);
     expect(bundle()).toMatchObject({ status: "published", price_all: 199 });
+  });
+});
+
+// ============================================================
+// LIVE-PRICE-CONFIRM-1 (Renato 10-24, "2. a", "3. a"): a new price on a
+// LIVE book or bundle needs the tick carrying exactly that new price.
+// ============================================================
+const PRICE_CONFIRM = encodeURIComponent("It's live, so tick the box under the price to confirm the new price.");
+const BOOK_CONFIRM = `/dashboard/books/${BOOK_ID}/edit?error=${PRICE_CONFIRM}`;
+const BUNDLE_CONFIRM = `/dashboard/bundles/${BUNDLE_ID}/edit?error=${PRICE_CONFIRM}`;
+
+describe("live price change needs the tick: books", () => {
+  beforeEach(openPaidPublishing);
+
+  it.each([
+    ["paid -> other paid", 199, "299"],
+    ["paid -> free", 199, "0"],
+    ["free -> paid", 0, "199"],
+    ["no price -> free", null, "0"],
+  ])("published, %s without the tick: refused, nothing written", async (_label, current, price) => {
+    seedBook({ status: "published", price_all: current });
+    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm(price))))).toBe(BOOK_CONFIRM);
+    expect(writes).toEqual([]);
+    expect(book().price_all).toBe(current);
+  });
+
+  it("a tick for another price does not confirm this one", async () => {
+    seedBook({ status: "published", price_all: 199 });
+    expect(await redirectOf(updateBook(BOOK_ID, bookForm("299", { confirmPriceChange: "250" })))).toBe(BOOK_CONFIRM);
+    expect(writes).toEqual([]);
+  });
+
+  it("the tick carries the price as parsed: '990,00' is confirmed by 990", async () => {
+    seedBook({ status: "published", price_all: 199 });
+    expect(await redirectOf(updateBook(BOOK_ID, bookForm("990,00", { confirmPriceChange: "990" })))).toBe(BOOK_SAVED);
+    expect(book().price_all).toBe(990);
+  });
+
+  it("with the tick the new price is saved", async () => {
+    seedBook({ status: "published", price_all: 199 });
+    expect(await redirectOf(updateBook(BOOK_ID, bookForm("299")))).toBe(BOOK_SAVED);
+    expect(book().price_all).toBe(299);
+  });
+
+  it("keeping the price needs no tick", async () => {
+    seedBook({ status: "published", price_all: 199 });
+    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm("199"))))).toBe(BOOK_SAVED);
+  });
+
+  it("a draft needs no tick", async () => {
+    seedBook({ status: "draft", price_all: 199 });
+    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm("299"))))).toBe(BOOK_SAVED);
+    expect(book().price_all).toBe(299);
+  });
+
+  it("the refusal happens before any cover or manuscript upload", async () => {
+    seedBook({ status: "published", price_all: 199 });
+    const png = new File(
+      [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])],
+      "cover.png",
+      { type: "image/png" },
+    );
+    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm("299", { cover: png }))))).toBe(BOOK_CONFIRM);
+    expect(uploads).toEqual([]);
+    expect(writes).toEqual([]);
+  });
+
+  it("while paid publishing is closed, the permission refusal still comes first", async () => {
+    vi.unstubAllEnvs();
+    seedBook({ status: "published", price_all: 0 });
+    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm("199"))))).toBe(BOOK_DENIED);
+  });
+});
+
+describe("live price change needs the tick: bundles", () => {
+  beforeEach(openPaidPublishing);
+
+  it.each([
+    ["paid -> other paid", 199, "299"],
+    ["paid -> free", 199, "0"],
+  ])("published, %s without the tick: refused, details and books untouched", async (_label, current, price) => {
+    seedBundle({ status: "published", price_all: current });
+    expect(await redirectOf(updateBundle(BUNDLE_ID, noTick(bundleForm(price))))).toBe(BUNDLE_CONFIRM);
+    expect(writes).toEqual([]);
+    expect(bundle()).toMatchObject({ title: "Bundle", price_all: current });
+  });
+
+  it("a tick for another price does not confirm this one", async () => {
+    seedBundle({ status: "published", price_all: 199 });
+    const fd = bundleForm("299");
+    fd.set("confirmPriceChange", "199");
+    expect(await redirectOf(updateBundle(BUNDLE_ID, fd))).toBe(BUNDLE_CONFIRM);
+  });
+
+  it("with the tick the new price is saved; a kept price or a draft needs none", async () => {
+    seedBundle({ status: "published", price_all: 199 });
+    expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")))).toBe(BUNDLE_SAVED);
+    expect(bundle().price_all).toBe(299);
+
+    seedBundle({ status: "published", price_all: 199 });
+    expect(await redirectOf(updateBundle(BUNDLE_ID, noTick(bundleForm("199"))))).toBe(BUNDLE_SAVED);
+
+    seedBundle({ status: "draft", price_all: 199 });
+    expect(await redirectOf(updateBundle(BUNDLE_ID, noTick(bundleForm("299"))))).toBe(BUNDLE_SAVED);
   });
 });
 

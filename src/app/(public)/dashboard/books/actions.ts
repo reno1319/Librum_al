@@ -70,6 +70,11 @@ import {
   MINIMUM_PAID_CATALOG_PRICE_ALL,
   parseCatalogPriceAll,
 } from "@/lib/catalog-price";
+import {
+  isLivePriceChange,
+  isPriceChangeConfirmed,
+  PRICE_CHANGE_CONFIRM_MESSAGE,
+} from "@/lib/price-change-confirm";
 
 // ALL-WIRING-2: one message for every rejected catalog price, built
 // from the module's own constants so it can never drift from the rule
@@ -1168,6 +1173,24 @@ export async function updateBook(bookId: string, formData: FormData) {
   ) {
     redirect(
       `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`,
+    );
+  }
+  // LIVE-PRICE-CONFIRM-1 (Renato 10-24): a new price on a LIVE book
+  // needs the tick under the price, carrying exactly this new price.
+  // Decided from the row read above and refused before any write. A
+  // publish or price change landing between that read and the save is
+  // not re-checked for the tick: priceGuard below conditions only the
+  // paid-repricing cases (a confirm step, not an authorization).
+  if (
+    isLivePriceChange({
+      status: existing.status,
+      currentPriceAll: existing.price_all,
+      submittedPriceAll: parsedPrice.priceAll,
+    }) &&
+    !isPriceChangeConfirmed(formData, parsedPrice.priceAll)
+  ) {
+    redirect(
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(PRICE_CHANGE_CONFIRM_MESSAGE)}`,
     );
   }
   // The row state the write below must still find. A read-then-check

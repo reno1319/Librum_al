@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/(public)/auth/actions";
 import { deleteAccount } from "./actions";
 import { becomeAuthor } from "./become-author";
+import { AUTHOR_AGE_FIELD, AUTHOR_AGE_STATEMENT } from "@/lib/author-age-statement";
 import { PageHeader } from "@/components/ui/page-header";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Alert } from "@/components/ui/alert";
@@ -123,7 +124,19 @@ export default async function AccountPage({
               you can change it on your author profile. An author account
               can&apos;t be switched back to a reader account.
             </p>
+            {/* AUTHOR-AGE-1: the Terms' 18+ rule; becomeAuthor checks the
+                tick again and records it. */}
             <form action={becomeAuthor} className="mt-3">
+              <div className="mb-3 flex items-start gap-2 text-sm">
+                <input
+                  id={AUTHOR_AGE_FIELD}
+                  name={AUTHOR_AGE_FIELD}
+                  type="checkbox"
+                  required
+                  className="focus-ring mt-1 size-4"
+                />
+                <label htmlFor={AUTHOR_AGE_FIELD}>{AUTHOR_AGE_STATEMENT}</label>
+              </div>
               <button type="submit" className={buttonClasses("primary", "sm")}>
                 Become an author
               </button>

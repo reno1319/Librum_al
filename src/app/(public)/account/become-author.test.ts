@@ -85,6 +85,7 @@ vi.mock("@/lib/author-role-write-client", () => ({
         update: (values: unknown) => {
           const write = { table, values, filters: [] as Array<[string, unknown]>, columns: "" };
           writes.push(write);
+          order.push("role");
           const chain = {
             eq: (column: string, value: unknown) => {
               write.filters.push([column, value]);
@@ -164,11 +165,37 @@ vi.mock("@/lib/pen-name-write-client", () => ({
   },
 }));
 
+// AUTHOR-AGE-1: the "I'm 18 or older" record goes through the service
+// role's auth admin API (src/lib/author-age.ts); this fake records each
+// call and the order against the role write.
+let ageCalls: Array<{ id: string; attributes: { app_metadata?: Record<string, unknown> } }>;
+let ageResult: { error: unknown };
+let order: string[];
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    auth: {
+      admin: {
+        updateUserById: async (id: string, attributes: { app_metadata?: Record<string, unknown> }) => {
+          ageCalls.push({ id, attributes });
+          order.push("age");
+          return { data: null, error: ageResult.error };
+        },
+      },
+    },
+  }),
+}));
+
 const { becomeAuthor } = await import("./become-author");
 
-async function run(): Promise<string> {
+function tickedForm(): FormData {
+  const formData = new FormData();
+  formData.set("confirm_author_age", "on");
+  return formData;
+}
+
+async function run(formData: FormData = tickedForm()): Promise<string> {
   try {
-    await becomeAuthor();
+    await becomeAuthor(formData);
   } catch (e) {
     if (e instanceof RedirectSignal) return e.target;
     throw e;
@@ -197,6 +224,9 @@ beforeEach(() => {
   defaultPenName = { data: { id: PEN_ID, avatar_path: null }, error: null };
   copyResult = { error: null };
   penUpdateResult = { data: [{ id: PEN_ID }], error: null };
+  ageCalls = [];
+  ageResult = { error: null };
+  order = [];
 });
 
 describe("becomeAuthor", () => {
@@ -267,7 +297,7 @@ describe("becomeAuthor", () => {
   });
 
   it("ignores anything the form submits", async () => {
-    const formData = new FormData();
+    const formData = tickedForm();
     formData.set("role", "admin");
     formData.set("public_author_name", "Injected");
     formData.set("id", OTHER_ID);
@@ -429,6 +459,46 @@ describe("becomeAuthor: legacy photo copied to the default pen name (17a after C
     expect(text).not.toContain(USER_ID);
     expect(text).not.toContain("avatar.png");
     expect(text).not.toContain("pen-name.");
+  });
+});
+
+describe("becomeAuthor: AUTHOR-AGE-1 18+ tick", () => {
+  const AGE_ERROR = `/account?error=${encodeURIComponent("Authors must be 18 or older. Tick the box to confirm.")}`;
+
+  it("records the confirmation for the caller's own id, before the role write", async () => {
+    expect((await run()).startsWith("/dashboard?success=")).toBe(true);
+    expect(ageCalls).toHaveLength(1);
+    expect(ageCalls[0].id).toBe(USER_ID);
+    expect(Object.keys(ageCalls[0].attributes)).toEqual(["app_metadata"]);
+    const meta = ageCalls[0].attributes.app_metadata ?? {};
+    expect(meta.author_age_statement_version).toBe("author-age-v1");
+    expect(Number.isNaN(Date.parse(String(meta.author_age_confirmed_at)))).toBe(false);
+    expect(order).toEqual(["age", "role"]);
+  });
+
+  it.each([
+    ["no tick", new FormData()],
+    ["a tick with another value", (() => { const f = new FormData(); f.set("confirm_author_age", "yes"); return f; })()],
+  ])("%s: refused with the age message, nothing recorded or written", async (_label, formData) => {
+    expect(await run(formData)).toBe(AGE_ERROR);
+    expect(ageCalls).toHaveLength(0);
+    expect(writerCreated).toBe(0);
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("an existing author still goes to the dashboard, tick or not, and nothing is recorded", async () => {
+    profileResult = readerProfile({ role: "author" });
+    expect(await run(new FormData())).toBe("/dashboard");
+    expect(ageCalls).toHaveLength(0);
+  });
+
+  it("a failed record fails closed: the role is not written", async () => {
+    ageResult = { error: { status: 500, message: "down" } };
+    const target = await run();
+    expect(target.startsWith("/account?error=")).toBe(true);
+    expect(target).not.toBe(AGE_ERROR);
+    expect(writerCreated).toBe(0);
+    expect(writes).toHaveLength(0);
   });
 });
 
