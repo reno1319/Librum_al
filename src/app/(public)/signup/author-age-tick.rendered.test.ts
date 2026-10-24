@@ -49,4 +49,13 @@ describe("account page", () => {
     expect(form).toContain("required");
     expect(form).toContain("{AUTHOR_AGE_STATEMENT}");
   });
+
+  // SECURITY-9A (Renato, "2. a"): the Terms tick sits next to the 18+ one.
+  it("the Become an author form also carries a required Terms tick", () => {
+    const form = source.slice(source.indexOf("<form action={becomeAuthor}"), source.indexOf("Become an author\n"));
+    const tick = form.match(/<input[^>]*name="accept_terms"[^>]*>/)?.[0] ?? "";
+    expect(tick).toContain('type="checkbox"');
+    expect(tick).toContain("required");
+    expect(form).toContain('href="/terms"');
+  });
 });
