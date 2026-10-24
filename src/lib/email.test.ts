@@ -228,3 +228,72 @@ describe("sendAccountSuspendedEmail / sendAccountSuspensionLiftedEmail", () => {
     expect(args.html).toContain("support@librum.al");
   });
 });
+
+// SMALL-FIXES-1 (1a): Resend reports a refused send by RETURNING
+// { error }, not by throwing. That is logged as a failure, never thrown,
+// and the log carries neither the address nor Resend's message.
+describe("sendEmail: a refused send", () => {
+  beforeEach(() => sendMock.mockClear());
+
+  it("logs Resend's { error } as a failure, without the address or the message, and does not throw", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    sendMock.mockResolvedValueOnce({
+      data: null,
+      error: {
+        name: "validation_error",
+        statusCode: 403,
+        message: "You can only send testing emails to your own email address (ana@example.com).",
+      },
+    } as never);
+    try {
+      await expect(sendAccountSuspendedEmail("ana@example.com")).resolves.toBeUndefined();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const logged = JSON.stringify(errorSpy.mock.calls[0]);
+      expect(logged).toContain("Resend refused it");
+      expect(logged).toContain("validation_error");
+      expect(logged).toContain("403");
+      expect(logged).not.toContain("ana@example.com");
+      expect(logged).not.toContain("testing emails");
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("logs nothing when Resend accepts the email", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await sendAccountSuspendedEmail("ana@example.com");
+      expect(sendMock).toHaveBeenCalledTimes(1);
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("still never throws when the send itself throws", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    sendMock.mockRejectedValueOnce(new Error("network down"));
+    try {
+      await expect(sendAccountSuspendedEmail("ana@example.com")).resolves.toBeUndefined();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("the missing-key warning names the subject but never the address", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const key = process.env.RESEND_API_KEY;
+    delete process.env.RESEND_API_KEY;
+    try {
+      await sendAccountSuspendedEmail("ana@example.com");
+      expect(sendMock).not.toHaveBeenCalled();
+      const warned = JSON.stringify(warnSpy.mock.calls);
+      expect(warned).toContain("Your Librum account is suspended");
+      expect(warned).not.toContain("ana@example.com");
+    } finally {
+      process.env.RESEND_API_KEY = key;
+      warnSpy.mockRestore();
+    }
+  });
+});

@@ -9,15 +9,29 @@ const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
 // missing API key or a failed send break whatever triggered the email
 // (here, recording a purchase). The Resend client is constructed lazily,
 // inside the try block, since it throws immediately if no key is set.
+//
+// SMALL-FIXES-1 (1a): Resend reports a refused send (bad key, unverified
+// domain, rate limit) by RETURNING { error }, not by throwing, so that is
+// checked and logged as a failure too. Still best effort: nothing is
+// thrown to the caller. No recipient address is ever logged -- and not
+// Resend's message either, since some of its messages repeat the address;
+// its error name and status code are enough to tell what went wrong.
 async function sendEmail(to: string, subject: string, html: string) {
   if (!process.env.RESEND_API_KEY) {
-    console.warn(`RESEND_API_KEY not set — skipping email "${subject}" to ${to}`);
+    console.warn(`RESEND_API_KEY not set — skipping email "${subject}"`);
     return;
   }
 
   try {
     const resend = new Resend(process.env.RESEND_API_KEY);
-    await resend.emails.send({ from: FROM, to, subject, html });
+    const { error } = await resend.emails.send({ from: FROM, to, subject, html });
+    if (error) {
+      console.error("Failed to send email: Resend refused it", {
+        subject,
+        name: error.name ?? null,
+        statusCode: error.statusCode ?? null,
+      });
+    }
   } catch (error) {
     console.error("Failed to send email:", error);
   }
