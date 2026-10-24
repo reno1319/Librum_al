@@ -158,6 +158,6 @@ describe("AUTHOR PAGES REDESIGN: the Terms contents box", () => {
     const headings = [...source.matchAll(/<section id="section-(\d+)"[^>]*>\s*<h2[^>]*>\s*<span[^>]*>\1\.<\/span> ([^\n<]+)/g)];
     expect(headings.map((m) => m[1])).toEqual(titles.map((_, i) => String(i + 1)));
     expect(headings.map((m) => m[2].trim())).toEqual(titles);
-    expect(titles).toHaveLength(16);
+    expect(titles).toHaveLength(18);
   });
 });

@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { PageBand, SECTION_CONTAINER } from "@/components/page-bands";
+import { SellerDetailsBlock } from "@/components/seller-details";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -6,12 +8,20 @@ export const metadata: Metadata = {
   description: "When you can get your money back for a Librum ebook, and how to ask.",
 };
 
-// REFUND POLICY (Renato, 10-19: refunds only for problems, reply within
-// 5 working days, no fixed time limit, no seller name/NIPT until the
-// NIPT exists). Same look as the Privacy page: green header band, no
-// closing band. Only email is offered as the way to ask: the purchases
-// page's "Request refund" button exists for Stripe orders only. The
-// date must match the month this goes live.
+// REFUND POLICY (Renato, 10-19: refunds for problems, reply within 5
+// working days, no fixed time limit for problems). Same look as the
+// Privacy page: green header band, no closing band. Only email is
+// offered as the way to ask: the purchases page's "Request refund"
+// button exists for Stripe orders only.
+//
+// POLICY PAGES (pipeline item 2, Renato 10-24): LAWYER-REVIEW DRAFT --
+// noted here only, not on the public page. Adds the 14-day cancel right
+// of Law 50/2025 until the first download (1. a), bundles only when no
+// book in them was downloaded (3. a), and the company details from
+// src/lib/seller.ts (4. a). "Downloaded" is read from the download log
+// of pipeline item 3, and the checkout agreement ships with the live
+// POK build; buying stays off until both exist (2. a). The date must
+// match the month this goes live.
 export default function RefundsPage() {
   return (
     <main className="flex-1">
@@ -28,9 +38,33 @@ export default function RefundsPage() {
           <div className="mt-8 flex flex-col gap-8 text-foreground/90">
             <section>
               <h2 className="font-serif text-xl font-normal text-primary">
-                When you can ask for a refund
+                Cancel within 14 days
               </h2>
-              <p className="mt-2">We refund a purchase if:</p>
+              <p className="mt-2">
+                You can cancel a purchase for any reason within 14 days of
+                buying it, as long as you haven&apos;t downloaded the book
+                yet.
+              </p>
+              <p className="mt-2">
+                Before you pay, you&apos;re asked to agree that the book is
+                delivered to your library straight away and that you lose
+                this right to cancel when you first download it. Your
+                purchase receipt email confirms this.
+              </p>
+              <p className="mt-2">
+                A bundle can be cancelled only if none of its books has been
+                downloaded.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="font-serif text-xl font-normal text-primary">
+                Problems with a book
+              </h2>
+              <p className="mt-2">
+                At any time, including after you&apos;ve downloaded it, we
+                refund a purchase if:
+              </p>
               <ul className="mt-2 list-disc pl-5">
                 <li>
                   the book never appeared in your library, or the download
@@ -51,9 +85,8 @@ export default function RefundsPage() {
               </ul>
               <p className="mt-2">Tell us as soon as you notice the problem.</p>
               <p className="mt-2">
-                Because ebooks are delivered instantly, we don&apos;t
-                otherwise refund a book after it has been delivered to your
-                library.
+                Apart from these problems, we don&apos;t refund a book after
+                you&apos;ve downloaded it. Free books have nothing to refund.
               </p>
             </section>
 
@@ -66,8 +99,10 @@ export default function RefundsPage() {
                 <a href="mailto:support@librum.al" className="text-primary underline">
                   support@librum.al
                 </a>{" "}
-                with the title of the book, the date you bought it, and what
-                went wrong. We reply within 5 working days.
+                from your account&apos;s email address, with the title of the
+                book, the date you bought it, and either &quot;I want to
+                cancel&quot; or what went wrong. We reply within 5 working
+                days.
               </p>
             </section>
 
@@ -76,11 +111,15 @@ export default function RefundsPage() {
                 What happens next
               </h2>
               <p className="mt-2">
-                If we approve your refund, we return the amount you paid,
-                normally to the card you paid with, through our payment
-                provider POK. Your bank decides how long it takes to show on
-                your statement. Your access to the refunded book or bundle
-                may be removed.
+                If you cancel within the 14 days, we send your money back
+                within 14 days of your request. For other refunds, we send it
+                once we approve your request.
+              </p>
+              <p className="mt-2">
+                We return the amount you paid, normally to the card you paid
+                with, through our payment provider POK. Your bank decides how
+                long it takes to show on your statement. Your access to the
+                refunded book or bundle may be removed.
               </p>
             </section>
 
@@ -93,6 +132,20 @@ export default function RefundsPage() {
                 dispute doesn&apos;t remove your access. If the bank decides
                 against the payment, your access to that book may be
                 removed.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="font-serif text-xl font-normal text-primary">
+                Who sells your books
+              </h2>
+              <SellerDetailsBlock />
+              <p className="mt-2">
+                The full rules are in our{" "}
+                <Link href="/terms" className="text-primary underline">
+                  Terms of Service
+                </Link>
+                .
               </p>
             </section>
 
