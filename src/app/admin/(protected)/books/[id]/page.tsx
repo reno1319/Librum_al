@@ -474,10 +474,20 @@ export default async function AdminBookPage({
               <h2 id="book-unpublish" className="font-serif text-2xl font-bold text-primary">
                 Unpublish this book
               </h2>
-              <p className="text-sm text-muted">
-                The book leaves the Bookstore at once. The author can&apos;t publish it again until you allow it.
-                Readers who already bought it keep it.
-              </p>
+              {/* SMALL-FIXES-1 (2a, audit A5): a draft is not in the Bookstore,
+                  so it can't "leave" it; a takedown also cancels a waiting review. */}
+              {book.status === "draft" ? (
+                <p className="text-sm text-muted">
+                  The book stays out of the Bookstore. The author can&apos;t publish it until you allow it. Readers who
+                  already bought it keep it.
+                  {pendingReview && " This also cancels the waiting review."}
+                </p>
+              ) : (
+                <p className="text-sm text-muted">
+                  The book leaves the Bookstore at once. The author can&apos;t publish it again until you allow it.
+                  Readers who already bought it keep it.
+                </p>
+              )}
               {publishedBundleTitles.length > 0 && (
                 <p className="text-sm font-semibold">This also unpublishes: {publishedBundleTitles.join(", ")}.</p>
               )}

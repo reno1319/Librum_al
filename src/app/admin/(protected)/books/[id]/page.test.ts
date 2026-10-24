@@ -174,6 +174,14 @@ describe("AdminBookPage", () => {
     expect(html).not.toContain("This also resolves the report.");
   });
 
+  // SMALL-FIXES-1 (2a): the live-book wording is unchanged.
+  it("on a live book, says the book leaves the Bookstore at once", async () => {
+    const html = await render("moderator");
+    expect(html).toContain("The book leaves the Bookstore at once.");
+    expect(html).not.toContain("The book stays out of the Bookstore.");
+    expect(html).not.toContain("This also cancels the waiting review.");
+  });
+
   it("carries ?report= only for an open report of this book, starting on its reason", async () => {
     const html = await render("moderator", { report: REPORT_ID });
     expect(html).toContain(`name="reportId" value="${REPORT_ID}"`);
@@ -361,6 +369,24 @@ describe("AdminBookPage", () => {
       rows.book_reviews = { data: [], error: null };
       await render("admin");
       expect(selects.some((s) => s.table === "book_reviews" && s.columns.includes("buyer_file_only"))).toBe(true);
+    });
+
+    // SMALL-FIXES-1 (2a, audit A5): a draft is not in the Bookstore.
+    it("the Unpublish panel on an in-review draft: stays out of the Bookstore, and cancels the waiting review", async () => {
+      const html = await render("admin");
+      expect(html).toContain("Unpublish now");
+      expect(html).toContain("The book stays out of the Bookstore.");
+      expect(html).toContain("The author can&#x27;t publish it until you allow it.");
+      expect(html).toContain("This also cancels the waiting review.");
+      expect(html).not.toContain("leaves the Bookstore at once");
+    });
+
+    it("the Unpublish panel on a draft with no waiting review: no cancel line", async () => {
+      rows.book_reviews = { data: [], error: null };
+      const html = await render("admin");
+      expect(html).toContain("The book stays out of the Bookstore.");
+      expect(html).not.toContain("This also cancels the waiting review.");
+      expect(html).not.toContain("leaves the Bookstore at once");
     });
 
     it("a book never sent for review says so", async () => {
