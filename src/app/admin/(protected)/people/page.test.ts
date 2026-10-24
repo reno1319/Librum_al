@@ -54,8 +54,15 @@ let authUserResult: { data: { user: { banned_until?: string } | null }; error: {
   error: null,
 };
 const authUserReads: string[] = [];
+// DOWNLOADS-1: the service-role purchase_download_states read.
+let adminRpcResult: RpcResult = { data: [], error: null };
+const adminRpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
+    rpc: (fn: string, args: Record<string, unknown>) => {
+      adminRpcCalls.push({ fn, args });
+      return Promise.resolve(adminRpcResult);
+    },
     auth: {
       admin: {
         getUserById: (id: string) => {
@@ -118,6 +125,8 @@ beforeEach(() => {
   tables = {};
   authUserResult = { data: { user: {} }, error: null };
   authUserReads.length = 0;
+  adminRpcResult = { data: [], error: null };
+  adminRpcCalls.length = 0;
   staffNamesResult = { data: [], error: null };
   rpcResult = (args) => {
     if (args.p_kind === "authors") return { data: [person({ total_count: 38 })], error: null };
@@ -376,6 +385,81 @@ describe("/admin/people/[id]", () => {
       expect(await renderPerson(ANA, { error: "This account is already suspended." })).toContain(
         "This account is already suspended.",
       );
+    });
+  });
+
+  describe("the Purchases box (DOWNLOADS-1)", () => {
+    function stateRow(overrides: Record<string, unknown> = {}) {
+      return {
+        purchase_id: "11111111-1111-4111-8111-111111111111",
+        book_id: "22222222-2222-4222-8222-222222222222",
+        payment_id: "33333333-3333-4333-8333-333333333333",
+        amount_minor: 49900,
+        currency: "ALL",
+        bought_at: "2026-10-23T10:00:00+00:00",
+        refunded_at: null,
+        download_count: 0,
+        first_downloaded_at: null,
+        last_downloaded_at: null,
+        payment_first_downloaded_at: null,
+        cancel_open_until: new Date(Date.now() + 86400000).toISOString(),
+        ...overrides,
+      };
+    }
+
+    it("reads this account's states with the service role and shows title, download and cancel lines", async () => {
+      rpcResult = () => ({ data: [person()], error: null });
+      adminRpcResult = {
+        data: [
+          stateRow(),
+          stateRow({
+            purchase_id: "44444444-4444-4444-8444-444444444444",
+            book_id: "55555555-5555-4555-8555-555555555555",
+            payment_id: null,
+            amount_minor: 0,
+            currency: null,
+            download_count: 1,
+            first_downloaded_at: "2026-10-24T10:00:00Z",
+            last_downloaded_at: "2026-10-24T10:00:00Z",
+            cancel_open_until: null,
+          }),
+        ],
+        error: null,
+      };
+      tables = {
+        books: {
+          data: [
+            { id: "22222222-2222-4222-8222-222222222222", title: "Paid Book" },
+            { id: "55555555-5555-4555-8555-555555555555", title: "Free Book" },
+          ],
+          error: null,
+        },
+      };
+      const html = await renderPerson(ANA);
+      expect(adminRpcCalls).toEqual([{ fn: "purchase_download_states", args: { p_reader_id: ANA } }]);
+      expect(html).toContain('id="person-purchases"');
+      expect(html).toContain("Paid Book");
+      expect(html).toContain("Not downloaded");
+      expect(html).toContain("Can cancel until ");
+      expect(html).toContain("Free Book");
+      expect(html).toContain("First downloaded 24 Oct 2026, 12:00 (Tirana time)");
+      expect(html).toContain("Free or older order: no 14-day cancel");
+      expect(html).not.toContain("Cancel purchase");
+    });
+
+    it("says so when the purchases can't be read", async () => {
+      rpcResult = () => ({ data: [person()], error: null });
+      adminRpcResult = { data: null, error: { message: "boom" } };
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const html = await renderPerson(ANA);
+      expect(html).toContain("Couldn&#x27;t load purchases.");
+      expect(html).toContain("Couldn&#x27;t load everything about this person.");
+      errorSpy.mockRestore();
+    });
+
+    it("no purchases", async () => {
+      rpcResult = () => ({ data: [person()], error: null });
+      expect(await renderPerson(ANA)).toContain("No purchases.");
     });
   });
 });

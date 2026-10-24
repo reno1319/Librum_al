@@ -45,6 +45,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
+import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 
 // LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
 // -- Bookstore (UI-4) owns discovery/browsing, this page owns "should I
@@ -514,6 +515,12 @@ export default async function BookDetailPage({
     priceAll: book.price_all,
     paidCheckoutAvailable,
   });
+  // DOWNLOADS-1 (3a, 4a): read only when the panel shows a buyer's
+  // Download EPUB.
+  const downloadNote =
+    purchaseState === "owned"
+      ? buyerDownloadNote((await readMyDownloadStates(supabase)).get(book.id))
+      : null;
   const usePok = resolveActiveCheckoutProvider({
     newCheckoutRegime: process.env.NEW_CHECKOUT_REGIME,
     ledgerPaymentProvider: process.env.LEDGER_PAYMENT_PROVIDER,
@@ -758,6 +765,7 @@ export default async function BookDetailPage({
               bookId={book.id}
               formattedPrice={formattedPrice}
               wishlisted={wishlisted}
+              downloadNote={downloadNote}
             />
 
             {showPurchaseNote &&
@@ -1379,11 +1387,14 @@ function PurchasePanel({
   bookId,
   formattedPrice,
   wishlisted,
+  downloadNote,
 }: {
   state: BookPurchaseState;
   bookId: string;
   formattedPrice: string;
   wishlisted: boolean;
+  // DOWNLOADS-1: the buyer's line under Download EPUB ("owned" only).
+  downloadNote: string | null;
 }) {
   const wishlistForm = (
     <form action={(wishlisted ? removeFromWishlist : addToWishlist).bind(null, bookId)}>
@@ -1414,6 +1425,7 @@ function PurchasePanel({
         <a href={`/api/books/${bookId}/download`} className={PRIMARY_ACTION_CLASSES}>
           Download EPUB
         </a>
+        {downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
       </div>
     );
   }

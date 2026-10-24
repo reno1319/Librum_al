@@ -20,6 +20,7 @@ export function LibraryBookCard({
   authorName,
   isPublished,
   downloadable,
+  downloadNote = null,
 }: {
   bookId: string;
   title: string;
@@ -29,6 +30,10 @@ export function LibraryBookCard({
   authorName: string | null;
   isPublished: boolean;
   downloadable: boolean;
+  // DOWNLOADS-1: the buyer's line under the button (the cancel warning
+  // while the 14 days are open, else "Downloaded <date>"), decided by
+  // the Library page.
+  downloadNote?: string | null;
 }) {
   return (
     <li className="flex flex-col gap-1.5">
@@ -75,6 +80,7 @@ export function LibraryBookCard({
           Download EPUB
         </a>
       )}
+      {downloadable && downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
     </li>
   );
 }

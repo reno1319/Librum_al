@@ -9,6 +9,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { LibraryBookCard } from "@/components/library-book-card";
 import { resolveBookByline } from "@/lib/book-byline";
+import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -77,6 +78,10 @@ export default async function LibraryPage({
   );
   const ownedByBookId = new Map(ownershipEntries);
 
+  // DOWNLOADS-1 (3a, 4a): the buyer's own download state, for the line
+  // under each Download button.
+  const downloadStates = await readMyDownloadStates(supabase);
+
   // The Library grid: every currently-owned book, as a flat list --
   // never grouped by bundle/transaction (that grouping lives entirely
   // at /account/purchases now). A refunded or lost-disputed purchase's
@@ -130,6 +135,7 @@ export default async function LibraryPage({
                 authorName={resolveBookByline(book)}
                 isPublished={book.status === "published"}
                 downloadable={ownedByBookId.get(book.id) ?? false}
+                downloadNote={buyerDownloadNote(downloadStates.get(book.id))}
               />
             );
           })}

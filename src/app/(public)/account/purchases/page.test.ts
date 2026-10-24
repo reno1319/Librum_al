@@ -72,6 +72,8 @@ type Fixture = {
   refundRequests?: unknown[];
   currencies?: unknown[] | null;
   currencyError?: unknown;
+  // DOWNLOADS-1: my_purchase_download_states rows.
+  downloadStates?: unknown[];
 };
 
 function purchaseRow(id: string, bookId: string, amount: number, pi: string | null, createdAt: string) {
@@ -92,6 +94,7 @@ async function renderPurchases(fixture: Fixture) {
       return { data: fixture.currencyError ? null : (fixture.currencies ?? []), error: fixture.currencyError ?? null };
     }
     if (fn === "user_owns_book") return { data: true, error: null };
+    if (fn === "my_purchase_download_states") return { data: fixture.downloadStates ?? [], error: null };
     throw new Error(`unexpected rpc ${fn}`);
   });
   mockCreateClient.mockImplementation((() => ({
@@ -240,5 +243,36 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
     // Counted once, at the snapshot total -- not 24 ALL.
     expect(html).not.toContain("24 ALL");
     expect(html).not.toMatch(/\$\d/);
+  });
+});
+
+describe("AccountPurchasesPage: download line (DOWNLOADS-1)", () => {
+  beforeEach(() => mockCreateClient.mockReset());
+
+  it("warns under Download EPUB while the cancel window is open, and shows the date once downloaded", async () => {
+    const { html, rpc } = await renderPurchases({
+      purchases: [purchaseRow("p1", "b1", 49900, null, RECENT), purchaseRow("p2", "b2", 0, null, OLDER)],
+      currencies: [
+        { purchase_id: "p1", currency_state: "resolved", currency: "ALL" },
+        { purchase_id: "p2", currency_state: "free", currency: null },
+      ],
+      downloadStates: [
+        { book_id: "b1", first_downloaded_at: null, cancel_open_until: new Date(Date.now() + 86400000).toISOString() },
+        { book_id: "b2", first_downloaded_at: "2026-10-20T12:00:00Z", cancel_open_until: null },
+      ],
+    });
+    expect(rpc).toHaveBeenCalledWith("my_purchase_download_states");
+    expect(html).toContain("Downloading ends your right to cancel this purchase.");
+    expect(html.match(/Downloading ends your right to cancel/g)).toHaveLength(1);
+    expect(html).toContain("Downloaded ");
+  });
+
+  it("shows no line when nothing is known", async () => {
+    const { html } = await renderPurchases({
+      purchases: [purchaseRow("p1", "b1", 0, null, RECENT)],
+      currencies: [{ purchase_id: "p1", currency_state: "free", currency: null }],
+    });
+    expect(html).not.toContain("Downloading ends your right to cancel");
+    expect(html).not.toContain("Downloaded ");
   });
 });
