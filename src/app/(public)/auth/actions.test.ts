@@ -45,10 +45,20 @@ let mockSupabaseAuth: {
 const mockCreateClient = vi.fn(() => Promise.resolve({ auth: mockSupabaseAuth }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
+// AUTHOR-AGE-1: the 18+ record is written through the service role's
+// auth admin API (src/lib/author-age.ts).
+const mockUpdateUserById = vi.fn((_id: string, _attributes: unknown) => Promise.resolve({ data: null, error: null as unknown }));
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    auth: { admin: { updateUserById: (id: string, attributes: unknown) => mockUpdateUserById(id, attributes) } },
+  }),
+}));
+
 const { updatePassword, logout, login, signup, requestPasswordReset } = await import("./actions");
 
 function resetMocks() {
   mockRedirect.mockClear();
+  mockUpdateUserById.mockClear();
   mockCookies.mockClear();
   mockCookieStore.get.mockClear();
   mockCookieStore.set.mockClear();
@@ -570,7 +580,7 @@ describe("signup: stale recovery marker", () => {
     // is always safe/idempotent whether or not a marker was actually
     // present) -- what matters here is that the ordinary redirect
     // behavior is completely unaffected either way.
-    await expectRedirectTo(signup(signupFormData({ role: "author" })), "/dashboard");
+    await expectRedirectTo(signup(signupFormData({ role: "author", confirm_author_age: "on" })), "/dashboard");
     expect(mockCookieStore.delete).toHaveBeenCalledExactlyOnceWith(RECOVERY_COOKIE_NAME);
   });
 
@@ -673,7 +683,7 @@ describe("signup: Terms/Privacy consent gate", () => {
   });
 
   it("5. author signup with acceptance: existing author flow (redirect to '/dashboard') is unchanged", async () => {
-    await expectRedirectTo(signup(signupFormData({ role: "author" })), "/dashboard");
+    await expectRedirectTo(signup(signupFormData({ role: "author", confirm_author_age: "on" })), "/dashboard");
   });
 
   it("6. email-confirmation-required signup with acceptance still redirects to /signup/check-email", async () => {
@@ -717,6 +727,7 @@ describe("signup: N3 name trim", () => {
       displayName: "New Author",
       role: "author",
       accept_terms: "on",
+      confirm_author_age: "on",
       ...overrides,
     });
   }
@@ -738,5 +749,92 @@ describe("signup: N3 name trim", () => {
   it("an absent name is still 'Please fill in every field'", async () => {
     await expectRedirectTo(signup(signupFormData({ displayName: "" })), "/signup?error=Please+fill+in+every+field");
     expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
+  });
+});
+
+// AUTHOR-AGE-1 (Renato 10-24, "6. a"): an author sign-up needs the
+// "I'm 18 or older" tick, checked here before signUp(), and the new
+// account gets the confirmation in its app_metadata. Reader sign-ups
+// are untouched.
+describe("signup: AUTHOR-AGE-1 18+ tick", () => {
+  beforeEach(resetMocks);
+
+  const NEW_ID = "44444444-4444-4444-8444-444444444444";
+  const AGE_ERROR = `/signup?role=author&error=${encodeURIComponent("Authors must be 18 or older. Tick the box to confirm.")}`;
+
+  function signupFormData(overrides: Record<string, string> = {}) {
+    return formData({
+      email: "newauthor@example.com",
+      password: "hunter2",
+      displayName: "New Author",
+      role: "author",
+      accept_terms: "on",
+      confirm_author_age: "on",
+      ...overrides,
+    });
+  }
+
+  function created(session: unknown) {
+    return { data: { session, user: { id: NEW_ID, identities: [{ id: "identity-1" }] } }, error: null };
+  }
+
+  it.each([
+    ["no tick", undefined],
+    ["a tick with another value", "yes"],
+  ])("author with %s: refused with the age message (Author kept chosen), signUp never called", async (_label, value) => {
+    const fd = signupFormData();
+    if (value === undefined) fd.delete("confirm_author_age");
+    else fd.set("confirm_author_age", value);
+    await expectRedirectTo(signup(fd), AGE_ERROR);
+    expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it("a reader needs no tick, and nothing is recorded", async () => {
+    const fd = signupFormData({ role: "reader" });
+    fd.delete("confirm_author_age");
+    mockSupabaseAuth.signUp.mockResolvedValue(created({ access_token: "tok" }));
+    await expectRedirectTo(signup(fd), "/");
+    expect(mockSupabaseAuth.signUp).toHaveBeenCalledOnce();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an immediate session", { access_token: "tok" }, "/dashboard"],
+    ["email confirmation pending", null, "/signup/check-email"],
+  ])("an author with the tick and %s: the new account's app_metadata gets the confirmation", async (_label, session, target) => {
+    mockSupabaseAuth.signUp.mockResolvedValue(created(session));
+    await expectRedirectTo(signup(signupFormData()), target);
+    expect(mockUpdateUserById).toHaveBeenCalledOnce();
+    const [id, attributes] = mockUpdateUserById.mock.calls[0] as [string, { app_metadata: Record<string, unknown> }];
+    expect(id).toBe(NEW_ID);
+    expect(Object.keys(attributes)).toEqual(["app_metadata"]);
+    expect(attributes.app_metadata.author_age_statement_version).toBe("author-age-v1");
+    expect(Number.isNaN(Date.parse(String(attributes.app_metadata.author_age_confirmed_at)))).toBe(false);
+  });
+
+  it("an address that already has an account (stand-in user, no identities) is never written", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue({
+      data: { session: null, user: { id: NEW_ID, identities: [] } },
+      error: null,
+    });
+    await expectRedirectTo(signup(signupFormData()), "/signup/check-email");
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it("a signUp error records nothing", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue({ data: { session: null, user: null }, error: { message: "User already registered" } });
+    await expectRedirectTo(signup(signupFormData()), "/signup?error=User%20already%20registered");
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it("a failed record is logged without the id and the sign-up still finishes", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockUpdateUserById.mockResolvedValueOnce({ data: null, error: { status: 500, message: "down" } });
+    mockSupabaseAuth.signUp.mockResolvedValue(created({ access_token: "tok" }));
+    await expectRedirectTo(signup(signupFormData()), "/dashboard");
+    expect(logged).toHaveBeenCalled();
+    expect(JSON.stringify(logged.mock.calls)).not.toContain(NEW_ID);
+    logged.mockRestore();
   });
 });

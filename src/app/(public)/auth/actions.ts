@@ -8,6 +8,8 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 import { clearRecoverySession } from "@/lib/recovery-session";
 import { loginErrorPath, resolveSafeInternalPath } from "@/lib/safe-redirect";
 import type { SignupRole } from "@/lib/types";
+import { hasAuthorAgeTick, recordAuthorAgeConfirmation } from "@/lib/author-age";
+import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
 
 // Supabase's own wrong-password message, which auth-error.ts translates.
 const INVALID_CREDENTIALS_MESSAGE = "Invalid login credentials";
@@ -62,6 +64,13 @@ export async function signup(formData: FormData) {
     );
   }
 
+  // AUTHOR-AGE-1: an author sign-up needs the "I'm 18 or older" tick
+  // (the Terms' rule). Checked here, before the account exists; the page
+  // keeps "Author" chosen on the way back.
+  if (role === "author" && !hasAuthorAgeTick(formData)) {
+    redirect(`/signup?role=author&error=${encodeURIComponent(AUTHOR_AGE_REQUIRED_MESSAGE)}`);
+  }
+
   const supabase = await createClient();
   // AUTH-1E: explicit emailRedirectTo, mirroring requestPasswordReset()'s
   // own explicit redirectTo below -- previously absent here, so a
@@ -83,6 +92,17 @@ export async function signup(formData: FormData) {
 
   if (error) {
     redirect(`/signup?error=${encodeURIComponent(error.message)}`);
+  }
+
+  // AUTHOR-AGE-1: record the tick on the new account. With email
+  // confirmation on, signUp() answers an address that already has an
+  // account with a stand-in user whose identities list is empty; only a
+  // user with an identity was really created here, so only that one is
+  // written. The account already exists at this point, so a failed
+  // write is logged (recordAuthorAgeConfirmation) and sign-up goes on.
+  const newUser = data.user;
+  if (role === "author" && newUser && (newUser.identities?.length ?? 0) > 0) {
+    await recordAuthorAgeConfirmation(newUser.id);
   }
 
   // If email confirmation is required, there's no session yet -- no

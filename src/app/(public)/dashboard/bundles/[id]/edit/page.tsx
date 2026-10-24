@@ -8,6 +8,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
+import { PriceChangeConfirm } from "@/components/price-change-confirm";
 import { MAXIMUM_CATALOG_PRICE_ALL, MINIMUM_PAID_CATALOG_PRICE_ALL } from "@/lib/catalog-price";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
@@ -55,9 +56,11 @@ export default async function EditBundlePage({
   // price field and saved back as if it were lek.
   const { data: bundle } = await supabase
     .from("bundles")
-    .select("id, author_id, title, description, price_all, pen_name_id")
+    .select("id, author_id, title, description, price_all, pen_name_id, status")
     .eq("id", id)
-    .single<Pick<Bundle, "id" | "author_id" | "title" | "description" | "price_all" | "pen_name_id">>();
+    .single<
+      Pick<Bundle, "id" | "author_id" | "title" | "description" | "price_all" | "pen_name_id" | "status">
+    >();
 
   if (!bundle || bundle.author_id !== user.id) {
     notFound();
@@ -153,6 +156,9 @@ export default async function EditBundlePage({
             {MAXIMUM_CATALOG_PRICE_ALL}.
           </span>
         </label>
+        {/* LIVE-PRICE-CONFIRM-1: a live bundle's new price needs a tick
+            (updateBundle checks it). */}
+        {bundle.status === "published" && <PriceChangeConfirm currentPriceAll={bundle.price_all ?? null} />}
 
         <fieldset>
           <legend className="text-sm">
