@@ -46,6 +46,7 @@ import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
+import { bookWhatsappShareHref } from "@/lib/contact";
 
 // LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
 // -- Bookstore (UI-4) owns discovery/browsing, this page owns "should I
@@ -629,6 +630,8 @@ export default async function BookDetailPage({
   // all name the book's pen name and link to its page.
   const bookByline = resolveBookByline(book);
   const authorName = bookByline;
+  // TRUST PACK (item 5, 6. a): a plain wa.me link, nothing loaded from WhatsApp.
+  const whatsappShareHref = bookWhatsappShareHref(book, bookByline);
 
   return (
     <main className="page-container flex-1 pt-5 pb-16 sm:pt-6">
@@ -803,6 +806,19 @@ export default async function BookDetailPage({
               </p>
             )}
           </div>
+
+          {whatsappShareHref && (
+            <p className="mt-3">
+              <a
+                href={whatsappShareHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${INLINE_LINK_CLASSES} text-sm`}
+              >
+                Share on WhatsApp
+              </a>
+            </p>
+          )}
 
           {purchase === "success" && (
             <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
@@ -1426,6 +1442,10 @@ function PurchasePanel({
           Download EPUB
         </a>
         {downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
+        {/* TRUST PACK (item 5, 1. a): the reader help page, next to Download. */}
+        <Link href="/help/reading" className="w-fit text-xs text-muted underline underline-offset-2 hover:text-foreground">
+          How to read your book
+        </Link>
       </div>
     );
   }

@@ -31,6 +31,7 @@ const STATIC_PUBLIC_ROUTES = [
   "/pricing",
   "/bookstore",
   "/help",
+  "/help/reading",
   "/contact",
   "/terms",
   "/privacy",

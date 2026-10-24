@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import { MINIMUM_PAID_CATALOG_PRICE_ALL } from "@/lib/catalog-price";
 import { getAuthorPageCta } from "@/lib/author-page-cta";
+import { REPLY_PROMISE } from "@/lib/contact";
 import { ClosingCtaBand, PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import type { Metadata } from "next";
 
@@ -16,7 +17,13 @@ export const metadata: Metadata = {
 // price (written as if paid publishing is live, R2 a -- Edit's own
 // message covers the gap until then), why a book is missing from the
 // Bookstore, and which rights statement to choose.
-const FAQ_GROUPS: { id: string; heading: string; faqs: { q: string; a: string }[] }[] = [
+//
+// TRUST PACK (pipeline item 5): "How do I open a book I downloaded?"
+// links to the reader help page (1. a), and the reply promise sits under
+// the list (5. a). An answer can end with one link.
+type Faq = { q: string; a: string; link?: { href: string; label: string } };
+
+const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
   {
     id: "publishing",
     heading: "Publishing",
@@ -65,6 +72,11 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: { q: string; a: string }[
     id: "buying",
     heading: "Buying and reading",
     faqs: [
+      {
+        q: "How do I open a book I downloaded?",
+        a: "Librum books are EPUB files with no DRM. They open in Apple Books, Google Play Books and most other reading apps, and Kindle takes them through Amazon's Send to Kindle.",
+        link: { href: "/help/reading", label: "How to read your book, step by step" },
+      },
       {
         q: "How do refunds work?",
         a: "There's no self-serve refund request yet — reach out from the contact page. The refund process for POK purchases will be published before paid sales launch. Once a refund is processed, you'll lose access to the book automatically (it disappears from downloads, though it stays listed in your library marked as refunded).",
@@ -143,7 +155,18 @@ export default async function HelpPage() {
                         <span className="hidden group-open:inline">&ndash;</span>
                       </span>
                     </summary>
-                    <p className="max-w-[65ch] pb-5 leading-relaxed text-foreground/90">{faq.a}</p>
+                    <p className="max-w-[65ch] pb-5 leading-relaxed text-foreground/90">
+                      {faq.a}
+                      {faq.link && (
+                        <>
+                          {" "}
+                          <Link href={faq.link.href} className="text-primary underline">
+                            {faq.link.label}
+                          </Link>
+                          .
+                        </>
+                      )}
+                    </p>
                   </details>
                 ))}
               </div>
@@ -155,7 +178,7 @@ export default async function HelpPage() {
             <Link href="/contact" className="text-primary underline">
               Get in touch
             </Link>
-            .
+            . {REPLY_PROMISE}
           </p>
         </div>
       </div>
