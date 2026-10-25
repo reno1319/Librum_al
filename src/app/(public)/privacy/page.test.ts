@@ -53,9 +53,8 @@ describe("POLICY PAGES: /privacy", () => {
     }
   });
 
-  it("keeps exactly one Stripe line until the Stripe removal step", () => {
-    expect(text.match(/Stripe/g)).toHaveLength(1);
-    expect(text).toContain("Stripe — handled earlier test payments and author payout accounts; we still hold some of those old records, which will be deleted.");
+  it("no longer mentions Stripe (STRIPE REMOVAL, item 10, 5. a)", () => {
+    expect(text).not.toMatch(/stripe/i);
   });
 
   it("explains the cookieless visit counts (VISITOR STATS, item 6, 3. a)", () => {

@@ -27,15 +27,6 @@ const mockCreateClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 const mockCreateAdminClient = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));
-const mockCheckoutSessionsCreate = vi.fn();
-const mockAccountsRetrieve = vi.fn();
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({
-    checkout: { sessions: { create: mockCheckoutSessionsCreate } },
-    accounts: { retrieve: (...args: unknown[]) => mockAccountsRetrieve(...args) },
-  }),
-}));
-
 const { buyBundle } = await import("./actions");
 
 describe("buyBundle: recovery-session defense-in-depth", () => {
@@ -43,7 +34,6 @@ describe("buyBundle: recovery-session defense-in-depth", () => {
     mockRedirect.mockClear();
     mockCreateClient.mockClear();
     mockCreateAdminClient.mockClear();
-    mockCheckoutSessionsCreate.mockClear();
   });
 
   it("redirects to /reset-password and never reaches Supabase or Stripe when a recovery session is active", async () => {
@@ -52,7 +42,6 @@ describe("buyBundle: recovery-session defense-in-depth", () => {
     expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/reset-password"));
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -80,8 +69,6 @@ describe("buyBundle: fails closed under every configuration (STRIPE-DISABLE-1)",
 
   beforeEach(() => {
     mockRedirect.mockClear();
-    mockAccountsRetrieve.mockReset();
-    mockCheckoutSessionsCreate.mockReset();
     mockCreateAdminClient.mockReset();
     mockCookieStore.get.mockImplementation(() => undefined);
 
@@ -135,8 +122,6 @@ describe("buyBundle: fails closed under every configuration (STRIPE-DISABLE-1)",
       expect(mockBundleSingle).not.toHaveBeenCalled();
       expect(mockBundleBooksSelect).not.toHaveBeenCalled();
       expect(mockRpc).not.toHaveBeenCalled();
-      expect(mockAccountsRetrieve).not.toHaveBeenCalled();
-      expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
       expect(mockCreateAdminClient).not.toHaveBeenCalled();
     },
   );
@@ -171,7 +156,6 @@ describe("buyBundle: maintenance-mode gate", () => {
     mockRedirect.mockClear();
     mockCreateClient.mockClear();
     mockCreateAdminClient.mockClear();
-    mockCheckoutSessionsCreate.mockClear();
     mockCookieStore.get.mockClear();
     vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
   });
@@ -185,7 +169,6 @@ describe("buyBundle: maintenance-mode gate", () => {
     expect(mockCookieStore.get).not.toHaveBeenCalled();
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
 
   it("maintenance mode off (unset) preserves buyBundle's existing recovery-session check", async () => {
@@ -215,7 +198,6 @@ describe("buyBundle: unconditional closure is not softened (PAID-MODE-1)", () =>
       auth: { getUser: async () => ({ data: { user: { id: "reader-1" } } }) },
     });
     mockCreateAdminClient.mockReset();
-    mockCheckoutSessionsCreate.mockReset();
     mockCookieStore.get.mockImplementation(() => undefined);
   });
 
@@ -251,7 +233,6 @@ describe("buyBundle: unconditional closure is not softened (PAID-MODE-1)", () =>
     await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({
       target: expect.stringContaining(`/bundles/${BUNDLE_ID}?error=`),
     });
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
   });
 

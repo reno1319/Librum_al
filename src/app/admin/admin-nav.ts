@@ -45,6 +45,8 @@ export type AdminNavItem = {
 // F5: Librum's choice added, gated by catalog.feature -- the same
 // permission /admin/librum-choice and its actions require (owner and
 // admin only).
+// HOME-PICKS-1: renamed "Featured picks" (Librum's choice and the three
+// home page cover slots share the page); the path stays.
 //
 // ADMIN-1 (A2 look): the menu is now grouped -- Daily, Catalog, Money,
 // Team -- and "Dashboard" is renamed "Today". Each item keeps the exact
@@ -78,7 +80,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
     label: "Catalog",
     items: [
       { href: "/admin/books", label: "Books", permission: "reports.view" },
-      { href: "/admin/librum-choice", label: "Librum's choice", permission: "catalog.feature" },
+      { href: "/admin/librum-choice", label: "Featured picks", permission: "catalog.feature" },
       { href: "/admin/blog", label: "Blog", permission: "blog.view" },
     ],
   },

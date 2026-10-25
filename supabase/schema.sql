@@ -14786,3 +14786,125 @@ alter default privileges for role postgres in schema public
   revoke all on sequences from anon, authenticated, service_role;
 alter default privileges for role postgres in schema public
   revoke all on functions from anon, authenticated, service_role;
+
+-- ============================================================
+-- HOME-PICKS-1 (migration 20261025100000_home_featured_slots.sql): the
+-- three home page cover slots (home_featured_slots), their public read
+-- view and the two service_role writers. Placed after the closed-by-
+-- default section above, so every privilege here is explicit. See the
+-- migration for the full reasoning; supabase/tests/083_home_featured_slots
+-- pins the behaviour and 083_home_featured_slots_catalog_equivalence.sh
+-- that this section and the migration build the same database.
+-- ============================================================
+-- ------------------------------------------------------------
+-- 1. The slots
+-- ------------------------------------------------------------
+create table public.home_featured_slots (
+  slot smallint primary key
+    constraint home_featured_slots_slot_check check (slot between 1 and 3),
+  book_id uuid not null references public.books(id) on delete cascade
+    constraint home_featured_slots_book_id_key unique,
+  sponsored boolean not null default false,
+  set_by uuid references public.profiles(id) on delete set null,
+  set_at timestamptz not null default now()
+);
+
+create index home_featured_slots_set_by_idx
+  on public.home_featured_slots (set_by);
+
+alter table public.home_featured_slots enable row level security;
+
+revoke all on public.home_featured_slots from public, anon, authenticated, service_role;
+grant select on public.home_featured_slots to service_role;
+
+-- ------------------------------------------------------------
+-- 2. The public read path
+-- ------------------------------------------------------------
+create view public.public_home_featured_slots
+  with (security_barrier)
+as
+  select s.slot, s.book_id, s.sponsored
+  from public.home_featured_slots s
+  join public.books b on b.id = s.book_id
+  where b.status = 'published';
+
+revoke all on public.public_home_featured_slots from public, anon, authenticated, service_role;
+grant select on public.public_home_featured_slots to anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 3. The writers
+-- ------------------------------------------------------------
+create function public.set_home_featured_slot(
+  p_slot smallint,
+  p_book_id uuid,
+  p_sponsored boolean,
+  p_set_by uuid
+)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_other_slot smallint;
+begin
+  if p_slot is null or p_slot not between 1 and 3 then
+    raise exception 'home slot must be 1, 2 or 3';
+  end if;
+  if p_book_id is null or p_sponsored is null then
+    raise exception 'home slot needs a book and a sponsored value';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.home_featured_slots'));
+
+  -- FOR SHARE: an unpublish racing this waits, and a book that stops
+  -- being eligible afterwards simply drops out of the public view.
+  perform 1 from public.books
+   where id = p_book_id
+     and status = 'published'
+     and cover_path is not null
+     and price_all is not null
+     for share;
+  if not found then
+    return 'not_eligible';
+  end if;
+
+  select slot into v_other_slot
+    from public.home_featured_slots
+   where book_id = p_book_id and slot <> p_slot;
+  if found then
+    return 'in_slot_' || v_other_slot;
+  end if;
+
+  insert into public.home_featured_slots (slot, book_id, sponsored, set_by, set_at)
+  values (p_slot, p_book_id, p_sponsored, p_set_by, now())
+  on conflict (slot) do update
+    set book_id = excluded.book_id,
+        sponsored = excluded.sponsored,
+        set_by = excluded.set_by,
+        set_at = excluded.set_at;
+  return 'ok';
+end;
+$$;
+
+create function public.clear_home_featured_slot(p_slot smallint)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if p_slot is null or p_slot not between 1 and 3 then
+    raise exception 'home slot must be 1, 2 or 3';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.home_featured_slots'));
+
+  delete from public.home_featured_slots where slot = p_slot;
+end;
+$$;
+
+revoke all on function public.set_home_featured_slot(smallint, uuid, boolean, uuid) from public, anon, authenticated, service_role;
+revoke all on function public.clear_home_featured_slot(smallint) from public, anon, authenticated, service_role;
+grant execute on function public.set_home_featured_slot(smallint, uuid, boolean, uuid) to service_role;
+grant execute on function public.clear_home_featured_slot(smallint) to service_role;

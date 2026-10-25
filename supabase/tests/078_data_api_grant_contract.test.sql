@@ -9,14 +9,16 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 219 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 225 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
 --   three book_downloads rows (migration 20261024090000), and with
 --   SECURITY-9B's narrowed anon/authenticated rows for book_reports,
 --   book_views, bundle_checkout_reader_holds, bundle_checkout_reservations
---   and wishlist_items (migration 20261024200000). A relation with no
+--   and wishlist_items (migration 20261024200000), plus HOME-PICKS-1's
+--   three home_featured_slots and three public_home_featured_slots rows
+--   (migration 20261025100000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -178,6 +180,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r discount_codes | anon | -'),
 ('rel','r discount_codes | authenticated | DELETE,SELECT'),
 ('rel','r discount_codes | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
+('rel','r home_featured_slots | anon | -'),
+('rel','r home_featured_slots | authenticated | -'),
+('rel','r home_featured_slots | service_role | SELECT'),
 ('rel','r payment_disputes | anon | -'),
 ('rel','r payment_disputes | authenticated | -'),
 ('rel','r payment_disputes | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
@@ -250,6 +255,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','v public_bundles | anon | SELECT'),
 ('rel','v public_bundles | authenticated | SELECT'),
 ('rel','v public_bundles | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
+('rel','v public_home_featured_slots | anon | SELECT'),
+('rel','v public_home_featured_slots | authenticated | SELECT'),
+('rel','v public_home_featured_slots | service_role | SELECT'),
 ('rel','v public_pen_names | anon | SELECT'),
 ('rel','v public_pen_names | authenticated | SELECT'),
 ('rel','v public_pen_names | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
@@ -296,8 +304,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 219 then
-    raise exception 'FAIL: part1: the snapshot must hold 219 rows, holds %', v_expected;
+  if v_expected <> 225 then
+    raise exception 'FAIL: part1: the snapshot must hold 225 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

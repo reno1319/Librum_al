@@ -93,8 +93,8 @@ describe("AdminRefundRequestDetailPage: maintenance-mode gate", () => {
   });
 });
 
-// ALL-TXN-CURRENCY-4 (Patch 4): the request total, every one of its
-// items, and the issue-refund confirmation all use the ONE currency the
+// ALL-TXN-CURRENCY-4 (Patch 4): the request total and every one of its
+// items use the ONE currency the
 // request's own payment reference establishes. An item never gets a
 // currency of its own, so parent and items cannot disagree.
 describe("AdminRefundRequestDetailPage: request and items share the request's currency (Patch 4)", () => {
@@ -198,5 +198,16 @@ describe("AdminRefundRequestDetailPage: request and items share the request's cu
     // React inlines its own form-replay script (which names `$$reactFormReplay`);
     // only the rendered markup is checked for a dollar sign.
     expect(html.replace(/<script>[\s\S]*?<\/script>/g, "")).not.toMatch(/\$/);
+  });
+
+  // STRIPE REMOVAL (pipeline item 10, Renato 2. a): an approved request
+  // shows a plain note, never an Issue refund button or form.
+  it("an approved request shows the not-available note and no Issue refund control", async () => {
+    setup([{ refund_request_id: REFUND_ID, currency_state: "resolved", currency: "USD" }], "approved");
+    const html = await render();
+    expect(html).toContain("This request has been approved. Sending the refund from Librum isn&#x27;t available yet.");
+    expect(html).not.toContain("Issue refund");
+    expect(html).not.toContain("Stripe");
+    expect(html).not.toContain("<form");
   });
 });

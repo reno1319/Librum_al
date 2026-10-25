@@ -4,16 +4,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
-import { getStripe } from "@/lib/stripe";
-import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import {
   mapReviewRpcError,
   validateAdminNotes,
   GENERIC_REVIEW_ERROR_MESSAGE,
   REVIEW_RPC_NOT_AUTHENTICATED_MESSAGE,
-  REFUND_SUBMITTED_SUCCESS_MESSAGE,
 } from "./refund-review-logic";
-import { executeApprovedRefund } from "./issue-refund";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
 
@@ -86,127 +82,4 @@ export async function reviewRefundRequest(
       decision === "approved" ? "Refund request approved." : "Refund request rejected.",
     )}`,
   );
-}
-
-// requireStaff("refunds.resolve") here is the same defense-in-depth
-// pattern as reviewRefundRequest() above, for the same reason (Server
-// Actions bypass the page/layout tree). The actual gate against a staff
-// member without refunds.resolve executing a real Stripe refund is
-// executeApprovedRefund() re-fetching the request through the
-// request-scoped, RLS-respecting client below -- no service-role/admin
-// Supabase client is used anywhere in this action. It was audited and
-// found unnecessary: this action never writes to any Supabase table
-// (Stripe execution and Librum's own refund-request/entitlement
-// bookkeeping are deliberately kept separate -- see issue-refund.ts's own
-// documentation), and the one read it performs (refund_requests by id) is
-// already covered by migration 040's "Staff with refunds.view can view
-// all refund requests" RLS policy plus its accompanying
-// `grant select ... to authenticated`. refunds.resolve is used here
-// (not refunds.view alone) because issuing the actual Stripe refund is
-// the money-moving completion of the same review action reviewRefundRequest()
-// gates -- a staff member who can only view refund requests must not be
-// able to trigger the Stripe call merely by reaching this action
-// directly. Stripe's secret key is only ever read server-side via
-// src/lib/stripe.ts, imported here in a "use server" file -- never
-// reachable from client code.
-// ADMIN-1A: migrated from requireAdmin() to
-// requireStaff("refunds.resolve").
-export async function issueStripeRefund(refundRequestId: string) {
-  // ALL-CUTOVER APP-A: gated before requireStaff(), before
-  // redirectIfRecoverySessionActive(), and before the real Stripe
-  // refund call below.
-  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    redirectForMaintenance("/admin/refunds");
-  }
-
-  await requireStaff("refunds.resolve");
-  // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks every
-  // /admin/* page while a recovery session is active, so this is the
-  // second layer against a crafted direct POST. Applies even to an
-  // admin's own account: if THIS admin is currently mid-recovery, they
-  // must finish that before performing any action, including this one
-  // -- the security invariant makes no role-based exception. Runs
-  // before the real Stripe refund call below.
-  await redirectIfRecoverySessionActive();
-
-  const supabase = await createClient();
-  const outcome = await executeApprovedRefund(supabase, getStripe(), refundRequestId);
-
-  switch (outcome.kind) {
-    case "not_found":
-      redirect(`/admin/refunds?error=${encodeURIComponent(GENERIC_REVIEW_ERROR_MESSAGE)}`);
-      break;
-    case "not_approved":
-      redirect(
-        `/admin/refunds/${refundRequestId}?error=${encodeURIComponent(
-          "This request is no longer approved -- it may have already been refunded, rejected, or cancelled.",
-        )}`,
-      );
-      break;
-    case "stripe_error":
-      redirect(
-        `/admin/refunds/${refundRequestId}?error=${encodeURIComponent(outcome.message)}`,
-      );
-      break;
-    case "ledger_v1_not_supported":
-      // STRIPE-CUTOVER-2A Section 24: development-safe, honest message --
-      // never a generic Stripe-failure wording, since Stripe was never
-      // even called. Stage 3 owns real ledger_v1 refund routing.
-      redirect(
-        `/admin/refunds/${refundRequestId}?error=${encodeURIComponent(
-          "This is a librum_ledger_v1 test transaction -- ledger_v1 refunds are not enabled yet.",
-        )}`,
-      );
-      break;
-    case "issued":
-    case "blocked":
-      // ADMIN-1C Part B: issueStripeRefund()'s own user-visible behavior
-      // is UNCHANGED by the "issued"/"blocked" split -- both cases still
-      // redirect with the identical success message below, exactly as
-      // the single "submitted" outcome always did. The split exists
-      // purely so executeApprovedRefund() itself can decide, internally,
-      // whether to write a refund.issuance_submitted audit event
-      // (only ever for "issued" -- see that function's own comment);
-      // it is not a new user-facing state.
-      //
-      // Deliberately does NOT say "Refunded" -- Stripe accepting this
-      // call means only that the refund was initiated. The Stripe
-      // webhook (processChargeRefund, gated by
-      // isChargeFullyRefundedBySucceededRefunds -- see route.ts) remains
-      // the sole writer of purchases.refunded_at,
-      // bundle_checkout_snapshots.refunded_at, and refund_requests.
-      // status = 'refunded'/refunded_at -- nothing here touches any of
-      // those. If that webhook has already landed by the time this page
-      // re-renders (a real, possible race: Stripe can deliver
-      // charge.refunded before this redirect even completes), the
-      // request's own status badge on the page -- re-read fresh on every
-      // render, independent of this banner -- will already correctly
-      // show "Refunded"; this transient message is only ever a
-      // same-request confirmation that the click worked, never the
-      // source of truth for current status. The page itself now also
-      // rewrites this exact message to REFUND_CONFIRMED_SUCCESS_MESSAGE
-      // when it detects that race (status already 'refunded' by the
-      // time this redirect is rendered) -- see
-      // resolveSuccessBannerMessage in refund-review-logic.ts -- so the
-      // banner and the badge can never visibly disagree.
-      //
-      // This same "waiting for confirmation" wording is used for EVERY
-      // "issued"/"blocked" outcome, including an immediate refund.status
-      // === 'succeeded' response from Stripe (see executeApprovedRefund
-      // in issue-refund.ts) -- explicitly confirmed correct, not an
-      // oversight: even a refund Stripe reports as already 'succeeded'
-      // at creation time has not yet been confirmed by Librum's own
-      // webhook, which independently re-verifies terminal success before
-      // writing anything (see isChargeFullyRefundedBySucceededRefunds).
-      // "Waiting for confirmation" is accurate regardless of how quickly
-      // that confirmation actually arrives.
-      revalidatePath(`/admin/refunds/${refundRequestId}`);
-      revalidatePath("/admin/refunds");
-      redirect(
-        `/admin/refunds/${refundRequestId}?success=${encodeURIComponent(
-          REFUND_SUBMITTED_SUCCESS_MESSAGE,
-        )}`,
-      );
-      break;
-  }
 }

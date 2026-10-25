@@ -31,18 +31,6 @@ export function resolveCheckoutRegime(raw: string | undefined): CheckoutRegime {
   return LEGACY_REGIME;
 }
 
-// Smallest robust, non-client-trusting test-mode proof available at
-// checkout-CREATION time. Stripe secret keys are always sk_test_... /
-// sk_live_... (restricted keys: rk_test_.../rk_live_...) -- a purely
-// server-side configuration value, never influenced by the browser or
-// by any request input, so it cannot be spoofed by a caller the way a
-// client-supplied "test" flag could be. This is the FIRST of the two
-// reachable stages Section 4 requires protection at.
-export function isStripeSecretKeyTestMode(secretKey: string | undefined): boolean {
-  if (!secretKey) return false;
-  return secretKey.startsWith("sk_test_") || secretKey.startsWith("rk_test_");
-}
-
 // STRIPE-DISABLE-1: the single, shared decision of which payment
 // provider (if any) is allowed to create a brand-new buyer checkout
 // right now. Deliberately implemented as composition over the two
@@ -73,17 +61,10 @@ export function resolveActiveCheckoutProvider(params: {
   return regime === LEDGER_V1_REGIME && provider === "pok" ? "pok" : "disabled";
 }
 
-// The SECOND reachable stage (Section 4): genuine test-mode proof is
-// only available later, once Stripe itself has returned a verified
-// object. `event.livemode` is part of the SIGNED webhook payload Stripe
-// just verified (constructStripeEventFromApprovedSecrets) -- not
-// anything this app derived and not anything a caller supplied -- so it
-// is the authoritative, non-spoofable confirmation that THIS SPECIFIC
-// delivery genuinely originated in Stripe's test mode. Checked again
-// here, independently of the checkout-creation-time key check above,
-// because the two checks protect two different moments and neither
-// implies the other (e.g. STRIPE_SECRET_KEY could theoretically change
-// between checkout creation and webhook delivery).
-export function isStripeEventTestMode(event: { livemode: boolean }): boolean {
-  return event.livemode === false;
-}
+// Public-safe messages for a buy attempt while checkout is disabled.
+// Moved here from the deleted src/lib/connect-account.ts (Stripe
+// removal, pipeline item 10); the wording is unchanged.
+export const BOOK_CHECKOUT_UNAVAILABLE_MESSAGE =
+  "This book isn't available for purchase right now";
+export const BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE =
+  "This bundle isn't available for purchase right now";

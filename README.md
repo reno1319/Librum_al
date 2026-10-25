@@ -49,44 +49,32 @@ For what's still open, see [`ROADMAP.md`](./ROADMAP.md).
   `supabase/migrations/`.
 - **Vercel** — hosting and CI/CD. Pushing this branch deploys straight to
   Vercel's Production environment.
-- **Stripe** — the legacy, currently-implemented payment/payout
-  integration (see "Payments" below for what's implemented, dormant, and
-  unverified).
-- Cron-driven internal routes (`src/app/api/internal/`), registered in
-  `vercel.json`: a daily reconciliation run, and a monthly payout run.
-  Vercel invokes the payout endpoint on schedule, but the endpoint itself
-  must stay a no-op unless `PAYOUT_SCHEDULER_ENABLED` is explicitly set —
-  the cron existing does not by itself mean payout execution is active.
+- **POK** — the only payment provider in the code, sandbox-only for now
+  (`src/lib/pok.ts`; see `POK_STAGING.md`). Buying stays off unless the
+  server-side checkout flags allow it.
+- A cron-driven internal route (`src/app/api/internal/payouts/run/`),
+  registered in `vercel.json`: a monthly payout run. Vercel invokes it on
+  schedule, but the endpoint itself must stay a no-op unless
+  `PAYOUT_SCHEDULER_ENABLED` is explicitly set — the cron existing does
+  not by itself mean payout execution is active.
 
-## Payments: implemented, dormant, and legacy paths
+## Payments
 
-Librum has three payment-related code paths, and none of them should be
-read as "real-money-ready" without qualification:
-
-- **Legacy Stripe Checkout/Connect — implemented and deployed:** this is
-  the currently implemented paid-commerce path. Stripe Checkout handles
-  buyer purchases (single book and bundle); Stripe Connect Express is the
-  author payout rail, splitting each sale between the author and Librum's
-  platform fee (`src/lib/pricing.ts`) via Stripe's own transfer mechanism.
-  Paid-book publishing is gated on each author having Stripe Connect
-  payouts enabled. This code is deployed and is the application's default
-  legacy path unless configuration selects another regime (see the
-  ledger_v1 bridge below). **Stripe credential mode (test vs. live) and
-  real-money readiness remain unverified from this repository** — don't
-  assume confirmed real transactions, real author payouts, or launch
-  readiness on that basis. Stripe Connect is also transitional: it is
-  **not** Librum's intended final payment architecture (see `ROADMAP.md`'s
-  Phases 6–14) — don't build new features assuming it's permanent.
-- **Built, but dormant (inactive in production):** a ledger_v1 checkout
-  bridge (`src/lib/checkout-regime.ts`) that can route a Stripe-funded
-  checkout through the provider-neutral ledger instead of the legacy path;
-  the author bank-destination payout system; and the monthly payout
-  scheduler. Each sits behind its own fail-closed environment flag
-  (`NEW_CHECKOUT_REGIME`, `BANK_PAYOUT_SETUP_ENABLED`,
-  `PAYOUT_SCHEDULER_ENABLED`) that defaults to off/legacy when unset in
-  code — whether any of them is actually set in Vercel Production has not
-  been directly inspected either. Enabling any of this is a deliberate,
-  gated decision described in `ROADMAP.md`.
+- **POK — sandbox only:** new paid checkouts go through POK, and only when
+  `NEW_CHECKOUT_REGIME=librum_ledger_v1` and `LEDGER_PAYMENT_PROVIDER=pok`
+  are both set (`src/lib/checkout-regime.ts`) and the paid-checkout
+  capability allows it (`src/lib/paid-readiness.ts`). Any other
+  configuration fails closed: buying is unavailable.
+- **Stripe — removed:** the old Stripe Checkout/Connect code, its webhook
+  and its nightly reconciliation job are gone. The database still has
+  Stripe-era columns and old Stripe test purchases; those are dropped in a
+  later database step, and some screens (purchases, refund requests,
+  admin Finance) still read them until then.
+- **Built, but dormant:** the author bank-destination payout system and
+  the monthly payout scheduler, each behind its own fail-closed
+  environment flag (`BANK_PAYOUT_SETUP_ENABLED`,
+  `PAYOUT_SCHEDULER_ENABLED`). Enabling either is a deliberate, gated
+  decision described in `ROADMAP.md`.
 
 ## Authentication
 
@@ -128,30 +116,13 @@ existing project instead, only run the migration files under
 [`supabase/migrations/`](./supabase/migrations) newer than what you last
 applied, in order.
 
-### 3. Create a Stripe account (test mode)
-
-Sign up at [stripe.com](https://stripe.com); no business details are needed
-for test mode. From **Developers > API keys**, copy the **Secret key**
-(`sk_test_...`). Install the [Stripe CLI](https://docs.stripe.com/stripe-cli)
-and run:
-
-```bash
-stripe login
-stripe listen --forward-to localhost:3000/api/webhooks/stripe
-```
-
-This prints a webhook signing secret (`whsec_...`) — keep this running while
-testing purchases locally. Also open **Connect** in the Stripe dashboard
-sidebar once to activate it on your test account (required before authors
-can onboard for payouts).
-
-### 4. (Optional) Create a Resend account for emails
+### 3. (Optional) Create a Resend account for emails
 
 Skip this if you don't need purchase-receipt / sale-notification emails
 locally. Sign up at [resend.com](https://resend.com) and create an API key
 under **API Keys**.
 
-### 5. Configure environment variables
+### 4. Configure environment variables
 
 ```bash
 cp .env.local.example .env.local
@@ -164,17 +135,13 @@ Then fill in `.env.local`. The variable names, verified against
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-STRIPE_CONNECT_WEBHOOK_SECRET=      # optional — see .env.local.example
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 RESEND_API_KEY=                     # optional — emails are skipped if unset
 EMAIL_FROM=                         # optional, defaults to a shared Resend test address
-NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY= # optional, used from a later phase onward
-CRON_SECRET=                        # shared secret for the internal cron routes
+CRON_SECRET=                        # shared secret for the internal cron route
 ```
 
-### 6. Install dependencies and run
+### 5. Install dependencies and run
 
 ```bash
 npm install
@@ -189,12 +156,6 @@ npm run start   # run a production build locally
 npm run lint     # ESLint
 npm run test     # vitest run
 ```
-
-Sign up as an author, go to **Dashboard > Payouts**, and connect a Stripe
-test account (test-mode onboarding accepts fake data — e.g. phone code
-`000000`, routing number `110000000`, account number `000123456789`).
-Publish a book, then buy it as a reader (or logged out) using Stripe's test
-card `4242 4242 4242 4242` with any future expiry and any CVC/ZIP.
 
 > Supabase requires email confirmation before login by default. For local
 > testing, either disable **Authentication > Providers > Email > Confirm
@@ -217,14 +178,13 @@ src/
     admin/(protected)/            staff-only back office
       staff/, reports/, refunds/, finance/, audit/, blog/
     api/
-      webhooks/stripe/              records purchases, drives refund/dispute handling
       books/[id]/download/, books/[id]/sample/
-      internal/payouts/run/, internal/reconcile-transfer-reversals/
+      internal/payouts/run/
   components/                     shared UI (site header, icons, etc.)
   lib/
     supabase/                       browser/server/middleware/admin clients
-    stripe.ts, connect-account.ts    Stripe SDK client + Connect helpers
-    checkout-regime.ts               dormant ledger_v1 checkout-regime selector
+    pok.ts, pok-checkout.ts          POK sandbox client + checkout
+    checkout-regime.ts               checkout provider selector (POK or disabled)
     payout-scheduler.ts              dormant payout scheduler logic
     docx-converter.ts                DOCX -> EPUB conversion
     email.ts, pricing.ts, safe-redirect.ts, recovery-session.ts, types.ts

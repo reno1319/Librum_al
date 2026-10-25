@@ -43,7 +43,7 @@ describe("AdminMobileNav (phone Section control)", () => {
 
   it("lists the owner's groups in order, with every page", () => {
     const html = render("owner", "/admin");
-    const order = ["Daily", "Today", "Book reports", "Refund requests", "Catalog", "Librum&#x27;s choice", "Blog", "Money", "Finance", "Team", "Staff", "Audit log", "Log out"];
+    const order = ["Daily", "Today", "Book reports", "Refund requests", "Catalog", "Featured picks", "Blog", "Money", "Finance", "Team", "Staff", "Audit log", "Log out"];
     let last = -1;
     for (const text of order) {
       const at = html.indexOf(`>${text}<`, last + 1);
@@ -58,7 +58,7 @@ describe("AdminMobileNav (phone Section control)", () => {
     expect(html).toContain(">Catalog<");
     expect(html).not.toContain(">Money<");
     expect(html).not.toContain(">Team<");
-    expect(html).not.toContain(">Librum&#x27;s choice<");
+    expect(html).not.toContain(">Featured picks<");
     expect(anchor(html, "/admin/blog")).toContain('aria-current="page"');
     expect(html).toContain(">Log out<");
   });
