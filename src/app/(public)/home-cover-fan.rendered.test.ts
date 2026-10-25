@@ -141,6 +141,18 @@ describe("home cover fan", () => {
     });
   });
 
+  it("desktop sizing (option b): with the fan the hero splits 50/50 from xl and the covers fill the column; the photograph keeps 55/45", async () => {
+    const html = await render();
+    expect(html).toContain("lg:grid-cols-[55fr_45fr]");
+    expect(html).toContain("xl:grid-cols-[1fr_1fr]");
+    expect(html.match(/lg:w-\[42%\] lg:max-w-\[240px\]/g)).toHaveLength(1);
+    expect(html.match(/lg:w-\[33%\] lg:max-w-\[190px\]/g)).toHaveLength(2);
+    rows = [book(1), book(2)];
+    const photo = await render();
+    expect(photo).toContain("lg:grid-cols-[55fr_45fr]");
+    expect(photo).not.toContain("xl:grid-cols-[1fr_1fr]");
+  });
+
   it("the middle cover loads first; every cover is a real cover image with an empty alt", async () => {
     const html = await render();
     const fan = html.slice(0, html.indexOf(">Published with Librum</h2>"));
