@@ -165,9 +165,10 @@ vi.mock("@/lib/pen-name-write-client", () => ({
   },
 }));
 
-// AUTHOR-AGE-1: the "I'm 18 or older" record goes through the service
-// role's auth admin API (src/lib/author-age.ts); this fake records each
-// call and the order against the role write.
+// AUTHOR-AGE-1 + SECURITY-9A: the "I'm 18 or older" and Terms records go
+// through the service role's auth admin API in one write
+// (src/lib/agreement-records.ts); this fake records each call and the
+// order against the role write.
 let ageCalls: Array<{ id: string; attributes: { app_metadata?: Record<string, unknown> } }>;
 let ageResult: { error: unknown };
 let order: string[];
@@ -190,6 +191,7 @@ const { becomeAuthor } = await import("./become-author");
 function tickedForm(): FormData {
   const formData = new FormData();
   formData.set("confirm_author_age", "on");
+  formData.set("accept_terms", "on");
   return formData;
 }
 
@@ -473,6 +475,9 @@ describe("becomeAuthor: AUTHOR-AGE-1 18+ tick", () => {
     const meta = ageCalls[0].attributes.app_metadata ?? {};
     expect(meta.author_age_statement_version).toBe("author-age-v1");
     expect(Number.isNaN(Date.parse(String(meta.author_age_confirmed_at)))).toBe(false);
+    // SECURITY-9A: the same write records the Terms.
+    expect(meta.terms_version).toBe("terms-2026-10");
+    expect(meta.terms_accepted_at).toBe(meta.author_age_confirmed_at);
     expect(order).toEqual(["age", "role"]);
   });
 
@@ -510,12 +515,45 @@ describe("author role write boundary (static)", () => {
     expect(read("src/lib/author-role-write-client.ts")).toMatch(/^import "server-only";/);
   });
 
-  it("becomeAuthor is the writer's only importer", () => {
+  it("becomeAuthor and signup (SECURITY-9A) are the writer's only importers", () => {
     const out = execFileSync("grep", ["-rl", "author-role-write-client", "src"], { cwd: root, encoding: "utf8" });
     const importers = out
       .split("\n")
       .filter(Boolean)
       .filter((f) => !f.endsWith(".test.ts") && f !== "src/lib/author-role-write-client.ts");
-    expect(importers).toEqual(["src/app/(public)/account/become-author.ts"]);
+    expect(importers.sort()).toEqual(["src/app/(public)/account/become-author.ts", "src/app/(public)/auth/actions.ts"]);
+  });
+});
+
+// SECURITY-9A (Renato, "2. a" after the r1 audit): "Become an author"
+// always needs the Terms tick too, and records it. A reader made by
+// calling Supabase Auth directly never saw the sign-up's Terms tick.
+describe("becomeAuthor: SECURITY-9A Terms tick", () => {
+  const TERMS_ERROR = `/account?error=${encodeURIComponent(
+    "You must agree to the Terms of Service before becoming an author.",
+  )}`;
+
+  it.each([
+    ["no Terms tick", undefined],
+    ["a Terms tick with another value", "yes"],
+  ])("%s (18+ ticked): refused, nothing recorded or written", async (_label, value) => {
+    const formData = new FormData();
+    formData.set("confirm_author_age", "on");
+    if (value !== undefined) formData.set("accept_terms", value);
+    expect(await run(formData)).toBe(TERMS_ERROR);
+    expect(ageCalls).toHaveLength(0);
+    expect(writerCreated).toBe(0);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("both ticks: one record with the Terms and 18+ fields only, then the role write", async () => {
+    expect((await run()).startsWith("/dashboard?success=")).toBe(true);
+    expect(Object.keys(ageCalls[0].attributes.app_metadata ?? {}).sort()).toEqual([
+      "author_age_confirmed_at",
+      "author_age_statement_version",
+      "terms_accepted_at",
+      "terms_version",
+    ]);
+    expect(order).toEqual(["age", "role"]);
   });
 });
