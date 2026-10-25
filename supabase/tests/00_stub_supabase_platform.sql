@@ -76,6 +76,12 @@ alter default privileges in schema public grant all on tables to anon, authentic
 alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 alter default privileges in schema public revoke select, insert, update, delete on tables from anon, authenticated, service_role;
 alter default privileges in schema public revoke usage, select on sequences from anon, authenticated, service_role;
+-- SECURITY-9B: staging and Production also give anon, authenticated and
+-- service_role EXECUTE on every new function in public by default (read
+-- 2026-10-22); modelled here so local function privileges equal
+-- theirs. schema.sql's last section closes postgres's defaults for
+-- anything created after it (run this harness as postgres to see that).
+alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
 
 -- email/raw_user_meta_data exist because supabase/schema.sql's own
 -- handle_new_user() trigger (fired after insert on auth.users) reads

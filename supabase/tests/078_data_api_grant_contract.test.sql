@@ -13,8 +13,11 @@
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
---   three book_downloads rows (migration 20261024090000). A relation
---   with no privilege for a role is a row with '-'.
+--   three book_downloads rows (migration 20261024090000), and with
+--   SECURITY-9B's narrowed anon/authenticated rows for book_reports,
+--   book_views, bundle_checkout_reader_holds, bundle_checkout_reservations
+--   and wishlist_items (migration 20261024200000). A relation with no
+--   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
 --   pen_names, books, profiles, purchases or payments.
@@ -139,8 +142,8 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r book_contributors | anon | SELECT'),
 ('rel','r book_contributors | authenticated | DELETE,INSERT,SELECT'),
 ('rel','r book_contributors | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
-('rel','r book_reports | anon | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
-('rel','r book_reports | authenticated | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
+('rel','r book_reports | anon | -'),
+('rel','r book_reports | authenticated | INSERT,SELECT'),
 ('rel','r book_reports | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
 ('rel','r book_reviews | anon | -'),
 ('rel','r book_reviews | authenticated | -'),
@@ -152,7 +155,7 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r book_takedowns | authenticated | -'),
 ('rel','r book_takedowns | service_role | SELECT'),
 ('rel','r book_views | anon | -'),
-('rel','r book_views | authenticated | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
+('rel','r book_views | authenticated | SELECT'),
 ('rel','r book_views | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
 ('rel','r books | anon | -'),
 ('rel','r books | authenticated | DELETE,SELECT'),
@@ -160,11 +163,11 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r bundle_books | anon | SELECT'),
 ('rel','r bundle_books | authenticated | SELECT'),
 ('rel','r bundle_books | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
-('rel','r bundle_checkout_reader_holds | anon | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
-('rel','r bundle_checkout_reader_holds | authenticated | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
+('rel','r bundle_checkout_reader_holds | anon | -'),
+('rel','r bundle_checkout_reader_holds | authenticated | -'),
 ('rel','r bundle_checkout_reader_holds | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
-('rel','r bundle_checkout_reservations | anon | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
-('rel','r bundle_checkout_reservations | authenticated | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
+('rel','r bundle_checkout_reservations | anon | -'),
+('rel','r bundle_checkout_reservations | authenticated | -'),
 ('rel','r bundle_checkout_reservations | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
 ('rel','r bundle_checkout_snapshots | anon | -'),
 ('rel','r bundle_checkout_snapshots | authenticated | -'),
@@ -232,8 +235,8 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r staff_members | anon | -'),
 ('rel','r staff_members | authenticated | SELECT'),
 ('rel','r staff_members | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
-('rel','r wishlist_items | anon | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
-('rel','r wishlist_items | authenticated | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
+('rel','r wishlist_items | anon | -'),
+('rel','r wishlist_items | authenticated | DELETE,INSERT,SELECT'),
 ('rel','r wishlist_items | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
 ('rel','v author_book_purchases | anon | -'),
 ('rel','v author_book_purchases | authenticated | SELECT'),
