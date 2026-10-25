@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { OrnateShelf, ORNATE_BINDINGS, type OrnateShelfBook } from "./ornate-shelf";
+import {
+  CREAM_TITLE,
+  GREEN_ALONG,
+  NAVY_TITLE,
+  ORNATE_BINDINGS,
+  OXBLOOD_TITLE,
+  OrnateShelf,
+  SKY_ALONG,
+  type OrnateShelfBook,
+} from "./ornate-shelf";
+import { fitVertical } from "@/lib/ornate-shelf-fit";
 
 function books(n: number): OrnateShelfBook[] {
   return Array.from({ length: n }, (_, i) => ({ id: `b${i + 1}`, title: `Libri ${i + 1}`, author: `Autor ${i + 1}` }));
@@ -37,16 +47,18 @@ describe("OrnateShelf", () => {
     expect(html).toMatch(/^<div[^>]*>.*<ul aria-label="Newest books"/);
   });
 
-  it("writes the title and author on every spine, sideways on the two thin ones", () => {
+  // SHELF-2 (Renato 10-25): every title runs along its spine; the
+  // author follows it on the thin spines and stays across on the wide.
+  it("writes every title along its spine, bottom to top, and every author", () => {
     const html = render(books(5));
     const spines = html.split(/<li /).slice(1);
     expect(spines).toHaveLength(5);
     spines.forEach((spine, i) => {
-      expect(spine).toContain(`>Libri ${i + 1}</span>`);
+      const along = spine.slice(spine.indexOf("writing-mode:vertical-rl;transform:rotate(180deg)"));
+      expect(along).toContain(`>Libri ${i + 1}</span>`);
       expect(spine).toContain(`>Autor ${i + 1}</span>`);
-      const sideways = spine.includes("writing-mode:vertical-rl");
-      expect(sideways).toBe(ORNATE_BINDINGS[i].width < 65);
-      if (sideways) expect(spine).toContain("transform:rotate(180deg)");
+      const authorAlong = along.split("</div>")[0].includes(`>Autor ${i + 1}</span>`);
+      expect(authorAlong).toBe(ORNATE_BINDINGS[i].width < 65);
     });
   });
 
@@ -66,18 +78,26 @@ describe("OrnateShelf", () => {
     expect(spine.match(/class="block overflow-hidden text-ellipsis"/g)).toHaveLength(1);
   });
 
-  it("a long word on a wide spine shrinks instead of overflowing", () => {
+  it("a title is never broken inside a word: each line is whole words, cut only by an ellipsis", () => {
     const list = books(5);
-    list[0] = { id: "w", title: "Mirëmëngjesi", author: null };
-    const spine = render(list).split(/<li /)[1];
-    expect(Number(/font-size:([\d.]+)px[^>]*>Mirëmëngjesi/.exec(spine)?.[1])).toBeLessThan(9.5);
+    list[0] = { id: "w", title: "Frankenstein", author: null };
+    list[1] = { id: "x", title: "Crime and Punishment", author: "Fyodor Dostoevsky" };
+    list[3] = { id: "y", title: "Kujtimet e një dimri të gjatë në malësi", author: "Besnik Kola" };
+    const html = render(list);
+    expect(html).not.toMatch(/overflow-wrap:anywhere[^>]*>(Frankenstein|Crime and Punishment|Kujtimet)/);
+    expect(html).toContain('<span class="block overflow-hidden text-ellipsis">Frankenstein</span>');
+    expect(html).toMatch(/text-ellipsis">Crime and Punishment<\/span>|text-ellipsis">Crime and<\/span><span class="block overflow-hidden text-ellipsis">Punishment<\/span>/);
+    const lines = [...html.split(/<li /)[4].matchAll(/text-ellipsis">([^<]+)<\/span>/g)].map((m) => m[1]);
+    expect(lines.join(" ")).toBe("Kujtimet e një dimri të gjatë në malësi");
+    expect(lines.length).toBeGreaterThan(1);
   });
 
   it("a book with no byline draws no author line", () => {
     const html = render([{ id: "x", title: "Pa autor", author: null }]);
     expect(html).toContain(">Pa autor</span>");
     expect(html).not.toContain("Autor");
-    expect(html.match(/<span/g)).toHaveLength(1);
+    // the title wrapper and its one line, nothing else
+    expect(html.match(/<span/g)).toHaveLength(2);
   });
 
   it("hides every ornament from assistive technology", () => {
@@ -108,4 +128,42 @@ describe("OrnateShelf", () => {
     expect(html).not.toContain("<b>Hi</b>");
     expect(html).toContain("&lt;b&gt;Hi&lt;/b&gt;");
   });
+
+  it("a long title on the navy spine takes all three lines", () => {
+    const list = books(5);
+    list[1] = { id: "n", title: "Mirëmëngjesi i qytetit të harruar", author: "Gjergj Kastrioti" };
+    const spine = render(list).split(/<li /)[2];
+    const lines = [...spine.matchAll(/text-ellipsis">([^<]+)<\/span>/g)].map((m) => m[1]);
+    expect(lines).toEqual(["Mirëmëngjesi", "i qytetit", "të harruar"]);
+  });
+
+  it("every title band keeps its lines unwrapped (no break inside a line)", () => {
+    const spines = render(books(5)).split(/<li /).slice(1);
+    for (const spine of spines) {
+      expect(spine).toMatch(/class="[^"]*whitespace-nowrap[^"]*"[^>]*writing-mode:vertical-rl/);
+    }
+  });
+
+  // SHELF-2 audit F1: a title typed in capitals fits every spine. The
+  // widths are real Libre Caslon Text measurements at the shelf's own
+  // scale (SHELF-2 r2 measure-caps.json): a capital is ~0.70em on the
+  // mixed-case spines, and the forced-capitals spines measured 0.71em
+  // (oxblood) and 0.78em (navy, bold) per letter; a space ~0.3em.
+  it.each([
+    ["oxblood", OXBLOOD_TITLE, 0.71, null],
+    ["navy", NAVY_TITLE, 0.78, null],
+    ["sky", SKY_ALONG, 0.7, "ELIRA DUSHKU"],
+    ["cream", CREAM_TITLE, 0.7, null],
+    ["green", GREEN_ALONG, 0.7, "MIRA SHALA"],
+  ] as const)("a title typed in capitals fits the %s spine without a cut", (_name, options, realEm, author) => {
+    for (const title of ["NË KËRKIM TË KOHËS SË HUMBUR NË TIRANË", "DRITA E VERIUT TË LARGËT", "FJALËT E NËNËS SIME", "MËMËDHEU"]) {
+      const fit = fitVertical(title, author, options);
+      expect(fit.titleFits).toBe(true);
+      const authorLength = author ? author.length * options.author!.emPerChar * fit.authorPx + options.gapPx : 0;
+      const realLength = (line: string) => [...line].reduce((sum, ch) => sum + (ch === " " ? 0.3 : realEm), 0);
+      const longest = Math.max(...fit.titleLines.map(realLength));
+      expect(longest * fit.titlePx + authorLength).toBeLessThanOrEqual(options.lengthPx + 0.5);
+    }
+  });
 });
+
