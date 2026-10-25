@@ -1,17 +1,18 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
-import { fitSideways, fitWrappedPx, type SidewaysOptions } from "@/lib/ornate-shelf-fit";
+import { fitVertical, fitWrappedPx, type VerticalOptions } from "@/lib/ornate-shelf-fit";
 
 // BOOKSTORE ORNATE SHELF (Renato 10-25, boards "Option 1, refined
 // (latest)" and "Bookstore header B"): five real books drawn as
 // leather-bound spines on a short wooden shelf. Each shelf slot has its
 // own fixed width, height and binding (74/108/58/92/62px wide); the
 // bindings cycle by position, so the newest book always gets the first
-// one. Spines under ~65px wide carry the title and author sideways,
-// bottom to top, like real books; wider ones carry them across.
+// one. Every title runs along its spine, bottom to top (SHELF-2); on
+// spines under ~65px wide the author follows it, on wider ones the
+// author stays across the foot.
 //
 // The ornaments are Librum's own drawings (lattice, jewel band, shield
-// and star, quill, crossed pens, sprig). They are not copied from any
+// and star, swashes, sprig). They are not copied from any
 // publisher's binding; keep them original if they are ever redrawn.
 //
 // Sizes here are the board's own, at full scale. The page scales the
@@ -130,22 +131,30 @@ function WrappedText({
   );
 }
 
-// Title and author on one line each, read bottom to top.
+// SHELF-2 (Renato 10-25, 1a 2a): every title runs along its spine,
+// bottom to top, so a word is never cut in the middle. A long title
+// takes a second (or third) line beside the first and only then gets
+// smaller; type may go small rather than cut the title. On the thin
+// spines the author follows the title on the same line of sight, as
+// before; on the wide ones the author stays across the foot.
 const SIDEWAYS_AUTHOR = { emPerChar: 0.9, maxPx: 10, minPx: 7 };
-function SidewaysText({
+function AlongSpine({
   book,
   options,
   color,
   shadow,
-  italicTitle,
+  titleStyle,
+  withAuthor,
 }: {
   book: OrnateShelfBook;
-  options: SidewaysOptions;
+  options: VerticalOptions;
   color: string;
-  shadow: string;
-  italicTitle?: boolean;
+  shadow?: string;
+  titleStyle?: CSSProperties;
+  withAuthor: boolean;
 }) {
-  const fit = fitSideways(book.title, book.author, options);
+  const author = withAuthor ? book.author : null;
+  const fit = fitVertical(book.title, author, options);
   return (
     <div
       className="flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden whitespace-nowrap"
@@ -161,7 +170,7 @@ function SidewaysText({
       <span
         lang="sq"
         className="min-h-0 shrink overflow-hidden"
-        style={{ fontSize: fit.titlePx, lineHeight: 1.1, letterSpacing: "0.02em", fontStyle: italicTitle ? "italic" : undefined }}
+        style={{ fontSize: fit.titlePx, lineHeight: options.lineHeight, letterSpacing: "0.02em", ...titleStyle }}
       >
         {fit.titleLines.map((line, i) => (
           <span key={i} className="block overflow-hidden text-ellipsis">
@@ -169,21 +178,29 @@ function SidewaysText({
           </span>
         ))}
       </span>
-      {book.author && (
+      {author && (
         <span
           lang="sq"
           className="min-h-0 shrink-0 overflow-hidden text-ellipsis uppercase"
-          style={{ fontSize: fit.authorPx, letterSpacing: "0.14em", maxHeight: `${options.authorShare * 100}%` }}
+          style={{ fontSize: fit.authorPx, letterSpacing: "0.14em", maxHeight: `${(options.authorShare ?? 0.4) * 100}%` }}
         >
-          {book.author}
+          {author}
         </span>
       )}
     </div>
   );
 }
 
-// ---- Binding 1: oxblood, 74px. A gilt eye, the title in a double
-// frame, a quill, the author between rules, a wave at the foot.
+// ---- Binding 1: oxblood, 74px. A gilt eye, the title up the spine in
+// a double frame, the author between rules, a wave at the foot.
+export const OXBLOOD_TITLE: VerticalOptions = {
+  lengthPx: 220,
+  widthPx: 50,
+  gapPx: 0,
+  lineHeight: 1.15,
+  maxLines: 3,
+  title: { emPerChar: 0.76, maxPx: 14, minPx: 6, caps: true },
+};
 function OxbloodSpine({ book }: { book: OrnateShelfBook }) {
   return (
     <div className="relative flex h-full flex-col items-center gap-[9px] pt-[9px] pb-2">
@@ -195,27 +212,17 @@ function OxbloodSpine({ book }: { book: OrnateShelfBook }) {
         <circle cx="63" cy="15" r="1.8" fill={GOLD} />
       </svg>
       <RaisedBand />
-      <div className="w-16 shrink-0 border-[3px] border-double border-[#c9a54a] px-px py-[9px]">
-        <WrappedText
-          text={book.title}
-          lines={5}
-          style={{
-            fontSize: fitWrappedPx(book.title, { boxPx: 54, emPerChar: 0.76, maxPx: 9.5, minPx: 7, lines: 5 }),
-            lineHeight: 1.3,
-            letterSpacing: "0.02em",
-            textTransform: "uppercase",
-            color: GOLD_TEXT,
-            textShadow: TEXT_SHADOW,
-          }}
+      <div className="flex min-h-0 w-16 flex-1 flex-col border-[3px] border-double border-[#c9a54a] px-0.5 py-2">
+        <AlongSpine
+          book={book}
+          options={OXBLOOD_TITLE}
+          withAuthor={false}
+          color={GOLD_TEXT}
+          shadow={TEXT_SHADOW}
+          titleStyle={{ textTransform: "uppercase" }}
         />
       </div>
       <RaisedBand />
-      <svg viewBox="0 0 40 120" width="34" height="112" aria-hidden="true" focusable="false" className="mt-1.5 shrink-0">
-        <path d="M20 118 C20 80 18 40 30 4" stroke={GOLD} strokeWidth="1.5" fill="none" />
-        <path d="M30 4 C14 20 8 50 19 90 M30 4 C34 30 30 60 20 96" stroke={GOLD} strokeWidth="1" fill="none" />
-        <path d="M14 30 L26 22 M12 44 L25 36 M12 58 L24 50 M13 72 L22 64 M23 30 L32 24 M24 44 L32 38 M23 58 L30 52" stroke={GOLD} strokeWidth=".9" />
-      </svg>
-      <RaisedBand className="mt-auto" />
       {book.author && (
         <div className="w-full shrink-0 px-[5px]">
           <WrappedText
@@ -241,9 +248,18 @@ function OxbloodSpine({ book }: { book: OrnateShelfBook }) {
 }
 
 // ---- Binding 2: navy with red studs, 108px. A shield and star, the
-// title in a framed panel between swashes, crossed pens in a medallion.
+// title up the spine in a framed panel between swashes, the author in
+// a small panel at the foot.
 const NAVY = "#1c3564";
 const NAVY_PANEL_RING = "0 0 0 1px rgba(201,165,74,.55)";
+export const NAVY_TITLE: VerticalOptions = {
+  lengthPx: 215,
+  widthPx: 84,
+  gapPx: 0,
+  lineHeight: 1.05,
+  maxLines: 3,
+  title: { emPerChar: 0.8, maxPx: 20, minPx: 7, caps: true },
+};
 function NavySpine({ book }: { book: OrnateShelfBook }) {
   return (
     <div className="relative flex h-full flex-col items-center gap-2 pt-3 pb-2.5">
@@ -254,46 +270,28 @@ function NavySpine({ book }: { book: OrnateShelfBook }) {
         <path d="M14 66 H94" stroke={GOLD_RULE} strokeWidth="1.6" />
       </svg>
       <div
-        className="flex w-24 shrink-0 flex-col items-center gap-1.5 py-1.5"
+        className="flex min-h-0 w-24 flex-1 flex-col items-center gap-1.5 px-1.5 py-1.5"
         style={{ background: NAVY, boxShadow: NAVY_PANEL_RING }}
       >
-        <svg viewBox="0 0 96 16" width="90" height="16" aria-hidden="true" focusable="false">
+        <svg viewBox="0 0 96 16" width="90" height="16" aria-hidden="true" focusable="false" className="shrink-0">
           <path d="M6 14 C18 2 34 2 48 10 C62 2 78 2 90 14" stroke={GOLD} strokeWidth="1.4" fill="none" />
           <circle cx="48" cy="10" r="2.6" fill={GOLD} />
         </svg>
-        <div className="w-full px-1">
-          <WrappedText
-            text={book.title}
-            lines={5}
-            style={{
-              fontSize: fitWrappedPx(book.title, { boxPx: 88, emPerChar: 0.8, maxPx: 19, minPx: 10, lines: 5 }),
-              fontWeight: 700,
-              lineHeight: 1.05,
-              textTransform: "uppercase",
-              color: GOLD_TEXT,
-              textShadow: "0 1px 0 rgba(0,0,0,.65)",
-            }}
-          />
-        </div>
-        <svg viewBox="0 0 96 16" width="90" height="16" aria-hidden="true" focusable="false">
+        <AlongSpine
+          book={book}
+          options={NAVY_TITLE}
+          withAuthor={false}
+          color={GOLD_TEXT}
+          shadow="0 1px 0 rgba(0,0,0,.65)"
+          titleStyle={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em" }}
+        />
+        <svg viewBox="0 0 96 16" width="90" height="16" aria-hidden="true" focusable="false" className="shrink-0">
           <path d="M6 2 C18 14 34 14 48 6 C62 14 78 14 90 2" stroke={GOLD} strokeWidth="1.4" fill="none" />
           <circle cx="48" cy="6" r="2.6" fill={GOLD} />
         </svg>
       </div>
-      <svg
-        viewBox="0 0 60 60"
-        width="56"
-        height="56"
-        aria-hidden="true"
-        focusable="false"
-        className="mt-3.5 shrink-0 rounded-full"
-        style={{ background: NAVY, boxShadow: NAVY_PANEL_RING }}
-      >
-        <path d="M16 48 L44 12 M44 48 L16 12" stroke={GOLD} strokeWidth="2.2" strokeLinecap="round" />
-        <path d="M44 12 C50 6 54 8 52 14 Z M16 12 C10 6 6 8 8 14 Z" fill={GOLD} />
-      </svg>
       {book.author && (
-        <div className="mt-auto max-w-24 shrink-0 px-1.5 py-[3px]" style={{ background: NAVY }}>
+        <div className="max-w-24 shrink-0 px-1.5 py-[3px]" style={{ background: NAVY }}>
           <WrappedText
             text={book.author}
             lines={2}
@@ -307,14 +305,7 @@ function NavySpine({ book }: { book: OrnateShelfBook }) {
           />
         </div>
       )}
-      <svg
-        viewBox="0 0 108 16"
-        width="108"
-        height="16"
-        aria-hidden="true"
-        focusable="false"
-        className={`shrink-0 ${book.author ? "" : "mt-auto"}`}
-      >
+      <svg viewBox="0 0 108 16" width="108" height="16" aria-hidden="true" focusable="false" className="shrink-0">
         <path d="M10 2 H98 M10 14 H98" stroke={GOLD_ACROSS} strokeWidth="1.3" />
         <path d="M16 8 H92" stroke={GOLD_RULE} strokeWidth="1" strokeDasharray="2 4" />
       </svg>
@@ -322,12 +313,15 @@ function NavySpine({ book }: { book: OrnateShelfBook }) {
   );
 }
 
-// ---- Binding 3: sky blue, 58px, sideways. Zigzag bands in white, a
-// gilt eight-point star.
-const SKY_SIDEWAYS: SidewaysOptions = {
+// ---- Binding 3: sky blue, 58px. Zigzag bands in white, a gilt
+// eight-point star; title and author along the spine.
+export const SKY_ALONG: VerticalOptions = {
   lengthPx: 255,
+  widthPx: 48,
   gapPx: 12,
-  title: { emPerChar: 0.52, maxPx: 16, minPx: 10 },
+  lineHeight: 1.1,
+  maxLines: 2,
+  title: { emPerChar: 0.52, maxPx: 16, minPx: 7 },
   author: SIDEWAYS_AUTHOR,
   authorShare: 0.4,
 };
@@ -344,7 +338,7 @@ function SkySpine({ book }: { book: OrnateShelfBook }) {
         </g>
         <circle cx="15" cy="15" r="2.6" fill={GOLD} />
       </svg>
-      <SidewaysText book={book} options={SKY_SIDEWAYS} color="#f4f8fb" shadow="0 1px 0 rgba(0,0,0,.45)" />
+      <AlongSpine book={book} options={SKY_ALONG} withAuthor color="#f4f8fb" shadow="0 1px 0 rgba(0,0,0,.45)" />
       <svg viewBox="0 0 58 22" width="58" height="22" aria-hidden="true" focusable="false" className="shrink-0">
         <path d="M5 2 H53 M5 20 H53" stroke="#e9f1f8" strokeWidth="1.2" />
         <path d="M5 15 L10 7 L15 15 L20 7 L25 15 L29 7 L33 15 L38 7 L43 15 L48 7 L53 15" stroke="#e9f1f8" strokeWidth="1.1" fill="none" />
@@ -353,11 +347,20 @@ function SkySpine({ book }: { book: OrnateShelfBook }) {
   );
 }
 
-// ---- Binding 4: cream, 92px. A jewel band, red-and-blue studded
-// lattice, the title and author in red between gilt rules.
+// ---- Binding 4: cream, 92px. A jewel band, the title up the spine in
+// red between gilt rules, the author across, a red-and-blue studded
+// lattice at the foot.
 const CREAM_RED = "#9a2229";
 const LATTICE_LINES =
   "repeating-linear-gradient(45deg, transparent 0 10.5px, rgba(176,138,40,.75) 10.5px 11.5px), repeating-linear-gradient(-45deg, transparent 0 10.5px, rgba(176,138,40,.75) 10.5px 11.5px)";
+export const CREAM_TITLE: VerticalOptions = {
+  lengthPx: 170,
+  widthPx: 76,
+  gapPx: 0,
+  lineHeight: 1.12,
+  maxLines: 3,
+  title: { emPerChar: 0.56, maxPx: 18, minPx: 7 },
+};
 function CreamSpine({ book }: { book: OrnateShelfBook }) {
   return (
     <div className="relative flex h-full flex-col items-center gap-[9px] pt-2.5 pb-[9px]">
@@ -368,27 +371,12 @@ function CreamSpine({ book }: { book: OrnateShelfBook }) {
         <circle cx="23" cy="15" r="5" fill="#2a5aa0" stroke={GOLD} strokeWidth="1.8" />
         <circle cx="69" cy="15" r="5" fill="#2a5aa0" stroke={GOLD} strokeWidth="1.8" />
       </svg>
-      <div
-        aria-hidden="true"
-        className="h-16 w-20 shrink-0"
-        style={{
-          background: `radial-gradient(circle, #a8282f 1.8px, transparent 2.2px) 0 0 / 16px 16px, radial-gradient(circle, #2a5aa0 1.8px, transparent 2.2px) 8px 8px / 16px 16px, ${LATTICE_LINES}`,
-        }}
-      />
       <svg viewBox="0 0 92 16" width="92" height="16" aria-hidden="true" focusable="false" className="shrink-0">
         <path d="M8 8 H84" stroke={GOLD_RULE} strokeWidth="1.6" />
         <path d="M36 8 Q46 -1 56 8 Q46 17 36 8 Z" fill={GOLD} />
       </svg>
-      <div className="w-20 shrink-0">
-        <WrappedText
-          text={book.title}
-          lines={3}
-          style={{
-            fontSize: fitWrappedPx(book.title, { boxPx: 80, emPerChar: 0.56, maxPx: 18, minPx: 10, lines: 3 }),
-            lineHeight: 1.12,
-            color: CREAM_RED,
-          }}
-        />
+      <div className="flex min-h-0 w-20 flex-1 flex-col">
+        <AlongSpine book={book} options={CREAM_TITLE} withAuthor={false} color={CREAM_RED} />
       </div>
       <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true" focusable="false" className="shrink-0">
         <path d="M6 0 L7.2 4.8 L12 6 L7.2 7.2 L6 12 L4.8 7.2 L0 6 L4.8 4.8 Z" fill="#2a5aa0" />
@@ -414,7 +402,7 @@ function CreamSpine({ book }: { book: OrnateShelfBook }) {
       </svg>
       <div
         aria-hidden="true"
-        className="mt-auto h-12 w-20 shrink-0"
+        className="h-12 w-20 shrink-0"
         style={{ background: `radial-gradient(circle, #a8282f 1.8px, transparent 2.2px) 0 0 / 16px 16px, ${LATTICE_LINES}` }}
       />
       <svg viewBox="0 0 92 22" width="92" height="22" aria-hidden="true" focusable="false" className="shrink-0">
@@ -426,12 +414,15 @@ function CreamSpine({ book }: { book: OrnateShelfBook }) {
   );
 }
 
-// ---- Binding 5: forest green, 62px, sideways. A gilt knot at the head,
-// a sprig at the foot.
-const GREEN_SIDEWAYS: SidewaysOptions = {
+// ---- Binding 5: forest green, 62px. A gilt knot at the head, a sprig
+// at the foot; title (italic) and author along the spine.
+export const GREEN_ALONG: VerticalOptions = {
   lengthPx: 224,
+  widthPx: 52,
   gapPx: 12,
-  title: { emPerChar: 0.5, maxPx: 17, minPx: 10 },
+  lineHeight: 1.1,
+  maxLines: 2,
+  title: { emPerChar: 0.5, maxPx: 17, minPx: 7 },
   author: SIDEWAYS_AUTHOR,
   authorShare: 0.4,
 };
@@ -445,7 +436,7 @@ function GreenSpine({ book }: { book: OrnateShelfBook }) {
         <path d="M5 38 H57" stroke={GOLD_RULE} strokeWidth="1.4" />
       </svg>
       <RaisedBand />
-      <SidewaysText book={book} options={GREEN_SIDEWAYS} color={GOLD_TEXT} shadow={TEXT_SHADOW} italicTitle />
+      <AlongSpine book={book} options={GREEN_ALONG} withAuthor color={GOLD_TEXT} shadow={TEXT_SHADOW} titleStyle={{ fontStyle: "italic" }} />
       <RaisedBand />
       <svg viewBox="0 0 30 44" width="22" height="34" aria-hidden="true" focusable="false" className="shrink-0">
         <path d="M15 42 C16 30 14 18 15 2" stroke={GOLD} strokeWidth="1.3" fill="none" />
