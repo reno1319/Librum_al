@@ -8,19 +8,20 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 import { clearRecoverySession } from "@/lib/recovery-session";
 import { loginErrorPath, resolveSafeInternalPath } from "@/lib/safe-redirect";
 import type { SignupRole } from "@/lib/types";
-import { hasAuthorAgeTick, recordAuthorAgeConfirmation } from "@/lib/author-age";
+import { hasAuthorAgeTick } from "@/lib/author-age";
 import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
+import { recordAgreements } from "@/lib/agreement-records";
+import { createAuthorRoleWriteClient } from "@/lib/author-role-write-client";
 
 // Supabase's own wrong-password message, which auth-error.ts translates.
 const INVALID_CREDENTIALS_MESSAGE = "Invalid login credentials";
 
 // Never widen this beyond "author"/"reader" -- signup must never be
-// able to produce an "admin" profile. handle_new_user() (migration 028)
-// enforces the same whitelist again, independently, at the database
-// layer, in case this validation is ever bypassed or this action is
-// ever called some other way -- but this is the first line of defense
-// against a crafted form submission (formData isn't limited to the
-// <select>'s own two options; a raw POST to this Server Action could
+// able to produce an "admin" profile. The database makes every new
+// account a reader (handle_new_user(), SECURITY-9A), and the only
+// switch below is reader -> author -- but this is the first line of
+// defense against a crafted form submission (formData isn't limited to
+// the <select>'s own two options; a raw POST to this Server Action could
 // submit anything).
 const SIGNUP_ROLES: readonly SignupRole[] = ["author", "reader"];
 
@@ -85,7 +86,9 @@ export async function signup(formData: FormData) {
     email,
     password,
     options: {
-      data: { display_name: displayName, role },
+      // SECURITY-9A: no role. The database ignores one and makes a
+      // reader; an author is switched on the server below.
+      data: { display_name: displayName },
       emailRedirectTo: `${origin}/auth/callback`,
     },
   });
@@ -94,16 +97,29 @@ export async function signup(formData: FormData) {
     redirect(`/signup?error=${encodeURIComponent(error.message)}`);
   }
 
-  // AUTHOR-AGE-1: record the tick on the new account. With email
+  // SECURITY-9A + AUTHOR-AGE-1: record the Terms tick (and, for an
+  // author, the 18+ tick) on the new account, then switch an author
+  // sign-up from reader to author on the server. With email
   // confirmation on, signUp() answers an address that already has an
   // account with a stand-in user whose identities list is empty; only a
   // user with an identity was really created here, so only that one is
-  // written. The account already exists at this point, so a failed
-  // write is logged (recordAuthorAgeConfirmation) and sign-up goes on.
+  // written. The account already exists at this point, so a failure is
+  // logged and sign-up goes on: an author whose record or switch failed
+  // stays a reader (it is never an author without the 18+ record) and is
+  // told to use "Become an author" (Renato, "2. a").
   const newUser = data.user;
-  if (role === "author" && newUser && (newUser.identities?.length ?? 0) > 0) {
-    await recordAuthorAgeConfirmation(newUser.id);
+  const created = Boolean(newUser && (newUser.identities?.length ?? 0) > 0);
+  let switchedToAuthor = false;
+  if (newUser && created) {
+    const recorded = await recordAgreements(newUser.id, { authorAge: role === "author" });
+    if (role === "author" && recorded) {
+      switchedToAuthor = await switchNewAccountToAuthor(newUser.id, displayName);
+    }
   }
+  // Only for an account really created here: a stand-in user must get
+  // exactly the ordinary answer, or the page would tell whether an
+  // address already has an account.
+  const authorPending = role === "author" && created && !switchedToAuthor;
 
   // If email confirmation is required, there's no session yet -- no
   // ordinary authenticated session exists here for a stale recovery
@@ -112,7 +128,7 @@ export async function signup(formData: FormData) {
   // confirmation link itself) is what clears a stale marker once a real
   // session actually exists.
   if (!data.session) {
-    redirect("/signup/check-email");
+    redirect(authorPending ? "/signup/check-email?author=pending" : "/signup/check-email");
   }
 
   // LAUNCH-1 P1-11 STALE-MARKER CORRECTION: data.session truthy here
@@ -128,7 +144,45 @@ export async function signup(formData: FormData) {
   clearRecoverySession(cookieStore);
 
   revalidatePath("/", "layout");
+  if (role === "author" && !switchedToAuthor) {
+    redirect(`/account?error=${encodeURIComponent(AUTHOR_PENDING_MESSAGE)}`);
+  }
   redirect(role === "author" ? "/dashboard" : "/");
+}
+
+// SECURITY-9A: shown when an author sign-up ended as a reader.
+const AUTHOR_PENDING_MESSAGE =
+  "Your account was created as a reader account. To publish, use \"Become an author\" on this page.";
+
+// SECURITY-9A: the database makes every new account a reader, so an
+// author sign-up is switched here, with the author-role writer (the
+// rules in src/lib/author-role-write-client.ts): only reader -> author,
+// only the row of the account signUp() just created, only role and
+// public_author_name = the trimmed sign-up name (the row
+// handle_new_user() used to write for an author; the database then
+// gives the default pen name). Exactly one changed row, now an author,
+// or it fails closed. Logged without the id.
+async function switchNewAccountToAuthor(userId: string, publicAuthorName: string): Promise<boolean> {
+  const { data: rows, error } = await createAuthorRoleWriteClient()
+    .from("profiles")
+    .update({ role: "author", public_author_name: publicAuthorName })
+    .eq("id", userId)
+    .eq("role", "reader")
+    .select("id, role");
+  if (
+    error ||
+    !Array.isArray(rows) ||
+    rows.length !== 1 ||
+    rows[0]?.id !== userId ||
+    rows[0]?.role !== "author"
+  ) {
+    console.error("signup: the switch to author failed", {
+      code: error?.code ?? null,
+      rowCount: Array.isArray(rows) ? rows.length : null,
+    });
+    return false;
+  }
+  return true;
 }
 
 export async function login(formData: FormData) {

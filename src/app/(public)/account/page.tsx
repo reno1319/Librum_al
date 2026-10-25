@@ -125,7 +125,7 @@ export default async function AccountPage({
               can&apos;t be switched back to a reader account.
             </p>
             {/* AUTHOR-AGE-1: the Terms' 18+ rule; becomeAuthor checks the
-                tick again and records it. */}
+                tick again and records it. SECURITY-9A adds the Terms tick. */}
             <form action={becomeAuthor} className="mt-3">
               <div className="mb-3 flex items-start gap-2 text-sm">
                 <input
@@ -136,6 +136,24 @@ export default async function AccountPage({
                   className="focus-ring mt-1 size-4"
                 />
                 <label htmlFor={AUTHOR_AGE_FIELD}>{AUTHOR_AGE_STATEMENT}</label>
+              </div>
+              {/* SECURITY-9A: the Terms tick, always (Renato, "2. a");
+                  becomeAuthor checks it again and records it. */}
+              <div className="mb-3 flex items-start gap-2 text-sm">
+                <input
+                  id="become_author_accept_terms"
+                  name="accept_terms"
+                  type="checkbox"
+                  required
+                  className="focus-ring mt-1 size-4"
+                />
+                <label htmlFor="become_author_accept_terms">
+                  I agree to the{" "}
+                  <Link href="/terms" className="focus-ring rounded-sm font-medium text-primary underline">
+                    Terms of Service
+                  </Link>
+                  .
+                </label>
               </div>
               <button type="submit" className={buttonClasses("primary", "sm")}>
                 Become an author

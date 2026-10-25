@@ -104,6 +104,54 @@ create table if not exists auth.users (
   raw_user_meta_data jsonb not null default '{}'::jsonb
 );
 
+-- SECURITY-9A: admin_lift_suspension() deletes the account's refresh
+-- tokens and sessions; admin_suspend_account() deletes neither (081
+-- checks both). Only the columns they touch, with real Supabase Auth's
+-- types (refresh_tokens.user_id is text there), its cascade from a
+-- deleted session to that session's refresh tokens, and the session
+-- columns that hold the newer refresh-token format (a session row with
+-- refresh_token_hmac_key set has no auth.refresh_tokens row).
+create table if not exists auth.sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  refresh_token_hmac_key text,
+  refresh_token_counter bigint
+);
+create table if not exists auth.refresh_tokens (
+  id bigserial primary key,
+  token text,
+  user_id character varying(255),
+  revoked boolean not null default false,
+  session_id uuid references auth.sessions(id) on delete cascade
+);
+
+-- SECURITY-9A: handle_new_user() makes every new account a reader; only
+-- the site's server switches a new account to author. The suites write
+-- their author fixtures as before (auth.users with
+-- raw_user_meta_data->>'role' = 'author'), so this TEST-ONLY trigger
+-- stands in for that server switch: it fires after on_auth_user_created
+-- (same event, later name) and makes exactly the reader -> author write
+-- the server makes (role plus public_author_name = display_name).
+-- Never part of schema.sql or a migration. 081 drops it to test the
+-- database on its own.
+create or replace function auth.zz_test_fixture_site_switches_authors()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.raw_user_meta_data->>'role' = 'author' then
+    update public.profiles
+       set role = 'author', public_author_name = display_name
+     where id = new.id and role = 'reader';
+  end if;
+  return new;
+end;
+$$;
+create trigger zz_test_fixture_site_switches_authors
+  after insert on auth.users
+  for each row execute function auth.zz_test_fixture_site_switches_authors();
+
 -- Mirrors real Supabase auth.uid(): reads the request's JWT `sub` claim
 -- out of a session-local GUC. Tests drive this directly via
 -- set_config('request.jwt.claim.sub', '<uuid>', true) instead of an
