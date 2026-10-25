@@ -263,8 +263,14 @@ function HeroSection({ cta, fan }: { cta: HomepageCta | null; fan: FanCover<Cove
       <div
         className="page-container py-10 lg:py-14"
       >
+        {/* With the cover fan the hero splits 50/50 from 1280px (xl) so
+            the covers get a wider column (Renato 2026-10-25, option b).
+            Narrower desktops keep 55/45: at 1024px a 50/50 split wraps
+            the heading onto three lines. The photograph keeps 55/45. */}
         <div
-          className="grid gap-10 lg:grid-cols-[55fr_45fr] lg:items-center lg:gap-12"
+          className={`grid gap-10 lg:grid-cols-[55fr_45fr] lg:items-center lg:gap-12 ${
+            showFan ? "xl:grid-cols-[1fr_1fr]" : ""
+          }`}
         >
           <div className="max-w-xl">
             <Eyebrow>Self-publishing for Albanian-language authors</Eyebrow>

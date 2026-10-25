@@ -17,11 +17,12 @@ type FanBook = { id: string; title: string; author: string | null; url: string }
 export const SPONSORED_LABEL = "Sponsored";
 
 // Literal class strings so Tailwind generates them. Widths are shares
-// of the column, so the fan shrinks with the screen, capped at the
-// board's desktop sizes.
+// of the column, so the fan shrinks with the screen. On desktop (lg)
+// the covers fill the whole column, about 23% larger (Renato
+// 2026-10-25, option b), in the same middle-to-side proportion.
 const COVER_WIDTH = {
-  side: "w-[30%] max-w-[170px]",
-  middle: "w-[38%] max-w-[220px]",
+  side: "w-[30%] max-w-[170px] lg:w-[33%] lg:max-w-[190px]",
+  middle: "w-[38%] max-w-[220px] lg:w-[42%] lg:max-w-[240px]",
 } as const;
 
 export function HomeCoverFan({ covers }: { covers: FanCover<FanBook>[] }) {
