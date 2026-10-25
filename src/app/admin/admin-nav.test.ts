@@ -23,7 +23,7 @@ describe("ADMIN_NAV_GROUPS", () => {
   it("lists the existing pages in the agreed groups and order", () => {
     expect(ADMIN_NAV_GROUPS.map((g) => ({ label: g.label, items: g.items.map((i) => i.label) }))).toEqual([
       { label: "Daily", items: ["Today", "Book reports", "Refund requests"] },
-      { label: "Catalog", items: ["Books", "Librum's choice", "Blog"] },
+      { label: "Catalog", items: ["Books", "Featured picks", "Blog"] },
       { label: "Money", items: ["Finance"] },
       { label: "Team", items: ["People", "Staff", "Audit log"] },
     ]);

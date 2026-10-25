@@ -26,7 +26,8 @@ const BYLINE_SITES: [file: string, expected: string[]][] = [
   ],
   ["app/(public)/library/page.tsx", ["authorName={resolveBookByline(book)}", "penNameId={book.pen?.id ?? null}"]],
   ["app/(public)/wishlist/page.tsx", ["authorName={resolveBookByline(book)}"]],
-  ["app/(public)/page.tsx", ["author: resolveBookByline(b),", "author: resolveBookByline(pick),"]],
+  // HOME-PICKS-1: the newest list and the fan's picks share toCover.
+  ["app/(public)/page.tsx", ["author: resolveBookByline(b),"]],
   [
     "app/(public)/books/[id]/page.tsx",
     ["const bookByline = resolveBookByline(book);", "authorName={bookByline}", "{bookByline}"],

@@ -15,7 +15,15 @@ vi.mock("@/lib/supabase/admin", () => ({
 vi.mock("./actions", () => ({
   pickLibrumChoiceFromForm: async () => undefined,
   removeLibrumChoiceFromForm: async () => undefined,
+  setHomeSlotFromForm: async () => undefined,
+  removeHomeSlotFromForm: async () => undefined,
 }));
+// HOME-PICKS-1: the slot rows come from the gated service-role helper,
+// modelled here; the slot books' titles are read from public_books
+// through the same in-memory table as the list.
+type SlotRow = { slot: number; book_id: string; sponsored: boolean };
+let homeSlots: { ok: true; slots: SlotRow[] } | { ok: false };
+vi.mock("@/lib/home-picks", () => ({ getHomeSlotsForStaff: () => Promise.resolve(homeSlots) }));
 
 type Row = Record<string, unknown>;
 let rows: Row[];
@@ -80,6 +88,7 @@ const listQuery = () => queries.find((q) => q.some((c) => c.method === "limit"))
 beforeEach(() => {
   rows = [book(1), book(2), book(3, { cover_path: null }), book(4, { price_all: null }), book(5, { status: "draft" })];
   listError = null;
+  homeSlots = { ok: true, slots: [] };
   queries = [];
   clientsCreated = 0;
   mockRequireStaff.mockReset();
@@ -136,14 +145,16 @@ describe("/admin/librum-choice", () => {
   it.each([false, true])("the current-pick card has a visible Current pick heading (picked: %s)", async (picked) => {
     if (picked) rows[0] = book(1, { librum_choice_at: "2026-10-18T09:00:00Z" });
     const html = await render();
-    expect(html).toContain('<h2 id="librum-choice-current" class="mb-1 text-sm font-medium">Current pick</h2>');
+    expect(html).toContain(
+      '<h2 id="librum-choice-current" class="mb-1 text-sm font-medium">Librum&#x27;s choice on the Bookstore: current pick</h2>',
+    );
     expect(html).toContain('aria-labelledby="librum-choice-current"');
-    expect(html.indexOf("Current pick")).toBeLessThan(html.indexOf(picked ? ">Remove<" : "Nothing picked."));
+    expect(html.indexOf("current pick</h2>")).toBeLessThan(html.indexOf(picked ? ">Remove<" : "Nothing picked."));
   });
 
-  it("a row without a cover says it is not on the homepage", async () => {
+  it("a row without a cover says it can't go on the home page", async () => {
     const html = await render();
-    expect(html.match(/Not on the homepage: no cover/g)).toHaveLength(1);
+    expect(html.match(/Can&#x27;t go on the home page: no cover/g)).toHaveLength(1);
   });
 
   it("search: trimmed, % _ and \\ escaped, ilike on the title only", async () => {
@@ -183,5 +194,76 @@ describe("/admin/librum-choice", () => {
     const html = await render();
     expect(html).toContain("Nothing picked.");
     expect(html).toContain(">Pick<");
+  });
+});
+
+describe("/admin/librum-choice: home page covers (HOME-PICKS-1)", () => {
+  const slotCards = (html: string) => html.slice(html.indexOf('id="home-slots"'), html.indexOf('id="librum-choice-current"'));
+
+  it("is titled Featured picks, with the home slots before Librum's choice", async () => {
+    const html = await render();
+    expect(html).toContain(">Featured picks</h1>");
+    expect(html.indexOf("Home page covers")).toBeLessThan(html.indexOf("Librum&#x27;s choice on the Bookstore"));
+  });
+
+  it("no slots filled: three Empty slots, labelled by place in the fan", async () => {
+    const cards = slotCards(await render());
+    expect(cards.match(/Empty: the home page shows the newest book here\./g)).toHaveLength(3);
+    for (const label of ["Slot 1 (middle, in front)", "Slot 2 (left)", "Slot 3 (right)"]) expect(cards).toContain(label);
+  });
+
+  it("a filled paid slot: the book with its byline, Paid ticked, Save and Remove", async () => {
+    rows[1] = book(2, { pen: { id: "pen-pena", name: "Pena" } });
+    homeSlots = { ok: true, slots: [{ slot: 1, book_id: "b02", sponsored: true }] };
+    const cards = slotCards(await render());
+    expect(cards).toContain("Book 02");
+    expect(cards).toContain("Pena");
+    expect(cards).toContain("Paid: shows Sponsored");
+    expect(cards).toContain('<input type="checkbox" class="size-4" name="sponsored" checked=""/>');
+    expect(cards).toContain('aria-label="Save Slot 1 (middle, in front)"');
+    expect(cards).toContain('aria-label="Remove Slot 1 (middle, in front)"');
+    expect(cards.match(/Empty:/g)).toHaveLength(2);
+  });
+
+  it("an unpaid slot: Paid not ticked, no Sponsored line", async () => {
+    homeSlots = { ok: true, slots: [{ slot: 2, book_id: "b01", sponsored: false }] };
+    const cards = slotCards(await render());
+    expect(cards).toContain("Book 01");
+    expect(cards).not.toContain("Paid: shows Sponsored");
+    expect(cards).toContain('<input type="checkbox" class="size-4" name="sponsored"/>');
+  });
+
+  it("a slot whose book is not published now: marked, a link to the book, Remove only", async () => {
+    homeSlots = { ok: true, slots: [{ slot: 3, book_id: "b05", sponsored: true }] };
+    const cards = slotCards(await render());
+    expect(cards).toContain("A book that is not published now");
+    expect(cards).toContain("Not live now: the home page shows the newest book here.");
+    expect(cards).toContain('href="/admin/books/b05"');
+    expect(cards).not.toContain('aria-label="Save Slot 3 (right)"');
+    expect(cards).toContain('aria-label="Remove Slot 3 (right)"');
+  });
+
+  it("a slot read error: the generic sentence instead of the slots, the list still loads", async () => {
+    homeSlots = { ok: false };
+    const html = await render();
+    expect(slotCards(html)).toContain("Something went wrong. Please try again.");
+    expect(slotCards(html)).not.toContain("Empty:");
+    expect(html).toContain(">Pick<");
+  });
+
+  it("each listed book with a cover can be put on the home page; not one in a slot, nor one without a cover", async () => {
+    homeSlots = { ok: true, slots: [{ slot: 2, book_id: "b01", sponsored: false }] };
+    const html = await render();
+    expect(html.match(/>Put on home page</g)).toHaveLength(1);
+    expect(html).toContain('aria-label="Put Book 02 on the home page"');
+    expect(html).toContain("On the home page: slot 2");
+    expect(html).not.toContain('aria-label="Put Book 03 on the home page"');
+  });
+
+  it("the put form offers the three slots and an unticked Paid box", async () => {
+    const html = await render();
+    const form = html.slice(html.indexOf('id="home-slot-b02"') - 200, html.indexOf('aria-label="Put Book 02 on the home page"'));
+    expect(form.match(/<option value="[123]"/g)).toEqual(['<option value="1"', '<option value="2"', '<option value="3"']);
+    expect(form).toContain('<input type="checkbox" class="size-4" name="sponsored"/>');
   });
 });
