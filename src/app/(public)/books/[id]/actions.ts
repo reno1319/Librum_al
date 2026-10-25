@@ -9,8 +9,7 @@ import { resolveCatalogPriceState } from "@/lib/catalog-price";
 import { REPORT_REASONS } from "@/lib/report-reasons";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
-import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/connect-account";
-import { resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
+import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE, resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
 import { canStartPaidCheckout } from "@/lib/paid-readiness";
 import { createPokClient, getPokConfig, type PokConfig } from "@/lib/pok";
 import {

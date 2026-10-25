@@ -28,8 +28,6 @@ const TRANSACTION_SURFACES = [
   "src/app/admin/(protected)/finance/page.tsx",
   "src/app/admin/(protected)/refunds/page.tsx",
   "src/app/admin/(protected)/refunds/[id]/page.tsx",
-  "src/app/admin/(protected)/refunds/[id]/issue-refund-button.tsx",
-  "src/app/admin/(protected)/refunds/refund-review-logic.ts",
   "src/lib/email.ts",
 ];
 

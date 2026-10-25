@@ -1,5 +1,4 @@
 import type { RefundRequestStatus } from "@/lib/types";
-import { formatTransactionMinorUnits, type CurrencyProvenance } from "@/lib/transaction-money";
 
 // Matches refund_requests.admin_notes's own cap, enforced by
 // review_refund_request() itself (migration 029:
@@ -28,89 +27,6 @@ export const REVIEW_STATUS_LABELS: Record<RefundRequestStatus, string> = {
 // what this function says.
 export function canReview(status: RefundRequestStatus): boolean {
   return status === "requested";
-}
-
-// The "Issue refund" control (Phase REFUND-1B Step 5) only ever appears
-// for a request currently 'approved' -- 'requested' still needs
-// Approve/Reject first, and 'rejected'/'cancelled'/'refunded' are all
-// terminal from this action's perspective (a refunded request has
-// nothing left to issue; the other two were never approved to begin
-// with). Presentational only, exactly like canReview() above:
-// executeApprovedRefund() (src/app/admin/refunds/issue-refund.ts)
-// independently re-checks the request's CURRENT status before ever
-// calling Stripe, and is what actually decides whether execution is
-// legal -- this function only decides whether the button renders.
-export function canIssueRefund(status: RefundRequestStatus): boolean {
-  return status === "approved";
-}
-
-// The exact success-banner text issueStripeRefund() (src/app/admin/
-// refunds/actions.ts) redirects with on a "submitted" outcome. Exported
-// as a shared constant, not duplicated as a string literal in actions.ts,
-// specifically so resolveSuccessBannerMessage below can never drift out
-// of sync with what that redirect actually sends.
-export const REFUND_SUBMITTED_SUCCESS_MESSAGE = "Refund submitted to Stripe. Waiting for confirmation.";
-
-// Shown instead of REFUND_SUBMITTED_SUCCESS_MESSAGE once the webhook has
-// already finalized the request -- see resolveSuccessBannerMessage.
-export const REFUND_CONFIRMED_SUCCESS_MESSAGE = "Refund confirmed by Stripe.";
-
-// Fixes the one observed UX defect in the otherwise-verified refund
-// lifecycle: issueStripeRefund()'s redirect always carries
-// REFUND_SUBMITTED_SUCCESS_MESSAGE at the moment it fires, but the
-// webhook can finalize the request (status -> 'refunded') before the
-// admin ever sees that redirect -- a real, already-documented race (see
-// issueStripeRefund's own comment). Without this, the page would show
-// "Waiting for confirmation" right next to a status badge that already
-// says "Refunded", which is confusing even though neither value is
-// technically wrong on its own.
-//
-// Deliberately narrow: only ever rewrites THIS specific, exact message,
-// and only when status is 'refunded'. Every other success message
-// (e.g. "Refund request approved.") is returned unchanged regardless of
-// status -- those were never a race with the webhook's own finalization
-// in the first place, so there is nothing stale to correct. Purely
-// presentational, like every other function in this file: it does not
-// read or influence refund_requests.status itself, only how a message
-// already computed elsewhere is displayed.
-export function resolveSuccessBannerMessage(
-  status: RefundRequestStatus,
-  successMessage: string | undefined,
-): string | undefined {
-  if (successMessage === REFUND_SUBMITTED_SUCCESS_MESSAGE && status === "refunded") {
-    return REFUND_CONFIRMED_SUCCESS_MESSAGE;
-  }
-  return successMessage;
-}
-
-// Confirmation copy for the "Issue refund" button
-// (src/app/admin/refunds/[id]/issue-refund-button.tsx) -- extracted as a
-// pure function for the same reason as getReviewConfirmationMessage
-// above: directly testable without a DOM/browser testing setup. The
-// amount shown here comes from the already-rendered, server-fetched
-// refund_requests.amount_cents -- purely for the admin's own
-// information before they decide whether to proceed. It plays no role
-// in what Stripe actually refunds: executeApprovedRefund() never passes
-// an amount to Stripe at all (see its own documentation for why),
-// so this confirmation text can never be more (or less) authoritative
-// than what actually happens next.
-//
-// ALL-TXN-CURRENCY-4: the amount is shown in the refund request's own
-// currency (list_refund_request_currencies(), derived from the request's
-// frozen payment reference), never as a bare "$". When that currency
-// cannot be established the confirmation shows NO amount at all rather
-// than a guessed one -- which is safe precisely because, as above, no
-// amount is ever sent to Stripe: it refunds the full remaining charge in
-// the charge's own currency either way.
-export function getIssueRefundConfirmationMessage(
-  amountCents: number,
-  currency: CurrencyProvenance,
-): string {
-  if (currency.state === "resolved" && Number.isSafeInteger(amountCents)) {
-    const amount = formatTransactionMinorUnits(amountCents, currency.currency);
-    return `Issue the ${amount} refund through Stripe? This will return the payment to the reader. This action cannot be undone.`;
-  }
-  return "Issue the full refund through Stripe? The amount cannot be shown because its currency could not be determined. This will return the payment to the reader. This action cannot be undone.";
 }
 
 // Sorts requested (actionable) items first, then by most recently

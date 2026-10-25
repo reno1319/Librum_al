@@ -9,14 +9,8 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     env: {
-      // route.ts imports the shared `stripe` client (src/lib/stripe.ts) at
-      // module scope, which throws immediately if the SDK gets no API key
-      // -- even though these tests never make a real Stripe call. A dummy
-      // value only needs to satisfy that constructor; it is never sent
-      // anywhere.
-      STRIPE_SECRET_KEY: "sk_test_dummy_for_vitest",
-      // AUTH-STAGE-1A: a handful of tests (e.g. middleware.test.ts, the
-      // Stripe webhook route tests) exercise the real
+      // AUTH-STAGE-1A: a handful of tests (e.g. middleware.test.ts)
+      // exercise the real
       // src/lib/supabase/{server,admin,middleware}.ts client constructors
       // rather than mocking them, only mocking the underlying
       // @supabase/ssr or @supabase/supabase-js SDK calls further down.

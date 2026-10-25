@@ -8,7 +8,7 @@ import { PAYOUT_CYCLE_CRON_EXPRESSION } from "./payout-cycle";
 // are kept in sync manually. This test is the regression guard on that
 // manual sync: it reads the real vercel.json directly (same technique
 // already used by src/app/api/internal/payouts/run/route.test.ts's own
-// source-guard tests) and locks in both cron entries structurally,
+// source-guard tests) and locks in the cron entries structurally,
 // rather than inventing a new config-testing framework for one file.
 function readVercelConfig(): { crons: { path: string; schedule: string }[] } {
   const raw = readFileSync(path.join(process.cwd(), "vercel.json"), "utf8");
@@ -16,13 +16,13 @@ function readVercelConfig(): { crons: { path: string; schedule: string }[] } {
 }
 
 describe("vercel.json cron configuration", () => {
-  it("preserves the existing reconciliation cron unchanged", () => {
+  // STRIPE REMOVAL (pipeline item 10): the daily Stripe
+  // reconcile-transfer-reversals cron and its route are gone.
+  it("no longer registers the retired Stripe reconciliation cron", () => {
     const config = readVercelConfig();
-    const reconciliation = config.crons.find(
-      (cron) => cron.path === "/api/internal/reconcile-transfer-reversals",
+    expect(config.crons.map((cron) => cron.path)).not.toContain(
+      "/api/internal/reconcile-transfer-reversals",
     );
-    expect(reconciliation).toBeDefined();
-    expect(reconciliation?.schedule).toBe("0 3 * * *");
   });
 
   it("registers the payout scheduler cron with the exact approved schedule", () => {
@@ -38,9 +38,9 @@ describe("vercel.json cron configuration", () => {
     expect(payout?.schedule).toBe(PAYOUT_CYCLE_CRON_EXPRESSION);
   });
 
-  it("contains exactly two cron entries -- no duplicate payout cron, nothing accidentally removed", () => {
+  it("contains exactly one cron entry -- no duplicate payout cron, nothing accidentally removed", () => {
     const config = readVercelConfig();
-    expect(config.crons).toHaveLength(2);
+    expect(config.crons).toHaveLength(1);
   });
 
   it("no cron path appears more than once", () => {

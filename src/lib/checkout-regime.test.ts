@@ -3,8 +3,8 @@ import {
   resolveCheckoutRegime,
   resolveLedgerPaymentProvider,
   resolveActiveCheckoutProvider,
-  isStripeSecretKeyTestMode,
-  isStripeEventTestMode,
+  BOOK_CHECKOUT_UNAVAILABLE_MESSAGE,
+  BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE,
 } from "./checkout-regime";
 
 describe("resolveLedgerPaymentProvider", () => {
@@ -103,42 +103,12 @@ describe("resolveActiveCheckoutProvider", () => {
   });
 });
 
-describe("isStripeSecretKeyTestMode", () => {
-  it("undefined resolves to false (fail closed)", () => {
-    expect(isStripeSecretKeyTestMode(undefined)).toBe(false);
-  });
-
-  it("empty string resolves to false", () => {
-    expect(isStripeSecretKeyTestMode("")).toBe(false);
-  });
-
-  it("a live secret key resolves to false", () => {
-    expect(isStripeSecretKeyTestMode("sk_live_abc123")).toBe(false);
-  });
-
-  it("a test secret key resolves to true", () => {
-    expect(isStripeSecretKeyTestMode("sk_test_abc123")).toBe(true);
-  });
-
-  it("a restricted test key resolves to true", () => {
-    expect(isStripeSecretKeyTestMode("rk_test_abc123")).toBe(true);
-  });
-
-  it("a restricted live key resolves to false", () => {
-    expect(isStripeSecretKeyTestMode("rk_live_abc123")).toBe(false);
-  });
-
-  it("an unrecognized key shape resolves to false", () => {
-    expect(isStripeSecretKeyTestMode("not_a_stripe_key")).toBe(false);
-  });
-});
-
-describe("isStripeEventTestMode", () => {
-  it("livemode false resolves to true", () => {
-    expect(isStripeEventTestMode({ livemode: false })).toBe(true);
-  });
-
-  it("livemode true resolves to false", () => {
-    expect(isStripeEventTestMode({ livemode: true })).toBe(false);
+describe("public-safe unavailability messages", () => {
+  it("never mention Stripe, accounts, or platform-internal details", () => {
+    for (const message of [BOOK_CHECKOUT_UNAVAILABLE_MESSAGE, BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE]) {
+      expect(message.toLowerCase()).not.toContain("stripe");
+      expect(message.toLowerCase()).not.toContain("acct_");
+      expect(message.toLowerCase()).not.toContain("platform");
+    }
   });
 });

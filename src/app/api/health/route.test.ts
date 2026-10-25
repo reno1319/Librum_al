@@ -15,11 +15,6 @@ vi.mock("@/lib/supabase/admin", () => ({
     throw new Error("health route must never construct a Supabase admin client");
   },
 }));
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => {
-    throw new Error("health route must never construct a Stripe client");
-  },
-}));
 vi.mock("@/lib/pok", () => ({
   createPokClient: () => {
     throw new Error("health route must never construct a POK client");

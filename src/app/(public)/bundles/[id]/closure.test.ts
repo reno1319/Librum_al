@@ -44,13 +44,6 @@ const mockCreateAdminClient = vi.fn(() => {
 });
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));
 
-const stripeCalls = vi.fn();
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => {
-    stripeCalls();
-    throw new Error("buyBundle reached Stripe");
-  },
-}));
 const pokCalls = vi.fn();
 vi.mock("@/lib/pok-checkout", () => ({
   startPokCheckout: () => {
@@ -123,7 +116,6 @@ describe("buyBundle: closed under every paid-mode combination, with zero side ef
     mockRedirect.mockClear();
     tableAccess.mockClear();
     rpcCalls.mockClear();
-    stripeCalls.mockClear();
     pokCalls.mockClear();
     mockCreateAdminClient.mockClear();
   });
@@ -140,7 +132,6 @@ describe("buyBundle: closed under every paid-mode combination, with zero side ef
     expect(tableAccess).not.toHaveBeenCalled();
     expect(rpcCalls).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
-    expect(stripeCalls).not.toHaveBeenCalled();
     expect(pokCalls).not.toHaveBeenCalled();
   });
 

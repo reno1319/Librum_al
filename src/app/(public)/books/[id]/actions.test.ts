@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 import { STAGING_SUPABASE_URL } from "@/lib/protected-staging";
-import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/connect-account";
+import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/checkout-regime";
 
 // PAID-MODE-1: buyBook now requires a paid-checkout permission as well
 // as a provider. Every pre-existing test below that expects buyBook to
@@ -44,15 +44,6 @@ const mockCreateClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 const mockCreateAdminClient = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));
-const mockCheckoutSessionsCreate = vi.fn();
-const mockAccountsRetrieve = vi.fn();
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({
-    checkout: { sessions: { create: mockCheckoutSessionsCreate } },
-    accounts: { retrieve: (...args: unknown[]) => mockAccountsRetrieve(...args) },
-  }),
-}));
-
 const mockPokConfig = vi.fn();
 const mockPokClient = vi.fn();
 const mockPokRepository = vi.fn();
@@ -135,7 +126,7 @@ describe("buyBook: POK provider selection", () => {
     vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1"); vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
     vi.stubEnv("STRIPE_SECRET_KEY", ""); stubPaidCheckoutAllowed();
     mockCookieStore.get.mockImplementation(() => undefined);
-    mockRedirect.mockClear(); mockCheckoutSessionsCreate.mockClear(); mockAccountsRetrieve.mockClear();
+    mockRedirect.mockClear();
     mockPokConfig.mockReset().mockReturnValue({ merchantId: "merchant", keyId: "key", keySecret: "secret" });
     mockPokClient.mockReturnValue({}); mockPokRepository.mockReturnValue({});
     mockStartPok.mockReset().mockResolvedValue(checkoutUrlResult);
@@ -170,7 +161,7 @@ describe("buyBook: POK provider selection", () => {
     for (const removed of ["p_regime", "p_currency", "p_royalty_rate_bps"]) {
       expect(intentCall[1]).not.toHaveProperty(removed);
     }
-    expect(mockStartPok).toHaveBeenCalled(); expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled(); expect(mockAccountsRetrieve).not.toHaveBeenCalled();
+    expect(mockStartPok).toHaveBeenCalled();
   });
   // PEN-NAMES-2: the author is found by an own-row books query, not by an
   // author_id on the public row. The author is sent back with no intent.
@@ -184,19 +175,17 @@ describe("buyBook: POK provider selection", () => {
   it("POK failure never falls back to Stripe", async () => {
     mockStartPok.mockRejectedValue(new Error("timeout"));
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Could+not+start+checkout" });
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
   it("an unsafe-to-resume checkout gets an honest message, never the generic one", async () => {
     mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_CANNOT_RESUME"));
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
       target: "/books/book?error=We%20can't%20safely%20reopen%20this%20checkout.%20If%20you%20already%20paid%2C%20check%20your%20library%3B%20otherwise%2C%20please%20contact%20support%20to%20complete%20this%20purchase.",
     });
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
   it("invalid sandbox configuration fails before an intent is minted", async () => {
     mockPokConfig.mockImplementation(() => { throw new Error("POK_STAGING_ONLY"); });
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Could+not+start+checkout" });
-    expect(rpc).not.toHaveBeenCalled(); expect(mockStartPok).not.toHaveBeenCalled(); expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled(); expect(mockStartPok).not.toHaveBeenCalled();
   });
   // APP A CORRECTION 2: startPokCheckout()'s own defense-in-depth
   // maintenance sentinel maps back to the exact same deterministic
@@ -207,7 +196,6 @@ describe("buyBook: POK provider selection", () => {
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
       target: "/books/book?error=Librum%20is%20temporarily%20unavailable%20for%20scheduled%20maintenance.%20Please%20try%20again%20shortly.",
     });
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -217,7 +205,6 @@ describe("buyBook: recovery-session defense-in-depth", () => {
     mockRedirect.mockClear();
     mockCreateClient.mockClear();
     mockCreateAdminClient.mockClear();
-    mockCheckoutSessionsCreate.mockClear();
   });
 
   it("redirects to /reset-password and never reaches Supabase or Stripe when a recovery session is active", async () => {
@@ -226,7 +213,6 @@ describe("buyBook: recovery-session defense-in-depth", () => {
     expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/reset-password"));
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -239,7 +225,6 @@ describe("buyBook / getFreeBook: maintenance-mode gate", () => {
     mockRedirect.mockClear();
     mockCreateClient.mockClear();
     mockCreateAdminClient.mockClear();
-    mockCheckoutSessionsCreate.mockClear();
     mockStartPok.mockClear();
     vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
   });
@@ -334,8 +319,6 @@ describe("buyBook: fail-closed provider resolution (STRIPE-DISABLE-1)", () => {
 
   beforeEach(() => {
     mockRedirect.mockClear();
-    mockAccountsRetrieve.mockReset();
-    mockCheckoutSessionsCreate.mockReset();
     mockCreateAdminClient.mockReset();
     mockPokConfig.mockReset();
     mockPokClient.mockReset();
@@ -398,8 +381,6 @@ describe("buyBook: fail-closed provider resolution (STRIPE-DISABLE-1)", () => {
       expect(mockRpc).not.toHaveBeenCalled();
       expect(mockPokConfig).not.toHaveBeenCalled();
       expect(mockStartPok).not.toHaveBeenCalled();
-      expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
-      expect(mockAccountsRetrieve).not.toHaveBeenCalled();
       expect(mockCreateAdminClient).not.toHaveBeenCalled();
     },
   );
@@ -434,8 +415,6 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
   beforeEach(() => {
     mockRedirect.mockClear();
     mockCreateAdminClient.mockReset();
-    mockCheckoutSessionsCreate.mockReset();
-    mockAccountsRetrieve.mockReset();
     mockPokConfig.mockReset();
     mockStartPok.mockReset();
 
@@ -468,8 +447,6 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
       expect.objectContaining({ book_id: BOOK_ID, reader_id: READER_ID, amount_cents: 0 }),
       expect.anything(),
     );
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
-    expect(mockAccountsRetrieve).not.toHaveBeenCalled();
     expect(mockPokConfig).not.toHaveBeenCalled();
     expect(mockStartPok).not.toHaveBeenCalled();
     expect(mockRpc).not.toHaveBeenCalledWith("create_book_checkout_intent", expect.anything());
@@ -583,7 +560,6 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
     // checkout-intent or ledger RPC is issued.
     expect(mockStartPok).not.toHaveBeenCalled();
     expect(mockPokConfig).not.toHaveBeenCalled();
-    expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
     const rpcNames = mockRpc.mock.calls.map((call: unknown[]) => call[0]);
     expect(rpcNames).toEqual(["user_owns_book"]);
     for (const forbidden of [
@@ -646,8 +622,6 @@ describe("buyBook: paid-checkout mode gate (PAID-MODE-1)", () => {
     mockPokRepository.mockReset().mockReturnValue({});
     mockStartPok.mockReset().mockResolvedValue(checkoutUrlResult);
     mockProbe.mockReset();
-    mockCheckoutSessionsCreate.mockReset();
-    mockAccountsRetrieve.mockReset();
     mockRpc = vi.fn().mockResolvedValue({ data: false, error: null });
     mockCreateClient.mockReset().mockResolvedValue({
       auth: { getUser: () => Promise.resolve({ data: { user: { id: READER_ID } } }) },
@@ -687,8 +661,6 @@ describe("buyBook: paid-checkout mode gate (PAID-MODE-1)", () => {
       expect(mockPokConfig).not.toHaveBeenCalled();
       expect(mockStartPok).not.toHaveBeenCalled();
       expect(mockRpc).not.toHaveBeenCalled();
-      expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
-      expect(mockAccountsRetrieve).not.toHaveBeenCalled();
     },
   );
 

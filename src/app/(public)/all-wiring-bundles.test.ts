@@ -46,9 +46,7 @@ const ACTIVE_BUNDLE_CATALOG = [
 // Rewriting them because the column name contains "price_cents" would
 // change what already-completed purchases mean.
 const HISTORICAL_EXCLUDED = [
-  "../api/webhooks/stripe/route.ts",
   "library/refund-logic.ts",
-  "bundles/[id]/checkout-logic.ts",
   "../../lib/email.ts",
 ];
 
