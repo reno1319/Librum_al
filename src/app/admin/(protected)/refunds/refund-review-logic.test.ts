@@ -1,19 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   abbreviatePaymentIntentId,
-  canIssueRefund,
   canReview,
   compareForTriage,
-  getIssueRefundConfirmationMessage,
   getReviewConfirmationMessage,
   mapReviewRpcError,
   resolveProfileDisplayName,
-  resolveSuccessBannerMessage,
   validateAdminNotes,
   ADMIN_NOTES_MAX_LENGTH,
   GENERIC_REVIEW_ERROR_MESSAGE,
-  REFUND_CONFIRMED_SUCCESS_MESSAGE,
-  REFUND_SUBMITTED_SUCCESS_MESSAGE,
 } from "./refund-review-logic";
 
 describe("resolveProfileDisplayName", () => {
@@ -91,78 +86,6 @@ describe("canReview", () => {
     expect(canReview("rejected")).toBe(false);
     expect(canReview("refunded")).toBe(false);
     expect(canReview("cancelled")).toBe(false);
-  });
-});
-
-describe("canIssueRefund", () => {
-  it("allows issuing a refund only when status is approved", () => {
-    expect(canIssueRefund("approved")).toBe(true);
-  });
-
-  it("disallows issuing a refund for every other status", () => {
-    expect(canIssueRefund("requested")).toBe(false);
-    expect(canIssueRefund("rejected")).toBe(false);
-    expect(canIssueRefund("refunded")).toBe(false);
-    expect(canIssueRefund("cancelled")).toBe(false);
-  });
-});
-
-describe("resolveSuccessBannerMessage", () => {
-  it("approved + the submitted-success message: shown as-is (\"waiting for confirmation\")", () => {
-    expect(resolveSuccessBannerMessage("approved", REFUND_SUBMITTED_SUCCESS_MESSAGE)).toBe(
-      REFUND_SUBMITTED_SUCCESS_MESSAGE,
-    );
-  });
-
-  it("refunded + the submitted-success message: rewritten to the confirmed message, not the stale one", () => {
-    expect(resolveSuccessBannerMessage("refunded", REFUND_SUBMITTED_SUCCESS_MESSAGE)).toBe(
-      REFUND_CONFIRMED_SUCCESS_MESSAGE,
-    );
-  });
-
-  it("leaves every other success message untouched regardless of status, even when refunded", () => {
-    expect(resolveSuccessBannerMessage("refunded", "Refund request approved.")).toBe(
-      "Refund request approved.",
-    );
-    expect(resolveSuccessBannerMessage("requested", "Refund request rejected.")).toBe(
-      "Refund request rejected.",
-    );
-  });
-
-  it("passes through an absent success message unchanged (no banner to show)", () => {
-    expect(resolveSuccessBannerMessage("approved", undefined)).toBeUndefined();
-    expect(resolveSuccessBannerMessage("refunded", undefined)).toBeUndefined();
-  });
-});
-
-describe("getIssueRefundConfirmationMessage", () => {
-  // ALL-TXN-CURRENCY-4: the request's own currency, never a bare "$".
-  it("formats a legacy USD amount with an explicit USD code and states the consequence is irreversible", () => {
-    expect(getIssueRefundConfirmationMessage(699, { state: "resolved", currency: "USD" })).toBe(
-      "Issue the USD 6.99 refund through Stripe? This will return the payment to the reader. This action cannot be undone.",
-    );
-  });
-
-  it("formats an ALL amount in lek with the qindarka", () => {
-    expect(getIssueRefundConfirmationMessage(17910, { state: "resolved", currency: "ALL" })).toContain(
-      "Issue the 179,10 ALL refund",
-    );
-  });
-
-  it("formats a whole amount with two decimal places", () => {
-    expect(getIssueRefundConfirmationMessage(500, { state: "resolved", currency: "USD" })).toContain("USD 5.00");
-  });
-
-  it("shows NO amount -- never a guessed currency -- when the currency is not established", () => {
-    for (const currency of [{ state: "unknown" }, { state: "conflict" }, { state: "free" }] as const) {
-      const message = getIssueRefundConfirmationMessage(699, currency);
-      expect(message).toContain("Issue the full refund through Stripe?");
-      expect(message).toContain("currency could not be determined");
-      expect(message).not.toMatch(/6[.,]99/);
-      expect(message).not.toContain("$");
-      expect(message).not.toContain("USD");
-      expect(message).toContain("This action cannot be undone.");
-    }
   });
 });
 

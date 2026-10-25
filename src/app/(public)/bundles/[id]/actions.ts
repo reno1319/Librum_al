@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
-import { BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/connect-account";
+import { BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE } from "@/lib/checkout-regime";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
 

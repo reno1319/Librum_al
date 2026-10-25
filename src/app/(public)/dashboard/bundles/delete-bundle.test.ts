@@ -46,8 +46,6 @@ vi.mock("@/lib/pok", () => (loadedPaymentModules.push("pok"), {}));
 vi.mock("@/lib/pok-checkout", () => (loadedPaymentModules.push("pok-checkout"), {}));
 vi.mock("@/lib/pok-repository", () => (loadedPaymentModules.push("pok-repository"), {}));
 vi.mock("@/lib/checkout-regime", () => (loadedPaymentModules.push("checkout-regime"), {}));
-vi.mock("@/lib/stripe", () => (loadedPaymentModules.push("lib/stripe"), {}));
-vi.mock("stripe", () => (loadedPaymentModules.push("stripe"), {}));
 
 const AUTHOR_ID = "a0000000-0000-4000-8000-00000000000a";
 const OTHER_AUTHOR_ID = "a0000000-0000-4000-8000-00000000000b";

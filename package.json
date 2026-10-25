@@ -14,7 +14,6 @@
     "staging:fixtures:teardown": "node --experimental-strip-types --env-file=.env.staging.local scripts/staging-fixtures/reset.mts teardown"
   },
   "dependencies": {
-    "@stripe/stripe-js": "^9.13.0",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
     "@vercel/analytics": "^2.0.1",
@@ -27,7 +26,6 @@
     "react-markdown": "^10.1.0",
     "resend": "^6.20.0",
     "server-only": "0.0.1",
-    "stripe": "^22.5.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

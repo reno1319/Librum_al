@@ -5,15 +5,12 @@ import { requireStaff } from "@/lib/staff";
 import type { RefundRequestStatus } from "@/lib/types";
 import {
   abbreviatePaymentIntentId,
-  canIssueRefund,
   canReview,
   resolveProfileDisplayName,
-  resolveSuccessBannerMessage,
   REVIEW_STATUS_LABELS,
 } from "../refund-review-logic";
-import { reviewRefundRequest, issueStripeRefund } from "../actions";
+import { reviewRefundRequest } from "../actions";
 import { ReviewButtons } from "./review-buttons";
-import { IssueRefundButton } from "./issue-refund-button";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatTransactionAmount } from "@/lib/transaction-money";
@@ -161,11 +158,7 @@ export default async function AdminRefundRequestDetailPage({
     request.id,
   );
   const reviewable = canReview(request.status);
-  // Fixes the observed stale-banner defect: issueStripeRefund()'s
-  // redirect always carries the "waiting for confirmation" message, but
-  // the webhook can finalize the request before this page ever renders
-  // that redirect -- see resolveSuccessBannerMessage's own docs.
-  const successMessage = resolveSuccessBannerMessage(request.status, success);
+  const successMessage = success;
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
@@ -287,20 +280,13 @@ export default async function AdminRefundRequestDetailPage({
         </form>
       )}
 
-      {canIssueRefund(request.status) && (
-        <form
-          action={issueStripeRefund.bind(null, request.id)}
-          className="mt-6 rounded-card border border-border bg-surface p-4 shadow-sm"
-        >
-          <p className="text-sm text-muted">
-            This request has been approved. Issuing the refund submits it to Stripe --
-            Librum&apos;s own records update automatically once Stripe confirms it, not
-            immediately on submission.
-          </p>
-          <div className="mt-3">
-            <IssueRefundButton amountCents={request.amount_cents} currency={requestCurrency} />
-          </div>
-        </form>
+      {/* STRIPE REMOVAL (pipeline item 10, Renato 2. a): the Stripe
+          "Issue refund" button is gone; refunds come with the live POK
+          build. */}
+      {request.status === "approved" && (
+        <p className="mt-6 rounded-card border border-border bg-surface p-4 text-sm text-muted shadow-sm">
+          This request has been approved. Sending the refund from Librum isn&apos;t available yet.
+        </p>
       )}
     </main>
   );

@@ -15,8 +15,9 @@ export const metadata: Metadata = {
 // here only, not on the public page. Company details come from
 // src/lib/seller.ts (4. a). The download record is the download log of
 // pipeline item 3 (2. a: published before it ships; buying is off until
-// then). The one Stripe line stays until the Stripe removal step (item
-// 10) deletes the Stripe data, and must go in that same change. The
+// then). STRIPE REMOVAL (item 10, Renato 5. a): the Stripe line is gone
+// with the Stripe code; only the owners' own test accounts ever used
+// Stripe, and those old records go at the pre-launch cleanup. The
 // date must match the month this goes live. TRUST PACK (item 5, 6. a):
 // the WhatsApp line shows only while src/lib/contact.ts holds a number,
 // the same value that shows the link on Contact. VISITOR STATS (item 6,
@@ -201,11 +202,6 @@ export default function PrivacyPage() {
                     phone number and WhatsApp name.
                   </li>
                 )}
-                <li>
-                  <strong>Stripe</strong> — handled earlier test payments and
-                  author payout accounts; we still hold some of those old
-                  records, which will be deleted.
-                </li>
               </ul>
               <p className="mt-2">
                 We may also share data with our accountant and lawyers, and
