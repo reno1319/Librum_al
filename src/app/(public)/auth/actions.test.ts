@@ -45,10 +45,60 @@ let mockSupabaseAuth: {
 const mockCreateClient = vi.fn(() => Promise.resolve({ auth: mockSupabaseAuth }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
+// AUTHOR-AGE-1 / SECURITY-9A: the sign-up records (Terms, 18+) are
+// written through the service role's auth admin API
+// (src/lib/agreement-records.ts), and an author sign-up is switched from
+// reader to author with the author-role writer, which is the same
+// service-role client (src/lib/author-role-write-client.ts).
+const mockUpdateUserById = vi.fn((_id: string, _attributes: unknown) => {
+  order.push("record");
+  return Promise.resolve({ data: null, error: null as unknown });
+});
+type RoleWrite = { table: string; values: unknown; filters: Array<[string, unknown]>; columns: string };
+let roleWrites: RoleWrite[] = [];
+let order: string[] = [];
+// null: answer with exactly the filtered row, now an author.
+let roleWriteResult: { data: unknown; error: unknown } | null = null;
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    auth: { admin: { updateUserById: (id: string, attributes: unknown) => mockUpdateUserById(id, attributes) } },
+    from: (table: string) => ({
+      update: (values: unknown) => {
+        const write: RoleWrite = { table, values, filters: [], columns: "" };
+        roleWrites.push(write);
+        order.push("switch");
+        const chain = {
+          eq: (column: string, value: unknown) => {
+            write.filters.push([column, value]);
+            return chain;
+          },
+          select: async (columns: string) => {
+            write.columns = columns;
+            if (roleWriteResult) return roleWriteResult;
+            const id = write.filters.find(([column]) => column === "id")?.[1];
+            return { data: [{ id, role: "author" }], error: null };
+          },
+        };
+        return chain;
+      },
+    }),
+  }),
+}));
+
+// A signUp() answer for an account really created (it has an identity).
+const CREATED_ID = "55555555-5555-4555-8555-555555555555";
+function createdUser(session: unknown) {
+  return { data: { session, user: { id: CREATED_ID, identities: [{ id: "identity-1" }] } }, error: null };
+}
+
 const { updatePassword, logout, login, signup, requestPasswordReset } = await import("./actions");
 
 function resetMocks() {
   mockRedirect.mockClear();
+  mockUpdateUserById.mockClear();
+  roleWrites = [];
+  order = [];
+  roleWriteResult = null;
   mockCookies.mockClear();
   mockCookieStore.get.mockClear();
   mockCookieStore.set.mockClear();
@@ -61,9 +111,7 @@ function resetMocks() {
     signInWithPassword: vi.fn(() =>
       Promise.resolve({ data: { user: { id: "signed-in-user" } }, error: null }),
     ),
-    signUp: vi.fn(() =>
-      Promise.resolve({ data: { session: { access_token: "tok" } }, error: null }),
-    ),
+    signUp: vi.fn(() => Promise.resolve(createdUser({ access_token: "tok" }))),
     resetPasswordForEmail: vi.fn(() => Promise.resolve({ data: {}, error: null })),
   };
 }
@@ -570,7 +618,7 @@ describe("signup: stale recovery marker", () => {
     // is always safe/idempotent whether or not a marker was actually
     // present) -- what matters here is that the ordinary redirect
     // behavior is completely unaffected either way.
-    await expectRedirectTo(signup(signupFormData({ role: "author" })), "/dashboard");
+    await expectRedirectTo(signup(signupFormData({ role: "author", confirm_author_age: "on" })), "/dashboard");
     expect(mockCookieStore.delete).toHaveBeenCalledExactlyOnceWith(RECOVERY_COOKIE_NAME);
   });
 
@@ -673,7 +721,7 @@ describe("signup: Terms/Privacy consent gate", () => {
   });
 
   it("5. author signup with acceptance: existing author flow (redirect to '/dashboard') is unchanged", async () => {
-    await expectRedirectTo(signup(signupFormData({ role: "author" })), "/dashboard");
+    await expectRedirectTo(signup(signupFormData({ role: "author", confirm_author_age: "on" })), "/dashboard");
   });
 
   it("6. email-confirmation-required signup with acceptance still redirects to /signup/check-email", async () => {
@@ -717,6 +765,7 @@ describe("signup: N3 name trim", () => {
       displayName: "New Author",
       role: "author",
       accept_terms: "on",
+      confirm_author_age: "on",
       ...overrides,
     });
   }
@@ -725,9 +774,11 @@ describe("signup: N3 name trim", () => {
     await expectRedirectTo(signup(signupFormData({ displayName: "  Ana Pen \t" })), "/dashboard");
     expect(mockSupabaseAuth.signUp).toHaveBeenCalledWith(
       expect.objectContaining({
-        options: expect.objectContaining({ data: { display_name: "Ana Pen", role: "author" } }),
+        options: expect.objectContaining({ data: { display_name: "Ana Pen" } }),
       }),
     );
+    // SECURITY-9A: the trimmed name is also the new author's public name.
+    expect(roleWrites[0]?.values).toEqual({ role: "author", public_author_name: "Ana Pen" });
   });
 
   it.each(["   ", "\t\n"])("refuses a whitespace-only name (%j) before signUp, with the profile page's message", async (name) => {
@@ -738,5 +789,204 @@ describe("signup: N3 name trim", () => {
   it("an absent name is still 'Please fill in every field'", async () => {
     await expectRedirectTo(signup(signupFormData({ displayName: "" })), "/signup?error=Please+fill+in+every+field");
     expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
+  });
+});
+
+// AUTHOR-AGE-1 (Renato 10-24, "6. a"): an author sign-up needs the
+// "I'm 18 or older" tick, checked here before signUp(), and the new
+// account gets the confirmation in its app_metadata. Reader sign-ups
+// are untouched.
+describe("signup: AUTHOR-AGE-1 18+ tick", () => {
+  beforeEach(resetMocks);
+
+  const NEW_ID = "44444444-4444-4444-8444-444444444444";
+  const AGE_ERROR = `/signup?role=author&error=${encodeURIComponent("Authors must be 18 or older. Tick the box to confirm.")}`;
+
+  function signupFormData(overrides: Record<string, string> = {}) {
+    return formData({
+      email: "newauthor@example.com",
+      password: "hunter2",
+      displayName: "New Author",
+      role: "author",
+      accept_terms: "on",
+      confirm_author_age: "on",
+      ...overrides,
+    });
+  }
+
+  function created(session: unknown) {
+    return { data: { session, user: { id: NEW_ID, identities: [{ id: "identity-1" }] } }, error: null };
+  }
+
+  it.each([
+    ["no tick", undefined],
+    ["a tick with another value", "yes"],
+  ])("author with %s: refused with the age message (Author kept chosen), signUp never called", async (_label, value) => {
+    const fd = signupFormData();
+    if (value === undefined) fd.delete("confirm_author_age");
+    else fd.set("confirm_author_age", value);
+    await expectRedirectTo(signup(fd), AGE_ERROR);
+    expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it("a reader needs no tick, and no 18+ confirmation is recorded (SECURITY-9A: the Terms date is)", async () => {
+    const fd = signupFormData({ role: "reader" });
+    fd.delete("confirm_author_age");
+    mockSupabaseAuth.signUp.mockResolvedValue(created({ access_token: "tok" }));
+    await expectRedirectTo(signup(fd), "/");
+    expect(mockSupabaseAuth.signUp).toHaveBeenCalledOnce();
+    expect(mockUpdateUserById).toHaveBeenCalledOnce();
+    const [, attributes] = mockUpdateUserById.mock.calls[0] as [string, { app_metadata: Record<string, unknown> }];
+    expect(Object.keys(attributes.app_metadata).sort()).toEqual(["terms_accepted_at", "terms_version"]);
+  });
+
+  it.each([
+    ["an immediate session", { access_token: "tok" }, "/dashboard"],
+    ["email confirmation pending", null, "/signup/check-email"],
+  ])("an author with the tick and %s: the new account's app_metadata gets the confirmation", async (_label, session, target) => {
+    mockSupabaseAuth.signUp.mockResolvedValue(created(session));
+    await expectRedirectTo(signup(signupFormData()), target);
+    expect(mockUpdateUserById).toHaveBeenCalledOnce();
+    const [id, attributes] = mockUpdateUserById.mock.calls[0] as [string, { app_metadata: Record<string, unknown> }];
+    expect(id).toBe(NEW_ID);
+    expect(Object.keys(attributes)).toEqual(["app_metadata"]);
+    expect(attributes.app_metadata.author_age_statement_version).toBe("author-age-v1");
+    expect(Number.isNaN(Date.parse(String(attributes.app_metadata.author_age_confirmed_at)))).toBe(false);
+    // SECURITY-9A: the same write carries the Terms record.
+    expect(attributes.app_metadata.terms_version).toBe("terms-2026-10");
+    expect(attributes.app_metadata.terms_accepted_at).toBe(attributes.app_metadata.author_age_confirmed_at);
+  });
+
+  it("an address that already has an account (stand-in user, no identities) is never written", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue({
+      data: { session: null, user: { id: NEW_ID, identities: [] } },
+      error: null,
+    });
+    await expectRedirectTo(signup(signupFormData()), "/signup/check-email");
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it("a signUp error records nothing", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue({ data: { session: null, user: null }, error: { message: "User already registered" } });
+    await expectRedirectTo(signup(signupFormData()), "/signup?error=User%20already%20registered");
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it("a failed record is logged without the id; the sign-up finishes as a reader (SECURITY-9A: never switched)", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockUpdateUserById.mockResolvedValueOnce({ data: null, error: { status: 500, message: "down" } });
+    mockSupabaseAuth.signUp.mockResolvedValue(created({ access_token: "tok" }));
+    await expectRedirectTo(signup(signupFormData()), "/account?error=");
+    expect(roleWrites).toHaveLength(0);
+    expect(logged).toHaveBeenCalled();
+    expect(JSON.stringify(logged.mock.calls)).not.toContain(NEW_ID);
+    logged.mockRestore();
+  });
+});
+
+// SECURITY-9A (pipeline item 9, Renato 10-24, all "a"): the database
+// makes every new account a reader and ignores any role a sign-up
+// sends. signup() sends none, records the Terms tick on every account
+// it really creates, and switches an author sign-up to author with the
+// author-role writer, only after the 18+ record. A failed switch leaves
+// a reader, who is told to use "Become an author".
+describe("signup: SECURITY-9A server-side switch to author", () => {
+  beforeEach(resetMocks);
+
+  function signupFormData(overrides: Record<string, string> = {}) {
+    return formData({
+      email: "newauthor@example.com",
+      password: "hunter2",
+      displayName: " New Author ",
+      role: "author",
+      accept_terms: "on",
+      confirm_author_age: "on",
+      ...overrides,
+    });
+  }
+
+  function lastRedirect() {
+    return mockRedirect.mock.calls.at(-1)?.[0];
+  }
+
+  it.each(["author", "reader"])("a %s sign-up sends no role to signUp", async (role) => {
+    await expect(signup(signupFormData({ role }))).rejects.toBeInstanceOf(RedirectSignal);
+    const [args] = mockSupabaseAuth.signUp.mock.calls[0] as unknown as [{ options: { data: Record<string, unknown> } }];
+    expect(args.options.data).toEqual({ display_name: "New Author" });
+  });
+
+  it.each([
+    ["an immediate session", { access_token: "tok" }, "/dashboard"],
+    ["email confirmation pending", null, "/signup/check-email"],
+  ])("an author with %s is switched: reader -> author, own row only, after the record", async (_label, session, target) => {
+    mockSupabaseAuth.signUp.mockResolvedValue(createdUser(session));
+    await expect(signup(signupFormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(lastRedirect()).toBe(target);
+    expect(roleWrites).toEqual([
+      {
+        table: "profiles",
+        values: { role: "author", public_author_name: "New Author" },
+        filters: [
+          ["id", CREATED_ID],
+          ["role", "reader"],
+        ],
+        columns: "id, role",
+      },
+    ]);
+    expect(order).toEqual(["record", "switch"]);
+  });
+
+  it("a reader sign-up is never switched", async () => {
+    await expect(signup(signupFormData({ role: "reader" }))).rejects.toBeInstanceOf(RedirectSignal);
+    expect(lastRedirect()).toBe("/");
+    expect(roleWrites).toHaveLength(0);
+    expect(order).toEqual(["record"]);
+  });
+
+  it.each([
+    ["an error", { data: null, error: { code: "42501" } }],
+    ["no row", { data: [], error: null }],
+    ["two rows", { data: [{ id: CREATED_ID, role: "author" }, { id: "x", role: "author" }], error: null }],
+    ["another row", { data: [{ id: "someone-else", role: "author" }], error: null }],
+    ["a row that is not an author", { data: [{ id: CREATED_ID, role: "reader" }], error: null }],
+  ])("a switch with %s fails closed: an immediate session goes to Account with the message", async (_label, result) => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    roleWriteResult = result;
+    await expect(signup(signupFormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(lastRedirect()).toBe(
+      `/account?error=${encodeURIComponent(
+        'Your account was created as a reader account. To publish, use "Become an author" on this page.',
+      )}`,
+    );
+    expect(JSON.stringify(logged.mock.calls)).not.toContain(CREATED_ID);
+    logged.mockRestore();
+  });
+
+  it("a failed switch with email confirmation pending adds the note to check-email", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    roleWriteResult = { data: [], error: null };
+    mockSupabaseAuth.signUp.mockResolvedValue(createdUser(null));
+    await expect(signup(signupFormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(lastRedirect()).toBe("/signup/check-email?author=pending");
+    logged.mockRestore();
+  });
+
+  it("a stand-in user (address already has an account) gets the plain answer: no record, no switch, no note", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue({
+      data: { session: null, user: { id: CREATED_ID, identities: [] } },
+      error: null,
+    });
+    await expect(signup(signupFormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(lastRedirect()).toBe("/signup/check-email");
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+    expect(roleWrites).toHaveLength(0);
+  });
+
+  it("an immediate session without a created user is never sent to the dashboard", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue({ data: { session: { access_token: "tok" }, user: null }, error: null });
+    await expect(signup(signupFormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(lastRedirect()).toMatch(/^\/account\?error=/);
+    expect(roleWrites).toHaveLength(0);
   });
 });

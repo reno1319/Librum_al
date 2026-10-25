@@ -526,7 +526,8 @@ describe("updateBundle: the owned bundle, the authenticated author, ONE atomic s
   ])("PAID-REPRICING-1 compare-and-set travels into the transaction: %s", async (_label, row, price, guard) => {
     existingBundle = { id: BUNDLE_ID, ...row };
     rpcResult = (c) => ({ data: stateRows(c.args, { bundle_status: row.status }), error: null });
-    expect(await redirectOf(updateBundle(BUNDLE_ID, form([BOOK_A, BOOK_B], { price })))).toBe(UPDATED);
+    // LIVE-PRICE-CONFIRM-1: a live bundle's new price carries its tick.
+    expect(await redirectOf(updateBundle(BUNDLE_ID, form([BOOK_A, BOOK_B], { price, confirmPriceChange: price })))).toBe(UPDATED);
     expect(rpcCalls[0].args).toMatchObject(guard);
   });
 

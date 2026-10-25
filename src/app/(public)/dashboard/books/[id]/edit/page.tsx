@@ -46,6 +46,7 @@ import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { FormDraftKeeper } from "@/components/form-draft-keeper";
+import { PriceChangeConfirm } from "@/components/price-change-confirm";
 import { CheckedBookField } from "@/components/checked-book-field";
 import type { Book, Series, Contributor } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
@@ -679,6 +680,9 @@ export default async function EditBookPage({
                     every sale.
                   </span>
                 </label>
+                {/* LIVE-PRICE-CONFIRM-1: a live book's new price needs a
+                    tick (updateBook checks it). */}
+                {isLive && <PriceChangeConfirm currentPriceAll={book.price_all ?? null} />}
               </div>
             </section>
 

@@ -9,6 +9,9 @@ import { createPenNameWriteClient } from "@/lib/pen-name-write-client";
 import { canonicalPenNamePhotoPath, type PenNamePhotoExtension } from "@/lib/pen-name-photo-path";
 import { AVATARS_BUCKET, isOwnCanonicalAvatarPath } from "@/lib/avatar-path";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
+import { hasAuthorAgeTick } from "@/lib/author-age";
+import { hasTermsTick, recordAgreements } from "@/lib/agreement-records";
+import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
 
 const FAILURE_PATH = `/account?error=${encodeURIComponent(
   "We couldn't switch your account to an author account. Please try again.",
@@ -17,6 +20,15 @@ const FAILURE_PATH = `/account?error=${encodeURIComponent(
 // PEN-2 (N3): the same message the profile page shows for an empty public
 // author name (dashboard/profile/actions.ts).
 const EMPTY_NAME_PATH = `/account?error=${encodeURIComponent("Public author name can't be empty")}`;
+
+// AUTHOR-AGE-1: the "I'm 18 or older" tick was not sent.
+const AGE_REQUIRED_PATH = `/account?error=${encodeURIComponent(AUTHOR_AGE_REQUIRED_MESSAGE)}`;
+
+// SECURITY-9A (Renato, "2. a" after the r1 audit): the Terms tick was not
+// sent.
+const TERMS_REQUIRED_PATH = `/account?error=${encodeURIComponent(
+  "You must agree to the Terms of Service before becoming an author.",
+)}`;
 
 // PEN-2 (17a after C8): the contract migration stops the default pen name
 // from taking the account's photo key, because that key
@@ -83,7 +95,16 @@ async function copyLegacyPhotoToDefaultPenName(
 // One way only. Nothing here (or anywhere else) turns an author back
 // into a reader, and an admin or any other role is never rewritten --
 // see src/lib/author-role-write-client.ts for the write rules.
-export async function becomeAuthor() {
+//
+// AUTHOR-AGE-1 + SECURITY-9A: the switch also needs the "I'm 18 or
+// older" tick and the Terms tick -- always, even for an account that
+// agreed to the Terms at sign-up -- and both are recorded
+// (src/lib/agreement-records.ts) BEFORE the role changes, so no account
+// becomes an author here without them. That also covers a reader made
+// by calling Supabase Auth directly, which never saw the sign-up's
+// Terms tick. If the role write then fails, the records stay: it is
+// still true that they agreed.
+export async function becomeAuthor(formData: FormData) {
   // Proxy already blocks /account while a recovery session is active;
   // this is the second layer against a crafted direct POST.
   await redirectIfRecoverySessionActive();
@@ -117,6 +138,14 @@ export async function becomeAuthor() {
     );
   }
 
+  if (!hasAuthorAgeTick(formData)) {
+    redirect(AGE_REQUIRED_PATH);
+  }
+
+  if (!hasTermsTick(formData)) {
+    redirect(TERMS_REQUIRED_PATH);
+  }
+
   // public_author_name_required_for_authors (migration 045) rejects an
   // author row with a null public name; handle_new_user() never leaves
   // display_name null, so a missing one means an unexpected row.
@@ -130,6 +159,10 @@ export async function becomeAuthor() {
   const publicAuthorName = storedName.trim();
   if (publicAuthorName === "") {
     redirect(EMPTY_NAME_PATH);
+  }
+
+  if (!(await recordAgreements(user.id, { authorAge: true }))) {
+    redirect(FAILURE_PATH);
   }
 
   const writer = createAuthorRoleWriteClient();

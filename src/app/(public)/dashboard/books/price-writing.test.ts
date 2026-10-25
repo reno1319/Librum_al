@@ -168,7 +168,10 @@ async function buildValidEpubBytes(): Promise<Buffer> {
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
 
-async function buildFormData(price: string): Promise<FormData> {
+// LIVE-PRICE-CONFIRM-1: `confirmed` adds the tick a live book's new
+// price needs (the price as parsed); the rule itself is covered in
+// paid-repricing-guards.test.ts.
+async function buildFormData(price: string, confirmed = false): Promise<FormData> {
   const epubBytes = await buildValidEpubBytes();
   const formData = new FormData();
   formData.set("title", "My Book");
@@ -177,6 +180,7 @@ async function buildFormData(price: string): Promise<FormData> {
   formData.set("isbn", "");
   formData.set("genre", "Fiction");
   formData.set("price", price);
+  if (confirmed) formData.set("confirmPriceChange", String(Number(price)));
   formData.set(
     "cover",
     new File([new Uint8Array(PNG_SIGNATURE)], "cover.png", { type: "image/png" }),
@@ -300,7 +304,7 @@ describe("updateBook: the accepted price is written to price_all and nothing els
       },
       error: null,
     });
-    await expect(updateBook(BOOK_ID, await buildFormData("0"))).rejects.toBeInstanceOf(
+    await expect(updateBook(BOOK_ID, await buildFormData("0", true))).rejects.toBeInstanceOf(
       RedirectSignal,
     );
     expect(
@@ -326,7 +330,7 @@ describe("updateBook: the accepted price is written to price_all and nothing els
       },
       error: null,
     });
-    await expect(updateBook(BOOK_ID, await buildFormData("1200"))).rejects.toBeInstanceOf(
+    await expect(updateBook(BOOK_ID, await buildFormData("1200", true))).rejects.toBeInstanceOf(
       RedirectSignal,
     );
     expect(

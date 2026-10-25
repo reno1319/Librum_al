@@ -250,4 +250,51 @@ describe("BookstorePage: redesign step 3 layout", () => {
     const fiction = await render({ genre: "Fiction" });
     expect(fiction).toMatch(/<summary[^>]*>Fiction<svg/);
   });
+
+  // BOOKSTORE ORNATE SHELF (Renato 10-25, header B; 1a/2a): the grid's
+  // five newest books as ornate spines beside the heading, from 768px up,
+  // and only on the unfiltered view.
+  function ornateShelf(html: string): string {
+    const start = html.indexOf('aria-label="Newest books"');
+    expect(start).toBeGreaterThan(-1);
+    return html.slice(start, html.indexOf("</ul>", start));
+  }
+
+  it("shows the five newest books as linked spines, newest first, with title and byline", async () => {
+    const shelf = ornateShelf(await render());
+    const ids = [...shelf.matchAll(/href="\/books\/(book-\d+)"/g)].map((m) => m[1]);
+    expect(ids).toEqual(["book-10", "book-09", "book-08", "book-07", "book-06"]);
+    expect(shelf).toContain('aria-label="View Book 10 on Librum"');
+    expect(shelf).toContain(">Book 10</span>");
+    expect(shelf).toContain(">An Author</span>");
+  });
+
+  it("puts the search box under the heading and hides the shelf below 768px", async () => {
+    const html = await render();
+    expect(html.indexOf("Discover independent books.")).toBeLessThan(html.indexOf('id="bookstore-search"'));
+    expect(html.indexOf('id="bookstore-search"')).toBeLessThan(html.indexOf('aria-label="Newest books"'));
+    expect(html).toMatch(/class="hidden shrink-0 md:block \[zoom:0\.7\]"><div[^>]*><svg/);
+  });
+
+  it("has no ornate shelf on a filtered, sorted or price-limited view, or after a failed load", async () => {
+    const views: Record<string, string>[] = [{ genre: "Fiction" }, { sort: "price_asc" }, { maxPrice: "0" }];
+    for (const params of views) {
+      expect(await render(params)).not.toContain('aria-label="Newest books"');
+    }
+    failBookList = true;
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const html = await render();
+    quiet.mockRestore();
+    expect(html).not.toContain('aria-label="Newest books"');
+  });
+
+  it("an unpriced or draft book never reaches the shelf", async () => {
+    bookRows = BOOKS.map((b) =>
+      b.id === "book-10" ? { ...b, price_all: null } : b.id === "book-09" ? { ...b, status: "draft" } : b,
+    );
+    const shelf = ornateShelf(await render());
+    expect(shelf).not.toContain("book-10");
+    expect(shelf).not.toContain("book-09");
+    expect([...shelf.matchAll(/href="\/books\//g)]).toHaveLength(5);
+  });
 });
