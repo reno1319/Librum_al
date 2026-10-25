@@ -24,6 +24,7 @@ import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
+import { OrnateShelf, ORNATE_SHELF_SIZE, type OrnateShelfBook } from "@/components/ornate-shelf";
 
 export const metadata: Metadata = {
   title: "Bookstore",
@@ -398,11 +399,23 @@ export default async function BookstorePage({
   // newest book as "New on Librum".
   const showShelves = !isFiltered && !error && books.length > 0;
   const featured = showShelves ? resolveBookstoreFeature<BookWithAuthor>(librumChoice, books[0]) : null;
+  // BOOKSTORE ORNATE SHELF (Renato 10-25, header B): the five newest
+  // books as ornate spines beside the heading -- the grid's own first
+  // five (unfiltered, so newest first), no extra query. Same gate as the
+  // shelves below (Renato 10-25: hidden once a reader searches, filters
+  // or sorts).
+  const ornateBooks: OrnateShelfBook[] = showShelves
+    ? books.slice(0, ORNATE_SHELF_SIZE).map((book) => ({
+        id: book.id,
+        title: book.title,
+        author: resolveBookByline(book),
+      }))
+    : [];
 
   return (
     <main className="flex-1 bg-background">
       <div className="page-container pt-5 pb-10 sm:pt-8 md:pb-12">
-        <BookstoreToolbar query={rawQuery} isFiltered={isFiltered} />
+        <BookstoreToolbar query={rawQuery} isFiltered={isFiltered} shelfBooks={ornateBooks} />
 
         {featured && (
           <FeaturedBook
@@ -442,19 +455,25 @@ export default async function BookstorePage({
 // genre dropdown (r3, Renato: one button that opens the genres) and,
 // on the right, Sort and the price range. The sort select stays a field of the search form (the `form` attribute)
 // so it is submitted with Search exactly as before.
+// BOOKSTORE ORNATE SHELF (header B): the heading, line and search box
+// stack on the left; the ornate shelf stands on the right at 70% of its
+// full size, from 768px up only (Renato 10-25: hidden on phones and
+// small tablets, so the search box stays near the top).
 function BookstoreToolbar({
   query,
   isFiltered,
+  shelfBooks,
 }: {
   query: BookstoreQuery;
   isFiltered: boolean;
+  shelfBooks: OrnateShelfBook[];
 }) {
   const { q, genre, sort, minPrice, maxPrice } = query;
 
   return (
     <div>
-      <div className="flex flex-wrap items-end justify-between gap-x-10 gap-y-6">
-        <div className="min-w-0 flex-[1_1_22rem]">
+      <div className="flex items-end justify-between gap-x-12">
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
             Librum Bookstore
           </p>
@@ -464,42 +483,48 @@ function BookstoreToolbar({
           <p className="mt-2 text-muted">
             Books published directly by Albanian-language authors.
           </p>
+
+          <form
+            id="bookstore-search"
+            action="/bookstore"
+            method="get"
+            role="search"
+            className="mt-6 flex w-full min-w-0 sm:max-w-[35rem]"
+          >
+            <label htmlFor="bookstore-q" className="sr-only">
+              Search books or authors
+            </label>
+            <input
+              id="bookstore-q"
+              type="search"
+              name="q"
+              defaultValue={q ?? ""}
+              placeholder="Search books or authors"
+              className="focus-ring min-w-0 flex-1 rounded-l-[3px] border border-r-0 border-[#8c8472] bg-surface px-4 py-3 text-base"
+            />
+
+            {/* A plain GET form only sends its own named fields -- these
+                preserve the current genre/price selections so submitting a
+                new search term (or changing sort) doesn't silently discard
+                them. */}
+            {genre && <input type="hidden" name="genre" value={genre} />}
+            {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
+            {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
+
+            <button
+              type="submit"
+              className="focus-ring shrink-0 rounded-r-[3px] bg-primary px-5 text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
+            >
+              Search
+            </button>
+          </form>
         </div>
 
-        <form
-          id="bookstore-search"
-          action="/bookstore"
-          method="get"
-          role="search"
-          className="flex w-full min-w-0 flex-[1_1_28rem] sm:max-w-[35rem]"
-        >
-          <label htmlFor="bookstore-q" className="sr-only">
-            Search books or authors
-          </label>
-          <input
-            id="bookstore-q"
-            type="search"
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Search books or authors"
-            className="focus-ring min-w-0 flex-1 rounded-l-[3px] border border-r-0 border-[#8c8472] bg-surface px-4 py-3 text-base"
-          />
-
-          {/* A plain GET form only sends its own named fields -- these
-              preserve the current genre/price selections so submitting a
-              new search term (or changing sort) doesn't silently discard
-              them. */}
-          {genre && <input type="hidden" name="genre" value={genre} />}
-          {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
-          {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
-
-          <button
-            type="submit"
-            className="focus-ring shrink-0 rounded-r-[3px] bg-primary px-5 text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
-          >
-            Search
-          </button>
-        </form>
+        {shelfBooks.length > 0 && (
+          <div className="hidden shrink-0 md:block [zoom:0.7]">
+            <OrnateShelf books={shelfBooks} label="Newest books" />
+          </div>
+        )}
       </div>
 
       {/* V1 (V8): genre, sort and price range are one control look --
