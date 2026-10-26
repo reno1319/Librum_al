@@ -813,21 +813,14 @@ export default async function EditBookPage({
                   </Alert>
                 )}
                 {/* PR-G: this replaced "Finish payout setup to publish paid
-                    books." above a "Manage payouts" link. Stated precisely,
-                    because the looser version of this is wrong: the payouts
-                    page can neither create a new Stripe Connect account nor
-                    finish onboarding one (connectStripeAccount fails closed
-                    under every configuration since STRIPE-DISABLE-1), but
-                    legacy payout state may well still exist -- an already
-                    connected account, kept current by the account.updated
-                    webhook, can have stripe_payouts_enabled set to true.
-                    Whichever it is makes no difference here: since the
-                    Stripe prerequisite was removed, canPublishPaidTitle()
-                    is the sole paid-publishing gate, and nothing on the
-                    payouts page can change its answer. So "Manage payouts"
-                    could only ever send an author somewhere that cannot
-                    unblock them, and it was correctly removed from THIS
-                    publishing notice. The copy must stay CONDITIONAL and
+                    books." above a "Manage payouts" link. Since the Stripe
+                    prerequisite was removed, canPublishPaidTitle() is the
+                    sole paid-publishing gate, and no payout setting can
+                    change its answer (Stripe, its payouts page and
+                    webhook have since been removed entirely). So a payouts
+                    link could only ever send an author somewhere that
+                    cannot unblock them, and it was correctly removed from
+                    THIS publishing notice. The copy must stay CONDITIONAL and
                     never become a hardcoded banner: with
                     PAID_PUBLISHING_MODE set on the protected staging
                     deployment this branch correctly disappears. */}

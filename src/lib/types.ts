@@ -455,10 +455,10 @@ export type FinanceRefundReconciliationRow = {
 // Mirrors list_finance_disputes()'s exact return shape.
 // transfer_reversal_failure_message is DELIBERATELY never part of this
 // type -- that column can hold a raw, unbounded Stripe SDK error string
-// (see failTransferReversalAttempt() in
-// src/app/api/webhooks/stripe/route.ts), and the RPC itself never
-// returns it. transfer_reversal_failure_code IS included -- Stripe's own
-// short, bounded error-code taxonomy, safe to surface. status/reason are
+// (written by the Stripe webhook, since removed with Stripe), and the
+// RPC itself never returns it. transfer_reversal_failure_code IS
+// included -- Stripe's own short, bounded error-code taxonomy, safe to
+// surface. status/reason are
 // plain strings, not narrowed unions -- payment_disputes.status carries
 // no CHECK constraint (Stripe's own vocabulary is open-ended, migration
 // 035), so a row already in the table must always render even if it

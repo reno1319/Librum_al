@@ -25,6 +25,9 @@
 -- local/CI Postgres was available (same limitation every prior
 -- migration's own test file in this directory already documents). It is
 -- a reviewed contract, not a confirmed-passing result.
+-- 2026-10: first actually run (PostgreSQL 17) when it was brought up to
+-- date with later migrations; CI now runs it on every change
+-- (supabase/tests/run-sql-tests.sh).
 --
 -- ============================================================
 -- TIMESTAMP NOTE (same discipline as 042_admin_audit_visibility.test.sql):
@@ -86,6 +89,8 @@ insert into public.bundles (id, author_id, title, description, price_cents, stat
 -- permission re-verified UNCHANGED, all 5 roles x 9 permissions.
 -- Mirrors 042's own Part 1 exhaustive-matrix pattern exactly, extended
 -- by one column.
+-- Editor's admin.access is true since LIBRUM 2.0 BLOG-1B (migration
+-- 047, see 040's matrix note); every other cell is as first written.
 -- ============================================================
 do $$
 declare
@@ -111,7 +116,7 @@ declare
       "staff.manage": false, "audit.view": false, "finance.view": false
     },
     "a0430000-0000-0000-0000-000000000005": {
-      "admin.access": false, "reports.view": false, "reports.resolve": false,
+      "admin.access": true, "reports.view": false, "reports.resolve": false,
       "refunds.view": false, "refunds.resolve": false, "staff.view": false,
       "staff.manage": false, "audit.view": false, "finance.view": false
     }
@@ -153,7 +158,7 @@ begin
     where n.nspname = 'public' and p.proname = 'refund_reconciliation_rows';
   perform pg_temp.assert(fn_oid is not null, 'part2: refund_reconciliation_rows() must exist');
   perform pg_temp.assert((select prosecdef from pg_proc where oid = fn_oid), 'part2: refund_reconciliation_rows() must be SECURITY DEFINER');
-  perform pg_temp.assert((select proconfig from pg_proc where oid = fn_oid) @> array['search_path='], 'part2: refund_reconciliation_rows() must set search_path = empty');
+  perform pg_temp.assert((select proconfig from pg_proc where oid = fn_oid) @> array['search_path=""'], 'part2: refund_reconciliation_rows() must set search_path = empty');
   perform pg_temp.assert(not has_function_privilege('authenticated', fn_oid, 'EXECUTE'), 'part2: authenticated must NOT have EXECUTE on the private helper');
   perform pg_temp.assert(not has_function_privilege('anon', fn_oid, 'EXECUTE'), 'part2: anon must NOT have EXECUTE on the private helper');
   perform pg_temp.assert(not has_function_privilege('public', fn_oid, 'EXECUTE'), 'part2: public must NOT have EXECUTE on the private helper');
@@ -167,7 +172,7 @@ begin
     )
   loop
     perform pg_temp.assert((select prosecdef from pg_proc where oid = fn_oid), format('part2: %s must be SECURITY DEFINER', fn_oid::regprocedure));
-    perform pg_temp.assert((select proconfig from pg_proc where oid = fn_oid) @> array['search_path='], format('part2: %s must set search_path = empty', fn_oid::regprocedure));
+    perform pg_temp.assert((select proconfig from pg_proc where oid = fn_oid) @> array['search_path=""'], format('part2: %s must set search_path = empty', fn_oid::regprocedure));
     perform pg_temp.assert(has_function_privilege('authenticated', fn_oid, 'EXECUTE'), format('part2: authenticated must have EXECUTE on %s', fn_oid::regprocedure));
     perform pg_temp.assert(not has_function_privilege('anon', fn_oid, 'EXECUTE'), format('part2: anon must NOT have EXECUTE on %s', fn_oid::regprocedure));
     perform pg_temp.assert(not has_function_privilege('public', fn_oid, 'EXECUTE'), format('part2: public must NOT have EXECUTE on %s', fn_oid::regprocedure));
@@ -413,8 +418,11 @@ begin
   perform set_config('request.jwt.claim.sub', 'a0430000-0000-0000-0000-000000000001', true);
   set local role authenticated;
 
-  select count(*) into cnt from public.list_refund_reconciliation_states(p_operational_state := 'approved_attempt_unknown', p_limit := 100);
-  perform pg_temp.assert(cnt = 1, format('part4: exactly one approved_attempt_unknown row expected, got %s', cnt));
+  -- Request 10d is Part 3b's tie-break fixture, which is also
+  -- approved_attempt_unknown; the one row expected here is Part 3's.
+  select count(*) into cnt from public.list_refund_reconciliation_states(p_operational_state := 'approved_attempt_unknown', p_limit := 100)
+    where refund_request_id <> 'a0430000-0000-0000-0000-00000000010d';
+  perform pg_temp.assert(cnt = 1, format('part4: exactly one approved_attempt_unknown row expected besides Part 3b''s, got %s', cnt));
 
   select count(*) into cnt from public.list_refund_reconciliation_states(p_needs_attention := true, p_limit := 100);
   perform pg_temp.assert(cnt >= 5, format('part4: at least 5 needs_attention rows expected from Part 3''s fixtures, got %s', cnt));
@@ -573,6 +581,13 @@ end $$;
 
 -- Consistent baseline (must NOT appear as a mismatch): a normal refunded
 -- purchase whose refund_requests row agrees.
+-- purchases allows one row per (book, reader), so each purchase below
+-- is for its own book.
+insert into public.books (id, author_id, title, description, preview_text, keywords, status) values
+  ('a0430000-0000-0000-0000-000000000012', 'a0430000-0000-0000-0000-000000000007', 'Test Book 2', '', '', '', 'published'),
+  ('a0430000-0000-0000-0000-000000000013', 'a0430000-0000-0000-0000-000000000007', 'Test Book 3', '', '', '', 'published'),
+  ('a0430000-0000-0000-0000-000000000014', 'a0430000-0000-0000-0000-000000000007', 'Test Book 4', '', '', '', 'published');
+
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id, amount_cents, refunded_at) values
   ('a0430000-0000-0000-0000-000000000500', 'a0430000-0000-0000-0000-000000000010', 'a0430000-0000-0000-0000-000000000008', 'cs_043_consistent', 'pi_043_consistent', 999, now());
 insert into public.refund_requests (id, reader_id, stripe_payment_intent_id, amount_cents, status, refunded_at) values
@@ -581,7 +596,7 @@ insert into public.refund_requests (id, reader_id, stripe_payment_intent_id, amo
 -- Mismatch 1: refund_requests says refunded, but the linked purchase is
 -- still active (refunded_at is null).
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id, amount_cents, refunded_at) values
-  ('a0430000-0000-0000-0000-000000000502', 'a0430000-0000-0000-0000-000000000010', 'a0430000-0000-0000-0000-000000000008', 'cs_043_mismatch1', 'pi_043_mismatch1', 999, null);
+  ('a0430000-0000-0000-0000-000000000502', 'a0430000-0000-0000-0000-000000000012', 'a0430000-0000-0000-0000-000000000008', 'cs_043_mismatch1', 'pi_043_mismatch1', 999, null);
 insert into public.refund_requests (id, reader_id, stripe_payment_intent_id, amount_cents, status, refunded_at) values
   ('a0430000-0000-0000-0000-000000000503', 'a0430000-0000-0000-0000-000000000008', 'pi_043_mismatch1', 999, 'refunded', now());
 
@@ -595,7 +610,7 @@ insert into public.refund_requests (id, reader_id, stripe_payment_intent_id, bun
 -- Mismatch 3: a purchase shows refunded_at set, but its matching
 -- refund_requests row is still 'approved' (not yet 'refunded').
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id, amount_cents, refunded_at) values
-  ('a0430000-0000-0000-0000-000000000506', 'a0430000-0000-0000-0000-000000000010', 'a0430000-0000-0000-0000-000000000008', 'cs_043_mismatch3', 'pi_043_mismatch3', 999, now());
+  ('a0430000-0000-0000-0000-000000000506', 'a0430000-0000-0000-0000-000000000013', 'a0430000-0000-0000-0000-000000000008', 'cs_043_mismatch3', 'pi_043_mismatch3', 999, now());
 insert into public.refund_requests (id, reader_id, stripe_payment_intent_id, amount_cents, status) values
   ('a0430000-0000-0000-0000-000000000507', 'a0430000-0000-0000-0000-000000000008', 'pi_043_mismatch3', 999, 'approved');
 
@@ -604,7 +619,7 @@ insert into public.refund_requests (id, reader_id, stripe_payment_intent_id, amo
 -- must never be flagged (explicitly documented as expected in
 -- refund_requests.reviewed_at's own column comment, migration 029).
 insert into public.purchases (id, book_id, reader_id, stripe_checkout_session_id, stripe_payment_intent_id, amount_cents, refunded_at) values
-  ('a0430000-0000-0000-0000-000000000508', 'a0430000-0000-0000-0000-000000000010', 'a0430000-0000-0000-0000-000000000008', 'cs_043_direct_stripe', 'pi_043_direct_stripe', 999, now());
+  ('a0430000-0000-0000-0000-000000000508', 'a0430000-0000-0000-0000-000000000014', 'a0430000-0000-0000-0000-000000000008', 'cs_043_direct_stripe', 'pi_043_direct_stripe', 999, now());
 
 do $$
 declare

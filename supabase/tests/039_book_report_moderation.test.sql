@@ -19,6 +19,9 @@
 -- but has NOT been executed in this environment -- no local/CI Postgres
 -- was available. It is a reviewed contract, not a confirmed-passing
 -- result; run it before this migration is ever applied anywhere real.
+-- 2026-10: first actually run (PostgreSQL 17) when it was brought up to
+-- date with later migrations; CI now runs it on every change
+-- (supabase/tests/run-sql-tests.sh).
 --
 -- Everything below runs inside one transaction and is rolled back at
 -- the end, so this file is fully repeatable with no manual cleanup
@@ -36,8 +39,11 @@ end;
 $$;
 
 -- ============================================================
--- Part 1: RLS policy definition -- exactly one admin-only SELECT
--- policy exists on book_reports, referencing is_admin(). No ordinary-
+-- Part 1: RLS policy definition -- exactly one staff-only SELECT
+-- policy exists on book_reports. Migration 039 shipped it as
+-- "Admins can view all book reports" using is_admin(); ADMIN-1A
+-- (migration 040, staff RBAC) replaced it with the reports.view
+-- permission check below. No ordinary-
 -- authenticated (reporter or otherwise) SELECT policy exists -- MOD-1's
 -- brief explicitly requires reports stay invisible to anonymous users,
 -- ordinary readers, and the reported book's own author.
@@ -51,11 +57,11 @@ begin
   into pol
   from pg_policy
   where polrelid = 'public.book_reports'::regclass
-    and polname = 'Admins can view all book reports';
+    and polname = 'Staff with reports.view can view all book reports';
 
-  perform pg_temp.assert(pol.polname is not null, 'part1: the admin SELECT policy must exist');
+  perform pg_temp.assert(pol.polname is not null, 'part1: the staff SELECT policy must exist');
   perform pg_temp.assert(
-    pol.qual = 'public.is_admin()',
+    pol.qual = 'staff_has_permission(''reports.view''::text)',
     format('part1: unexpected USING clause: %s', pol.qual)
   );
 
@@ -97,7 +103,8 @@ begin
   perform pg_temp.assert(func.prosecdef is not null, 'part1b: review_book_report(uuid, text, text) must exist');
   perform pg_temp.assert(func.prosecdef = true, 'part1b: review_book_report must be SECURITY DEFINER');
   perform pg_temp.assert(
-    exists (select 1 from unnest(coalesce(func.proconfig, '{}'::text[])) c where c = 'search_path='),
+    -- `set search_path = ''` is stored as search_path="" (quoted empty).
+    exists (select 1 from unnest(coalesce(func.proconfig, '{}'::text[])) c where c = 'search_path=""'),
     'part1b: review_book_report must SET search_path = '''' (empty), matching is_admin()/review_refund_request()'
   );
 
@@ -137,10 +144,12 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('22222222-2222-2222-2222-222222222222', 'p039-reporter@test', '{"role":"reader","display_name":"Reporter"}'),
   ('33333333-3333-3333-3333-333333333333', 'p039-author@test', '{"role":"author","display_name":"Author"}');
 
--- Promoted directly, the only legitimate way (see migration 028) --
--- mirrors how every other admin-focused test in this directory
--- establishes an admin fixture.
-update public.profiles set role = 'admin' where id = '11111111-1111-1111-1111-111111111111';
+-- Since ADMIN-1A (migration 040) staff access comes only from a
+-- staff_members row, never from profiles.role. "Admin" below is a
+-- moderator: the smallest role holding both reports.view and
+-- reports.resolve.
+insert into public.staff_members (user_id, role) values
+  ('11111111-1111-1111-1111-111111111111', 'moderator');
 
 insert into public.books (id, author_id, title, description, preview_text, keywords, status) values
   ('44444444-4444-4444-4444-444444444444', '33333333-3333-3333-3333-333333333333',
@@ -181,13 +190,17 @@ begin
   );
   reset role;
 
-  -- anon: does NOT see it.
+  -- anon: does NOT see it. Since SECURITY-9B (migration
+  -- 20261024200000, test 082) anon holds no privilege on book_reports,
+  -- so the ACL refuses it before RLS is reached.
   perform set_config('request.jwt.claim.sub', '', true);
   set local role anon;
-  perform pg_temp.assert(
-    (select count(*) from public.book_reports where id = '55555555-5555-5555-5555-555555555555') = 0,
-    'part2: anon must NOT be able to SELECT any book report'
-  );
+  begin
+    perform count(*) from public.book_reports where id = '55555555-5555-5555-5555-555555555555';
+    perform pg_temp.assert(false, 'part2: anon must NOT be able to SELECT any book report');
+  exception when insufficient_privilege then
+    null;
+  end;
   reset role;
 end $$;
 
@@ -352,6 +365,7 @@ end $$;
 delete from public.book_reports where id in
   ('55555555-5555-5555-5555-555555555555', '66666666-6666-6666-6666-666666666666');
 delete from public.books where id = '44444444-4444-4444-4444-444444444444';
+delete from public.staff_members where user_id = '11111111-1111-1111-1111-111111111111';
 delete from public.profiles where id in
   ('11111111-1111-1111-1111-111111111111',
    '22222222-2222-2222-2222-222222222222',

@@ -41,15 +41,17 @@ $$;
 -- ============================================================
 do $$
 begin
-  -- anon: SELECT only. has_table_privilege('UPDATE'/'INSERT'/etc.)
-  -- returns true if the role holds that privilege on ANY column, not
-  -- just the whole table -- so this is a valid, sufficient check for
-  -- anon specifically (it holds zero UPDATE grants anywhere, unlike
+  -- anon: nothing. Migration 033 left anon SELECT; LIBRUM 2.0
+  -- AUTHOR-1D (migration 046) took that away too, so anon now holds no
+  -- privilege on the base table at all. has_table_privilege('UPDATE'/
+  -- 'INSERT'/etc.) returns true if the role holds that privilege on ANY
+  -- column, not just the whole table -- so this is a valid, sufficient
+  -- check for anon specifically (it holds zero grants anywhere, unlike
   -- authenticated, whose column-scoped UPDATE grant means the
   -- equivalent table-level check would trivially pass and prove
   -- nothing -- see the column-level checks below for authenticated).
-  perform pg_temp.assert(has_table_privilege('anon', 'public.profiles', 'SELECT'),
-    'part1: anon must have SELECT on profiles');
+  perform pg_temp.assert(not has_table_privilege('anon', 'public.profiles', 'SELECT'),
+    'part1: anon must not have SELECT on profiles (any column; migration 046)');
   perform pg_temp.assert(not has_table_privilege('anon', 'public.profiles', 'INSERT'),
     'part1: anon must not have INSERT on profiles');
   perform pg_temp.assert(not has_table_privilege('anon', 'public.profiles', 'UPDATE'),
@@ -63,7 +65,7 @@ begin
   perform pg_temp.assert(not has_table_privilege('anon', 'public.profiles', 'TRIGGER'),
     'part1: anon must not have TRIGGER on profiles');
 
-  -- authenticated: SELECT + UPDATE on exactly three columns; no other
+  -- authenticated: SELECT + UPDATE on exactly two columns; no other
   -- table-wide privilege.
   perform pg_temp.assert(has_table_privilege('authenticated', 'public.profiles', 'SELECT'),
     'part1: authenticated must have SELECT on profiles');
@@ -78,12 +80,17 @@ begin
   perform pg_temp.assert(not has_table_privilege('authenticated', 'public.profiles', 'TRIGGER'),
     'part1: authenticated must not have TRIGGER on profiles');
 
-  -- authenticated's UPDATE, column by column: display_name, bio -- NOT avatar_path
-  -- since AVATAR-STORAGE-PATH-AUTH-1 (see 068) -- everything else, explicitly false.
+  -- authenticated's UPDATE, column by column: display_name and
+  -- public_author_name (LIBRUM 2.0 AUTHOR-1A, migration 045) -- NOT
+  -- avatar_path since AVATAR-STORAGE-PATH-AUTH-1 (see 068), NOT bio since
+  -- PEN-NAMES-2 (migration 20261019222500) -- everything else, explicitly
+  -- false.
   perform pg_temp.assert(has_column_privilege('authenticated', 'public.profiles', 'display_name', 'UPDATE'),
     'part1: authenticated must have UPDATE on display_name');
-  perform pg_temp.assert(has_column_privilege('authenticated', 'public.profiles', 'bio', 'UPDATE'),
-    'part1: authenticated must have UPDATE on bio');
+  perform pg_temp.assert(has_column_privilege('authenticated', 'public.profiles', 'public_author_name', 'UPDATE'),
+    'part1: authenticated must have UPDATE on public_author_name');
+  perform pg_temp.assert(not has_column_privilege('authenticated', 'public.profiles', 'bio', 'UPDATE'),
+    'part1: authenticated must NOT have UPDATE on bio');
   perform pg_temp.assert(not has_column_privilege('authenticated', 'public.profiles', 'avatar_path', 'UPDATE'),
     'part1: authenticated must NOT have UPDATE on avatar_path');
   perform pg_temp.assert(not has_column_privilege('authenticated', 'public.profiles', 'role', 'UPDATE'),
@@ -152,12 +159,14 @@ insert into auth.users (id, email, raw_user_meta_data) values
 do $$
 begin
   -- authenticated, acting as the row's own owner: the exact
-  -- updateProfile() session payload shape must succeed (avatar_path is
-  -- written by the trusted server writer since AVATAR-STORAGE-PATH-AUTH-1).
+  -- updateProfile() session payload shape for a reader must succeed
+  -- (avatar_path is written by the trusted server writer since
+  -- AVATAR-STORAGE-PATH-AUTH-1; bio is no longer written since
+  -- PEN-NAMES-1 r4; public_author_name is sent only for an author).
   perform set_config('request.jwt.claim.sub', '55555555-5555-5555-5555-555555555555', true);
   set local role authenticated;
   update public.profiles
-  set display_name = 'Updated Name', bio = 'Updated bio'
+  set display_name = 'Updated Name'
   where id = '55555555-5555-5555-5555-555555555555';
   reset role;
 
@@ -207,19 +216,32 @@ end $$;
 
 do $$
 begin
-  -- Public SELECT behavior unchanged for both anon and authenticated.
+  -- SELECT since LIBRUM 2.0 AUTHOR-1D (migration 046): anon is refused
+  -- by the ACL itself; authenticated sees its own row, and a non-staff
+  -- caller sees zero rows of anyone else's.
   perform set_config('request.jwt.claim.sub', '', true);
   set local role anon;
-  perform pg_temp.assert(
-    (select count(*) from public.profiles where id = '55555555-5555-5555-5555-555555555555') = 1,
-    'part3: anon must still be able to SELECT profiles (public readability unchanged)'
-  );
+  begin
+    perform count(*) from public.profiles where id = '55555555-5555-5555-5555-555555555555';
+    perform pg_temp.assert(false, 'part3: anon must not be able to SELECT profiles at all');
+  exception when insufficient_privilege then
+    null;
+  end;
   reset role;
 
+  perform set_config('request.jwt.claim.sub', '55555555-5555-5555-5555-555555555555', true);
   set local role authenticated;
   perform pg_temp.assert(
     (select count(*) from public.profiles where id = '55555555-5555-5555-5555-555555555555') = 1,
-    'part3: authenticated must still be able to SELECT profiles'
+    'part3: authenticated must be able to SELECT its own profile'
+  );
+  reset role;
+
+  perform set_config('request.jwt.claim.sub', '66666666-6666-6666-6666-666666666666', true);
+  set local role authenticated;
+  perform pg_temp.assert(
+    (select count(*) from public.profiles where id = '55555555-5555-5555-5555-555555555555') = 0,
+    'part3: a non-staff authenticated user must see zero rows of another user''s profile'
   );
   reset role;
 end $$;

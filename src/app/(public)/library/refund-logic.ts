@@ -92,10 +92,10 @@ export type PurchaseForGrouping = {
 };
 
 // The frozen per-item shape create_bundle_checkout_snapshot() writes
-// into bundle_checkout_snapshots.items (migration 025) and
-// fulfillBundleSnapshot() reads back (src/app/api/webhooks/stripe/
-// route.ts's parseSnapshotItems) -- book_id/title/price_cents_at_checkout
-// keys, snake_case, exactly as jsonb_build_object wrote them.
+// into bundle_checkout_snapshots.items (migration 025) -- book_id/title/
+// price_cents_at_checkout keys, snake_case, exactly as jsonb_build_object
+// wrote them. (The Stripe webhook that once read them back for
+// fulfilment was removed with Stripe.)
 export type BundleSnapshotItem = {
   bookId: string;
   title: string;
@@ -105,8 +105,7 @@ export type BundleSnapshotItem = {
 // What the Library query fetches from bundle_checkout_snapshots for the
 // reader's own fulfilled rows (see migration 030's reader SELECT
 // policy). items arrives as raw jsonb (`unknown`) -- parsed defensively
-// below, same posture as the webhook's own parseSnapshotItems, but
-// lenient rather than fail-loud: this is a display path, not a write
+// below, lenient rather than fail-loud: this is a display path, not a write
 // path, so a malformed/unexpected entry is silently skipped rather than
 // blocking the whole page.
 export type BundleSnapshotForGrouping = {
@@ -156,8 +155,8 @@ export type TransactionGroup<T extends PurchaseForGrouping> = {
   // own frozen item count when there is one -- which can be greater
   // than purchases.length whenever some of the bundle's books were
   // already owned through a different transaction and so produced no
-  // purchases row here (fulfillBundleSnapshot's "active_other_session"
-  // classification).
+  // purchases row here (the "active_other_session" classification of
+  // the Stripe-era bundle fulfilment).
   bookCount: number;
   // Snapshot items with no matching purchases row in THIS group --
   // i.e. books this checkout covered but did not newly grant, because
