@@ -1895,18 +1895,11 @@ async function performPublish(
   //   PAID_PUBLISHING_MODE is absent it denies everywhere.
   //
   //   The legacy profiles.stripe_payouts_enabled prerequisite that used
-  //   to sit below it is gone. Stated precisely, because the looser
-  //   version of this claim is wrong: connectStripeAccount()
-  //   (dashboard/payouts/actions.ts) fails closed under every
-  //   configuration since STRIPE-DISABLE-1, so no author can CREATE a
-  //   Connect account or finish onboarding one. That is not the same as
-  //   the flag being unsettable -- processAccountUpdatedEvent()
-  //   (api/webhooks/stripe/route.ts) writes it from Stripe's own
-  //   account.updated event, so a pre-existing connected account could
-  //   still flip it to true. The prerequisite was removed for a
-  //   different reason: it is provider-specific author-payout state, and
-  //   provider-specific payout state is not a valid permission to
-  //   publish a priced title. Removing it does not weaken this gate:
+  //   to sit below it is gone: it is provider-specific author-payout
+  //   state, and provider-specific payout state is not a valid
+  //   permission to publish a priced title. (Stripe itself, with the
+  //   Connect code and webhook that could set the flag, has since been
+  //   removed.) Removing it does not weaken this gate:
   //   canPublishPaidTitle() still denies in every environment where
   //   PAID_PUBLISHING_MODE is unset, which is everywhere today.
   //
