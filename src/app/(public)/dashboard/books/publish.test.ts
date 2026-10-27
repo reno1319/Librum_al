@@ -180,6 +180,13 @@ vi.mock("@/lib/book-takedowns", () => ({
 vi.mock("@/lib/email", () => ({
   sendNewBookEmails: (admin: unknown, args: unknown) => mockSendNewBookEmails(admin, args),
 }));
+// ADMIN-ALERTS-1: the staff email after a successful review request.
+const mockReviewStaffEmail = vi.fn(async (_args: unknown) => {
+  void _args;
+});
+vi.mock("@/lib/staff-alerts", () => ({
+  sendReviewRequestedStaffEmail: (args: unknown) => mockReviewStaffEmail(args),
+}));
 
 const { createBook, publishBook } = await import("./actions");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
@@ -1161,7 +1168,10 @@ describe("performPublish: a book Librum took down (ADMIN-2)", () => {
 // it is sent for review and stays a draft. An already-published book is
 // unaffected.
 describe("performPublish: In review (ADMIN-3)", () => {
-  beforeEach(resetMocks);
+  beforeEach(() => {
+    resetMocks();
+    mockReviewStaffEmail.mockClear();
+  });
   const SENT = `/dashboard?success=${encodeURIComponent(
     "Sent for review. We'll check your book and tell you when it's live. It isn't in the Bookstore yet.",
   )}`;
@@ -1173,6 +1183,9 @@ describe("performPublish: In review (ADMIN-3)", () => {
     expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["getBookReviewState", "requestBookReview"]);
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+    // ADMIN-ALERTS-1: staff are told, once.
+    expect(mockReviewStaffEmail).toHaveBeenCalledTimes(1);
+    expect(mockReviewStaffEmail).toHaveBeenCalledWith({ bookId: BOOK_ID, authorId: USER_ID });
   });
 
   it("a draft whose approval matches its files publishes as before (3a)", async () => {
@@ -1181,6 +1194,7 @@ describe("performPublish: In review (ADMIN-3)", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
     expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["getBookReviewState"]);
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(expect.objectContaining({ status: "published" }));
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
   it("the review is asked for only after every author-fixable gate", async () => {
@@ -1198,6 +1212,7 @@ describe("performPublish: In review (ADMIN-3)", () => {
       `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("This book is already waiting for review.")}`,
     );
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
   it("an unreadable review state or a failed request fails closed with the generic sentence", async () => {

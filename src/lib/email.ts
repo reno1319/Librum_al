@@ -16,7 +16,8 @@ const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
 // thrown to the caller. No recipient address is ever logged -- and not
 // Resend's message either, since some of its messages repeat the address;
 // its error name and status code are enough to tell what went wrong.
-async function sendEmail(to: string, subject: string, html: string) {
+// Exported for the staff alerts (src/lib/staff-alerts.ts).
+export async function sendEmail(to: string, subject: string, html: string) {
   if (!process.env.RESEND_API_KEY) {
     console.warn(`RESEND_API_KEY not set — skipping email "${subject}"`);
     return;

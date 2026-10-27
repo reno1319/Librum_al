@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveCatalogPriceState } from "@/lib/catalog-price";
 import { REPORT_REASONS } from "@/lib/report-reasons";
+import { sendBookReportedStaffEmail } from "@/lib/staff-alerts";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE, resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
@@ -839,6 +840,9 @@ export async function submitReport(bookId: string, formData: FormData) {
       `/books/${bookId}/report?error=${encodeURIComponent("We couldn't submit your report. Please try again.")}`,
     );
   }
+
+  // ADMIN-ALERTS-1: best effort, never throws; redirect() stays outside it.
+  await sendBookReportedStaffEmail({ bookId, reporterId: user.id, reason });
 
   redirect(`/books/${bookId}?report=success`);
 }

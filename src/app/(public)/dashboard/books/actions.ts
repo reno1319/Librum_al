@@ -10,6 +10,7 @@ import { GENRES } from "@/lib/genres";
 import { isSupportedLanguage } from "@/lib/languages";
 import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 import { sendNewBookEmails } from "@/lib/email";
+import { sendReviewRequestedStaffEmail } from "@/lib/staff-alerts";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
 import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
@@ -1670,6 +1671,8 @@ export async function updateBook(bookId: string, formData: FormData) {
   if (filesChanged && (wasLive || wasPending)) {
     const request = await requestBookReview(supabase, existing.id);
     reviewRequestFailed = !request.ok && request.reason !== "already_pending";
+    // ADMIN-ALERTS-1 (2a): a new review request starts a new 48h clock.
+    if (request.ok) await sendReviewRequestedStaffEmail({ bookId: existing.id, authorId: user.id });
   }
 
   // ADMIN-3-REVIEW (N3, P1): after the review request -- whether it
@@ -1931,6 +1934,8 @@ async function performPublish(
     if (!reviewState.approvalValid) {
       const request = await requestBookReview(supabase, bookId);
       if (request.ok) {
+        // ADMIN-ALERTS-1: best effort, never throws.
+        await sendReviewRequestedStaffEmail({ bookId, authorId: userId });
         return { ok: true, outcome: "sent_for_review" };
       }
       if (request.reason === "already_pending") {
