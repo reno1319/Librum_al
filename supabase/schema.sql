@@ -2218,6 +2218,13 @@ create table public.discount_codes (
     constraint discount_codes_amount_off_all_range_check
     check (amount_off_all is null
            or (amount_off_all >= 1 and amount_off_all <= 100000)),
+  -- DISCOUNT-LIMIT-1: how many checkouts may use this code, or null for
+  -- no limit. Declared after amount_off_all, so that `attnum` matches
+  -- what `add column` produces in the migration. Set once, at creation:
+  -- authenticated may INSERT it but not UPDATE it.
+  max_uses integer
+    constraint discount_codes_max_uses_range_check
+    check (max_uses is null or (max_uses >= 1 and max_uses <= 100000)),
 
   unique (book_id, code),
   -- ALL-CATALOG-1: replaces the anonymous two-column exclusive-or
@@ -2233,6 +2240,9 @@ create table public.discount_codes (
 
 comment on column public.discount_codes.amount_off_all is
   'Fixed discount in WHOLE ALL (1..100000), or null. Whether a code yields a legal final price for a given book is decided at checkout and rejected there when it does not -- never clamped.';
+
+comment on column public.discount_codes.max_uses is
+  'How many checkouts may use this code (1..100000), or null for no limit. A use is a completed checkout or one still open; create_book_checkout_intent refuses the code with discount_used_up once they reach this number.';
 
 alter table public.discount_codes enable row level security;
 
@@ -2293,13 +2303,16 @@ create index discount_codes_book_id_idx on public.discount_codes(book_id);
 -- neither insert nor update it; new fixed discounts are whole ALL in
 -- `amount_off_all`. `active` and `created_at` take their defaults.
 -- Existing amount_off_cents rows stay readable (SELECT is unchanged).
+--
+-- DISCOUNT-LIMIT-1 (migration 20261027120000): max_uses joins the
+-- INSERT columns. It is not in the UPDATE grant: a limit is set once.
 revoke all on public.discount_codes from public, anon, authenticated;
 
 grant select, delete
   on public.discount_codes
   to authenticated;
 
-grant insert (id, author_id, book_id, code, percent_off, amount_off_all, expires_at)
+grant insert (id, author_id, book_id, code, percent_off, amount_off_all, expires_at, max_uses)
   on public.discount_codes
   to authenticated;
 
@@ -3999,6 +4012,12 @@ create index book_checkout_intents_needs_reconciliation_idx
   on public.book_checkout_intents (completed_at)
   where fulfilled_at is null and completed_at is not null;
 
+-- DISCOUNT-LIMIT-1: counting a code's uses (create_book_checkout_intent
+-- and discount_code_use_counts) reads intents by discount_code_id.
+create index book_checkout_intents_discount_code_idx
+  on public.book_checkout_intents (discount_code_id)
+  where discount_code_id is not null;
+
 -- STALE-CHECKOUT-1: the transition trigger, renamed from
 -- enforce_book_checkout_intents_financial_facts_immutability() because
 -- that name is now wrong -- it enforces transitions, not only field
@@ -4263,7 +4282,7 @@ begin
   v_discount_code_id := null;
 
   if p_discount_code is not null and pg_catalog.length(pg_catalog.btrim(p_discount_code)) > 0 then
-    select d.id, d.percent_off, d.amount_off_cents, d.amount_off_all
+    select d.id, d.percent_off, d.amount_off_cents, d.amount_off_all, d.max_uses
     into v_discount
     from public.discount_codes d
     where d.book_id = create_book_checkout_intent.book_id
@@ -4271,6 +4290,39 @@ begin
       and d.active = true
       and (d.expires_at is null or d.expires_at > now())
     limit 1;
+
+    -- DISCOUNT-LIMIT-1: a code with max_uses is refused once its uses
+    -- reach the limit. A use is an intent carrying this code that is
+    -- completed (paid; a refund does not give the use back) or still
+    -- open (not superseded, not expired), so a use is held from the
+    -- moment checkout starts and the limit is never passed. The
+    -- reader's OWN open intents for this book are not counted: the
+    -- reuse path returns one of them, and a new mint supersedes them.
+    --
+    -- The code's row is locked first, so two readers checking out with
+    -- the last use cannot both see it free: the second waits, then
+    -- counts the first one's committed intent. Unlimited codes take no
+    -- lock. Refused BEFORE the first mutation, like the rejections
+    -- below, and never by falling back to the full price.
+    if v_discount.id is not null and v_discount.max_uses is not null then
+      perform 1
+      from public.discount_codes d
+      where d.id = v_discount.id
+      for update;
+
+      if (select pg_catalog.count(*)
+          from public.book_checkout_intents i
+          where i.discount_code_id = v_discount.id
+            and (i.completed_at is not null
+                 or (i.superseded_at is null
+                     and i.expires_at > now()
+                     and i.reader_id is distinct from v_reader_id)))
+         >= v_discount.max_uses then
+        return query select null::uuid, null::integer, null::uuid,
+                            null::timestamptz, 'discount_used_up'::text;
+        return;
+      end if;
+    end if;
 
     -- ALL-CHECKOUT-1: the greatest(..., 50) clamp is DELETED, and
     -- deliberately not retuned to 9900. A clamp answers "the discounted
@@ -4573,6 +4625,33 @@ revoke all on function public.create_book_checkout_intent(uuid, text, boolean, u
 revoke all on function public.create_book_checkout_intent(uuid, text, boolean, uuid) from anon;
 revoke all on function public.create_book_checkout_intent(uuid, text, boolean, uuid) from authenticated;
 grant execute on function public.create_book_checkout_intent(uuid, text, boolean, uuid) to authenticated;
+
+-- ============================================================
+-- DISCOUNT-LIMIT-1: discount_code_use_counts() -- for each of the
+-- calling author's own codes that has at least one use, how many it
+-- has, counted exactly as create_book_checkout_intent counts them
+-- (completed, or open and unexpired). The dashboard shows "Used X of
+-- Y". SECURITY DEFINER because authors cannot read readers' checkout
+-- intents; it returns only code ids the caller owns and a number.
+-- ============================================================
+create function public.discount_code_use_counts()
+returns table (discount_code_id uuid, uses integer)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select d.id, pg_catalog.count(i.id)::integer
+  from public.discount_codes d
+  join public.book_checkout_intents i on i.discount_code_id = d.id
+  where d.author_id = auth.uid()
+    and (i.completed_at is not null
+         or (i.superseded_at is null and i.expires_at > now()))
+  group by d.id;
+$$;
+
+revoke all on function public.discount_code_use_counts() from public, anon, authenticated, service_role;
+grant execute on function public.discount_code_use_counts() to authenticated;
 
 -- STRIPE-CUTOVER-1C (migration 056): the entitlement-creation logic
 -- below (lock intent, classify already-finalized/disputed/deleted/
