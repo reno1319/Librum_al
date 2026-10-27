@@ -961,7 +961,7 @@ function BundlesSection({
                     }`;
                     return src ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img key={i} src={src} alt="" className={`${position} object-cover`} />
+                      <img key={i} src={src} alt="" loading="lazy" decoding="async" className={`${position} object-cover`} />
                     ) : (
                       <div key={i} className={`${position} bg-border`} />
                     );

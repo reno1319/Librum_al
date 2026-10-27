@@ -468,6 +468,8 @@ export default async function AuthorProfilePage({
                           <img
                             src={coverUrl}
                             alt=""
+                            loading="lazy"
+                            decoding="async"
                             className="aspect-[2/3] w-full rounded-[2px] object-cover shadow-sm"
                           />
                         ) : (

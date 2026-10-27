@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff } from "@/lib/staff";
 import { ADMIN_LOGIN_PATH } from "@/lib/admin-safe-redirect";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
+import { BLOG_COVER_SIZE, IMAGE_CACHE_CONTROL_SECONDS, shrinkImageToJpeg } from "@/lib/cover-resize";
 import {
   mapBlogRpcError,
   NOT_AUTHENTICATED_RPC_MESSAGE,
@@ -80,9 +81,15 @@ async function resolveStagedCoverInput(
     await supabase.storage.from(STAGING_BUCKET).remove([tempPath]);
     redirect(`${errorRedirectPath}?error=${encodeURIComponent("That doesn't look like a valid JPEG or PNG image")}`);
   }
-  const { extension, contentType } = resolveVerifiedCoverStorageDetails(coverKind!);
+  // COVERS-1: the stored cover is always the shrunk JPEG.
+  const shrunk = await shrinkImageToJpeg(bytes, BLOG_COVER_SIZE);
+  if (!shrunk) {
+    await supabase.storage.from(STAGING_BUCKET).remove([tempPath]);
+    redirect(`${errorRedirectPath}?error=${encodeURIComponent("Could not read your uploaded cover. Please try again.")}`);
+  }
+  const { extension, contentType } = resolveVerifiedCoverStorageDetails("jpeg");
 
-  return { present: true, bytes, extension, contentType, tempPathToCleanup: tempPath };
+  return { present: true, bytes: shrunk!, extension, contentType, tempPathToCleanup: tempPath };
 }
 
 // Recommended permanent path from the BLOG-1B design report:
@@ -113,7 +120,7 @@ async function uploadPermanentCover(
   const permanentPath = `covers/${postId}/${randomUUID()}.${extension}`;
   const { error } = await createAdminClient().storage
     .from(BLOG_BUCKET)
-    .upload(permanentPath, bytes, { contentType });
+    .upload(permanentPath, bytes, { contentType, cacheControl: IMAGE_CACHE_CONTROL_SECONDS });
   if (error) {
     console.error("uploadPermanentCover: upload failed:", error);
     return null;

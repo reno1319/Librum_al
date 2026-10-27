@@ -46,6 +46,8 @@ export function LibraryBookCard({
           <img
             src={coverUrl}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-sm transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-md motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
           />
         ) : (

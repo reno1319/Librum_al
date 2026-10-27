@@ -104,7 +104,7 @@ function coverUrlFor(supabase: SupabaseClient, coverPath: string | null) {
 function Thumbnail({ url, title, author }: { url: string | null; title: string; author: string | null }) {
   return url ? (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt="" className="aspect-[2/3] w-12 shrink-0 rounded-[3px] object-cover" />
+    <img src={url} alt="" loading="lazy" decoding="async" className="aspect-[2/3] w-12 shrink-0 rounded-[3px] object-cover" />
   ) : (
     <CoverPlaceholder title={title} authorName={author} className="aspect-[2/3] w-12 shrink-0 rounded-[3px]" />
   );
