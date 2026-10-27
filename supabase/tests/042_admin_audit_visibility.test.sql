@@ -65,6 +65,9 @@
 -- available (same limitation every prior migration's own test file in
 -- this directory already documents). It is a reviewed contract, not a
 -- confirmed-passing result.
+-- 2026-10: first actually run (PostgreSQL 17) when it was brought up to
+-- date with later migrations; CI now runs it on every change
+-- (supabase/tests/run-sql-tests.sh).
 --
 -- ============================================================
 -- TIMESTAMP NOTE: everything in this file runs inside ONE transaction,
@@ -91,6 +94,15 @@ begin
   end if;
 end;
 $$;
+
+-- authenticated holds no privilege on admin_audit_log or
+-- refund_issuance_attempts (Parts 2, 8 and 9 assert exactly that), so
+-- the checks made while acting as a staff caller read both tables
+-- through these owner-run views. The raw-access refusals keep using the
+-- real tables.
+create view pg_temp.admin_audit_log_as_owner as select * from public.admin_audit_log;
+create view pg_temp.refund_issuance_attempts_as_owner as select * from public.refund_issuance_attempts;
+grant select on pg_temp.admin_audit_log_as_owner, pg_temp.refund_issuance_attempts_as_owner to authenticated;
 
 -- ============================================================
 -- Shared fixtures: one staff member per role, one non-staff user, one
@@ -123,6 +135,8 @@ insert into public.books (id, author_id, title, description, preview_text, keywo
 -- re-verified UNCHANGED, all 5 roles x 8 permissions. Mirrors migration
 -- 040's own Part 2 exhaustive-matrix pattern exactly, extended by one
 -- column.
+-- Editor's admin.access is true since LIBRUM 2.0 BLOG-1B (migration
+-- 047, see 040's matrix note); every other cell is as first written.
 -- ============================================================
 do $$
 declare
@@ -148,7 +162,7 @@ declare
       "staff.manage": false, "audit.view": false
     },
     "f0000000-0000-0000-0000-000000000005": {
-      "admin.access": false, "reports.view": false, "reports.resolve": false,
+      "admin.access": true, "reports.view": false, "reports.resolve": false,
       "refunds.view": false, "refunds.resolve": false, "staff.view": false,
       "staff.manage": false, "audit.view": false
     }
@@ -320,7 +334,7 @@ begin
         select 1 from pg_catalog.pg_proc p
         join pg_catalog.pg_namespace n on n.oid = p.pronamespace,
         unnest(coalesce(p.proconfig, '{}'::text[])) c
-        where n.nspname = 'public' and p.proname = fname and c = 'search_path='
+        where n.nspname = 'public' and p.proname = fname and c = 'search_path=""'
       ),
       format('part3: %s must SET search_path = '''' (empty)', fname)
     );
@@ -354,12 +368,15 @@ end $$;
 -- here, but list_admin_audit_events() itself needs genuinely distinct,
 -- orderable timestamps to prove pagination/ordering correctness).
 -- ============================================================
+-- Rows a3-a5 target ids (029, 039) that Parts 6-7 never use: those parts
+-- review report 020 and refund 030 through the real RPCs and then expect
+-- exactly one event each.
 insert into public.admin_audit_log (id, actor_id, action, target_type, target_id, metadata, created_at) values
   ('f0000000-0000-0000-0000-0000000000a1', 'f0000000-0000-0000-0000-000000000001', 'staff.added', 'staff_members', 'f0000000-0000-0000-0000-000000000006', '{"role":"support"}', now() - interval '50 minutes'),
   ('f0000000-0000-0000-0000-0000000000a2', 'f0000000-0000-0000-0000-000000000002', 'staff.role_changed', 'staff_members', 'f0000000-0000-0000-0000-000000000006', '{"old_role":"support","new_role":"moderator"}', now() - interval '40 minutes'),
-  ('f0000000-0000-0000-0000-0000000000a3', 'f0000000-0000-0000-0000-000000000001', 'report.resolved', 'book_reports', 'f0000000-0000-0000-0000-000000000020', '{"old_status":"open","new_status":"resolved","notes_added":false}', now() - interval '30 minutes'),
-  ('f0000000-0000-0000-0000-0000000000a4', 'f0000000-0000-0000-0000-000000000002', 'refund.review_approved', 'refund_requests', 'f0000000-0000-0000-0000-000000000030', '{"old_status":"requested","new_status":"approved","notes_added":false}', now() - interval '20 minutes'),
-  ('f0000000-0000-0000-0000-0000000000a5', 'f0000000-0000-0000-0000-000000000001', 'refund.issuance_submitted', 'refund_requests', 'f0000000-0000-0000-0000-000000000030', '{"stripe_refund_id":"re_fixture_1","stripe_status":"succeeded"}', now() - interval '10 minutes');
+  ('f0000000-0000-0000-0000-0000000000a3', 'f0000000-0000-0000-0000-000000000001', 'report.resolved', 'book_reports', 'f0000000-0000-0000-0000-000000000029', '{"old_status":"open","new_status":"resolved","notes_added":false}', now() - interval '30 minutes'),
+  ('f0000000-0000-0000-0000-0000000000a4', 'f0000000-0000-0000-0000-000000000002', 'refund.review_approved', 'refund_requests', 'f0000000-0000-0000-0000-000000000039', '{"old_status":"requested","new_status":"approved","notes_added":false}', now() - interval '20 minutes'),
+  ('f0000000-0000-0000-0000-0000000000a5', 'f0000000-0000-0000-0000-000000000001', 'refund.issuance_submitted', 'refund_requests', 'f0000000-0000-0000-0000-000000000039', '{"stripe_refund_id":"re_fixture_1","stripe_status":"succeeded"}', now() - interval '10 minutes');
 
 -- Two rows with an IDENTICAL created_at, to exercise the id-desc tie-break.
 insert into public.admin_audit_log (id, actor_id, action, target_type, target_id, metadata, created_at) values
@@ -578,12 +595,12 @@ begin
   reset role;
 
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'report.resolved' and target_id = 'f0000000-0000-0000-0000-000000000020';
   perform pg_temp.assert(event_count = 1, format('part6: expected exactly one report.resolved event, got %s', event_count));
 
   select actor_id, target_type, metadata into ev
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'report.resolved' and target_id = 'f0000000-0000-0000-0000-000000000020';
   perform pg_temp.assert(ev.actor_id = 'f0000000-0000-0000-0000-000000000002', 'part6: actor must be the calling admin, not hardcoded');
   perform pg_temp.assert(ev.target_type = 'book_reports', 'part6: target_type must be book_reports');
@@ -601,12 +618,12 @@ begin
   reset role;
 
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'report.dismissed' and target_id = 'f0000000-0000-0000-0000-000000000021';
   perform pg_temp.assert(event_count = 1, format('part6: expected exactly one report.dismissed event, got %s', event_count));
 
   select metadata into ev
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'report.dismissed' and target_id = 'f0000000-0000-0000-0000-000000000021';
   perform pg_temp.assert((ev.metadata->>'notes_added')::boolean = false, 'part6: notes_added must be false when no notes were supplied');
 
@@ -623,7 +640,7 @@ begin
   reset role;
 
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where target_id = 'f0000000-0000-0000-0000-000000000022' and action like 'report.%';
   perform pg_temp.assert(event_count = 1, format('part6: report 022 must still show exactly the ONE event from its original dismissal, got %s', event_count));
 end $$;
@@ -664,12 +681,12 @@ begin
   reset role;
 
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'refund.review_approved' and target_id = 'f0000000-0000-0000-0000-000000000030';
   perform pg_temp.assert(event_count = 1, format('part7: expected exactly one refund.review_approved event, got %s', event_count));
 
   select actor_id, target_type, metadata into ev
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'refund.review_approved' and target_id = 'f0000000-0000-0000-0000-000000000030';
   perform pg_temp.assert(ev.actor_id = 'f0000000-0000-0000-0000-000000000002', 'part7: actor must be the calling admin');
   perform pg_temp.assert(ev.target_type = 'refund_requests', 'part7: target_type must be refund_requests');
@@ -690,7 +707,7 @@ begin
   reset role;
 
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'refund.review_rejected' and target_id = 'f0000000-0000-0000-0000-000000000031';
   perform pg_temp.assert(event_count = 1, format('part7: expected exactly one refund.review_rejected event, got %s', event_count));
 
@@ -706,7 +723,7 @@ begin
   reset role;
 
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where target_id = 'f0000000-0000-0000-0000-000000000032' and action like 'refund.review_%';
   perform pg_temp.assert(event_count = 1, format('part7: request 032 must still show exactly the ONE event from its original rejection, got %s', event_count));
 end $$;
@@ -875,7 +892,7 @@ begin
   select public.begin_refund_issuance_attempt('f0000000-0000-0000-0000-000000000040', 'key-h1-first') into attempt_id;
   perform pg_temp.assert(attempt_id is not null, 'part8: begin_refund_issuance_attempt must return a non-null attempt id');
 
-  select * into attempt_row from public.refund_issuance_attempts where id = attempt_id;
+  select * into attempt_row from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(attempt_row.refund_request_id = 'f0000000-0000-0000-0000-000000000040', 'part8: attempt.refund_request_id must match the target');
   perform pg_temp.assert(attempt_row.actor_id = 'f0000000-0000-0000-0000-000000000001', 'part8: attempt.actor_id must be auth.uid(), the calling owner -- never caller-supplied');
   perform pg_temp.assert(attempt_row.idempotency_key = 'key-h1-first', 'part8: attempt.idempotency_key must match exactly');
@@ -891,7 +908,7 @@ begin
   select public.begin_refund_issuance_attempt('f0000000-0000-0000-0000-000000000040', 'key-h1-first') into attempt_id_2;
   perform pg_temp.assert(attempt_id_2 = attempt_id, 'part8: the SAME idempotency key must resolve to the SAME attempt id, not create a second one');
 
-  select count(*) into row_count from public.refund_issuance_attempts where idempotency_key = 'key-h1-first';
+  select count(*) into row_count from pg_temp.refund_issuance_attempts_as_owner where idempotency_key = 'key-h1-first';
   perform pg_temp.assert(row_count = 1, format('part8: exactly one attempt row must exist for a repeated idempotency key, got %s', row_count));
 
   -- a DIFFERENT, legitimate idempotency key (a genuine retry, in real
@@ -1010,17 +1027,17 @@ begin
   -- event, atomically.
   perform public.complete_refund_issuance_attempt(attempt_id, 're_h2', 'succeeded');
 
-  select status into final_status from public.refund_issuance_attempts where id = attempt_id;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'submitted', format('part8: attempt must transition to submitted, got %s', final_status));
 
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'refund.issuance_submitted' and target_id = 'f0000000-0000-0000-0000-000000000041'
     and metadata->>'stripe_refund_id' = 're_h2';
   perform pg_temp.assert(event_count = 1, format('part8: expected exactly one refund.issuance_submitted event for re_h2, got %s', event_count));
 
   select actor_id, target_type, metadata into ev
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'refund.issuance_submitted' and metadata->>'stripe_refund_id' = 're_h2';
   perform pg_temp.assert(ev.actor_id = 'f0000000-0000-0000-0000-000000000001', 'part8: audit actor must be auth.uid(), the calling owner');
   perform pg_temp.assert(ev.target_type = 'refund_requests', 'part8: audit target_type must be refund_requests');
@@ -1038,7 +1055,7 @@ begin
   perform public.complete_refund_issuance_attempt(attempt_id, 're_h2', 'succeeded');
 
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'refund.issuance_submitted' and metadata->>'stripe_refund_id' = 're_h2';
   perform pg_temp.assert(event_count = 1, format('part8: a repeated completion of the SAME attempt must still show exactly one audit row, got %s', event_count));
 
@@ -1067,19 +1084,19 @@ begin
 
   -- attempt B remains non-submitted (still 'initiated') -- the collision
   -- must never falsely mark it 'submitted'.
-  select status into final_status from public.refund_issuance_attempts where id = other_attempt_id;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = other_attempt_id;
   perform pg_temp.assert(final_status = 'initiated', format('part8: the rejected second attempt must remain non-submitted, got %s', final_status));
 
   -- exactly one attempt owns re_h2.
   select count(*) into event_count
-  from public.refund_issuance_attempts
+  from pg_temp.refund_issuance_attempts_as_owner
   where stripe_refund_id = 're_h2';
   perform pg_temp.assert(event_count = 1, format('part8: exactly one attempt row may ever claim stripe_refund_id re_h2, got %s', event_count));
 
   -- exactly one refund.issuance_submitted audit row exists for re_h2 --
   -- unchanged by the rejected second attempt.
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'refund.issuance_submitted' and metadata->>'stripe_refund_id' = 're_h2';
   perform pg_temp.assert(event_count = 1, format('part8: exactly one refund.issuance_submitted audit row must exist for re_h2, got %s', event_count));
 
@@ -1119,7 +1136,7 @@ begin
   -- already has several such rows from the tests above; this simply
   -- confirms no violation was ever raised for them.
   perform pg_temp.assert(
-    (select count(*) from public.refund_issuance_attempts where stripe_refund_id is null) > 1,
+    (select count(*) from pg_temp.refund_issuance_attempts_as_owner where stripe_refund_id is null) > 1,
     'part8: multiple attempts with a null stripe_refund_id must coexist without violating the partial unique index'
   );
 end $$;
@@ -1207,7 +1224,7 @@ begin
   perform public.fail_refund_issuance_attempt(attempt_id, 'stripe_error');
 
   select status, failure_reason into final_status, final_reason
-  from public.refund_issuance_attempts where id = attempt_id;
+  from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'unknown', format('part8: a stripe_error reason must land on status = unknown (ambiguous), not failed, got %s', final_status));
   perform pg_temp.assert(final_reason = 'stripe_error', format('part8: failure_reason must be stored exactly, got %s', final_reason));
 
@@ -1226,14 +1243,14 @@ begin
   perform public.fail_refund_issuance_attempt(attempt_id, 'stripe_error');
 
   select status, failure_reason into final_status, final_reason
-  from public.refund_issuance_attempts where id = attempt_id;
+  from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'unknown', 'part8: unknown -> unknown must remain unknown');
   perform pg_temp.assert(final_reason = 'stripe_error', 'part8: failure_reason must still reflect the latest observation');
 
   -- an 'unknown' attempt must never carry a refund.issuance_submitted audit event.
   perform pg_temp.assert(
     not exists (
-      select 1 from public.admin_audit_log
+      select 1 from pg_temp.admin_audit_log_as_owner
       where action = 'refund.issuance_submitted' and target_id = 'f0000000-0000-0000-0000-000000000042'
     ),
     'part8: an unknown-status attempt must never produce a refund.issuance_submitted audit event'
@@ -1258,17 +1275,17 @@ begin
 
   select public.begin_refund_issuance_attempt('f0000000-0000-0000-0000-000000000043', 'key-h4-immediate-failed') into attempt_failed;
   perform public.fail_refund_issuance_attempt(attempt_failed, 'immediate_failed');
-  select status into final_status from public.refund_issuance_attempts where id = attempt_failed;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_failed;
   perform pg_temp.assert(final_status = 'failed', format('part8: immediate_failed must land on status = failed (confirmed), got %s', final_status));
 
   select public.begin_refund_issuance_attempt('f0000000-0000-0000-0000-000000000043', 'key-h4-immediate-canceled') into attempt_canceled;
   perform public.fail_refund_issuance_attempt(attempt_canceled, 'immediate_canceled');
-  select status into final_status from public.refund_issuance_attempts where id = attempt_canceled;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_canceled;
   perform pg_temp.assert(final_status = 'failed', format('part8: immediate_canceled must land on status = failed (confirmed), got %s', final_status));
 
   perform pg_temp.assert(
     not exists (
-      select 1 from public.admin_audit_log
+      select 1 from pg_temp.admin_audit_log_as_owner
       where action = 'refund.issuance_submitted' and target_id = 'f0000000-0000-0000-0000-000000000043'
     ),
     'part8: neither a failed nor an unknown attempt may ever produce a refund.issuance_submitted audit event'
@@ -1302,15 +1319,15 @@ begin
   -- initiated -> unknown -> submitted.
   select public.begin_refund_issuance_attempt('f0000000-0000-0000-0000-000000000044', 'key-sm-044') into attempt_id;
   perform public.fail_refund_issuance_attempt(attempt_id, 'stripe_error');
-  select status into final_status from public.refund_issuance_attempts where id = attempt_id;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'unknown', format('part8: initiated -> unknown must be allowed, got %s', final_status));
 
   perform public.complete_refund_issuance_attempt(attempt_id, 're_sm_044', 'succeeded');
-  select status into final_status from public.refund_issuance_attempts where id = attempt_id;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'submitted', format('part8: unknown -> submitted must be allowed, got %s', final_status));
 
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'refund.issuance_submitted' and metadata->>'stripe_refund_id' = 're_sm_044';
   perform pg_temp.assert(event_count = 1, format('part8: unknown -> submitted must write exactly one audit event, got %s', event_count));
 
@@ -1319,7 +1336,7 @@ begin
   -- completion.
   perform public.complete_refund_issuance_attempt(attempt_id, 're_sm_044', 'succeeded');
   select count(*) into event_count
-  from public.admin_audit_log
+  from pg_temp.admin_audit_log_as_owner
   where action = 'refund.issuance_submitted' and metadata->>'stripe_refund_id' = 're_sm_044';
   perform pg_temp.assert(event_count = 1, format('part8: a repeated completion after unknown -> submitted recovery must still show exactly one audit row, got %s', event_count));
 
@@ -1327,11 +1344,11 @@ begin
   select public.begin_refund_issuance_attempt('f0000000-0000-0000-0000-000000000045', 'key-sm-045') into attempt_id;
   perform public.fail_refund_issuance_attempt(attempt_id, 'stripe_error');
   perform public.fail_refund_issuance_attempt(attempt_id, 'immediate_failed');
-  select status into final_status from public.refund_issuance_attempts where id = attempt_id;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'failed', format('part8: unknown -> failed must be allowed, got %s', final_status));
   perform pg_temp.assert(
     not exists (
-      select 1 from public.admin_audit_log
+      select 1 from pg_temp.admin_audit_log_as_owner
       where action = 'refund.issuance_submitted' and target_id = 'f0000000-0000-0000-0000-000000000045'
     ),
     'part8: unknown -> failed must never produce a refund.issuance_submitted audit event'
@@ -1346,7 +1363,7 @@ begin
   perform public.fail_refund_issuance_attempt(attempt_id, 'stripe_error');
   perform public.fail_refund_issuance_attempt(attempt_id, null);
   select status, failure_reason into final_status, final_reason
-  from public.refund_issuance_attempts where id = attempt_id;
+  from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'unknown', format('part8: unknown -> unknown must remain unknown, got %s', final_status));
   perform pg_temp.assert(final_reason is null, 'part8: the unknown -> unknown transition must actually update the row (failure_reason must reflect the latest call), not silently no-op');
 
@@ -1356,11 +1373,11 @@ begin
   perform public.complete_refund_issuance_attempt(attempt_id, 're_sm_047', 'succeeded');
 
   perform public.fail_refund_issuance_attempt(attempt_id, 'stripe_error');
-  select status into final_status from public.refund_issuance_attempts where id = attempt_id;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'submitted', format('part8: submitted must never be downgraded to unknown, got %s', final_status));
 
   perform public.fail_refund_issuance_attempt(attempt_id, 'immediate_failed');
-  select status into final_status from public.refund_issuance_attempts where id = attempt_id;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'submitted', format('part8: submitted must never be downgraded to failed, got %s', final_status));
 
   -- failed is terminal: neither a fail nor a complete call may reopen it
@@ -1369,16 +1386,16 @@ begin
   perform public.fail_refund_issuance_attempt(attempt_id, 'immediate_failed');
 
   perform public.fail_refund_issuance_attempt(attempt_id, 'stripe_error');
-  select status into final_status from public.refund_issuance_attempts where id = attempt_id;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'failed', format('part8: failed must never be downgraded to unknown, got %s', final_status));
 
   perform public.complete_refund_issuance_attempt(attempt_id, 're_sm_048', 'succeeded');
-  select status into final_status from public.refund_issuance_attempts where id = attempt_id;
+  select status into final_status from pg_temp.refund_issuance_attempts_as_owner where id = attempt_id;
   perform pg_temp.assert(final_status = 'failed', format('part8: failed must never be reopened to submitted, got %s', final_status));
 
   perform pg_temp.assert(
     not exists (
-      select 1 from public.admin_audit_log where metadata->>'stripe_refund_id' = 're_sm_048'
+      select 1 from pg_temp.admin_audit_log_as_owner where metadata->>'stripe_refund_id' = 're_sm_048'
     ),
     'part8: a failed attempt must never produce an audit event even if a complete call is later (incorrectly) attempted against it'
   );
@@ -1438,7 +1455,7 @@ begin
   end;
 
   perform pg_temp.assert(
-    exists (select 1 from public.refund_issuance_attempts where id = v_attempt_id),
+    exists (select 1 from pg_temp.refund_issuance_attempts_as_owner where id = v_attempt_id),
     'part8: the attempt row must still exist after the rejected delete -- RESTRICT, not a silent cascade'
   );
   perform pg_temp.assert(

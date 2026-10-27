@@ -18,13 +18,10 @@ import type { Book } from "@/lib/types";
 // profiles.stripe_payouts_enabled, and in practice that permanently hid
 // the continue-draft prompt from every author with a priced book.
 //
-// Why that flag stopped being a valid input, stated accurately rather
-// than overstated: creation of new Stripe Connect accounts is disabled
-// (connectStripeAccount, dashboard/payouts/actions.ts), but the flag was
-// never unsettable -- a pre-existing connected account and the
-// account.updated webhook (processAccountUpdatedEvent) could still have
-// made it true. It is provider-specific author-payout state, and that is
-// not a valid paid-publishing permission whatever its value.
+// Why that flag stopped being a valid input: it is provider-specific
+// author-payout state, and that is not a valid paid-publishing
+// permission whatever its value. (Stripe, and the Connect code and
+// webhook that could set it, have since been removed.)
 //
 // An actionable prompt now outranks an informational one. "Your draft is
 // waiting" is something the author can act on today; "paid publishing

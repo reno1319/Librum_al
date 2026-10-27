@@ -45,6 +45,8 @@ export function BookCard({
           <img
             src={coverUrl}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_6px_14px_rgba(30,58,50,0.18)] transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-[0_10px_20px_rgba(30,58,50,0.24)] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
           />
         ) : (

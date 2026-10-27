@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { assertSupabaseEnvSafeForExecution } from "@/lib/supabase/env-guard";
+import { SECURITY_HEADER_RULES } from "@/lib/security-headers";
 
 // AUTH-STAGE-1A: this file is loaded once, in Node, by the `next`
 // CLI itself -- for `next dev`, `next build`, and `next start` alike --
@@ -24,6 +25,8 @@ import { assertSupabaseEnvSafeForExecution } from "@/lib/supabase/env-guard";
 assertSupabaseEnvSafeForExecution();
 
 const nextConfig: NextConfig = {
+  // COVERS-1: stop announcing the framework in an x-powered-by header.
+  poweredByHeader: false,
   experimental: {
     serverActions: {
       // Book uploads (cover + EPUB) can be up to ~55MB combined —
@@ -41,6 +44,9 @@ const nextConfig: NextConfig = {
   // gone; old links land on Financial balance. Permanent (308).
   redirects() {
     return [{ source: "/dashboard/payouts", destination: "/dashboard/balance", permanent: true }];
+  },
+  headers() {
+    return SECURITY_HEADER_RULES;
   },
 };
 

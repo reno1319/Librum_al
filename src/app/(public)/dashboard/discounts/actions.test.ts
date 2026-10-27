@@ -139,7 +139,9 @@ describe("createDiscountCode: ALL fixed discounts and payload shape", () => {
       ["author_id", "book_id", "code", "expires_at", "id", "percent_off"].sort(),
     );
     expect(payload).toMatchObject({
-      author_id: "author-1", book_id: "book-1", code: "LAUNCH20", percent_off: 20, expires_at: "2026-12-31",
+      author_id: "author-1", book_id: "book-1", code: "LAUNCH20", percent_off: 20,
+      // DISCOUNT-LIMIT-1: the end of 31 December in Albania (UTC+1).
+      expires_at: "2026-12-31T23:00:00.000Z",
     });
     expect(payload.id).toMatch(/^[0-9a-f-]{36}$/);
   });
@@ -290,5 +292,64 @@ describe("createDiscountCode / toggle / delete: authorization is preserved", () 
       { table: "discount_codes", op: "eq", args: ["id", "code-1"] },
       { table: "discount_codes", op: "eq", args: ["author_id", "author-1"] },
     ]);
+  });
+});
+
+// DISCOUNT-LIMIT-1: the optional use limit and the end-of-day expiry.
+describe("createDiscountCode: max uses and expiry", () => {
+  let stub: ReturnType<typeof recordingClient>;
+
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    mockRedirect.mockClear();
+    stub = recordingClient();
+    mockCreateClient.mockReset();
+    mockCreateClient.mockImplementation(async () => stub.client);
+  });
+
+  async function submit(fields: Record<string, string | File>) {
+    return createDiscountCode(discountForm({ ...BASE_FIELDS, type: "percent", value: "10", ...fields })).catch(
+      (e: unknown) => e,
+    );
+  }
+
+  it.each([["1", 1], [" 25 ", 25], ["100000", 100_000]])("max uses %j is stored as %d", async (maxUses, expected) => {
+    const outcome = await submit({ maxUses });
+    expect(outcome).toMatchObject({ target: "/dashboard/discounts?success=Discount+code+created" });
+    expect(stub.inserts).toHaveLength(1);
+    expect(stub.inserts[0].max_uses).toBe(expected);
+  });
+
+  it("blank or missing max uses leaves max_uses out of the payload (no limit)", async () => {
+    await submit({ maxUses: "" });
+    await submit({ code: "other" });
+    expect(stub.inserts).toHaveLength(2);
+    for (const payload of stub.inserts) {
+      expect(Object.prototype.hasOwnProperty.call(payload, "max_uses")).toBe(false);
+    }
+  });
+
+  it.each(["0", "100001", "-3", "2.5", "1e2", "ten"])("max uses %j never reaches the insert", async (maxUses) => {
+    const outcome = await submit({ maxUses });
+    expect(outcome).toMatchObject({
+      target: "/dashboard/discounts?error=Max+uses+must+be+a+whole+number+from+1+to+100000",
+    });
+    expect(stub.inserts).toHaveLength(0);
+  });
+
+  it("a picked date is stored as the next midnight in Albania, summer time included", async () => {
+    await submit({ expiresAt: "2026-07-10" });
+    expect(stub.inserts[0].expires_at).toBe("2026-07-10T22:00:00.000Z");
+  });
+
+  it("no date means no expiry", async () => {
+    await submit({ expiresAt: "" });
+    expect(stub.inserts[0].expires_at).toBeNull();
+  });
+
+  it("a malformed date never reaches the insert", async () => {
+    const outcome = await submit({ expiresAt: "2026-02-30" });
+    expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Choose+a+valid+expiry+date" });
+    expect(stub.inserts).toHaveLength(0);
   });
 });

@@ -162,7 +162,8 @@ end $$;
 -- ============================================================
 -- Part 2: the exact per-column INSERT and UPDATE sets for
 -- authenticated, over EVERY column of the table -- so a future column
--- that silently becomes writable is caught too.
+-- that silently becomes writable is caught too. DISCOUNT-LIMIT-1
+-- (migration 20261027120000) added max_uses, INSERT only.
 -- ============================================================
 do $$
 declare
@@ -183,10 +184,10 @@ begin
    where attrelid = 'public.discount_codes'::regclass and attnum > 0 and not attisdropped;
 
   perform pg_temp.assert(
-    v_cols = 'active,amount_off_all,amount_off_cents,author_id,book_id,code,created_at,expires_at,id,percent_off',
+    v_cols = 'active,amount_off_all,amount_off_cents,author_id,book_id,code,created_at,expires_at,id,max_uses,percent_off',
     format('part2: discount_codes column set changed -- re-derive this suite''s expectations; found %s', v_cols));
   perform pg_temp.assert(
-    v_insert = 'amount_off_all,author_id,book_id,code,expires_at,id,percent_off',
+    v_insert = 'amount_off_all,author_id,book_id,code,expires_at,id,max_uses,percent_off',
     format('part2: authenticated INSERT columns must be exactly the application''s create path -- found %s', v_insert));
   perform pg_temp.assert(v_update = 'active',
     format('part2: authenticated UPDATE must remain exactly (active) -- found %s', v_update));
@@ -274,6 +275,7 @@ begin
     || ' | code/authenticated:INSERT'
     || ' | expires_at/authenticated:INSERT'
     || ' | id/authenticated:INSERT'
+    || ' | max_uses/authenticated:INSERT'
     || ' | percent_off/authenticated:INSERT',
     format('part3: discount_codes column ACLs -- found %s', v_colacl));
 

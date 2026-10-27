@@ -180,13 +180,21 @@ vi.mock("@/lib/book-takedowns", () => ({
 vi.mock("@/lib/email", () => ({
   sendNewBookEmails: (admin: unknown, args: unknown) => mockSendNewBookEmails(admin, args),
 }));
+// ADMIN-ALERTS-1: the staff email after a successful review request.
+const mockReviewStaffEmail = vi.fn(async (_args: unknown) => {
+  void _args;
+});
+vi.mock("@/lib/staff-alerts", () => ({
+  sendReviewRequestedStaffEmail: (args: unknown) => mockReviewStaffEmail(args),
+}));
 
 const { createBook, publishBook } = await import("./actions");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
 
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
 const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+// COVERS-1: a real 1x1 PNG, since every cover is now decoded and re-encoded.
+const PNG_SIGNATURE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWMwTgsFAAG+AO/TH36BAAAAAElFTkSuQmCC", "base64");
 
 async function buildValidEpubBytes(): Promise<Buffer> {
   const zip = new JSZip();
@@ -1161,7 +1169,10 @@ describe("performPublish: a book Librum took down (ADMIN-2)", () => {
 // it is sent for review and stays a draft. An already-published book is
 // unaffected.
 describe("performPublish: In review (ADMIN-3)", () => {
-  beforeEach(resetMocks);
+  beforeEach(() => {
+    resetMocks();
+    mockReviewStaffEmail.mockClear();
+  });
   const SENT = `/dashboard?success=${encodeURIComponent(
     "Sent for review. We'll check your book and tell you when it's live. It isn't in the Bookstore yet.",
   )}`;
@@ -1173,6 +1184,9 @@ describe("performPublish: In review (ADMIN-3)", () => {
     expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["getBookReviewState", "requestBookReview"]);
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+    // ADMIN-ALERTS-1: staff are told, once.
+    expect(mockReviewStaffEmail).toHaveBeenCalledTimes(1);
+    expect(mockReviewStaffEmail).toHaveBeenCalledWith({ bookId: BOOK_ID, authorId: USER_ID });
   });
 
   it("a draft whose approval matches its files publishes as before (3a)", async () => {
@@ -1181,6 +1195,7 @@ describe("performPublish: In review (ADMIN-3)", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
     expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["getBookReviewState"]);
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(expect.objectContaining({ status: "published" }));
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
   it("the review is asked for only after every author-fixable gate", async () => {
@@ -1198,6 +1213,7 @@ describe("performPublish: In review (ADMIN-3)", () => {
       `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("This book is already waiting for review.")}`,
     );
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
   it("an unreadable review state or a failed request fails closed with the generic sentence", async () => {

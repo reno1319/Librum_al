@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 225 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 226 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -18,7 +18,8 @@
 --   book_views, bundle_checkout_reader_holds, bundle_checkout_reservations
 --   and wishlist_items (migration 20261024200000), plus HOME-PICKS-1's
 --   three home_featured_slots and three public_home_featured_slots rows
---   (migration 20261025100000). A relation with no
+--   (migration 20261025100000), plus DISCOUNT-LIMIT-1's INSERT on
+--   discount_codes.max_uses (migration 20261027120000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -101,6 +102,7 @@ insert into grant_contract_expected (kind, line) values
 ('col','discount_codes.code | authenticated | INSERT'),
 ('col','discount_codes.expires_at | authenticated | INSERT'),
 ('col','discount_codes.id | authenticated | INSERT'),
+('col','discount_codes.max_uses | authenticated | INSERT'),
 ('col','discount_codes.percent_off | authenticated | INSERT'),
 ('col','pen_names.bio | authenticated | UPDATE'),
 ('col','pen_names.links | authenticated | UPDATE'),
@@ -304,8 +306,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 225 then
-    raise exception 'FAIL: part1: the snapshot must hold 225 rows, holds %', v_expected;
+  if v_expected <> 226 then
+    raise exception 'FAIL: part1: the snapshot must hold 226 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

@@ -38,6 +38,13 @@ vi.mock("@/lib/recovery-guard", () => ({ redirectIfRecoverySessionActive: vi.fn(
 // ADMIN-2-TAKEDOWN: deleteBook reads the book's active takedown; none
 // here (its own cases are in unpublish-delete.test.ts).
 vi.mock("@/lib/book-takedowns", () => ({ getActiveTakedownState: async () => ({ kind: "none" }) }));
+// ADMIN-ALERTS-1: the staff email after a successful review request.
+const mockReviewStaffEmail = vi.fn(async (_args: unknown) => {
+  void _args;
+});
+vi.mock("@/lib/staff-alerts", () => ({
+  sendReviewRequestedStaffEmail: (args: unknown) => mockReviewStaffEmail(args),
+}));
 
 type Filter = { kind: string; column: string; value: unknown };
 type DbWrite = { table: string; op: string; payload: unknown; filters: Filter[] };
@@ -190,8 +197,9 @@ vi.mock("@/lib/catalog-write-client", async () => {
 const { createBook, updateBook, deleteBook, cancelBookReview } = await import("./actions");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
 
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
-const JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0]);
+// COVERS-1: a real 1x1 PNG and JPEG, since every cover is now decoded and re-encoded.
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWMwTgsFAAG+AO/TH36BAAAAAElFTkSuQmCC", "base64");
+const JPG = Buffer.from("/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCGAER//9k=", "base64");
 const TEMP_EPUB = `${USER_ID}/tmp/epub/e5f6a7b8-7777-4777-8777-abcdef777777.epub`;
 const TEMP_COVER = `${USER_ID}/tmp/cover/f6a7b8c9-8888-4888-8888-abcdef888888.png`;
 
@@ -201,7 +209,6 @@ const OWN_EPUB = canonicalBookManuscriptPath(USER_ID, BOOK_ID);
 const LEGACY_JPEG = `${USER_ID}/${BOOK_ID}-cover.jpeg`;
 // PEN-2 (L10): a new cover key is `<random uuid>/cover.<ext>`.
 const NEW_JPG = expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.jpg$/);
-const NEW_PNG = expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.png$/);
 // ADMIN-3-REVIEW (M5): a new manuscript key is versioned,
 // `<author>/<book>/<random uuid>.epub`, written by the catalog writer
 // before the row write; the superseded own key is removed after it.
@@ -372,11 +379,12 @@ describe("updateBook with a replacement", () => {
     ]);
   });
 
-  // PEN-2 (L10): a fresh random folder plus the verified bytes' extension;
-  // nothing from the account, the book or the file name.
-  it("the key is a fresh random folder and the verified bytes' extension -- not the file name, account or book", async () => {
+  // PEN-2 (L10): a fresh random folder; nothing from the account, the
+  // book or the file name. COVERS-1: a PNG upload is stored as the
+  // shrunk JPEG, so the extension is always .jpg.
+  it("the key is a fresh random folder and always .jpg -- not the file name, account or book", async () => {
     await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
-    expect(storageCalls[0]).toEqual({ op: "upload", bucket: "covers", paths: [NEW_PNG] });
+    expect(storageCalls[0]).toEqual({ op: "upload", bucket: "covers", paths: [NEW_JPG] });
     expect(uploadedCoverKey()).not.toContain(USER_ID);
     expect(uploadedCoverKey()).not.toContain(BOOK_ID);
     expect(uploadedCoverKey()).not.toContain("anything");
@@ -612,8 +620,8 @@ describe("createBook", () => {
     const versioned = expect.stringMatching(
       new RegExp(`^${USER_ID}/${id}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.epub$`),
     );
-    expect(insert.payload).toMatchObject({ author_id: USER_ID, cover_path: NEW_PNG, file_path: versioned });
-    expect(everyStorageKey()).toEqual([NEW_PNG, versioned]);
+    expect(insert.payload).toMatchObject({ author_id: USER_ID, cover_path: NEW_JPG, file_path: versioned });
+    expect(everyStorageKey()).toEqual([NEW_JPG, versioned]);
     expect(everyStorageKey()).not.toContain(canonicalBookManuscriptPath(USER_ID, id));
     expect(uploadedCoverKey()).not.toContain(USER_ID);
     expect(uploadedCoverKey()).not.toContain(id);
@@ -966,7 +974,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
     const target = await run(updateBook(BOOK_ID, f));
     expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
     expect(storageCalls.filter((c) => c.op === "upload")).toEqual([
-      { op: "upload", bucket: "covers", paths: [NEW_PNG] },
+      { op: "upload", bucket: "covers", paths: [NEW_JPG] },
       { op: "upload", bucket: "manuscripts", paths: [NEW_EPUB] },
     ]);
     const newManuscript = String(storageCalls.find((c) => c.op === "upload" && c.bucket === "manuscripts")?.paths[0]);
@@ -1010,6 +1018,7 @@ describe("updateBook and review (ADMIN-3)", () => {
 
   beforeEach(() => {
     bookReadResult = { data: row({ status: "published" }), error: null };
+    mockReviewStaffEmail.mockClear();
   });
 
   it("a live book's new cover: one write back to draft, then a review request", async () => {
@@ -1018,6 +1027,7 @@ describe("updateBook and review (ADMIN-3)", () => {
     expect(update.payload).toMatchObject({ cover_path: NEW_JPG, status: "draft", librum_choice_at: null });
     expect(fns()).toEqual(["requestBookReview"]);
     expect(events.indexOf("db:update:books")).toBeLessThan(events.indexOf("storage:remove:covers"));
+    expect(mockReviewStaffEmail).toHaveBeenCalledWith({ bookId: BOOK_ID, authorId: USER_ID });
   });
 
   it("a live book's new manuscript: draft, review request, then retention cleanup of the superseded key", async () => {
@@ -1033,6 +1043,7 @@ describe("updateBook and review (ADMIN-3)", () => {
       `/dashboard/books/${BOOK_ID}/edit?success=${encodeURIComponent("Saved. Press Send for review when you're ready.")}`,
     );
     expect(bookUpdates()).toHaveLength(1);
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
   it("a live book in a published bundle cannot change its files: refused before any upload", async () => {
@@ -1057,6 +1068,7 @@ describe("updateBook and review (ADMIN-3)", () => {
     expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Book+updated");
     expect(bookUpdates()[0].payload).not.toHaveProperty("status");
     expect(bookReviewsDoubleState.calls).toEqual([]);
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
   it("a draft waiting for review: its snapshot is replaced with the new files", async () => {
@@ -1065,6 +1077,7 @@ describe("updateBook and review (ADMIN-3)", () => {
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
     expect(fns()).toEqual(["getBookReviewState", "requestBookReview"]);
     expect(bookUpdates()[0].payload).toMatchObject({ status: "draft" });
+    expect(mockReviewStaffEmail).toHaveBeenCalledTimes(1);
   });
 
   it("a draft not waiting for review is not sent for review by a file change", async () => {

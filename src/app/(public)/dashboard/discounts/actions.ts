@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
 import { FIXED_ALL_DISCOUNT_FORM_TYPE, parseFixedDiscountAll } from "@/lib/discount-amount";
+import { discountExpiryInstant, parseMaxUses } from "@/lib/discount-code-limits";
 
 export async function createDiscountCode(formData: FormData) {
   // ALL-CUTOVER APP-A: discount amount is written by this action --
@@ -72,13 +73,32 @@ export async function createDiscountCode(formData: FormData) {
     redirect("/dashboard/discounts?error=Choose+a+discount+type");
   }
 
+  // DISCOUNT-LIMIT-1: the picked date works through the end of that day
+  // in Albania (see discount-code-limits.ts), so the stored instant is
+  // the next day's midnight there, never the raw date.
+  let expiresAtInstant: string | null = null;
+  if (expiresAt) {
+    expiresAtInstant = discountExpiryInstant(expiresAt);
+    if (!expiresAtInstant) {
+      redirect("/dashboard/discounts?error=Choose+a+valid+expiry+date");
+    }
+  }
+
+  // DISCOUNT-LIMIT-1: blank is no limit, and then max_uses is left out
+  // of the payload altogether rather than sent as null.
+  const maxUses = parseMaxUses(formData.get("maxUses"));
+  if (!maxUses.ok) {
+    redirect("/dashboard/discounts?error=Max+uses+must+be+a+whole+number+from+1+to+100000");
+  }
+
   const { error } = await supabase.from("discount_codes").insert({
     id: randomUUID(),
     author_id: user.id,
     book_id: bookId,
     code,
     ...discount,
-    expires_at: expiresAt || null,
+    expires_at: expiresAtInstant,
+    ...(maxUses.maxUses === null ? {} : { max_uses: maxUses.maxUses }),
   });
 
   if (error) {

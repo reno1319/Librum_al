@@ -23,7 +23,7 @@ type Result = { data?: unknown; error?: { code?: string } | null; count?: number
 
 let queries: Query[] = [];
 let respond: (q: Query) => Result;
-let storageCalls: { client: string; bucket: string; op: string; path: unknown }[] = [];
+let storageCalls: { client: string; bucket: string; op: string; path: unknown; bytes?: Buffer; opts?: unknown }[] = [];
 let stagedBytes: Buffer | null;
 
 function method(q: Query, name: string): Op | undefined {
@@ -55,7 +55,9 @@ function recordingClient(client: Query["client"]) {
     },
     storage: {
       from: (bucket: string) => ({
-        upload: async (path: string) => (storageCalls.push({ client, bucket, op: "upload", path }), { error: null }),
+        upload: async (path: string, bytes: Buffer, opts: unknown) => (
+          storageCalls.push({ client, bucket, op: "upload", path, bytes, opts }), { error: null }
+        ),
         remove: async (paths: unknown) => (storageCalls.push({ client, bucket, op: "remove", path: paths }), { error: null }),
         download: async (path: string) => {
           storageCalls.push({ client, bucket, op: "download", path });
@@ -114,7 +116,8 @@ async function redirectOf(action: Promise<unknown>): Promise<string> {
   throw new Error("expected a redirect");
 }
 
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+// COVERS-1: a real 1x1 PNG, since every photo is now decoded and re-encoded.
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWMwTgsFAAG+AO/TH36BAAAAAElFTkSuQmCC", "base64");
 
 beforeEach(() => {
   queries = [];
@@ -181,8 +184,11 @@ describe("updatePenName", () => {
     const upload = storageCalls.find((c) => c.op === "upload")!;
     expect(upload.client).toBe("writer");
     expect(upload.bucket).toBe("avatars");
-    expect(upload.path).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/pen-name\.png$/);
+    // COVERS-1: stored as the shrunk JPEG.
+    expect(upload.path).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/pen-name\.jpg$/);
     expect(upload.path).not.toContain(USER_ID);
+    expect([...upload.bytes!.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+    expect(upload.opts).toEqual({ contentType: "image/jpeg", cacheControl: "604800", upsert: false });
     const write = queries.find((q) => q.client === "writer" && method(q, "update"))!;
     expect(method(write, "update")!.args[0]).toEqual({ avatar_path: upload.path });
     expect(write.ops).toContainEqual({ method: "eq", args: ["author_id", USER_ID] });
@@ -205,6 +211,17 @@ describe("updatePenName", () => {
       updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: `${USER_ID}/tmp/avatar/x.png` })),
     );
     expect(target).toContain("valid JPEG or PNG");
+    expect(storageCalls.some((c) => c.op === "upload")).toBe(false);
+  });
+
+  // COVERS-1: a PNG signature followed by bytes that don't decode can't
+  // be shrunk -- refused with the existing read error, never stored raw.
+  it("a signature-valid photo that can't be decoded is refused", async () => {
+    stagedBytes = Buffer.concat([PNG.subarray(0, 8), Buffer.alloc(512, 7)]);
+    const target = await redirectOf(
+      updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: `${USER_ID}/tmp/avatar/x.png` })),
+    );
+    expect(target).toContain("Could not read your uploaded photo. Please try again.");
     expect(storageCalls.some((c) => c.op === "upload")).toBe(false);
   });
 
@@ -233,7 +250,7 @@ describe("updatePenName: a default pen name holding the profile photo", () => {
     const removedAvatars = storageCalls.filter((c) => c.bucket === "avatars" && c.op === "remove");
     expect(removedAvatars).toEqual([]);
     const write = queries.find((q) => q.client === "writer" && method(q, "update"))!;
-    expect((method(write, "update")!.args[0] as { avatar_path: string }).avatar_path).toMatch(/\/pen-name\.png$/);
+    expect((method(write, "update")!.args[0] as { avatar_path: string }).avatar_path).toMatch(/\/pen-name\.jpg$/);
   });
 
   it("Remove photo clears the row only; the shared profile object stays", async () => {

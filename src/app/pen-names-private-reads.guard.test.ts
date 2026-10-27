@@ -55,11 +55,14 @@ const OWN_ROW_EQ = /\.eq\("(author_id|reader_id)",\s*(user\.id|userId)\)/;
 // series) feed public pages. email.ts is left out on purpose: it is given
 // the service-role client by its callers (webhooks and server actions)
 // to build transactional emails, and it never renders a public page.
+// staff-alerts.ts likewise (ADMIN-ALERTS-1): it reads a book's title
+// with the service-role client only to email staff, never for a page.
+const NOT_PUBLIC_LIB = new Set(["lib/email.ts", "lib/staff-alerts.ts"]);
 const PUBLIC_FILES = [
   ...walk(join(SRC, "app", "(public)")),
   ...walk(join(SRC, "components")),
   ...walk(join(SRC, "lib")),
-].filter((f) => !rel(f).startsWith("app/(public)/dashboard/") && rel(f) !== "lib/email.ts");
+].filter((f) => !rel(f).startsWith("app/(public)/dashboard/") && !NOT_PUBLIC_LIB.has(rel(f)));
 
 // The own-row checks the brief lists (isAuthor and "your review"), plus
 // deleteAccount's own-books read. Each must carry an own-row filter.

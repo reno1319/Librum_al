@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveCatalogPriceState } from "@/lib/catalog-price";
 import { REPORT_REASONS } from "@/lib/report-reasons";
+import { sendBookReportedStaffEmail } from "@/lib/staff-alerts";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { BOOK_CHECKOUT_UNAVAILABLE_MESSAGE, resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
@@ -98,7 +99,11 @@ type CheckoutQuoteStatus =
   // is deleted, and this status is the rejection that replaced it. The
   // reader is never quietly charged the full price, and never charged
   // an amount raised above what the code implied. Nothing was mutated.
-  | "discount_below_minimum";
+  | "discount_below_minimum"
+  // DISCOUNT-LIMIT-1: the code has max_uses and its uses (completed or
+  // open checkouts by other readers) have reached it. Nothing was
+  // mutated, and the full price is never charged in its place.
+  | "discount_used_up";
 
 type CheckoutIntentResult = {
   intent_id: string | null;
@@ -129,7 +134,7 @@ type CheckoutIntentResult = {
 // no longer carry either status, and a leftover comparison against one
 // of them becomes a compile error rather than dead code that reads as
 // coverage.
-type DiscountRejectionStatus = "discount_not_applicable" | "discount_below_minimum";
+type DiscountRejectionStatus = "discount_not_applicable" | "discount_below_minimum" | "discount_used_up";
 
 type ScreenedQuote = Omit<CheckoutIntentResult, "quote_status"> & {
   quote_status: Exclude<CheckoutQuoteStatus, DiscountRejectionStatus>;
@@ -158,6 +163,8 @@ const CHECKOUT_DISCOUNT_NOT_APPLICABLE_MESSAGE =
   "That promo code can't be used for this book, so nothing was charged. Remove the code to buy at the current price.";
 const CHECKOUT_DISCOUNT_BELOW_MINIMUM_MESSAGE =
   "That promo code would bring this book below Librum's minimum price, so it can't be used and nothing was charged.";
+const CHECKOUT_DISCOUNT_USED_UP_MESSAGE =
+  "This promo code has been used up, so nothing was charged.";
 // A payment was found but not yet PROVEN (POK reported the order
 // completed without capture evidence we can verify). The reader must not
 // be invited to pay again -- that is the one outcome with no remedy,
@@ -400,6 +407,9 @@ export async function buyBook(bookId: string, formData: FormData) {
     }
     if (row.quote_status === "discount_below_minimum") {
       failClosed(CHECKOUT_DISCOUNT_BELOW_MINIMUM_MESSAGE);
+    }
+    if (row.quote_status === "discount_used_up") {
+      failClosed(CHECKOUT_DISCOUNT_USED_UP_MESSAGE);
     }
 
     return row as ScreenedQuote;
@@ -839,6 +849,9 @@ export async function submitReport(bookId: string, formData: FormData) {
       `/books/${bookId}/report?error=${encodeURIComponent("We couldn't submit your report. Please try again.")}`,
     );
   }
+
+  // ADMIN-ALERTS-1: best effort, never throws; redirect() stays outside it.
+  await sendBookReportedStaffEmail({ bookId, reporterId: user.id, reason });
 
   redirect(`/books/${bookId}?report=success`);
 }

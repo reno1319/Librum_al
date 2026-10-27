@@ -10,7 +10,7 @@ import { PAYOUT_CYCLE_CRON_EXPRESSION } from "./payout-cycle";
 // already used by src/app/api/internal/payouts/run/route.test.ts's own
 // source-guard tests) and locks in the cron entries structurally,
 // rather than inventing a new config-testing framework for one file.
-function readVercelConfig(): { crons: { path: string; schedule: string }[] } {
+function readVercelConfig(): { regions?: string[]; crons: { path: string; schedule: string }[] } {
   const raw = readFileSync(path.join(process.cwd(), "vercel.json"), "utf8");
   return JSON.parse(raw);
 }
@@ -47,5 +47,11 @@ describe("vercel.json cron configuration", () => {
     const config = readVercelConfig();
     const paths = config.crons.map((cron) => cron.path);
     expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  // B3 (Renato, "2. a"): functions run next to the Production database
+  // (Supabase eu-west-3, Paris), not in Vercel's default Washington.
+  it("runs functions in Paris (cdg1), next to the Production database", () => {
+    expect(readVercelConfig().regions).toEqual(["cdg1"]);
   });
 });

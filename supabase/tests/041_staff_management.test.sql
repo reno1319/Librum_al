@@ -25,6 +25,9 @@
 -- local/CI Postgres was available (same limitation the ADMIN-1B Part A
 -- audit and every prior migration's own test file already documents).
 -- It is a reviewed contract, not a confirmed-passing result.
+-- 2026-10: first actually run (PostgreSQL 17) when it was brought up to
+-- date with later migrations; CI now runs it on every change
+-- (supabase/tests/run-sql-tests.sh).
 --
 -- ============================================================
 -- CONCURRENCY LIMITATION (required reading before trusting the
@@ -59,6 +62,21 @@ begin
     raise exception 'FAIL: %', message;
   end if;
 end;
+$$;
+
+-- authenticated holds no privilege on admin_audit_log (Part 6 below), so
+-- the audit checks made while acting as a staff caller read the log
+-- through these two owner-run helpers instead of a raw SELECT.
+create function pg_temp.audit_count(p_action text, p_target uuid) returns integer
+  language sql security definer as $$
+  select count(*)::integer from public.admin_audit_log
+  where action = p_action and target_id = p_target;
+$$;
+
+create function pg_temp.audit_metadata(p_action text, p_target uuid) returns jsonb
+  language sql security definer as $$
+  select metadata from public.admin_audit_log
+  where action = p_action and target_id = p_target;
 $$;
 
 -- ============================================================
@@ -186,10 +204,15 @@ begin
   reset role;
 end $$;
 
-delete from public.admin_audit_log where target_id like 'e0000000-%';
-delete from public.staff_members where user_id like 'e0000000-%';
-delete from public.profiles where id like 'e0000000-%';
-delete from auth.users where id like 'e0000000-%';
+delete from public.admin_audit_log where target_id::text like 'e0000000-%';
+-- Section cleanup only: the last-owner trigger would refuse to delete
+-- this section's only owner, so triggers are skipped for this one
+-- statement (the same pattern 083 uses). The whole file still rolls back.
+set local session_replication_role = replica;
+delete from public.staff_members where user_id::text like 'e0000000-%';
+set local session_replication_role = origin;
+delete from public.profiles where id::text like 'e0000000-%';
+delete from auth.users where id::text like 'e0000000-%';
 
 -- ============================================================
 -- Part 2: ADD (add_staff_member_by_email)
@@ -228,9 +251,7 @@ begin
     'part2: created_by must be the actor'
   );
 
-  select count(*) into v_audit_count
-  from public.admin_audit_log
-  where action = 'staff.added' and target_id = 'f0000000-0000-0000-0000-000000000002';
+  v_audit_count := pg_temp.audit_count('staff.added', 'f0000000-0000-0000-0000-000000000002');
   perform pg_temp.assert(v_audit_count = 1, 'part2: a successful add must create exactly one staff.added audit row');
 
   -- 2. Nonexistent email rejected.
@@ -329,21 +350,24 @@ begin
   perform pg_temp.assert(v_audit_count = 0, 'part2: a failed add must never create an audit event');
 end $$;
 
-delete from public.admin_audit_log where target_id like 'f0000000-%';
-delete from public.staff_members where user_id like 'f0000000-%';
-delete from public.profiles where id like 'f0000000-%';
-delete from auth.users where id like 'f0000000-%';
+delete from public.admin_audit_log where target_id::text like 'f0000000-%';
+-- Section cleanup only, triggers skipped (see the first section's cleanup).
+set local session_replication_role = replica;
+delete from public.staff_members where user_id::text like 'f0000000-%';
+set local session_replication_role = origin;
+delete from public.profiles where id::text like 'f0000000-%';
+delete from auth.users where id::text like 'f0000000-%';
 
 -- ============================================================
 -- Part 3: ROLE CHANGE (change_staff_role)
 -- ============================================================
 insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data) values
-  ('g0000000-0000-0000-0000-000000000001', 'p041-owner3@test', now(), '{"role":"reader","display_name":"Owner"}'),
-  ('g0000000-0000-0000-0000-000000000002', 'p041-target3@test', now(), '{"role":"reader","display_name":"Target"}');
+  ('c0000000-0000-0000-0000-000000000001', 'p041-owner3@test', now(), '{"role":"reader","display_name":"Owner"}'),
+  ('c0000000-0000-0000-0000-000000000002', 'p041-target3@test', now(), '{"role":"reader","display_name":"Target"}');
 
 insert into public.staff_members (user_id, role) values
-  ('g0000000-0000-0000-0000-000000000001', 'owner'),
-  ('g0000000-0000-0000-0000-000000000002', 'support');
+  ('c0000000-0000-0000-0000-000000000001', 'owner'),
+  ('c0000000-0000-0000-0000-000000000002', 'support');
 
 -- Backdated deliberately: now() is TRANSACTION-scoped in Postgres (the
 -- same instant for every call within this whole file's one enclosing
@@ -354,7 +378,7 @@ insert into public.staff_members (user_id, role) values
 -- meaningful.
 update public.staff_members
 set updated_at = now() - interval '1 day'
-where user_id = 'g0000000-0000-0000-0000-000000000002';
+where user_id = 'c0000000-0000-0000-0000-000000000002';
 
 do $$
 declare
@@ -362,20 +386,20 @@ declare
   v_updated_at_after timestamptz;
   v_audit_count integer;
 begin
-  perform set_config('request.jwt.claim.sub', 'g0000000-0000-0000-0000-000000000001', true);
+  perform set_config('request.jwt.claim.sub', 'c0000000-0000-0000-0000-000000000001', true);
   set local role authenticated;
 
   -- Real change: support -> moderator.
   select updated_at into v_updated_at_before
-  from public.staff_members where user_id = 'g0000000-0000-0000-0000-000000000002';
+  from public.staff_members where user_id = 'c0000000-0000-0000-0000-000000000002';
 
-  perform public.change_staff_role('g0000000-0000-0000-0000-000000000002', 'moderator');
+  perform public.change_staff_role('c0000000-0000-0000-0000-000000000002', 'moderator');
 
   select updated_at into v_updated_at_after
-  from public.staff_members where user_id = 'g0000000-0000-0000-0000-000000000002';
+  from public.staff_members where user_id = 'c0000000-0000-0000-0000-000000000002';
 
   perform pg_temp.assert(
-    (select role from public.staff_members where user_id = 'g0000000-0000-0000-0000-000000000002') = 'moderator',
+    (select role from public.staff_members where user_id = 'c0000000-0000-0000-0000-000000000002') = 'moderator',
     'part3: a real role change must apply the new role'
   );
   perform pg_temp.assert(
@@ -383,13 +407,10 @@ begin
     'part3: a real role change must bump updated_at to a later value (the fixture was backdated by 1 day)'
   );
 
-  select count(*) into v_audit_count
-  from public.admin_audit_log
-  where action = 'staff.role_changed' and target_id = 'g0000000-0000-0000-0000-000000000002';
+  v_audit_count := pg_temp.audit_count('staff.role_changed', 'c0000000-0000-0000-0000-000000000002');
   perform pg_temp.assert(v_audit_count = 1, 'part3: a real role change must create exactly one staff.role_changed audit row');
   perform pg_temp.assert(
-    (select metadata from public.admin_audit_log
-       where action = 'staff.role_changed' and target_id = 'g0000000-0000-0000-0000-000000000002')
+    pg_temp.audit_metadata('staff.role_changed', 'c0000000-0000-0000-0000-000000000002')
       = jsonb_build_object('old_role', 'support', 'new_role', 'moderator'),
     'part3: audit metadata must record old_role and new_role'
   );
@@ -397,26 +418,24 @@ begin
   -- Same-role change: moderator -> moderator. Idempotent no-op: no
   -- exception, no new audit row, updated_at unchanged.
   select updated_at into v_updated_at_before
-  from public.staff_members where user_id = 'g0000000-0000-0000-0000-000000000002';
+  from public.staff_members where user_id = 'c0000000-0000-0000-0000-000000000002';
 
-  perform public.change_staff_role('g0000000-0000-0000-0000-000000000002', 'moderator');
+  perform public.change_staff_role('c0000000-0000-0000-0000-000000000002', 'moderator');
 
   select updated_at into v_updated_at_after
-  from public.staff_members where user_id = 'g0000000-0000-0000-0000-000000000002';
+  from public.staff_members where user_id = 'c0000000-0000-0000-0000-000000000002';
 
   perform pg_temp.assert(
     v_updated_at_after = v_updated_at_before,
     'part3: a same-role no-op must NOT change updated_at'
   );
 
-  select count(*) into v_audit_count
-  from public.admin_audit_log
-  where action = 'staff.role_changed' and target_id = 'g0000000-0000-0000-0000-000000000002';
+  v_audit_count := pg_temp.audit_count('staff.role_changed', 'c0000000-0000-0000-0000-000000000002');
   perform pg_temp.assert(v_audit_count = 1, 'part3: a same-role no-op must NOT create a second audit row');
 
   -- Self role change rejected.
   begin
-    perform public.change_staff_role('g0000000-0000-0000-0000-000000000001', 'admin');
+    perform public.change_staff_role('c0000000-0000-0000-0000-000000000001', 'admin');
     perform pg_temp.assert(false, 'part3: an actor changing their own role must be rejected');
   exception when others then
     perform pg_temp.assert(
@@ -427,7 +446,7 @@ begin
 
   -- Forged role rejected.
   begin
-    perform public.change_staff_role('g0000000-0000-0000-0000-000000000002', 'superadmin');
+    perform public.change_staff_role('c0000000-0000-0000-0000-000000000002', 'superadmin');
     perform pg_temp.assert(false, 'part3: a forged role must be rejected');
   exception when others then
     perform pg_temp.assert(sqlerrm = 'invalid role', format('part3: unexpected message: %s', sqlerrm));
@@ -436,27 +455,30 @@ begin
   reset role;
 end $$;
 
-delete from public.admin_audit_log where target_id like 'g0000000-%';
-delete from public.staff_members where user_id like 'g0000000-%';
-delete from public.profiles where id like 'g0000000-%';
-delete from auth.users where id like 'g0000000-%';
+delete from public.admin_audit_log where target_id::text like 'c0000000-%';
+-- Section cleanup only, triggers skipped (see the first section's cleanup).
+set local session_replication_role = replica;
+delete from public.staff_members where user_id::text like 'c0000000-%';
+set local session_replication_role = origin;
+delete from public.profiles where id::text like 'c0000000-%';
+delete from auth.users where id::text like 'c0000000-%';
 
 -- ============================================================
 -- Part 4: REMOVE (remove_staff_member)
 -- ============================================================
 insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data) values
-  ('h0000000-0000-0000-0000-000000000001', 'p041-owner4@test', now(), '{"role":"reader","display_name":"Owner"}'),
-  ('h0000000-0000-0000-0000-000000000002', 'p041-target4@test', now(), '{"role":"reader","display_name":"Target"}');
+  ('d0000000-0000-0000-0000-000000000001', 'p041-owner4@test', now(), '{"role":"reader","display_name":"Owner"}'),
+  ('d0000000-0000-0000-0000-000000000002', 'p041-target4@test', now(), '{"role":"reader","display_name":"Target"}');
 
 insert into public.staff_members (user_id, role) values
-  ('h0000000-0000-0000-0000-000000000001', 'owner'),
-  ('h0000000-0000-0000-0000-000000000002', 'moderator');
+  ('d0000000-0000-0000-0000-000000000001', 'owner'),
+  ('d0000000-0000-0000-0000-000000000002', 'moderator');
 
 do $$
 declare
   v_audit_count integer;
 begin
-  perform set_config('request.jwt.claim.sub', 'h0000000-0000-0000-0000-000000000001', true);
+  perform set_config('request.jwt.claim.sub', 'd0000000-0000-0000-0000-000000000001', true);
   set local role authenticated;
 
   -- Nonexistent target rejected first (before the real removal below
@@ -473,26 +495,23 @@ begin
 
   -- Self-removal rejected.
   begin
-    perform public.remove_staff_member('h0000000-0000-0000-0000-000000000001');
+    perform public.remove_staff_member('d0000000-0000-0000-0000-000000000001');
     perform pg_temp.assert(false, 'part4: an actor removing themselves must be rejected');
   exception when others then
     perform pg_temp.assert(sqlerrm = 'cannot remove yourself', format('part4: unexpected message: %s', sqlerrm));
   end;
 
   -- Ordinary staff removable.
-  perform public.remove_staff_member('h0000000-0000-0000-0000-000000000002');
+  perform public.remove_staff_member('d0000000-0000-0000-0000-000000000002');
   perform pg_temp.assert(
-    not exists (select 1 from public.staff_members where user_id = 'h0000000-0000-0000-0000-000000000002'),
+    not exists (select 1 from public.staff_members where user_id = 'd0000000-0000-0000-0000-000000000002'),
     'part4: a successful removal must delete the staff_members row'
   );
 
-  select count(*) into v_audit_count
-  from public.admin_audit_log
-  where action = 'staff.removed' and target_id = 'h0000000-0000-0000-0000-000000000002';
+  v_audit_count := pg_temp.audit_count('staff.removed', 'd0000000-0000-0000-0000-000000000002');
   perform pg_temp.assert(v_audit_count = 1, 'part4: a successful removal must create exactly one staff.removed audit row');
   perform pg_temp.assert(
-    (select metadata from public.admin_audit_log
-       where action = 'staff.removed' and target_id = 'h0000000-0000-0000-0000-000000000002')
+    pg_temp.audit_metadata('staff.removed', 'd0000000-0000-0000-0000-000000000002')
       = jsonb_build_object('role', 'moderator'),
     'part4: audit metadata must record the removed role'
   );
@@ -500,7 +519,7 @@ begin
   -- Removing the same target again must now fail as "not found" --
   -- removal does not silently no-op like same-role change does.
   begin
-    perform public.remove_staff_member('h0000000-0000-0000-0000-000000000002');
+    perform public.remove_staff_member('d0000000-0000-0000-0000-000000000002');
     perform pg_temp.assert(false, 'part4: removing an already-removed target must be rejected, not silently succeed');
   exception when others then
     perform pg_temp.assert(
@@ -513,19 +532,22 @@ begin
 
   -- Target profile and auth account both survive removal.
   perform pg_temp.assert(
-    exists (select 1 from public.profiles where id = 'h0000000-0000-0000-0000-000000000002'),
+    exists (select 1 from public.profiles where id = 'd0000000-0000-0000-0000-000000000002'),
     'part4: removing staff must not delete the target''s profiles row'
   );
   perform pg_temp.assert(
-    exists (select 1 from auth.users where id = 'h0000000-0000-0000-0000-000000000002'),
+    exists (select 1 from auth.users where id = 'd0000000-0000-0000-0000-000000000002'),
     'part4: removing staff must not delete the target''s auth.users row'
   );
 end $$;
 
-delete from public.admin_audit_log where target_id like 'h0000000-%';
-delete from public.staff_members where user_id like 'h0000000-%';
-delete from public.profiles where id like 'h0000000-%';
-delete from auth.users where id like 'h0000000-%';
+delete from public.admin_audit_log where target_id::text like 'd0000000-%';
+-- Section cleanup only, triggers skipped (see the first section's cleanup).
+set local session_replication_role = replica;
+delete from public.staff_members where user_id::text like 'd0000000-%';
+set local session_replication_role = origin;
+delete from public.profiles where id::text like 'd0000000-%';
+delete from auth.users where id::text like 'd0000000-%';
 
 -- ============================================================
 -- Part 5: LAST OWNER -- the hard trigger, exercised directly via
@@ -544,16 +566,16 @@ delete from auth.users where id like 'h0000000-%';
 -- proves, directly and unconditionally.
 -- ============================================================
 insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data) values
-  ('i0000000-0000-0000-0000-000000000001', 'p041-soleowner@test', now(), '{"role":"reader","display_name":"Sole Owner"}');
+  ('b0000000-0000-0000-0000-000000000001', 'p041-soleowner@test', now(), '{"role":"reader","display_name":"Sole Owner"}');
 
 insert into public.staff_members (user_id, role) values
-  ('i0000000-0000-0000-0000-000000000001', 'owner');
+  ('b0000000-0000-0000-0000-000000000001', 'owner');
 
 do $$
 begin
   -- Direct privileged UPDATE of the sole owner -> non-owner: rejected.
   begin
-    update public.staff_members set role = 'admin' where user_id = 'i0000000-0000-0000-0000-000000000001';
+    update public.staff_members set role = 'admin' where user_id = 'b0000000-0000-0000-0000-000000000001';
     perform pg_temp.assert(false, 'part5: a direct UPDATE demoting the sole owner must be rejected by the trigger');
   exception when others then
     perform pg_temp.assert(
@@ -562,13 +584,13 @@ begin
     );
   end;
   perform pg_temp.assert(
-    (select role from public.staff_members where user_id = 'i0000000-0000-0000-0000-000000000001') = 'owner',
+    (select role from public.staff_members where user_id = 'b0000000-0000-0000-0000-000000000001') = 'owner',
     'part5: the sole owner''s role must be unchanged after the rejected UPDATE'
   );
 
   -- Direct privileged DELETE of the sole owner: rejected.
   begin
-    delete from public.staff_members where user_id = 'i0000000-0000-0000-0000-000000000001';
+    delete from public.staff_members where user_id = 'b0000000-0000-0000-0000-000000000001';
     perform pg_temp.assert(false, 'part5: a direct DELETE of the sole owner must be rejected by the trigger');
   exception when others then
     perform pg_temp.assert(
@@ -577,7 +599,7 @@ begin
     );
   end;
   perform pg_temp.assert(
-    exists (select 1 from public.staff_members where user_id = 'i0000000-0000-0000-0000-000000000001'),
+    exists (select 1 from public.staff_members where user_id = 'b0000000-0000-0000-0000-000000000001'),
     'part5: the sole owner''s row must still exist after the rejected DELETE'
   );
 
@@ -588,7 +610,7 @@ begin
   -- account itself cannot be deleted out from under the sole owner
   -- either, not just the staff_members row in isolation.
   begin
-    delete from auth.users where id = 'i0000000-0000-0000-0000-000000000001';
+    delete from auth.users where id = 'b0000000-0000-0000-0000-000000000001';
     perform pg_temp.assert(false, 'part5: deleting the sole owner''s auth account must be rejected via the cascade path');
   exception when others then
     perform pg_temp.assert(
@@ -597,15 +619,15 @@ begin
     );
   end;
   perform pg_temp.assert(
-    exists (select 1 from auth.users where id = 'i0000000-0000-0000-0000-000000000001'),
+    exists (select 1 from auth.users where id = 'b0000000-0000-0000-0000-000000000001'),
     'part5: the sole owner''s auth.users row must survive the rejected cascade'
   );
   perform pg_temp.assert(
-    exists (select 1 from public.profiles where id = 'i0000000-0000-0000-0000-000000000001'),
+    exists (select 1 from public.profiles where id = 'b0000000-0000-0000-0000-000000000001'),
     'part5: the sole owner''s profiles row must survive the rejected cascade'
   );
   perform pg_temp.assert(
-    exists (select 1 from public.staff_members where user_id = 'i0000000-0000-0000-0000-000000000001'),
+    exists (select 1 from public.staff_members where user_id = 'b0000000-0000-0000-0000-000000000001'),
     'part5: the sole owner''s staff_members row must survive the rejected cascade'
   );
 end $$;
@@ -614,10 +636,10 @@ end $$;
 -- layer this time, proving the trigger does NOT over-block a safe
 -- transition).
 insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data) values
-  ('i0000000-0000-0000-0000-000000000002', 'p041-secondowner@test', now(), '{"role":"reader","display_name":"Second Owner"}');
+  ('b0000000-0000-0000-0000-000000000002', 'p041-secondowner@test', now(), '{"role":"reader","display_name":"Second Owner"}');
 
 insert into public.staff_members (user_id, role) values
-  ('i0000000-0000-0000-0000-000000000002', 'owner');
+  ('b0000000-0000-0000-0000-000000000002', 'owner');
 
 do $$
 begin
@@ -626,13 +648,13 @@ begin
     'part5: fixture setup must have exactly two owners before this sub-test'
   );
 
-  perform set_config('request.jwt.claim.sub', 'i0000000-0000-0000-0000-000000000001', true);
+  perform set_config('request.jwt.claim.sub', 'b0000000-0000-0000-0000-000000000001', true);
   set local role authenticated;
-  perform public.remove_staff_member('i0000000-0000-0000-0000-000000000002');
+  perform public.remove_staff_member('b0000000-0000-0000-0000-000000000002');
   reset role;
 
   perform pg_temp.assert(
-    not exists (select 1 from public.staff_members where user_id = 'i0000000-0000-0000-0000-000000000002'),
+    not exists (select 1 from public.staff_members where user_id = 'b0000000-0000-0000-0000-000000000002'),
     'part5: removing one of two owners must succeed'
   );
   perform pg_temp.assert(
@@ -641,10 +663,13 @@ begin
   );
 end $$;
 
-delete from public.admin_audit_log where target_id like 'i0000000-%';
-delete from public.staff_members where user_id like 'i0000000-%';
-delete from public.profiles where id like 'i0000000-%';
-delete from auth.users where id like 'i0000000-%';
+delete from public.admin_audit_log where target_id::text like 'b0000000-%';
+-- Section cleanup only, triggers skipped (see the first section's cleanup).
+set local session_replication_role = replica;
+delete from public.staff_members where user_id::text like 'b0000000-%';
+set local session_replication_role = origin;
+delete from public.profiles where id::text like 'b0000000-%';
+delete from auth.users where id::text like 'b0000000-%';
 
 -- ============================================================
 -- Part 6: AUDIT SECURITY -- admin_audit_log must be completely
@@ -764,7 +789,7 @@ begin
         select 1 from pg_catalog.pg_proc p
         join pg_catalog.pg_namespace n on n.oid = p.pronamespace,
         unnest(coalesce(p.proconfig, '{}'::text[])) c
-        where n.nspname = 'public' and p.proname = fname and c = 'search_path='
+        where n.nspname = 'public' and p.proname = fname and c = 'search_path=""'
       ),
       format('part8: %s must SET search_path = '''' (empty)', fname)
     );

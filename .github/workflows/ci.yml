@@ -122,3 +122,48 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  # Every supabase/tests/*.test.sql suite, on PostgreSQL 17 -- the
+  # version Production runs. Before this job no SQL suite ran
+  # automatically, and five of them (033, 039, 041-043) went stale
+  # unnoticed while later migrations changed what they check. It runs
+  # beside `verify`, not inside it, so a red run names which half broke.
+  sql-tests:
+    name: SQL tests (PostgreSQL 17)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        # postgres 17.11, pinned by digest like the actions above.
+        image: postgres:17.11@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
+        env:
+          # Trust auth means no password exists to leak: the server is a
+          # throwaway container that lives only for this job and is
+          # reachable only from this runner. It holds no real data.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      LIBRUM_SQL_TESTS_DISPOSABLE: "1"
+
+    steps:
+      - name: Check out the commit under test
+        # actions/checkout v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      # The runner image's own psql client (16) talks to the 17 server;
+      # the suites only need the client to send SQL.
+      - name: Run every SQL suite
+        run: ./supabase/tests/run-sql-tests.sh

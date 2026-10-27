@@ -14,6 +14,7 @@ import {
   MINIMUM_FIXED_DISCOUNT_ALL,
   describeDiscountCode,
 } from "@/lib/discount-amount";
+import { discountExpiryDisplayDate } from "@/lib/discount-code-limits";
 import type { Book, DiscountCode } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -59,6 +60,15 @@ export default async function DiscountsPage({
     .eq("author_id", user!.id)
     .order("created_at", { ascending: false })
     .returns<DiscountCodeWithBook[]>();
+
+  // DISCOUNT-LIMIT-1: uses per code (completed or open checkouts), from
+  // a function that returns the caller's own codes only. If it fails --
+  // or does not exist yet -- the list simply shows no counts.
+  const { data: useData } = await supabase.rpc("discount_code_use_counts");
+  const useRows = useData as { discount_code_id: string; uses: number }[] | null;
+  const usesByCode = Array.isArray(useRows)
+    ? new Map(useRows.map((row) => [row.discount_code_id, row.uses]))
+    : null;
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
@@ -160,6 +170,17 @@ export default async function DiscountsPage({
             <input name="expiresAt" type="date" className={formControlClasses} />
           </label>
 
+          <label className="flex flex-col gap-1 text-sm">
+            Max uses (optional)
+            <input
+              name="maxUses"
+              type="text"
+              inputMode="numeric"
+              placeholder="No limit"
+              className={formControlClasses}
+            />
+          </label>
+
           <button type="submit" className={buttonClasses("primary", "md", "w-fit")}>
             Create code
           </button>
@@ -174,6 +195,7 @@ export default async function DiscountsPage({
           // amount_off_cents code is shown in USD with a notice, never
           // as lek; checkout refuses it (discount_not_applicable).
           const discount = describeDiscountCode(code);
+          const uses = usesByCode ? (usesByCode.get(code.id) ?? 0) : null;
 
           return (
             <li
@@ -190,7 +212,9 @@ export default async function DiscountsPage({
                 <p className="text-xs text-muted">
                   {code.books?.title}
                   {code.expires_at &&
-                    ` · ${expired ? "Expired" : "Expires"} ${new Date(code.expires_at).toLocaleDateString()}`}
+                    ` · ${expired ? "Expired" : "Expires"} ${discountExpiryDisplayDate(code.expires_at)}`}
+                  {uses !== null &&
+                    (!code.max_uses ? ` · Used ${uses}` : ` · Used ${uses} of ${code.max_uses}`)}
                   {!code.active && " · Disabled"}
                 </p>
               </div>
