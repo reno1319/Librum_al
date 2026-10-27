@@ -25,6 +25,8 @@ import { SECURITY_HEADER_RULES } from "@/lib/security-headers";
 assertSupabaseEnvSafeForExecution();
 
 const nextConfig: NextConfig = {
+  // COVERS-1: stop announcing the framework in an x-powered-by header.
+  poweredByHeader: false,
   experimental: {
     serverActions: {
       // Book uploads (cover + EPUB) can be up to ~55MB combined —

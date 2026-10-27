@@ -144,7 +144,8 @@ const { createBook, updateBook, publishBook, unpublishBook, deleteBook } = await
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
 const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+// COVERS-1: a real 1x1 PNG, since every cover is now decoded and re-encoded.
+const PNG_SIGNATURE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWMwTgsFAAG+AO/TH36BAAAAAElFTkSuQmCC", "base64");
 
 async function buildValidEpubBytes(): Promise<Buffer> {
   const zip = new JSZip();
@@ -1256,10 +1257,13 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
     expect(mockUploadCover).toHaveBeenCalledOnce();
     const [uploadedPath, uploadedBytes, uploadOpts] = mockUploadCover.mock.calls[0];
     // PEN-2 (L10): a fresh random folder, never the account id.
-    expect(uploadedPath).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.png$/);
+    // COVERS-1: a PNG upload is stored as the shrunk JPEG, never the raw
+    // bytes, and with a one-week cache (each new cover has a fresh key).
+    expect(uploadedPath).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.jpg$/);
     expect(uploadedPath).not.toContain(USER_ID);
-    expect(Buffer.isBuffer(uploadedBytes) ? uploadedBytes.equals(bytes) : false).toBe(true);
-    expect(uploadOpts).toMatchObject({ contentType: "image/png" });
+    expect(Buffer.isBuffer(uploadedBytes) ? uploadedBytes.equals(bytes) : true).toBe(false);
+    expect([...uploadedBytes.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+    expect(uploadOpts).toEqual({ contentType: "image/jpeg", cacheControl: "604800" });
     // Cleaned up only after the full save succeeded -- from the SAME
     // private "manuscripts" bucket the temp object was staged in.
     expect(mockRemoveManuscript).toHaveBeenCalledWith([tempPath]);
@@ -1277,8 +1281,9 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
     expect(mockInsert).toHaveBeenCalledOnce();
+    // COVERS-1: what is stored is the shrunk JPEG, not the 4.8MB upload.
     const [, uploadedBytes] = mockUploadCover.mock.calls[0];
-    expect(uploadedBytes.length).toBeGreaterThan(4.5 * 1024 * 1024);
+    expect(uploadedBytes.length).toBeLessThan(10 * 1024);
     expect(mockRemoveManuscript).toHaveBeenCalledWith([tempPath]);
   });
 
@@ -1306,6 +1311,24 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
       "/dashboard/books/new?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image",
     );
     expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  // COVERS-1: a PNG signature followed by bytes that don't decode passes
+  // the signature check but can't be shrunk -- rejected, never stored raw.
+  it("rejects a signature-valid cover that can't be decoded, with the existing read error", async () => {
+    const tempPath = `${USER_ID}/tmp/cover/0b8e6a52-6f0e-4d3c-9a61-2f4d8c1e7b90.png`;
+    mockDownloadManuscript.mockResolvedValueOnce(
+      downloadResult(Buffer.concat([PNG_SIGNATURE.subarray(0, 8), Buffer.alloc(2048, 7)])),
+    );
+
+    const formData = await buildFormDataWithCoverPath(tempPath);
+    await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/books/new?error=Could+not+read+your+uploaded+cover.+Please+try+again",
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockUploadCover).not.toHaveBeenCalled();
   });
 });
 
@@ -1348,8 +1371,10 @@ describe("updateBook: coverStoragePath reference (COVER-1)", () => {
     expect(mockUpdate).toHaveBeenCalledOnce();
     // PEN-2 (L10): a new random-folder key on every replace.
     expect(mockUpdate.mock.calls[0][0]).toMatchObject({
-      cover_path: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.png$/),
+      cover_path: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.jpg$/),
     });
+    // COVERS-1: the replacement is the shrunk JPEG, cached for a week.
+    expect(mockUploadCover.mock.calls[0][2]).toEqual({ contentType: "image/jpeg", cacheControl: "604800" });
     expect(mockRemoveManuscript).toHaveBeenCalledWith([tempPath]);
   });
 

@@ -12,6 +12,7 @@ import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 import { sendNewBookEmails } from "@/lib/email";
 import { sendReviewRequestedStaffEmail } from "@/lib/staff-alerts";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
+import { BOOK_COVER_SIZE, IMAGE_CACHE_CONTROL_SECONDS, shrinkImageToJpeg } from "@/lib/cover-resize";
 import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
@@ -497,9 +498,15 @@ async function resolveCoverInput(
   if (!coverKind) {
     redirect(`${errorPath}?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image`);
   }
-  const { extension, contentType } = resolveVerifiedCoverStorageDetails(coverKind);
+  // COVERS-1: the signature check above still gates what gets decoded;
+  // the stored cover is always the shrunk JPEG, never the raw upload.
+  const shrunk = await shrinkImageToJpeg(bytes, BOOK_COVER_SIZE);
+  if (!shrunk) {
+    redirect(`${errorPath}?error=Could+not+read+your+uploaded+cover.+Please+try+again`);
+  }
+  const { extension, contentType } = resolveVerifiedCoverStorageDetails("jpeg");
 
-  return { present: true, bytes, extension, contentType, tempPathToCleanup };
+  return { present: true, bytes: shrunk!, extension, contentType, tempPathToCleanup };
 }
 
 // Confirms the chosen series actually belongs to this author (an empty
@@ -799,7 +806,10 @@ export async function createBook(formData: FormData) {
 
   const { error: coverError } = await catalogWriter.storage
     .from(BOOK_COVERS_BUCKET)
-    .upload(coverPath, coverResult.bytes, { contentType: coverResult.contentType });
+    .upload(coverPath, coverResult.bytes, {
+      contentType: coverResult.contentType,
+      cacheControl: IMAGE_CACHE_CONTROL_SECONDS,
+    });
 
   if (coverError) {
     console.error("createBook: cover upload failed:", coverError);
@@ -1468,7 +1478,10 @@ export async function updateBook(bookId: string, formData: FormData) {
     // needs an upsert.
     const { error: uploadError } = await catalogWriter.storage
       .from(upload.bucket)
-      .upload(upload.path, upload.bytes, { contentType: upload.contentType });
+      .upload(upload.path, upload.bytes, {
+        contentType: upload.contentType,
+        ...(upload.kind === "cover" ? { cacheControl: IMAGE_CACHE_CONTROL_SECONDS } : {}),
+      });
 
     if (uploadError) {
       console.error(`updateBook: ${upload.kind} upload failed:`, uploadError);

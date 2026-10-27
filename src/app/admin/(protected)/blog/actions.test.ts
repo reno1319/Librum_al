@@ -21,7 +21,8 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 const mockRequireStaff = vi.fn();
 vi.mock("@/lib/staff", () => ({ requireStaff: (permission: string) => mockRequireStaff(permission) }));
 
-const PNG_BYTES = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+// COVERS-1: a real 1x1 PNG, since every cover is now decoded and re-encoded.
+const PNG_BYTES = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWMwTgsFAAG+AO/TH36BAAAAAElFTkSuQmCC", "base64"));
 const NOT_AN_IMAGE_BYTES = Uint8Array.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05]);
 
 type MockSupabaseOptions = {
@@ -182,8 +183,11 @@ describe("createBlogPostAction", () => {
 
     expect(currentMockSupabase._spies.download).toHaveBeenCalledWith("editor-1/tmp/blog/abc.png");
     expect(currentMockSupabase._spies.upload).toHaveBeenCalled();
-    const [permanentPath] = currentMockSupabase._spies.upload.mock.calls[0];
-    expect(permanentPath).toMatch(/^covers\/22222222-2222-4222-8222-222222222222\/.+\.png$/);
+    const [permanentPath, uploadedBytes, uploadOpts] = currentMockSupabase._spies.upload.mock.calls[0];
+    // COVERS-1: stored as the shrunk JPEG, cached for a week.
+    expect(permanentPath).toMatch(/^covers\/22222222-2222-4222-8222-222222222222\/.+\.jpg$/);
+    expect([...uploadedBytes.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+    expect(uploadOpts).toEqual({ contentType: "image/jpeg", cacheControl: "604800" });
     expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
       "update_blog_post",
       expect.objectContaining({ p_id: "22222222-2222-4222-8222-222222222222", p_cover_image_path: permanentPath }),
@@ -230,6 +234,24 @@ describe("createBlogPostAction", () => {
     );
   });
 
+  // COVERS-1: a PNG signature followed by bytes that don't decode can't
+  // be shrunk -- refused with the existing read error, never stored raw.
+  it("rejects a signature-valid cover that can't be decoded, with the existing read error", async () => {
+    currentMockSupabase = makeMockSupabase({
+      rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
+      downloadBytes: Uint8Array.from([...PNG_BYTES.subarray(0, 8), ...new Array(512).fill(7)]),
+    });
+    const formData = validFormData({ coverStoragePath: "editor-1/tmp/blog/abc.png" });
+
+    await expect(createBlogPostAction(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(currentMockSupabase._spies.upload).not.toHaveBeenCalled();
+    expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["editor-1/tmp/blog/abc.png"]);
+    expect(mockRedirect.mock.calls[0][0]).toBe(
+      `/admin/blog/22222222-2222-4222-8222-222222222222/edit?error=${encodeURIComponent("Could not read your uploaded cover. Please try again.")}`,
+    );
+  });
+
   it("when the permanent upload succeeds but update_blog_post fails: the orphaned object is removed, draft is preserved", async () => {
     currentMockSupabase = makeMockSupabase({
       rpcResults: {
@@ -265,7 +287,7 @@ describe("uploadPermanentCover (PEN-2 O12)", () => {
 
     expect(mockCreateAdminClient).toHaveBeenCalledTimes(1);
     const [path] = currentMockSupabase._spies.upload.mock.calls[0];
-    expect(path).toMatch(/^covers\/22222222-2222-4222-8222-222222222222\/[0-9a-f-]{36}\.png$/);
+    expect(path).toMatch(/^covers\/22222222-2222-4222-8222-222222222222\/[0-9a-f-]{36}\.jpg$/);
   });
 
   it("refuses a post id that is not a lowercase UUID: no service-role upload at all", async () => {
@@ -355,7 +377,7 @@ describe("updateBlogPostAction", () => {
     expect(currentMockSupabase._spies.upload).toHaveBeenCalled();
     expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
       "update_blog_post",
-      expect.objectContaining({ p_cover_image_path: expect.stringMatching(/^covers\/11111111-1111-4111-8111-111111111111\/.+\.png$/) }),
+      expect.objectContaining({ p_cover_image_path: expect.stringMatching(/^covers\/11111111-1111-4111-8111-111111111111\/.+\.jpg$/) }),
     );
     // Old cover removed only after the RPC call above already resolved successfully.
     expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith(["covers/11111111-1111-4111-8111-111111111111/old.jpg"]);

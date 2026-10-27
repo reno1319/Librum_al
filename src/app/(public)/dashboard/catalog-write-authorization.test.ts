@@ -534,7 +534,8 @@ const maintenance = () => vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", MAINTENANCE
 // ------------------------------------------------------------
 // Fixtures.
 // ------------------------------------------------------------
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+// COVERS-1: a real 1x1 PNG, since every cover is now decoded and re-encoded.
+const PNG_SIGNATURE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWMwTgsFAAG+AO/TH36BAAAAAElFTkSuQmCC", "base64");
 
 async function validEpub(): Promise<Buffer> {
   const zip = new JSZip();

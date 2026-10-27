@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
+import { IMAGE_CACHE_CONTROL_SECONDS, PEN_NAME_PHOTO_SIZE, shrinkImageToJpeg } from "@/lib/cover-resize";
 import { AVATARS_BUCKET } from "@/lib/avatar-path";
 import { createPenNameWriteClient } from "@/lib/pen-name-write-client";
 import { canonicalPenNamePhotoPath, isPenNamePhotoPath } from "@/lib/pen-name-photo-path";
@@ -85,8 +86,11 @@ async function readStagedPhoto(
     new File([new Uint8Array(bytes)], "pen-name", { type: "application/octet-stream" }),
   );
   if (!kind) fail("That doesn't look like a valid JPEG or PNG image.");
-  const { extension, contentType } = resolveVerifiedCoverStorageDetails(kind);
-  return { bytes, extension, contentType };
+  // COVERS-1: the stored photo is always the shrunk JPEG.
+  const shrunk = await shrinkImageToJpeg(bytes, PEN_NAME_PHOTO_SIZE);
+  if (!shrunk) fail("Could not read your uploaded photo. Please try again.");
+  const { extension, contentType } = resolveVerifiedCoverStorageDetails("jpeg");
+  return { bytes: shrunk, extension, contentType };
 }
 
 export async function updatePenName(penNameId: string, formData: FormData) {
@@ -127,7 +131,11 @@ export async function updatePenName(penNameId: string, formData: FormData) {
     newPhotoPath = canonicalPenNamePhotoPath(randomUUID(), photo.extension);
     const { error: uploadError } = await writer.storage
       .from(AVATARS_BUCKET)
-      .upload(newPhotoPath, photo.bytes, { contentType: photo.contentType, upsert: false });
+      .upload(newPhotoPath, photo.bytes, {
+        contentType: photo.contentType,
+        cacheControl: IMAGE_CACHE_CONTROL_SECONDS,
+        upsert: false,
+      });
     if (uploadError) {
       console.error("updatePenName: photo upload failed:", uploadError);
       fail(PHOTO_ERROR);

@@ -16,6 +16,10 @@ describe("B4 security headers", () => {
     expect(await nextConfig.headers!()).toEqual(SECURITY_HEADER_RULES);
   });
 
+  it("next.config does not send x-powered-by (COVERS-1)", () => {
+    expect(nextConfig.poweredByHeader).toBe(false);
+  });
+
   it("the first rule covers every path and blocks framing, sniffing and unused features", () => {
     expect(SECURITY_HEADER_RULES[0]?.source).toBe("/:path*");
     expect(headersFor("/:path*")).toEqual({
