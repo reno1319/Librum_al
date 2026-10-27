@@ -71,14 +71,19 @@ const NONE: DiscountValues = { percent_off: null, amount_off_cents: null, amount
 function codeRow(id: string, code: string, values: Partial<DiscountValues>) {
   return {
     id, author_id: "author-1", book_id: "book-1", code, ...NONE, ...values,
-    active: true, expires_at: null, created_at: "2026-09-23T10:00:00Z", books: { title: "Test Book" },
+    active: true, expires_at: null, created_at: "2026-09-23T10:00:00Z", max_uses: null, books: { title: "Test Book" },
   };
 }
 
-async function renderWith(codes: unknown[], books: unknown[] = [{ id: "book-1", title: "Test Book" }]) {
+async function renderWith(
+  codes: unknown[],
+  books: unknown[] = [{ id: "book-1", title: "Test Book" }],
+  useCounts: { data: unknown; error: unknown } = { data: [], error: null },
+) {
   mockCreateClient.mockImplementation((() => ({
     auth: { getUser: async () => ({ data: { user: { id: "author-1" } } }) },
     from: (table: string) => queryStub({ data: table === "books" ? books : codes }),
+    rpc: (name: string) => queryStub(name === "discount_code_use_counts" ? useCounts : { data: null, error: null }),
   })) as never);
   const element = await DiscountsPage(pageArgs());
   return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
@@ -158,5 +163,55 @@ describe("DiscountsPage: ALL discount creation and display", () => {
     expect(rowFor(html, "ALLTWO")).toContain("200 ALL off");
     expect(rowFor(html, "USDTHREE")).toContain("USD 3.00 off");
     expect(html.match(/not applicable to ALL checkout/g)).toHaveLength(1);
+  });
+});
+
+// DISCOUNT-LIMIT-1: the "Max uses" field and the per-code use counts.
+describe("DiscountsPage: max uses and use counts", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    mockCreateClient.mockReset();
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("the creation form has an optional Max uses field", async () => {
+    const html = await renderWith([]);
+    const form = html.match(/<form[\s\S]*?<\/form>/)![0];
+    expect(form).toContain("Max uses (optional)");
+    expect(form).toMatch(/<input(?=[^>]*name="maxUses")(?=[^>]*placeholder="No limit")[^>]*>/);
+    expect(form).not.toMatch(/<input(?=[^>]*name="maxUses")[^>]*required/);
+  });
+
+  it("shows Used X of Y for a limited code and Used X for an unlimited one", async () => {
+    const html = await renderWith(
+      [
+        { ...codeRow("c1", "LIMITED", { percent_off: 10 }), max_uses: 10 },
+        { ...codeRow("c2", "UNLIMITED", { percent_off: 10 }) },
+        { ...codeRow("c3", "UNUSED", { percent_off: 10 }), max_uses: 5 },
+      ],
+      undefined,
+      { data: [{ discount_code_id: "c1", uses: 3 }, { discount_code_id: "c2", uses: 7 }], error: null },
+    );
+    expect(rowFor(html, "LIMITED")).toContain("Used 3 of 10");
+    expect(rowFor(html, "UNLIMITED")).toContain("Used 7");
+    expect(rowFor(html, "UNLIMITED")).not.toContain(" of ");
+    expect(rowFor(html, "UNUSED")).toContain("Used 0 of 5");
+  });
+
+  it("shows no counts at all when the count function fails", async () => {
+    const html = await renderWith(
+      [{ ...codeRow("c1", "LIMITED", { percent_off: 10 }), max_uses: 10 }],
+      undefined,
+      { data: null, error: { code: "PGRST202", message: "not found" } },
+    );
+    expect(rowFor(html, "LIMITED")).not.toContain("Used");
+  });
+
+  it("shows the picked day as the expiry date, in Albania", async () => {
+    const html = await renderWith([
+      { ...codeRow("c1", "SUMMER", { percent_off: 10 }), expires_at: "2027-07-10T22:00:00.000Z" },
+    ]);
+    const expected = new Date(Date.UTC(2027, 6, 10, 12)).toLocaleDateString(undefined, { timeZone: "UTC" });
+    expect(rowFor(html, "SUMMER")).toContain(`Expires ${expected}`);
   });
 });

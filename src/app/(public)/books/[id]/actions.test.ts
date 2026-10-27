@@ -1104,7 +1104,7 @@ describe("buyBook: the two new discount rejections are honest and charge nothing
   // whole handling is to stop. The forbidden outcomes are (a) telling
   // the reader the code was applied, and (b) quietly charging the full
   // price as though they had never entered one.
-  it.each(["discount_not_applicable", "discount_below_minimum"])(
+  it.each(["discount_not_applicable", "discount_below_minimum", "discount_used_up"])(
     "%s stops checkout dead: no provider call, no second intent",
     async (status) => {
       quote(status);
@@ -1122,6 +1122,7 @@ describe("buyBook: the two new discount rejections are honest and charge nothing
   it.each([
     ["discount_not_applicable", "can't be used for this book"],
     ["discount_below_minimum", "below Librum's minimum price"],
+    ["discount_used_up", "has been used up"],
   ])("%s gets its OWN message, naming the real reason", async (status, fragment) => {
     quote(status);
     await expect(buyBook("book", new FormData())).rejects.toBeInstanceOf(RedirectSignal);
@@ -1129,8 +1130,8 @@ describe("buyBook: the two new discount rejections are honest and charge nothing
     expect(target).toContain(fragment);
   });
 
-  it("neither message ever claims a discount was applied, and both say nothing was charged", async () => {
-    for (const status of ["discount_not_applicable", "discount_below_minimum"]) {
+  it("no message ever claims a discount was applied, and each says nothing was charged", async () => {
+    for (const status of ["discount_not_applicable", "discount_below_minimum", "discount_used_up"]) {
       mockRedirect.mockClear();
       quote(status);
       await expect(buyBook("book", new FormData())).rejects.toBeInstanceOf(RedirectSignal);
@@ -1143,15 +1144,15 @@ describe("buyBook: the two new discount rejections are honest and charge nothing
     }
   });
 
-  it("the two messages are different from each other and from the generic failure", async () => {
+  it("the messages are different from each other and from the generic failure", async () => {
     const seen: string[] = [];
-    for (const status of ["discount_not_applicable", "discount_below_minimum"]) {
+    for (const status of ["discount_not_applicable", "discount_below_minimum", "discount_used_up"]) {
       mockRedirect.mockClear();
       quote(status);
       await expect(buyBook("book", new FormData())).rejects.toBeInstanceOf(RedirectSignal);
       seen.push(decodeURIComponent(mockRedirect.mock.calls.at(-1)?.[0] as string));
     }
-    expect(seen[0]).not.toBe(seen[1]);
+    expect(new Set(seen).size).toBe(seen.length);
     for (const message of seen) {
       expect(message).not.toContain("Could not start checkout");
     }
@@ -1189,6 +1190,7 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
     "That promo code can't be used for this book, so nothing was charged. Remove the code to buy at the current price.";
   const BELOW_MINIMUM =
     "That promo code would bring this book below Librum's minimum price, so it can't be used and nothing was charged.";
+  const USED_UP = "This promo code has been used up, so nothing was charged.";
   const GENERIC_AMBIGUOUS =
     "We can't safely reopen your previous checkout yet. Please try again in a few minutes.";
 
@@ -1297,6 +1299,7 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
   describe.each([
     ["discount_not_applicable", NOT_APPLICABLE],
     ["discount_below_minimum", BELOW_MINIMUM],
+    ["discount_used_up", USED_UP],
   ])("A. provider-probe retirement replacement returning %s", (status, expected) => {
     beforeEach(() => {
       // Initial quote: the old attempt may still be payable.
@@ -1340,6 +1343,7 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
   describe.each([
     ["discount_not_applicable", NOT_APPLICABLE],
     ["discount_below_minimum", BELOW_MINIMUM],
+    ["discount_used_up", USED_UP],
   ])("B. POK_CHECKOUT_ATTEMPT_RETIRED replacement returning %s", (status, expected) => {
     beforeEach(() => {
       // The initial quote is fine; the claim race resolves into a
@@ -1382,6 +1386,7 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
   describe.each([
     ["discount_not_applicable", NOT_APPLICABLE],
     ["discount_below_minimum", BELOW_MINIMUM],
+    ["discount_used_up", USED_UP],
   ])("C. expected_intent_changed re-evaluation returning %s", (status, expected) => {
     it("returns the exact status-specific message, never the generic one", async () => {
       rpc.mockImplementation(async (name: string) => {
@@ -1406,6 +1411,7 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
     for (const [status, expected] of [
       ["discount_not_applicable", NOT_APPLICABLE],
       ["discount_below_minimum", BELOW_MINIMUM],
+      ["discount_used_up", USED_UP],
     ] as Array<[string, string]>) {
       mockRedirect.mockClear();
       mockStartPok.mockReset().mockResolvedValue(checkoutUrlResult);
@@ -1426,7 +1432,7 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
     // Each status is compared in exactly ONE place, and that place is the
     // screening inside createQuote (the only `row.`-prefixed comparison).
     // Any second, divergent copy at a call site would push these past 1.
-    for (const status of ["discount_not_applicable", "discount_below_minimum"]) {
+    for (const status of ["discount_not_applicable", "discount_below_minimum", "discount_used_up"]) {
       const all = code.match(new RegExp(`quote_status === "${status}"`, "g")) ?? [];
       const screened = code.match(new RegExp(`row\\.quote_status === "${status}"`, "g")) ?? [];
       expect(all).toHaveLength(1);

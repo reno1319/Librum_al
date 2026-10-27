@@ -245,6 +245,8 @@ export type DiscountCode = {
   active: boolean;
   expires_at: string | null;
   created_at: string;
+  // DISCOUNT-LIMIT-1 (migration 20261027120000): null = no limit.
+  max_uses: number | null;
 };
 
 // Mirrors refund_requests.status's CHECK constraint (migration 029).
