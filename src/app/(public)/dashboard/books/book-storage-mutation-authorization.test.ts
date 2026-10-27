@@ -38,6 +38,13 @@ vi.mock("@/lib/recovery-guard", () => ({ redirectIfRecoverySessionActive: vi.fn(
 // ADMIN-2-TAKEDOWN: deleteBook reads the book's active takedown; none
 // here (its own cases are in unpublish-delete.test.ts).
 vi.mock("@/lib/book-takedowns", () => ({ getActiveTakedownState: async () => ({ kind: "none" }) }));
+// ADMIN-ALERTS-1: the staff email after a successful review request.
+const mockReviewStaffEmail = vi.fn(async (_args: unknown) => {
+  void _args;
+});
+vi.mock("@/lib/staff-alerts", () => ({
+  sendReviewRequestedStaffEmail: (args: unknown) => mockReviewStaffEmail(args),
+}));
 
 type Filter = { kind: string; column: string; value: unknown };
 type DbWrite = { table: string; op: string; payload: unknown; filters: Filter[] };
@@ -1010,6 +1017,7 @@ describe("updateBook and review (ADMIN-3)", () => {
 
   beforeEach(() => {
     bookReadResult = { data: row({ status: "published" }), error: null };
+    mockReviewStaffEmail.mockClear();
   });
 
   it("a live book's new cover: one write back to draft, then a review request", async () => {
@@ -1018,6 +1026,7 @@ describe("updateBook and review (ADMIN-3)", () => {
     expect(update.payload).toMatchObject({ cover_path: NEW_JPG, status: "draft", librum_choice_at: null });
     expect(fns()).toEqual(["requestBookReview"]);
     expect(events.indexOf("db:update:books")).toBeLessThan(events.indexOf("storage:remove:covers"));
+    expect(mockReviewStaffEmail).toHaveBeenCalledWith({ bookId: BOOK_ID, authorId: USER_ID });
   });
 
   it("a live book's new manuscript: draft, review request, then retention cleanup of the superseded key", async () => {
@@ -1033,6 +1042,7 @@ describe("updateBook and review (ADMIN-3)", () => {
       `/dashboard/books/${BOOK_ID}/edit?success=${encodeURIComponent("Saved. Press Send for review when you're ready.")}`,
     );
     expect(bookUpdates()).toHaveLength(1);
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
   it("a live book in a published bundle cannot change its files: refused before any upload", async () => {
@@ -1057,6 +1067,7 @@ describe("updateBook and review (ADMIN-3)", () => {
     expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Book+updated");
     expect(bookUpdates()[0].payload).not.toHaveProperty("status");
     expect(bookReviewsDoubleState.calls).toEqual([]);
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
   it("a draft waiting for review: its snapshot is replaced with the new files", async () => {
@@ -1065,6 +1076,7 @@ describe("updateBook and review (ADMIN-3)", () => {
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
     expect(fns()).toEqual(["getBookReviewState", "requestBookReview"]);
     expect(bookUpdates()[0].payload).toMatchObject({ status: "draft" });
+    expect(mockReviewStaffEmail).toHaveBeenCalledTimes(1);
   });
 
   it("a draft not waiting for review is not sent for review by a file change", async () => {

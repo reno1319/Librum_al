@@ -41,6 +41,14 @@ const mockCreateClient = vi.fn(() =>
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
+// ADMIN-ALERTS-1: the staff email after a saved report.
+const mockReportedStaffEmail = vi.fn(async (_args: unknown) => {
+  void _args;
+});
+vi.mock("@/lib/staff-alerts", () => ({
+  sendBookReportedStaffEmail: (args: unknown) => mockReportedStaffEmail(args),
+}));
+
 const { submitReview, submitReport } = await import("./actions");
 
 describe("submitReview: ERR-2 error-message mapping", () => {
@@ -87,6 +95,20 @@ describe("submitReport: ERR-2 error-message mapping", () => {
     mockRedirect.mockClear();
     mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: "reader-1" } } });
     mockInsertReport.mockReset();
+    mockReportedStaffEmail.mockClear();
+  });
+
+  it("emails staff once after a saved report, then redirects to success (ADMIN-ALERTS-1)", async () => {
+    const formData = new FormData();
+    formData.set("reason", "Other");
+    formData.set("details", "private text");
+    mockInsertReport.mockResolvedValue({ error: null });
+
+    await expect(submitReport("book-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockReportedStaffEmail).toHaveBeenCalledTimes(1);
+    expect(mockReportedStaffEmail).toHaveBeenCalledWith({ bookId: "book-1", reporterId: "reader-1", reason: "Other" });
+    expect(mockRedirect).toHaveBeenCalledWith("/books/book-1?report=success");
   });
 
   it("maps a raw Postgres/PostgREST error to a stable Librum-facing message, never error.message", async () => {
@@ -104,6 +126,7 @@ describe("submitReport: ERR-2 error-message mapping", () => {
       encodeURIComponent("We couldn't submit your report. Please try again."),
     );
     expect(redirectedTo).not.toContain("duplicate key");
+    expect(mockReportedStaffEmail).not.toHaveBeenCalled();
   });
 
   it("still redirects with the existing, Librum-authored validation message for a missing reason -- untouched by ERR-2", async () => {
@@ -116,5 +139,6 @@ describe("submitReport: ERR-2 error-message mapping", () => {
       expect.stringContaining("error=Please+choose+a+reason"),
     );
     expect(mockInsertReport).not.toHaveBeenCalled();
+    expect(mockReportedStaffEmail).not.toHaveBeenCalled();
   });
 });
