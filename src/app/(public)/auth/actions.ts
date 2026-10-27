@@ -12,6 +12,7 @@ import { hasAuthorAgeTick } from "@/lib/author-age";
 import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
 import { recordAgreements } from "@/lib/agreement-records";
 import { createAuthorRoleWriteClient } from "@/lib/author-role-write-client";
+import { ACCOUNT_NAME_MAX_LENGTH, ACCOUNT_NAME_TOO_LONG_MESSAGE } from "@/lib/account-name";
 
 // Supabase's own wrong-password message, which auth-error.ts translates.
 const INVALID_CREDENTIALS_MESSAGE = "Invalid login credentials";
@@ -46,6 +47,9 @@ export async function signup(formData: FormData) {
   if (!displayName) {
     // The same message the profile page shows for an empty name.
     redirect("/signup?error=Name+can%27t+be+empty");
+  }
+  if (displayName.length > ACCOUNT_NAME_MAX_LENGTH) {
+    redirect(`/signup?error=${encodeURIComponent(ACCOUNT_NAME_TOO_LONG_MESSAGE)}`);
   }
 
   // LAUNCH-1 P2: required, unchecked-by-default signup clickwrap --

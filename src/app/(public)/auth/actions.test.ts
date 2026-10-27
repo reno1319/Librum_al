@@ -790,6 +790,22 @@ describe("signup: N3 name trim", () => {
     await expectRedirectTo(signup(signupFormData({ displayName: "" })), "/signup?error=Please+fill+in+every+field");
     expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
   });
+
+  // B2: the name becomes the public author name (at most 120 characters
+  // in the database), so a longer one is refused before signUp.
+  it("refuses a name over 120 characters before signUp", async () => {
+    await expectRedirectTo(
+      signup(signupFormData({ displayName: "x".repeat(121) })),
+      `/signup?error=${encodeURIComponent("Name must be 120 characters or fewer")}`,
+    );
+    expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
+  });
+
+  it("accepts a name of exactly 120 characters, counted after trimming", async () => {
+    const exactly120 = "x".repeat(120);
+    await expectRedirectTo(signup(signupFormData({ displayName: `  ${exactly120}  ` })), "/dashboard");
+    expect(roleWrites[0]?.values).toEqual({ role: "author", public_author_name: exactly120 });
+  });
 });
 
 // AUTHOR-AGE-1 (Renato 10-24, "6. a"): an author sign-up needs the

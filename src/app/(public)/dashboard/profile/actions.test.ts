@@ -189,6 +189,30 @@ describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
     expect(mockUpdateProfile).not.toHaveBeenCalled();
   });
 
+  // B2: the account name is capped too, for readers and authors alike.
+  it("account name over 120 characters is rejected", async () => {
+    const formData = formDataWith({ displayName: "x".repeat(121) });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/profile?error=${encodeURIComponent("Name must be 120 characters or fewer")}`,
+    );
+    expect(mockUpdateProfile).not.toHaveBeenCalled();
+  });
+
+  it("account name at exactly 120 characters is accepted", async () => {
+    const exactly120 = "x".repeat(120);
+    const formData = formDataWith({ displayName: exactly120, publicAuthorName: "Ana Pen" });
+
+    await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockUpdateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ display_name: exactly120 }),
+    );
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/profile?success=1");
+  });
+
   it("public author name over 120 characters is rejected", async () => {
     const formData = formDataWith({
       displayName: "Renato Kalemi",
