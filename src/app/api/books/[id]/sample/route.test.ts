@@ -133,7 +133,17 @@ function recordingFrom(calls: Call[], resolve: () => QueryResult) {
   });
 }
 
-function makeFakeSupabase(overrides: { book?: FakeBook | null; result?: QueryResult; storageResult?: QueryResult } = {}) {
+// PREVIEW-1: `userId` is the signed-in caller (none by default);
+// `authError` makes getUser() fail.
+function makeFakeSupabase(
+  overrides: {
+    book?: FakeBook | null;
+    result?: QueryResult;
+    storageResult?: QueryResult;
+    userId?: string;
+    authError?: boolean;
+  } = {},
+) {
   const book = "book" in overrides ? overrides.book : publishedBook();
   currentBook = book;
   currentStorageResult = overrides.storageResult;
@@ -147,10 +157,32 @@ function makeFakeSupabase(overrides: { book?: FakeBook | null; result?: QueryRes
   const result = overrides.result ?? { data: publicPart(book), error: null };
   const calls: Call[] = [];
   const from = recordingFrom(calls, () => result);
-  return { from, __from: from, __calls: calls };
+  const getUser = vi.fn(() =>
+    Promise.resolve(
+      overrides.authError
+        ? { data: { user: null }, error: { message: "auth down" } }
+        : { data: { user: overrides.userId ? { id: overrides.userId } : null }, error: null },
+    ),
+  );
+  return { from, auth: { getUser }, __from: from, __calls: calls, __getUser: getUser };
 }
 
-function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: unknown } = {}) {
+// PREVIEW-1: the book's review rows (readDownloadFilePath), as the
+// service role reads them. Default: none, so the current file is used.
+type FakeReview = { status: string; file_path: string | null; decided_at: string | null; submitted_at?: string };
+function reviewRows(reviews: FakeReview[]) {
+  return reviews.map((review, index) => ({
+    id: `0000000${index}-0000-4000-8000-000000000000`,
+    book_id: BOOK_ID,
+    cover_path: null,
+    submitted_at: review.submitted_at ?? "2026-10-01T00:00:00Z",
+    ...review,
+  }));
+}
+
+function makeFakeAdminClient(
+  overrides: { fileBytes?: Buffer; downloadError?: unknown; reviews?: QueryResult } = {},
+) {
   const { fileBytes, downloadError = null } = overrides;
   const download = vi.fn((_path: string) =>
     Promise.resolve(
@@ -161,13 +193,32 @@ function makeFakeAdminClient(overrides: { fileBytes?: Buffer; downloadError?: un
   );
   const storageFrom = vi.fn((_bucket: string) => ({ download }));
   const calls: Call[] = [];
-  const from = recordingFrom(calls, () =>
+  const booksFrom = recordingFrom(calls, () =>
     currentStorageResult ??
     (currentBook
       ? { data: { author_id: currentBook.author_id, file_path: currentBook.file_path }, error: null }
       : { data: null, error: null }),
   );
-  return { storage: { from: storageFrom }, from, __from: storageFrom, __download: download, __calls: calls };
+  const reviewCalls: Array<{ columns: string; bookIds: unknown }> = [];
+  const reviewsResult = overrides.reviews ?? { data: [], error: null };
+  const from = vi.fn((table: string) => {
+    if (table !== "book_reviews") return booksFrom(table);
+    const call = { columns: "", bookIds: undefined as unknown };
+    const chain = {
+      select: (columns: string) => ((call.columns = columns), chain),
+      in: (_column: string, ids: unknown) => ((call.bookIds = ids), chain),
+      returns: () => (reviewCalls.push(call), Promise.resolve(reviewsResult)),
+    };
+    return chain;
+  });
+  return {
+    storage: { from: storageFrom },
+    from,
+    __from: storageFrom,
+    __download: download,
+    __calls: calls,
+    __reviewCalls: reviewCalls,
+  };
 }
 
 async function buildValidEpubBytes(): Promise<Buffer> {
@@ -631,6 +682,186 @@ describe("GET /api/books/[id]/sample", () => {
       }
       expect(allHtml).not.toMatch(/<[a-zA-Z][^>]*=/);
       expect(allHtml).toContain("Real content");
+    });
+  });
+
+  // PREVIEW-1 (A5, Renato 3a/4a): the author's own preview in any state,
+  // from the current file; readers get the latest approved file.
+  describe("author preview and the approved file", () => {
+    const V1 = `${AUTHOR_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020101.epub`;
+    const V2 = `${AUTHOR_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020102.epub`;
+    const approvedV1PendingV2 = {
+      data: reviewRows([
+        { status: "approved", file_path: V1, decided_at: "2026-10-02T00:00:00Z" },
+        { status: "pending", file_path: V2, decided_at: null, submitted_at: "2026-10-03T00:00:00Z" },
+      ]),
+      error: null,
+    };
+
+    it.each(["draft", "archived"])(
+      "the author of a %s book gets the sample of their current file, never cached",
+      async (status) => {
+        const supabase = makeFakeSupabase({ book: publishedBook({ status, file_path: V2 }), userId: AUTHOR_ID });
+        const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews: approvedV1PendingV2 });
+        mockCreateClient.mockResolvedValue(supabase);
+        mockCreateAdminClient.mockReturnValue(admin);
+
+        const response = await callRoute();
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("cache-control")).toBe("private, no-store");
+        expect((await response.json()).sections.length).toBeGreaterThan(0);
+        // An unpublished book: the service role reads by id only.
+        expect(admin.__calls).toEqual([
+          { table: "books", columns: EXPECTED_STORAGE_COLUMNS, filters: [["id", BOOK_ID]] },
+        ]);
+        expect(admin.__reviewCalls).toEqual([]);
+        expect(admin.__download).toHaveBeenCalledTimes(1);
+        expect(admin.__download).toHaveBeenCalledWith(V2);
+      },
+    );
+
+    it("a signed-in caller who is not the author gets the same 404 for an unpublished book", async () => {
+      mockCreateClient.mockResolvedValue(
+        makeFakeSupabase({ book: publishedBook({ status: "draft" }), userId: OTHER_AUTHOR_ID }),
+      );
+      const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() });
+      mockCreateAdminClient.mockReturnValue(admin);
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "not_found" });
+      expect(admin.__download).not.toHaveBeenCalled();
+      expect(mockExtractEpubSample).not.toHaveBeenCalled();
+    });
+
+    it("an auth error reads as anonymous: an unpublished book is a 404 before any service-role read", async () => {
+      mockCreateClient.mockResolvedValue(
+        makeFakeSupabase({ book: publishedBook({ status: "draft" }), authError: true }),
+      );
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient());
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "not_found" });
+      expect(mockCreateAdminClient).not.toHaveBeenCalled();
+    });
+
+    it("the author's unpublished book still refuses a forged stored path", async () => {
+      mockCreateClient.mockResolvedValue(
+        makeFakeSupabase({
+          book: publishedBook({ status: "draft", file_path: `${OTHER_AUTHOR_ID}/${BOOK_ID}.epub` }),
+          userId: AUTHOR_ID,
+        }),
+      );
+      const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() });
+      mockCreateAdminClient.mockReturnValue(admin);
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "sample_unavailable" });
+      expect(admin.__download).not.toHaveBeenCalled();
+    });
+
+    it("a reader of a live book with a new file waiting for review gets the approved file", async () => {
+      const supabase = makeFakeSupabase({ book: publishedBook({ file_path: V2 }) });
+      const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews: approvedV1PendingV2 });
+      mockCreateClient.mockResolvedValue(supabase);
+      mockCreateAdminClient.mockReturnValue(admin);
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBeNull();
+      expect(admin.__reviewCalls).toEqual([
+        { columns: "id, book_id, status, file_path, cover_path, submitted_at, decided_at", bookIds: [BOOK_ID] },
+      ]);
+      expect(admin.__download).toHaveBeenCalledTimes(1);
+      expect(admin.__download).toHaveBeenCalledWith(V1);
+    });
+
+    it("a signed-in reader who is not the author also gets the approved file", async () => {
+      mockCreateClient.mockResolvedValue(
+        makeFakeSupabase({ book: publishedBook({ file_path: V2 }), userId: OTHER_AUTHOR_ID }),
+      );
+      const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews: approvedV1PendingV2 });
+      mockCreateAdminClient.mockReturnValue(admin);
+
+      expect((await callRoute()).status).toBe(200);
+      expect(admin.__download).toHaveBeenCalledWith(V1);
+    });
+
+    it("the author of the same live book gets their current (waiting) file", async () => {
+      mockCreateClient.mockResolvedValue(
+        makeFakeSupabase({ book: publishedBook({ file_path: V2 }), userId: AUTHOR_ID }),
+      );
+      const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews: approvedV1PendingV2 });
+      mockCreateAdminClient.mockReturnValue(admin);
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      // A published book: the service-role read keeps its status filter.
+      expect(admin.__calls).toEqual([
+        { table: "books", columns: EXPECTED_STORAGE_COLUMNS, filters: [["id", BOOK_ID], ["status", "published"]] },
+      ]);
+      expect(admin.__download).toHaveBeenCalledWith(V2);
+    });
+
+    it.each<[string, QueryResult]>([
+      ["an error", { data: null, error: { message: "db down", code: "XX000" } }],
+      ["a non-array", { data: { status: "approved" }, error: null }],
+    ])("a review read that fails (%s) never falls back to the current file", async (_label, reviews) => {
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ file_path: V2 }) }));
+      const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews });
+      mockCreateAdminClient.mockReturnValue(admin);
+
+      const response = await callRoute();
+      const text = await response.text();
+
+      expect(response.status).toBe(404);
+      expect(JSON.parse(text)).toEqual({ error: "sample_unavailable" });
+      expect(admin.__download).not.toHaveBeenCalled();
+      expect(text).not.toContain("db down");
+    });
+
+    it("an approved review with no file is no manuscript on file", async () => {
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ file_path: V2 }) }));
+      const admin = makeFakeAdminClient({
+        fileBytes: await buildValidEpubBytes(),
+        reviews: { data: reviewRows([{ status: "approved", file_path: null, decided_at: "2026-10-02T00:00:00Z" }]), error: null },
+      });
+      mockCreateAdminClient.mockReturnValue(admin);
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "not_found" });
+      expect(admin.__download).not.toHaveBeenCalled();
+    });
+
+    it("an approved file that is not this book's own key is refused", async () => {
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ file_path: V2 }) }));
+      const admin = makeFakeAdminClient({
+        fileBytes: await buildValidEpubBytes(),
+        reviews: {
+          data: reviewRows([
+            { status: "approved", file_path: `${OTHER_AUTHOR_ID}/${OTHER_BOOK_ID}.epub`, decided_at: "2026-10-02T00:00:00Z" },
+          ]),
+          error: null,
+        },
+      });
+      mockCreateAdminClient.mockReturnValue(admin);
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "sample_unavailable" });
+      expect(admin.__download).not.toHaveBeenCalled();
     });
   });
 });

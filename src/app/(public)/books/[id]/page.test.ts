@@ -64,7 +64,8 @@ describe("BookDetailPage: maintenance-mode gate", () => {
     expect(html.length).toBeLessThan(600);
   });
 
-  it("generateMetadata returns {} and performs zero Supabase calls, same as its own draft/missing-book fallback", async () => {
+  // PREVIEW-1: a draft/missing book now gets noindex; maintenance stays {}.
+  it("generateMetadata returns {} and performs zero Supabase calls", async () => {
     const metadata = await generateMetadata({ params: Promise.resolve({ id: BOOK_ID }) });
     expect(metadata).toEqual({});
     expect(mockCreateClient).not.toHaveBeenCalled();
