@@ -144,6 +144,43 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     expect(html).toContain(">Delete<");
   });
 
+  // PREVIEW-1 (A5, Renato 6a): every book that isn't live has Preview,
+  // a link to its own page inside the menu; a live book has View instead.
+  it.each<[string, Partial<Parameters<typeof AuthorBookRow>[0]>]>([
+    ["a draft", {}],
+    ["a book in review", { review: { inReview: true, sentBack: null } }],
+    [
+      "a sent-back book",
+      {
+        review: {
+          inReview: false,
+          sentBack: { sentBackAt: "2026-10-19T10:00:00Z", reason: "broken_file", message: "The file does not open" },
+        },
+      },
+    ],
+    [
+      "a taken-down book",
+      { takedown: { takenDownAt: "2026-10-19T10:00:00Z", reason: "content_rules", message: "x", bundleTitles: [] } },
+    ],
+  ])("%s: Preview links to the book's own page, once, inside the menu", (_label, props) => {
+    const html = render(props);
+    expect(html).toMatch(new RegExp(`href="/books/${BOOK.id}"[^>]*>Preview<`));
+    expect(html.split(`href="/books/${BOOK.id}"`).length - 1).toBe(1);
+    expect(html.indexOf(`href="/books/${BOOK.id}"`)).toBeGreaterThan(html.indexOf("<summary"));
+    expect(html).not.toContain("View in Bookstore");
+  });
+
+  it("a live book has View in Bookstore and no Preview", () => {
+    const html = render({ book: { ...BOOK, status: "published" as const, price_all: 499 }, missing: [] });
+    expect(html).not.toContain(">Preview<");
+  });
+
+  it("a draft keeps no Unpublish and keeps Delete", () => {
+    const html = render();
+    expect(html).not.toContain(">Unpublish<");
+    expect(html).toContain(">Delete<");
+  });
+
   it("Unpublish is only a link to the Edit page, never a form of its own", () => {
     const html = render({ book: LIVE, missing: [] });
     expect(html.match(/<form/g)?.length).toBe(1);

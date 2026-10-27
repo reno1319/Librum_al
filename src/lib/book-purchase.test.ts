@@ -106,8 +106,10 @@ describe("resolveShowSample", () => {
     "free-unowned",
     "paid-unowned",
     "unavailable-unowned",
+    // PREVIEW-1 (A5): the author previews the sample readers get.
+    "author",
   ];
-  const hidden: BookPurchaseState[] = ["author", "owned"];
+  const hidden: BookPurchaseState[] = ["owned"];
 
   it.each(shown)("shows Read Sample for %s", (state) => {
     expect(resolveShowSample(state)).toBe(true);

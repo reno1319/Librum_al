@@ -105,8 +105,13 @@ export function resolveBookPurchaseState(params: {
 //
 // PAID-CHECKOUT-SURFACE-1: the two checkout-closed states are included
 // for the same reason -- the reader still lacks full access.
+//
+// PREVIEW-1 (A5, Renato 3a): "author" is shown again, so the author can
+// check the sample readers get ("Preview my book") in every state of
+// their own book. The sample route gives them their current file.
 export function resolveShowSample(state: BookPurchaseState): boolean {
   return (
+    state === "author" ||
     state === "anonymous-paid" ||
     state === "anonymous-paid-checkout-closed" ||
     state === "anonymous-free" ||

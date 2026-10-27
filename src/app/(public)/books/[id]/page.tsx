@@ -179,10 +179,13 @@ export async function generateMetadata({
   // metadata lives in <head> and can be read by crawlers/link-preview
   // bots regardless of who's logged in -- it must never present a
   // private draft's title/description/cover as public marketing copy.
-  // Falling back to {} lets the root layout's generic site metadata
-  // apply instead.
+  // Falling back to the root layout's generic site metadata instead.
+  //
+  // PREVIEW-1 (A5, Renato 7a): plus noindex. Only the author (their
+  // "Preview my book" page) and earlier buyers can open an unpublished
+  // book's page, so a crawler never sees it anyway; this is extra safety.
   if (!book || book.status !== "published") {
-    return {};
+    return { robots: { index: false, follow: false } };
   }
 
   // LIBRUM 2.0 SEO-1: `title` is the bare book title, deliberately NOT
@@ -600,8 +603,8 @@ export default async function BookDetailPage({
   }
 
   // See resolveShowSample's own comment (src/lib/book-purchase.ts) for
-  // the full rule -- omitted for "owned"/"author" (who already have
-  // Download EPUB), shown otherwise, identically regardless of whether
+  // the full rule -- omitted for "owned" (who already have Download
+  // EPUB), shown otherwise (PREVIEW-1: the author too), identically regardless of whether
   // this book's manuscript was uploaded directly as an EPUB or
   // converted from DOCX.
   const showSample = resolveShowSample(purchaseState);
@@ -635,6 +638,17 @@ export default async function BookDetailPage({
 
   return (
     <main className="page-container flex-1 pt-5 pb-16 sm:pt-6">
+      {/* PREVIEW-1 (A5, Renato 1a): the author's own unpublished book is
+          their "Preview my book" page. Not "only you can see this": a
+          reader who bought the book before it was unpublished still can. */}
+      {isAuthor && book.status !== "published" && (
+        <p
+          role="status"
+          className="mb-4 rounded-[3px] border-l-4 border-[#806510] bg-[#fbf6e8] px-3 py-2 text-sm font-medium text-foreground"
+        >
+          Preview. This book isn&apos;t in the Bookstore.
+        </p>
+      )}
       {/* REDESIGN STEP 3 (P1): Bookstore › Genre › Title. */}
       <nav aria-label="Breadcrumb" className="text-sm text-muted">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -686,7 +700,7 @@ export default async function BookDetailPage({
             />
           )}
           {/* See resolveShowSample's own comment (src/lib/book-purchase.ts):
-              omitted for "owned"/"author", who already have Download EPUB. */}
+              omitted for "owned", who already have Download EPUB. */}
           {showSample && (
             <div className="flex flex-col [&>button]:w-full [&>button]:rounded-[3px] [&>button]:border-primary [&>button]:py-3 [&>button]:font-semibold [&>button]:text-primary">
               <BookSampleReader bookId={book.id} bookTitle={book.title} />
