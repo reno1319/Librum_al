@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { PEN_NAME_TAKEN_MESSAGE } from "@/lib/pen-names";
+import { ACCOUNT_NAME_MAX_LENGTH, ACCOUNT_NAME_TOO_LONG_MESSAGE } from "@/lib/account-name";
 
 // LIBRUM 2.0 AUTHOR-1A: mirrors migration 045's own CHECK constraint
 // exactly (see that migration's comment) -- a value that passes this can
@@ -143,6 +144,9 @@ export async function updateProfile(formData: FormData) {
 
   if (!displayName) {
     redirect("/dashboard/profile?error=Name+can%27t+be+empty");
+  }
+  if (displayName.length > ACCOUNT_NAME_MAX_LENGTH) {
+    redirect(`/dashboard/profile?error=${encodeURIComponent(ACCOUNT_NAME_TOO_LONG_MESSAGE)}`);
   }
 
   const publicAuthorNameResolution = resolvePublicAuthorNameSubmission(formData, isAuthor);

@@ -7,6 +7,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import { resolvePublicAuthorName } from "@/lib/author-name";
+import { ACCOUNT_NAME_MAX_LENGTH } from "@/lib/account-name";
 import type { Profile } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -69,6 +70,7 @@ export default async function EditProfilePage({
             name="displayName"
             type="text"
             required
+            maxLength={ACCOUNT_NAME_MAX_LENGTH}
             defaultValue={profile?.display_name}
             className={formControlClasses}
           />

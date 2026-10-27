@@ -5,6 +5,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import { AUTHOR_AGE_FIELD, AUTHOR_AGE_STATEMENT } from "@/lib/author-age-statement";
+import { ACCOUNT_NAME_MAX_LENGTH } from "@/lib/account-name";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -38,6 +39,7 @@ export default async function SignupPage({
             type="text"
             autoComplete="name"
             required
+            maxLength={ACCOUNT_NAME_MAX_LENGTH}
             className={formControlClasses}
           />
           {/* PEN-NAMES-1 (6a). */}
