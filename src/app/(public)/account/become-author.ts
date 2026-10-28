@@ -14,12 +14,13 @@ import { hasTermsTick, recordAgreements } from "@/lib/agreement-records";
 import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
 
 const FAILURE_PATH = `/account?error=${encodeURIComponent(
-  "We couldn't switch your account to an author account. Please try again.",
+  "Nuk mundëm ta kalojmë llogarinë tuaj në llogari autori. Provoni përsëri.",
 )}`;
 
 // PEN-2 (N3): the same message the profile page shows for an empty public
-// author name (dashboard/profile/actions.ts).
-const EMPTY_NAME_PATH = `/account?error=${encodeURIComponent("Public author name can't be empty")}`;
+// author name (dashboard/profile/actions.ts; that copy is translated with
+// the author dashboard).
+const EMPTY_NAME_PATH = `/account?error=${encodeURIComponent("Emri publik i autorit nuk mund të jetë bosh.")}`;
 
 // AUTHOR-AGE-1: the "I'm 18 or older" tick was not sent.
 const AGE_REQUIRED_PATH = `/account?error=${encodeURIComponent(AUTHOR_AGE_REQUIRED_MESSAGE)}`;
@@ -27,7 +28,7 @@ const AGE_REQUIRED_PATH = `/account?error=${encodeURIComponent(AUTHOR_AGE_REQUIR
 // SECURITY-9A (Renato, "2. a" after the r1 audit): the Terms tick was not
 // sent.
 const TERMS_REQUIRED_PATH = `/account?error=${encodeURIComponent(
-  "You must agree to the Terms of Service before becoming an author.",
+  "Duhet të pranoni Kushtet e përdorimit para se të bëheni autor.",
 )}`;
 
 // PEN-2 (17a after C8): the contract migration stops the default pen name
@@ -134,7 +135,7 @@ export async function becomeAuthor(formData: FormData) {
 
   if (profile.role !== "reader") {
     redirect(
-      `/account?error=${encodeURIComponent("This account can't become an author account.")}`,
+      `/account?error=${encodeURIComponent("Kjo llogari nuk mund të bëhet llogari autori.")}`,
     );
   }
 
@@ -199,7 +200,7 @@ export async function becomeAuthor(formData: FormData) {
   revalidatePath("/", "layout");
   redirect(
     `/dashboard?success=${encodeURIComponent(
-      "Your account is now an author account. Start by adding your first book.",
+      "Llogaria juaj tani është llogari autori. Filloni duke shtuar librin tuaj të parë.",
     )}`,
   );
 }

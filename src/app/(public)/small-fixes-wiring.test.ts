@@ -73,7 +73,6 @@ describe("FIX1 X12: header on one row, a quiet Log out, one word for it", () => 
 
   it('says "Log out" everywhere, never "Sign out"', () => {
     for (const file of [
-      "src/app/(public)/account/page.tsx",
       "src/app/admin/admin-shell.tsx",
       "src/app/admin/admin-mobile-nav.tsx",
       "src/app/admin/login/page.tsx",
@@ -82,6 +81,10 @@ describe("FIX1 X12: header on one row, a quiet Log out, one word for it", () => 
       expect(source).toContain("Log out");
       expect(source).not.toMatch(/>\s*Sign out\s*</);
     }
+    // ALBANIAN-7: the reader's Account page says "Dilni", like the header.
+    const account = read("src/app/(public)/account/page.tsx");
+    expect(account).toMatch(/>\s*Dilni\s*</);
+    expect(account).not.toMatch(/>\s*(Log out|Sign out)\s*</);
   });
 });
 

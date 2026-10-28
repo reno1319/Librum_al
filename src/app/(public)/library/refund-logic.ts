@@ -10,7 +10,7 @@ import {
 export const REFUND_REASON_MAX_LENGTH = 2000;
 export const REFUND_ELIGIBILITY_WINDOW_DAYS = 14;
 
-export const GENERIC_REFUND_ERROR_MESSAGE = "Something went wrong. Please try again.";
+export const GENERIC_REFUND_ERROR_MESSAGE = "Diçka shkoi keq. Provoni përsëri.";
 
 // The exact string request_refund()/cancel_refund_request() raise via
 // `raise exception '...'` in migration 029 -- PostgREST surfaces that
@@ -31,18 +31,18 @@ export const RPC_NOT_AUTHENTICATED_MESSAGE = "not authenticated";
 // implementation detail that shouldn't be shown.
 const KNOWN_RPC_ERROR_MESSAGES: Record<string, string> = {
   "no matching purchase found for this payment intent":
-    "We couldn't find a purchase matching this transaction.",
-  "this purchase has already been refunded": "This purchase has already been refunded.",
+    "Nuk gjetëm asnjë blerje për këtë transaksion.",
+  "this purchase has already been refunded": "Kjo blerje është rimbursuar tashmë.",
   "this purchase is outside the refund request window":
-    "This purchase is no longer eligible for a refund request — requests must be made within 14 days of purchase.",
+    "Për këtë blerje nuk mund të kërkoni më rimbursim: kërkesa bëhet brenda 14 ditëve nga blerja.",
   "a refund request for this purchase is already open":
-    "You already have an open refund request for this purchase.",
+    "Keni tashmë një kërkesë të hapur për rimbursim për këtë blerje.",
   "unable to determine a refundable amount for this payment intent":
-    "We couldn't determine a refundable amount for this purchase. Please contact support.",
+    "Nuk mundëm të përcaktojmë shumën që rimbursohet për këtë blerje. Na shkruani te mbështetja.",
   "no cancellable refund request found for this id":
-    "This refund request can no longer be cancelled.",
+    "Kjo kërkesë për rimbursim nuk mund të anulohet më.",
   "stripe_payment_intent_id is required":
-    "Something went wrong identifying this purchase. Please refresh and try again.",
+    "Diçka shkoi keq gjatë gjetjes së kësaj blerjeje. Rifreskoni faqen dhe provoni përsëri.",
 };
 
 export function mapRefundRpcError(error: { message?: string | null } | null | undefined): string {
@@ -73,7 +73,7 @@ export function validateRefundReason(raw: FormDataEntryValue | null): RefundReas
   if (trimmed.length > REFUND_REASON_MAX_LENGTH) {
     return {
       ok: false,
-      error: `Please keep your reason under ${REFUND_REASON_MAX_LENGTH} characters.`,
+      error: `Arsyeja duhet të ketë më pak se ${REFUND_REASON_MAX_LENGTH} karaktere.`,
     };
   }
   return { ok: true, value: trimmed };

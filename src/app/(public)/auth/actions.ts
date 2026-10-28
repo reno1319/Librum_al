@@ -42,11 +42,11 @@ export async function signup(formData: FormData) {
   const role = resolveSignupRole(formData.get("role"));
 
   if (!email || !password || !rawDisplayName) {
-    redirect("/signup?error=Please+fill+in+every+field");
+    redirect(`/signup?error=${encodeURIComponent("Plotësoni të gjitha fushat.")}`);
   }
   if (!displayName) {
     // The same message the profile page shows for an empty name.
-    redirect("/signup?error=Name+can%27t+be+empty");
+    redirect(`/signup?error=${encodeURIComponent("Emri nuk mund të jetë bosh.")}`);
   }
   if (displayName.length > ACCOUNT_NAME_MAX_LENGTH) {
     redirect(`/signup?error=${encodeURIComponent(ACCOUNT_NAME_TOO_LONG_MESSAGE)}`);
@@ -64,7 +64,7 @@ export async function signup(formData: FormData) {
   if (!acceptedTerms) {
     redirect(
       `/signup?error=${encodeURIComponent(
-        "You must agree to the Terms of Service before creating an account.",
+        "Duhet të pranoni Kushtet e përdorimit para se të krijoni llogarinë.",
       )}`,
     );
   }
@@ -156,7 +156,7 @@ export async function signup(formData: FormData) {
 
 // SECURITY-9A: shown when an author sign-up ended as a reader.
 const AUTHOR_PENDING_MESSAGE =
-  "Your account was created as a reader account. To publish, use \"Become an author\" on this page.";
+  "Llogaria juaj u krijua si llogari lexuesi. Për të botuar, përdorni \"Bëhuni autor\" në këtë faqe.";
 
 // SECURITY-9A: the database makes every new account a reader, so an
 // author sign-up is switched here, with the author-role writer (the
@@ -227,7 +227,7 @@ export async function login(formData: FormData) {
   // asserting it away.
   const signedInUser = data.user;
   if (!signedInUser) {
-    redirect(loginErrorPath("Unable to complete login. Please try again.", next));
+    redirect(loginErrorPath("Hyrja nuk u krye. Provoni përsëri.", next));
   }
 
   // LAUNCH-1 P1-11 STALE-MARKER CORRECTION: signInWithPassword resolving
@@ -284,7 +284,7 @@ export async function requestPasswordReset(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
 
   if (!email) {
-    redirect("/forgot-password?error=Enter+your+email");
+    redirect(`/forgot-password?error=${encodeURIComponent("Shkruani emailin.")}`);
   }
 
   const supabase = await createClient();
@@ -304,7 +304,7 @@ export async function requestPasswordReset(formData: FormData) {
     console.error("requestPasswordReset: password-reset provider request threw");
     redirect(
       `/forgot-password?error=${encodeURIComponent(
-        "We couldn't send a reset email right now. Please wait and try again.",
+        "Nuk mundëm ta dërgojmë emailin e rivendosjes tani. Prisni pak dhe provoni përsëri.",
       )}`,
     );
   }
@@ -320,7 +320,7 @@ export async function requestPasswordReset(formData: FormData) {
     });
     redirect(
       `/forgot-password?error=${encodeURIComponent(
-        "We couldn't send a reset email right now. Please wait and try again.",
+        "Nuk mundëm ta dërgojmë emailin e rivendosjes tani. Prisni pak dhe provoni përsëri.",
       )}`,
     );
   }
@@ -338,7 +338,9 @@ export async function updatePassword(formData: FormData) {
 
   if (!user) {
     redirect(
-      "/login?error=That+reset+link+has+expired.+Request+a+new+one+from+the+login+page.",
+      `/login?error=${encodeURIComponent(
+        "Kjo lidhje për rivendosjen ka skaduar. Kërkoni një të re nga faqja e hyrjes.",
+      )}`,
     );
   }
 
@@ -346,11 +348,13 @@ export async function updatePassword(formData: FormData) {
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
 
   if (!password || password.length < 6) {
-    redirect("/reset-password?error=Password+must+be+at+least+6+characters");
+    redirect(
+      `/reset-password?error=${encodeURIComponent("Fjalëkalimi duhet të ketë të paktën 6 karaktere.")}`,
+    );
   }
 
   if (password !== confirmPassword) {
-    redirect("/reset-password?error=Passwords+don%27t+match");
+    redirect(`/reset-password?error=${encodeURIComponent("Fjalëkalimet nuk përputhen.")}`);
   }
 
   const { error } = await supabase.auth.updateUser({ password });
@@ -378,5 +382,7 @@ export async function updatePassword(formData: FormData) {
   clearRecoverySession(cookieStore);
   await supabase.auth.signOut();
 
-  redirect("/login?success=Password+updated.+Log+in+with+your+new+password.");
+  redirect(
+    `/login?success=${encodeURIComponent("Fjalëkalimi u ndryshua. Hyni me fjalëkalimin e ri.")}`,
+  );
 }

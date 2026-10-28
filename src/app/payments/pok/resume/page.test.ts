@@ -25,7 +25,7 @@ describe("POK resume page (R3-ADDR)", () => {
     { intent: id, token: "/evil" },
     { intent: [id, id], token },
   ])("refuses an invalid hand-over %#", async (query) => {
-    await expect(render(query)).rejects.toMatchObject({ target: "/library?error=Invalid+payment+return" });
+    await expect(render(query)).rejects.toMatchObject({ target: "/library?error=Kthimi%20nga%20pagesa%20nuk%20%C3%ABsht%C3%AB%20i%20vlefsh%C3%ABm." });
   });
 
   // No render harness here (plain node vitest; see route-group-structure.test.ts).

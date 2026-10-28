@@ -509,13 +509,13 @@ describe("mapRefundRpcError", () => {
   it("maps a known RPC exception message to reader-facing copy", () => {
     expect(
       mapRefundRpcError({ message: "a refund request for this purchase is already open" }),
-    ).toBe("You already have an open refund request for this purchase.");
+    ).toBe("Keni tashmë një kërkesë të hapur për rimbursim për këtë blerje.");
   });
 
   it("maps the 14-day window exception to reader-facing copy", () => {
     expect(
       mapRefundRpcError({ message: "this purchase is outside the refund request window" }),
-    ).toContain("14 days");
+    ).toContain("14 ditëve");
   });
 
   it("falls back to a generic message for an unrecognized error, never leaking raw Postgres text", () => {

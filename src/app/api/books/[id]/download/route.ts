@@ -89,7 +89,7 @@ export async function GET(
   }
 
   const fileUnavailable = () =>
-    NextResponse.redirect(new URL(`/books/${id}?error=That+file+isn%27t+available`, request.url));
+    NextResponse.redirect(new URL(`/books/${id}?error=${encodeURIComponent("Ky skedar nuk është i disponueshëm.")}`, request.url));
 
   // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: a query error fails closed even
   // when plausible row data rides along with it. The stored path is NOT
@@ -127,7 +127,7 @@ export async function GET(
 
   if (!owned) {
     return NextResponse.redirect(
-      new URL(`/books/${id}?error=Buy+this+book+to+download+it`, request.url),
+      new URL(`/books/${id}?error=${encodeURIComponent("Blini këtë libër për ta shkarkuar.")}`, request.url),
     );
   }
 
@@ -177,7 +177,7 @@ export async function GET(
 
   if (downloadError || !fileBlob) {
     return NextResponse.redirect(
-      new URL(`/books/${id}?error=Could+not+download+that+file`, request.url),
+      new URL(`/books/${id}?error=${encodeURIComponent("Skedari nuk u shkarkua dot.")}`, request.url),
     );
   }
 
@@ -239,7 +239,7 @@ export async function GET(
         code: recordError.code ?? null,
       });
       return NextResponse.redirect(
-        new URL(`/books/${id}?error=Could+not+download+that+file.+Please+try+again`, request.url),
+        new URL(`/books/${id}?error=${encodeURIComponent("Skedari nuk u shkarkua dot. Provoni përsëri.")}`, request.url),
       );
     }
   }

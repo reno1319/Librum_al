@@ -133,7 +133,9 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
     });
     expect(rpc).toHaveBeenCalledWith("list_purchase_currencies", { p_purchase_ids: ["p1"] });
     expect(html).toContain("· USD 9.99");
-    expect(html).toContain('Total spent: <span><span class="font-semibold text-primary">USD 9.99</span></span>');
+    expect(html).toContain('Shpenzuar gjithsej: <span><span class="font-semibold text-primary">USD 9.99</span></span>');
+    // ALBANIAN-7: the purchase date in Albanian (the shared reader formatter).
+    expect(html).toMatch(/Blerë më \d{1,2} (janar|shkurt|mars|prill|maj|qershor|korrik|gusht|shtator|tetor|nëntor|dhjetor) \d{4} · USD 9\.99/);
     expect(html).not.toContain("9,99 lekë");
     expect(html).not.toMatch(/\$\d/);
   });
@@ -180,7 +182,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
     });
     expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toMatch(/42[.,]42/);
-    expect(html).toContain("1 purchase is not included because its currency could not be determined.");
+    expect(html).toContain("1 blerje nuk përfshihet sepse monedha e saj nuk u përcaktua dot.");
     expect(html).not.toMatch(/\$\d/);
   });
 
@@ -202,7 +204,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
     expect(html).not.toContain("USD 9.99");
     expect(html).not.toMatch(/\$\d/);
     // The rest of the page still works.
-    expect(html).toContain("Download EPUB");
+    expect(html).toContain("Shkarkoni EPUB");
   });
 
   it("a free acquisition reads Free and adds nothing to any total", async () => {
@@ -211,7 +213,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       currencies: [{ purchase_id: "p4", currency_state: "free", currency: null }],
     });
     expect(html).toContain("· Falas");
-    expect(html).toContain("Total spent: nothing yet");
+    expect(html).toContain("Shpenzuar gjithsej: asgjë ende");
   });
 
   it("a bundle transaction's total uses the snapshot's own frozen currency", async () => {
@@ -239,7 +241,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
         { purchase_id: "p7", currency_state: "resolved", currency: "ALL" },
       ],
     });
-    expect(html).toContain("One purchase · 2 books · 12 lekë");
+    expect(html).toContain("Një blerje · 2 libra · 12 lekë");
     // Counted once, at the snapshot total -- not 24 lekë.
     expect(html).not.toContain("24 lekë");
     expect(html).not.toMatch(/\$\d/);

@@ -4,7 +4,7 @@ import { translateAuthErrorMessage } from "./auth-error";
 describe("translateAuthErrorMessage", () => {
   it("translates a known Supabase message into Librum wording", () => {
     expect(translateAuthErrorMessage("Invalid login credentials")).toBe(
-      "That email or password isn't right. Please try again.",
+      "Emaili ose fjalëkalimi nuk është i saktë. Provoni përsëri.",
     );
   });
 
@@ -16,7 +16,7 @@ describe("translateAuthErrorMessage", () => {
       translateAuthErrorMessage("Invalid login credentials"),
     );
     expect(translateAuthErrorMessage("Email not confirmed")).toBe(
-      "That email or password isn't right. Please try again.",
+      "Emaili ose fjalëkalimi nuk është i saktë. Provoni përsëri.",
     );
   });
 
@@ -27,13 +27,13 @@ describe("translateAuthErrorMessage", () => {
 
   it("translates User already registered", () => {
     expect(translateAuthErrorMessage("User already registered")).toBe(
-      "An account with that email already exists. Try logging in instead.",
+      "Ka tashmë një llogari me këtë email. Provoni të hyni.",
     );
   });
 
   it("translates the password-length message", () => {
     expect(translateAuthErrorMessage("Password should be at least 6 characters")).toBe(
-      "Password must be at least 6 characters.",
+      "Fjalëkalimi duhet të ketë të paktën 6 karaktere.",
     );
   });
 
@@ -44,7 +44,7 @@ describe("translateAuthErrorMessage", () => {
   });
 
   it("passes through a locally-generated (non-Supabase) message unchanged", () => {
-    expect(translateAuthErrorMessage("Enter your email")).toBe("Enter your email");
+    expect(translateAuthErrorMessage("Shkruani emailin.")).toBe("Shkruani emailin.");
   });
 
   it("returns null for a null/undefined/empty message", () => {

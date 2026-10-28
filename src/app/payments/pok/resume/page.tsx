@@ -20,7 +20,7 @@ export default async function PokResumePage({
   const query = await searchParams;
   const intent = uuid.safeParse(query.intent);
   const token = uuid.safeParse(query.token);
-  if (!intent.success || !token.success) redirect("/library?error=Invalid+payment+return");
+  if (!intent.success || !token.success) redirect(`/library?error=${encodeURIComponent("Kthimi nga pagesa nuk është i vlefshëm.")}`);
 
   const params = new URLSearchParams({ intent: intent.data, token: token.data });
   return <ResumeRedirect to={`/payments/pok/return?${params}`} />;

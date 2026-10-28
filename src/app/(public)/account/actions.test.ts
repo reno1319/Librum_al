@@ -85,7 +85,7 @@ describe("deleteAccount: active-staff self-service deletion guard", () => {
       name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined,
     );
 
-    await expect(deleteAccount(formData({ confirmation: "DELETE" }))).rejects.toMatchObject({
+    await expect(deleteAccount(formData({ confirmation: "FSHI" }))).rejects.toMatchObject({
       target: expect.stringContaining("/reset-password"),
     });
 
@@ -96,7 +96,7 @@ describe("deleteAccount: active-staff self-service deletion guard", () => {
   it("unauthenticated: redirects to /login before ever querying staff_members", async () => {
     mockGetUser.mockResolvedValue({ data: { user: null } });
 
-    await expect(deleteAccount(formData({ confirmation: "DELETE" }))).rejects.toBeInstanceOf(
+    await expect(deleteAccount(formData({ confirmation: "FSHI" }))).rejects.toBeInstanceOf(
       RedirectSignal,
     );
 
@@ -124,16 +124,16 @@ describe("deleteAccount: active-staff self-service deletion guard", () => {
   ])("active staff (%s): blocked with the stable staff message, even with a correct confirmation", async (_label, role) => {
     mockStaffLookup.mockResolvedValue({ data: { role }, error: null });
 
-    await expect(deleteAccount(formData({ confirmation: "DELETE" }))).rejects.toMatchObject({
-      target: "/account?error=Remove+this+account+from+Librum+staff+before+deleting+the+account.",
+    await expect(deleteAccount(formData({ confirmation: "FSHI" }))).rejects.toMatchObject({
+      target: "/account?error=Hiqeni%20k%C3%ABt%C3%AB%20llogari%20nga%20stafi%20i%20Librum%20para%20se%20ta%20fshini.",
     });
   });
 
   it("staff-lookup DATABASE ERROR: deletion is blocked, not fail-open -- ambiguity between 'not staff' and 'lookup failed' is not permitted", async () => {
     mockStaffLookup.mockResolvedValue({ data: null, error: { message: "connection refused" } });
 
-    await expect(deleteAccount(formData({ confirmation: "DELETE" }))).rejects.toMatchObject({
-      target: "/account?error=Unable+to+verify+account+eligibility+for+deletion.+Try+again.",
+    await expect(deleteAccount(formData({ confirmation: "FSHI" }))).rejects.toMatchObject({
+      target: "/account?error=Nuk%20mund%C3%ABm%20t%C3%AB%20kontrollojm%C3%AB%20n%C3%ABse%20kjo%20llogari%20mund%20t%C3%AB%20fshihet.%20Provoni%20p%C3%ABrs%C3%ABri.",
     });
 
     // The generic lookup-error message never contains the raw
@@ -148,7 +148,7 @@ describe("deleteAccount: active-staff self-service deletion guard", () => {
   it("blocking deletion (active staff) changes neither the account nor staff membership -- the admin client is never even constructed", async () => {
     mockStaffLookup.mockResolvedValue({ data: { role: "owner" }, error: null });
 
-    await expect(deleteAccount(formData({ confirmation: "DELETE" }))).rejects.toBeInstanceOf(
+    await expect(deleteAccount(formData({ confirmation: "FSHI" }))).rejects.toBeInstanceOf(
       RedirectSignal,
     );
 

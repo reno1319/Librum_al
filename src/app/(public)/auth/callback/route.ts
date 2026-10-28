@@ -68,9 +68,9 @@ export function isRecoveryAttempt(type: string | null, next: string): boolean {
 }
 
 const CONFIRMATION_LINK_INVALID_MESSAGE =
-  "This confirmation link is invalid or has expired. Please request a new one.";
+  "Kjo lidhje konfirmimi nuk vlen ose ka skaduar. Kërkoni një të re.";
 const RECOVERY_LINK_INVALID_MESSAGE =
-  "This password reset link is invalid or has expired. Please request a new one.";
+  "Kjo lidhje për rivendosjen e fjalëkalimit nuk vlen ose ka skaduar. Kërkoni një të re.";
 
 // AUTH-1E: one safe, non-leaking failure destination -- never the raw
 // Supabase/GoTrue error, only a choice between signup and recovery copy.

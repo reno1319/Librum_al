@@ -13,8 +13,8 @@ import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Account",
-  description: "Manage your Librum account.",
+  title: "Llogaria",
+  description: "Menaxhoni llogarinë tuaj në Librum.",
 };
 
 // LIBRUM 2.0 UI-9: Account is identity / security-adjacent actions /
@@ -47,31 +47,31 @@ export default async function AccountPage({
     .single();
 
   const isAuthor = profile?.role === "author";
-  const roleLabel = isAuthor ? "Author" : profile?.role === "reader" ? "Reader" : null;
+  const roleLabel = isAuthor ? "Autor" : profile?.role === "reader" ? "Lexues" : null;
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
       <PageHeader
-        title="Account"
-        description="Manage your Librum account and access your account history."
+        title="Llogaria"
+        description="Menaxhoni llogarinë tuaj në Librum dhe shikoni historikun e saj."
       />
 
       <SurfaceCard className="mt-8">
-        <h2 className="font-serif text-lg font-normal">Identity</h2>
+        <h2 className="font-serif text-lg font-normal">Të dhënat</h2>
         <dl className="mt-3 flex flex-col gap-2 text-sm">
           {profile?.display_name && (
             <div className="flex justify-between gap-4">
-              <dt className="text-muted">Name</dt>
+              <dt className="text-muted">Emri</dt>
               <dd className="text-right">{profile.display_name}</dd>
             </div>
           )}
           <div className="flex justify-between gap-4">
-            <dt className="text-muted">Email</dt>
+            <dt className="text-muted">Adresa e emailit</dt>
             <dd className="text-right">{user.email}</dd>
           </div>
           {roleLabel && (
             <div className="flex justify-between gap-4">
-              <dt className="text-muted">Role</dt>
+              <dt className="text-muted">Roli</dt>
               <dd className="text-right">{roleLabel}</dd>
             </div>
           )}
@@ -79,15 +79,15 @@ export default async function AccountPage({
       </SurfaceCard>
 
       <SurfaceCard className="mt-4">
-        <h2 className="font-serif text-lg font-normal">Purchases & refunds</h2>
+        <h2 className="font-serif text-lg font-normal">Blerjet dhe rimbursimet</h2>
         <p className="mt-1 text-sm text-muted">
-          View your purchase history and manage eligible refund requests.
+          Shikoni blerjet tuaja dhe menaxhoni kërkesat për rimbursim që lejohen.
         </p>
         <Link
           href="/account/purchases"
           className={`mt-3 inline-flex ${buttonClasses("outline", "sm")}`}
         >
-          View purchases & refunds
+          Shikoni blerjet dhe rimbursimet
         </Link>
       </SurfaceCard>
 
@@ -98,7 +98,7 @@ export default async function AccountPage({
               href="/dashboard"
               className={`focus-ring inline-flex ${buttonClasses("outline", "sm")}`}
             >
-              Go to Dashboard
+              Shkoni te Paneli i autorit
             </Link>
           )}
           {/* BECOME-AUTHOR-1: an author keeps the books they bought, and a
@@ -108,7 +108,7 @@ export default async function AccountPage({
             href="/library"
             className={`focus-ring inline-flex ${buttonClasses("outline", "sm")}`}
           >
-            Go to Library
+            Shkoni te Biblioteka ime
           </Link>
         </div>
       </SurfaceCard>
@@ -116,13 +116,13 @@ export default async function AccountPage({
       {profile?.role === "reader" && (
         <div id="become-author">
           <SurfaceCard className="mt-4">
-            <h2 className="font-serif text-lg font-normal">Publish your own books</h2>
+            <h2 className="font-serif text-lg font-normal">Botoni librat tuaj</h2>
             <p className="mt-1 text-sm text-muted">
-              Switch to an author account to publish and sell ebooks. You keep
-              your library and purchases. Your public author name will start
-              as <span className="font-medium text-foreground">{profile.display_name}</span>;
-              you can change it on your author profile. An author account
-              can&apos;t be switched back to a reader account.
+              Kaloni në llogari autori për të botuar dhe shitur libra elektronikë. Biblioteka
+              dhe blerjet tuaja mbeten. Emri juaj publik i autorit do të jetë fillimisht{" "}
+              <span className="font-medium text-foreground">{profile.display_name}</span>;
+              mund ta ndryshoni te profili i autorit. Një llogari autori nuk mund të
+              kthehet më në llogari lexuesi.
             </p>
             {/* AUTHOR-AGE-1: the Terms' 18+ rule; becomeAuthor checks the
                 tick again and records it. SECURITY-9A adds the Terms tick. */}
@@ -148,15 +148,15 @@ export default async function AccountPage({
                   className="focus-ring mt-1 size-4"
                 />
                 <label htmlFor="become_author_accept_terms">
-                  I agree to the{" "}
+                  Pranoj{" "}
                   <Link href="/terms" className="focus-ring rounded-sm font-medium text-primary underline">
-                    Terms of Service
+                    Kushtet e përdorimit
                   </Link>
                   .
                 </label>
               </div>
               <button type="submit" className={buttonClasses("primary", "sm")}>
-                Become an author
+                Bëhuni autor
               </button>
             </form>
           </SurfaceCard>
@@ -165,24 +165,24 @@ export default async function AccountPage({
 
       <form action={logout} className="mt-6">
         <button type="submit" className="focus-ring rounded-sm text-sm text-muted hover:underline">
-          Log out
+          Dilni
         </button>
       </form>
 
       <section className="mt-10 rounded-card border-l-4 border-red-600 bg-surface p-6">
-        <h2 className="font-serif text-lg font-normal text-red-800">Danger zone</h2>
+        <h2 className="font-serif text-lg font-normal text-red-800">Zonë rreziku</h2>
         <p className="mt-2 text-sm text-foreground/90">
-          Delete account. This permanently deletes your account
+          Fshirja e llogarisë. Kjo fshin përgjithmonë llogarinë tuaj
           {isAuthor
-            ? ", every book you've published, and their files"
-            : " and removes your access to your library"}
-          . This can&apos;t be undone.
+            ? ", çdo libër që keni botuar dhe skedarët e tyre"
+            : " dhe ju heq aksesin te biblioteka juaj"}
+          . Ky veprim nuk kthehet pas.
           {!isAuthor && (
             <>
               {" "}
-              Some transaction records may be retained, detached from your
-              account, where necessary for payment accounting, refunds,
-              disputes, or legal obligations.
+              Disa të dhëna transaksionesh mund të ruhen, të shkëputura nga llogaria
+              juaj, kur nevojiten për kontabilitetin e pagesave, rimbursimet,
+              mosmarrëveshjet ose detyrimet ligjore.
             </>
           )}
         </p>
@@ -195,11 +195,11 @@ export default async function AccountPage({
 
         <form action={deleteAccount} className="mt-4 flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-sm">
-            Type DELETE to confirm
+            Shkruani FSHI për ta konfirmuar
             <input name="confirmation" type="text" required className={formControlClasses} />
           </label>
           <button type="submit" className={`w-fit ${buttonClasses("danger", "md")}`}>
-            Permanently delete my account
+            Fshini përgjithmonë llogarinë time
           </button>
         </form>
       </section>

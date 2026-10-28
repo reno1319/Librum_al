@@ -12,7 +12,7 @@ function SubmitButton() {
       disabled={pending}
       className="rounded-control bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
     >
-      {pending ? "Submitting…" : "Submit refund request"}
+      {pending ? "Duke dërguar…" : "Dërgoni kërkesën për rimbursim"}
     </button>
   );
 }
@@ -40,7 +40,7 @@ export function RefundRequestForm({
         onClick={() => setOpen(true)}
         className="rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
       >
-        Request refund
+        Kërkoni rimbursim
       </button>
     );
   }
@@ -51,17 +51,16 @@ export function RefundRequestForm({
       className="mt-3 w-full rounded-card border border-border bg-surface p-4"
     >
       <p className="text-sm font-medium">
-        Request a refund for this {bookCount > 1 ? "transaction" : "purchase"}?
+        Të kërkoni rimbursim për këtë blerje?
       </p>
       <p className="mt-1 text-xs text-muted">
         {bookCount > 1
-          ? `This was one purchase covering ${bookCount} books — a refund request applies to the whole transaction, not a single book.`
-          : "This will request a refund for this purchase."}{" "}
-        Submitting a request doesn&apos;t refund you right away — it will be
-        reviewed first.
+          ? `Kjo ishte një blerje me ${bookCount} libra: kërkesa për rimbursim vlen për të gjithë blerjen, jo për një libër të vetëm.`
+          : "Kjo do të kërkojë rimbursim për këtë blerje."}{" "}
+        Kërkesa nuk ju rimburson menjëherë: fillimisht do të shqyrtohet.
       </p>
       <label className="mt-3 flex flex-col gap-1 text-sm">
-        Reason (optional)
+        Arsyeja (nuk është e detyrueshme)
         <textarea
           name="reason"
           rows={3}
@@ -76,7 +75,7 @@ export function RefundRequestForm({
           onClick={() => setOpen(false)}
           className="rounded-control border border-border px-3 py-2 text-sm hover:bg-surface-hover"
         >
-          Never mind
+          Anuloni
         </button>
       </div>
     </form>
