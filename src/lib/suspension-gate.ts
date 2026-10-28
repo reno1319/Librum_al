@@ -19,8 +19,8 @@
 // Anonymous requests never reach this.
 
 export const SUSPENDED_LOGIN_PATH = "/login?suspended=1";
-export const SUSPENDED_MESSAGE = "This account is suspended. Contact support@librum.al.";
-export const SUSPENSION_CHECK_FAILED_MESSAGE = "Something went wrong, try again.";
+export const SUSPENDED_MESSAGE = "Kjo llogari është pezulluar. Shkruani te support@librum.al.";
+export const SUSPENSION_CHECK_FAILED_MESSAGE = "Diçka shkoi keq. Provoni përsëri.";
 
 export type SuspensionDecision = "allow" | "suspended" | "check_failed";
 

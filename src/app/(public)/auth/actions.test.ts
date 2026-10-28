@@ -131,7 +131,7 @@ describe("requestPasswordReset: provider failures and anti-enumeration", () => {
   beforeEach(resetMocks);
 
   it("rejects an empty email before calling Supabase", async () => {
-    await expectRedirectTo(requestPasswordReset(formData({ email: "" })), "Enter+your+email");
+    await expectRedirectTo(requestPasswordReset(formData({ email: "" })), "Shkruani%20emailin.");
     expect(mockSupabaseAuth.resetPasswordForEmail).not.toHaveBeenCalled();
   });
 
@@ -163,7 +163,7 @@ describe("requestPasswordReset: provider failures and anti-enumeration", () => {
     try {
       await expectRedirectTo(
         requestPasswordReset(formData({ email: "private@example.com" })),
-        "We%20couldn't%20send%20a%20reset%20email%20right%20now",
+        encodeURIComponent("Nuk mundëm ta dërgojmë emailin e rivendosjes tani."),
       );
 
       expect(consoleError).toHaveBeenCalledWith(
@@ -187,7 +187,7 @@ describe("requestPasswordReset: provider failures and anti-enumeration", () => {
     try {
       await expectRedirectTo(
         requestPasswordReset(formData({ email: "private@example.com" })),
-        "We%20couldn't%20send%20a%20reset%20email%20right%20now",
+        encodeURIComponent("Nuk mundëm ta dërgojmë emailin e rivendosjes tani."),
       );
 
       expect(consoleError).toHaveBeenCalledExactlyOnceWith(
@@ -326,7 +326,7 @@ describe("login: never marked as a recovery session", () => {
 
     await expectRedirectTo(
       login(formData({ email: "reader@example.com", password: "hunter2" })),
-      "/login?error=Unable%20to%20complete%20login.%20Please%20try%20again.",
+      "/login?error=Hyrja%20nuk%20u%20krye.%20Provoni%20p%C3%ABrs%C3%ABri.",
     );
 
     expect(mockSupabaseAuth.getUser).not.toHaveBeenCalled();
@@ -701,7 +701,7 @@ describe("signup: Terms/Privacy consent gate", () => {
     fd.delete("accept_terms");
     await expectRedirectTo(
       signup(fd),
-      "/signup?error=You%20must%20agree%20to%20the%20Terms%20of%20Service%20before%20creating%20an%20account.",
+      "/signup?error=Duhet%20t%C3%AB%20pranoni%20Kushtet%20e%20p%C3%ABrdorimit%20para%20se%20t%C3%AB%20krijoni%20llogarin%C3%AB.",
     );
     expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
   });
@@ -782,12 +782,12 @@ describe("signup: N3 name trim", () => {
   });
 
   it.each(["   ", "\t\n"])("refuses a whitespace-only name (%j) before signUp, with the profile page's message", async (name) => {
-    await expectRedirectTo(signup(signupFormData({ displayName: name })), "/signup?error=Name+can%27t+be+empty");
+    await expectRedirectTo(signup(signupFormData({ displayName: name })), "/signup?error=Emri%20nuk%20mund%20t%C3%AB%20jet%C3%AB%20bosh.");
     expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
   });
 
-  it("an absent name is still 'Please fill in every field'", async () => {
-    await expectRedirectTo(signup(signupFormData({ displayName: "" })), "/signup?error=Please+fill+in+every+field");
+  it("an absent name is still 'Plotësoni të gjitha fushat.'", async () => {
+    await expectRedirectTo(signup(signupFormData({ displayName: "" })), "/signup?error=Plot%C3%ABsoni%20t%C3%AB%20gjitha%20fushat.");
     expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
   });
 
@@ -796,7 +796,7 @@ describe("signup: N3 name trim", () => {
   it("refuses a name over 120 characters before signUp", async () => {
     await expectRedirectTo(
       signup(signupFormData({ displayName: "x".repeat(121) })),
-      `/signup?error=${encodeURIComponent("Name must be 120 characters or fewer")}`,
+      `/signup?error=${encodeURIComponent("Emri mund të ketë deri në 120 karaktere")}`,
     );
     expect(mockSupabaseAuth.signUp).not.toHaveBeenCalled();
   });
@@ -816,7 +816,7 @@ describe("signup: AUTHOR-AGE-1 18+ tick", () => {
   beforeEach(resetMocks);
 
   const NEW_ID = "44444444-4444-4444-8444-444444444444";
-  const AGE_ERROR = `/signup?role=author&error=${encodeURIComponent("Authors must be 18 or older. Tick the box to confirm.")}`;
+  const AGE_ERROR = `/signup?role=author&error=${encodeURIComponent("Autorët duhet të jenë 18 vjeç ose më shumë. Shënoni kutinë për ta konfirmuar.")}`;
 
   function signupFormData(overrides: Record<string, string> = {}) {
     return formData({
@@ -972,7 +972,7 @@ describe("signup: SECURITY-9A server-side switch to author", () => {
     await expect(signup(signupFormData())).rejects.toBeInstanceOf(RedirectSignal);
     expect(lastRedirect()).toBe(
       `/account?error=${encodeURIComponent(
-        'Your account was created as a reader account. To publish, use "Become an author" on this page.',
+        'Llogaria juaj u krijua si llogari lexuesi. Për të botuar, përdorni "Bëhuni autor" në këtë faqe.',
       )}`,
     );
     expect(JSON.stringify(logged.mock.calls)).not.toContain(CREATED_ID);

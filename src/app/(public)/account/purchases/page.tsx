@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
+import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { PublicBook, RefundRequest } from "@/lib/types";
@@ -27,8 +28,8 @@ import {
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Purchases & refunds",
-  description: "Review your purchases and manage eligible refund requests.",
+  title: "Blerjet dhe rimbursimet",
+  description: "Shikoni blerjet tuaja dhe menaxhoni kërkesat për rimbursim që lejohen.",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -66,11 +67,11 @@ type PurchaseCurrencyRow = {
 };
 
 const REFUND_STATUS_LABELS: Record<string, string> = {
-  requested: "Refund requested",
-  approved: "Refund approved",
-  rejected: "Refund request rejected",
-  refunded: "Refunded",
-  cancelled: "Refund request cancelled",
+  requested: "Rimbursimi u kërkua",
+  approved: "Rimbursimi u miratua",
+  rejected: "Rimbursimi u refuzua",
+  refunded: "U rimbursua",
+  cancelled: "Kërkesa u anulua",
 };
 
 export default async function AccountPurchasesPage({
@@ -222,8 +223,8 @@ export default async function AccountPurchasesPage({
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
       <PageHeader
-        title="Purchases & refunds"
-        description="Review your purchases and manage eligible refund requests."
+        title="Blerjet dhe rimbursimet"
+        description="Shikoni blerjet tuaja dhe menaxhoni kërkesat për rimbursim që lejohen."
       />
 
       {error && (
@@ -238,17 +239,17 @@ export default async function AccountPurchasesPage({
       )}
 
       {transactionGroups.length === 0 ? (
-        <EmptyState className="mt-8" description="You haven't bought any books yet." />
+        <EmptyState className="mt-8" description="Nuk keni blerë ende asnjë libër." />
       ) : (
         <>
           {/* One figure per currency, never a converted or combined
               total -- see calculateTotalSpentByCurrency. */}
           <div className="mt-6 text-sm text-muted">
             {totalSpent.totals.length === 0 ? (
-              <p>Total spent: nothing yet</p>
+              <p>Shpenzuar gjithsej: asgjë ende</p>
             ) : (
               <p>
-                Total spent:{" "}
+                Shpenzuar gjithsej:{" "}
                 {totalSpent.totals.map((total, index) => (
                   <span key={total.currency}>
                     {index > 0 && " · "}
@@ -262,8 +263,8 @@ export default async function AccountPurchasesPage({
             {totalSpent.unresolvedCount > 0 && (
               <p className="mt-1 text-xs">
                 {totalSpent.unresolvedCount === 1
-                  ? "1 purchase is not included because its currency could not be determined."
-                  : `${totalSpent.unresolvedCount} purchases are not included because their currency could not be determined.`}
+                  ? "1 blerje nuk përfshihet sepse monedha e saj nuk u përcaktua dot."
+                  : `${totalSpent.unresolvedCount} blerje nuk përfshihen sepse monedha e tyre nuk u përcaktua dot.`}
               </p>
             )}
           </div>
@@ -305,7 +306,8 @@ export default async function AccountPurchasesPage({
                 >
                   {isBundle && (
                     <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted">
-                      One purchase · {group.bookCount} books ·{" "}
+                      Një blerje ·{" "}
+                      {group.bookCount === 1 ? "1 libër" : `${group.bookCount} libra`} ·{" "}
                       {formatTransactionAmount(group.totalAmountCents, group.currency)}
                     </p>
                   )}
@@ -326,15 +328,10 @@ export default async function AccountPurchasesPage({
                                 {purchase.books.title}
                               </Link>
                               <p className="text-xs text-muted">
-                                Purchased{" "}
-                                {new Date(purchase.created_at).toLocaleDateString(undefined, {
-                                  year: "numeric",
-                                  month: "short",
-                                  day: "numeric",
-                                })}{" "}
+                                Blerë më {formatTimestampAsDate(purchase.created_at)}{" "}
                                 · {formatTransactionAmount(purchase.amount_cents, purchase.currency)}
                                 {purchase.refunded_at && (
-                                  <span className="ml-2 text-red-600">Refunded</span>
+                                  <span className="ml-2 text-red-600">U rimbursua</span>
                                 )}
                               </p>
                             </div>
@@ -344,7 +341,7 @@ export default async function AccountPurchasesPage({
                                   href={`/api/books/${purchase.book_id}/download`}
                                   className="rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
                                 >
-                                  Download EPUB
+                                  Shkarkoni EPUB
                                 </a>
                                 {(() => {
                                   const note = buyerDownloadNote(downloadStates.get(purchase.book_id));
@@ -352,7 +349,7 @@ export default async function AccountPurchasesPage({
                                 })()}
                               </div>
                             ) : (
-                              <span className="text-xs text-muted">No longer available</span>
+                              <span className="text-xs text-muted">Nuk ofrohet më</span>
                             )}
                           </li>
                         ) : null,
@@ -372,8 +369,8 @@ export default async function AccountPurchasesPage({
                     <div className={group.purchases.length > 0 ? "mt-3" : undefined}>
                       <p className="text-xs text-muted">
                         {group.purchases.length > 0
-                          ? "Also included in this purchase, already in your library:"
-                          : "This purchase covered books already in your library:"}
+                          ? "Të përfshirë në këtë blerje, tashmë në bibliotekën tuaj:"
+                          : "Kjo blerje përfshinte libra që janë tashmë në bibliotekën tuaj:"}
                       </p>
                       <ul className="mt-1 text-xs text-muted">
                         {group.unpurchasedSnapshotItems.map((item) => (
@@ -408,7 +405,7 @@ export default async function AccountPurchasesPage({
                           />
                         ) : (
                           <span className="text-xs text-muted">
-                            No longer eligible for a refund request (past the 14-day window)
+                            Nuk mund të kërkoni më rimbursim (kanë kaluar 14 ditët)
                           </span>
                         ))}
                     </div>

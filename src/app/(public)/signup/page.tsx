@@ -9,8 +9,8 @@ import { ACCOUNT_NAME_MAX_LENGTH } from "@/lib/account-name";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Create account",
-  description: "Create a Librum account to publish or buy ebooks.",
+  title: "Krijoni llogari",
+  description: "Krijoni një llogari në Librum për të botuar ose për të blerë libra elektronikë.",
 };
 
 export default async function SignupPage({
@@ -23,7 +23,7 @@ export default async function SignupPage({
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
-      <h1 className="font-serif text-3xl font-normal">Sign up</h1>
+      <h1 className="font-serif text-3xl font-normal">Regjistrohuni</h1>
 
       {error && (
         <Alert variant="error" className="mt-4">
@@ -33,7 +33,7 @@ export default async function SignupPage({
 
       <form action={signup} className="group mt-6 flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">
-          Name
+          Emri
           <input
             name="displayName"
             type="text"
@@ -44,13 +44,13 @@ export default async function SignupPage({
           />
           {/* PEN-NAMES-1 (6a). */}
           <span className="text-sm text-muted">
-            If you sign up as an author, readers see this as your author name. You can set a pen
-            name later.
+            Nëse regjistroheni si autor, lexuesit e shohin këtë si emrin tuaj të autorit. Pseudonimin
+            mund ta vendosni më vonë.
           </span>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          Email
+          Adresa e emailit
           <input
             name="email"
             type="email"
@@ -61,7 +61,7 @@ export default async function SignupPage({
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          Password
+          Fjalëkalimi
           <input
             name="password"
             type="password"
@@ -70,11 +70,11 @@ export default async function SignupPage({
             minLength={6}
             className={formControlClasses}
           />
-          <span className="text-sm text-muted">At least 6 characters.</span>
+          <span className="text-sm text-muted">Të paktën 6 karaktere.</span>
         </label>
 
         <fieldset className="flex flex-col gap-2 text-sm">
-          <legend className="mb-1">I am signing up as a...</legend>
+          <legend className="mb-1">Regjistrohem si...</legend>
           <label className="flex items-center gap-2">
             <input
               type="radio"
@@ -82,7 +82,7 @@ export default async function SignupPage({
               value="reader"
               defaultChecked={!authorPreselected}
             />
-            Reader — I want to buy and read ebooks
+            Lexues: dua të blej dhe të lexoj libra elektronikë
           </label>
           <label className="flex items-center gap-2">
             <input
@@ -91,7 +91,7 @@ export default async function SignupPage({
               value="author"
               defaultChecked={authorPreselected}
             />
-            Author — I want to publish and sell ebooks
+            Autor: dua të botoj dhe të shes libra elektronikë
           </label>
           {/* AUTHOR-AGE-1: shown only while "Author" is chosen (CSS
               :has(), no script). Not `required`: a hidden required box
@@ -117,27 +117,27 @@ export default async function SignupPage({
             className="focus-ring mt-1 size-4"
           />
           <label htmlFor="accept_terms">
-            I agree to the{" "}
+            Pranoj{" "}
             <Link href="/terms" className="focus-ring rounded-sm font-medium text-primary underline">
-              Terms of Service
+              Kushtet e përdorimit
             </Link>{" "}
-            and acknowledge the{" "}
+            dhe kam lexuar{" "}
             <Link href="/privacy" className="focus-ring rounded-sm font-medium text-primary underline">
-              Privacy Policy
+              Politikën e privatësisë
             </Link>
             .
           </label>
         </div>
 
         <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
-          Create account
+          Krijoni llogarinë
         </button>
       </form>
 
       <p className="mt-6 text-sm text-muted">
-        Already have an account?{" "}
+        Keni tashmë llogari?{" "}
         <Link href="/login" className="focus-ring rounded-sm font-medium text-primary underline">
-          Log in
+          Hyni
         </Link>
       </p>
     </main>

@@ -6,8 +6,8 @@ import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Set a new password",
-  description: "Set a new password to complete your Librum password reset.",
+  title: "Vendosni një fjalëkalim të ri",
+  description: "Vendosni një fjalëkalim të ri për të përfunduar rivendosjen e fjalëkalimit në Librum.",
 };
 
 export default async function ResetPasswordPage({
@@ -19,9 +19,9 @@ export default async function ResetPasswordPage({
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
-      <h1 className="font-serif text-3xl font-normal">Set a new password</h1>
+      <h1 className="font-serif text-3xl font-normal">Vendosni një fjalëkalim të ri</h1>
       <p className="mt-1 text-sm text-muted">
-        You&apos;re completing a password reset. Set a new password to continue.
+        Po rivendosni fjalëkalimin. Vendosni një fjalëkalim të ri për të vazhduar.
       </p>
 
       {error && (
@@ -32,7 +32,7 @@ export default async function ResetPasswordPage({
 
       <form action={updatePassword} className="mt-6 flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">
-          New password
+          Fjalëkalimi i ri
           <input
             name="password"
             type="password"
@@ -44,7 +44,7 @@ export default async function ResetPasswordPage({
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          Confirm new password
+          Konfirmoni fjalëkalimin e ri
           <input
             name="confirmPassword"
             type="password"
@@ -56,7 +56,7 @@ export default async function ResetPasswordPage({
         </label>
 
         <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
-          Update password
+          Ruani fjalëkalimin
         </button>
       </form>
     </main>

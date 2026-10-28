@@ -341,7 +341,7 @@ describe("becomeAuthor: N3 name trim", () => {
   it.each(["", "   ", "\t\n"])("refuses a name that is empty after trimming (%j), with the profile page's message", async (name) => {
     profileResult = readerProfile({ display_name: name });
     const target = await run();
-    expect(target).toBe(`/account?error=${encodeURIComponent("Public author name can't be empty")}`);
+    expect(target).toBe(`/account?error=${encodeURIComponent("Emri publik i autorit nuk mund të jetë bosh.")}`);
     expect(writerCreated).toBe(0);
     expect(penWriterCreated).toBe(0);
   });
@@ -465,7 +465,7 @@ describe("becomeAuthor: legacy photo copied to the default pen name (17a after C
 });
 
 describe("becomeAuthor: AUTHOR-AGE-1 18+ tick", () => {
-  const AGE_ERROR = `/account?error=${encodeURIComponent("Authors must be 18 or older. Tick the box to confirm.")}`;
+  const AGE_ERROR = `/account?error=${encodeURIComponent("Autorët duhet të jenë 18 vjeç ose më shumë. Shënoni kutinë për ta konfirmuar.")}`;
 
   it("records the confirmation for the caller's own id, before the role write", async () => {
     expect((await run()).startsWith("/dashboard?success=")).toBe(true);
@@ -530,7 +530,7 @@ describe("author role write boundary (static)", () => {
 // calling Supabase Auth directly never saw the sign-up's Terms tick.
 describe("becomeAuthor: SECURITY-9A Terms tick", () => {
   const TERMS_ERROR = `/account?error=${encodeURIComponent(
-    "You must agree to the Terms of Service before becoming an author.",
+    "Duhet të pranoni Kushtet e përdorimit para se të bëheni autor.",
   )}`;
 
   it.each([

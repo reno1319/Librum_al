@@ -25,13 +25,13 @@
 // visitor's side, both are just "you can't log in right now") and
 // gives an attacker no way to distinguish the two failure modes.
 const KNOWN_AUTH_ERROR_MESSAGES: Record<string, string> = {
-  "Invalid login credentials": "That email or password isn't right. Please try again.",
-  "Email not confirmed": "That email or password isn't right. Please try again.",
-  "User already registered": "An account with that email already exists. Try logging in instead.",
-  "Password should be at least 6 characters": "Password must be at least 6 characters.",
+  "Invalid login credentials": "Emaili ose fjalëkalimi nuk është i saktë. Provoni përsëri.",
+  "Email not confirmed": "Emaili ose fjalëkalimi nuk është i saktë. Provoni përsëri.",
+  "User already registered": "Ka tashmë një llogari me këtë email. Provoni të hyni.",
+  "Password should be at least 6 characters": "Fjalëkalimi duhet të ketë të paktën 6 karaktere.",
   // PEOPLE-2: Supabase checks a ban before the password, so its ban
   // message must read exactly like a wrong password (no enumeration).
-  "User is banned": "That email or password isn't right. Please try again.",
+  "User is banned": "Emaili ose fjalëkalimi nuk është i saktë. Provoni përsëri.",
 };
 
 export function translateAuthErrorMessage(message: string | null | undefined): string | null {

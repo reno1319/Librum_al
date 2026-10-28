@@ -13,8 +13,8 @@ import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Your library",
-  description: "The books you've collected on Librum.",
+  title: "Biblioteka ime",
+  description: "Librat që keni mbledhur në Librum.",
 };
 
 // LIBRUM 2.0 UI-9 / ACCOUNT-1: Library is now current-ownership/download
@@ -94,7 +94,7 @@ export default async function LibraryPage({
 
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
-      <PageHeader title="Your library" description="The books you've collected on Librum." />
+      <PageHeader title="Biblioteka ime" description="Librat që keni mbledhur në Librum." />
 
       {error && (
         <Alert variant="error" className="mt-4">
@@ -110,11 +110,11 @@ export default async function LibraryPage({
       {ownedBooks.length === 0 ? (
         <EmptyState
           className="mt-8"
-          title="Your library is empty."
-          description="Books you acquire on Librum will appear here."
+          title="Biblioteka juaj është bosh."
+          description="Librat që merrni në Librum do të shfaqen këtu."
           action={
             <Link href="/bookstore" className={buttonClasses("primary", "md")}>
-              Browse the Bookstore
+              Shfletoni Librarinë
             </Link>
           }
         />
@@ -122,9 +122,9 @@ export default async function LibraryPage({
         <>
         {/* TRUST PACK (item 5, 1. a): one link above the grid, not one per card. */}
         <p className="mt-4 text-sm text-muted">
-          Not sure how to open a book on your phone or Kindle?{" "}
+          Nuk e dini si ta hapni një libër në telefon ose në Kindle?{" "}
           <Link href="/help/reading" className="text-primary underline">
-            How to read your book
+            Si ta lexoni librin tuaj
           </Link>
           .
         </p>

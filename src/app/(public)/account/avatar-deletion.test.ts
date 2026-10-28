@@ -136,7 +136,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 
 const { deleteAccount } = await import("./actions");
 
-async function run(confirmation = "DELETE"): Promise<string> {
+async function run(confirmation = "FSHI"): Promise<string> {
   const fd = new FormData();
   fd.set("confirmation", confirmation);
   try {
@@ -263,7 +263,7 @@ describe("deleteAccount: failures stop before anything irreversible", () => {
   it("a failed profile read stops: no admin client, no deleteUser, no removal of any kind", async () => {
     profileResult = { data: { avatar_path: `${OTHER_ID}/avatar.png` }, error: { message: "db down" } };
 
-    expect(await run()).toBe("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+    expect(await run()).toBe("/account?error=Nuk%20mund%C3%ABm%20ta%20p%C3%ABrgatisim%20fshirjen%20e%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.");
 
     expect(adminClientsCreated).toBe(0);
     expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
@@ -283,7 +283,7 @@ describe("deleteAccount: failures stop before anything irreversible", () => {
     books = [OWN_BOOK];
     deleteUserError = { message: "restrict violation" };
 
-    expect(await run()).toBe("/account?error=Something+went+wrong+deleting+your+account.+Please+try+again");
+    expect(await run()).toBe("/account?error=Di%C3%A7ka%20shkoi%20keq%20gjat%C3%AB%20fshirjes%20s%C3%AB%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.");
     expect(storageCalls).toEqual([]);
   });
 
@@ -316,21 +316,21 @@ describe("deleteAccount: existing gates are intact and run before any profile re
 
   it("active staff: blocked before the profile read", async () => {
     staffResult = { data: { role: "owner" }, error: null };
-    expect(await run()).toBe("/account?error=Remove+this+account+from+Librum+staff+before+deleting+the+account.");
+    expect(await run()).toBe("/account?error=Hiqeni%20k%C3%ABt%C3%AB%20llogari%20nga%20stafi%20i%20Librum%20para%20se%20ta%20fshini.");
     expect(events).toEqual(["read:staff"]);
     expect(adminClientsCreated).toBe(0);
   });
 
   it("staff lookup error: blocked before the profile read", async () => {
     staffResult = { data: null, error: { message: "x" } };
-    expect(await run()).toBe("/account?error=Unable+to+verify+account+eligibility+for+deletion.+Try+again.");
+    expect(await run()).toBe("/account?error=Nuk%20mund%C3%ABm%20t%C3%AB%20kontrollojm%C3%AB%20n%C3%ABse%20kjo%20llogari%20mund%20t%C3%AB%20fshihet.%20Provoni%20p%C3%ABrs%C3%ABri.");
     expect(events).toEqual(["read:staff"]);
     expect(adminClientsCreated).toBe(0);
   });
 
-  it.each(["", "delete", "DELETE ", "Delete"])("wrong confirmation %j: blocked before the profile read", async (confirmation) => {
+  it.each(["", "fshi", "FSHI ", "Fshi", "DELETE"])("wrong confirmation %j: blocked before the profile read", async (confirmation) => {
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
-    expect(await run(confirmation)).toBe("/account?error=Type+DELETE+to+confirm");
+    expect(await run(confirmation)).toBe("/account?error=Shkruani%20FSHI%20p%C3%ABr%20ta%20konfirmuar.");
     expect(events).toEqual(["read:staff"]);
     expect(adminClientsCreated).toBe(0);
     expect(storageCalls).toEqual([]);
@@ -340,7 +340,7 @@ describe("deleteAccount: existing gates are intact and run before any profile re
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
     books = [OWN_BOOK];
     purchaseCount = 1;
-    expect(await run()).toContain("/account?error=Your+account+can%27t+be+deleted");
+    expect(await run()).toContain("/account?error=Llogaria%20juaj%20nuk%20mund%20t%C3%AB%20fshihet");
     expect(adminClientsCreated).toBe(0);
     expect(storageCalls).toEqual([]);
   });
@@ -414,7 +414,7 @@ describe("deleteAccount: pen name photos", () => {
 
   it("a pen names read failure stops before anything irreversible", async () => {
     penNamesResult = { data: null, error: { message: "down" } };
-    expect(await run()).toBe("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+    expect(await run()).toBe("/account?error=Nuk%20mund%C3%ABm%20ta%20p%C3%ABrgatisim%20fshirjen%20e%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.");
     expect(events).not.toContain(`deleteUser:${USER_ID}`);
     expect(storageCalls).toEqual([]);
   });

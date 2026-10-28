@@ -7,6 +7,12 @@ import { createPokRepository } from "@/lib/pok-repository";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { maintenanceHttpResponse } from "@/lib/maintenance-response";
 
+// Fixed reader-facing messages (the only text this route puts in a URL).
+const INVALID_RETURN_MESSAGE = "Kthimi nga pagesa nuk është i vlefshëm.";
+const PENDING_MESSAGE = "Pagesa po verifikohet ende.";
+const NOT_COMPLETED_MESSAGE = "Pagesa nuk u krye.";
+const NEEDS_REVIEW_MESSAGE = "Pagesa duhet të shqyrtohet nga ne.";
+
 export const runtime = "nodejs";
 export async function GET(request: Request) {
   // ALL-CUTOVER APP-A: gated before any query parsing, before
@@ -21,7 +27,7 @@ export async function GET(request: Request) {
   const query = new URL(request.url).searchParams;
   const intent = uuid.safeParse(query.get("intent"));
   const token = uuid.safeParse(query.get("token"));
-  if (!intent.success || !token.success) redirect("/library?error=Invalid+payment+return");
+  if (!intent.success || !token.success) redirect(`/library?error=${encodeURIComponent(INVALID_RETURN_MESSAGE)}`);
   const db = await createClient();
   const { data: { user } } = await db.auth.getUser();
   // R3-ADDR: the login target is the resume page, not this route; see
@@ -30,7 +36,7 @@ export async function GET(request: Request) {
     const resume = new URLSearchParams({ intent: intent.data, token: token.data });
     redirect(`/login?next=${encodeURIComponent(`/payments/pok/resume?${resume}`)}`);
   }
-  let destination = "/library?error=Payment+verification+pending";
+  let destination = `/library?error=${encodeURIComponent(PENDING_MESSAGE)}`;
   try {
     const config = getPokConfig();
     const result = await fulfillPokCheckout({ intentId: intent.data, token: token.data, readerId: user.id, merchantId: config.merchantId },
@@ -44,9 +50,9 @@ export async function GET(request: Request) {
     // Each message is a fixed literal. No cause, no last_error_code, no
     // timestamp and no provider text ever reaches the query string.
     destination = result.status === "fulfilled" ? `/books/${result.bookId}?purchase=success`
-      : result.status === "closed_unpaid" ? `/books/${result.bookId}?error=Payment+was+not+completed`
-      : result.status === "blocked" ? `/books/${result.bookId}?error=Payment+needs+review`
-      : `/books/${result.bookId}?error=Payment+verification+pending`;
+      : result.status === "closed_unpaid" ? `/books/${result.bookId}?error=${encodeURIComponent(NOT_COMPLETED_MESSAGE)}`
+      : result.status === "blocked" ? `/books/${result.bookId}?error=${encodeURIComponent(NEEDS_REVIEW_MESSAGE)}`
+      : `/books/${result.bookId}?error=${encodeURIComponent(PENDING_MESSAGE)}`;
   } catch { /* generic, non-secret diagnostic only */ }
   redirect(destination);
 }

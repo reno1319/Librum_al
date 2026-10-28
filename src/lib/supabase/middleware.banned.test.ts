@@ -99,7 +99,7 @@ describe("updateSession against the real auth client (PEOPLE-2 F1)", () => {
     authUserResponse = () => Response.json(BANNED_BODIES[0], { status: 403, headers: { "x-supabase-api-version": "2024-01-01" } });
     const response = await updateSession(request("/dashboard", { method: "POST", headers: { "next-action": "abc" } }));
     expect(response.status).toBe(403);
-    expect(await response.text()).toBe("This account is suspended. Contact support@librum.al.");
+    expect(await response.text()).toBe("Kjo llogari është pezulluar. Shkruani te support@librum.al.");
     expect(response.cookies.get(COOKIE)?.maxAge).toBe(0);
   });
 

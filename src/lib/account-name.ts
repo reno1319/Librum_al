@@ -8,4 +8,4 @@
 // passes here always fits there.
 export const ACCOUNT_NAME_MAX_LENGTH = 120;
 
-export const ACCOUNT_NAME_TOO_LONG_MESSAGE = `Name must be ${ACCOUNT_NAME_MAX_LENGTH} characters or fewer`;
+export const ACCOUNT_NAME_TOO_LONG_MESSAGE = `Emri mund të ketë deri në ${ACCOUNT_NAME_MAX_LENGTH} karaktere`;

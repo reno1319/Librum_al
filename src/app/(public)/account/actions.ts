@@ -16,6 +16,10 @@ import {
 } from "@/lib/book-storage-path";
 import { deletedBookManuscriptKeys, readReviewSnapshots } from "@/lib/book-reviews";
 
+const PREPARE_FAILED_PATH = `/account?error=${encodeURIComponent(
+  "Nuk mundëm ta përgatisim fshirjen e llogarisë. Provoni përsëri.",
+)}`;
+
 export async function deleteAccount(formData: FormData) {
   // AUTH-1C: defense-in-depth -- Proxy already blocks /account itself
   // while a recovery session is active, so this is the second layer
@@ -40,7 +44,7 @@ export async function deleteAccount(formData: FormData) {
   // exception) cannot delete their own Librum account through this
   // ordinary self-service path. Checked FIRST, before the
   // confirmation-text check below, so a staff member learns this
-  // immediately rather than after typing "DELETE" -- and deliberately
+  // immediately rather than after typing "FSHI" -- and deliberately
   // does nothing else: no auto-removal from staff_members, no silent
   // mutation of anything, just a stable redirect either way.
   //
@@ -67,19 +71,23 @@ export async function deleteAccount(formData: FormData) {
   if (staffLookupError) {
     console.error("deleteAccount: staff status lookup failed:", staffLookupError);
     redirect(
-      "/account?error=Unable+to+verify+account+eligibility+for+deletion.+Try+again.",
+      `/account?error=${encodeURIComponent(
+        "Nuk mundëm të kontrollojmë nëse kjo llogari mund të fshihet. Provoni përsëri.",
+      )}`,
     );
   }
 
   if (staffRow) {
     redirect(
-      "/account?error=Remove+this+account+from+Librum+staff+before+deleting+the+account.",
+      `/account?error=${encodeURIComponent(
+        "Hiqeni këtë llogari nga stafi i Librum para se ta fshini.",
+      )}`,
     );
   }
 
   const confirmation = String(formData.get("confirmation") ?? "");
-  if (confirmation !== "DELETE") {
-    redirect("/account?error=Type+DELETE+to+confirm");
+  if (confirmation !== "FSHI") {
+    redirect(`/account?error=${encodeURIComponent("Shkruani FSHI për ta konfirmuar.")}`);
   }
 
   // AVATAR-STORAGE-PATH-AUTH-1: the stored avatar_path is removed below
@@ -97,7 +105,7 @@ export async function deleteAccount(formData: FormData) {
 
   if (profileReadError) {
     console.error("deleteAccount: profile read failed:", profileReadError);
-    redirect("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+    redirect(PREPARE_FAILED_PATH);
   }
 
   // Only a value that is EXACTLY this user's own canonical avatar key
@@ -131,7 +139,7 @@ export async function deleteAccount(formData: FormData) {
 
   if (booksReadError || !Array.isArray(books)) {
     console.error("deleteAccount: authored books read failed; nothing was deleted");
-    redirect("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+    redirect(PREPARE_FAILED_PATH);
   }
 
   const authoredBooks = books;
@@ -151,7 +159,7 @@ export async function deleteAccount(formData: FormData) {
 
   if (penNamesReadError || !Array.isArray(penNameRows)) {
     console.error("deleteAccount: pen names read failed; nothing was deleted");
-    redirect("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+    redirect(PREPARE_FAILED_PATH);
   }
 
   // PEN-NAMES-1 r4 (17a): the migration copied the profile photo onto the
@@ -191,7 +199,9 @@ export async function deleteAccount(formData: FormData) {
 
     if ((acquisitionCount ?? 0) > 0) {
       redirect(
-        "/account?error=Your+account+can%27t+be+deleted+while+readers+own+books+you%27ve+published.+Unpublish+the+books+if+you+no+longer+want+them+for+sale.",
+        `/account?error=${encodeURIComponent(
+          "Llogaria juaj nuk mund të fshihet ndërsa lexuesit kanë libra që keni botuar. Hiqini librat nga publikimi nëse nuk doni më t'i shisni.",
+        )}`,
       );
     }
   }
@@ -263,7 +273,7 @@ export async function deleteAccount(formData: FormData) {
     const snapshots = await readReviewSnapshots(admin, bookIds);
     if (!snapshots.ok) {
       console.error("deleteAccount: review snapshots read failed; nothing was deleted");
-      redirect("/account?error=Unable+to+prepare+account+deletion.+Try+again.");
+      redirect(PREPARE_FAILED_PATH);
     }
     for (const book of authoredBooks) {
       for (const path of deletedBookManuscriptKeys({
@@ -288,7 +298,9 @@ export async function deleteAccount(formData: FormData) {
   if (deleteUserError) {
     console.error("deleteAccount: failed to delete auth user:", deleteUserError);
     redirect(
-      "/account?error=Something+went+wrong+deleting+your+account.+Please+try+again",
+      `/account?error=${encodeURIComponent(
+        "Diçka shkoi keq gjatë fshirjes së llogarisë. Provoni përsëri.",
+      )}`,
     );
   }
 

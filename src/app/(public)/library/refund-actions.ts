@@ -68,7 +68,7 @@ export async function requestTransactionRefund(
 
   revalidatePath("/account/purchases");
   redirect(
-    `/account/purchases?success=${encodeURIComponent("Your refund request has been submitted for review.")}`,
+    `/account/purchases?success=${encodeURIComponent("Kërkesa juaj për rimbursim u dërgua për shqyrtim.")}`,
   );
 }
 
@@ -108,6 +108,6 @@ export async function cancelRefundRequest(refundRequestId: string) {
 
   revalidatePath("/account/purchases");
   redirect(
-    `/account/purchases?success=${encodeURIComponent("Your refund request has been cancelled.")}`,
+    `/account/purchases?success=${encodeURIComponent("Kërkesa juaj për rimbursim u anulua.")}`,
   );
 }

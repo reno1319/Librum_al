@@ -5,4 +5,4 @@
 export const AUTHOR_AGE_STATEMENT = "I'm 18 or older";
 export const AUTHOR_AGE_STATEMENT_VERSION = "author-age-v1";
 export const AUTHOR_AGE_FIELD = "confirm_author_age";
-export const AUTHOR_AGE_REQUIRED_MESSAGE = "Authors must be 18 or older. Tick the box to confirm.";
+export const AUTHOR_AGE_REQUIRED_MESSAGE = "Autorët duhet të jenë 18 vjeç ose më shumë. Shënoni kutinë për ta konfirmuar.";

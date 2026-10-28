@@ -14,8 +14,8 @@ import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Wishlist",
-  description: "Books you've saved to buy later on Librum.",
+  title: "Lista e dëshirave",
+  description: "Librat që keni ruajtur për t'i blerë më vonë në Librum.",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -72,16 +72,16 @@ export default async function WishlistPage() {
 
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
-      <PageHeader title="Your wishlist" />
+      <PageHeader title="Lista e dëshirave" />
 
       {validItems.length === 0 ? (
         <EmptyState
           className="mt-8"
-          title="Your wishlist is empty."
-          description="Books you save for later will appear here."
+          title="Lista juaj e dëshirave është bosh."
+          description="Librat që ruani për më vonë do të shfaqen këtu."
           action={
             <Link href="/bookstore" className={buttonClasses("primary", "md")}>
-              Browse the Bookstore
+              Shfletoni Librarinë
             </Link>
           }
         />
@@ -105,7 +105,7 @@ export default async function WishlistPage() {
                     type="submit"
                     className="focus-ring w-fit rounded-control border border-border px-3 py-1.5 text-xs hover:bg-surface-hover"
                   >
-                    Remove
+                    Hiqeni
                   </button>
                 </form>
               </li>

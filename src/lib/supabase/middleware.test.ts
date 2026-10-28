@@ -409,7 +409,7 @@ describe("updateSession: the suspension check (PEOPLE-2)", () => {
     expect(response.status).toBe(403);
     expect(response.headers.get("location")).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.text()).toBe("This account is suspended. Contact support@librum.al.");
+    expect(await response.text()).toBe("Kjo llogari është pezulluar. Shkruani te support@librum.al.");
     expectSessionCleared(response);
   });
 
@@ -426,7 +426,7 @@ describe("updateSession: the suspension check (PEOPLE-2)", () => {
     const response = await updateSession(makeRequest("/dashboard", SESSION));
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.text()).toBe("Something went wrong, try again.");
+    expect(await response.text()).toBe("Diçka shkoi keq. Provoni përsëri.");
     expect(mockSignOut).not.toHaveBeenCalled();
     expect(response.cookies.get("sb-project-auth-token")).toBeUndefined();
   });

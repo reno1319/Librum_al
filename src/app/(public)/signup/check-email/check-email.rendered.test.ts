@@ -14,17 +14,17 @@ async function render(searchParams: { author?: string } = {}) {
 describe("check-email page", () => {
   it("shows no extra line by default", async () => {
     const html = await render();
-    expect(html).toContain("We sent you a confirmation link.");
-    expect(html).not.toContain("reader account");
+    expect(html).toContain("Ju dërguam një lidhje konfirmimi.");
+    expect(html).not.toContain("llogari lexuesi");
   });
 
   it("with author=pending, says to use Become an author", async () => {
     const html = await render({ author: "pending" });
-    expect(html).toContain("Your account was created as a reader account.");
-    expect(html).toContain("Become an author");
+    expect(html).toContain("Llogaria juaj u krijua si llogari lexuesi.");
+    expect(html).toContain("Bëhuni autor");
   });
 
   it("any other value shows no extra line", async () => {
-    expect(await render({ author: "yes" })).not.toContain("reader account");
+    expect(await render({ author: "yes" })).not.toContain("llogari lexuesi");
   });
 });
