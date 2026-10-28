@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import RefundsPage, { metadata } from "./page";
 import { SELLER_PENDING_TEXT } from "@/lib/seller";
+import { POLICY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
 
-// REFUND POLICY + POLICY PAGES: the page text is Renato's policy
+// REFUND POLICY + POLICY PAGES (Albanian since ALBANIAN-14): the page text is Renato's policy
 // (problem refunds with no time limit, reply within 5 working days) plus
 // the 14-day cancel right until the first download (10-24, 1. a, 3. a).
 const html = renderToStaticMarkup(RefundsPage());
@@ -20,31 +21,31 @@ const root = path.join(__dirname, "..", "..", "..", "..");
 const read = (relative: string) => readFileSync(path.join(root, relative), "utf8");
 
 describe("REFUND POLICY: /refunds", () => {
-  it("is titled Refund Policy", () => {
-    expect(metadata.title).toBe("Refund Policy");
-    expect(html).toMatch(/<h1[^>]*>Refund Policy<\/h1>/);
+  it("is titled Politika e rimbursimit", () => {
+    expect(metadata.title).toBe("Politika e rimbursimit");
+    expect(html).toMatch(/<h1[^>]*>Politika e rimbursimit<\/h1>/);
   });
 
-  it("states the policy word for word", () => {
+  it("states the policy sentence for sentence", () => {
     for (const sentence of [
-      "This page explains when you can get your money back for an ebook bought on Librum.",
-      "Last updated: October 2026",
-      "You can cancel a purchase for any reason within 14 days of buying it, as long as you haven't downloaded the book yet.",
-      "you lose this right to cancel when you first download it.",
-      "A bundle can be cancelled only if none of its books has been downloaded.",
-      "At any time, including after you've downloaded it, we refund a purchase if:",
-      "the book never appeared in your library, or the download doesn't work;",
-      "the file is damaged or can't be opened, and we can't fix it for you;",
-      "you were charged twice for the same book, or charged the wrong amount;",
-      "someone bought it with your card or account without your permission.",
-      "Tell us as soon as you notice the problem.",
-      "Apart from these problems, we don't refund a book after you've downloaded it.",
-      'and either "I want to cancel" or what went wrong. We reply within 5 working days.',
-      "If you cancel within the 14 days, we send your money back within 14 days of your request.",
-      "We return the amount you paid, normally to the card you paid with, through our payment provider POK. Your bank decides how long it takes to show on your statement. Your access to the refunded book or bundle may be removed.",
-      "You can also dispute a payment with your bank. Opening a dispute doesn't remove your access. If the bank decides against the payment, your access to that book may be removed.",
+      "Kjo faqe shpjegon kur mund t'i merrni paratë mbrapsht për një libër elektronik të blerë në Librum.",
+      POLICY_LAST_UPDATED_LINE,
+      "Mund ta anuloni një blerje për çfarëdo arsye brenda 14 ditëve nga blerja, për sa kohë nuk e keni shkarkuar ende librin.",
+      "e humbni këtë të drejtë anulimi kur e shkarkoni për herë të parë.",
+      "Një paketë mund të anulohet vetëm nëse asnjë nga librat e saj nuk është shkarkuar.",
+      "Në çdo kohë, edhe pasi ta keni shkarkuar librin, jua rimbursojmë blerjen nëse:",
+      "libri nuk u shfaq kurrë në bibliotekën tuaj, ose shkarkimi nuk funksionon;",
+      "skedari është i dëmtuar ose nuk hapet, dhe nuk mund t'jua rregullojmë;",
+      "u tarifuat dy herë për të njëjtin libër, ose u tarifuat me shumë të gabuar;",
+      "dikush e bleu me kartën ose me llogarinë tuaj pa lejen tuaj.",
+      "Na tregoni sapo ta vini re problemin.",
+      "Përveç këtyre problemeve, nuk e rimbursojmë një libër pasi ta keni shkarkuar.",
+      'dhe ose "Dua ta anuloj" ose çfarë shkoi keq. Përgjigjemi brenda 5 ditëve të punës.',
+      "Nëse anuloni brenda 14 ditëve, jua kthejmë paratë brenda 14 ditëve nga kërkesa juaj.",
+      "Ju kthejmë shumën që paguat, zakonisht në kartën me të cilën paguat, përmes ofruesit tonë të pagesave POK. Sa kohë duhet që shuma të shfaqet në pasqyrën tuaj e vendos banka juaj. Aksesi juaj te libri ose paketa e rimbursuar mund të hiqet.",
+      "Mund ta kundërshtoni një pagesë edhe te banka juaj. Hapja e një kundërshtimi nuk jua heq aksesin. Nëse banka vendos kundër pagesës, aksesi juaj te ai libër mund të hiqet.",
       SELLER_PENDING_TEXT,
-      "Questions about this policy? Write to support@librum.al .",
+      "Keni pyetje për këtë politikë? Na shkruani te support@librum.al .",
     ]) {
       expect(text).toContain(sentence);
     }
@@ -53,7 +54,7 @@ describe("REFUND POLICY: /refunds", () => {
   });
 
   it("no longer refuses every refund after delivery, and shows no blank slots", () => {
-    for (const absent of ["Request refund", "after it has been delivered to your library", "[", "NIPT:"]) {
+    for (const absent of ["Request refund", "Kërkoni rimbursim", "[", "NIPT:"]) {
       expect(text).not.toContain(absent);
     }
   });
@@ -62,14 +63,20 @@ describe("REFUND POLICY: /refunds", () => {
     expect(read("src/app/(public)/refunds/page.tsx")).toContain("LAWYER-REVIEW DRAFT");
     expect(text).not.toMatch(/\bdraft\b|lawyer/i);
   });
+
+  it("has no English left in the page text", () => {
+    for (const english of ["Refund Policy", "Last updated", "Cancel within", "How to ask", "Contact"]) {
+      expect(text).not.toContain(english);
+    }
+  });
 });
 
 describe("REFUND POLICY: Terms section 9 links the policy", () => {
   it("keeps the money paragraph and links the policy", () => {
     const source = read("src/app/(public)/terms/page.tsx");
     const section9 = source.match(/<section id="section-9"[\s\S]*?<\/section>/)![0];
-    expect(section9).toContain("corresponding author proceeds are reversed");
+    expect(section9).toContain("të ardhurat përkatëse të autorit anulohen");
     expect(section9).toContain('<Link href="/refunds" className="text-primary underline">');
-    expect(section9).toContain("Refund Policy");
+    expect(section9).toContain("Politikën e rimbursimit");
   });
 });

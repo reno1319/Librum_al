@@ -125,8 +125,8 @@ describe("TRUST PACK 5-6: Contact, footer and Privacy", () => {
   it("Privacy doesn't mention WhatsApp while the number is empty", () => {
     const text = toText(renderToStaticMarkup(PrivacyPage()));
     expect(text).not.toContain("WhatsApp");
-    expect(text).toContain("the emails you send us and our replies.");
-    expect(text).toContain("Emails with us: up to 2 years after your last message.");
+    expect(text).toContain("emailet që na dërgoni dhe përgjigjet tona.");
+    expect(text).toContain("Emailet me ne: deri në 2 vjet pas mesazhit tuaj të fundit.");
   });
 
   it("the Contact link and the Privacy lines come from the same value", () => {

@@ -867,10 +867,10 @@ describe("signup: AUTHOR-AGE-1 18+ tick", () => {
     const [id, attributes] = mockUpdateUserById.mock.calls[0] as [string, { app_metadata: Record<string, unknown> }];
     expect(id).toBe(NEW_ID);
     expect(Object.keys(attributes)).toEqual(["app_metadata"]);
-    expect(attributes.app_metadata.author_age_statement_version).toBe("author-age-v1");
+    expect(attributes.app_metadata.author_age_statement_version).toBe("author-age-v2");
     expect(Number.isNaN(Date.parse(String(attributes.app_metadata.author_age_confirmed_at)))).toBe(false);
     // SECURITY-9A: the same write carries the Terms record.
-    expect(attributes.app_metadata.terms_version).toBe("terms-2026-10");
+    expect(attributes.app_metadata.terms_version).toBe("terms-sq-1");
     expect(attributes.app_metadata.terms_accepted_at).toBe(attributes.app_metadata.author_age_confirmed_at);
   });
 

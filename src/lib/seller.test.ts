@@ -23,6 +23,7 @@ describe("POLICY PAGES: seller details", () => {
     expect(renderToStaticMarkup(SellerDetailsBlock({}))).toContain(SELLER_PENDING_TEXT.replace(/'/g, "&#x27;"));
     const html = renderToStaticMarkup(SellerDetailsBlock({ seller: full }));
     for (const value of Object.values(full)) expect(html).toContain(value);
-    expect(html).not.toContain("will be added");
+    expect(html).not.toContain("do të shtohen");
+    for (const label of ["Kompania", "NIPT", "Adresa", "Telefoni"]) expect(html).toContain(label);
   });
 });
