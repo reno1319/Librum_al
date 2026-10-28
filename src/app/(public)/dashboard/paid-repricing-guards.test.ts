@@ -291,7 +291,7 @@ function bookForm(price: string, extra: Record<string, string | File> = {}): For
   fd.set("description", "New description");
   fd.set("keywords", "");
   fd.set("isbn", "");
-  fd.set("genre", "Fiction");
+  fd.set("genre", "Letërsi artistike");
   fd.set("price", price);
   fd.set("confirmPriceChange", price);
   for (const [k, v] of Object.entries(extra)) fd.set(k, v);

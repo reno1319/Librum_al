@@ -22,7 +22,7 @@ const { default: BookDetailPage } = await import("./page");
 const BOOK = {
   id: "00000000-1414-4000-8000-000000000001", title: "Libri", price_cents: 0, price_all: 199,
   author_id: "1f9d4948-1414-4000-8000-000000000000", status: "published", cover_path: null,
-  series_id: null, genre: "Fiction", description: "About it.", language: null,
+  series_id: null, genre: "Letërsi artistike", description: "About it.", language: null,
   created_at: "2026-09-01T00:00:00Z", published_at: "2026-09-02T00:00:00Z", pen_name: "Jo Pen",
   pen_name_id: "f0000000-1414-4000-8000-000000000001",
   // PEN-NAMES-1: the book's pen name, embedded from public_pen_names.

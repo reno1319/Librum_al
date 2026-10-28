@@ -179,7 +179,7 @@ async function buildFormData(price: string, confirmed = false): Promise<FormData
   formData.set("description", "A description.");
   formData.set("keywords", "");
   formData.set("isbn", "");
-  formData.set("genre", "Fiction");
+  formData.set("genre", "Letërsi artistike");
   formData.set("price", price);
   if (confirmed) formData.set("confirmPriceChange", String(Number(price)));
   formData.set(

@@ -529,9 +529,9 @@ describe("BookDetailPage: redesign step 3", () => {
   });
 
   it("the breadcrumb links the bookstore and the book's genre", async () => {
-    const html = await render({ user: null, book: { ...BOOK_ROW, genre: "Poetry" } });
+    const html = await render({ user: null, book: { ...BOOK_ROW, genre: "Poezi" } });
     expect(html).toContain('aria-label="Breadcrumb"');
-    expect(html).toContain('href="/bookstore?genre=Poetry"');
+    expect(html).toContain('href="/bookstore?genre=Poezi"');
   });
 
   // FIX1 (X4): no star row until the first review.

@@ -86,7 +86,7 @@ function book(n: number, priceAll: number): Row {
   const day = String(n).padStart(2, "0");
   return {
     id: `book-${day}`, title: `Book ${day}`, author_id: "author", status: "published",
-    price_all: priceAll, genre: "Fiction", cover_path: null, description: `About ${day}.`,
+    price_all: priceAll, genre: "Letërsi artistike", cover_path: null, description: `About ${day}.`,
     created_at: `2026-10-${day}T00:00:00Z`, pen: { id: "pen-an-author", name: "An Author" },
   };
 }
@@ -176,7 +176,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
 
   it("a filtered view shows no feature block, pick or not", async () => {
     bookRows = withPick(4);
-    const html = await render({ genre: "Fiction" });
+    const html = await render({ genre: "Letërsi artistike" });
     expect(html).not.toContain("featured-book-title");
     expect(html).not.toContain("Librum&#x27;s choice");
   });
@@ -228,7 +228,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
   });
 
   it("a filtered view is the result grid alone: no feature, shelves, All books heading or band", async () => {
-    const html = await render({ genre: "Fiction" });
+    const html = await render({ genre: "Letërsi artistike" });
     expect(html).not.toContain("featured-book-title");
     expect(html).not.toContain(">New on Librum</h2>");
     expect(html).not.toContain(">Free to start reading</h2>");
@@ -239,16 +239,16 @@ describe("BookstorePage: redesign step 3 layout", () => {
   });
 
   it("marks the current genre in the genre menu", async () => {
-    const html = await render({ genre: "Fiction" });
-    expect(html).toMatch(/aria-current="true"[^>]*>Fiction</);
+    const html = await render({ genre: "Letërsi artistike" });
+    expect(html).toMatch(/aria-current="true"[^>]*>Letërsi artistike</);
   });
 
   it("puts the genres behind one button that names the current genre", async () => {
     const all = await render({});
     expect(all).toMatch(/<summary[^>]*>All genres<svg/);
     expect(all).toMatch(/<nav aria-label="Genres"/);
-    const fiction = await render({ genre: "Fiction" });
-    expect(fiction).toMatch(/<summary[^>]*>Fiction<svg/);
+    const fiction = await render({ genre: "Letërsi artistike" });
+    expect(fiction).toMatch(/<summary[^>]*>Letërsi artistike<svg/);
   });
 
   // BOOKSTORE ORNATE SHELF (Renato 10-25, header B; 1a/2a): the grid's
@@ -277,7 +277,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
   });
 
   it("has no ornate shelf on a filtered, sorted or price-limited view, or after a failed load", async () => {
-    const views: Record<string, string>[] = [{ genre: "Fiction" }, { sort: "price_asc" }, { maxPrice: "0" }];
+    const views: Record<string, string>[] = [{ genre: "Letërsi artistike" }, { sort: "price_asc" }, { maxPrice: "0" }];
     for (const params of views) {
       expect(await render(params)).not.toContain('aria-label="Newest books"');
     }

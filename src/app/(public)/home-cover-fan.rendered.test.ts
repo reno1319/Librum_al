@@ -48,7 +48,7 @@ function book(n: number, extra: Row = {}): Row {
   const day = String(n).padStart(2, "0");
   return {
     id: `book-${day}`, title: `Book ${day}`, status: "published", price_all: 199,
-    genre: "Fiction", cover_path: `c/${day}.png`, description: `About ${day}.`, pen_name: null,
+    genre: "Letërsi artistike", cover_path: `c/${day}.png`, description: `About ${day}.`, pen_name: null,
     created_at: `2026-10-${day}T00:00:00Z`, pen: { id: "pen-an-author", name: "An Author" }, ...extra,
   };
 }

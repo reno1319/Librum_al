@@ -14,7 +14,7 @@ const BOOK = {
   title: "Kënga e fundit",
   status: "draft" as const,
   price_all: 0,
-  genre: "Fiction",
+  genre: "Letërsi artistike",
   published_at: "2026-09-01T10:00:00Z",
 };
 

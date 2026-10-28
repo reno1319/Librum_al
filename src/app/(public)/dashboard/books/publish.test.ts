@@ -217,7 +217,7 @@ async function buildFormData(overrides: Record<string, string> = {}): Promise<Fo
   formData.set("description", "A description.");
   formData.set("keywords", "");
   formData.set("isbn", overrides.isbn ?? "");
-  formData.set("genre", "Fiction");
+  formData.set("genre", "Letërsi artistike");
   formData.set("price", overrides.price ?? "0");
   if (overrides.intent) formData.set("intent", overrides.intent);
   formData.set("cover", new File([new Uint8Array(PNG_SIGNATURE)], "cover.png", { type: "image/png" }));

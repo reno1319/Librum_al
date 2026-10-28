@@ -91,7 +91,7 @@ beforeEach(() => {
     keywords: "",
     isbn: null,
     language: "sq",
-    genre: "Fiction",
+    genre: "Letërsi artistike",
     publisher: null,
     edition: null,
     original_publication_date: null,

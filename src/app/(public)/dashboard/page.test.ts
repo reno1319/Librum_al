@@ -75,7 +75,7 @@ describe("DashboardPage: step 4 dashboard", () => {
     description: "",
     keywords: "",
     cover_path: null,
-    genre: "Fiction",
+    genre: "Letërsi artistike",
     published_at: "2026-10-02T10:00:00Z",
   };
   const BOOKS = [

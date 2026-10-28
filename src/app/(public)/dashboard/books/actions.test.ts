@@ -213,7 +213,7 @@ async function buildFormData(overrides: Record<string, string> = {}): Promise<Fo
   formData.set("description", overrides.description ?? "A description.");
   formData.set("keywords", "");
   formData.set("isbn", "");
-  formData.set("genre", "Fiction");
+  formData.set("genre", "Letërsi artistike");
   formData.set("price", "0");
   formData.set(
     "cover",
