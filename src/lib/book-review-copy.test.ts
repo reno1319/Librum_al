@@ -109,16 +109,16 @@ describe("words", () => {
         () => "Oct 19, 2026",
       ),
     ).toEqual([
-      "Librum sent this book back on Oct 19, 2026. Reason: Wrong or broken file.",
+      "Librum jua ktheu këtë libër për ndryshime më Oct 19, 2026. Arsyeja: Skedar i gabuar ose i dëmtuar.",
       "The file is broken.",
-      "Fix it and send it for review again.",
-      "Questions? Write to support@librum.al",
+      "Rregullojeni dhe dërgojeni përsëri për shqyrtim.",
+      "Pyetje? Na shkruani te support@librum.al",
     ]);
   });
 
   it("the publish control's label (B)", () => {
-    expect(publishControlLabel(false)).toBe("Send for review");
-    expect(publishControlLabel(true)).toBe("Publish");
+    expect(publishControlLabel(false)).toBe("Dërgojeni për shqyrtim");
+    expect(publishControlLabel(true)).toBe("Publikoni");
   });
 
   it("no author-facing sentence promises a review time", () => {

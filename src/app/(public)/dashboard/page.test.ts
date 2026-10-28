@@ -129,19 +129,19 @@ describe("DashboardPage: step 4 dashboard", () => {
     });
   });
 
-  it("shows the summary, 30-day figures and 'Not scheduled yet' when every read succeeds", async () => {
+  it("shows the summary, 30-day figures and 'Nuk është caktuar ende' when every read succeeds", async () => {
     const html = await render(TABLES, RPCS);
-    expect(html).toContain("Sales this month");
-    expect(html).toContain("Net revenue this month");
-    expect(html).toContain("Net revenue all time");
-    expect(html).toContain("Not scheduled yet");
-    expect(html).toContain("1 sale (30 days)");
-    expect(html).toContain("0 downloads (30 days)");
-    expect(html).toContain("All (3)");
-    expect(html).toContain("Published (2)");
-    expect(html).toContain("Drafts (1)");
-    expect(html).toContain("Missing: Add a cover image");
-    expect(html).not.toContain("Could not load sales data");
+    expect(html).toContain("Shitje këtë muaj");
+    expect(html).toContain("Të ardhurat neto këtë muaj");
+    expect(html).toContain("Të ardhurat neto gjithsej");
+    expect(html).toContain("Nuk është caktuar ende");
+    expect(html).toContain("1 shitje (30 ditë)");
+    expect(html).toContain("0 shkarkime (30 ditë)");
+    expect(html).toContain("Të gjithë (3)");
+    expect(html).toContain("Të publikuar (2)");
+    expect(html).toContain("Drafte (1)");
+    expect(html).toContain("Për t&#x27;u bërë: Shtoni një kopertinë");
+    expect(html).not.toContain("Të dhënat e shitjeve nuk u ngarkuan");
   });
 
   it("a failed sales read replaces every figure with the existing sentence and keeps the book list", async () => {
@@ -150,10 +150,10 @@ describe("DashboardPage: step 4 dashboard", () => {
       ...RPCS,
       author_lost_disputed_payment_intents: { data: null, error: { message: "boom" } },
     });
-    expect(html).toContain("Could not load sales data. Please try again.");
-    expect(html).not.toContain("Sales this month");
-    expect(html).not.toContain("Net revenue");
-    expect(html).not.toContain("(30 days)");
+    expect(html).toContain("Të dhënat e shitjeve nuk u ngarkuan. Provoni përsëri.");
+    expect(html).not.toContain("Shitje këtë muaj");
+    expect(html).not.toContain("Të ardhurat neto");
+    expect(html).not.toContain("(30 ditë)");
     expect(html).toContain("Era e Veriut");
     expect(html).toContain("Udhetim ne Jug");
   });
@@ -162,12 +162,12 @@ describe("DashboardPage: step 4 dashboard", () => {
     const html = await render(TABLES, RPCS);
     const { computeNextPayoutCycleDate, formatPayoutCycleDate } = await import("@/lib/payout-cycle");
     expect(html).not.toContain(formatPayoutCycleDate(computeNextPayoutCycleDate()));
-    expect(html).toContain("Not scheduled yet");
+    expect(html).toContain("Nuk është caktuar ende");
 
     vi.stubEnv("PAYOUT_SCHEDULER_ENABLED", "true");
     const enabled = await render(TABLES, RPCS);
     expect(enabled).toContain(formatPayoutCycleDate(computeNextPayoutCycleDate()));
-    expect(enabled).not.toContain("Not scheduled yet");
+    expect(enabled).not.toContain("Nuk është caktuar ende");
   });
 
   // ADMIN-3-REVIEW (F, N9): the row's IN REVIEW tag and send-back notice
@@ -185,7 +185,7 @@ describe("DashboardPage: step 4 dashboard", () => {
       ...extra,
     });
     const pending = await render({ ...TABLES, book_reviews: { data: [reviewRow("pending")], error: null } }, RPCS);
-    expect(pending).toContain(">IN REVIEW<");
+    expect(pending).toContain(">NË SHQYRTIM<");
     const sentBack = await render(
       {
         ...TABLES,
@@ -196,8 +196,8 @@ describe("DashboardPage: step 4 dashboard", () => {
       },
       RPCS,
     );
-    expect(sentBack).not.toContain(">IN REVIEW<");
-    expect(sentBack).toContain("Librum sent this book back on");
+    expect(sentBack).not.toContain(">NË SHQYRTIM<");
+    expect(sentBack).toContain("Librum jua ktheu këtë libër për ndryshime më");
     expect(sentBack).toContain("Please fix the file.");
   });
 
@@ -211,7 +211,7 @@ describe("DashboardPage: step 4 dashboard", () => {
     expect(search).not.toContain("Era e Veriut");
 
     const none = await render(TABLES, RPCS, { q: "zzz" });
-    expect(none).toContain("No books match your search.");
+    expect(none).toContain("Asnjë libër nuk përputhet me kërkimin.");
   });
 });
 
@@ -239,7 +239,7 @@ describe("DashboardPage: no greeting line (HEADER-NAME r2)", () => {
     })) as never);
     const element = await DashboardPage({ searchParams: Promise.resolve({}) });
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-    expect(html).toContain("Your dashboard");
+    expect(html).toContain("Paneli juaj");
     expect(html).not.toMatch(/>Hello\b/);
     expect(html).not.toContain("Manage your books, sales, and earnings.");
     expect(tablesRead).not.toContain("profiles");

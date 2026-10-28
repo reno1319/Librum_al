@@ -212,7 +212,7 @@ describe("decision site 5 of 13: resolvePublishReadiness", () => {
 
 describe("decision site 6 of 13: the publish checklist's price item", () => {
   function priceItem(book: Parameters<typeof getPublishChecklist>[0]) {
-    return getPublishChecklist(book).find((item) => item.label.includes("price"));
+    return getPublishChecklist(book).find((item) => item.label.includes("çmimin"));
   }
 
   it("is done for the paid row and for the free row", () => {
@@ -365,7 +365,7 @@ describe("no pure decision site reads price_cents at all", () => {
       resolvePublishReadiness({ book: legacyOnly, paidPublishingAvailable: true, hasRightsDeclaration: true }).missingAllPrice,
     ).toBe(true);
     expect(
-      getPublishChecklist(legacyOnly).find((item) => item.label.includes("price"))?.done,
+      getPublishChecklist(legacyOnly).find((item) => item.label.includes("çmimin"))?.done,
     ).toBe(false);
     expect(
       resolveDashboardAttention({

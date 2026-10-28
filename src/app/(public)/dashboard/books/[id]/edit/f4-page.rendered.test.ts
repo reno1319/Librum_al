@@ -25,7 +25,7 @@ vi.mock("../../../actions", () => ({
   cancelBookReview: { bind: () => async () => undefined },
 }));
 // ADMIN-3-REVIEW: a draft with no approval and nothing pending -- the
-// Publish control reads "Send for review" (its own states are in
+// Publish control reads "Dërgojeni për shqyrtim" (its own states are in
 // review-state.rendered.test.ts).
 vi.mock("@/lib/book-reviews", () => ({
   getBookReviewState: async () => ({ kind: "ok", pending: false, approvalValid: false, latestSentBack: null }),
@@ -84,8 +84,8 @@ function radio(html: string, basis: string): string {
 }
 
 function publishButton(html: string): string {
-  const start = html.lastIndexOf("<button", html.indexOf("Send for review</button>"));
-  return html.slice(start, html.indexOf("Send for review</button>"));
+  const start = html.lastIndexOf("<button", html.indexOf("Dërgojeni për shqyrtim</button>"));
+  return html.slice(start, html.indexOf("Dërgojeni për shqyrtim</button>"));
 }
 
 beforeEach(() => {

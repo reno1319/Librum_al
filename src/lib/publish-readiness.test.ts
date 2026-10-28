@@ -162,7 +162,7 @@ describe("resolvePublishReadiness: the missing-ALL-price blocker", () => {
       });
       expect(result.missingDescription).toBe(true);
       expect(result.recommended.map((item) => item.label)).not.toContain(
-        "Write a description (a couple of sentences or more)",
+        "Shkruani një përshkrim (disa fjali ose më shumë)",
       );
     }
   });
@@ -175,7 +175,7 @@ describe("resolvePublishReadiness: the missing-ALL-price blocker", () => {
     });
     expect(result.missingDescription).toBe(false);
     expect(result.recommended).toContainEqual({
-      label: "Write a description (a couple of sentences or more)",
+      label: "Shkruani një përshkrim (disa fjali ose më shumë)",
       done: false,
     });
   });

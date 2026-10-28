@@ -2,7 +2,7 @@
 // "In review" (public.book_reviews, migration 20261020120000). Pure and
 // client-safe: the Dashboard row, the Edit page, the actions and the
 // admin pages all read from here, so one sentence never drifts.
-import { SUPPORT_EMAIL, takedownReasonLabel } from "@/lib/takedown-reasons";
+import { SUPPORT_EMAIL, authorTakedownReasonLabel } from "@/lib/takedown-reasons";
 
 // R1 (ADMIN-2 style): authenticated holds SELECT on these columns of
 // book_reviews and no others (no id, no paths, no checklist, no
@@ -78,7 +78,7 @@ function withFinalStop(text: string): string {
   return /[.!?…]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
-export const QUESTIONS_LINE = `Questions? Write to ${SUPPORT_EMAIL}`;
+export const QUESTIONS_LINE = `Pyetje? Na shkruani te ${SUPPORT_EMAIL}`;
 
 /**
  * F: "Librum sent this book back on <date>. Reason: <label>. <message>
@@ -90,20 +90,20 @@ export function buildAuthorSentBackNoticeLines(
   formatDate: (iso: string) => string,
 ): string[] {
   return [
-    `Librum sent this book back on ${formatDate(notice.sentBackAt)}. Reason: ${takedownReasonLabel(notice.reason)}.`,
+    `Librum jua ktheu këtë libër për ndryshime më ${formatDate(notice.sentBackAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`,
     withFinalStop(notice.message),
-    "Fix it and send it for review again.",
+    "Rregullojeni dhe dërgojeni përsëri për shqyrtim.",
     QUESTIONS_LINE,
   ];
 }
 
-export const IN_REVIEW_LABEL = "In review";
+export const IN_REVIEW_LABEL = "Në shqyrtim";
 
 // B: the publish control's label. "Send for review" for a draft without
 // a valid approval; "Publish" once Librum has approved its current
 // files (3a: a republish with nothing new goes live straight away).
-export const SEND_FOR_REVIEW_LABEL = "Send for review";
-export const PUBLISH_APPROVED_LABEL = "Publish";
+export const SEND_FOR_REVIEW_LABEL = "Dërgojeni për shqyrtim";
+export const PUBLISH_APPROVED_LABEL = "Publikoni";
 
 export function publishControlLabel(approvalValid: boolean): string {
   return approvalValid ? PUBLISH_APPROVED_LABEL : SEND_FOR_REVIEW_LABEL;
@@ -111,26 +111,26 @@ export function publishControlLabel(approvalValid: boolean): string {
 
 // A: performPublish's review outcomes.
 export const SENT_FOR_REVIEW_MESSAGE =
-  "Sent for review. We'll check your book and tell you when it's live. It isn't in the Bookstore yet.";
-export const ALREADY_IN_REVIEW_MESSAGE = "This book is already waiting for review.";
+  "U dërgua për shqyrtim. Do ta kontrollojmë librin dhe do t'ju njoftojmë kur të publikohet. Nuk është ende në Librari.";
+export const ALREADY_IN_REVIEW_MESSAGE = "Ky libër po pret tashmë shqyrtimin.";
 
 // E: Cancel review.
-export const CANCEL_REVIEW_LABEL = "Cancel review";
-export const REVIEW_CANCELLED_MESSAGE = "Review cancelled. Your book is a draft again.";
-export const NOT_IN_REVIEW_MESSAGE = "This book isn't waiting for review.";
+export const CANCEL_REVIEW_LABEL = "Anuloni shqyrtimin";
+export const REVIEW_CANCELLED_MESSAGE = "Shqyrtimi u anulua. Libri juaj është përsëri draft.";
+export const NOT_IN_REVIEW_MESSAGE = "Ky libër nuk po pret shqyrtim.";
 
 // C / S5: a new file or cover on a live book.
 export const LIVE_FILES_WARNING =
-  "Changing the book file or cover takes your book out of the Bookstore until Librum approves it. Other changes go live at once.";
+  "Nëse ndryshoni skedarin e librit ose kopertinën, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
 export const LIVE_FILES_SAVED_MESSAGE =
-  "Saved. Your book is out of the Bookstore until Librum approves the new file or cover.";
-export const LIVE_FILES_REQUEST_FAILED_MESSAGE = "Saved. Press Send for review when you're ready.";
+  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.";
+export const LIVE_FILES_REQUEST_FAILED_MESSAGE = "U ruajt. Shtypni \"Dërgojeni për shqyrtim\" kur të jeni gati.";
 export const LIVE_FILES_IN_BUNDLE_MESSAGE =
-  "This book is part of a published bundle. Unpublish the bundle first, then change the file or cover.";
+  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose kopertinën.";
 
 // S3: LB462 / LB463 caught at the write (the book changed after it was
 // read).
-export const BOOK_CHANGED_WHILE_EDITING_MESSAGE = "Your book changed while you were editing. Reload and try again.";
+export const BOOK_CHANGED_WHILE_EDITING_MESSAGE = "Libri juaj ndryshoi ndërsa po e redaktonit. Rifreskoni faqen dhe provoni përsëri.";
 
 // H: the staff side.
 export const REVIEW_CHECKLIST_ITEMS = [

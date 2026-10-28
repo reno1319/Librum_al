@@ -5,6 +5,12 @@ export type ChecklistItem = { label: string; done: boolean };
 
 type ChecklistBook = Pick<Book, "description" | "keywords" | "price_all" | "cover_path">;
 
+// ALBANIAN-8: exported so publish-readiness.ts matches these items by
+// the same constant, not by a copy of the words.
+export const DESCRIPTION_CHECKLIST_LABEL = "Shkruani një përshkrim (disa fjali ose më shumë)";
+export const KEYWORDS_CHECKLIST_LABEL = "Shtoni fjalë kyçe që lexuesit ta gjejnë me kërkim";
+export const PRICE_CHECKLIST_LABEL = "Vendosni çmimin në lekë (0 për libër falas)";
+
 // Purely informational, never blocks publishing — a free price or a
 // short description can be entirely intentional (a free book, a short
 // story). This just nudges authors toward a more complete listing.
@@ -25,13 +31,13 @@ type ChecklistBook = Pick<Book, "description" | "keywords" | "price_all" | "cove
 // a reader will ever see.
 export function getPublishChecklist(book: ChecklistBook): ChecklistItem[] {
   return [
-    { label: "Add a cover image", done: !!book.cover_path },
+    { label: "Shtoni një kopertinë", done: !!book.cover_path },
     {
-      label: "Write a description (a couple of sentences or more)",
+      label: DESCRIPTION_CHECKLIST_LABEL,
       done: book.description.trim().length >= 50,
     },
     {
-      label: "Add keywords so readers can find it by search",
+      label: KEYWORDS_CHECKLIST_LABEL,
       done: book.keywords.trim().length > 0,
     },
     // ALL-WIRING-2: the item is now "has this book an ALL price at all",
@@ -45,7 +51,7 @@ export function getPublishChecklist(book: ChecklistBook): ChecklistItem[] {
     // with no authored ALL price at all, which is exactly the row that
     // cannot be published and does not appear in listings.
     {
-      label: "Set your price in lek (0 for a free ebook)",
+      label: PRICE_CHECKLIST_LABEL,
       done: resolveCatalogPriceState(book.price_all) !== "unavailable",
     },
   ];
