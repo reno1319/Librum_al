@@ -4,8 +4,8 @@ import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "How to read your book",
-  description: "Where your Librum downloads are, and how to open an EPUB on iPhone, Android, a computer or a Kindle.",
+  title: "Si ta lexoni librin tuaj",
+  description: "Ku janë librat që shkarkoni nga Librum dhe si të hapni një EPUB në iPhone, Android, kompjuter ose Kindle.",
 };
 
 // TRUST PACK (pipeline item 5, Renato 10-24): the reader help page
@@ -20,31 +20,31 @@ export const THORIUM_HREF = "https://thorium.edrlab.org/";
 const DEVICES: { id: string; heading: string; steps: string[] }[] = [
   {
     id: "iphone",
-    heading: "iPhone or iPad",
+    heading: "iPhone ose iPad",
     steps: [
-      "Tap Download EPUB. Safari saves the book to the Files app.",
-      "Open the Files app and go to Downloads.",
-      "Tap the book, tap the Share button, then choose Books.",
-      "The book opens in Apple Books and stays in its Library.",
+      "Prekni \"Shkarkoni EPUB\". Safari e ruan librin te aplikacioni Files (Skedarët).",
+      "Hapni aplikacionin Files dhe shkoni te Downloads (Shkarkimet).",
+      "Prekni librin, prekni butonin e ndarjes (Share), pastaj zgjidhni Books.",
+      "Libri hapet në Apple Books dhe mbetet në bibliotekën e tij.",
     ],
   },
   {
     id: "android",
-    heading: "Android phone or tablet",
+    heading: "Telefon ose tablet Android",
     steps: [
-      "Tap Download EPUB. The book is saved to your Downloads folder.",
-      "Open the Files app (on some phones it's called My Files) and go to Downloads.",
-      "Tap the book and choose Google Play Books, or another EPUB reading app.",
-      "If no app offers to open it, install Google Play Books from the Play Store and try again.",
+      "Prekni \"Shkarkoni EPUB\". Libri ruhet në dosjen Downloads (Shkarkimet).",
+      "Hapni aplikacionin Files (në disa telefona quhet My Files) dhe shkoni te Downloads.",
+      "Prekni librin dhe zgjidhni Google Play Books ose një aplikacion tjetër leximi për EPUB.",
+      "Nëse asnjë aplikacion nuk ofrohet ta hapë, instaloni Google Play Books nga Play Store dhe provoni përsëri.",
     ],
   },
   {
     id: "computer",
-    heading: "Computer",
+    heading: "Kompjuter",
     steps: [
-      "Click Download EPUB. The book is saved to your Downloads folder.",
-      "On a Mac, double-click the book and it opens in Apple Books.",
-      "On Windows, install Thorium Reader (free), then open the book with it.",
+      "Klikoni \"Shkarkoni EPUB\". Libri ruhet në dosjen Downloads (Shkarkimet).",
+      "Në Mac, klikoni dy herë mbi librin dhe ai hapet në Apple Books.",
+      "Në Windows, instaloni Thorium Reader (falas), pastaj hapeni librin me të.",
     ],
   },
 ];
@@ -55,11 +55,11 @@ export default function ReadingHelpPage() {
   return (
     <main className="flex-1">
       <PageBand
-        eyebrow="Help"
-        title="How to read your book"
-        lead="Every Librum book is an EPUB file with no DRM, so it opens in the reading app you already use."
+        eyebrow="Ndihmë"
+        title="Si ta lexoni librin tuaj"
+        lead="Çdo libër i Librum është një skedar EPUB pa DRM, prandaj hapet në aplikacionin e leximit që përdorni tashmë."
       >
-        <nav aria-label="Devices" className="mt-6">
+        <nav aria-label="Pajisjet" className="mt-6">
           <ul className="flex flex-wrap gap-2.5">
             {[...DEVICES, { id: "kindle", heading: "Kindle" }].map((device) => (
               <li key={device.id}>
@@ -79,33 +79,33 @@ export default function ReadingHelpPage() {
         <div className="flex max-w-2xl flex-col gap-10 leading-relaxed text-foreground/90">
           <section aria-labelledby="where-heading">
             <h2 id="where-heading" className="font-serif text-2xl font-normal text-primary">
-              Where your books are
+              Ku janë librat tuaj
             </h2>
             <p className="mt-3">
-              Every book you get on Librum, free or paid, is in{" "}
+              Çdo libër që merrni në Librum, falas ose me pagesë, është te{" "}
               <Link href="/library" className={LINK_CLASSES}>
-                your Library
+                Biblioteka ime
               </Link>
-              . Tap Download EPUB under a book to save it to your phone or
-              computer. You can download it again whenever you need to, for
-              example on a new phone.
+              . Prekni &quot;Shkarkoni EPUB&quot; poshtë librit për ta ruajtur në telefon ose
+              kompjuter. Mund ta shkarkoni përsëri sa herë të keni nevojë, për
+              shembull në një telefon të ri.
             </p>
           </section>
 
           <section aria-labelledby="cancel-heading">
             <h2 id="cancel-heading" className="font-serif text-2xl font-normal text-primary">
-              Before your first download
+              Para shkarkimit të parë
             </h2>
             <p className="mt-3">
-              You can cancel a paid purchase within 14 days, as long as you
-              haven&apos;t downloaded the book yet. Your first download ends
-              that right. While you can still cancel, you&apos;ll see a
-              reminder next to the Download button. Free books have nothing to
-              cancel. The{" "}
+              Mund ta anuloni një blerje me pagesë brenda 14 ditëve, për sa kohë
+              nuk e keni shkarkuar ende librin. Shkarkimi i parë e mbyll këtë
+              të drejtë. Sa kohë që mund ta anuloni ende, do të shihni një
+              kujtesë pranë butonit të shkarkimit. Librat falas nuk kanë asgjë
+              për të anuluar. Hollësitë janë te faqja{" "}
               <Link href="/refunds" className={LINK_CLASSES}>
-                Refund Policy
-              </Link>{" "}
-              has the details.
+                Rimbursimet
+              </Link>
+              .
             </p>
           </section>
 
@@ -126,6 +126,7 @@ export default function ReadingHelpPage() {
                   Thorium Reader:{" "}
                   <a href={THORIUM_HREF} target="_blank" rel="noopener noreferrer" className={LINK_CLASSES}>
                     thorium.edrlab.org
+                    <span className="sr-only"> (hapet në një skedë të re)</span>
                   </a>
                 </p>
               )}
@@ -137,27 +138,28 @@ export default function ReadingHelpPage() {
               Kindle
             </h2>
             <p className="mt-3">
-              Kindle doesn&apos;t open EPUB files straight from your downloads,
-              but Amazon&apos;s free Send to Kindle service takes them. Download
-              the book first, then send it from Amazon&apos;s{" "}
+              Kindle nuk i hap skedarët EPUB drejtpërdrejt nga shkarkimet, por
+              shërbimi falas Send to Kindle i Amazon i pranon. Fillimisht
+              shkarkoni librin, pastaj dërgojeni nga{" "}
               <a href={SEND_TO_KINDLE_HREF} target="_blank" rel="noopener noreferrer" className={LINK_CLASSES}>
-                Send to Kindle page
+                faqja Send to Kindle e Amazon
+                <span className="sr-only"> (hapet në një skedë të re)</span>
               </a>
-              . It then appears on your Kindle and in the Kindle app. Amazon
-              converts the file, so the layout can look a little different.
+              . Pastaj libri shfaqet në Kindle dhe në aplikacionin Kindle. Amazon
+              e konverton skedarin, prandaj faqosja mund të duket pak ndryshe.
             </p>
           </section>
 
           <section aria-labelledby="problem-heading">
             <h2 id="problem-heading" className="font-serif text-2xl font-normal text-primary">
-              Book won&apos;t download or open?
+              Libri nuk shkarkohet ose nuk hapet?
             </h2>
             <p className="mt-3">
-              Email{" "}
+              Shkruani te{" "}
               <a href={`mailto:${SUPPORT_EMAIL}`} className={LINK_CLASSES}>
                 {SUPPORT_EMAIL}
               </a>{" "}
-              and tell us which book and which device. {REPLY_PROMISE}
+              dhe na tregoni cili libër dhe cila pajisje. {REPLY_PROMISE}
             </p>
           </section>
         </div>

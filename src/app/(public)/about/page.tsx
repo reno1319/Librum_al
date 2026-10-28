@@ -7,8 +7,8 @@ import { visibleTeam } from "@/lib/team";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "About",
-  description: "Librum is a self-publishing platform for digital ebooks, built for Albanian-language authors.",
+  title: "Rreth nesh",
+  description: "Librum është një platformë vetëbotimi për libra elektronikë, e krijuar për autorët që shkruajnë shqip.",
 };
 
 // LIBRUM 2.0 UI-1: the representative page for the design-system
@@ -28,6 +28,9 @@ export const metadata: Metadata = {
 //
 // TRUST PACK (pipeline item 5, 3. a and 4. a): "Who we are" renders only
 // once src/lib/team.ts holds the team's own words.
+//
+// ALBANIAN-13 (Renato's a): the first paragraph no longer says "no
+// waiting for approval"; every new book waits for Librum's review.
 
 export default async function AboutPage() {
   const cta = await getAuthorPageCta();
@@ -35,45 +38,45 @@ export default async function AboutPage() {
 
   return (
     <main className="flex-1">
-      <PageBand eyebrow="About" title="About Librum" />
+      <PageBand eyebrow="Rreth nesh" title="Rreth Librum" />
 
       <div className={SECTION_CONTAINER}>
         <div className="max-w-2xl">
           <div className="flex flex-col gap-4 leading-relaxed text-foreground/90">
             <p>
-              Librum is a self-publishing platform for digital ebooks. Authors
-              upload their work, set their own price, and publish directly to
-              readers — no gatekeepers, no submission queue, no waiting for
-              approval.
+              Librum është një platformë vetëbotimi për libra elektronikë.
+              Autorët ngarkojnë veprat e tyre, vendosin vetë çmimin dhe botojnë
+              drejtpërdrejt për lexuesit, pa botues ndërmjet. Librum kontrollon
+              çdo libër para se të dalë në Librari.
             </p>
 
             <p>
-              We handle the parts that are genuinely hard to do well: secure file
-              storage, payment processing, and getting authors paid. Everything
-              else — what to write, how to price it, when to publish — stays in
-              the author&apos;s hands.
+              Ne merremi me pjesët që janë vërtet të vështira për t&apos;u bërë
+              mirë: ruajtjen e sigurt të skedarëve, pagesat e lexuesve dhe
+              pagesat për autorët. Gjithçka tjetër (çfarë të shkruani, çfarë
+              çmimi t&apos;i vini, kur ta publikoni) mbetet në duart e autorit.
             </p>
           </div>
 
           <section className="mt-12">
-            <h2 className="font-serif text-2xl font-normal text-primary">How the money works</h2>
+            <h2 className="font-serif text-2xl font-normal text-primary">Si funksionojnë paratë</h2>
             <p className="mt-3 text-foreground/90">
-              Librum takes a {PLATFORM_FEE_PERCENT}% platform fee on every sale,
-              once paid publishing launches. Paid publishing and author payout
-              setup have not launched yet — authors can continue to publish
-              free books while Librum completes its payment and payout
-              systems. See{" "}
+              Kur të nisë botimi me pagesë, Librum do të marrë një tarifë
+              platforme prej {PLATFORM_FEE_PERCENT}% për çdo shitje. Botimi me
+              pagesë dhe pagesat për autorët nuk janë aktivizuar ende: autorët
+              mund të vazhdojnë të publikojnë libra falas, ndërsa Librum
+              përfundon sistemet e pagesave. Shihni{" "}
               <Link href="/how-it-works" className="text-primary underline">
-                how self-publishing works
+                si funksionon vetëbotimi
               </Link>{" "}
-              for the full walkthrough.
+              për të gjithë procesin.
             </p>
           </section>
 
           {team.length > 0 && (
             <section className="mt-12" aria-labelledby="team-heading">
               <h2 id="team-heading" className="font-serif text-2xl font-normal text-primary">
-                Who we are
+                Kush jemi
               </h2>
               <ul className="mt-4 flex flex-col gap-6">
                 {team.map((member) => (
@@ -90,15 +93,15 @@ export default async function AboutPage() {
           <section className="mt-12">
             <SurfaceCard className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="font-serif text-lg font-normal text-primary">Questions?</h2>
+                <h2 className="font-serif text-lg font-normal text-primary">Keni pyetje?</h2>
                 <p className="mt-1 text-sm text-foreground/90">
-                  Check the{" "}
+                  Shihni fillimisht{" "}
                   <Link href="/help" className="text-primary underline">
-                    help page
-                  </Link>{" "}
-                  first, or{" "}
+                    faqen e ndihmës
+                  </Link>
+                  , ose{" "}
                   <Link href="/contact" className="text-primary underline">
-                    get in touch
+                    na kontaktoni
                   </Link>
                   .
                 </p>

@@ -251,7 +251,7 @@ describe("Edit page: Shikoni faqen e librit para botimit (PREVIEW-1)", () => {
     setUp();
     const html = publishing(await render());
     expect(html).toContain(LINK);
-    expect(html).toContain("Shikoni faqen e librit para botimit<span class=\"sr-only\"> (hapet në skedë të re)</span>");
+    expect(html).toContain("Shikoni faqen e librit para botimit<span class=\"sr-only\"> (hapet në një skedë të re)</span>");
     expect(html).toContain("Tregon ndryshimet e ruajtura së fundmi.");
     expect(html.indexOf(LINK)).toBeGreaterThan(html.indexOf("Status:"));
   });

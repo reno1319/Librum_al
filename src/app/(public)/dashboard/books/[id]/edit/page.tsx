@@ -471,7 +471,7 @@ export default async function EditBookPage({
                           className="focus-ring rounded-sm underline"
                         >
                           Krijoni fillimisht një seri
-                          <span className="sr-only"> (hapet në skedë të re)</span>
+                          <span className="sr-only"> (hapet në një skedë të re)</span>
                         </Link>
                         , pastaj kthehuni këtu.
                       </p>
@@ -721,7 +721,7 @@ export default async function EditBookPage({
                   className="focus-ring rounded-sm font-medium text-foreground underline"
                 >
                   Shikoni faqen e librit para botimit
-                  <span className="sr-only"> (hapet në skedë të re)</span>
+                  <span className="sr-only"> (hapet në një skedë të re)</span>
                 </Link>
                 . Tregon ndryshimet e ruajtura së fundmi.
               </p>

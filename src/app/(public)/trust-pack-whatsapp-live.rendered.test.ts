@@ -28,7 +28,7 @@ describe("TRUST PACK 6: WhatsApp contact, once a number is filled in", () => {
   it("Contact shows the chat link in a new tab, without referrer", () => {
     const html = renderToStaticMarkup(ContactPage());
     expect(html).toContain('href="https://wa.me/355600000000" target="_blank" rel="noopener noreferrer"');
-    expect(toText(html)).toContain("Chat on WhatsApp");
+    expect(toText(html)).toContain("Na shkruani në WhatsApp (hapet në një skedë të re)");
   });
 
   it("Privacy names WhatsApp in the processors, messages and retention", () => {

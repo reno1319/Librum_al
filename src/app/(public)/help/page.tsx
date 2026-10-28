@@ -7,8 +7,8 @@ import { ClosingCtaBand, PageBand, SECTION_CONTAINER } from "@/components/page-b
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Help",
-  description: "Frequently asked questions about publishing and buying ebooks on Librum.",
+  title: "Ndihmë",
+  description: "Pyetjet më të shpeshta për botimin dhe blerjen e librave elektronikë në Librum.",
 };
 
 // AUTHOR PAGES REDESIGN: the answers in four groups (Renato's list);
@@ -21,91 +21,96 @@ export const metadata: Metadata = {
 // TRUST PACK (pipeline item 5): "How do I open a book I downloaded?"
 // links to the reader help page (1. a), and the reply promise sits under
 // the list (5. a). An answer can end with one link.
+//
+// ALBANIAN-13 (Renato's a): three answers written before book review
+// existed now say what the site does: the editing answer adds that a
+// new cover or file waits for Librum's approval (LIVE_FILES_WARNING),
+// and "not in the Bookstore" names the review.
 type Faq = { q: string; a: string; link?: { href: string; label: string } };
 
 const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
   {
     id: "publishing",
-    heading: "Publishing",
+    heading: "Botimi",
     faqs: [
       {
-        q: "What file formats can I upload?",
-        a: "EPUB, or DOCX (Librum converts it into an EPUB for you), up to 50MB, plus a JPG or PNG cover image up to 5MB.",
+        q: "Çfarë skedarësh mund të ngarkoj?",
+        a: "EPUB, ose DOCX (Librum e kthen në EPUB për ju), deri në 50 MB, si dhe një kopertinë JPG ose PNG deri në 5 MB.",
       },
       {
-        q: "Can I edit a book after publishing it?",
-        a: "Yes — from your dashboard, click Edit on any book to change its title, description, genre, price, cover, or manuscript. Replacing the cover or manuscript is optional; leave those fields blank to keep the current file.",
+        q: "A mund ta ndryshoj një libër pasi e kam publikuar?",
+        a: "Po. Te Paneli i autorit, shtypni \"Ndryshoni\" te libri për të ndryshuar titullin, përshkrimin, zhanrin, çmimin, kopertinën ose dorëshkrimin. Kopertina dhe dorëshkrimi i ri janë opsionalë: lërini bosh ato fusha për të mbajtur skedarët e tanishëm. Nëse ndryshoni kopertinën ose skedarin e librit, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.",
       },
       {
-        q: "Can I publish under a pen name?",
-        a: "Yes. Each book has an optional \"Pen name\" field under the title.",
+        q: "A mund të botoj me pseudonim?",
+        a: "Po. Çdo libër ka fushën opsionale \"Pseudonimi\" poshtë titullit.",
       },
       {
-        q: "Can I change my price after publishing?",
-        a: `Yes. Open Edit on the book and change the price. A paid price is at least ${MINIMUM_PAID_CATALOG_PRICE_ALL} ALL.`,
+        q: "A mund ta ndryshoj çmimin pasi e kam publikuar?",
+        a: `Po. Hapni \"Ndryshoni\" te libri dhe ndryshoni çmimin. Një çmim me pagesë është të paktën ${MINIMUM_PAID_CATALOG_PRICE_ALL} lekë.`,
       },
       {
-        q: "Why is my book not in the Bookstore?",
-        a: "A book shows in the Bookstore once it is published and has a price. Free counts as a price.",
+        q: "Pse libri im nuk është në Librari?",
+        a: "Një libër shfaqet në Librari pasi e dërgoni për shqyrtim, Librum e miraton dhe libri ka një çmim. Edhe \"Falas\" llogaritet si çmim.",
       },
     ],
   },
   {
     id: "money",
-    heading: "Money",
+    heading: "Paratë",
     faqs: [
       {
-        q: "How do I get paid?",
-        a: `Paid publishing and author payout setup have not launched yet. Authors can continue to publish free books while Librum completes its payment and payout systems. When paid publishing launches, the current commission terms allocate ${100 - PLATFORM_FEE_PERCENT}% to the author and ${PLATFORM_FEE_PERCENT}% to Librum. The author payout method and timing will be published before paid publishing launches.`,
+        q: "Si paguhem?",
+        a: `Botimi me pagesë dhe pagesat për autorët nuk janë aktivizuar ende. Autorët mund të vazhdojnë të publikojnë libra falas, ndërsa Librum përfundon sistemet e pagesave. Kur të nisë botimi me pagesë, sipas kushteve aktuale të komisionit autori merr ${100 - PLATFORM_FEE_PERCENT}% dhe Librum ${PLATFORM_FEE_PERCENT}%. Mënyra dhe koha e pagesave për autorët do të publikohen para se të nisë botimi me pagesë.`,
       },
       {
-        q: "What happens to my earnings if a sale is refunded?",
-        a: "The corresponding proceeds you received from that sale are reversed, and Librum's platform fee for that sale is refunded too — Librum doesn't keep its fee on a refunded sale.",
+        q: "Çfarë ndodh me fitimet e mia nëse një shitje rimbursohet?",
+        a: "Të ardhurat që morët nga ajo shitje anulohen, dhe rimbursohet edhe tarifa e platformës së Librum për atë shitje: Librum nuk e mban tarifën e vet për një shitje të rimbursuar.",
       },
       {
-        q: "What happens if a buyer wins a chargeback or payment dispute?",
-        a: `If a dispute is ultimately resolved against the payment, Librum may recover from you only the remaining proceeds you actually retained from that sale — never more. You're never charged Librum's own ${PLATFORM_FEE_PERCENT}% platform-fee share of a lost dispute, and Librum bears the payment processor's dispute fee under current policy.`,
+        q: "Çfarë ndodh nëse një blerës fiton një kundërshtim të pagesës?",
+        a: `Nëse kundërshtimi zgjidhet përfundimisht kundër pagesës, Librum mund t'ju kërkojë vetëm të ardhurat që mbajtët realisht nga ajo shitje, asnjëherë më shumë. Nuk paguani kurrë pjesën prej ${PLATFORM_FEE_PERCENT}% të tarifës së platformës së Librum për një kundërshtim të humbur, dhe sipas rregullave aktuale Librum paguan vetë tarifën që merr për kundërshtimin ofruesi i pagesave.`,
       },
     ],
   },
   {
     id: "buying",
-    heading: "Buying and reading",
+    heading: "Blerja dhe leximi",
     faqs: [
       {
-        q: "How do I open a book I downloaded?",
-        a: "Librum books are EPUB files with no DRM. They open in Apple Books, Google Play Books and most other reading apps, and Kindle takes them through Amazon's Send to Kindle.",
-        link: { href: "/help/reading", label: "How to read your book, step by step" },
+        q: "Si ta hap një libër që kam shkarkuar?",
+        a: "Librat e Librum janë skedarë EPUB pa DRM. Hapen në Apple Books, Google Play Books dhe në shumicën e aplikacioneve të tjera të leximit, ndërsa Kindle i merr përmes shërbimit Send to Kindle të Amazon.",
+        link: { href: "/help/reading", label: "Si ta lexoni librin tuaj, hap pas hapi" },
       },
       {
-        q: "How do refunds work?",
-        a: "There's no self-serve refund request yet — reach out from the contact page. The refund process for POK purchases will be published before paid sales launch. Once a refund is processed, you'll lose access to the book automatically (it disappears from downloads, though it stays listed in your library marked as refunded).",
+        q: "Si funksionojnë rimbursimet?",
+        a: "Ende nuk mund ta kërkoni vetë një rimbursim në faqe: na shkruani nga faqja e kontaktit. Procesi i rimbursimit për blerjet me POK do të publikohet para se të nisin shitjet me pagesë. Pasi rimbursimi kryhet, humbni automatikisht aksesin te libri (nuk mund ta shkarkoni më, por mbetet në bibliotekën tuaj me shënimin që është rimbursuar).",
       },
       {
-        q: "What happens if I dispute a payment with my bank?",
-        a: "That's handled through your card or bank's own dispute process, separately from Librum. Opening a dispute doesn't by itself remove your access to the purchase. If the dispute is ultimately resolved against the payment, your access to that purchase may be removed.",
+        q: "Çfarë ndodh nëse e kundërshtoj një pagesë te banka ime?",
+        a: "Kjo trajtohet nga procedura e kundërshtimit e kartës ose e bankës suaj, veçmas nga Librum. Hapja e një kundërshtimi nuk jua heq vetvetiu aksesin te blerja. Nëse kundërshtimi zgjidhet përfundimisht kundër pagesës, aksesi te ajo blerje mund t'ju hiqet.",
       },
       {
-        q: "Is my payment information safe?",
-        a: "Librum is currently in pre-launch testing. When paid purchases launch publicly, checkout will take place on POK's hosted payment page and will be charged in ALL — Librum never sees or stores your card details.",
+        q: "A janë të sigurta të dhënat e pagesës sime?",
+        a: "Librum është tani në testim, para nisjes. Kur të nisin blerjet me pagesë, pagesa do të bëhet në faqen e pagesës së POK dhe do të tarifohet në lekë. Librum nuk i sheh dhe nuk i ruan kurrë të dhënat e kartës suaj.",
       },
       {
-        q: "Can readers preview a book before buying?",
-        a: "Yes — click \"Read sample\" on any published book's page for an excerpt from the opening of the book, generated automatically from the manuscript.",
+        q: "A mund ta shohin lexuesit një pjesë të librit para se ta blejnë?",
+        a: "Po. Shtypni \"Lexoni një pjesë\" në faqen e çdo libri të publikuar për të lexuar fillimin e librit, të marrë automatikisht nga dorëshkrimi.",
       },
     ],
   },
   {
     id: "rights",
-    heading: "Rights and reports",
+    heading: "Të drejtat dhe raportimet",
     faqs: [
       {
-        q: "Which rights statement should I choose?",
-        a: "Your own book, or one you have permission to publish: the first. An old book whose copyright has expired: the second, and only if any translation you upload is also free of copyright.",
+        q: "Cilën deklaratë të të drejtave duhet të zgjedh?",
+        a: "Për librin tuaj, ose për një libër që keni leje ta publikoni: të parën. Për një libër të vjetër, të cilit i ka skaduar e drejta e autorit: të dytën, dhe vetëm nëse edhe përkthimi që ngarkoni nuk mbrohet më nga e drejta e autorit.",
       },
       {
-        q: "I found a book that shouldn't be on Librum — what do I do?",
-        a: "Click \"Report this book\" near the bottom of its page and tell us why. We review every report.",
+        q: "Gjeta një libër që nuk duhet të jetë në Librum. Çfarë të bëj?",
+        a: "Shtypni \"Raportoni këtë libër\" pranë fundit të faqes së tij dhe na tregoni arsyen. E shqyrtojmë çdo raportim.",
       },
     ],
   },
@@ -120,8 +125,8 @@ export default async function HelpPage() {
 
   return (
     <main className="flex-1">
-      <PageBand eyebrow="Help" title="Help & FAQ" lead="Answers for authors and readers.">
-        <nav aria-label="Help topics" className="mt-6">
+      <PageBand eyebrow="Ndihmë" title="Ndihmë dhe pyetje të shpeshta" lead="Përgjigje për autorët dhe lexuesit.">
+        <nav aria-label="Temat e ndihmës" className="mt-6">
           <ul className="flex flex-wrap gap-2.5">
             {FAQ_GROUPS.map((group) => (
               <li key={group.id}>
@@ -174,9 +179,9 @@ export default async function HelpPage() {
           ))}
 
           <p className="text-sm text-muted">
-            Didn&apos;t find your answer?{" "}
+            Nuk e gjetët përgjigjen?{" "}
             <Link href="/contact" className="text-primary underline">
-              Get in touch
+              Na kontaktoni
             </Link>
             . {REPLY_PROMISE}
           </p>

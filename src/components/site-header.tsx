@@ -166,13 +166,13 @@ export async function SiteHeader() {
               greeting) ran into the right-hand group, so that range uses
               slightly smaller text and gaps, and this group no longer
               shrinks: the name in the greeting is shortened instead. */}
-          <nav className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex lg:flex-nowrap lg:gap-x-3 lg:text-[0.9375rem] lg:whitespace-nowrap xl:gap-x-6 xl:text-base">
+          <nav aria-label="Kryesore" className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex lg:flex-nowrap lg:gap-x-3 lg:text-[0.9375rem] lg:whitespace-nowrap xl:gap-x-6 xl:text-base">
             <NavLinks items={nav.primaryLinks} onDark />
           </nav>
         </div>
 
         <div className="flex min-w-0 items-center gap-3">
-          <nav className="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap">
+          <nav aria-label="Llogaria" className="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap">
             {nav.recoveryLabel && (
               <span className="text-primary-foreground/80">{nav.recoveryLabel}</span>
             )}
