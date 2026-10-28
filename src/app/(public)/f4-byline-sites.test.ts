@@ -98,7 +98,8 @@ describe("PEN-NAMES-1: places that named the author now name the pen name", () =
   it("the follower email names the book's pen name (4a)", () => {
     const source = readSrc("lib/email.ts");
     expect(source).not.toContain("resolveBookByline");
-    expect(source).toContain("const authorName = penName.name;");
+    expect(source).toContain("const authorName = escapeEmailHtml(penName.name);");
+    expect(source).toContain("const subject = `${penName.name} publikoi një libër të ri`;");
   });
 
   it("the staff report page still shows the account's names (staff-only)", () => {
