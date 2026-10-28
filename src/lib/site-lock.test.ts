@@ -58,8 +58,10 @@ describe("locked page", () => {
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(response.headers.get("set-cookie")).toBeNull();
     const html = await response.text();
-    expect(html).toContain("under construction");
-    expect(html).toContain("Librum po ndërtohet. Hapemi së shpejti.");
+    expect(html).toContain('<html lang="sq">');
+    expect(html).toContain("<title>Librum është në ndërtim</title>");
+    expect(html).toContain("Faqja jonë është në ndërtim. Hapemi së shpejti.");
+    expect(html).not.toContain("under construction");
     expect(html).toContain('<meta name="robots" content="noindex, nofollow">');
     expect(html).toContain("mailto:support@librum.al");
     expect(html).not.toContain(KEY);

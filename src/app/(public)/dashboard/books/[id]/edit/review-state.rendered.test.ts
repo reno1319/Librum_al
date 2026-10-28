@@ -183,7 +183,7 @@ describe("Edit page: sent back (F)", () => {
   it("shows the send-back notice above the publish control", async () => {
     reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK };
     const html = await render();
-    expect(html).toContain("Librum sent this book back on Oct 19, 2026. Reason: ");
+    expect(html).toContain("Librum sent this book back on 19 tetor 2026. Reason: ");
     expect(html).toContain("The cover is blurry.");
     expect(html).toContain("Fix it and send it for review again.");
     expect(html).toContain("Questions? Write to support@librum.al");

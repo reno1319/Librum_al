@@ -126,7 +126,7 @@ describe("Edit page: a book Librum took down", () => {
     };
     const html = await render();
     expect(html).toContain("Taken down by Librum</span>");
-    expect(html).toContain("Taken down by Librum on Oct 19, 2026. Reason: Copyright complaint.");
+    expect(html).toContain("Taken down by Librum on 19 tetor 2026. Reason: Copyright complaint.");
     expect(html).toContain("Please send proof.");
     expect(html).toContain("We also unpublished: Set A.");
     expect(html).toContain("Questions? Write to support@librum.al");
