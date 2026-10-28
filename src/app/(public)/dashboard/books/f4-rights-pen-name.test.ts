@@ -487,7 +487,7 @@ describe("pen name (P1, PEN-NAMES-1 10a/14a/11a)", () => {
   it("updateBook: 14a -- a book in a series or bundle keeps its pen name (LB452): take it out first", async () => {
     writerError = { code: "LB452", message: "pen names: the book is in a series or bundle" };
     expect(await redirectOf(updateBook(BOOK_ID, editForm({ penName: "Jo Pen" })))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=Ky libër është në një seri ose paketë. Hiqeni prej saj më parë, pastaj ndryshojini pseudonimin.`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Ky libër është në një seri ose paketë. Hiqeni prej saj më parë, pastaj ndryshoni pseudonimin.`,
     );
   });
 

@@ -57,7 +57,7 @@ describe("discount code actions: maintenance-mode gate", () => {
     // validation, not the maintenance gate; proves the gate itself is
     // off and the function proceeds into its normal logic.
     await expect(createDiscountCode(new FormData())).rejects.toMatchObject({
-      target: "/dashboard/discounts?error=Please+fill+in+every+field",
+      target: "/dashboard/discounts?error=Plot%C3%ABsoni%20t%C3%AB%20gjitha%20fushat",
     });
     expect(mockCreateClient).toHaveBeenCalled();
   });
@@ -113,7 +113,7 @@ function discountForm(fields: Record<string, string | File>) {
 
 const BASE_FIELDS = { bookId: "book-1", code: "launch20" };
 const FIXED_ERROR =
-  "/dashboard/discounts?error=Fixed+amount+off+must+be+a+whole+number+of+lek+from+1+to+100000";
+  "/dashboard/discounts?error=Zbritja%20me%20shum%C3%AB%20fikse%20duhet%20t%C3%AB%20jet%C3%AB%20nj%C3%AB%20num%C3%ABr%20i%20plot%C3%AB%20lek%C3%ABsh%20nga%201%20deri%20n%C3%AB%20100.000";
 
 describe("createDiscountCode: ALL fixed discounts and payload shape", () => {
   let stub: ReturnType<typeof recordingClient>;
@@ -132,7 +132,7 @@ describe("createDiscountCode: ALL fixed discounts and payload shape", () => {
 
   it("percentage creation writes exactly the percentage shape", async () => {
     const outcome = await submit({ ...BASE_FIELDS, type: "percent", value: "20", expiresAt: "2026-12-31" });
-    expect(outcome).toMatchObject({ target: "/dashboard/discounts?success=Discount+code+created" });
+    expect(outcome).toMatchObject({ target: "/dashboard/discounts?success=Kodi%20i%20zbritjes%20u%20krijua" });
     expect(stub.inserts).toHaveLength(1);
     const payload = stub.inserts[0];
     expect(Object.keys(payload).sort()).toEqual(
@@ -149,7 +149,7 @@ describe("createDiscountCode: ALL fixed discounts and payload shape", () => {
   it("percentage bounds and parsing are unchanged", async () => {
     for (const value of ["0", "101", "12.5", "abc", ""]) {
       const outcome = await submit({ ...BASE_FIELDS, type: "percent", value });
-      expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Percent+off+must+be+between+1+and+100" });
+      expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=P%C3%ABrqindja%20e%20zbritjes%20duhet%20t%C3%AB%20jet%C3%AB%20nga%201%20deri%20n%C3%AB%20100" });
     }
     expect(stub.inserts).toHaveLength(0);
     await submit({ ...BASE_FIELDS, type: "percent", value: "100" });
@@ -166,7 +166,7 @@ describe("createDiscountCode: ALL fixed discounts and payload shape", () => {
     [" 0250 ", 250],
   ])("fixed creation of %j writes integer amount_off_all = %d and nothing else", async (value, expected) => {
     const outcome = await submit({ ...BASE_FIELDS, type: "amount_all", value });
-    expect(outcome).toMatchObject({ target: "/dashboard/discounts?success=Discount+code+created" });
+    expect(outcome).toMatchObject({ target: "/dashboard/discounts?success=Kodi%20i%20zbritjes%20u%20krijua" });
     expect(stub.inserts).toHaveLength(1);
     const payload = stub.inserts[0];
     expect(Object.keys(payload).sort()).toEqual(
@@ -208,14 +208,14 @@ describe("createDiscountCode: ALL fixed discounts and payload shape", () => {
 
   it("the retired USD type 'amount' is refused instead of being stored as lek", async () => {
     const outcome = await submit({ ...BASE_FIELDS, type: "amount", value: "5" });
-    expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Choose+a+discount+type" });
+    expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Zgjidhni%20llojin%20e%20zbritjes" });
     expect(stub.inserts).toHaveLength(0);
   });
 
   it("an unknown or missing type is refused", async () => {
     for (const type of ["", "amount_cents", "AMOUNT_ALL"]) {
       const outcome = await submit({ ...BASE_FIELDS, type, value: "5" });
-      expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Choose+a+discount+type" });
+      expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Zgjidhni%20llojin%20e%20zbritjes" });
     }
     expect(stub.inserts).toHaveLength(0);
   });
@@ -225,7 +225,7 @@ describe("createDiscountCode: ALL fixed discounts and payload shape", () => {
     mockCreateClient.mockImplementation(async () => stub.client);
     const outcome = await submit({ ...BASE_FIELDS, type: "amount_all", value: "250" });
     expect(outcome).toMatchObject({
-      target: `/dashboard/discounts?error=${encodeURIComponent("That code already exists for this book")}`,
+      target: `/dashboard/discounts?error=${encodeURIComponent("Ky kod ekziston tashmë për këtë libër")}`,
     });
   });
 });
@@ -255,7 +255,7 @@ describe("createDiscountCode / toggle / delete: authorization is preserved", () 
     mockCreateClient.mockImplementation(async () => stub.client);
     await expect(
       createDiscountCode(discountForm({ ...BASE_FIELDS, type: "amount_all", value: "250" })),
-    ).rejects.toMatchObject({ target: "/dashboard/discounts?error=Choose+one+of+your+own+books" });
+    ).rejects.toMatchObject({ target: "/dashboard/discounts?error=Zgjidhni%20nj%C3%AB%20nga%20librat%20tuaj" });
     expect(stub.inserts).toHaveLength(0);
     const eqs = stub.calls.filter((c) => c.table === "books" && c.op === "eq").map((c) => c.args);
     expect(eqs).toEqual([["id", "book-1"], ["author_id", "author-1"]]);
@@ -315,7 +315,7 @@ describe("createDiscountCode: max uses and expiry", () => {
 
   it.each([["1", 1], [" 25 ", 25], ["100000", 100_000]])("max uses %j is stored as %d", async (maxUses, expected) => {
     const outcome = await submit({ maxUses });
-    expect(outcome).toMatchObject({ target: "/dashboard/discounts?success=Discount+code+created" });
+    expect(outcome).toMatchObject({ target: "/dashboard/discounts?success=Kodi%20i%20zbritjes%20u%20krijua" });
     expect(stub.inserts).toHaveLength(1);
     expect(stub.inserts[0].max_uses).toBe(expected);
   });
@@ -332,7 +332,7 @@ describe("createDiscountCode: max uses and expiry", () => {
   it.each(["0", "100001", "-3", "2.5", "1e2", "ten"])("max uses %j never reaches the insert", async (maxUses) => {
     const outcome = await submit({ maxUses });
     expect(outcome).toMatchObject({
-      target: "/dashboard/discounts?error=Max+uses+must+be+a+whole+number+from+1+to+100000",
+      target: "/dashboard/discounts?error=Numri%20maksimal%20i%20p%C3%ABrdorimeve%20duhet%20t%C3%AB%20jet%C3%AB%20nj%C3%AB%20num%C3%ABr%20i%20plot%C3%AB%20nga%201%20deri%20n%C3%AB%20100.000",
     });
     expect(stub.inserts).toHaveLength(0);
   });
@@ -349,7 +349,7 @@ describe("createDiscountCode: max uses and expiry", () => {
 
   it("a malformed date never reaches the insert", async () => {
     const outcome = await submit({ expiresAt: "2026-02-30" });
-    expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Choose+a+valid+expiry+date" });
+    expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Zgjidhni%20nj%C3%AB%20dat%C3%AB%20skadimi%20t%C3%AB%20vlefshme" });
     expect(stub.inserts).toHaveLength(0);
   });
 });

@@ -32,7 +32,7 @@ export async function createDiscountCode(formData: FormData) {
   const expiresAt = String(formData.get("expiresAt") ?? "").trim();
 
   if (!bookId || !code) {
-    redirect("/dashboard/discounts?error=Please+fill+in+every+field");
+    redirect(`/dashboard/discounts?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   const { data: book } = await supabase
@@ -43,7 +43,7 @@ export async function createDiscountCode(formData: FormData) {
     .maybeSingle();
 
   if (!book) {
-    redirect("/dashboard/discounts?error=Choose+one+of+your+own+books");
+    redirect(`/dashboard/discounts?error=${encodeURIComponent("Zgjidhni një nga librat tuaj")}`);
   }
 
   // ALL-DISCOUNT-3: exactly ONE discount column is named in the insert,
@@ -56,7 +56,7 @@ export async function createDiscountCode(formData: FormData) {
     // Unchanged percentage parsing and bounds.
     const value = Number(rawValue ?? 0);
     if (!Number.isInteger(value) || value < 1 || value > 100) {
-      redirect("/dashboard/discounts?error=Percent+off+must+be+between+1+and+100");
+      redirect(`/dashboard/discounts?error=${encodeURIComponent("Përqindja e zbritjes duhet të jetë nga 1 deri në 100")}`);
     }
     discount = { percent_off: value };
   } else if (type === FIXED_ALL_DISCOUNT_FORM_TYPE) {
@@ -66,11 +66,11 @@ export async function createDiscountCode(formData: FormData) {
     // checkout.
     const parsed = parseFixedDiscountAll(rawValue);
     if (!parsed.ok) {
-      redirect("/dashboard/discounts?error=Fixed+amount+off+must+be+a+whole+number+of+lek+from+1+to+100000");
+      redirect(`/dashboard/discounts?error=${encodeURIComponent("Zbritja me shumë fikse duhet të jetë një numër i plotë lekësh nga 1 deri në 100.000")}`);
     }
     discount = { amount_off_all: parsed.amountOffAll };
   } else {
-    redirect("/dashboard/discounts?error=Choose+a+discount+type");
+    redirect(`/dashboard/discounts?error=${encodeURIComponent("Zgjidhni llojin e zbritjes")}`);
   }
 
   // DISCOUNT-LIMIT-1: the picked date works through the end of that day
@@ -80,7 +80,7 @@ export async function createDiscountCode(formData: FormData) {
   if (expiresAt) {
     expiresAtInstant = discountExpiryInstant(expiresAt);
     if (!expiresAtInstant) {
-      redirect("/dashboard/discounts?error=Choose+a+valid+expiry+date");
+      redirect(`/dashboard/discounts?error=${encodeURIComponent("Zgjidhni një datë skadimi të vlefshme")}`);
     }
   }
 
@@ -88,7 +88,7 @@ export async function createDiscountCode(formData: FormData) {
   // of the payload altogether rather than sent as null.
   const maxUses = parseMaxUses(formData.get("maxUses"));
   if (!maxUses.ok) {
-    redirect("/dashboard/discounts?error=Max+uses+must+be+a+whole+number+from+1+to+100000");
+    redirect(`/dashboard/discounts?error=${encodeURIComponent("Numri maksimal i përdorimeve duhet të jetë një numër i plotë nga 1 deri në 100.000")}`);
   }
 
   const { error } = await supabase.from("discount_codes").insert({
@@ -102,14 +102,17 @@ export async function createDiscountCode(formData: FormData) {
   });
 
   if (error) {
+    // ALBANIAN-11: the database's own text (English, technical) is logged,
+    // never shown; the author sees a fixed Albanian message.
+    if (error.code !== "23505") console.error("createDiscountCode: insert failed:", error.code);
     const message = error.code === "23505"
-      ? "That code already exists for this book"
-      : error.message;
+      ? "Ky kod ekziston tashmë për këtë libër"
+      : "Kodi nuk u krijua dot. Provoni përsëri.";
     redirect(`/dashboard/discounts?error=${encodeURIComponent(message)}`);
   }
 
   revalidatePath("/dashboard/discounts");
-  redirect("/dashboard/discounts?success=Discount+code+created");
+  redirect(`/dashboard/discounts?success=${encodeURIComponent("Kodi i zbritjes u krijua")}`);
 }
 
 export async function toggleDiscountCode(id: string, currentlyActive: boolean) {

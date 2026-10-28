@@ -358,7 +358,7 @@ describe("saveAuthorPayoutDestination", () => {
 
     expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard/balance");
     expect(redirectTarget).toContain("/dashboard/balance");
-    expect(redirectTarget).toContain(encodeURIComponent("Bank details saved."));
+    expect(redirectTarget).toContain(encodeURIComponent("Të dhënat bankare u ruajtën."));
     expect(redirectTarget.toLowerCase()).not.toContain("verified");
   });
 
@@ -398,7 +398,7 @@ describe("saveAuthorPayoutDestination", () => {
     }
 
     expect(redirectTarget).not.toContain("connection reset by peer");
-    expect(redirectTarget).toContain(encodeURIComponent("We couldn't save your bank details"));
+    expect(redirectTarget).toContain(encodeURIComponent("Të dhënat bankare nuk u ruajtën"));
   });
 });
 

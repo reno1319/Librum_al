@@ -34,10 +34,10 @@ export function formatMinorAmount(amountMinor: number, currency: string): string
 }
 
 const ENTRY_TYPE_LABELS: Record<AuthorFinancialActivityRow["entry_type"], string> = {
-  sale: "Sale",
-  refund: "Refund",
-  payout: "Payout",
-  adjustment: "Adjustment",
+  sale: "Shitje",
+  refund: "Rimbursim",
+  payout: "Pagesë për autorin",
+  adjustment: "Rregullim",
 };
 
 export function entryTypeLabel(entryType: AuthorFinancialActivityRow["entry_type"]): string {
@@ -99,12 +99,12 @@ export function resolveActivityPage(
 // with the provider, a genuinely different fact from either terminal
 // state (migration 051's own reasoning for the state existing at all).
 const PAYOUT_STATUS_LABELS: Record<AuthorPayoutHistoryRow["status"], string> = {
-  pending: "Pending",
-  processing: "Processing",
-  reconciling: "Under review",
-  paid: "Paid",
-  failed: "Failed",
-  cancelled: "Cancelled",
+  pending: "Në pritje",
+  processing: "Në përpunim",
+  reconciling: "Në kontroll",
+  paid: "E paguar",
+  failed: "Dështoi",
+  cancelled: "E anuluar",
 };
 
 export function payoutStatusLabel(status: AuthorPayoutHistoryRow["status"]): string {

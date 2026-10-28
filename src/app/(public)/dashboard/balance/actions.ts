@@ -37,7 +37,7 @@ export async function getAuthorFinancialSummary(): Promise<FinancialSummaryResul
 
   if (error) {
     console.error("getAuthorFinancialSummary: RPC failed", { error });
-    return { ok: false, error: "Could not load your financial summary. Please try again." };
+    return { ok: false, error: "Përmbledhja juaj financiare nuk u ngarkua. Provoni përsëri." };
   }
 
   return { ok: true, data: (data ?? []) as AuthorFinancialSummaryRow[] };
@@ -65,7 +65,7 @@ export async function listAuthorFinancialActivity(
 
   if (error) {
     console.error("listAuthorFinancialActivity: RPC failed", { error });
-    return { ok: false, error: "Could not load your recent activity. Please try again." };
+    return { ok: false, error: "Lëvizjet tuaja të fundit nuk u ngarkuan. Provoni përsëri." };
   }
 
   return { ok: true, data: (data ?? []) as AuthorFinancialActivityRow[] };
@@ -86,7 +86,7 @@ export async function getAuthorPayoutOverview(): Promise<PayoutOverviewResult> {
 
   if (error) {
     console.error("getAuthorPayoutOverview: RPC failed", { error });
-    return { ok: false, error: "Could not load your payout overview. Please try again." };
+    return { ok: false, error: "Përmbledhja e pagesave tuaja nuk u ngarkua. Provoni përsëri." };
   }
 
   return { ok: true, data: (data ?? []) as AuthorPayoutOverviewRow[] };
@@ -114,7 +114,7 @@ export async function listAuthorPayoutHistory(
 
   if (error) {
     console.error("listAuthorPayoutHistory: RPC failed", { error });
-    return { ok: false, error: "Could not load your payout history. Please try again." };
+    return { ok: false, error: "Historiku i pagesave tuaja nuk u ngarkua. Provoni përsëri." };
   }
 
   return { ok: true, data: (data ?? []) as AuthorPayoutHistoryRow[] };
@@ -153,7 +153,7 @@ export async function getAuthorPayoutDestination(): Promise<AuthorPayoutDestinat
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return { ok: false, error: "Not authenticated." };
+    return { ok: false, error: "Nuk jeni identifikuar." };
   }
 
   const { data, error } = await supabase
@@ -169,7 +169,7 @@ export async function getAuthorPayoutDestination(): Promise<AuthorPayoutDestinat
     // non-data-bearing enum value), never the row itself or the raw
     // error object's own message text.
     console.error("getAuthorPayoutDestination: read failed", { code: error.code });
-    return { ok: false, error: "Could not load your bank account details. Please try again." };
+    return { ok: false, error: "Të dhënat e llogarisë suaj bankare nuk u ngarkuan. Provoni përsëri." };
   }
 
   return { ok: true, data: data as AuthorPayoutDestination | null };
@@ -189,18 +189,18 @@ export async function getAuthorPayoutDestination(): Promise<AuthorPayoutDestinat
 // forwarded to the browser.
 function mapDestinationRpcError(message: string): string {
   if (message.includes("beneficiary_name is required")) {
-    return "Please enter the account holder's name.";
+    return "Shkruani emrin e mbajtësit të llogarisë.";
   }
   if (message.includes("iban is required")) {
-    return "Please enter your IBAN.";
+    return "Shkruani IBAN-in tuaj.";
   }
   if (message.includes("does not match the expected Albanian IBAN format")) {
-    return "That doesn't look like a valid Albanian IBAN (it should start with AL, followed by 26 digits or letters).";
+    return "Ky nuk duket si IBAN i vlefshëm shqiptar (duhet të fillojë me AL dhe të vazhdojë me 26 shifra ose shkronja).";
   }
   if (message.includes("fails checksum validation")) {
-    return "That IBAN doesn't look valid. Please double-check the number and try again.";
+    return "Ky IBAN nuk duket i vlefshëm. Kontrollojeni numrin dhe provoni përsëri.";
   }
-  return "We couldn't save your bank details. Please check the information and try again.";
+  return "Të dhënat bankare nuk u ruajtën. Kontrolloni të dhënat dhe provoni përsëri.";
 }
 
 // Server Action for the "Add/Change bank account" form (Section 9).
@@ -227,7 +227,7 @@ export async function saveAuthorPayoutDestination(formData: FormData): Promise<v
   // field -- no destination RPC call, no write of any kind, when
   // disabled.
   if (!isBankPayoutSetupEnabled(process.env.BANK_PAYOUT_SETUP_ENABLED)) {
-    redirect(`/dashboard/balance?error=${encodeURIComponent("Bank payout setup isn't available yet.")}`);
+    redirect(`/dashboard/balance?error=${encodeURIComponent("Konfigurimi i pagesave bankare nuk është i disponueshëm ende.")}`);
   }
 
   const supabase = await createClient();
@@ -244,7 +244,7 @@ export async function saveAuthorPayoutDestination(formData: FormData): Promise<v
 
   if (!beneficiaryName || !iban) {
     redirect(
-      `/dashboard/balance?editBank=1&error=${encodeURIComponent("Please fill in both the account holder name and IBAN.")}`,
+      `/dashboard/balance?editBank=1&error=${encodeURIComponent("Plotësoni edhe emrin e mbajtësit të llogarisë, edhe IBAN-in.")}`,
     );
   }
 
@@ -265,5 +265,5 @@ export async function saveAuthorPayoutDestination(formData: FormData): Promise<v
   }
 
   revalidatePath("/dashboard/balance");
-  redirect(`/dashboard/balance?success=${encodeURIComponent("Bank details saved.")}`);
+  redirect(`/dashboard/balance?success=${encodeURIComponent("Të dhënat bankare u ruajtën.")}`);
 }

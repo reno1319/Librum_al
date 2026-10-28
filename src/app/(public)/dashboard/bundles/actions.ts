@@ -152,7 +152,7 @@ export async function createBundle(formData: FormData) {
   const parsedPrice = parseCatalogPriceAll(formData.get("price"));
 
   if (!title) {
-    redirect(`/dashboard/bundles?error=${encodeURIComponent("Plotësoni çdo fushë")}`);
+    redirect(`/dashboard/bundles?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   // A rejected price performs NO insert: this redirect precedes every
@@ -261,7 +261,7 @@ export async function updateBundle(bundleId: string, formData: FormData) {
   const parsedPrice = parseCatalogPriceAll(formData.get("price"));
 
   if (!title) {
-    redirect(`/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent("Plotësoni çdo fushë")}`);
+    redirect(`/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   // Precedes the single trusted save (details AND membership)

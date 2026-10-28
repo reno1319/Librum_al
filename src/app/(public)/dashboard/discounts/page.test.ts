@@ -106,16 +106,16 @@ describe("DiscountsPage: ALL discount creation and display", () => {
   it("the creation control offers percentage and ALL fixed discounts, with no USD label", async () => {
     const html = await renderWith([]);
     const form = html.match(/<form[\s\S]*?<\/form>/)![0];
-    expect(form).toContain('<option value="percent" selected="">Percentage off</option>');
-    expect(form).toContain('<option value="amount_all">Fixed amount off (ALL, lek)</option>');
+    expect(form).toContain('<option value="percent" selected="">Zbritje në përqindje</option>');
+    expect(form).toContain('<option value="amount_all">Zbritje me shumë fikse (lekë)</option>');
     expect(form).not.toMatch(/USD|\$/);
     expect(form).not.toContain('value="amount"');
     // A text value field, so "250,00" is enterable; no float step.
     expect(form).toMatch(/<input type="text" inputMode="decimal"[^>]*name="value"\/>/);
     expect(form).not.toContain('step="0.01"');
-    expect(form).toContain("from 1 to 100000 ALL");
+    expect(form).toContain("nga 1 deri në 100.000 lekë");
     // The page description names lek, not dollars.
-    expect(html).toContain("a fixed amount in lek (ALL) off");
+    expect(html).toContain("një shumë fikse në lekë");
     expect(html).not.toMatch(/\$\d/);
   });
 
@@ -125,10 +125,10 @@ describe("DiscountsPage: ALL discount creation and display", () => {
       codeRow("c2", "BIG2500", { amount_off_all: 2500 }),
     ]);
     const small = rowFor(html, "SMALL1");
-    expect(small).toContain("1 lek off");
+    expect(small).toContain("1 lek zbritje");
     expect(small).not.toContain("99,00");
-    expect(small).not.toMatch(/legacy/i);
-    expect(rowFor(html, "BIG2500")).toContain("2.500 lekë off");
+    expect(small).not.toMatch(/legacy|e vjetër/i);
+    expect(rowFor(html, "BIG2500")).toContain("2.500 lekë zbritje");
     // The bug this replaces: an amount_off_all row used to render "$0.00 off".
     expect(html).not.toContain("$0.00");
   });
@@ -136,21 +136,21 @@ describe("DiscountsPage: ALL discount creation and display", () => {
   it("renders a percentage code accurately", async () => {
     const html = await renderWith([codeRow("c1", "PCT20", { percent_off: 20 })]);
     const row = rowFor(html, "PCT20");
-    expect(row).toContain("20% off");
-    expect(row).not.toMatch(/ALL off|USD|legacy/i);
+    expect(row).toContain("20% zbritje");
+    expect(row).not.toMatch(/ALL zbritje|USD|legacy|e vjetër/i);
   });
 
   it("marks a legacy amount_off_cents code as legacy USD and inapplicable, never as ALL", async () => {
     const html = await renderWith([codeRow("c1", "OLDUSD", { amount_off_cents: 500 })]);
     const row = rowFor(html, "OLDUSD");
-    expect(row).toContain("USD 5.00 off");
-    expect(row).toContain("Legacy USD discount: not applicable to ALL checkout");
-    expect(row).not.toMatch(/\d[\d.,]*\s*ALL off/);
+    expect(row).toContain("USD 5.00 zbritje");
+    expect(row).toContain("Zbritje e vjetër në USD: nuk vlen për pagesat në lekë");
+    expect(row).not.toMatch(/\d[\d.,]*\s*ALL zbritje/);
     expect(row).not.toContain("5 lekë");
     expect(row).not.toContain("500 lekë");
     // Existing enable/disable and delete controls are unchanged for it.
-    expect(row).toContain("Disable");
-    expect(row).toContain("Delete");
+    expect(row).toContain("Çaktivizoni");
+    expect(row).toContain("Fshini");
   });
 
   it("renders all three shapes side by side, each with its own label", async () => {
@@ -159,10 +159,10 @@ describe("DiscountsPage: ALL discount creation and display", () => {
       codeRow("c2", "ALLTWO", { amount_off_all: 200 }),
       codeRow("c3", "USDTHREE", { amount_off_cents: 300 }),
     ]);
-    expect(rowFor(html, "PCTTEN")).toContain("10% off");
-    expect(rowFor(html, "ALLTWO")).toContain("200 lekë off");
-    expect(rowFor(html, "USDTHREE")).toContain("USD 3.00 off");
-    expect(html.match(/not applicable to ALL checkout/g)).toHaveLength(1);
+    expect(rowFor(html, "PCTTEN")).toContain("10% zbritje");
+    expect(rowFor(html, "ALLTWO")).toContain("200 lekë zbritje");
+    expect(rowFor(html, "USDTHREE")).toContain("USD 3.00 zbritje");
+    expect(html.match(/nuk vlen për pagesat në lekë/g)).toHaveLength(1);
   });
 });
 
@@ -177,8 +177,8 @@ describe("DiscountsPage: max uses and use counts", () => {
   it("the creation form has an optional Max uses field", async () => {
     const html = await renderWith([]);
     const form = html.match(/<form[\s\S]*?<\/form>/)![0];
-    expect(form).toContain("Max uses (optional)");
-    expect(form).toMatch(/<input(?=[^>]*name="maxUses")(?=[^>]*placeholder="No limit")[^>]*>/);
+    expect(form).toContain("Numri maksimal i përdorimeve (opsional)");
+    expect(form).toMatch(/<input(?=[^>]*name="maxUses")(?=[^>]*placeholder="Pa kufi")[^>]*>/);
     expect(form).not.toMatch(/<input(?=[^>]*name="maxUses")[^>]*required/);
   });
 
@@ -192,10 +192,10 @@ describe("DiscountsPage: max uses and use counts", () => {
       undefined,
       { data: [{ discount_code_id: "c1", uses: 3 }, { discount_code_id: "c2", uses: 7 }], error: null },
     );
-    expect(rowFor(html, "LIMITED")).toContain("Used 3 of 10");
-    expect(rowFor(html, "UNLIMITED")).toContain("Used 7");
-    expect(rowFor(html, "UNLIMITED")).not.toContain(" of ");
-    expect(rowFor(html, "UNUSED")).toContain("Used 0 of 5");
+    expect(rowFor(html, "LIMITED")).toContain("Përdorur: 3 nga 10");
+    expect(rowFor(html, "UNLIMITED")).toContain("Përdorur: 7");
+    expect(rowFor(html, "UNLIMITED")).not.toContain(" nga ");
+    expect(rowFor(html, "UNUSED")).toContain("Përdorur: 0 nga 5");
   });
 
   it("shows no counts at all when the count function fails", async () => {
@@ -204,14 +204,13 @@ describe("DiscountsPage: max uses and use counts", () => {
       undefined,
       { data: null, error: { code: "PGRST202", message: "not found" } },
     );
-    expect(rowFor(html, "LIMITED")).not.toContain("Used");
+    expect(rowFor(html, "LIMITED")).not.toContain("Përdorur");
   });
 
   it("shows the picked day as the expiry date, in Albania", async () => {
     const html = await renderWith([
       { ...codeRow("c1", "SUMMER", { percent_off: 10 }), expires_at: "2027-07-10T22:00:00.000Z" },
     ]);
-    const expected = new Date(Date.UTC(2027, 6, 10, 12)).toLocaleDateString(undefined, { timeZone: "UTC" });
-    expect(rowFor(html, "SUMMER")).toContain(`Expires ${expected}`);
+    expect(rowFor(html, "SUMMER")).toContain("Vlen deri më 10 korrik 2027");
   });
 });

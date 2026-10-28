@@ -114,7 +114,7 @@ export function parsePenNameName(value: unknown): PenNameNameResult {
 export const PEN_NAME_MIXED_MESSAGE =
   "Një seri ose paketë mban vetëm libra me të njëjtin pseudonim. Zgjidhni libra me të njëjtin pseudonim.";
 export const PEN_NAME_LOCKED_MESSAGE =
-  "Ky libër është në një seri ose paketë. Hiqeni prej saj më parë, pastaj ndryshojini pseudonimin.";
+  "Ky libër është në një seri ose paketë. Hiqeni prej saj më parë, pastaj ndryshoni pseudonimin.";
 export const PEN_NAME_TAKEN_MESSAGE =
   "Këtë emër e përdorni tashmë si një nga pseudonimet tuaja. Zgjidhni një emër tjetër, ose ndryshoni më parë emrin e atij pseudonimi.";
 
