@@ -244,7 +244,7 @@ describe("performPublish: order price -> description -> rights -> paid (P4)", ()
     publishRead = { ...publishRead, price_all: null };
     mockRightsState.mockResolvedValue({ kind: "none" });
     expect(await redirectOf(publishBook(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=Set this book's price in lek before publishing it.`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Vendosni çmimin e librit në lekë para se ta publikoni.`,
     );
     expect(mockRightsState).not.toHaveBeenCalled();
   });
@@ -253,7 +253,7 @@ describe("performPublish: order price -> description -> rights -> paid (P4)", ()
     publishRead = { ...publishRead, description: "  " };
     mockRightsState.mockResolvedValue({ kind: "none" });
     expect(await redirectOf(publishBook(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=Add a description before publishing.`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Shtoni një përshkrim para publikimit.`,
     );
     expect(mockRightsState).not.toHaveBeenCalled();
   });
@@ -263,7 +263,7 @@ describe("performPublish: order price -> description -> rights -> paid (P4)", ()
     vi.stubEnv("PAID_PUBLISHING_MODE", "");
     mockRightsState.mockResolvedValue({ kind: "none" });
     expect(await redirectOf(publishBook(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=Choose the rights before publishing.`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Zgjidhni të drejtat para publikimit.`,
     );
     expect(mockRightsState).toHaveBeenCalledWith(BOOK_ID);
     expect(publishWrites()).toEqual([]);
@@ -272,7 +272,7 @@ describe("performPublish: order price -> description -> rights -> paid (P4)", ()
   it("an unreadable declaration -> rights_unavailable: the existing generic sentence on the dashboard", async () => {
     mockRightsState.mockResolvedValue({ kind: "unavailable" });
     expect(await redirectOf(publishBook(BOOK_ID))).toBe(
-      "/dashboard?error=We couldn't publish your book yet. Please try again from your dashboard",
+      "/dashboard?error=Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj",
     );
     expect(publishWrites()).toEqual([]);
   });
@@ -280,12 +280,12 @@ describe("performPublish: order price -> description -> rights -> paid (P4)", ()
   it("with a declaration, a paid book without paid permission is refused by the paid check", async () => {
     publishRead = { ...publishRead, price_all: 199 };
     vi.stubEnv("PAID_PUBLISHING_MODE", "");
-    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?error=Paid publishing isn't available right now");
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?error=Publikimi me pagesë nuk është i mundur tani");
     expect(publishWrites()).toEqual([]);
   });
 
   it("with a declaration, publishes", async () => {
-    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your book is now live");
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Libri juaj u publikua");
     expect(publishWrites()).toHaveLength(1);
   });
 
@@ -304,16 +304,16 @@ describe("performPublish: order price -> description -> rights -> paid (P4)", ()
 });
 
 describe("createBook: the rights choice (P3/P4)", () => {
-  it("Save as draft without a choice saves the book and records nothing", async () => {
+  it("Ruajeni si draft without a choice saves the book and records nothing", async () => {
     expect(await redirectOf(createBook(createForm({ intent: "draft" })))).toBe("/dashboard");
     expect(writerInserts()).toHaveLength(1);
     expect(mockRecordRights).not.toHaveBeenCalled();
   });
 
-  it("Publish without a choice keeps the draft and refuses with Saved as draft", async () => {
+  it("Publish without a choice keeps the draft and refuses with U ruajt si draft", async () => {
     mockRightsState.mockResolvedValue({ kind: "none" });
     expect(await redirectOf(createBook(createForm({ intent: "publish" })))).toBe(
-      "/dashboard?success=Saved as draft&error=Choose the rights before publishing.",
+      "/dashboard?success=U ruajt si draft&error=Zgjidhni të drejtat para publikimit.",
     );
     expect(writerInserts()).toHaveLength(1);
     expect(publishWrites()).toEqual([]);
@@ -323,7 +323,7 @@ describe("createBook: the rights choice (P3/P4)", () => {
     mockRightsState.mockResolvedValue({ kind: "unavailable" });
     mockRecordRights.mockResolvedValue({ ok: false, reason: "feature_off" });
     expect(await redirectOf(createBook(createForm({ intent: "publish", rightsBasis: "own_rights" })))).toBe(
-      "/dashboard?success=Saved as draft&error=We couldn't publish your book yet. Please try again from your dashboard",
+      "/dashboard?success=U ruajt si draft&error=Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj",
     );
     expect(writerInserts()).toHaveLength(1);
   });
@@ -332,7 +332,7 @@ describe("createBook: the rights choice (P3/P4)", () => {
     "records exactly one declaration, for the new book's server id and the submitted basis (%s)",
     async (basis) => {
       const form = createForm({ intent: "publish", rightsBasis: basis, bookId: "client-chosen-id" });
-      expect(await redirectOf(createBook(form))).toBe("/dashboard?success=Your book is now live");
+      expect(await redirectOf(createBook(form))).toBe("/dashboard?success=Libri juaj u publikua");
       const insertedId = (method(writerInserts()[0], "insert")!.args[0] as { id: string }).id;
       expect(mockRecordRights).toHaveBeenCalledTimes(1);
       expect(mockRecordRights).toHaveBeenCalledWith(insertedId, basis);
@@ -349,7 +349,7 @@ describe("createBook: the rights choice (P3/P4)", () => {
     mockRecordRights.mockResolvedValue({ ok: false, reason: "error" });
     mockRightsState.mockResolvedValue({ kind: "none" });
     expect(await redirectOf(createBook(createForm({ intent: "publish", rightsBasis: "own_rights" })))).toBe(
-      "/dashboard?success=Saved as draft&error=Choose the rights before publishing.",
+      "/dashboard?success=U ruajt si draft&error=Zgjidhni të drejtat para publikimit.",
     );
     expect(writerInserts()).toHaveLength(1);
   });
@@ -359,7 +359,7 @@ describe("updateBook: the rights choice is recorded only when it changes (P3)", 
   it("no declaration yet -> recorded, after the proven save", async () => {
     mockRightsState.mockResolvedValue({ kind: "none" });
     expect(await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain" })))).toBe(
-      "/dashboard?success=Book updated",
+      "/dashboard?success=Libri u përditësua",
     );
     expect(mockRecordRights).toHaveBeenCalledWith(BOOK_ID, "public_domain");
     expect(writerUpdates()).toHaveLength(1);
@@ -378,7 +378,7 @@ describe("updateBook: the rights choice is recorded only when it changes (P3)", 
   it("unavailable -> nothing recorded, the save stands", async () => {
     mockRightsState.mockResolvedValue({ kind: "unavailable" });
     expect(await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain" })))).toBe(
-      "/dashboard?success=Book updated",
+      "/dashboard?success=Libri u përditësua",
     );
     expect(mockRecordRights).not.toHaveBeenCalled();
   });
@@ -402,7 +402,7 @@ describe("updateBook: the rights choice is recorded only when it changes (P3)", 
     mockRightsState.mockResolvedValue({ kind: "none" });
     mockRecordRights.mockResolvedValue({ ok: false, reason: "error" });
     expect(await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "own_rights" })))).toBe(
-      "/dashboard?success=Book updated",
+      "/dashboard?success=Libri u përditësua",
     );
   });
 });
@@ -445,7 +445,7 @@ describe("pen name (P1, PEN-NAMES-1 10a/14a/11a)", () => {
   it("createBook: a failed resolution -> the existing save-failure message, nothing uploaded", async () => {
     mockResolvePenName.mockResolvedValue({ ok: false, reason: "failed" });
     expect(await redirectOf(createBook(createForm({ intent: "draft", penName: "Jo Pen" })))).toBe(
-      "/dashboard/books/new?error=Something went wrong saving your book. Please try again",
+      "/dashboard/books/new?error=Diçka shkoi keq gjatë ruajtjes së librit. Provoni përsëri",
     );
     expect(uploads).toEqual([]);
   });
@@ -460,7 +460,7 @@ describe("pen name (P1, PEN-NAMES-1 10a/14a/11a)", () => {
   it("createBook: any other write error -> the existing save-failure message", async () => {
     writerError = { code: "PGRST204", message: "Could not find the 'pen_name_id' column" };
     expect(await redirectOf(createBook(createForm({ intent: "draft", penName: "Jo Pen" })))).toBe(
-      "/dashboard/books/new?error=Something went wrong saving your book. Please try again",
+      "/dashboard/books/new?error=Diçka shkoi keq gjatë ruajtjes së librit. Provoni përsëri",
     );
   });
 
@@ -494,7 +494,7 @@ describe("pen name (P1, PEN-NAMES-1 10a/14a/11a)", () => {
   it("updateBook: any other write error -> the existing save-failure message", async () => {
     writerError = { code: "23514", message: "violates check constraint" };
     expect(await redirectOf(updateBook(BOOK_ID, editForm({ penName: "Jo Pen" })))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=Something went wrong saving your changes. Please try again`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri`,
     );
   });
 });
@@ -518,7 +518,7 @@ describe("Translator (P2) and the one error slot", () => {
 
   it("121 characters: no insert, the book is kept, the contributor message shows", async () => {
     expect(await redirectOf(createBook(createForm({ intent: "draft", translator: "t".repeat(121) })))).toBe(
-      "/dashboard?error=We couldn't add the contributor. Please try again.",
+      "/dashboard?error=Bashkëpunëtori nuk u shtua dot. Provoni përsëri.",
     );
     expect(contributorInserts()).toEqual([]);
     expect(writerInserts()).toHaveLength(1);
@@ -532,7 +532,7 @@ describe("Translator (P2) and the one error slot", () => {
   it("an insert failure keeps the book and shows the contributor message", async () => {
     contributorError = { code: "42501", message: "denied" };
     expect(await redirectOf(createBook(createForm({ intent: "draft", translator: "Ana" })))).toBe(
-      "/dashboard?error=We couldn't add the contributor. Please try again.",
+      "/dashboard?error=Bashkëpunëtori nuk u shtua dot. Provoni përsëri.",
     );
     expect(writerInserts()).toHaveLength(1);
   });
@@ -540,7 +540,7 @@ describe("Translator (P2) and the one error slot", () => {
   it("a successful publish keeps its success line and adds the contributor message", async () => {
     contributorError = { code: "42501", message: "denied" };
     expect(await redirectOf(createBook(createForm({ intent: "publish", translator: "Ana", rightsBasis: "own_rights" })))).toBe(
-      "/dashboard?success=Your book is now live&error=We couldn't add the contributor. Please try again.",
+      "/dashboard?success=Libri juaj u publikua&error=Bashkëpunëtori nuk u shtua dot. Provoni përsëri.",
     );
   });
 
@@ -548,7 +548,7 @@ describe("Translator (P2) and the one error slot", () => {
     contributorError = { code: "42501", message: "denied" };
     mockRightsState.mockResolvedValue({ kind: "none" });
     expect(await redirectOf(createBook(createForm({ intent: "publish", translator: "Ana" })))).toBe(
-      "/dashboard?success=Saved as draft&error=Choose the rights before publishing.",
+      "/dashboard?success=U ruajt si draft&error=Zgjidhni të drejtat para publikimit.",
     );
   });
 });
@@ -559,14 +559,14 @@ describe("updateBook: a published book keeps its description (P6, FIX1 A5)", () 
     const form = editForm({ description: "   " });
     form.set("cover", new File([new Uint8Array(PNG_SIGNATURE)], "cover.png", { type: "image/png" }));
     expect(await redirectOf(updateBook(BOOK_ID, form))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=A published book needs a description.`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Një libër i publikuar duhet të ketë përshkrim.`,
     );
     expect(uploads).toEqual([]);
     expect(writerUpdates()).toEqual([]);
   });
 
   it("a draft may clear it, and that write also requires the row to still be a draft", async () => {
-    expect(await redirectOf(updateBook(BOOK_ID, editForm({ description: "" })))).toBe("/dashboard?success=Book updated");
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ description: "" })))).toBe("/dashboard?success=Libri u përditësua");
     expect(writerUpdates()[0].ops).toContainEqual({ method: "eq", args: ["status", "draft"] });
   });
 
@@ -580,7 +580,7 @@ describe("updateBook: a published book keeps its description (P6, FIX1 A5)", () 
   it("a published book with a description saves normally, with no draft condition added", async () => {
     existingRow = { ...existingRow, status: "published" };
     expect(await redirectOf(updateBook(BOOK_ID, editForm({ description: "Still here." })))).toBe(
-      "/dashboard?success=Book updated",
+      "/dashboard?success=Libri u përditësua",
     );
     expect(writerUpdates()[0].ops).not.toContainEqual({ method: "eq", args: ["status", "draft"] });
   });

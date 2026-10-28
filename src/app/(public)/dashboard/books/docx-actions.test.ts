@@ -101,7 +101,7 @@ describe("parseDocxToDocument", () => {
     const result = await parseDocxToDocument(foreignPath);
     expect(result).toEqual({
       success: false,
-      error: "Something went wrong converting this document. Please try again.",
+      error: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
     });
     expect(fakeStorage.objects.has(foreignPath)).toBe(true);
   });
@@ -111,7 +111,7 @@ describe("parseDocxToDocument", () => {
     const result = await parseDocxToDocument(`${USER_ID}/tmp/docx/abc.docx`);
     expect(result).toEqual({
       success: false,
-      error: "Your session has expired. Please refresh the page and try again.",
+      error: "Seanca juaj ka skaduar. Rifreskoni faqen dhe provoni përsëri.",
     });
   });
 
@@ -119,7 +119,7 @@ describe("parseDocxToDocument", () => {
     const result = await parseDocxToDocument(`${USER_ID}/tmp/docx/does-not-exist.docx`);
     expect(result).toEqual({
       success: false,
-      error: "Something went wrong converting this document. Please try again.",
+      error: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
     });
   });
 
@@ -205,7 +205,7 @@ describe("repackageWithTitle", () => {
     const result = await repackageWithTitle("someone-else/tmp/epub/x.epub", "Title", "Author");
     expect(result).toEqual({
       success: false,
-      error: "Something went wrong converting this document. Please try again.",
+      error: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
     });
   });
 
@@ -213,7 +213,7 @@ describe("repackageWithTitle", () => {
     const result = await repackageWithTitle(`${USER_ID}/tmp/epub/missing.epub`, "Title", "Author");
     expect(result).toEqual({
       success: false,
-      error: "Something went wrong converting this document. Please try again.",
+      error: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
     });
   });
 

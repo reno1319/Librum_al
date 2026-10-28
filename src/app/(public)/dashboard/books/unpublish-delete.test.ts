@@ -195,7 +195,7 @@ describe("unpublishBook: published-bundle-membership gate (PHASE-2C)", () => {
 
     const target = mockRedirect.mock.calls[0][0] as string;
     expect(target).toContain("/dashboard?error=");
-    expect(target).toContain("published+bundle");
+    expect(target).toContain(encodeURIComponent("pakete të publikuar"));
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
   });
 
@@ -279,7 +279,7 @@ describe("deleteBook: published-bundle-membership gate (PHASE-2C)", () => {
 
     const target = mockRedirect.mock.calls[0][0] as string;
     expect(target).toContain("/dashboard?error=");
-    expect(target).toContain("published+bundle");
+    expect(target).toContain(encodeURIComponent("pakete të publikuar"));
     expect(mockPurchaseCountResult).not.toHaveBeenCalled();
   });
 
@@ -308,7 +308,7 @@ describe("deleteBook: published-bundle-membership gate (PHASE-2C)", () => {
     await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?error=This+book+has+been+acquired+by+readers+and+can%27t+be+deleted+-+unpublish+it+instead",
+      "/dashboard?error=K%C3%ABt%C3%AB%20lib%C3%ABr%20e%20kan%C3%AB%20marr%C3%AB%20lexues%20dhe%20nuk%20mund%20t%C3%AB%20fshihet.%20Hiqeni%20nga%20publikimi",
     );
   });
 
@@ -318,7 +318,7 @@ describe("deleteBook: published-bundle-membership gate (PHASE-2C)", () => {
 
     await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?error=Could+not+delete+that+book+right+now");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20fshihet%20tani");
   });
 
   it("unowned/missing book: redirected, membership never queried", async () => {
@@ -362,7 +362,7 @@ describe("deleteBook: a book Librum took down (ADMIN-2)", () => {
 
     await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?error=Could+not+delete+that+book+right+now");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20fshihet%20tani");
     expect(mockBookDeleteResult).not.toHaveBeenCalled();
   });
 

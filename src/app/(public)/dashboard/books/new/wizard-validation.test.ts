@@ -10,26 +10,21 @@ import {
 } from "./wizard-validation";
 
 describe("canAdvanceFromBookDetails", () => {
-  it("requires a non-blank title, language, and genre", () => {
+  it("requires a non-blank title and genre (ALBANIAN-9: no language step)", () => {
     expect(
-      canAdvanceFromBookDetails({ title: "My Book", language: "sq", genre: "Letërsi artistike" }),
+      canAdvanceFromBookDetails({ title: "My Book", genre: "Letërsi artistike" }),
     ).toBe(true);
   });
 
   it("rejects a blank title", () => {
-    expect(canAdvanceFromBookDetails({ title: "   ", language: "sq", genre: "Letërsi artistike" })).toBe(
+    expect(canAdvanceFromBookDetails({ title: "   ", genre: "Letërsi artistike" })).toBe(
       false,
     );
   });
 
-  it("rejects a missing language", () => {
-    expect(canAdvanceFromBookDetails({ title: "My Book", language: "", genre: "Letërsi artistike" })).toBe(
-      false,
-    );
-  });
 
   it("rejects a missing genre", () => {
-    expect(canAdvanceFromBookDetails({ title: "My Book", language: "sq", genre: "" })).toBe(
+    expect(canAdvanceFromBookDetails({ title: "My Book", genre: "" })).toBe(
       false,
     );
   });

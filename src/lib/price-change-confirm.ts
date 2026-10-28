@@ -12,7 +12,7 @@
 export const PRICE_CHANGE_CONFIRM_FIELD = "confirmPriceChange";
 
 export const PRICE_CHANGE_CONFIRM_MESSAGE =
-  "It's live, so tick the box under the price to confirm the new price.";
+  "Lexuesit e shohin tashmë këtë çmim, ndaj shënoni kutinë nën çmim për të konfirmuar çmimin e ri.";
 
 export function isLivePriceChange(input: {
   status: string | null | undefined;
@@ -26,12 +26,16 @@ export function isPriceChangeConfirmed(formData: FormData, submittedPriceAll: nu
   return formData.get(PRICE_CHANGE_CONFIRM_FIELD) === String(submittedPriceAll);
 }
 
+// ALBANIAN-9: "1.500 lekë", with a dot for thousands like every other
+// price on the site (kept import-free, so the grouping is done here).
 function priceWords(priceAll: number | null): string {
-  if (priceAll === null) return "no price";
-  if (priceAll === 0) return "free";
-  return `${priceAll} lek`;
+  if (priceAll === null) return "pa çmim";
+  if (priceAll === 0) return "falas";
+  const grouped = String(priceAll).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${grouped} ${priceAll === 1 ? "lek" : "lekë"}`;
 }
 
 export function priceChangeConfirmText(currentPriceAll: number | null, newPriceAll: number): string {
-  return `Yes, change the price from ${priceWords(currentPriceAll)} to ${priceWords(newPriceAll)}. Readers see the new price right away.`;
+  const change = newPriceAll === 0 ? "bëjeni falas" : `ndryshojeni çmimin në ${priceWords(newPriceAll)}`;
+  return `Po, ${change} (deri tani: ${priceWords(currentPriceAll)}). Lexuesit e shohin çmimin e ri menjëherë.`;
 }

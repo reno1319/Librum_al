@@ -106,7 +106,7 @@ describe("recordRightsDeclaration", () => {
         // PEN-NAMES-1 (16a): the book's pen name beside the account's name.
         pen_name: "Jo Pen",
         basis: "own_rights",
-        statement_version: "rights-v1",
+        statement_version: "rights-v2",
         statement_text: RIGHTS_STATEMENTS.own_rights.text,
       },
     ]);

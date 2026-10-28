@@ -851,7 +851,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
   it("createBook intent=publish (free): inserted by the trusted writer as a draft, then published by it", async () => {
     tables.books = [];
     expect(await redirectOf(createBook(await createBookForm("0", "publish")))).toBe(
-      "/dashboard?success=Your+book+is+now+live",
+      "/dashboard?success=Libri%20juaj%20u%20publikua",
     );
     expect(tables.books[0]).toMatchObject({ status: "published", price_all: 0 });
     expect(tables.books[0].published_at).toEqual(expect.any(String));
@@ -865,7 +865,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
   });
 
   it("updateBook: one atomic catalog-writer update carries metadata AND price_all", async () => {
-    expect(await redirectOf(updateBook(BOOK_ID, editBookForm("199")))).toBe("/dashboard?success=Book+updated");
+    expect(await redirectOf(updateBook(BOOK_ID, editBookForm("199")))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(bookRow()).toMatchObject({ title: "Book, edited", price_all: 199, status: "draft" });
 
     const bookUpdates = writes.filter((w) => w.table === "books" && w.op === "update");
@@ -876,12 +876,12 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
 
   it("updateBook on a published paid book, same price: metadata edit succeeds", async () => {
     seed({ book: { status: "published", price_all: 199, published_at: "2026-09-01T00:00:00Z" } });
-    expect(await redirectOf(updateBook(BOOK_ID, editBookForm("199")))).toBe("/dashboard?success=Book+updated");
+    expect(await redirectOf(updateBook(BOOK_ID, editBookForm("199")))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(bookRow()).toMatchObject({ title: "Book, edited", price_all: 199, status: "published" });
   });
 
   it("publishBook: the catalog writer sets status and first published_at", async () => {
-    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(bookRow()).toMatchObject({ status: "published" });
     expect(bookRow().published_at).toEqual(expect.any(String));
     // F5 (C5): the publish, then the best-effort pick clear (0 rows here).
@@ -891,7 +891,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
 
   it("publishBook on a republish keeps the original published_at", async () => {
     seed({ book: { status: "draft", price_all: 0, published_at: "2026-01-01T00:00:00Z" } });
-    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(bookRow().published_at).toBe("2026-01-01T00:00:00Z");
     expect(catalogWrites()[0].payload).not.toHaveProperty("published_at");
   });
@@ -899,7 +899,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
   it("publishBook: a paid draft publishes when paid publishing is open", async () => {
     openPaidPublishing();
     seed({ book: { status: "draft", price_all: 199 } });
-    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(bookRow()).toMatchObject({ status: "published", price_all: 199 });
   });
 
@@ -1198,7 +1198,7 @@ describe("privileged writes stay narrow", () => {
   it.each([0, 2])("unpublishBook: a %i-row result fails closed", async (count) => {
     seed({ book: { status: "published" } });
     forcedCatalogWriterRowCount = count;
-    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("/dashboard?error=Could+not+unpublish+that+book+right+now");
+    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("/dashboard?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20hiqet%20nga%20publikimi%20tani");
   });
 
   it("updateBundle: a refused compare-and-set (LB409) fails closed with the changed message", async () => {
@@ -1207,7 +1207,7 @@ describe("privileged writes stay narrow", () => {
     forcedRpcResult = { data: null, error: { code: "LB409", message: "bundle update: the bundle changed since it was read" } };
     expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")))).toBe(
       `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent(
-        "This title changed while you were editing it, so nothing was saved. Reload the page and try again.",
+        "Ky titull ndryshoi ndërsa po e redaktonit, ndaj nuk u ruajt asgjë. Rifreskoni faqen dhe provoni përsëri.",
       )}`,
     );
     expect(tables.bundle_books).toEqual(membersBefore);
@@ -1283,7 +1283,7 @@ const versionedManuscriptKey = (bookId: unknown) =>
   new RegExp(`^${USER_ID}/${String(bookId)}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.epub$`);
 const NEW_COVER_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/cover\.(?:jpg|png)$/;
 const STORAGE_PATH_COLUMNS = ["cover_path", "file_path"];
-const NEW_BOOK_ERROR = "/dashboard/books/new?error=Something+went+wrong+saving+your+book.+Please+try+again";
+const NEW_BOOK_ERROR = "/dashboard/books/new?error=Di%C3%A7ka%20shkoi%20keq%20gjat%C3%AB%20ruajtjes%20s%C3%AB%20librit.%20Provoni%20p%C3%ABrs%C3%ABri";
 
 const bookInserts = () => writes.filter((w) => w.table === "books" && w.op === "insert");
 
@@ -1443,7 +1443,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
 
     it("intent=publish inserts through the writer, then publishes through it, id+author scoped", async () => {
       expect(await redirectOf(createBook(await createBookForm("0", "publish")))).toBe(
-        "/dashboard?success=Your+book+is+now+live",
+        "/dashboard?success=Libri%20juaj%20u%20publikua",
       );
       const [insert, publish] = catalogWrites();
       expect(insert.op).toBe("insert");
@@ -1501,14 +1501,14 @@ describe("Patch 8: createBook never creates the trusted writer for a refused req
   // cover it left behind.
   it("a failed covers upload (writer) never reaches the trusted insert", async () => {
     failWriterCoverUpload = true;
-    expect(await redirectOf(createBook(await createBookForm("199")))).toMatch(/^\/dashboard\/books\/new\?error=Could\+not\+upload/);
+    expect(await redirectOf(createBook(await createBookForm("199")))).toMatch(/^\/dashboard\/books\/new\?error=.+nuk%20u%20ngarkua%20dot/);
     expect(bookInserts()).toEqual([]);
     expect(events.filter((e) => e.startsWith("upload:manuscripts:"))).toEqual([]);
   });
 
   it("a failed manuscripts upload never reaches the trusted insert, and the new cover is removed", async () => {
     failWriterManuscriptUpload = true;
-    expect(await redirectOf(createBook(await createBookForm("199")))).toMatch(/^\/dashboard\/books\/new\?error=Could\+not\+upload/);
+    expect(await redirectOf(createBook(await createBookForm("199")))).toMatch(/^\/dashboard\/books\/new\?error=.+nuk%20u%20ngarkua%20dot/);
     expect(bookInserts()).toEqual([]);
     expect(writerRemoved).toHaveLength(1);
     expect(writerRemoved[0]).toMatch(NEW_COVER_KEY);
@@ -1585,7 +1585,7 @@ describe("Patch 8: book edits and replacement uploads stay protected", () => {
       const fd = withHostileIdentity(editBookForm("199"));
       fd.set("cover", new File([new Uint8Array(PNG_SIGNATURE)], "cover.png", { type: "image/png" }));
       fd.set("manuscript", new File([new Uint8Array(await validEpub())], "book.epub"));
-      expect(await redirectOf(updateBook(BOOK_ID, fd))).toBe("/dashboard?success=Book+updated");
+      expect(await redirectOf(updateBook(BOOK_ID, fd))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
 
       const [update] = catalogWrites();
       expect(update.op).toBe("update");
@@ -1609,7 +1609,7 @@ describe("Patch 8: book edits and replacement uploads stay protected", () => {
 
   it("an edit without a replacement keeps the stored paths, and never adopts a client-supplied one", async () => {
     expect(await redirectOf(updateBook(BOOK_ID, withHostileIdentity(editBookForm("0"))))).toBe(
-      "/dashboard?success=Book+updated",
+      "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua",
     );
     // BOOK-STORAGE-MUTATION-AUTH-1: kept by omission -- neither path key
     // is re-written from the stored row.
@@ -1716,7 +1716,7 @@ describe("F5: the Librum's choice pick is cleared on unpublish and on a real pub
   it("an unpublish that changed no row clears nothing", async () => {
     seed({ book: { status: "published", librum_choice_at: PICKED_AT } });
     forcedCatalogWriterRowCount = 0;
-    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("/dashboard?error=Could+not+unpublish+that+book+right+now");
+    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("/dashboard?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20hiqet%20nga%20publikimi%20tani");
     expect(pickClears()).toEqual([]);
   });
 
@@ -1745,7 +1745,7 @@ describe("F5: the Librum's choice pick is cleared on unpublish and on a real pub
 
   it("a republished book with a leftover pick comes back without it (publish self-heal)", async () => {
     seed({ book: { status: "draft", published_at: "2026-09-01T00:00:00Z", librum_choice_at: PICKED_AT } });
-    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(bookRow()).toMatchObject({ status: "published", librum_choice_at: null });
     const [clear] = pickClears();
     expect(clear.filters).toEqual([
@@ -1758,7 +1758,7 @@ describe("F5: the Librum's choice pick is cleared on unpublish and on a real pub
 
   it("a publish write on an already-published picked book does NOT clear the pick", async () => {
     seed({ book: { status: "published", published_at: "2026-09-01T00:00:00Z", librum_choice_at: PICKED_AT } });
-    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(bookRow().librum_choice_at).toBe(PICKED_AT);
     expect(pickClears()).toEqual([]);
   });
@@ -1773,7 +1773,7 @@ describe("F5: the Librum's choice pick is cleared on unpublish and on a real pub
   it("a failing self-heal clear keeps the successful publish", async () => {
     seed({ book: { status: "draft", librum_choice_at: PICKED_AT } });
     forcedPickClearError = { code: "08006", message: "connection" };
-    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(bookRow().status).toBe("published");
     expect(console.error).toHaveBeenCalledTimes(1);
   });

@@ -15,16 +15,8 @@ import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
 // submits) stays in the component, unchanged in kind from before this
 // module existed.
 
-export function canAdvanceFromBookDetails(params: {
-  title: string;
-  language: string;
-  genre: string;
-}): boolean {
-  return (
-    params.title.trim().length > 0 &&
-    params.language.trim().length > 0 &&
-    params.genre.trim().length > 0
-  );
+export function canAdvanceFromBookDetails(params: { title: string; genre: string }): boolean {
+  return params.title.trim().length > 0 && params.genre.trim().length > 0;
 }
 
 export function canAdvanceFromFiles(params: {

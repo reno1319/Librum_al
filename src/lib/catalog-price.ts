@@ -234,10 +234,16 @@ export function formatCatalogPriceAll(priceAll: number): string {
 // FIX1 (X5): no ",00" -- a catalog price is whole lek, so it reads
 // "199 lekë", "1.500 lekë", "100.000 lekë" (the thousands dot stays).
 function groupWholeAll(amountAll: number): string {
-  const grouped = String(amountAll).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const grouped = groupAllDigits(amountAll);
   // ALBANIAN-1 (Renato 10-28, 2b): "1 lek", otherwise "lekë". Kept
   // inline (not imported) because this module stays import-free.
   return `${grouped} ${amountAll === 1 ? "lek" : "lekë"}`;
+}
+
+// ALBANIAN-9: the digits alone with the thousands dot ("100.000"), for a
+// sentence that already says "lekë" ("nga 99 deri në 100.000").
+export function groupAllDigits(amountAll: number): string {
+  return String(amountAll).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
 // Fixed, non-sensitive message, same posture as INVALID_DOMAIN_MESSAGE.

@@ -318,7 +318,7 @@ function loggedText(): string {
 // ============================================================
 describe("updateBook without an upload", () => {
   it("omits both path keys, leaves the stored values untouched, and makes no Storage call", async () => {
-    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     const [update] = bookUpdates();
     expect(update.payload).not.toHaveProperty("cover_path");
     expect(update.payload).not.toHaveProperty("file_path");
@@ -332,7 +332,7 @@ describe("updateBook without an upload", () => {
     ["null paths", { cover_path: null, file_path: null }],
   ])("keeps working for %s without touching it", async (_label, overrides) => {
     bookReadResult = { data: row(overrides), error: null };
-    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(bookUpdates()[0].payload).not.toHaveProperty("cover_path");
     expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
     expect(storageCalls).toEqual([]);
@@ -345,7 +345,7 @@ describe("updateBook without an upload", () => {
     f.set("coverPath", `${OTHER_AUTHOR}/x.png`);
     f.set("id", OTHER_BOOK);
     f.set("author_id", OTHER_AUTHOR);
-    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(JSON.stringify(bookUpdates()[0].payload)).not.toContain(OTHER_AUTHOR);
     expect(JSON.stringify(bookUpdates()[0].payload)).not.toContain(OTHER_BOOK);
   });
@@ -356,7 +356,7 @@ describe("updateBook with a replacement", () => {
   it("manuscript only: writes only file_path, never re-persists or removes the cover", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
     expect(await run(updateBook(BOOK_ID, await withManuscript(editForm())))).toBe(
-      "/dashboard?success=Book+updated",
+      "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua",
     );
     const payload = bookUpdates()[0].payload as Record<string, unknown>;
     expect(payload.file_path).toEqual(NEW_EPUB);
@@ -369,7 +369,7 @@ describe("updateBook with a replacement", () => {
   });
 
   it("cover only: writes only cover_path, never re-persists or removes the manuscript", async () => {
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     const payload = bookUpdates()[0].payload as Record<string, unknown>;
     expect(payload.cover_path).toEqual(NEW_JPG);
     expect(payload).not.toHaveProperty("file_path");
@@ -399,7 +399,7 @@ describe("updateBook with a replacement", () => {
   // replace never overwrites the live object; the previous one is removed
   // after the proven write.
   it("a same-extension replace gets a new key and removes the previous object after the write", async () => {
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), PNG)))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), PNG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(uploadedCoverKey()).not.toBe(OWN_PNG);
     expect(events).toEqual(["storage:upload:covers", "db:update:books", "storage:remove:covers"]);
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [OWN_PNG] }]);
@@ -407,7 +407,7 @@ describe("updateBook with a replacement", () => {
 
   it("a new-shape stored cover (read from the author's own row) is replaced and removed after the write", async () => {
     bookReadResult = { data: row({ cover_path: RANDOM_STORED }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(bookUpdates()[0].filters).toContainEqual({ kind: "eq", column: "cover_path", value: RANDOM_STORED });
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [RANDOM_STORED] }]);
   });
@@ -423,7 +423,7 @@ describe("updateBook with a replacement", () => {
 
   it("the exact own-book legacy .jpeg cover is removed only after the write, and never re-created", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(events).toEqual(["storage:upload:covers", "db:update:books", "storage:remove:covers"]);
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [LEGACY_JPEG] }]);
     expect(everyStorageKey().filter((k) => String(k).endsWith(".jpeg"))).toEqual([LEGACY_JPEG]);
@@ -441,7 +441,7 @@ describe("updateBook with a replacement", () => {
 
   it("a null stored cover compares with IS NULL", async () => {
     bookReadResult = { data: row({ cover_path: null }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm())))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm())))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(bookUpdates()[0].filters).toContainEqual({ kind: "is", column: "cover_path", value: null });
     expect(removals()).toEqual([]);
   });
@@ -461,7 +461,7 @@ describe("updateBook with a replacement", () => {
     const f = editForm();
     f.set("manuscriptStoragePath", TEMP_EPUB);
     f.set("coverStoragePath", TEMP_COVER);
-    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     // ADMIN-3-REVIEW (N3): the superseded own manuscript key goes first
     // (retention cleanup), then the old cover, then the temporary keys.
     expect(removals()).toEqual([
@@ -483,7 +483,7 @@ describe("updateBook never hands an unsafe stored path to Storage", () => {
 
   it.each(coverCases)("stored cover %s: replacement succeeds, the old value is left untouched", async (_label, value) => {
     bookReadResult = { data: row({ cover_path: value }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(storageCalls).toEqual([{ op: "upload", bucket: "covers", paths: [NEW_JPG] }]);
     expect((bookUpdates()[0].payload as Record<string, unknown>).cover_path).toEqual(NEW_JPG);
     if (value.trim().length > 8) expect(loggedText()).not.toContain(value);
@@ -492,7 +492,7 @@ describe("updateBook never hands an unsafe stored path to Storage", () => {
   it.each(manuscriptCases)("stored manuscript %s: replacement succeeds, the old value is left untouched", async (_label, value) => {
     bookReadResult = { data: row({ file_path: value }), error: null };
     expect(await run(updateBook(BOOK_ID, await withManuscript(editForm())))).toBe(
-      "/dashboard?success=Book+updated",
+      "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua",
     );
     expect(storageCalls).toEqual([{ op: "upload", bucket: "manuscripts", paths: [NEW_EPUB] }]);
     if (value.trim().length > 8) expect(loggedText()).not.toContain(value);
@@ -585,7 +585,7 @@ describe("temporary upload references", () => {
   it.each(hostile)("a manuscript reference with %s is refused before any Storage call", async (_label, value) => {
     const f = editForm();
     f.set("manuscriptStoragePath", value);
-    expect(await run(updateBook(BOOK_ID, f))).toMatch(/error=That\+manuscript\+reference/);
+    expect(await run(updateBook(BOOK_ID, f))).toContain(`error=${encodeURIComponent("Dorëshkrimi i zgjedhur nuk vlen më.")}`);
     expect(storageCalls).toEqual([]);
     expect(dbWrites).toEqual([]);
   });
@@ -595,7 +595,7 @@ describe("temporary upload references", () => {
     async (_label, value) => {
       const f = editForm();
       f.set("coverStoragePath", value);
-      expect(await run(updateBook(BOOK_ID, f))).toMatch(/error=That\+cover\+reference/);
+      expect(await run(updateBook(BOOK_ID, f))).toContain(`error=${encodeURIComponent("Kopertina e zgjedhur nuk vlen më.")}`);
       expect(storageCalls).toEqual([]);
     },
   );
@@ -783,14 +783,14 @@ const JPEG_SPELLINGS = Array.from({ length: 16 }, (_, mask) =>
 describe("legacy cover: every ASCII spelling of jpeg, bound to the exact author and book", () => {
   it.each(JPEG_SPELLINGS)("no-upload edit keeps .%s untouched", async (ext) => {
     bookReadResult = { data: row({ cover_path: `${USER_ID}/${BOOK_ID}-cover.${ext}` }), error: null };
-    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(bookUpdates()[0].payload).not.toHaveProperty("cover_path");
     expect(storageCalls).toEqual([]);
   });
 
   it.each(JPEG_SPELLINGS)("manuscript-only replacement never touches .%s", async (ext) => {
     bookReadResult = { data: row({ cover_path: `${USER_ID}/${BOOK_ID}-cover.${ext}` }), error: null };
-    expect(await run(updateBook(BOOK_ID, await withManuscript(editForm())))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, await withManuscript(editForm())))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(storageCalls).toEqual([
       { op: "upload", bucket: "manuscripts", paths: [NEW_EPUB] },
       { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] },
@@ -801,7 +801,7 @@ describe("legacy cover: every ASCII spelling of jpeg, bound to the exact author 
   it.each(JPEG_SPELLINGS)("cover replacement removes .%s exactly as stored, after the write", async (ext) => {
     const stored = `${USER_ID}/${BOOK_ID}-cover.${ext}`;
     bookReadResult = { data: row({ cover_path: stored }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(events).toEqual(["storage:upload:covers", "db:update:books", "storage:remove:covers"]);
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [stored] }]);
     expect(bookUpdates()[0].filters).toContainEqual({ kind: "eq", column: "cover_path", value: stored });
@@ -876,7 +876,7 @@ describe("a failed removal is logged without any key and never reverses the comp
     const stored = `${USER_ID}/${BOOK_ID}-cover.JPEG`;
     bookReadResult = { data: row({ cover_path: stored }), error: null };
     removeError = hostileStorageError(stored);
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(bookUpdates()).toHaveLength(1);
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [stored] }]);
     const text = loggedText();
@@ -943,7 +943,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   // and the superseded own key removed only after it.
   it("the new cover and the new manuscript go before the row update; old keys are removed after it", async () => {
     const f = await withManuscript(withCover(editForm(), PNG));
-    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(events).toEqual([
       "storage:upload:covers",
       "storage:upload:manuscripts",
@@ -956,7 +956,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   it("a new-key cover is still uploaded before the row update, so the row never points at a missing file", async () => {
     bookReadResult = { data: row({ cover_path: OWN_PNG, file_path: null }), error: null };
     const f = await withManuscript(withCover(editForm(), JPG));
-    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(events).toEqual([
       "storage:upload:covers",
       "storage:upload:manuscripts",
@@ -1000,7 +1000,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   it("a new-key upload that fails stops before the row update", async () => {
     failUploadsTo = new Set(["covers:*"]);
     const target = await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
-    expect(target).toBe(`/dashboard/books/${BOOK_ID}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`);
+    expect(target).toBe(`/dashboard/books/${BOOK_ID}/edit?error=Imazhi%20i%20kopertin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri`);
     expect(dbWrites).toEqual([]);
     expect(removals()).toEqual([]);
   });
@@ -1059,13 +1059,13 @@ describe("updateBook and review (ADMIN-3)", () => {
 
   it("an unreadable bundle membership fails closed", async () => {
     bundleBooksResult = { data: null, error: { message: "down" } };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toMatch(/\/edit\?error=Something\+went\+wrong/);
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toContain(`/edit?error=${encodeURIComponent("Diçka shkoi keq")}`);
     expect(storageCalls).toEqual([]);
     expect(dbWrites).toEqual([]);
   });
 
   it("a text-only edit of a live book stays live: no status, no review", async () => {
-    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(bookUpdates()[0].payload).not.toHaveProperty("status");
     expect(bookReviewsDoubleState.calls).toEqual([]);
     expect(mockReviewStaffEmail).not.toHaveBeenCalled();
@@ -1074,7 +1074,7 @@ describe("updateBook and review (ADMIN-3)", () => {
   it("a draft waiting for review: its snapshot is replaced with the new files", async () => {
     bookReadResult = { data: row({ status: "draft" }), error: null };
     bookReviewsDoubleState.pending = true;
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(fns()).toEqual(["getBookReviewState", "requestBookReview"]);
     expect(bookUpdates()[0].payload).toMatchObject({ status: "draft" });
     expect(mockReviewStaffEmail).toHaveBeenCalledTimes(1);
@@ -1082,7 +1082,7 @@ describe("updateBook and review (ADMIN-3)", () => {
 
   it("a draft not waiting for review is not sent for review by a file change", async () => {
     bookReadResult = { data: row({ status: "draft" }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Book+updated");
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(fns()).toEqual(["getBookReviewState"]);
   });
 
@@ -1149,7 +1149,7 @@ describe("deleteBook and review snapshots (ADMIN-3)", () => {
 
   it("a failed snapshot read deletes nothing and removes nothing", async () => {
     bookReviewsDoubleState.snapshotsOk = false;
-    expect(await run(deleteBook(BOOK_ID))).toBe("/dashboard?error=Could+not+delete+that+book+right+now");
+    expect(await run(deleteBook(BOOK_ID))).toBe("/dashboard?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20fshihet%20tani");
     expect(bookDeletes()).toEqual([]);
     expect(storageCalls).toEqual([]);
   });

@@ -180,7 +180,7 @@ describe("convertDocxToDocument", () => {
     const warning = result.warnings.find((w) => w.code === "footnotes_or_endnotes_skipped");
     expect(warning).toBeDefined();
     expect(warning?.message).toBe(
-      "Footnotes or endnotes were detected. They are not preserved in DOCX conversion yet. Review the generated EPUB before publishing.",
+      "U gjetën shënime në fund të faqes ose të librit. Ato ende nuk ruhen gjatë kthimit nga DOCX. Kontrolloni EPUB-in e krijuar para publikimit.",
     );
     expect(warning?.message).not.toMatch(/may (require|need)/i);
   });

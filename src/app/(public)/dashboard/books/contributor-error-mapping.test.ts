@@ -65,7 +65,7 @@ describe("addContributor: ERR-2 error-message mapping", () => {
 
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
     expect(redirectedTo).toContain(
-      encodeURIComponent("We couldn't add the contributor. Please try again."),
+      encodeURIComponent("Bashkëpunëtori nuk u shtua dot. Provoni përsëri."),
     );
     expect(redirectedTo).not.toContain("row-level security");
   });
@@ -78,7 +78,7 @@ describe("addContributor: ERR-2 error-message mapping", () => {
     await expect(addContributor("book-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining("error=Enter+a+name+and+choose+a+role"),
+      expect.stringContaining("error=Shkruani%20nj%C3%AB%20em%C3%ABr%20dhe%20zgjidhni%20nj%C3%AB%20rol"),
     );
     expect(mockInsertContributor).not.toHaveBeenCalled();
   });

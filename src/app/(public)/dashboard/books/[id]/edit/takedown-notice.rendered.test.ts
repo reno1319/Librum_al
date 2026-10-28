@@ -125,7 +125,7 @@ describe("Edit page: a book Librum took down", () => {
       },
     };
     const html = await render();
-    expect(html).toContain("Taken down by Librum</span>");
+    expect(html).toContain("Hequr nga Librum</span>");
     expect(html).toContain("Hequr nga Librum më 19 tetor 2026. Arsyeja: Ankesë për të drejtën e autorit.");
     expect(html).toContain("Please send proof.");
     expect(html).toContain("Hoqëm nga publikimi edhe: Set A.");

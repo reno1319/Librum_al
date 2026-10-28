@@ -459,7 +459,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
           if (!mediaType) {
             warnings.push({
               code: "image_skipped_unsupported_type",
-              message: "An embedded image used an unsupported format and was skipped.",
+              message: "Një imazh brenda dokumentit ishte në format të papranuar dhe u la jashtë.",
             });
             return { src: "" };
           }
@@ -467,14 +467,14 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
           if (imageBuffer.length > MAX_SINGLE_IMAGE_BYTES) {
             warnings.push({
               code: "image_skipped_too_large",
-              message: "An embedded image was too large and was skipped.",
+              message: "Një imazh brenda dokumentit ishte shumë i madh dhe u la jashtë.",
             });
             return { src: "" };
           }
           if (totalImageBytes + imageBuffer.length > MAX_TOTAL_IMAGE_BYTES) {
             warnings.push({
               code: "image_skipped_too_large",
-              message: "The manuscript's embedded images exceeded the total size allowed and some were skipped.",
+              message: "Imazhet brenda dorëshkrimit e kaluan madhësinë e lejuar gjithsej dhe disa u lanë jashtë.",
             });
             return { src: "" };
           }
@@ -491,7 +491,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
     if (result.messages.some((m) => m.type === "warning")) {
       warnings.push({
         code: "unsupported_element_skipped",
-        message: "Some Word-specific formatting couldn't be converted and was simplified.",
+        message: "Disa formatime të veçanta të Word-it nuk u kthyen dot dhe u thjeshtuan.",
       });
     }
   } catch {
@@ -501,7 +501,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
   if (skippedForCount) {
     warnings.push({
       code: "too_many_images",
-      message: "This manuscript has more embedded images than Librum can convert; some were skipped.",
+      message: "Ky dorëshkrim ka më shumë imazhe nga sa mund të kthejë Librum; disa u lanë jashtë.",
     });
   }
 
@@ -512,7 +512,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
   if (/<table\b/i.test(rawHtml)) {
     warnings.push({
       code: "table_present",
-      message: "Tables were converted, but complex tables may need review after conversion.",
+      message: "Tabelat u kthyen, por tabelat e ndërlikuara mund të duhen kontrolluar pas kthimit.",
     });
   }
 
@@ -525,7 +525,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
       // review." This exact wording was specified in the correction
       // brief.
       message:
-        "Footnotes or endnotes were detected. They are not preserved in DOCX conversion yet. Review the generated EPUB before publishing.",
+        "U gjetën shënime në fund të faqes ose të librit. Ato ende nuk ruhen gjatë kthimit nga DOCX. Kontrolloni EPUB-in e krijuar para publikimit.",
     });
   }
 
@@ -593,7 +593,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
   if (unsafeLinkFound) {
     warnings.push({
       code: "unsafe_link_removed",
-      message: "One or more links used an unsupported address type and were removed.",
+      message: "Një ose më shumë lidhje kishin adresë të papranuar dhe u hoqën.",
     });
   }
 

@@ -77,23 +77,23 @@ const MANUSCRIPTS_BUCKET = "manuscripts";
 const MAX_DOCX_BYTES = 50 * 1024 * 1024;
 
 const ERROR_MESSAGES: Record<string, string> = {
-  missing_path: "Choose a DOCX file to convert.",
-  not_authenticated: "Your session has expired. Please refresh the page and try again.",
-  unauthorized: "Something went wrong converting this document. Please try again.",
+  missing_path: "Zgjidhni një skedar DOCX për ta kthyer.",
+  not_authenticated: "Seanca juaj ka skaduar. Rifreskoni faqen dhe provoni përsëri.",
+  unauthorized: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
   temp_upload_failed:
-    "We couldn't upload your manuscript. Please check your connection and try again.",
-  temp_file_missing: "Something went wrong converting this document. Please try again.",
-  too_large: "DOCX manuscript must be under 50MB.",
-  invalid_zip: "That file doesn't look like a valid DOCX file.",
-  not_a_docx: "That file doesn't look like a valid DOCX file.",
+    "Dorëshkrimi juaj nuk u ngarkua. Kontrolloni lidhjen dhe provoni përsëri.",
+  temp_file_missing: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
+  too_large: "Dorëshkrimi DOCX duhet të jetë nën 50 MB.",
+  invalid_zip: "Ky skedar nuk duket si skedar DOCX i vlefshëm.",
+  not_a_docx: "Ky skedar nuk duket si skedar DOCX i vlefshëm.",
   macro_enabled_document_not_supported:
-    "Macro-enabled documents (.docm) aren't supported. Please save as a standard .docx file and try again.",
-  empty_document: "This document doesn't have any readable text to convert.",
-  conversion_failed: "Something went wrong converting this document. Please try again.",
-  too_large_uncompressed: "Document is too large to convert.",
-  too_complex: "Document is too complex to convert.",
+    "Dokumentet me makro (.docm) nuk pranohen. Ruajeni si skedar të zakonshëm .docx dhe provoni përsëri.",
+  empty_document: "Ky dokument nuk ka tekst të lexueshëm për t'u kthyer.",
+  conversion_failed: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
+  too_large_uncompressed: "Dokumenti është shumë i madh për t'u kthyer.",
+  too_complex: "Dokumenti është shumë i ndërlikuar për t'u kthyer.",
   generated_epub_invalid:
-    "Something went wrong generating your ebook. Please try again, or upload an EPUB directly.",
+    "Diçka shkoi keq gjatë krijimit të e-librit tuaj. Provoni përsëri ose ngarkoni drejtpërdrejt një EPUB.",
 };
 
 async function requireOwnedTempPath(tempPath: string) {

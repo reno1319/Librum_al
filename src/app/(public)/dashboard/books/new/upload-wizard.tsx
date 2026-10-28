@@ -9,11 +9,12 @@ import { formatAllMinorUnits } from "@/lib/all-money";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
+  groupAllDigits,
   formatCatalogPriceLabel,
 } from "@/lib/catalog-price";
 import { GENRES } from "@/lib/genres";
-import { LANGUAGES } from "@/lib/languages";
 import { resolvePublishReadiness } from "@/lib/publish-readiness";
+import { SEND_FOR_REVIEW_LABEL } from "@/lib/book-review-copy";
 import {
   canAdvanceFromBookDetails,
   canAdvanceFromFiles,
@@ -61,7 +62,7 @@ import type { RightsBasis, Series } from "@/lib/types";
 // payouts are set up) leaves the author with a safely saved draft, not
 // a failed submission. See SaveButtons below for the native
 // name="intent" value="draft"|"publish" submitter mechanism.
-const STEPS = ["Details", "Manuscript & cover", "Price"];
+const STEPS = ["Të dhënat", "Dorëshkrimi dhe kopertina", "Çmimi"];
 
 // Client-side-only bounds, purely a UX nicety mirroring actions.ts's own
 // authoritative SUBTITLE_MAX_LENGTH/PUBLISHER_MAX_LENGTH/EDITION_MAX_LENGTH
@@ -69,6 +70,9 @@ const STEPS = ["Details", "Manuscript & cover", "Price"];
 // file this task's own instructions protect from edits). A mismatch here
 // has no security implication: the server re-validates and rejects an
 // over-limit value independently, regardless of what a client sends.
+// ALBANIAN-9: the language every new book is saved with.
+const BOOK_LANGUAGE = "sq";
+
 const SUBTITLE_MAX_LENGTH = 300;
 const PUBLISHER_MAX_LENGTH = 200;
 const EDITION_MAX_LENGTH = 100;
@@ -82,20 +86,19 @@ const TRANSLATOR_MAX_LENGTH = 120;
 // REDESIGN STEP 5: Q7's wording -- the free-ebook "0" option is gone
 // from the paid price's error, hint and earnings sentences, because Free
 // is now its own choice and 0 is not accepted under Paid.
-const PAID_PRICE_ERROR = `Enter a price in lek: a whole number from ${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}.`;
+const PAID_PRICE_ERROR = `Shkruani çmimin në lekë: një numër i plotë nga ${MINIMUM_PAID_CATALOG_PRICE_ALL} deri në ${groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}.`;
 
 // FIX1 (X8): Renato's W-B wording, one message beside each field.
-const TITLE_ERROR = "Add a title.";
-const LANGUAGE_ERROR = "Choose a language.";
-const GENRE_ERROR = "Choose a genre.";
-const FILES_ERROR = "Add both a cover image and a manuscript file to continue.";
+const TITLE_ERROR = "Shtoni një titull.";
+const GENRE_ERROR = "Zgjidhni një zhanër.";
+const FILES_ERROR = "Shtoni edhe kopertinën, edhe skedarin e dorëshkrimit për të vazhduar.";
 // FIX1 (X16): shown in Readiness while the description is empty. True
 // here: Publish book always saves the draft before the publish check.
 const MISSING_DESCRIPTION_LINE =
-  "Add a description before publishing. Your book will still be saved as a draft.";
+  "Shtoni një përshkrim para publikimit. Libri juaj ruhet gjithsesi si draft.";
 // F4 (P3): shown under the Rights choice when Publish book is pressed
 // without one, and as a Readiness blocker until one is chosen.
-const MISSING_RIGHTS_LINE = "Choose the rights before publishing.";
+const MISSING_RIGHTS_LINE = "Zgjidhni të drejtat para publikimit.";
 
 // FIX1 (X8): a field's own message, tied to the field by id.
 function FieldError({ id, message }: { id: string; message: string }) {
@@ -120,7 +123,7 @@ function SaveButtons() {
     <div className="flex flex-col items-end gap-2">
       {pending && (
         <p role="status" className="text-sm text-muted">
-          Saving…
+          Po ruhet…
         </p>
       )}
       <div className="flex flex-wrap justify-end gap-3">
@@ -131,7 +134,7 @@ function SaveButtons() {
           disabled={pending}
           className={buttonClasses("outline", "md", "min-h-11 disabled:cursor-not-allowed disabled:opacity-60")}
         >
-          Save as draft
+          Ruajeni si draft
         </button>
         <button
           type="submit"
@@ -141,7 +144,7 @@ function SaveButtons() {
           className={buttonClasses("primary", "md", "min-h-11 disabled:cursor-not-allowed disabled:opacity-60")}
         >
           {/* ADMIN-3-REVIEW (B): a new book has no approval yet. */}
-          Send for review
+          {SEND_FOR_REVIEW_LABEL}
         </button>
       </div>
     </div>
@@ -202,15 +205,6 @@ export function UploadWizard({
   // top-of-file comment) and reports only display metadata here.
   const [manuscript, setManuscript] = useState<{ name: string } | null>(null);
   const [title, setTitle] = useState("");
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART C FINAL-VERIFICATION CORRECTION:
-  // defaults to "sq" (Albanian) -- Librum is an Albanian-market
-  // platform, so the common case is zero extra clicks, not a forced
-  // choice like Genre (which has no sensible default). Still a real,
-  // required, submitted <select name="language">, so an author who
-  // wants a different LANGUAGES entry changes it same as any other
-  // field -- this default never bypasses canAdvanceFromBookDetails()'s
-  // own real "language must be present" check, it just starts true.
-  const [language, setLanguage] = useState("sq");
   const [genre, setGenre] = useState("");
   // LIBRUM 2.0 PUBLISHING-UX-1 PART C: promoted from uncontrolled to
   // controlled -- deliberately just these two fields, not a full
@@ -245,7 +239,6 @@ export function UploadWizard({
   const stepHeadingRef = useRef<HTMLHeadingElement>(null);
   const priceInputRef = useRef<HTMLInputElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const languageSelectRef = useRef<HTMLSelectElement>(null);
   const genreSelectRef = useRef<HTMLSelectElement>(null);
   const isbnInputRef = useRef<HTMLInputElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -261,12 +254,10 @@ export function UploadWizard({
   }, [step]);
 
   const titleError = title.trim() ? "" : TITLE_ERROR;
-  const languageError = language.trim() ? "" : LANGUAGE_ERROR;
   const genreError = genre.trim() ? "" : GENRE_ERROR;
   const isbnError = isbn.trim() && !isValidIsbn(isbn) ? INVALID_ISBN_MESSAGE : "";
   const dateError = isFutureDateString(originalPublicationDate) ? FUTURE_DATE_MESSAGE : "";
   const shownTitleError = showDetailErrors ? titleError : "";
-  const shownLanguageError = showDetailErrors ? languageError : "";
   const shownGenreError = showDetailErrors ? genreError : "";
   const shownIsbnError = showDetailErrors || isbnTouched ? isbnError : "";
   const shownDateError = showDetailErrors || dateTouched ? dateError : "";
@@ -278,11 +269,10 @@ export function UploadWizard({
   // one, opening "Additional book details" when that field is inside.
   function detailsAreValid(): boolean {
     const valid =
-      canAdvanceFromBookDetails({ title, language, genre }) && !isbnError && !dateError;
+      canAdvanceFromBookDetails({ title, genre }) && !isbnError && !dateError;
     if (valid) return true;
     setShowDetailErrors(true);
     if (titleError) titleInputRef.current?.focus();
-    else if (languageError) languageSelectRef.current?.focus();
     else if (genreError) genreSelectRef.current?.focus();
     else {
       if (moreDetailsRef.current) moreDetailsRef.current.open = true;
@@ -326,7 +316,7 @@ export function UploadWizard({
   // an invalid field, so this sends the author back to it only if that
   // ever changed.
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    if (!canAdvanceFromBookDetails({ title, language, genre }) || isbnError || dateError) {
+    if (!canAdvanceFromBookDetails({ title, genre }) || isbnError || dateError) {
       event.preventDefault();
       setStep(1);
       setShowDetailErrors(true);
@@ -370,7 +360,7 @@ export function UploadWizard({
 
   return (
     <form action={createBook} onSubmit={handleSubmit} className="mt-8 flex flex-col gap-6">
-      <ol aria-label="Steps" className="grid grid-cols-3 gap-2 sm:gap-3">
+      <ol aria-label="Hapat" className="grid grid-cols-3 gap-2 sm:gap-3">
         {STEPS.map((label, i) => (
           <li
             key={label}
@@ -395,13 +385,13 @@ export function UploadWizard({
                 {/* The mockup's dark brass (#8a6d12), darkened a step to
                     5.0:1 on cream so 13px text passes AA. */}
                 <span className="text-[0.8125rem] font-bold text-[#806511]">
-                  Step {i + 1} of {STEPS.length}
+                  Hapi {i + 1} nga {STEPS.length}
                 </span>
                 <span className="text-sm font-bold text-primary">{label}</span>
               </>
             ) : (
               <>
-                <span className="text-[0.8125rem] font-bold text-muted">Step {i + 1}</span>
+                <span className="text-[0.8125rem] font-bold text-muted">Hapi {i + 1}</span>
                 <span className="text-sm font-semibold text-muted">{label}</span>
               </>
             )}
@@ -426,7 +416,7 @@ export function UploadWizard({
           {/* Step 1: Details */}
           <div className={step === 1 ? "flex flex-col gap-4" : "hidden"}>
             <label className="flex flex-col gap-1 text-sm">
-              Title
+              Titulli
               <input
                 ref={titleInputRef}
                 name="title"
@@ -445,7 +435,7 @@ export function UploadWizard({
                 database can store it. */}
             {penNameAvailable && (
               <label className="flex flex-col gap-1 text-sm">
-                Pen name (optional)
+                Pseudonimi (opsional)
                 <input
                   name="penName"
                   type="text"
@@ -465,44 +455,24 @@ export function UploadWizard({
                 )}
                 {authorName && (
                   <span className="text-sm text-muted">
-                    Leave blank to use your author name, {authorName}.
+                    Lëreni bosh për të përdorur emrin tuaj si autor, {authorName}.
                   </span>
                 )}
                 {/* PEN-NAMES-1 (10a): a new name creates a pen name with
                     its own Author Page. */}
                 <span className="text-sm text-muted">
-                  A new name becomes a new pen name with its own author page.
-                  {penNameSuggestions.length > 0 && " Your pen names are suggested as you type."}
+                  Një emër i ri bëhet pseudonim i ri me faqen e vet të autorit.
+                  {penNameSuggestions.length > 0 && " Pseudonimet tuaja ju sugjerohen ndërsa shkruani."}
                 </span>
               </label>
             )}
 
-            <label className="flex flex-col gap-1 text-sm">
-              Language
-              <select
-                name="language"
-                ref={languageSelectRef}
-                required
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                aria-invalid={shownLanguageError ? true : undefined}
-                aria-describedby={shownLanguageError ? "wizard-language-error" : undefined}
-                className={formControlClassesFor(!!shownLanguageError)}
-              >
-                <option value="" disabled>
-                  Choose a language
-                </option>
-                {LANGUAGES.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-              <FieldError id="wizard-language-error" message={shownLanguageError} />
-            </label>
+            {/* ALBANIAN-9: the book language picker is gone (Renato,
+                10-28). Every new book is saved as Albanian. */}
+            <input type="hidden" name="language" value={BOOK_LANGUAGE} />
 
             <label className="flex flex-col gap-1 text-sm">
-              Genre
+              Zhanri
               <select
                 name="genre"
                 ref={genreSelectRef}
@@ -514,7 +484,7 @@ export function UploadWizard({
                 className={formControlClassesFor(!!shownGenreError)}
               >
                 <option value="" disabled>
-                  Choose a genre
+                  Zgjidhni një zhanër
                 </option>
                 {GENRES.map((g) => (
                   <option key={g} value={g}>
@@ -526,7 +496,7 @@ export function UploadWizard({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              Subtitle (optional)
+              Nëntitulli (opsional)
               <input
                 name="subtitle"
                 type="text"
@@ -536,7 +506,7 @@ export function UploadWizard({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              Description
+              Përshkrimi
               <textarea
                 name="description"
                 rows={4}
@@ -545,22 +515,22 @@ export function UploadWizard({
                 className={formControlClassesFor(false)}
               />
               <span className="text-sm text-muted">
-                A couple of sentences or more helps readers decide.
+                Disa fjali ose më shumë i ndihmojnë lexuesit të vendosin.
               </span>
             </label>
 
             <details ref={moreDetailsRef} className="rounded-card border border-border px-4 py-3">
               <summary className="cursor-pointer text-sm font-medium text-foreground">
-                Additional book details
+                Të dhëna të tjera për librin
               </summary>
               <div className="mt-4 flex flex-col gap-4">
                 <label className="flex flex-col gap-1 text-sm">
-                  ISBN (optional)
+                  ISBN (opsional)
                   <input
                     ref={isbnInputRef}
                     name="isbn"
                     type="text"
-                    placeholder="e.g. 978-3-16-148410-0"
+                    placeholder="p.sh. 978-3-16-148410-0"
                     value={isbn}
                     onChange={(e) => setIsbn(e.target.value)}
                     onBlur={() => setIsbnTouched(true)}
@@ -570,13 +540,13 @@ export function UploadWizard({
                   />
                   <FieldError id="wizard-isbn-error" message={shownIsbnError} />
                   <span className="text-sm text-muted">
-                    Only if you already own one — Librum doesn&apos;t issue or
-                    register ISBNs. Leave blank to skip.
+                    Vetëm nëse e keni tashmë një të tillë. Librum nuk lëshon e as
+                    regjistron ISBN. Lëreni bosh nëse nuk keni.
                   </span>
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
-                  Publisher (optional)
+                  Botuesi (opsional)
                   <input
                     name="publisher"
                     type="text"
@@ -586,11 +556,11 @@ export function UploadWizard({
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
-                  Edition (optional)
+                  Botimi (opsional)
                   <input
                     name="edition"
                     type="text"
-                    placeholder="e.g. 2nd edition"
+                    placeholder="p.sh. Botimi i dytë"
                     maxLength={EDITION_MAX_LENGTH}
                     className={formControlClassesFor(false)}
                   />
@@ -600,7 +570,7 @@ export function UploadWizard({
                     Translator role; edited or removed later under People
                     on the Edit page. */}
                 <label className="flex flex-col gap-1 text-sm">
-                  Translator (optional)
+                  Përkthyesi (opsional)
                   <input
                     name="translator"
                     type="text"
@@ -610,7 +580,7 @@ export function UploadWizard({
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
-                  Originally published (optional)
+                  Botuar fillimisht (opsional)
                   <input
                     ref={dateInputRef}
                     name="originalPublicationDate"
@@ -624,30 +594,30 @@ export function UploadWizard({
                   />
                   <FieldError id="wizard-date-error" message={shownDateError} />
                   <span className="text-sm text-muted">
-                    Only if this edition was first published elsewhere before
-                    arriving on Librum.
+                    Vetëm nëse ky botim është botuar diku tjetër para se
+                    të vinte në Librum.
                   </span>
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
-                  Keywords (optional)
+                  Fjalë kyçe (opsionale)
                   <input
                     name="keywords"
                     type="text"
                     value={keywords}
                     onChange={(e) => setKeywords(e.target.value)}
-                    placeholder="e.g. space opera, first contact, hard sci-fi"
+                    placeholder="p.sh. dashuri, luftë, histori familjare"
                     className={formControlClassesFor(false)}
                   />
                   <span className="text-sm text-muted">
-                    Comma-separated. Helps readers find your book by terms beyond
-                    its genre — up to 15.
+                    Të ndara me presje. Ndihmojnë lexuesit ta gjejnë librin tuaj me
+                    fjalë përtej zhanrit, deri në 15.
                   </span>
                 </label>
 
                 {series.length === 0 && (
                   <p className="text-sm text-muted">
-                    Want to group this with other books as a series?{" "}
+                    Doni ta gruponi me libra të tjerë në një seri?{" "}
                     {/* FIX1 (X11): a new tab, so nothing typed here is lost. */}
                     <Link
                       href="/dashboard/series"
@@ -655,19 +625,19 @@ export function UploadWizard({
                       rel="noopener"
                       className="focus-ring rounded-sm underline"
                     >
-                      Create a series first
-                      <span className="sr-only"> (opens in a new tab)</span>
+                      Krijoni fillimisht një seri
+                      <span className="sr-only"> (hapet në skedë të re)</span>
                     </Link>
-                    , then come back here.
+                    , pastaj kthehuni këtu.
                   </p>
                 )}
 
                 {series.length > 0 && (
                   <div className="flex gap-3">
                     <label className="flex flex-1 flex-col gap-1 text-sm">
-                      Series (optional)
+                      Seria (opsionale)
                       <select name="seriesId" defaultValue="" className={formControlClassesFor(false)}>
-                        <option value="">None</option>
+                        <option value="">Asnjë</option>
                         {series.map((s) => (
                           <option key={s.id} value={s.id}>
                             {s.title}
@@ -676,7 +646,7 @@ export function UploadWizard({
                       </select>
                     </label>
                     <label className="flex flex-col gap-1 text-sm">
-                      Position
+                      Vendi në seri
                       <input
                         name="seriesPosition"
                         type="number"
@@ -699,20 +669,20 @@ export function UploadWizard({
                 <CoverField authorId={authorId} onCoverChange={setCover} />
                 {/* FIX1 (X10): the tip moved here from the Tips box. */}
                 <p className="text-sm text-muted">
-                  Covers work best as a portrait image, at least 1000px tall.
+                  Kopertina duket më mirë si imazh vertikal, të paktën 1000px i lartë.
                 </p>
               </div>
 
               <ManuscriptField
                 bookTitle={title}
-                bookLanguage={language}
+                bookLanguage={BOOK_LANGUAGE}
                 authorName={authorName}
                 authorId={authorId}
                 onManuscriptChange={setManuscript}
               />
 
               <p role="status" className="text-sm text-muted">
-                {[cover, manuscript].filter(Boolean).length} of 2 files ready.
+                {[cover, manuscript].filter(Boolean).length} nga 2 skedarë gati.
               </p>
 
               {/* FIX1 (X8): the existing sentence, under the file fields. */}
@@ -723,17 +693,17 @@ export function UploadWizard({
               )}
 
               <p className="text-sm text-muted">
-                Readers can preview approximately the first 10% of your ebook —
-                generated automatically, no extra steps needed.
+                Lexuesit mund të shohin rreth 10% të parë të e-librit tuaj. Kjo
+                krijohet automatikisht, pa hapa të tjerë.
               </p>
             </div>
 
             <aside className="rounded-card border border-dashed border-border px-4 py-3 text-xs text-muted">
-              <p className="font-medium text-foreground">Tips</p>
+              <p className="font-medium text-foreground">Këshilla</p>
               <ul className="mt-1 flex flex-col gap-1 pl-4 list-disc">
                 <li>
-                  You can replace either file later from your dashboard before —
-                  or after — publishing.
+                  Mund ta zëvendësoni cilindo skedar më vonë nga paneli juaj,
+                  para ose pas publikimit.
                 </li>
               </ul>
             </aside>
@@ -750,8 +720,8 @@ export function UploadWizard({
               <legend className="sr-only">{STEPS[2]}</legend>
               {(
                 [
-                  ["paid", "Paid"],
-                  ["free", "Free"],
+                  ["paid", "Me pagesë"],
+                  ["free", "Falas"],
                 ] as const
               ).map(([mode, label]) => (
                 <label
@@ -790,7 +760,7 @@ export function UploadWizard({
               // form unreachable and advertised a fractional lek price the
               // catalog cannot store.
               <label className="flex flex-col gap-1 text-sm">
-                Price (ALL)
+                Çmimi (lekë)
                 <span
                   className={`flex w-full max-w-[17.5rem] items-stretch overflow-hidden rounded-[4px] border bg-surface focus-within:shadow-[var(--focus-ring)] ${
                     priceError ? "border-red-700" : "border-[#8c8472]"
@@ -820,15 +790,15 @@ export function UploadWizard({
                     aria-hidden="true"
                     className="flex items-center bg-surface-hover px-4 font-bold text-foreground"
                   >
-                    ALL
+                    lekë
                   </span>
                 </span>
                 {/* FIX1 (X8): the price message, under the price box. */}
                 <FieldError id="wizard-price-error" message={priceError} />
                 <span className="text-sm text-muted">
-                  Whole lek: {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
-                  {MAXIMUM_CATALOG_PRICE_ALL}. Librum takes a {PLATFORM_FEE_PERCENT}%
-                  platform fee — you keep the rest of every sale.
+                  Lekë të plota: nga {MINIMUM_PAID_CATALOG_PRICE_ALL} deri në{" "}
+                  {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}. Librum mban një tarifë platforme prej{" "}
+                  {PLATFORM_FEE_PERCENT}%; pjesa tjetër e çdo shitjeje është e juaja.
                 </span>
               </label>
             ) : (
@@ -840,7 +810,7 @@ export function UploadWizard({
                 is no longer reachable (an invalid paid price is blocked
                 before submit) and is not rendered. */}
             <div className="rounded-card border border-border bg-background p-4 text-sm">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted">Readiness</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted">Gatishmëria</p>
               {/* PR-G: replaces "Finish payout setup to publish paid books."
                   -- there is no payout setup to finish, and nothing an author
                   can do here changes this. Stays CONDITIONAL, never a
@@ -854,8 +824,8 @@ export function UploadWizard({
               )}
               {readiness.paidPublishingBlocked && (
                 <p className="mt-2 text-red-800">
-                  Paid publishing hasn&apos;t launched yet. Your book will still
-                  be saved as a draft.
+                  Publikimi me pagesë nuk ka nisur ende. Libri juaj ruhet
+                  gjithsesi si draft.
                 </p>
               )}
               {readiness.recommended.filter((item) => !item.done).length > 0 && (
@@ -872,7 +842,7 @@ export function UploadWizard({
                 !readiness.missingRights &&
                 !readiness.paidPublishingBlocked &&
                 readiness.recommended.every((item) => item.done) && (
-                <p className="mt-2 text-muted">Looks good — ready to send for review.</p>
+                <p className="mt-2 text-muted">Gjithçka duket mirë: gati për t&apos;u dërguar për shqyrtim.</p>
               )}
             </div>
 
@@ -887,7 +857,7 @@ export function UploadWizard({
                   rightsError ? "outline-2 outline-offset-4 outline-red-700" : ""
                 }`}
               >
-                <legend className="mb-3 font-bold text-foreground">Rights</legend>
+                <legend className="mb-3 font-bold text-foreground">Të drejtat</legend>
                 {RIGHTS_BASES.map((basis, index) => (
                   <label
                     key={basis}
@@ -929,7 +899,7 @@ export function UploadWizard({
                 onClick={goBack}
                 className="focus-ring min-h-11 rounded-sm text-sm font-semibold text-primary underline underline-offset-2 hover:decoration-2"
               >
-                <span aria-hidden="true">&larr; </span>Back
+                <span aria-hidden="true">&larr; </span>Prapa
               </button>
             ) : (
               <span />
@@ -937,7 +907,7 @@ export function UploadWizard({
 
             {step < STEPS.length ? (
               <button type="button" onClick={goNext} className={buttonClasses("primary", "md", "min-h-11")}>
-                Next
+                Vazhdoni
               </button>
             ) : (
               <SaveButtons />
@@ -950,25 +920,25 @@ export function UploadWizard({
           <div className={`${CARD_CLASSES} p-5 text-sm`}>
             {!priceValid ? (
               <p className="text-muted">
-                Enter a price in lek ({MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
-                {MAXIMUM_CATALOG_PRICE_ALL}) to see your estimated earnings.
+                Shkruani çmimin në lekë (nga {MINIMUM_PAID_CATALOG_PRICE_ALL} deri në{" "}
+                {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}) për të parë fitimin e parashikuar.
               </p>
             ) : isFreeBook ? (
               <p className="font-medium text-foreground">
-                Free book — no author earnings from sales.
+                Libër falas: autori nuk fiton nga shitjet.
               </p>
             ) : (
               <div className="flex flex-col gap-2">
                 <div className="flex items-baseline justify-between gap-4">
-                  <span className="text-muted">Sale price</span>
+                  <span className="text-muted">Çmimi i shitjes</span>
                   <span>{formatAllMinorUnits(grossMinor)}</span>
                 </div>
                 <div className="flex items-baseline justify-between gap-4">
-                  <span className="text-muted">Librum platform fee ({PLATFORM_FEE_PERCENT}%)</span>
+                  <span className="text-muted">Tarifa e platformës Librum ({PLATFORM_FEE_PERCENT}%)</span>
                   <span>-{formatAllMinorUnits(feeMinor)}</span>
                 </div>
                 <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
-                  <span className="font-medium text-foreground">You earn per sale</span>
+                  <span className="font-medium text-foreground">Ju fitoni për çdo shitje</span>
                   <span className="font-serif text-2xl text-primary">
                     {formatAllMinorUnits(earningsMinor)}
                   </span>
@@ -977,7 +947,7 @@ export function UploadWizard({
             )}
 
             <Link href="/pricing" className={`${TEXT_LINK_CLASSES} mt-4 block`}>
-              Not sure what to charge? See the earnings calculator &rarr;
+              Nuk e dini çfarë çmimi të vendosni? Shikoni llogaritësin e fitimeve &rarr;
             </Link>
           </div>
 
@@ -1003,7 +973,7 @@ export function UploadWizard({
               />
             )}
             <div className="flex min-w-0 flex-col gap-1">
-              <p className={BOX_LABEL_CLASSES}>How readers will see it</p>
+              <p className={BOX_LABEL_CLASSES}>Si do ta shohin lexuesit</p>
               {title.trim() && (
                 <p className="break-words font-serif text-lg leading-snug text-foreground">{title}</p>
               )}

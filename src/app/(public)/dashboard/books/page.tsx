@@ -13,7 +13,7 @@ import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Your books",
+  title: "Librat tuaj",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -60,16 +60,16 @@ export default async function AllBooksPage() {
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
 
       <div className="mt-2">
         <PageHeader
-          title="All books"
-          description="Manage your drafts and published books."
+          title="Të gjithë librat"
+          description="Menaxhoni draftet dhe librat e publikuar."
           actions={
             <Link href="/dashboard/books/new" className={buttonClasses("primary", "md")}>
-              New book
+              Libër i ri
             </Link>
           }
         />
@@ -78,10 +78,10 @@ export default async function AllBooksPage() {
       {allBooks.length === 0 ? (
         <EmptyState
           className="mt-8"
-          title="You haven't added any books yet."
+          title="Nuk keni shtuar ende asnjë libër."
           action={
             <Link href="/dashboard/books/new" className={buttonClasses("primary", "md")}>
-              New book
+              Libër i ri
             </Link>
           }
         />
