@@ -434,9 +434,9 @@ describe("pen name (P1, PEN-NAMES-1 10a/14a/11a)", () => {
   });
 
   it("createBook: an invalid name is refused with its own message, before any upload or insert", async () => {
-    mockResolvePenName.mockResolvedValue({ ok: false, reason: "invalid", message: "A pen name must be 120 characters or fewer." });
+    mockResolvePenName.mockResolvedValue({ ok: false, reason: "invalid", message: "Pseudonimi mund të ketë deri në 120 karaktere." });
     expect(await redirectOf(createBook(createForm({ intent: "draft", penName: "x".repeat(121) })))).toBe(
-      "/dashboard/books/new?error=A pen name must be 120 characters or fewer.",
+      "/dashboard/books/new?error=Pseudonimi mund të ketë deri në 120 karaktere.",
     );
     expect(uploads).toEqual([]);
     expect(writerInserts()).toEqual([]);
@@ -453,7 +453,7 @@ describe("pen name (P1, PEN-NAMES-1 10a/14a/11a)", () => {
   it("createBook: 11a -- the database refuses a series of another pen name (LB451) with a clear message", async () => {
     writerError = { code: "LB451", message: "pen names: a series holds books of one pen name only" };
     expect(await redirectOf(createBook(createForm({ intent: "draft", penName: "Jo Pen" })))).toBe(
-      "/dashboard/books/new?error=A series or bundle holds books of one pen name only. Choose books under the same pen name.",
+      "/dashboard/books/new?error=Një seri ose paketë mban vetëm libra me të njëjtin pseudonim. Zgjidhni libra me të njëjtin pseudonim.",
     );
   });
 
@@ -487,7 +487,7 @@ describe("pen name (P1, PEN-NAMES-1 10a/14a/11a)", () => {
   it("updateBook: 14a -- a book in a series or bundle keeps its pen name (LB452): take it out first", async () => {
     writerError = { code: "LB452", message: "pen names: the book is in a series or bundle" };
     expect(await redirectOf(updateBook(BOOK_ID, editForm({ penName: "Jo Pen" })))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=This book is in a series or bundle. Take it out first, then change its pen name.`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Ky libër është në një seri ose paketë. Hiqeni prej saj më parë, pastaj ndryshojini pseudonimin.`,
     );
   });
 

@@ -372,7 +372,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=N%C3%ABntitulli%20duhet%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20300%20shenja",
+      "/dashboard/books/new?error=N%C3%ABntitulli%20mund%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20300%20karaktere",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -394,7 +394,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Botuesi%20duhet%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20200%20shenja",
+      "/dashboard/books/new?error=Botuesi%20mund%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20200%20karaktere",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -415,7 +415,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Botimi%20duhet%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20100%20shenja",
+      "/dashboard/books/new?error=Botimi%20mund%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20100%20karaktere",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -704,7 +704,7 @@ describe("updateBook: bibliographic metadata (PUBLISHING-UX-1 Part B FINAL PRE-C
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=N%C3%ABntitulli%20duhet%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20300%20shenja`,
+      `/dashboard/books/${BOOK_ID}/edit?error=N%C3%ABntitulli%20mund%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20300%20karaktere`,
     );
     expect(mockUpdate).not.toHaveBeenCalled();
   });

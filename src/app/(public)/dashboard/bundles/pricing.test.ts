@@ -144,7 +144,7 @@ function form(price: unknown, overrides: { title?: string } = {}): FormData {
 }
 
 const PRICE_ERROR =
-  "Enter the bundle price in lek: 0 for a free bundle, or a whole number from 99 to 100000";
+  "Shkruani çmimin e paketës në lekë: 0 për paketë falas, ose një numër të plotë nga 99 deri në 100.000";
 
 // Accepted inputs and the whole-lek integer each must be stored as.
 const ACCEPTED: Array<[string, number]> = [
@@ -205,7 +205,7 @@ afterEach(() => {
 describe("createBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
   it.each(ACCEPTED)("accepts %j and inserts price_all = %i", async (raw, expected) => {
     await expect(createBundle(form(raw))).rejects.toMatchObject({
-      target: "/dashboard/bundles?success=Bundle+created+as+a+draft",
+      target: "/dashboard/bundles?success=Paketa%20u%20krijua%20si%20draft",
     });
 
     // BUNDLE-MEMBERSHIP-AUTH-1: the bundle row is inserted by
@@ -263,7 +263,7 @@ describe("createBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
 
   it("existing validation is intact: a missing title is still refused before any write", async () => {
     await expect(createBundle(form("199", { title: "   " }))).rejects.toMatchObject({
-      target: "/dashboard/bundles?error=Please+fill+in+every+field",
+      target: "/dashboard/bundles?error=Plot%C3%ABsoni%20%C3%A7do%20fush%C3%AB",
     });
     expect(writes).toEqual([]);
   });
@@ -273,7 +273,7 @@ describe("createBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
     fd.delete("bookIds");
     fd.append("bookIds", "book-a");
     await expect(createBundle(fd)).rejects.toMatchObject({
-      target: "/dashboard/bundles?error=Choose+at+least+2+books",
+      target: "/dashboard/bundles?error=Zgjidhni%20t%C3%AB%20pakt%C3%ABn%202%20libra",
     });
     expect(writes).toEqual([]);
   });
@@ -287,7 +287,7 @@ describe("createBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
     await expect(createBundle(form("199"))).rejects.toBeInstanceOf(RedirectSignal);
 
     const target = decodeURIComponent(mockRedirect.mock.calls[0][0]);
-    expect(target).toBe("/dashboard/bundles?error=Could not create the bundle. Please try again.");
+    expect(target).toBe("/dashboard/bundles?error=Paketa nuk u krijua dot. Provoni përsëri.");
     expect(writes.some((w) => w.table === "bundle_books")).toBe(false);
   });
 
@@ -298,7 +298,7 @@ describe("createBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
 
     const target = decodeURIComponent(mockRedirect.mock.calls[0][0]);
     expect(target).toBe(
-      "/dashboard/bundles?error=We could not confirm whether the bundle was created. Check your bundles before trying again.",
+      "/dashboard/bundles?error=Nuk mundëm të konfirmojmë nëse paketa u krijua. Kontrolloni paketat tuaja para se të provoni përsëri.",
     );
   });
 });
@@ -308,7 +308,7 @@ describe("updateBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
 
   it.each(ACCEPTED)("accepts %j and updates price_all = %i", async (raw, expected) => {
     await expect(updateBundle(BUNDLE_ID, form(raw))).rejects.toMatchObject({
-      target: "/dashboard/bundles?success=Bundle+updated",
+      target: "/dashboard/bundles?success=Paketa%20u%20p%C3%ABrdit%C3%ABsua",
     });
 
     // BUNDLE-MEMBERSHIP-AUTH-1: details and membership are one RPC.
@@ -381,7 +381,7 @@ describe("updateBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
     await expect(updateBundle(BUNDLE_ID, form("199"))).rejects.toBeInstanceOf(RedirectSignal);
 
     const target = decodeURIComponent(mockRedirect.mock.calls[0][0]);
-    expect(target).toBe(`${EDIT}?error=Could not save the bundle, so nothing was changed. Please try again.`);
+    expect(target).toBe(`${EDIT}?error=Paketa nuk u ruajt dot, ndaj nuk ndryshoi asgjë. Provoni përsëri.`);
     expect(writes.map((w) => w.table)).toEqual(["rpc:update_bundle_with_membership"]);
   });
 

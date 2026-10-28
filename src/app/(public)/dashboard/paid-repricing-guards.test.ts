@@ -252,7 +252,7 @@ const BOOK_CHANGED = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponen
 const BOOK_SAVED = "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua";
 const BUNDLE_DENIED = `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`;
 const BUNDLE_CHANGED = `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`;
-const BUNDLE_SAVED = "/dashboard/bundles?success=Bundle+updated";
+const BUNDLE_SAVED = "/dashboard/bundles?success=Paketa%20u%20p%C3%ABrdit%C3%ABsua";
 
 function seedBook(overrides: Row) {
   tables.books = [
@@ -518,7 +518,7 @@ describe("updateBundle while paid publishing is closed", () => {
     expect(bundle()).toMatchObject({ status: "draft", price_all: 199 });
 
     expect(await redirectOf(publishBundle(BUNDLE_ID))).toBe(
-      "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard/bundles?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(bundle()).toMatchObject({ status: "draft", price_all: 199 });
   });

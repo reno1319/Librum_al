@@ -86,7 +86,7 @@ describe("bundle actions: maintenance-mode gate", () => {
     // validation, not the maintenance gate; proves the gate itself is
     // off and the function proceeds into its normal logic.
     await expect(createBundle(new FormData())).rejects.toMatchObject({
-      target: "/dashboard/bundles?error=Please+fill+in+every+field",
+      target: "/dashboard/bundles?error=Plot%C3%ABsoni%20%C3%A7do%20fush%C3%AB",
     });
     expect(mockCreateClient).toHaveBeenCalled();
   });

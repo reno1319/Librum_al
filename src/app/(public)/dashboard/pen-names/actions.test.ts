@@ -133,7 +133,7 @@ describe("updatePenName", () => {
     const target = await redirectOf(
       updatePenName(PEN_ID, form({ name: "  Jo Pen ", bio: " Bio ", links: ["https://a.example", "", ""] })),
     );
-    expect(target).toBe("/dashboard/pen-names?success=Pen name saved.");
+    expect(target).toBe("/dashboard/pen-names?success=Pseudonimi u ruajt.");
     const update = queries.find((q) => q.client === "session" && method(q, "update"))!;
     expect(method(update, "update")!.args[0]).toEqual({ name: "Jo Pen", bio: "Bio", links: ["https://a.example"] });
     expect(update.ops).toContainEqual({ method: "eq", args: ["id", PEN_ID] });
@@ -151,7 +151,7 @@ describe("updatePenName", () => {
     expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", links: ["http://a.example"] })))).toContain("https://");
     expect(
       await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", links: ["https://a.e", "https://b.e", "https://c.e", "https://d.e"] }))),
-    ).toContain("at most 3");
+    ).toContain("deri në 3 lidhje");
     expect(queries.some((q) => method(q, "update"))).toBe(false);
   });
 
@@ -159,7 +159,7 @@ describe("updatePenName", () => {
     respond = (q) =>
       q.client === "session" && method(q, "update") ? { data: null, error: { code: "23505" } } : defaultRespond(q);
     expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Taken" })))).toBe(
-      "/dashboard/pen-names?error=You already use this name as one of your pen names. Choose another name, or rename that pen name first.",
+      "/dashboard/pen-names?error=Këtë emër e përdorni tashmë si një nga pseudonimet tuaja. Zgjidhni një emër tjetër, ose ndryshoni më parë emrin e atij pseudonimi.",
     );
   });
 
@@ -179,7 +179,7 @@ describe("updatePenName", () => {
     stagedBytes = PNG;
     const staged = `${USER_ID}/tmp/avatar/aaaaaaaa-0000-4000-8000-000000000001.png`;
     expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: staged })))).toBe(
-      "/dashboard/pen-names?success=Pen name saved.",
+      "/dashboard/pen-names?success=Pseudonimi u ruajt.",
     );
     const upload = storageCalls.find((c) => c.op === "upload")!;
     expect(upload.client).toBe("writer");
@@ -201,7 +201,7 @@ describe("updatePenName", () => {
     const target = await redirectOf(
       updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: "someone-else/tmp/avatar/x.png" })),
     );
-    expect(target).toContain("no longer valid");
+    expect(target).toContain("nuk është më e vlefshme");
     expect(storageCalls).toEqual([]);
   });
 
@@ -210,7 +210,7 @@ describe("updatePenName", () => {
     const target = await redirectOf(
       updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: `${USER_ID}/tmp/avatar/x.png` })),
     );
-    expect(target).toContain("valid JPEG or PNG");
+    expect(target).toContain("i vlefshëm JPEG ose PNG");
     expect(storageCalls.some((c) => c.op === "upload")).toBe(false);
   });
 
@@ -221,7 +221,7 @@ describe("updatePenName", () => {
     const target = await redirectOf(
       updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: `${USER_ID}/tmp/avatar/x.png` })),
     );
-    expect(target).toContain("Could not read your uploaded photo. Please try again.");
+    expect(target).toContain("Fotoja e ngarkuar nuk u lexua dot. Provoni përsëri.");
     expect(storageCalls.some((c) => c.op === "upload")).toBe(false);
   });
 
@@ -246,7 +246,7 @@ describe("updatePenName: a default pen name holding the profile photo", () => {
     stagedBytes = PNG;
     expect(
       await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: `${USER_ID}/tmp/avatar/x.png` }))),
-    ).toBe("/dashboard/pen-names?success=Pen name saved.");
+    ).toBe("/dashboard/pen-names?success=Pseudonimi u ruajt.");
     const removedAvatars = storageCalls.filter((c) => c.bucket === "avatars" && c.op === "remove");
     expect(removedAvatars).toEqual([]);
     const write = queries.find((q) => q.client === "writer" && method(q, "update"))!;
@@ -264,7 +264,7 @@ describe("updatePenName: a default pen name holding the profile photo", () => {
 
 describe("deletePenName", () => {
   it("deletes an unused, non-default pen name through the writer, by id, author and is_default=false", async () => {
-    expect(await redirectOf(deletePenName(PEN_ID))).toBe("/dashboard/pen-names?success=Pen name deleted.");
+    expect(await redirectOf(deletePenName(PEN_ID))).toBe("/dashboard/pen-names?success=Pseudonimi u fshi.");
     const del = queries.find((q) => q.client === "writer" && method(q, "delete"))!;
     expect(del.ops).toContainEqual({ method: "eq", args: ["id", PEN_ID] });
     expect(del.ops).toContainEqual({ method: "eq", args: ["author_id", USER_ID] });
@@ -273,19 +273,19 @@ describe("deletePenName", () => {
 
   it("the default pen name is never deleted", async () => {
     ownRow = { id: PEN_ID, is_default: true, avatar_path: null };
-    expect(await redirectOf(deletePenName(PEN_ID))).toContain("default pen name can't be deleted");
+    expect(await redirectOf(deletePenName(PEN_ID))).toContain("Pseudonimi kryesor nuk mund të fshihet");
     expect(queries.some((q) => method(q, "delete"))).toBe(false);
   });
 
   it("a pen name used by a book, series or bundle is not deleted", async () => {
     respond = (q) => (q.table === "series" ? { count: 1 } : defaultRespond(q));
-    expect(await redirectOf(deletePenName(PEN_ID))).toContain("still used");
+    expect(await redirectOf(deletePenName(PEN_ID))).toContain("përdoret ende");
     expect(queries.some((q) => method(q, "delete"))).toBe(false);
   });
 
   it("a foreign-key refusal (used after all) gets the same message", async () => {
     respond = (q) => (method(q, "delete") ? { data: null, error: { code: "23503" } } : defaultRespond(q));
-    expect(await redirectOf(deletePenName(PEN_ID))).toContain("still used");
+    expect(await redirectOf(deletePenName(PEN_ID))).toContain("përdoret ende");
   });
 
   it("its photo is removed after the delete", async () => {

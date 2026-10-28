@@ -11,7 +11,7 @@ import type { Series } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Series",
+  title: "Seritë",
 };
 
 export default async function SeriesPage({
@@ -62,13 +62,13 @@ export default async function SeriesPage({
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
 
       <div className="mt-2">
         <PageHeader
-          title="Series"
-          description="Create a series here, then assign each book to it (and set its reading order) from the book's edit page. All books in a series use the series' pen name."
+          title="Seritë"
+          description="Krijoni një seri këtu, pastaj vendosni çdo libër në të (dhe radhën e leximit) nga faqja e ndryshimit të librit. Të gjithë librat e një serie përdorin pseudonimin e serisë."
         />
       </div>
 
@@ -88,12 +88,12 @@ export default async function SeriesPage({
         className="mt-6 flex flex-col gap-4 rounded-card border border-border bg-surface p-4 shadow-sm sm:flex-row sm:items-end"
       >
         <label className="flex flex-1 flex-col gap-1 text-sm">
-          Series title
+          Titulli i serisë
           <input
             name="title"
             type="text"
             required
-            placeholder="e.g. The Ashfall Trilogy"
+            placeholder="p.sh. Trilogjia e Hirit"
             className={formControlClasses}
           />
         </label>
@@ -101,7 +101,7 @@ export default async function SeriesPage({
             pen name. Shown only when the author has more than one. */}
         {(penNames ?? []).length > 1 && (
           <label className="flex flex-col gap-1 text-sm">
-            Pen name
+            Pseudonimi
             <select name="penNameId" defaultValue={penNames![0].id} className={formControlClasses}>
               {penNames!.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -112,7 +112,7 @@ export default async function SeriesPage({
           </label>
         )}
         <button type="submit" className={buttonClasses("primary", "md", "w-fit")}>
-          Create series
+          Krijoni serinë
         </button>
       </form>
 
@@ -126,7 +126,7 @@ export default async function SeriesPage({
               <p className="font-medium">{s.title}</p>
               <p className="text-xs text-muted">
                 {counts.get(s.id) ?? 0}{" "}
-                {(counts.get(s.id) ?? 0) === 1 ? "book" : "books"}
+                {(counts.get(s.id) ?? 0) === 1 ? "libër" : "libra"}
                 {(penNames ?? []).length > 1 && s.pen_name_id && penNameById.get(s.pen_name_id)
                   ? ` · ${penNameById.get(s.pen_name_id)}`
                   : ""}
@@ -137,14 +137,14 @@ export default async function SeriesPage({
                 type="submit"
                 className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
               >
-                Delete
+                Fshini
               </button>
             </form>
           </li>
         ))}
         {(series ?? []).length === 0 && (
           <li>
-            <EmptyState description="No series yet." />
+            <EmptyState description="Ende nuk keni asnjë seri." />
           </li>
         )}
       </ul>

@@ -55,12 +55,12 @@ function resolvePublicAuthorNameSubmission(
   const value = String(formData.get("publicAuthorName") ?? "").trim();
 
   if (!value) {
-    return { action: "reject", message: "Public author name can't be empty" };
+    return { action: "reject", message: "Emri publik i autorit nuk mund të jetë bosh" };
   }
   if (value.length > PUBLIC_AUTHOR_NAME_MAX_LENGTH) {
     return {
       action: "reject",
-      message: `Public author name must be ${PUBLIC_AUTHOR_NAME_MAX_LENGTH} characters or fewer`,
+      message: `Emri publik i autorit mund të ketë deri në ${PUBLIC_AUTHOR_NAME_MAX_LENGTH} karaktere`,
     };
   }
 
@@ -80,7 +80,7 @@ function isExactlyOwnProfileRowWritten(rows: unknown, userId: string): boolean {
 }
 
 const PROFILE_SAVE_ERROR = `/dashboard/profile?error=${encodeURIComponent(
-  "We couldn't save your profile. Please try again.",
+  "Profili nuk u ruajt dot. Provoni përsëri.",
 )}`;
 
 // AVATAR-STORAGE-PATH-AUTH-1: the profile fields (display_name and
@@ -143,7 +143,7 @@ export async function updateProfile(formData: FormData) {
   const displayName = String(formData.get("displayName") ?? "").trim();
 
   if (!displayName) {
-    redirect("/dashboard/profile?error=Name+can%27t+be+empty");
+    redirect(`/dashboard/profile?error=${encodeURIComponent("Emri nuk mund të jetë bosh")}`);
   }
   if (displayName.length > ACCOUNT_NAME_MAX_LENGTH) {
     redirect(`/dashboard/profile?error=${encodeURIComponent(ACCOUNT_NAME_TOO_LONG_MESSAGE)}`);

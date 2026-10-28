@@ -20,7 +20,7 @@ export async function createSeries(formData: FormData) {
   const penNameId = String(formData.get("penNameId") ?? "").trim();
 
   if (!title) {
-    redirect("/dashboard/series?error=Please+enter+a+series+title");
+    redirect(`/dashboard/series?error=${encodeURIComponent("Shkruani titullin e serisë")}`);
   }
 
   if (penNameId) {
@@ -33,7 +33,7 @@ export async function createSeries(formData: FormData) {
       .eq("author_id", user.id)
       .maybeSingle();
     if (!ownPenName) {
-      redirect(`/dashboard/series?error=${encodeURIComponent("Please choose one of your pen names.")}`);
+      redirect(`/dashboard/series?error=${encodeURIComponent("Zgjidhni një nga pseudonimet tuaja.")}`);
     }
   }
 
@@ -47,12 +47,12 @@ export async function createSeries(formData: FormData) {
     // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: was error.message -- see the
     // identical correction in src/app/books/[id]/actions.ts for why.
     redirect(
-      `/dashboard/series?error=${encodeURIComponent("We couldn't create the series. Please try again.")}`,
+      `/dashboard/series?error=${encodeURIComponent("Seria nuk u krijua dot. Provoni përsëri.")}`,
     );
   }
 
   revalidatePath("/dashboard/series");
-  redirect("/dashboard/series?success=Series+created");
+  redirect(`/dashboard/series?success=${encodeURIComponent("Seria u krijua")}`);
 }
 
 export async function deleteSeries(seriesId: string) {

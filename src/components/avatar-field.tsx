@@ -36,9 +36,9 @@ type Status = "idle" | "uploading" | "success" | "error";
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const MANUSCRIPTS_BUCKET = "manuscripts";
-const GENERIC_ERROR = "We couldn't upload your profile photo. Please try again.";
-const TOO_LARGE_ERROR = "This image is larger than the 5 MB limit.";
-const UNSUPPORTED_FORMAT_ERROR = "Unsupported image format. Use JPEG or PNG.";
+const GENERIC_ERROR = "Fotoja nuk u ngarkua dot. Provoni përsëri.";
+const TOO_LARGE_ERROR = "Ky imazh e kalon kufirin prej 5 MB.";
+const UNSUPPORTED_FORMAT_ERROR = "Format imazhi i papranuar. Përdorni JPEG ose PNG.";
 
 export function AvatarField({
   userId,
@@ -218,7 +218,7 @@ export function AvatarField({
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <label className="flex flex-col gap-1 text-sm">
-          Photo (JPG or PNG, up to 5MB)
+          Fotoja (JPEG ose PNG, deri në 5 MB)
           <input
             type="file"
             accept="image/png,image/jpeg"
@@ -229,7 +229,7 @@ export function AvatarField({
 
         {status === "uploading" && (
           <p role="status" className="text-sm text-muted">
-            Uploading photo…
+            Fotoja po ngarkohet…
           </p>
         )}
 
