@@ -26,7 +26,7 @@ export function generateMetadata(): Metadata {
   const origin = resolveSiteOrigin();
   const title = "Blog";
   const description =
-    "Këshilla, udhëzues dhe histori nga bota e vetëpublikimit shqip -- si të shkruash, botosh dhe promovosh librin tënd me Librum.";
+    "Këshilla, udhëzues dhe histori nga bota e vetëbotimit shqip: si ta shkruani, ta botoni dhe ta promovoni librin tuaj me Librum.";
 
   return {
     title,
@@ -99,8 +99,8 @@ export default async function BlogIndexPage() {
           Blogu i Librum
         </h1>
         <p className="mt-3 text-muted">
-          Këshilla, udhëzues dhe histori nga bota e vetëpublikimit shqip — si të shkruash, redaktosh,
-          botosh dhe promovosh librin tënd.
+          Këshilla, udhëzues dhe histori nga bota e vetëbotimit shqip: si ta shkruani, ta redaktoni,
+          ta botoni dhe ta promovoni librin tuaj.
         </p>
       </div>
 
@@ -108,7 +108,7 @@ export default async function BlogIndexPage() {
         <EmptyState
           className="mt-10"
           title="Artikujt e parë po vijnë së shpejti."
-          description="Ekipi ynë editorial po përgatit udhëzuesit e parë për autorët dhe lexuesit. Kthehu shpejt."
+          description="Ekipi ynë editorial po përgatit udhëzuesit e parë për autorët dhe lexuesit. Kthehuni së shpejti."
         />
       ) : (
         <div className="mt-10 flex flex-col gap-14">
@@ -159,12 +159,12 @@ export default async function BlogIndexPage() {
 
       {!empty && (
         <div className="mt-14 border-t border-border pt-8 text-center">
-          <p className="text-muted">Gati të botosh librin tënd?</p>
+          <p className="text-muted">Gati ta botoni librin tuaj?</p>
           <Link
             href="/signup?role=author"
             className="mt-3 inline-block rounded-control bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
           >
-            Boto librin tënd
+            Publikoni librin tuaj
           </Link>
         </div>
       )}

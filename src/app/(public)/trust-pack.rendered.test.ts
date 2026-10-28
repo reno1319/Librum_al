@@ -35,13 +35,13 @@ describe("TRUST PACK 1-2: How to read your book", () => {
   const text = toText(html);
 
   it("is its own page with one h1", () => {
-    expect(readingMetadata.title).toBe("How to read your book");
+    expect(readingMetadata.title).toBe("Si ta lexoni librin tuaj");
     expect(html.match(/<h1\b/g)).toHaveLength(1);
-    expect(html).toMatch(/<h1[^>]*>How to read your book<\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Si ta lexoni librin tuaj<\/h1>/);
   });
 
   it("covers iPhone, Android, computer and Kindle with the named apps", () => {
-    for (const phrase of ["iPhone or iPad", "Android phone or tablet", "Computer", "Kindle", "Apple Books", "Google Play Books", "Thorium Reader", "Send to Kindle", "no DRM"]) {
+    for (const phrase of ["iPhone ose iPad", "Telefon ose tablet Android", "Kompjuter", "Kindle", "Apple Books", "Google Play Books", "Thorium Reader", "Send to Kindle", "pa DRM", 'Prekni "Shkarkoni EPUB"']) {
       expect(text).toContain(phrase);
     }
     for (const id of ["iphone", "android", "computer", "kindle"]) {
@@ -55,12 +55,14 @@ describe("TRUST PACK 1-2: How to read your book", () => {
     for (const href of [SEND_TO_KINDLE_HREF, "https://thorium.edrlab.org/"]) {
       expect(html).toContain(`href="${href}" target="_blank" rel="noopener noreferrer"`);
     }
+    // T54: both new-tab links say so to screen readers.
+    expect(html.match(/<span class="sr-only"> \(hapet në një skedë të re\)<\/span><\/a>/g)).toHaveLength(2);
   });
 
   it("says where downloads are and repeats the 14-day rule with a Refund Policy link", () => {
     expect(html).toContain('href="/library"');
-    expect(text).toContain("within 14 days, as long as you haven't downloaded the book yet");
-    expect(text).toContain("Your first download ends that right.");
+    expect(text).toContain("brenda 14 ditëve, për sa kohë nuk e keni shkarkuar ende librin");
+    expect(text).toContain("Shkarkimi i parë e mbyll këtë të drejtë.");
     expect(html).toContain('href="/refunds"');
   });
 
@@ -74,9 +76,18 @@ describe("TRUST PACK 1: links to the reader help page", () => {
   it("Help has an answer that links to it, and the reply promise at the bottom", async () => {
     const html = renderToStaticMarkup(await HelpPage());
     const text = toText(html);
-    expect(text).toContain("How do I open a book I downloaded?");
+    expect(text).toContain("Si ta hap një libër që kam shkarkuar?");
     expect(html).toContain('href="/help/reading"');
-    expect(text).toContain("Get in touch . Përgjigjemi brenda 3 ditëve të punës.");
+    expect(text).toContain("Si ta lexoni librin tuaj, hap pas hapi");
+    expect(text).toContain("Na kontaktoni . Përgjigjemi brenda 3 ditëve të punës.");
+  });
+
+  // ALBANIAN-13 (Renato's a): the answers written before book review
+  // existed now name it.
+  it("Help says a book needs Librum's approval, and that a new cover or file waits for it", async () => {
+    const text = toText(renderToStaticMarkup(await HelpPage()));
+    expect(text).toContain("Një libër shfaqet në Librari pasi e dërgoni për shqyrtim, Librum e miraton dhe libri ka një çmim.");
+    expect(text).toContain("Nëse ndryshoni kopertinën ose skedarin e librit, libri del nga Libraria derisa Librum ta miratojë.");
   });
 
   it("the Library and the book page's owned panel link to it", () => {
@@ -100,6 +111,15 @@ describe("TRUST PACK 5-6: Contact, footer and Privacy", () => {
     const html = renderToStaticMarkup(SiteFooter());
     expect(html).toContain('href="mailto:support@librum.al"');
     expect(toText(html)).toContain("Përgjigjemi brenda 3 ditëve të punës.");
+  });
+
+  // ALBANIAN-13 (SQ-4 audit N8): each footer link group is a named nav,
+  // and the partner link says it opens a new tab.
+  it("the footer names its link groups and marks the partner link as a new tab", () => {
+    const html = renderToStaticMarkup(SiteFooter());
+    expect(html.match(/<nav aria-label="[^"]+"/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(html).toContain('<nav aria-label="Ligjore"');
+    expect(toText(html)).toContain("Boto me L&K ↗ (hapet në një skedë të re)");
   });
 
   it("Privacy doesn't mention WhatsApp while the number is empty", () => {
@@ -130,7 +150,17 @@ describe("TRUST PACK 6: share on WhatsApp", () => {
 describe("TRUST PACK 3-4: Who we are", () => {
   it("doesn't render on About while the team list is empty", async () => {
     const html = renderToStaticMarkup(await AboutPage());
-    expect(html).not.toContain("Who we are");
+    expect(html).not.toContain("Kush jemi");
     expect(html).not.toContain('id="team-heading"');
+  });
+});
+
+// ALBANIAN-13 (Renato's a): About no longer says books go live without
+// approval; it says Librum checks every book.
+describe("About: the review is described truthfully", () => {
+  it("says Librum checks every book before it reaches the Bookstore", async () => {
+    const text = toText(renderToStaticMarkup(await AboutPage()));
+    expect(text).toContain("Librum kontrollon çdo libër para se të dalë në Librari.");
+    expect(text).not.toMatch(/pa pritur|pa miratim/);
   });
 });

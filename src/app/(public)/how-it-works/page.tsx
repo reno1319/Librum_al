@@ -13,8 +13,8 @@ import {
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "How it works",
-  description: "Learn how to prepare, publish, price, and sell your ebook with Librum.",
+  title: "Si funksionon",
+  description: "Si ta përgatitni, ta publikoni, t'i vini çmimin dhe ta shisni librin tuaj elektronik me Librum.",
 };
 
 // FIX1 (X3): each step is numbered once -- by its numeral (01-06), never
@@ -24,56 +24,56 @@ export const metadata: Metadata = {
 // retyped copy. Every other step's words are unchanged.
 const steps: { title: string; body: string; rights?: boolean }[] = [
   {
-    title: "Sign up as an author",
-    body: "Create an account and choose \"Author\" when you sign up.",
+    title: "Regjistrohuni si autor",
+    body: "Krijoni një llogari dhe zgjidhni \"Autor\" kur regjistroheni.",
   },
   {
-    title: "Payout setup",
-    body: "Paid publishing and author payout setup have not launched yet. Authors can continue to publish free books while Librum completes its payment and payout systems.",
+    title: "Pagesat për autorët",
+    body: "Botimi me pagesë dhe pagesat për autorët nuk janë aktivizuar ende. Autorët mund të vazhdojnë të publikojnë libra falas, ndërsa Librum përfundon sistemet e pagesave.",
   },
   {
-    title: "Upload your book",
-    body: "From your dashboard, add a title, description, genre, price, a cover image (JPG or PNG, up to 5MB), and your manuscript — an EPUB file, or a DOCX file that Librum converts into an EPUB for you (either way, up to 50MB). It's saved as a draft.",
+    title: "Ngarkoni librin tuaj",
+    body: "Te Paneli i autorit, shtoni titullin, përshkrimin, zhanrin, çmimin, një kopertinë (JPG ose PNG, deri në 5 MB) dhe dorëshkrimin: një skedar EPUB, ose një skedar DOCX që Librum e kthen në EPUB për ju (në të dyja rastet, deri në 50 MB). Libri ruhet si draft.",
   },
   {
-    title: "Choose the rights statement",
-    body: "Before you publish, pick the one that's true:",
+    title: "Zgjidhni deklaratën e të drejtave",
+    body: "Para se ta publikoni, zgjidhni atë që është e vërtetë:",
     rights: true,
   },
   {
-    title: "Send for review",
-    body: "When you're ready, send the draft for review. Once Librum approves it, it appears on the storefront and in search.",
+    title: "Dërgojeni për shqyrtim",
+    body: "Kur të jeni gati, dërgojeni draftin për shqyrtim. Pasi Librum ta miratojë, libri shfaqet në Librari dhe në kërkim.",
   },
   {
-    title: "Get paid",
-    body: `When paid publishing launches, the current commission terms allocate ${100 - PLATFORM_FEE_PERCENT}% to the author and ${PLATFORM_FEE_PERCENT}% to Librum. The author payout method and timing will be published before paid publishing launches.`,
+    title: "Merrni pagesën",
+    body: `Kur të nisë botimi me pagesë, sipas kushteve aktuale të komisionit autori merr ${100 - PLATFORM_FEE_PERCENT}% dhe Librum ${PLATFORM_FEE_PERCENT}%. Mënyra dhe koha e pagesave për autorët do të publikohen para se të nisë botimi me pagesë.`,
   },
 ];
 
 const FILE_GUIDELINES: { heading: string; rows: [string, string][] }[] = [
   {
-    heading: "Manuscript",
+    heading: "Dorëshkrimi",
     rows: [
-      ["Format", "EPUB, or DOCX (Librum converts it to EPUB)"],
-      ["Size", "Up to 50 MB"],
-      ["Extra", "Pen name and translator are optional fields"],
+      ["Formati", "EPUB, ose DOCX (Librum e kthen në EPUB)"],
+      ["Madhësia", "Deri në 50 MB"],
+      ["Të tjera", "Pseudonimi dhe përkthyesi janë fusha opsionale"],
     ],
   },
   {
-    heading: "Cover",
+    heading: "Kopertina",
     rows: [
-      ["Format", "JPG or PNG"],
-      ["Size", "Up to 5 MB"],
-      ["Best", "1600 × 2560 px. At least 1000 px tall."],
+      ["Formati", "JPG ose PNG"],
+      ["Madhësia", "Deri në 5 MB"],
+      ["Më mirë", "1600 × 2560 px. Të paktën 1000 px e lartë."],
     ],
   },
 ];
 
 const AFTER_YOU_PUBLISH = [
-  { heading: "Series", body: "Group your books in reading order on one series page." },
-  { heading: "Discount codes", body: "Make discount codes for a launch or for your readers." },
-  { heading: "Followers", body: "Readers who follow you get an email when you publish a new book." },
-  { heading: "Free sample", body: "Readers can read a free sample from the opening of your book." },
+  { heading: "Seritë", body: "Gruponi librat tuaj sipas radhës së leximit në një faqe serie." },
+  { heading: "Kodet e zbritjes", body: "Krijoni kode zbritjeje për nisjen e një libri ose për lexuesit tuaj." },
+  { heading: "Ndjekësit", body: "Lexuesit që ju ndjekin marrin një email kur publikoni një libër të ri." },
+  { heading: "Pjesë falas", body: "Lexuesit mund të lexojnë falas fillimin e librit tuaj." },
 ];
 
 export default async function HowItWorksPage() {
@@ -82,14 +82,14 @@ export default async function HowItWorksPage() {
   return (
     <main className="flex-1">
       <PageBand
-        eyebrow="How it works"
-        title="How self-publishing works"
-        lead={<>From signing up to getting paid, here&apos;s the whole process.</>}
+        eyebrow="Si funksionon"
+        title="Si funksionon vetëbotimi"
+        lead={<>Nga regjistrimi deri te pagesa, ja i gjithë procesi.</>}
       />
 
       <section className="border-b border-border bg-surface">
         <div className={SECTION_CONTAINER}>
-          <h2 className={SECTION_HEADING}>Six steps</h2>
+          <h2 className={SECTION_HEADING}>Gjashtë hapa</h2>
           <ol className="mt-8 grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
             {steps.map((step, i) => (
               <li key={step.title} className="flex flex-col gap-2">
@@ -116,7 +116,7 @@ export default async function HowItWorksPage() {
 
       <section className="bg-background">
         <div className={SECTION_CONTAINER}>
-          <h2 className={SECTION_HEADING}>File guidelines</h2>
+          <h2 className={SECTION_HEADING}>Udhëzime për skedarët</h2>
           <div className="mt-8 grid gap-6 md:grid-cols-2">
             {FILE_GUIDELINES.map((card) => (
               <div key={card.heading} className="rounded-[4px] border border-border bg-surface p-5 sm:p-6">
@@ -137,7 +137,7 @@ export default async function HowItWorksPage() {
 
       <section className="border-y border-border bg-surface">
         <div className={SECTION_CONTAINER}>
-          <h2 className={SECTION_HEADING}>After you publish</h2>
+          <h2 className={SECTION_HEADING}>Pasi të publikoni</h2>
           <ul className="mt-8 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             {AFTER_YOU_PUBLISH.map((card) => (
               <li key={card.heading}>
@@ -151,9 +151,9 @@ export default async function HowItWorksPage() {
 
       <div className="page-container py-10">
         <p className="text-sm text-foreground/90">
-          Questions? See the{" "}
+          Keni pyetje? Shihni{" "}
           <Link href="/help" className={TEXT_LINK_CLASSES}>
-            help page
+            faqen e ndihmës
           </Link>
           .
         </p>

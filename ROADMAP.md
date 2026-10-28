@@ -507,11 +507,14 @@ two systems are kept separate.
 - Signup `emailRedirectTo` (drives the confirmation-link destination) —
   **DONE**, active in production.
 - PKCE `?code=` auth callback — **DONE**, active (pre-existing).
-- Direct `?token_hash=...&type=signup|recovery` auth callback — **BUILT/
-  DORMANT** (AUTH-1E). The route accepts only the closed `signup`/`recovery`
-  set; nothing in the current email configuration emits this link shape yet.
-- Supabase Auth is currently on its **default email templates**, with **no
-  custom SMTP configured**.
+- Direct `?token_hash=...&type=signup|recovery` auth callback — **DONE**,
+  active in production (AUTH-1E). The route accepts only the closed
+  `signup`/`recovery` set. Correction 28 Oct 2026: Production's Supabase
+  Auth has custom SMTP and custom "Confirm sign up" / "Reset password"
+  templates that emit this link shape (the reset link adds
+  `&next=/reset-password`). Staging has no custom SMTP and uses the
+  default templates. Albanian texts: SUPABASE-AUTH-EMAILS-r3 (project
+  files), pasted at the Albanian release.
 - Cross-browser/device email confirmation (the scenario the `token_hash`
   path exists for) — **DEFERRED/BLOCKED** until custom SMTP, coordinated
   email templates, and a real staging end-to-end send/click test all exist

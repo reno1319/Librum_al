@@ -46,7 +46,7 @@ describe("FIX1 X3: How it works numbers each step once", () => {
     const html = await renderHowItWorks();
     const numerals = [...html.matchAll(/<span class="[^"]*italic[^"]*">(\d\d)<\/span>/g)].map((m) => m[1]);
     expect(numerals).toEqual(["01", "02", "03", "04", "05", "06"]);
-    expect(html).toContain(">Sign up as an author</h3>");
+    expect(html).toContain(">Regjistrohuni si autor</h3>");
     expect(html).not.toMatch(/>\d\. /);
     expect(html).not.toContain("list-decimal");
   });

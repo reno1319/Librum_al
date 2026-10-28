@@ -117,7 +117,7 @@ export function MobileNav({
             </div>
           ) : (
             <>
-              <nav className="flex flex-col">
+              <nav aria-label="Menyja" className="flex flex-col">
                 {items.map((item) => (
                   <Link key={item.href} href={item.href} className={linkClassName}>
                     {item.label}

@@ -626,7 +626,7 @@ export function UploadWizard({
                       className="focus-ring rounded-sm underline"
                     >
                       Krijoni fillimisht një seri
-                      <span className="sr-only"> (hapet në skedë të re)</span>
+                      <span className="sr-only"> (hapet në një skedë të re)</span>
                     </Link>
                     , pastaj kthehuni këtu.
                   </p>

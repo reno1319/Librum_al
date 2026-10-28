@@ -6,16 +6,16 @@ import { ClosingCtaBand, PageBand, SECTION_CONTAINER } from "@/components/page-b
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Earnings",
-  description: "See Librum's platform fee, author share, and payout information.",
+  title: "Fitimet",
+  description: "Tarifa e platformës së Librum, pjesa e autorit dhe informacioni për pagesat.",
 };
 
 const HOW_IT_WORKS = [
-  "You set the price for your book — any price you like, including free.",
-  `Librum takes a flat ${PLATFORM_FEE_PERCENT}% platform fee on every sale. That's it — no other cuts.`,
-  "Paid publishing and author payout setup have not launched yet.",
-  "No setup fees, no monthly subscription, no minimum number of sales.",
-  "Refunded transactions, or disputes resolved against the payment, are adjusted accordingly.",
+  "Çmimin e librit e vendosni ju: çfarëdo çmimi që doni, edhe falas.",
+  `Librum merr një tarifë fikse platforme prej ${PLATFORM_FEE_PERCENT}% për çdo shitje. Kaq, Librum nuk mban asgjë tjetër.`,
+  "Botimi me pagesë dhe pagesat për autorët nuk janë aktivizuar ende.",
+  "Pa tarifë fillestare, pa abonim mujor, pa numër minimal shitjesh.",
+  "Shitjet e rimbursuara, ose kundërshtimet e zgjidhura kundër pagesës, rregullohen në përputhje me to.",
 ];
 
 const SUBHEADING = "font-serif text-2xl font-normal text-primary";
@@ -31,13 +31,13 @@ export default async function PricingPage() {
   return (
     <main className="flex-1">
       <PageBand
-        eyebrow="Earnings"
-        title="Earnings"
+        eyebrow="Fitimet"
+        title="Fitimet"
         lead={
           <>
-            You keep {authorSharePercent}% of every sale — Librum keeps{" "}
-            {PLATFORM_FEE_PERCENT}%. No setup fees, no monthly subscription, no
-            minimum sales. Librum only makes money when you do.
+            Ju mbani {authorSharePercent}% të çdo shitjeje, Librum mban{" "}
+            {PLATFORM_FEE_PERCENT}%. Pa tarifë fillestare, pa abonim mujor, pa
+            minimum shitjesh. Librum fiton vetëm kur fitoni ju.
           </>
         }
         aside={
@@ -46,7 +46,7 @@ export default async function PricingPage() {
               {authorSharePercent}%
             </span>
             <p className="mt-2 text-sm font-medium tracking-wide text-primary-foreground/85 uppercase">
-              Author share
+              Pjesa e autorit
             </p>
           </div>
         }
@@ -61,7 +61,7 @@ export default async function PricingPage() {
       <section className="border-y border-border bg-surface">
         <div className={`${SECTION_CONTAINER} grid gap-10 lg:grid-cols-3`}>
           <div>
-            <h2 className={SUBHEADING}>How it works</h2>
+            <h2 className={SUBHEADING}>Si funksionon</h2>
             <ul className="mt-4 flex list-disc flex-col gap-2 pl-5 leading-relaxed text-foreground/90 marker:text-[#8a6d12]">
               {HOW_IT_WORKS.map((line) => (
                 <li key={line}>{line}</li>
@@ -75,20 +75,21 @@ export default async function PricingPage() {
               here: POK is only ever named for reader checkout, never as an
               implied author-payout provider. */}
           <div>
-            <h2 className={SUBHEADING}>Payouts</h2>
+            <h2 className={SUBHEADING}>Pagesat për autorët</h2>
             <p className="mt-4 leading-relaxed text-foreground/90">
-              Paid publishing and author payout setup have not launched yet.
-              Authors can continue to publish free books without payout setup
-              while Librum completes its payment and payout systems.
+              Botimi me pagesë dhe pagesat për autorët nuk janë aktivizuar ende.
+              Autorët mund të vazhdojnë të publikojnë libra falas, pa konfiguruar
+              pagesat, ndërsa Librum përfundon sistemet e pagesave.
             </p>
           </div>
 
           <div>
-            <h2 className={SUBHEADING}>What the fee covers</h2>
+            <h2 className={SUBHEADING}>Çfarë mbulon tarifa</h2>
             <p className="mt-4 leading-relaxed text-foreground/90">
-              Hosting, secure checkout, ebook delivery, and watermarking — plus
-              every tool in your dashboard: sales analytics, discount codes,
-              series, and contributor credits. All included, no extra charge.
+              Ruajtjen e skedarëve, pagesën e sigurt, dërgimin e librit elektronik
+              dhe shenjën e ujit në skedar, si dhe çdo mjet në Panelin e autorit:
+              statistikat e shitjeve, kodet e zbritjes, seritë dhe emrat e
+              bashkëpunëtorëve. Të gjitha të përfshira, pa pagesë shtesë.
             </p>
           </div>
         </div>

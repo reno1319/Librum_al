@@ -439,7 +439,7 @@ describe("UploadWizard: FIX1 per-field messages and wording", () => {
     const link = source.match(/<Link\s+href="\/dashboard\/series"[\s\S]*?<\/Link>/)![0];
     expect(link).toContain('target="_blank"');
     expect(link).toContain('rel="noopener"');
-    expect(link).toContain("(hapet në skedë të re)");
+    expect(link).toContain("(hapet në një skedë të re)");
   });
 
   it("labels the description \"Description\" and shows the missing-description blocker in Readiness", () => {

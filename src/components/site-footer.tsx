@@ -78,7 +78,7 @@ export function SiteFooter() {
               <p className="text-[0.9375rem] font-semibold text-primary-foreground">
                 {section}
               </p>
-              <nav className="mt-2 flex flex-col gap-1.5 text-[0.9375rem]">
+              <nav aria-label={section} className="mt-2 flex flex-col gap-1.5 text-[0.9375rem]">
                 {links.map((link) => (
                   <Link
                     key={link.href}
@@ -107,6 +107,7 @@ export function SiteFooter() {
             className="focus-ring rounded-sm hover:text-primary-foreground hover:underline"
           >
             Boto me L&amp;K ↗
+            <span className="sr-only"> (hapet në një skedë të re)</span>
           </a>
         </div>
       </div>
