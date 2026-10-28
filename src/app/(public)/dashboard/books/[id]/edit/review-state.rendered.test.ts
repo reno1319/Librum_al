@@ -226,3 +226,40 @@ describe("Edit page: a live book (C)", () => {
     expect(html).not.toContain(WARNING);
   });
 });
+
+// PREVIEW-1 (A5, Renato 6a): the Publishing section links to the book's
+// own page (the preview) in every state before it's live, in a new tab.
+describe("Edit page: Preview your book page (PREVIEW-1)", () => {
+  const LINK = `<a target="_blank" rel="noopener" class="focus-ring rounded-sm font-medium text-foreground underline" href="/books/${BOOK_ID}">`;
+  function publishing(html: string): string {
+    return html.slice(html.indexOf(">Publishing</h2>"), html.indexOf(">Danger zone</h2>"));
+  }
+
+  it.each<[string, () => void]>([
+    ["a draft", () => {}],
+    ["a book in review", () => (reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null })],
+    ["a sent-back book", () => (reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK })],
+    [
+      "a taken-down book",
+      () =>
+        (takedown = {
+          state: { kind: "active", takedown: {} },
+          notice: { takenDownAt: "2026-10-19T10:00:00Z", reason: "copyright", message: "Proof please", bundleTitles: [] },
+        }),
+    ],
+  ])("%s: links to its page in a new tab, under Status", async (_label, setUp) => {
+    setUp();
+    const html = publishing(await render());
+    expect(html).toContain(LINK);
+    expect(html).toContain("Preview your book page<span class=\"sr-only\"> (opens in a new tab)</span>");
+    expect(html).toContain("Shows your last saved changes.");
+    expect(html.indexOf(LINK)).toBeGreaterThan(html.indexOf("Status:"));
+  });
+
+  it("a live book has no Preview link", async () => {
+    book.status = "published";
+    const html = await render();
+    expect(html).not.toContain("Preview your book page");
+    expect(html).not.toContain(`href="/books/${BOOK_ID}"`);
+  });
+});

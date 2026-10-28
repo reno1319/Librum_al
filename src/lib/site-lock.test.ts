@@ -76,6 +76,8 @@ describe("locked page", () => {
     "/api/books/abc/download",
     "/payments/pok/return",
     "/api/health/extra",
+    "/api/health/db/",
+    "/api/health/db/x",
     "/auth/callback/x",
     "/api/payments/pok/webhook/",
   ])("locks %s", (path) => {
@@ -88,10 +90,11 @@ describe("locked page", () => {
     expect(siteLockResponse(request("/login", { method: "POST" }))?.status).toBe(503);
   });
 
-  it("leaves exactly the four machine routes open", () => {
+  it("leaves exactly the five machine routes open", () => {
     vi.stubEnv(SITE_LOCK_ENV, KEY);
     expect([...SITE_LOCK_OPEN_PATHS].sort()).toEqual([
       "/api/health",
+      "/api/health/db",
       "/api/internal/payouts/run",
       "/api/payments/pok/webhook",
       "/auth/callback",

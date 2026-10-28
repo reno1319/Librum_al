@@ -774,6 +774,25 @@ export default async function EditBookPage({
               </span>
             </p>
 
+            {/* PREVIEW-1 (A5, Renato 6a): the book's own page, as readers
+                will see it, before it's live. A new tab (like FIX1 X11's
+                series link), so unsaved edits here stay; it shows what was
+                last saved. */}
+            {book.status !== "published" && (
+              <p className="mt-2 text-sm text-muted">
+                <Link
+                  href={`/books/${book.id}`}
+                  target="_blank"
+                  rel="noopener"
+                  className="focus-ring rounded-sm font-medium text-foreground underline"
+                >
+                  Preview your book page
+                  <span className="sr-only"> (opens in a new tab)</span>
+                </Link>
+                . Shows your last saved changes.
+              </p>
+            )}
+
             {takedown.notice ? (
               <Alert variant="error" className="mt-4">
                 {buildAuthorTakedownNoticeLines(takedown.notice, formatTimestampAsDate).map((line, index) => (

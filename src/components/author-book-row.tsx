@@ -238,6 +238,16 @@ export function AuthorBookRow({
                   Change price
                 </Link>
               </li>
+              {/* PREVIEW-1 (A5, Renato 6a): before it's live (draft, in
+                  review, sent back, taken down), the book's own page is
+                  the author's preview of it. */}
+              {book.status !== "published" && (
+                <li>
+                  <Link href={`/books/${book.id}`} className={MENU_ITEM_CLASSES}>
+                    Preview
+                  </Link>
+                </li>
+              )}
               {book.status === "published" && (
                 <>
                   <li>

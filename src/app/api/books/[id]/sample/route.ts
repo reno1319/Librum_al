@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractEpubSample } from "@/lib/epub-sample";
+import { readDownloadFilePath } from "@/lib/book-reviews";
 import { resolveBookByline } from "@/lib/book-byline";
 import {
   BOOK_MANUSCRIPTS_BUCKET,
@@ -25,6 +26,14 @@ import type { PenNameRef } from "@/lib/pen-names";
 // PEN-NAMES-2 (D2): the status, title and pen name come from public_books
 // (no account columns). Only for a PUBLISHED book does a service-role
 // read fetch author_id and file_path, and neither ever leaves this route.
+//
+// PREVIEW-1 (A5, Renato 3a/4a): the book's own author may read the sample
+// of their own book in any state (draft, in review, sent back, taken
+// down, live), from their CURRENT file -- that is the preview. Everyone
+// else still needs a published book, and now reads the file of its latest
+// APPROVED review (readDownloadFilePath, the same rule as the buyer's
+// download). A new file already takes a live book out of the Bookstore
+// (updateBook sets it back to draft), so this is defence in depth.
 type SampleBookRow = Pick<PublicBook, "id" | "title" | "status"> & {
   pen: PenNameRef | null;
 };
@@ -72,6 +81,11 @@ function isSampleStorageRow(data: unknown): data is SampleStorageRow {
 // reader, and a recovery-restricted session all get literally the same
 // public response for the same published book, so there is no privilege
 // boundary here for that containment to apply to.
+//
+// PREVIEW-1: the one exception is an author previewing their own
+// unpublished book. Proxy already keeps a recovery-restricted session out
+// of every /api/* route (LAUNCH-1 P1-11), and the preview only ever shows
+// the caller their own book, so no guard is added here either.
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -100,21 +114,55 @@ export async function GET(
   // it does. A draft, or a book that doesn't exist at all, gets the
   // identical safe 404 -- never distinguishing the two to an anonymous
   // caller.
-  if (!book || book.status !== "published") {
+  if (!book) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  // PEN-NAMES-2: published only -- the service role reads the manuscript
-  // key and its owner. A read error or odd shape is the same 404.
+  // PREVIEW-1: who is asking. Only an unpublished book needs a session;
+  // for a published one it only decides which file (the author's current
+  // file vs. the approved one). An auth error reads as anonymous.
+  const isPublished = book.status === "published";
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  const userId = !authError && authData?.user ? authData.user.id : null;
+  if (!isPublished && !userId) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // PEN-NAMES-2: the service role reads the manuscript key and its owner
+  // -- for a published book, or (PREVIEW-1) for an unpublished one, after
+  // which only its own author passes. A read error or odd shape is the
+  // same 404.
   const admin = createAdminClient();
-  const { data: storageData, error: storageError } = await admin
-    .from("books")
-    .select("author_id, file_path")
-    .eq("id", book.id)
-    .eq("status", "published")
-    .maybeSingle<SampleStorageRow>();
+  const storageQuery = admin.from("books").select("author_id, file_path").eq("id", book.id);
+  const { data: storageData, error: storageError } = await (isPublished
+    ? storageQuery.eq("status", "published")
+    : storageQuery
+  ).maybeSingle<SampleStorageRow>();
   const storageRow = !storageError && isSampleStorageRow(storageData) ? storageData : null;
-  if (!storageRow || !storageRow.file_path) {
+  const isAuthor = !!storageRow && userId !== null && storageRow.author_id === userId;
+  if (!storageRow || (!isPublished && !isAuthor)) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // Absent/empty is "no manuscript on file", exactly as before; any other
+  // value goes on to the path check below untouched.
+  if (!storageRow.file_path) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // PREVIEW-1 (4a): which file. The author gets the current one; a reader
+  // the latest approved one (or the current one if the book was never
+  // approved). A review read error fails closed and never falls back to
+  // the current file.
+  const chosen = await readDownloadFilePath(admin, {
+    bookId: book.id,
+    isAuthor,
+    currentFilePath: storageRow.file_path as string,
+  });
+  if (!chosen.ok) {
+    return NextResponse.json({ error: "sample_unavailable" }, { status: 404 });
+  }
+  if (!chosen.filePath) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
@@ -126,7 +174,7 @@ export async function GET(
   // legacy or forged value gets the same controlled answer as an
   // unreadable manuscript, before any admin client, Storage request or
   // EPUB extraction, and without echoing the value.
-  const filePath = storageRow.file_path;
+  const filePath = chosen.filePath;
   if (!isOwnBookManuscriptPath(filePath, storageRow.author_id, book.id)) {
     return NextResponse.json({ error: "sample_unavailable" }, { status: 404 });
   }
@@ -150,11 +198,16 @@ export async function GET(
   }
 
   // F4 (P5): the sample's author line is the book's byline (pen name).
-  return NextResponse.json({
-    bookId: id,
-    title: book.title,
-    author: resolveBookByline(book),
-    sections: sample.sections,
-    approximatePercent: sample.approximatePercent,
-  });
+  // PREVIEW-1: the author's preview (their unapproved file, maybe a
+  // draft) is never stored by any shared cache.
+  return NextResponse.json(
+    {
+      bookId: id,
+      title: book.title,
+      author: resolveBookByline(book),
+      sections: sample.sections,
+      approximatePercent: sample.approximatePercent,
+    },
+    isAuthor ? { headers: { "Cache-Control": "private, no-store" } } : undefined,
+  );
 }
