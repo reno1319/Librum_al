@@ -51,8 +51,8 @@ describe("BookDetailPage: maintenance-mode gate", () => {
   it("renders the maintenance notice and performs zero Supabase calls", async () => {
     const element = await BookDetailPage(pageArgs());
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 
@@ -331,7 +331,7 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
       { book: UNPRICED_BOOK, quoteRows: heldQuote },
     );
 
-    expect(html).toContain("Price unavailable");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
 
     // The notice, the frozen amount, the form, its hidden fields and the
     // button -- each asserted individually, so a partial regression
@@ -369,7 +369,7 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
       { book: UNPRICED_BOOK },
     );
 
-    expect(html).toContain("Price unavailable");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).not.toContain("lapsed before it could be resumed");
     // The specific false sentence: a null-priced book has no current
     // purchasable price to start a new checkout at.
@@ -389,7 +389,7 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
       { book: UNPRICED_BOOK, user: null, quoteRows: heldQuote },
     );
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
-    expect(html).toContain("Price unavailable");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).not.toContain("Continue that checkout");
     expect(html).not.toContain("Log in to buy");
   });

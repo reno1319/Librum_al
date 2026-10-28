@@ -305,10 +305,10 @@ export function resolveCatalogPriceState(priceAll: unknown): CatalogPriceState {
 }
 
 /** Reader-facing label for a row with no authored ALL price. */
-export const CATALOG_PRICE_UNAVAILABLE_LABEL = "Price unavailable";
+export const CATALOG_PRICE_UNAVAILABLE_LABEL = "Çmimi nuk është i disponueshëm";
 
 /** Reader-facing label for an explicitly free book. */
-export const CATALOG_PRICE_FREE_LABEL = "Free";
+export const CATALOG_PRICE_FREE_LABEL = "Falas";
 
 /**
  * The one reader-facing price label for a book, for every active book

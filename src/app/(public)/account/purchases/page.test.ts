@@ -31,8 +31,8 @@ describe("AccountPurchasesPage: maintenance-mode gate", () => {
   it("renders the maintenance notice and performs zero Supabase calls", async () => {
     const element = await AccountPurchasesPage(pageArgs());
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 
@@ -178,7 +178,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
         { purchase_id: "p3", currency_state: "unknown", currency: null },
       ],
     });
-    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toMatch(/42[.,]42/);
     expect(html).toContain("1 purchase is not included because its currency could not be determined.");
     expect(html).not.toMatch(/\$\d/);
@@ -189,7 +189,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       purchases: [purchaseRow("p5", "b5", 1234, "pi_conflict", RECENT)],
       currencies: [{ purchase_id: "p5", currency_state: "conflict", currency: null }],
     });
-    expect(html).toContain("Amount unavailable (conflicting currency records)");
+    expect(html).toContain("Shuma nuk është e disponueshme (të dhëna kontradiktore për monedhën)");
     expect(html).not.toMatch(/12[.,]34/);
   });
 
@@ -198,7 +198,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       purchases: [purchaseRow("p1", "b1", 999, "pi_legacy", RECENT)],
       currencyError: { message: "function list_purchase_currencies does not exist" },
     });
-    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toContain("USD 9.99");
     expect(html).not.toMatch(/\$\d/);
     // The rest of the page still works.
@@ -210,7 +210,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       purchases: [purchaseRow("p4", "b4", 0, null, RECENT)],
       currencies: [{ purchase_id: "p4", currency_state: "free", currency: null }],
     });
-    expect(html).toContain("· Free");
+    expect(html).toContain("· Falas");
     expect(html).toContain("Total spent: nothing yet");
   });
 

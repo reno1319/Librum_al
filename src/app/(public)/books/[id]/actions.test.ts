@@ -194,7 +194,7 @@ describe("buyBook: POK provider selection", () => {
   it("startPokCheckout's own maintenance sentinel redirects identically to the top-of-function gate", async () => {
     mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_MAINTENANCE_ACTIVE"));
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: "/books/book?error=Librum%20is%20temporarily%20unavailable%20for%20scheduled%20maintenance.%20Please%20try%20again%20shortly.",
+      target: "/books/book?error=Librum%20%C3%ABsht%C3%AB%20p%C3%ABrkoh%C3%ABsisht%20i%20padisponuesh%C3%ABm%20p%C3%ABr%20mir%C3%ABmbajtje%20t%C3%AB%20planifikuar.%20Ju%20lutemi%20provoni%20p%C3%ABrs%C3%ABri%20pas%20pak.",
     });
   });
 });
@@ -698,7 +698,7 @@ describe("buyBook: paid-checkout mode gate (PAID-MODE-1)", () => {
     vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
 
     await expect(buyBook(BOOK_ID, new FormData())).rejects.toMatchObject({
-      target: expect.stringContaining("maintenance"),
+      target: expect.stringContaining(encodeURIComponent("mirëmbajtje")),
     });
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockPokConfig).not.toHaveBeenCalled();

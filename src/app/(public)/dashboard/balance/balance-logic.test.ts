@@ -78,7 +78,7 @@ describe("formatMinorAmount", () => {
 
   it("never renders an unsupported currency as if it were a supported one", () => {
     const formatted = formatMinorAmount(500, "EUR");
-    expect(formatted).toBe("Amount unavailable (unsupported currency EUR)");
+    expect(formatted).toBe("Shuma nuk është e disponueshme (monedhë e pambështetur EUR)");
     expect(formatted).not.toContain("$");
     expect(formatted).not.toContain("ALL");
     expect(formatted).not.toContain("USD");
@@ -95,8 +95,8 @@ describe("formatMinorAmount", () => {
   });
 
   it("a malformed ledger currency is never guessed", () => {
-    expect(formatMinorAmount(500, "")).toBe("Amount unavailable (currency unknown)");
-    expect(formatMinorAmount(500, "usd")).toBe("Amount unavailable (currency unknown)");
+    expect(formatMinorAmount(500, "")).toBe("Shuma nuk është e disponueshme (monedhë e panjohur)");
+    expect(formatMinorAmount(500, "usd")).toBe("Shuma nuk është e disponueshme (monedhë e panjohur)");
   });
 });
 

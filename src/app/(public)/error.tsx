@@ -39,12 +39,12 @@ export default function PublicError({
   return (
     <main className="flex w-full flex-1 items-center justify-center px-4 py-24 sm:px-6">
       <div className="mx-auto w-full max-w-md text-center">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted">Error</p>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted">Gabim</p>
         <h1 className="mt-2 font-serif text-3xl font-normal text-foreground md:text-4xl">
-          Something went wrong
+          Diçka shkoi keq
         </h1>
         <p className="mt-3 text-muted">
-          We couldn&apos;t load this page. Please try again.
+          Kjo faqe nuk u hap dot. Ju lutemi provoni përsëri.
         </p>
         <div className="mt-8 flex flex-col items-center gap-3">
           <button
@@ -52,10 +52,10 @@ export default function PublicError({
             onClick={() => reset()}
             className={buttonClasses("primary", "md")}
           >
-            Try again
+            Provoni përsëri
           </button>
           <Link href="/" className="focus-ring rounded-sm text-sm text-muted hover:underline">
-            Go home
+            Shkoni te faqja kryesore
           </Link>
         </div>
       </div>

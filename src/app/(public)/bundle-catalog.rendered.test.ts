@@ -303,7 +303,7 @@ describe("bookstore bundle rail (rendered)", () => {
 
     const rail = html.slice(html.indexOf("Paid Collection"));
     expect(rail).toContain("199 lekë");
-    expect(rail).not.toContain(">Free<");
+    expect(rail).not.toContain(">Falas<");
     expect(html).not.toContain("$0.00");
   });
 
@@ -312,7 +312,7 @@ describe("bookstore bundle rail (rendered)", () => {
     const html = await render(BookstorePage({ searchParams: Promise.resolve({}) }));
 
     expect(html).toContain("Free Collection");
-    expect(html).toContain(">Free<");
+    expect(html).toContain(">Falas<");
     expect(html).not.toContain("15.00");
   });
 
@@ -320,7 +320,7 @@ describe("bookstore bundle rail (rendered)", () => {
     const html = await render(BookstorePage({ searchParams: Promise.resolve({}) }));
     noDollarOrUsd(html);
     expect(html).not.toContain("25.00");
-    expect(html).not.toContain("Price unavailable");
+    expect(html).not.toContain("Çmimi nuk është i disponueshëm");
   });
 
   it("asks for price_all, filters on it, and never selects or filters on price_cents", async () => {
@@ -360,7 +360,7 @@ describe("author public bundle rail (rendered)", () => {
     expect(html).toContain("Paid Collection");
     expect(html).toContain("199 lekë");
     expect(html).toContain("Free Collection");
-    expect(html).toContain(">Free<");
+    expect(html).toContain(">Falas<");
     expect(html).not.toContain("Unpriced Collection");
     expect(html).not.toContain("Draft Collection");
     expect(html).not.toContain("Someone Else");
@@ -422,8 +422,8 @@ describe("bundle detail page (rendered)", () => {
     const html = await detail(UNPRICED, [A, B]);
 
     expect(html).toContain("Unpriced Collection");
-    expect(priceLine(html)).toContain("Price unavailable");
-    expect(priceLine(html)).not.toContain("Free");
+    expect(priceLine(html)).toContain("Çmimi nuk është i disponueshëm");
+    expect(priceLine(html)).not.toContain("Falas");
     expect(html).not.toContain("25.00");
     expect(html).not.toContain("you save");
     expect(html).toContain("Not available right now");
@@ -434,7 +434,7 @@ describe("bundle detail page (rendered)", () => {
   it("199 / price_cents 0 renders 199 ALL, never Free or $0.00", async () => {
     const html = await detail(PAID, [A, B]);
     expect(priceLine(html)).toContain("199 lekë");
-    expect(priceLine(html)).not.toContain("Free");
+    expect(priceLine(html)).not.toContain("Falas");
     expect(html).not.toContain("$0.00");
     noDollarOrUsd(html);
   });
@@ -467,7 +467,7 @@ describe("bundle detail page (rendered)", () => {
     expect(html).not.toContain("line-through");
     // The member is still listed, with its own honest state.
     expect(html).toContain("Libri Pa Çmim");
-    expect(html).toContain("Price unavailable");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).toContain("150 lekë");
   });
 
@@ -486,7 +486,7 @@ describe("bundle detail page (rendered)", () => {
 
   it("a free bundle reads Free, may state its saving, and is not called paid bundle checkout", async () => {
     const html = await detail(FREE, [A, B]);
-    expect(priceLine(html)).toContain(">Free<");
+    expect(priceLine(html)).toContain(">Falas<");
     expect(priceLine(html)).toContain("you save 270 lekë");
     expect(html).toContain("Bundle checkout coming soon");
     expect(html).not.toMatch(/paid bundle checkout/i);
@@ -510,7 +510,7 @@ describe("bundle detail page (rendered)", () => {
     expect(html).toContain("Libri A");
     expect(html).toContain("150 lekë");
     expect(html).toContain("Libri Pa Çmim");
-    expect(html).toContain("Price unavailable");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).not.toContain("9.00");
   });
 
@@ -529,7 +529,7 @@ describe("bundle detail page (rendered)", () => {
 
     const html = await detail(draftUnpriced, [A, B], AUTHOR);
     expect(html).toContain("Draft Unpriced");
-    expect(html).toContain("Price unavailable");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).toContain("This is your bundle");
 
     await expect(detail(draftUnpriced, [A, B], READER)).rejects.toThrow();
@@ -547,7 +547,7 @@ describe("author bundle dashboard and edit form (rendered)", () => {
     const html = await render(BundlesDashboardPage({ searchParams: Promise.resolve({}) }));
 
     expect(html).toContain("Unpriced Collection");
-    expect(html).toContain("Price unavailable");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).toContain("Paid Collection");
     expect(html).toContain("199 lekë");
     expect(html).toContain("Free Collection");
@@ -642,7 +642,7 @@ describe("bundle catalog pages: first-statement maintenance gate (ALL-WIRING-5)"
     ],
   ])("%s renders the maintenance notice without touching Supabase", async (_label, page) => {
     const html = await render(page() as Promise<unknown>);
-    expect(html).toContain("Scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
     expect(log).toEqual([]);
   });
 });

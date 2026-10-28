@@ -854,7 +854,7 @@ describe("AdminFinancePage: maintenance-mode gate", () => {
     const page = await AdminFinancePage({ searchParams: Promise.resolve({}) });
     const text = collectText(page).join(" | ");
 
-    expect(text).toContain("temporarily unavailable for scheduled maintenance");
+    expect(text).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockRequireStaff).not.toHaveBeenCalled();
     expect(mockGetFinanceSummaryCounts).not.toHaveBeenCalled();
     expect(mockListRefundReconciliationStates).not.toHaveBeenCalled();
@@ -953,8 +953,8 @@ describe("AdminFinancePage: transaction currency (Patch 4)", () => {
       ],
     });
     const html = await renderHtml();
-    expect(html).toContain("Amount unavailable (currency unknown)");
-    expect(html).toContain("Amount unavailable (conflicting currency records)");
+    expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
+    expect(html).toContain("Shuma nuk është e disponueshme (të dhëna kontradiktore për monedhën)");
     expect(html).not.toContain("42.42");
     expect(html).not.toContain("42,42");
     expect(html).not.toContain("43.43");
@@ -970,7 +970,7 @@ describe("AdminFinancePage: transaction currency (Patch 4)", () => {
       data: [legacyShaped as FinanceRefundReconciliationRow],
     });
     const html = await renderHtml();
-    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toContain("USD 19.99");
     expect(html).not.toMatch(/\$\d/);
   });

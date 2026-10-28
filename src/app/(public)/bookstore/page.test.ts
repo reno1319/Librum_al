@@ -28,8 +28,8 @@ describe("BookstorePage: maintenance-mode gate", () => {
   it("renders the maintenance notice and performs zero Supabase calls", async () => {
     const element = await BookstorePage(noParams());
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 
@@ -264,7 +264,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     const shelf = ornateShelf(await render());
     const ids = [...shelf.matchAll(/href="\/books\/(book-\d+)"/g)].map((m) => m[1]);
     expect(ids).toEqual(["book-10", "book-09", "book-08", "book-07", "book-06"]);
-    expect(shelf).toContain('aria-label="View Book 10 on Librum"');
+    expect(shelf).toContain('aria-label="Shikoni Book 10 në Librum"');
     expect(shelf).toContain(">Book 10</span>");
     expect(shelf).toContain(">An Author</span>");
   });

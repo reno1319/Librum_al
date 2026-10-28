@@ -21,7 +21,7 @@ import type { Metadata } from "next";
 // SiteHeader/any per-request data, so reusing it here carries none of
 // global-error.tsx's own reason to avoid shared imports).
 export const metadata: Metadata = {
-  title: "Page not found",
+  title: "Faqja nuk u gjet",
 };
 
 export default function NotFound() {
@@ -30,14 +30,14 @@ export default function NotFound() {
       <div className="mx-auto w-full max-w-md text-center">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">404</p>
         <h1 className="mt-2 font-serif text-3xl font-semibold text-foreground md:text-4xl">
-          Page not found
+          Faqja nuk u gjet
         </h1>
         <p className="mt-3 text-muted">
-          We couldn&apos;t find the page you&apos;re looking for.
+          Nuk e gjetëm faqen që po kërkoni.
         </p>
         <div className="mt-8">
           <Link href="/" className={buttonClasses("primary", "md")}>
-            Go home
+            Shkoni te faqja kryesore
           </Link>
         </div>
       </div>

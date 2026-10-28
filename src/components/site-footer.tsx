@@ -18,23 +18,23 @@ import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 // infrastructure (see site-header.test.ts's own header comment), so
 // testing footer content means testing the data it renders from.
 export const FOOTER_GROUPS = {
-  Discover: [
-    { href: "/bookstore", label: "Bookstore" },
+  Zbuloni: [
+    { href: "/bookstore", label: "Libraria" },
     { href: "/blog", label: "Blog" },
-    { href: "/about", label: "About" },
+    { href: "/about", label: "Rreth nesh" },
   ],
-  Publish: [
-    { href: "/how-it-works", label: "How it works" },
-    { href: "/pricing", label: "Earnings" },
+  Publikoni: [
+    { href: "/how-it-works", label: "Si funksionon" },
+    { href: "/pricing", label: "Fitimet" },
   ],
-  Support: [
-    { href: "/help", label: "Help" },
-    { href: "/contact", label: "Contact" },
+  Mbështetje: [
+    { href: "/help", label: "Ndihmë" },
+    { href: "/contact", label: "Kontakt" },
   ],
-  Legal: [
-    { href: "/terms", label: "Terms" },
-    { href: "/privacy", label: "Privacy" },
-    { href: "/refunds", label: "Refunds" },
+  Ligjore: [
+    { href: "/terms", label: "Kushtet e përdorimit" },
+    { href: "/privacy", label: "Privatësia" },
+    { href: "/refunds", label: "Rimbursimet" },
   ],
 };
 
@@ -56,11 +56,11 @@ export function SiteFooter() {
         <div className="max-w-xs">
           <span className="font-serif text-[1.625rem]">Librum</span>
           <p className="mt-2 text-[0.9375rem] leading-relaxed text-primary-foreground/80">
-            Independent ebooks, published directly by the people who wrote
-            them.
+            Libra elektronikë të pavarur, të botuar drejtpërdrejt nga ata
+            që i shkruan.
           </p>
           <p className="mt-3 text-[0.9375rem] text-primary-foreground/80">
-            Questions?{" "}
+            Pyetje?{" "}
             <a
               href={`mailto:${SUPPORT_EMAIL}`}
               className="focus-ring rounded-sm text-primary-foreground underline underline-offset-2 hover:decoration-2"

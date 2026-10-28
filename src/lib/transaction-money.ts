@@ -164,13 +164,13 @@ export function provenanceFromStoredCurrency(currency: unknown): CurrencyProvena
   return fromCurrencyCode(currency);
 }
 
-export const CURRENCY_UNKNOWN_LABEL = "Amount unavailable (currency unknown)";
-export const CURRENCY_CONFLICT_LABEL = "Amount unavailable (conflicting currency records)";
-export const INVALID_AMOUNT_LABEL = "Amount unavailable (invalid amount)";
-export const FREE_ACQUISITION_LABEL = "Free";
+export const CURRENCY_UNKNOWN_LABEL = "Shuma nuk është e disponueshme (monedhë e panjohur)";
+export const CURRENCY_CONFLICT_LABEL = "Shuma nuk është e disponueshme (të dhëna kontradiktore për monedhën)";
+export const INVALID_AMOUNT_LABEL = "Shuma nuk është e disponueshme (vlerë e pavlefshme)";
+export const FREE_ACQUISITION_LABEL = "Falas";
 
 export function unsupportedCurrencyLabel(currency: string): string {
-  return `Amount unavailable (unsupported currency ${currency})`;
+  return `Shuma nuk është e disponueshme (monedhë e pambështetur ${currency})`;
 }
 
 /**

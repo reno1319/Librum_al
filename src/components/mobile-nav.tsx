@@ -92,7 +92,7 @@ export function MobileNav({
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        aria-label={open ? "Close menu" : "Open menu"}
+        aria-label={open ? "Mbyllni menynë" : "Hapni menynë"}
         onClick={() => setOpen((v) => !v)}
         className="focus-ring flex size-11 items-center justify-center rounded-sm text-primary-foreground"
       >
@@ -108,10 +108,10 @@ export function MobileNav({
         >
           {recoveryActive ? (
             <div className="flex flex-col">
-              <span className="text-sm text-primary-foreground/80">Password recovery</span>
+              <span className="text-sm text-primary-foreground/80">Rikthimi i fjalëkalimit</span>
               <form action={logoutAction}>
                 <button type="submit" className={linkClassName}>
-                  Log out
+                  Dilni
                 </button>
               </form>
             </div>
@@ -129,22 +129,22 @@ export function MobileNav({
                 {loggedIn ? (
                   <>
                     <Link href={accountHref} className={linkClassName}>
-                      Account
+                      Llogaria
                     </Link>
                     <form action={logoutAction}>
                       <button type="submit" className={linkClassName}>
-                        Log out
+                        Dilni
                       </button>
                     </form>
                   </>
                 ) : (
                   <>
                     <Link href="/login" className={linkClassName}>
-                      Log in
+                      Hyni
                     </Link>
                     {/* FIX1 (X2): Author chosen, as on Earnings. */}
                     <Link href="/signup?role=author" className={linkClassName}>
-                      Sign up
+                      Regjistrohuni
                     </Link>
                   </>
                 )}

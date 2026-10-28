@@ -61,8 +61,8 @@ describe("AdminRefundRequestDetailPage: maintenance-mode gate", () => {
     });
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
 
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockRequireStaff).not.toHaveBeenCalled();
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockFrom).not.toHaveBeenCalled();
@@ -192,7 +192,7 @@ describe("AdminRefundRequestDetailPage: request and items share the request's cu
   it("an unknown currency is shown as unavailable on the total and on every item, never as USD or ALL", async () => {
     setup(null);
     const html = await render();
-    expect(html.match(/Amount unavailable \(currency unknown\)/g)).toHaveLength(3);
+    expect(html.match(/Shuma nuk është e disponueshme \(monedhë e panjohur\)/g)).toHaveLength(3);
     expect(html).not.toContain("USD");
     expect(html).not.toContain(" ALL");
     // React inlines its own form-replay script (which names `$$reactFormReplay`);

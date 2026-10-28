@@ -488,13 +488,13 @@ describe("resolveCatalogPriceState", () => {
 
 describe("formatCatalogPriceLabel", () => {
   it("null reads Price unavailable -- it borrows neither the free nor the paid wording", () => {
-    expect(formatCatalogPriceLabel(null)).toBe("Price unavailable");
+    expect(formatCatalogPriceLabel(null)).toBe("Çmimi nuk është i disponueshëm");
     expect(formatCatalogPriceLabel(null)).toBe(CATALOG_PRICE_UNAVAILABLE_LABEL);
     expect(formatCatalogPriceLabel(null)).not.toBe(CATALOG_PRICE_FREE_LABEL);
   });
 
   it("0 reads Free, not 0 ALL", () => {
-    expect(formatCatalogPriceLabel(0)).toBe("Free");
+    expect(formatCatalogPriceLabel(0)).toBe("Falas");
     expect(formatCatalogPriceLabel(0)).toBe(CATALOG_PRICE_FREE_LABEL);
   });
 
