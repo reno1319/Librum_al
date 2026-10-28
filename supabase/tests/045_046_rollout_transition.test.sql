@@ -52,7 +52,7 @@ insert into public.staff_members (user_id, role) values ('33333333-3333-3333-333
 -- with no authored ALL price, and this suite's subject is the 045/046
 -- pen-name rollout, not pricing.
 insert into public.books (id, author_id, title, description, genre, price_cents, price_all, status)
-values ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'A Book', 'desc', 'Fiction', 500, 500, 'published');
+values ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'A Book', 'desc', 'Letërsi artistike', 500, 500, 'published');
 
 -- ============================================================
 -- Confirms this database already has BOTH migrations applied (the

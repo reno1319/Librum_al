@@ -36,7 +36,7 @@ const AUTHOR_ID = "1f9d4948-0000-4000-8000-000000000000";
 const READER_ID = "9229f938-0000-4000-8000-000000000000";
 const BOOK_U = {
   id: BOOK_U_ID, title: "Fixture Book U", price_cents: 799, price_all: 199, author_id: AUTHOR_ID,
-  status: "published", cover_path: null, series_id: null, genre: "Fiction",
+  status: "published", cover_path: null, series_id: null, genre: "Letërsi artistike",
   description: "About U.", language: null, created_at: "2026-09-01T00:00:00Z",
   published_at: "2026-09-02T00:00:00Z",
   profiles: { public_author_name: "Fixture Author", bio: null, avatar_path: null },

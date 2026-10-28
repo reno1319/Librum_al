@@ -715,10 +715,16 @@ create table public.books (
   publisher text check (publisher is null or char_length(publisher) <= 200),
   edition text check (edition is null or char_length(edition) <= 100),
   original_publication_date date,
-  genre text check (genre in (
-    'Fiction', 'Non-Fiction', 'Mystery & Thriller', 'Romance', 'Fantasy',
-    'Science Fiction', 'Horror', 'Biography & Memoir', 'Self-Help',
-    'History', 'Poetry', 'Young Adult', 'Children''s', 'Business'
+  -- ALBANIAN-3 (migration 20261028150000_albanian_genres.sql): the
+  -- eighteen genres are stored in Albanian; same list and order as
+  -- GENRES in src/lib/genres.ts. The constraint keeps the name Postgres
+  -- gave the original inline CHECK.
+  genre text constraint books_genre_check check (genre in (
+    'Biografi & kujtime', 'Biznes & ekonomi', 'Drama & teatër',
+    'Fantashkencë', 'Fantazi', 'Filozofi', 'Histori', 'Horror',
+    'Letërsi artistike', 'Për fëmijë', 'Për të rinj', 'Poezi',
+    'Policor & triler', 'Psikologji', 'Publicistikë & ese', 'Romancë',
+    'Shkencë', 'Zhvillim personal'
   )),
   series_id uuid references public.series(id) on delete set null,
   series_position integer check (series_position > 0),

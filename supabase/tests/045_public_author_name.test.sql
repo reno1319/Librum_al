@@ -103,10 +103,10 @@ insert into public.staff_members (user_id, role) values
 -- whole-lek prices; the null-price exclusion itself is the subject of
 -- supabase/tests/063_all_search_books_price_all.test.sql.
 insert into public.books (id, author_id, title, description, keywords, genre, status, price_cents, price_all) values
-  ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Under a Pen Name', 'A pseudonymous novel.', 'fiction, drama', 'Fiction', 'published', 999, 999),
-  ('b0000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', 'Same Name Book', 'No pen name here.', 'nonfiction', 'Non-Fiction', 'published', 500, 500),
-  ('b0000000-0000-0000-0000-000000000004', '11111111-1111-1111-1111-111111111111', 'Zgjuar mendjen', 'Një libër shqip.', 'edukim', 'Non-Fiction', 'published', 300, 300),
-  ('b0000000-0000-0000-0000-000000000005', '55555555-5555-5555-5555-555555555555', 'Search Fixture Book', 'desc', 'kw', 'Fiction', 'published', 100, 100);
+  ('b0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Under a Pen Name', 'A pseudonymous novel.', 'fiction, drama', 'Letërsi artistike', 'published', 999, 999),
+  ('b0000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', 'Same Name Book', 'No pen name here.', 'nonfiction', 'Publicistikë & ese', 'published', 500, 500),
+  ('b0000000-0000-0000-0000-000000000004', '11111111-1111-1111-1111-111111111111', 'Zgjuar mendjen', 'Një libër shqip.', 'edukim', 'Publicistikë & ese', 'published', 300, 300),
+  ('b0000000-0000-0000-0000-000000000005', '55555555-5555-5555-5555-555555555555', 'Search Fixture Book', 'desc', 'kw', 'Letërsi artistike', 'published', 100, 100);
 
 -- ============================================================
 -- Part 1: schema contract -- additive, length-checked, no uniqueness,
@@ -252,7 +252,7 @@ begin
   );
 
   -- E: genre/price filters unchanged.
-  select array_agg(book_id) into matched from public.search_books(null, 'Non-Fiction', null, null);
+  select array_agg(book_id) into matched from public.search_books(null, 'Publicistikë & ese', null, null);
   perform pg_temp.assert(
     matched @> array['b0000000-0000-0000-0000-000000000002'::uuid, 'b0000000-0000-0000-0000-000000000004'::uuid]
     and not (matched @> array['b0000000-0000-0000-0000-000000000001'::uuid]),

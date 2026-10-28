@@ -251,7 +251,7 @@ function editForm(): FormData {
   f.set("description", "Description");
   f.set("keywords", "");
   f.set("isbn", "");
-  f.set("genre", "Fiction");
+  f.set("genre", "Letërsi artistike");
   f.set("price", "0");
   return f;
 }

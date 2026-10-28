@@ -12,18 +12,18 @@ import {
 describe("canAdvanceFromBookDetails", () => {
   it("requires a non-blank title, language, and genre", () => {
     expect(
-      canAdvanceFromBookDetails({ title: "My Book", language: "sq", genre: "Fiction" }),
+      canAdvanceFromBookDetails({ title: "My Book", language: "sq", genre: "Letërsi artistike" }),
     ).toBe(true);
   });
 
   it("rejects a blank title", () => {
-    expect(canAdvanceFromBookDetails({ title: "   ", language: "sq", genre: "Fiction" })).toBe(
+    expect(canAdvanceFromBookDetails({ title: "   ", language: "sq", genre: "Letërsi artistike" })).toBe(
       false,
     );
   });
 
   it("rejects a missing language", () => {
-    expect(canAdvanceFromBookDetails({ title: "My Book", language: "", genre: "Fiction" })).toBe(
+    expect(canAdvanceFromBookDetails({ title: "My Book", language: "", genre: "Letërsi artistike" })).toBe(
       false,
     );
   });

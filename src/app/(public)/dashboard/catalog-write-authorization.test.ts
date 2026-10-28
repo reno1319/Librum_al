@@ -557,7 +557,7 @@ async function createBookForm(price: string, intent?: "publish"): Promise<FormDa
   fd.set("description", "A description.");
   fd.set("keywords", "");
   fd.set("isbn", "");
-  fd.set("genre", "Fiction");
+  fd.set("genre", "Letërsi artistike");
   fd.set("price", price);
   fd.set("cover", new File([new Uint8Array(PNG_SIGNATURE)], "cover.png", { type: "image/png" }));
   fd.set(
@@ -574,7 +574,7 @@ function editBookForm(price: string): FormData {
   fd.set("description", "New description");
   fd.set("keywords", "");
   fd.set("isbn", "");
-  fd.set("genre", "Fiction");
+  fd.set("genre", "Letërsi artistike");
   fd.set("price", price);
   return fd;
 }

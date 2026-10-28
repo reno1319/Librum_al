@@ -64,7 +64,7 @@ describe("parseBookstoreQuery", () => {
   });
 
   it("genre alone counts as filtered", () => {
-    expect(parseBookstoreQuery({ genre: "Fiction" }).isFiltered).toBe(true);
+    expect(parseBookstoreQuery({ genre: "Letërsi artistike" }).isFiltered).toBe(true);
   });
 
   it("sort alone counts as filtered", () => {
@@ -92,7 +92,7 @@ describe("isFiltered as the Bundles-visibility gate", () => {
   });
 
   it("an active genre hides Bundles", () => {
-    expect(parseBookstoreQuery({ genre: "Fiction" }).isFiltered).toBe(true);
+    expect(parseBookstoreQuery({ genre: "Letërsi artistike" }).isFiltered).toBe(true);
   });
 
   it("a non-default sort hides Bundles", () => {
@@ -135,39 +135,39 @@ describe("buildBookstoreHref", () => {
   });
 
   it("an override adds a new param without disturbing the others", () => {
-    expect(buildBookstoreHref({ q: "dante" }, { genre: "Fiction" })).toBe(
-      "/bookstore?q=dante&genre=Fiction",
+    expect(buildBookstoreHref({ q: "dante" }, { genre: "Letërsi artistike" })).toBe(
+      "/bookstore?q=dante&genre=Let%C3%ABrsi+artistike",
     );
   });
 
   it("an override of undefined removes that param", () => {
-    expect(buildBookstoreHref({ q: "dante", genre: "Fiction" }, { genre: undefined })).toBe(
+    expect(buildBookstoreHref({ q: "dante", genre: "Letërsi artistike" }, { genre: undefined })).toBe(
       "/bookstore?q=dante",
     );
   });
 
   it("an override replaces an existing value for the same key", () => {
-    expect(buildBookstoreHref({ genre: "Fiction" }, { genre: "Poetry" })).toBe(
-      "/bookstore?genre=Poetry",
+    expect(buildBookstoreHref({ genre: "Letërsi artistike" }, { genre: "Poezi" })).toBe(
+      "/bookstore?genre=Poezi",
     );
   });
 });
 
 describe("toggleGenreHref", () => {
   it("selecting a genre with none active adds it", () => {
-    expect(toggleGenreHref({}, "Fiction")).toBe("/bookstore?genre=Fiction");
+    expect(toggleGenreHref({}, "Letërsi artistike")).toBe("/bookstore?genre=Let%C3%ABrsi+artistike");
   });
 
   it("clicking the already-active genre clears it (toggle off)", () => {
-    expect(toggleGenreHref({ genre: "Fiction" }, "Fiction")).toBe("/bookstore");
+    expect(toggleGenreHref({ genre: "Letërsi artistike" }, "Letërsi artistike")).toBe("/bookstore");
   });
 
   it("clicking a different genre switches to it", () => {
-    expect(toggleGenreHref({ genre: "Fiction" }, "Poetry")).toBe("/bookstore?genre=Poetry");
+    expect(toggleGenreHref({ genre: "Letërsi artistike" }, "Poezi")).toBe("/bookstore?genre=Poezi");
   });
 
   it("preserves an active search term while toggling genre", () => {
-    expect(toggleGenreHref({ q: "dante", genre: "Fiction" }, "Fiction")).toBe(
+    expect(toggleGenreHref({ q: "dante", genre: "Letërsi artistike" }, "Letërsi artistike")).toBe(
       "/bookstore?q=dante",
     );
   });

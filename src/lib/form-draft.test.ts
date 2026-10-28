@@ -16,8 +16,8 @@ function makeForm() {
     description: { tagName: "TEXTAREA", value: "Typed description" } satisfies DraftField,
     genre: {
       tagName: "SELECT",
-      value: "Fiction",
-      options: [{ value: "" }, { value: "Fiction" }, { value: "Poetry" }],
+      value: "Letërsi artistike",
+      options: [{ value: "" }, { value: "Letërsi artistike" }, { value: "Poezi" }],
     } satisfies DraftField,
     price: { tagName: "input", value: "990" } satisfies DraftField,
     manuscriptTempPath: { tagName: "INPUT", type: "hidden", value: "u/tmp/abc.epub" } satisfies DraftField,
@@ -35,7 +35,7 @@ describe("form drafts", () => {
     const raw = serializeFormDraft(form, FIELDS, NOW);
     expect(JSON.parse(raw)).toEqual({
       savedAt: NOW,
-      values: { title: "Typed title", description: "Typed description", genre: "Fiction", price: "990" },
+      values: { title: "Typed title", description: "Typed description", genre: "Letërsi artistike", price: "990" },
     });
     expect(raw).not.toContain("tmp");
     expect(raw).not.toContain("secret");
@@ -48,7 +48,7 @@ describe("form drafts", () => {
     const fresh = makeForm();
     (fresh.fields.title as DraftField).value = "DB title";
     (fresh.fields.description as DraftField).value = "DB description";
-    (fresh.fields.genre as DraftField).value = "Poetry";
+    (fresh.fields.genre as DraftField).value = "Poezi";
     (fresh.fields.manuscriptTempPath as DraftField).value = "";
 
     const values = parseFormDraft(raw, FIELDS, NOW + 1000);
@@ -56,7 +56,7 @@ describe("form drafts", () => {
     expect(applyFormDraft(fresh.form, values!, FIELDS)).toBe(3);
     expect((fresh.fields.title as DraftField).value).toBe("Typed title");
     expect((fresh.fields.description as DraftField).value).toBe("Typed description");
-    expect((fresh.fields.genre as DraftField).value).toBe("Fiction");
+    expect((fresh.fields.genre as DraftField).value).toBe("Letërsi artistike");
     expect((fresh.fields.manuscriptTempPath as DraftField).value).toBe("");
   });
 
@@ -75,7 +75,7 @@ describe("form drafts", () => {
     expect(changed).toBe(0);
     expect((fields.manuscriptTempPath as DraftField).value).toBe("u/tmp/abc.epub");
     expect((fields.notListed as DraftField).value).toBe("secret");
-    expect((fields.genre as DraftField).value).toBe("Fiction");
+    expect((fields.genre as DraftField).value).toBe("Letërsi artistike");
   });
 
   it("ignores stale, future-dated, malformed or wrongly shaped copies", () => {
@@ -100,7 +100,7 @@ describe("form drafts", () => {
   it("drops unlisted names and non-string values from a stored copy", () => {
     const raw = JSON.stringify({
       savedAt: NOW,
-      values: { title: 5, description: "ok", other: "x", __proto__: { genre: "Poetry" } },
+      values: { title: 5, description: "ok", other: "x", __proto__: { genre: "Poezi" } },
     });
     expect(parseFormDraft(raw, FIELDS, NOW)).toEqual({ description: "ok" });
   });

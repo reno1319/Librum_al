@@ -170,7 +170,7 @@ function createForm(fields: Record<string, string> = {}): FormData {
   formData.set("description", "A description.");
   formData.set("keywords", "");
   formData.set("isbn", "");
-  formData.set("genre", "Fiction");
+  formData.set("genre", "Letërsi artistike");
   formData.set("price", "0");
   for (const [key, value] of Object.entries(fields)) formData.set(key, value);
   formData.set("cover", new File([new Uint8Array(PNG_SIGNATURE)], "cover.png", { type: "image/png" }));
@@ -184,7 +184,7 @@ function editForm(fields: Record<string, string> = {}): FormData {
   formData.set("description", "A description.");
   formData.set("keywords", "");
   formData.set("isbn", "");
-  formData.set("genre", "Fiction");
+  formData.set("genre", "Letërsi artistike");
   formData.set("price", "0");
   for (const [key, value] of Object.entries(fields)) formData.set(key, value);
   return formData;
