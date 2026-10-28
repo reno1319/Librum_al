@@ -1012,7 +1012,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
 // review gets its snapshot replaced; text-only edits are unchanged.
 describe("updateBook and review (ADMIN-3)", () => {
   const SAVED_LIVE = `/dashboard?success=${encodeURIComponent(
-    "Saved. Your book is out of the Bookstore until Librum approves the new file or cover.",
+    "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
   )}`;
   const fns = () => bookReviewsDoubleState.calls.map((c) => c.fn);
 
@@ -1037,10 +1037,10 @@ describe("updateBook and review (ADMIN-3)", () => {
     expect(removals()).toEqual([{ op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] }]);
   });
 
-  it("a failed review request keeps the draft and tells the author to press Send for review", async () => {
+  it("a failed review request keeps the draft and tells the author to press Dërgojeni për shqyrtim", async () => {
     bookReviewsDoubleState.requestResult = { ok: false, reason: "failed" };
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?success=${encodeURIComponent("Saved. Press Send for review when you're ready.")}`,
+      `/dashboard/books/${BOOK_ID}/edit?success=${encodeURIComponent('U ruajt. Shtypni "Dërgojeni për shqyrtim" kur të jeni gati.')}`,
     );
     expect(bookUpdates()).toHaveLength(1);
     expect(mockReviewStaffEmail).not.toHaveBeenCalled();
@@ -1050,7 +1050,7 @@ describe("updateBook and review (ADMIN-3)", () => {
     bundleBooksResult = { data: [{ bundle_id: "b1" }], error: null };
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(
       `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(
-        "This book is part of a published bundle. Unpublish the bundle first, then change the file or cover.",
+        "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose kopertinën.",
       )}`,
     );
     expect(storageCalls).toEqual([]);
@@ -1089,7 +1089,7 @@ describe("updateBook and review (ADMIN-3)", () => {
   it.each(["LB462", "LB463"])("%s on the write: 'changed while editing', the new uploads removed", async (code) => {
     updateResult = { data: null, error: { code, message: "x" } };
     expect(await run(updateBook(BOOK_ID, await withManuscript(withCover(editForm(), PNG))))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Your book changed while you were editing. Reload and try again.")}`,
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Libri juaj ndryshoi ndërsa po e redaktonit. Rifreskoni faqen dhe provoni përsëri.")}`,
     );
     expect(removals().map((c) => c.bucket)).toEqual(["covers", "manuscripts"]);
     expect(everyStorageKey()).not.toContain(OWN_EPUB);
@@ -1105,7 +1105,7 @@ describe("updateBook and review (ADMIN-3)", () => {
 describe("cancelBookReview (ADMIN-3, E)", () => {
   it("withdraws the pending review on the author's session and says so", async () => {
     expect(await run(cancelBookReview(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?success=${encodeURIComponent("Review cancelled. Your book is a draft again.")}`,
+      `/dashboard/books/${BOOK_ID}/edit?success=${encodeURIComponent("Shqyrtimi u anulua. Libri juaj është përsëri draft.")}`,
     );
     expect(bookReviewsDoubleState.calls).toEqual([{ fn: "withdrawBookReview", bookId: BOOK_ID }]);
     expect(dbWrites).toEqual([]);
@@ -1115,7 +1115,7 @@ describe("cancelBookReview (ADMIN-3, E)", () => {
   it("not waiting: says so", async () => {
     bookReviewsDoubleState.withdrawResult = { ok: false, reason: "not_pending" };
     expect(await run(cancelBookReview(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("This book isn't waiting for review.")}`,
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër nuk po pret shqyrtim.")}`,
     );
   });
 

@@ -21,7 +21,7 @@ export function DashboardMenu() {
   const subItems = match && match.group.items.length > 1 ? match.group.items : null;
 
   return (
-    <nav aria-label="Dashboard">
+    <nav aria-label="Paneli i autorit">
       {/* Computer and tablet: the four groups, then the current group's
           pages on a second line. */}
       <div className="hidden md:block">
@@ -76,7 +76,7 @@ export function DashboardMenu() {
       <DismissableDetails key={pathname} className="group relative md:hidden">
         <summary className="focus-ring flex min-h-11 w-full cursor-pointer list-none items-center justify-between gap-2 rounded-control border border-control bg-surface px-3.5 text-[0.9375rem] text-foreground select-none [&::-webkit-details-marker]:hidden">
           <span>
-            <span className="text-muted">Section{match ? ":" : ""}</span>
+            <span className="text-muted">Seksioni{match ? ":" : ""}</span>
             {match && (
               <>
                 {" "}

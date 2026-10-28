@@ -22,34 +22,34 @@ export type DashboardMenuGroup = {
 
 export const DASHBOARD_MENU_GROUPS: DashboardMenuGroup[] = [
   {
-    label: "Books",
+    label: "Librat",
     items: [
       // /dashboard itself only; /dashboard/books ("All books", Add a
       // book, book edit) has no item of its own and counts as Books.
-      { href: "/dashboard", label: "Books", alsoMatches: ["/dashboard/books"] },
-      { href: "/dashboard/series", label: "Series", nested: true },
+      { href: "/dashboard", label: "Librat", alsoMatches: ["/dashboard/books"] },
+      { href: "/dashboard/series", label: "Seritë", nested: true },
     ],
   },
   {
-    label: "Money",
+    label: "Paratë",
     items: [
-      { href: "/dashboard/sales", label: "Sales", nested: true },
-      { href: "/dashboard/balance", label: "Financial balance", nested: true },
+      { href: "/dashboard/sales", label: "Shitjet", nested: true },
+      { href: "/dashboard/balance", label: "Bilanci", nested: true },
     ],
   },
   {
-    label: "Promotion",
+    label: "Promovimi",
     items: [
-      { href: "/dashboard/bundles", label: "Bundles", nested: true },
-      { href: "/dashboard/discounts", label: "Discounts", nested: true },
+      { href: "/dashboard/bundles", label: "Paketat", nested: true },
+      { href: "/dashboard/discounts", label: "Zbritjet", nested: true },
     ],
   },
   {
-    label: "Profile",
+    label: "Profili",
     // PEN-NAMES-1: each pen name's own name, bio, photo and links.
     items: [
-      { href: "/dashboard/profile", label: "Profile", nested: true },
-      { href: "/dashboard/pen-names", label: "Pen names", nested: true },
+      { href: "/dashboard/profile", label: "Profili", nested: true },
+      { href: "/dashboard/pen-names", label: "Pseudonimet", nested: true },
     ],
   },
 ];

@@ -101,9 +101,9 @@ describe("summarizeDashboardSales", () => {
 
 describe("formatMonthComparison", () => {
   it("uses Renato's D1 wording", () => {
-    expect(formatMonthComparison(23, 15)).toBe("+8 vs last month");
-    expect(formatMonthComparison(3, 5)).toBe("−2 vs last month");
-    expect(formatMonthComparison(4, 4)).toBe("Same as last month");
+    expect(formatMonthComparison(23, 15)).toBe("+8 krahasuar me muajin e kaluar");
+    expect(formatMonthComparison(3, 5)).toBe("−2 krahasuar me muajin e kaluar");
+    expect(formatMonthComparison(4, 4)).toBe("Njëlloj si muajin e kaluar");
   });
 });
 

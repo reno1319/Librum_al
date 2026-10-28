@@ -1,5 +1,10 @@
 import { resolveCatalogPriceState } from "@/lib/catalog-price";
-import { getPublishChecklist, type ChecklistItem } from "@/lib/publish-checklist";
+import {
+  DESCRIPTION_CHECKLIST_LABEL,
+  KEYWORDS_CHECKLIST_LABEL,
+  getPublishChecklist,
+  type ChecklistItem,
+} from "@/lib/publish-checklist";
 import type { Book } from "@/lib/types";
 
 // LIBRUM 2.0 UI-7: the Publishing Studio's readiness classification,
@@ -59,11 +64,8 @@ export type PublishReadiness = {
 // preview-excerpt label is gone from this set, not merely renamed --
 // see getPublishChecklist()'s own comment for why that item was removed
 // entirely rather than relabeled.
-const DESCRIPTION_LABEL = "Write a description (a couple of sentences or more)";
-const RECOMMENDED_LABELS = new Set([
-  DESCRIPTION_LABEL,
-  "Add keywords so readers can find it by search",
-]);
+const DESCRIPTION_LABEL = DESCRIPTION_CHECKLIST_LABEL;
+const RECOMMENDED_LABELS = new Set([DESCRIPTION_LABEL, KEYWORDS_CHECKLIST_LABEL]);
 
 type ReadinessBook = Pick<Book, "description" | "keywords" | "price_all" | "cover_path">;
 

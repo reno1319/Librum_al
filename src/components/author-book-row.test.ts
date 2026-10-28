@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // ADMIN-2-TAKEDOWN (G, M4): the Dashboard row of a book Librum took
 // down -- the TAKEN DOWN tag and the notice in place of the draft's
-// missing-items list, and "Edit" rather than "Continue setup".
+// missing-items list, and "Edit" rather than "Vazhdoni përgatitjen".
 vi.mock("@/app/(public)/dashboard/books/actions", () => ({ deleteBook: { bind: () => async () => undefined } }));
 
 const { AuthorBookRow } = await import("./author-book-row");
@@ -32,68 +32,68 @@ describe("AuthorBookRow: a book Librum took down", () => {
         bundleTitles: ["Set A"],
       },
     });
-    expect(html).toContain(">TAKEN DOWN<");
+    expect(html).toContain(">HEQUR NGA LIBRARIA<");
     expect(html).not.toContain(">DRAFT<");
     expect(html).toContain('role="status"');
-    expect(html).toMatch(/Taken down by Librum on [^<]+\. Reason: Breaks content rules\./);
+    expect(html).toMatch(/Hequr nga Librum më [^<]+\. Arsyeja: Shkel rregullat e përmbajtjes\./);
     expect(html).toContain("This breaks the rules.");
-    expect(html).toContain("We also unpublished: Set A.");
-    expect(html).toContain("Questions? Write to support@librum.al");
-    expect(html).not.toContain("Missing:");
-    expect(html).not.toContain("Continue setup");
-    expect(html).toContain(">Edit<");
+    expect(html).toContain("Hoqëm nga publikimi edhe: Set A.");
+    expect(html).toContain("Pyetje? Na shkruani te support@librum.al");
+    expect(html).not.toContain("Për t&#x27;u bërë:");
+    expect(html).not.toContain("Vazhdoni përgatitjen");
+    expect(html).toContain(">Ndryshoni<");
   });
 
   it("is an ordinary draft without one", () => {
     const html = render();
     expect(html).toContain(">DRAFT<");
-    expect(html).toContain("Missing: Cover");
-    expect(html).toContain("Continue setup");
-    expect(html).not.toContain("TAKEN DOWN");
+    expect(html).toContain("Për t&#x27;u bërë: Cover");
+    expect(html).toContain("Vazhdoni përgatitjen");
+    expect(html).not.toContain("HEQUR NGA LIBRARIA");
   });
 });
 
 // ADMIN-3-REVIEW (F, 4a): the IN REVIEW tag (no timing promise, no
-// "Continue setup"), and the send-back notice while it is the newest
+// "Vazhdoni përgatitjen"), and the send-back notice while it is the newest
 // review. The takedown notice keeps priority.
 describe("AuthorBookRow: In review and sent back (ADMIN-3)", () => {
   const SENT_BACK = { sentBackAt: "2026-10-19T10:00:00Z", reason: "broken_file", message: "The file does not open" };
   const TAKEDOWN = { takenDownAt: "2026-10-19T10:00:00Z", reason: "copyright", message: "Proof please", bundleTitles: [] };
 
-  it("in review: the IN REVIEW tag instead of DRAFT, no missing list, no Continue setup", () => {
+  it("in review: the IN REVIEW tag instead of DRAFT, no missing list, no Vazhdoni përgatitjen", () => {
     const html = render({ review: { inReview: true, sentBack: null } });
-    expect(html).toContain(">IN REVIEW<");
+    expect(html).toContain(">NË SHQYRTIM<");
     expect(html).not.toContain(">DRAFT<");
-    expect(html).not.toContain("Missing:");
-    expect(html).not.toContain("Continue setup");
+    expect(html).not.toContain("Për t&#x27;u bërë:");
+    expect(html).not.toContain("Vazhdoni përgatitjen");
     expect(html).not.toMatch(/\b(hours?|days?|within|soon)\b/i);
   });
 
   it("sent back: the notice, in reading order, and the draft's own controls", () => {
     const html = render({ review: { inReview: false, sentBack: SENT_BACK } });
     expect(html).toContain(">DRAFT<");
-    expect(html).toMatch(/Librum sent this book back on [^<]+\. Reason: Wrong or broken file\./);
-    const order = ["Librum sent this book back", "The file does not open.", "Fix it and send it for review again.", "Questions? Write to support@librum.al"];
+    expect(html).toMatch(/Librum jua ktheu këtë libër për ndryshime më [^<]+\. Arsyeja: Skedar i gabuar ose i dëmtuar\./);
+    const order = ["Librum jua ktheu këtë libër", "The file does not open.", "Rregullojeni dhe dërgojeni përsëri për shqyrtim.", "Pyetje? Na shkruani te support@librum.al"];
     const at = order.map((text) => html.indexOf(text));
     expect(at.every((i) => i > -1)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
-    expect(html).toContain("Continue setup");
+    expect(html).toContain("Vazhdoni përgatitjen");
   });
 
   it("a takedown replaces both", () => {
     for (const review of [{ inReview: true, sentBack: null }, { inReview: false, sentBack: SENT_BACK }]) {
       const html = render({ takedown: TAKEDOWN, review });
-      expect(html).toContain(">TAKEN DOWN<");
-      expect(html).not.toContain(">IN REVIEW<");
-      expect(html).not.toContain("Librum sent this book back");
+      expect(html).toContain(">HEQUR NGA LIBRARIA<");
+      expect(html).not.toContain(">NË SHQYRTIM<");
+      expect(html).not.toContain("Librum jua ktheu këtë libër");
     }
   });
 
   it("a live book shows neither", () => {
     const html = render({ book: { ...BOOK, status: "published" }, review: { inReview: true, sentBack: SENT_BACK } });
-    expect(html).toContain(">LIVE<");
-    expect(html).not.toContain(">IN REVIEW<");
-    expect(html).not.toContain("Librum sent this book back");
+    expect(html).toContain(">I PUBLIKUAR<");
+    expect(html).not.toContain(">NË SHQYRTIM<");
+    expect(html).not.toContain("Librum jua ktheu këtë libër");
   });
 
   it("the notice escapes Librum's message", () => {
@@ -103,7 +103,7 @@ describe("AuthorBookRow: In review and sent back (ADMIN-3)", () => {
   });
 });
 
-// PHONE PASS (D3, D4 / Renato 4a 5a): Edit (or Continue setup) plus a
+// PHONE PASS (D3, D4 / Renato 4a 5a): Edit (or Vazhdoni përgatitjen) plus a
 // "···" menu on every row; the menu's items, by book state.
 describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
   const LIVE = { ...BOOK, status: "published" as const, price_all: 499 };
@@ -111,21 +111,21 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
 
   it("a live book: Edit plus ···, and every menu item including View and Unpublish", () => {
     const html = render({ book: LIVE, missing: [] });
-    expect(html).toContain(">Edit<");
-    expect(html).toContain(`aria-label="More actions for ${BOOK.title}"`);
+    expect(html).toContain(">Ndryshoni<");
+    expect(html).toContain(`aria-label="Më shumë veprime për ${BOOK.title}"`);
     expect(html).toContain(">···<");
-    expect(html).not.toContain(">More actions<");
+    expect(html).not.toContain(">Më shumë veprime<");
     for (const [label, href] of [
-      ["Edit details", `${editBase}#details`],
-      ["Change manuscript or cover", `${editBase}#files`],
-      ["Change price", `${editBase}#pricing`],
-      ["View in Bookstore", `/books/${BOOK.id}`],
-      ["Unpublish", `${editBase}#publishing`],
+      ["Ndryshoni të dhënat", `${editBase}#details`],
+      ["Ndryshoni dorëshkrimin ose kopertinën", `${editBase}#files`],
+      ["Ndryshoni çmimin", `${editBase}#pricing`],
+      ["Shikojeni në Librari", `/books/${BOOK.id}`],
+      ["Hiqeni nga publikimi", `${editBase}#publishing`],
     ]) {
       expect(html).toContain(`href="${href}"`);
       expect(html).toContain(`>${label}<`);
     }
-    expect(html).toContain(">Delete<");
+    expect(html).toContain(">Fshini<");
   });
 
   it("the separate View button is gone: /books/<id> appears once, inside the menu", () => {
@@ -134,14 +134,14 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     expect(html.indexOf(`href="/books/${BOOK.id}"`)).toBeGreaterThan(html.indexOf("<summary"));
   });
 
-  it("a draft: Continue setup plus ···, no View or Unpublish, Delete kept", () => {
+  it("a draft: Vazhdoni përgatitjen plus ···, no View or Unpublish, Delete kept", () => {
     const html = render();
-    expect(html).toContain("Continue setup");
-    expect(html).toContain(`aria-label="More actions for ${BOOK.title}"`);
-    expect(html).toContain(">Edit details<");
-    expect(html).not.toContain("View in Bookstore");
-    expect(html).not.toContain(">Unpublish<");
-    expect(html).toContain(">Delete<");
+    expect(html).toContain("Vazhdoni përgatitjen");
+    expect(html).toContain(`aria-label="Më shumë veprime për ${BOOK.title}"`);
+    expect(html).toContain(">Ndryshoni të dhënat<");
+    expect(html).not.toContain("Shikojeni në Librari");
+    expect(html).not.toContain(">Hiqeni nga publikimi<");
+    expect(html).toContain(">Fshini<");
   });
 
   // PREVIEW-1 (A5, Renato 6a): every book that isn't live has Preview,
@@ -164,21 +164,21 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     ],
   ])("%s: Preview links to the book's own page, once, inside the menu", (_label, props) => {
     const html = render(props);
-    expect(html).toMatch(new RegExp(`href="/books/${BOOK.id}"[^>]*>Preview<`));
+    expect(html).toMatch(new RegExp(`href="/books/${BOOK.id}"[^>]*>Shikoni librin para botimit<`));
     expect(html.split(`href="/books/${BOOK.id}"`).length - 1).toBe(1);
     expect(html.indexOf(`href="/books/${BOOK.id}"`)).toBeGreaterThan(html.indexOf("<summary"));
-    expect(html).not.toContain("View in Bookstore");
+    expect(html).not.toContain("Shikojeni në Librari");
   });
 
-  it("a live book has View in Bookstore and no Preview", () => {
+  it("a live book has Shikojeni në Librari and no Preview", () => {
     const html = render({ book: { ...BOOK, status: "published" as const, price_all: 499 }, missing: [] });
-    expect(html).not.toContain(">Preview<");
+    expect(html).not.toContain(">Shikoni librin para botimit<");
   });
 
   it("a draft keeps no Unpublish and keeps Delete", () => {
     const html = render();
-    expect(html).not.toContain(">Unpublish<");
-    expect(html).toContain(">Delete<");
+    expect(html).not.toContain(">Hiqeni nga publikimi<");
+    expect(html).toContain(">Fshini<");
   });
 
   it("Unpublish is only a link to the Edit page, never a form of its own", () => {

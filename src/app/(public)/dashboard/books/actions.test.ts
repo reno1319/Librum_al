@@ -1083,7 +1083,7 @@ describe("createBook: create atomicity when the final manuscript write fails (CB
 // ADMIN-3-REVIEW (C): the book in these doubles is live, so a new file
 // or cover takes it out of the Bookstore until Librum approves it.
 const LIVE_FILES_SAVED_REDIRECT = `/dashboard?success=${encodeURIComponent(
-  "Saved. Your book is out of the Bookstore until Librum approves the new file or cover.",
+  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
 )}`;
 
 describe("updateBook: manuscriptStoragePath reference (CB-1)", () => {

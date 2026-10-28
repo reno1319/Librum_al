@@ -11,14 +11,14 @@ export function DeleteBookButton({ title, className = DEFAULT_CLASS_NAME }: { ti
       className={className}
       onClick={(e) => {
         const confirmed = window.confirm(
-          `Delete "${title}"? This can't be undone. Books that have been acquired by readers can't be deleted — you'll need to unpublish this one instead if that's the case.`,
+          `Ta fshini "${title}"? Ky veprim nuk mund të zhbëhet. Librat që lexuesit i kanë marrë nuk mund të fshihen: në atë rast hiqeni librin nga publikimi.`,
         );
         if (!confirmed) {
           e.preventDefault();
         }
       }}
     >
-      Delete
+      Fshini
     </button>
   );
 }

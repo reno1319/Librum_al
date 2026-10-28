@@ -1174,7 +1174,7 @@ describe("performPublish: In review (ADMIN-3)", () => {
     mockReviewStaffEmail.mockClear();
   });
   const SENT = `/dashboard?success=${encodeURIComponent(
-    "Sent for review. We'll check your book and tell you when it's live. It isn't in the Bookstore yet.",
+    "U dërgua për shqyrtim. Do ta kontrollojmë librin dhe do t'ju njoftojmë kur të publikohet. Nuk është ende në Librari.",
   )}`;
 
   it("a draft without a valid approval is sent for review: no publish write, no email", async () => {
@@ -1210,7 +1210,7 @@ describe("performPublish: In review (ADMIN-3)", () => {
     bookReviewsDoubleState.requestResult = { ok: false, reason: "already_pending" };
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("This book is already waiting for review.")}`,
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër po pret tashmë shqyrtimin.")}`,
     );
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(mockReviewStaffEmail).not.toHaveBeenCalled();
@@ -1252,7 +1252,7 @@ describe("performPublish: In review (ADMIN-3)", () => {
     mockBookUpdateResult.mockReturnValue({ error: { code, message: "x" } });
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Your book changed while you were editing. Reload and try again.")}`,
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Libri juaj ndryshoi ndërsa po e redaktonit. Rifreskoni faqen dhe provoni përsëri.")}`,
     );
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
   });

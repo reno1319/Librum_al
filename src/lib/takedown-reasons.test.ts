@@ -68,10 +68,10 @@ describe("takedown reasons", () => {
 describe("the author's words (G, M5)", () => {
   it("uses the agreed publish and delete refusals", () => {
     expect(TAKEN_DOWN_PUBLISH_MESSAGE).toBe(
-      "Librum took this book down. You can't publish it again until we review it. Questions? Write to support@librum.al",
+      "Librum e hoqi këtë libër. Nuk mund ta publikoni përsëri derisa ta shqyrtojmë. Pyetje? Na shkruani te support@librum.al",
     );
     expect(TAKEN_DOWN_DELETE_MESSAGE).toBe(
-      "This book was taken down by Librum and can't be deleted until we review it. Questions? Write to support@librum.al",
+      "Ky libër u hoq nga Librum dhe nuk mund të fshihet derisa ta shqyrtojmë. Pyetje? Na shkruani te support@librum.al",
     );
   });
 
@@ -83,10 +83,10 @@ describe("the author's words (G, M5)", () => {
         formatDate,
       ),
     ).toEqual([
-      "Taken down by Librum on 19 Oct 2026. Reason: Copyright complaint.",
+      "Hequr nga Librum më 19 Oct 2026. Arsyeja: Ankesë për të drejtën e autorit.",
       "Send proof.",
-      "We also unpublished: Set A, Set B.",
-      "Questions? Write to support@librum.al",
+      "Hoqëm nga publikimi edhe: Set A, Set B.",
+      "Pyetje? Na shkruani te support@librum.al",
     ]);
     expect(
       buildAuthorTakedownNoticeLines(
@@ -94,9 +94,9 @@ describe("the author's words (G, M5)", () => {
         formatDate,
       ),
     ).toEqual([
-      "Taken down by Librum on 19 Oct 2026. Reason: Other.",
+      "Hequr nga Librum më 19 Oct 2026. Arsyeja: Tjetër.",
       "Done!",
-      "Questions? Write to support@librum.al",
+      "Pyetje? Na shkruani te support@librum.al",
     ]);
   });
 });

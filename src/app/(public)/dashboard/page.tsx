@@ -24,7 +24,7 @@ import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Dashboard",
+  title: "Paneli i autorit",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -127,14 +127,14 @@ export default async function DashboardPage({
           r2 moved the greeting to the site header ("Hello, <name>"). */}
       <div className="min-w-0">
         <h1 className="font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
-          Your dashboard
+          Paneli juaj
         </h1>
       </div>
       <Link
         href="/dashboard/books/new"
         className={buttonClasses("primary", "md", "min-h-11 shrink-0 rounded-[3px] px-4 font-bold sm:px-5")}
       >
-        New book
+        Libër i ri
       </Link>
     </div>
   );
@@ -162,18 +162,18 @@ export default async function DashboardPage({
 
         <EmptyState
           className="mt-8 rounded-[4px] border-solid"
-          title="Your first book starts here."
-          description="Upload your manuscript, set a price, and publish when you're ready."
+          title="Libri juaj i parë fillon këtu."
+          description="Ngarkoni dorëshkrimin, vendosni çmimin dhe publikojeni kur të jeni gati."
           action={
             <div className="flex flex-wrap items-center justify-center gap-4">
               <Link
                 href="/dashboard/books/new"
                 className={buttonClasses("primary", "md", "min-h-11 rounded-[3px] px-5 font-bold")}
               >
-                New book
+                Libër i ri
               </Link>
               <Link href="/how-it-works" className={TEXT_LINK_CLASSES}>
-                How publishing works
+                Si funksionon botimi
               </Link>
             </div>
           }
@@ -223,31 +223,31 @@ export default async function DashboardPage({
       {attention.kind === "paid-publishing-unavailable" && (
         <Alert
           variant="warning"
-          title="Paid publishing and author payout setup have not launched yet."
+          title="Botimi me pagesë dhe pagesat për autorët nuk kanë nisur ende."
           className="mt-6"
         >
           {/* PR-G: no payout link in this alert: nothing an author can
               set up changes this outcome -- paid publishing is gated by
               canPublishPaidTitle() alone. */}
           <p>
-            You can continue to publish free books while Librum completes
-            its payment and payout systems.
+            Mund të vazhdoni të publikoni libra falas, ndërsa Librum përfundon
+            sistemet e pagesave.
           </p>
         </Alert>
       )}
 
       {attention.kind === "continue-draft" && (
-        <Alert variant="info" title="Continue your draft" className="mt-6">
+        <Alert variant="info" title="Vazhdoni draftin tuaj" className="mt-6">
           <p>
             {attention.book.title}
             {draftIncompleteCount > 0 &&
-              ` — ${draftIncompleteCount} thing${draftIncompleteCount === 1 ? "" : "s"} to consider before publishing.`}
+              ` — ${draftIncompleteCount === 1 ? "1 gjë" : `${draftIncompleteCount} gjëra`} për të parë para publikimit.`}
           </p>
           <Link
             href={`/dashboard/books/${attention.book.id}/edit`}
             className="focus-ring rounded-sm font-medium underline"
           >
-            Continue editing
+            Vazhdoni redaktimin
           </Link>
         </Alert>
       )}
@@ -255,26 +255,26 @@ export default async function DashboardPage({
       <MoneySummary
         sales={sales}
         nextPayoutCycle={
-          schedulerEnabled ? formatPayoutCycleDate(computeNextPayoutCycleDate()) : "Not scheduled yet"
+          schedulerEnabled ? formatPayoutCycleDate(computeNextPayoutCycleDate()) : "Nuk është caktuar ende"
         }
       />
 
       <section aria-labelledby="your-books-heading" className="mt-8 sm:mt-10">
         <h2 id="your-books-heading" className="font-serif text-2xl font-normal text-primary">
-          Your books
+          Librat tuaj
         </h2>
         <div className="mt-4 rounded-[4px] border border-border bg-surface">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
-            <nav aria-label="Your books" className="flex flex-wrap gap-2">
-              <BookTabLink label={`All (${allBooks.length})`} href={dashboardHref("all", q)} active={tab === "all"} />
+            <nav aria-label="Librat tuaj" className="flex flex-wrap gap-2">
+              <BookTabLink label={`Të gjithë (${allBooks.length})`} href={dashboardHref("all", q)} active={tab === "all"} />
               <BookTabLink
-                label={`Published (${publishedCount})`}
+                label={`Të publikuar (${publishedCount})`}
                 href={dashboardHref("published", q)}
                 active={tab === "published"}
                 disabled={publishedCount === 0}
               />
               <BookTabLink
-                label={`Drafts (${draftCount})`}
+                label={`Drafte (${draftCount})`}
                 href={dashboardHref("drafts", q)}
                 active={tab === "drafts"}
                 disabled={draftCount === 0}
@@ -282,7 +282,7 @@ export default async function DashboardPage({
             </nav>
             <form action="/dashboard" method="get" role="search" className="flex w-full items-center gap-2 sm:w-auto">
               <label htmlFor="dashboard-book-search" className="text-sm text-muted">
-                Search
+                Kërkoni
               </label>
               {tab !== "all" && <input type="hidden" name="tab" value={tab} />}
               <input
@@ -290,14 +290,14 @@ export default async function DashboardPage({
                 type="search"
                 name="q"
                 defaultValue={q}
-                placeholder="Title"
+                placeholder="Titulli"
                 className="focus-ring min-h-11 min-w-0 flex-1 rounded-[3px] border border-[#8c8472] bg-surface px-3 text-sm sm:w-52 sm:flex-none"
               />
             </form>
           </div>
 
           {listedBooks.length === 0 ? (
-            <EmptyState className="m-4 border-0 sm:m-5" title="No books match your search." />
+            <EmptyState className="m-4 border-0 sm:m-5" title="Asnjë libër nuk përputhet me kërkimin." />
           ) : (
             <ul className="divide-y divide-[#efe9dd]">
               {listedBooks.map((book) => {
@@ -326,12 +326,12 @@ export default async function DashboardPage({
           )}
         </div>
         <Link href="/dashboard/books" className={`${TEXT_LINK_CLASSES} mt-4 inline-block`}>
-          View all books &rarr;
+          Shikoni të gjithë librat &rarr;
         </Link>
       </section>
 
       <section className="mt-10">
-        <h2 className="font-serif text-2xl font-normal text-primary">Tools</h2>
+        <h2 className="font-serif text-2xl font-normal text-primary">Mjetet</h2>
         <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {DASHBOARD_TOOLS.map((tool) => (
             <li key={tool.href}>
@@ -404,8 +404,8 @@ function UnresolvedNote({ totals }: { totals: CurrencyTotals }) {
   return (
     <p className="text-xs text-muted">
       {totals.unresolvedCount === 1
-        ? "1 sale is not included: its currency could not be determined."
-        : `${totals.unresolvedCount} sales are not included: their currency could not be determined.`}
+        ? "1 shitje nuk përfshihet: monedha e saj nuk u përcaktua dot."
+        : `${totals.unresolvedCount} shitje nuk përfshihen: monedha e tyre nuk u përcaktua dot.`}
     </p>
   );
 }
@@ -419,8 +419,8 @@ function MoneySummary({
 }) {
   if (!sales.ok) {
     return (
-      <section aria-label="Money summary" className={`mt-6 sm:mt-8 ${BOX_CLASSES}`}>
-        <p className="text-sm text-foreground">Could not load sales data. Please try again.</p>
+      <section aria-label="Përmbledhja e parave" className={`mt-6 sm:mt-8 ${BOX_CLASSES}`}>
+        <p className="text-sm text-foreground">Të dhënat e shitjeve nuk u ngarkuan. Provoni përsëri.</p>
       </section>
     );
   }
@@ -429,54 +429,54 @@ function MoneySummary({
   const comparison = formatMonthComparison(salesThisMonth, salesLastMonth);
 
   return (
-    <section aria-label="Money summary" className="mt-6 sm:mt-8">
+    <section aria-label="Përmbledhja e parave" className="mt-6 sm:mt-8">
       {/* Phone: the compact two-figure box from the phone mockup. */}
       <div className={`${BOX_CLASSES} grid grid-cols-2 gap-4 sm:hidden`}>
         <div>
-          <p className={BOX_LABEL_CLASSES}>This month</p>
+          <p className={BOX_LABEL_CLASSES}>Këtë muaj</p>
           <p className="font-serif text-2xl leading-tight text-primary">
-            <CurrencyTotalsText totals={netThisMonth} emptyLabel="No sales yet" />
+            <CurrencyTotalsText totals={netThisMonth} emptyLabel="Ende pa shitje" />
           </p>
         </div>
         <div>
-          <p className={BOX_LABEL_CLASSES}>Sales</p>
+          <p className={BOX_LABEL_CLASSES}>Shitje</p>
           <p className="font-serif text-2xl leading-tight text-primary">{salesThisMonth}</p>
         </div>
         <Link href="/dashboard/sales" className={`${TEXT_LINK_CLASSES} col-span-2`}>
-          View sales and earnings &rarr;
+          Shikoni shitjet dhe fitimet &rarr;
         </Link>
       </div>
 
       <div className="hidden gap-4 sm:grid sm:grid-cols-2 lg:grid-cols-4">
         <div className={`${BOX_CLASSES} flex flex-col gap-1.5`}>
-          <p className={BOX_LABEL_CLASSES}>Sales this month</p>
+          <p className={BOX_LABEL_CLASSES}>Shitje këtë muaj</p>
           <p className={BOX_FIGURE_CLASSES}>{salesThisMonth}</p>
           <p className={`text-[0.8125rem] ${salesThisMonth > salesLastMonth ? "text-[#2f6b4f]" : "text-muted"}`}>
             {comparison}
           </p>
         </div>
         <div className={`${BOX_CLASSES} flex flex-col gap-1.5`}>
-          <p className={BOX_LABEL_CLASSES}>Net revenue this month</p>
+          <p className={BOX_LABEL_CLASSES}>Të ardhurat neto këtë muaj</p>
           <p className={BOX_FIGURE_CLASSES}>
-            <CurrencyTotalsText totals={netThisMonth} emptyLabel="No sales yet" />
+            <CurrencyTotalsText totals={netThisMonth} emptyLabel="Ende pa shitje" />
           </p>
           <UnresolvedNote totals={netThisMonth} />
         </div>
         <div className={`${BOX_CLASSES} flex flex-col gap-1.5`}>
-          <p className={BOX_LABEL_CLASSES}>Next payout cycle</p>
+          <p className={BOX_LABEL_CLASSES}>Pagesa e radhës për autorin</p>
           <p className="font-serif text-2xl leading-tight text-primary">{nextPayoutCycle}</p>
           <Link href="/dashboard/balance" className={TEXT_LINK_CLASSES}>
-            View financial balance &rarr;
+            Shikoni bilancin &rarr;
           </Link>
         </div>
         <div className={`${BOX_CLASSES} flex flex-col gap-1.5`}>
-          <p className={BOX_LABEL_CLASSES}>Net revenue all time</p>
+          <p className={BOX_LABEL_CLASSES}>Të ardhurat neto gjithsej</p>
           <p className={BOX_FIGURE_CLASSES}>
-            <CurrencyTotalsText totals={netAllTime} emptyLabel="No sales yet" />
+            <CurrencyTotalsText totals={netAllTime} emptyLabel="Ende pa shitje" />
           </p>
           <UnresolvedNote totals={netAllTime} />
           <Link href="/dashboard/sales" className={TEXT_LINK_CLASSES}>
-            View sales and earnings &rarr;
+            Shikoni shitjet dhe fitimet &rarr;
           </Link>
         </div>
       </div>
@@ -487,22 +487,22 @@ function MoneySummary({
 const DASHBOARD_TOOLS: { href: string; label: string; description: string }[] = [
   {
     href: "/dashboard/bundles",
-    label: "Bundles",
-    description: "Group multiple books into one offer.",
+    label: "Paketat",
+    description: "Bashkoni disa libra në një ofertë.",
   },
   {
     href: "/dashboard/series",
-    label: "Series",
-    description: "Organize related books in reading order.",
+    label: "Seritë",
+    description: "Renditni librat e lidhur sipas radhës së leximit.",
   },
   {
     href: "/dashboard/discounts",
-    label: "Discounts",
-    description: "Create promotional codes for eligible sales.",
+    label: "Zbritjet",
+    description: "Krijoni kode promocionale për shitjet që lejohen.",
   },
   {
     href: "/dashboard/profile",
-    label: "Profile",
-    description: "Manage your public author information.",
+    label: "Profili",
+    description: "Menaxhoni të dhënat tuaja publike si autor.",
   },
 ];
