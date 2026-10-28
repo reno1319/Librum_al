@@ -202,8 +202,8 @@ export function classifyCatalogPrice(priceAll: number): "free" | "paid" {
  * Albanian reader-facing display for a validated whole-ALL catalog
  * price -- dot as the thousands separator and, since FIX1 (X5), no
  * decimals at all, because a catalog price is always whole lek:
- * `99` -> `"99 ALL"`, `1000` -> `"1.000 ALL"`,
- * `100000` -> `"100.000 ALL"`. Enforces the same canonical numeric
+ * `99` -> `"99 lekë"`, `1000` -> `"1.000 lekë"`,
+ * `100000` -> `"100.000 lekë"`. Enforces the same canonical numeric
  * domain `parseCatalogPriceAll`/`classifyCatalogPrice` do -- a value
  * outside the domain throws rather than silently formatting (e.g.
  * `formatCatalogPriceAll(1)` throws; it never again returns
@@ -232,10 +232,12 @@ export function formatCatalogPriceAll(priceAll: number): string {
 // displayed in two different shapes.
 //
 // FIX1 (X5): no ",00" -- a catalog price is whole lek, so it reads
-// "199 ALL", "1.500 ALL", "100.000 ALL" (the thousands dot stays).
+// "199 lekë", "1.500 lekë", "100.000 lekë" (the thousands dot stays).
 function groupWholeAll(amountAll: number): string {
   const grouped = String(amountAll).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${grouped} ALL`;
+  // ALBANIAN-1 (Renato 10-28, 2b): "1 lek", otherwise "lekë". Kept
+  // inline (not imported) because this module stays import-free.
+  return `${grouped} ${amountAll === 1 ? "lek" : "lekë"}`;
 }
 
 // Fixed, non-sensitive message, same posture as INVALID_DOMAIN_MESSAGE.

@@ -115,13 +115,14 @@ function groupDigits(digits: string, separator: string): string {
  * Albanian display of a validated fixed ALL discount, in the same
  * convention as `formatCatalogPriceAll` (dot thousands, comma decimals,
  * explicit `ALL` suffix, and since FIX1 (X5) no ",00" for whole lek):
- * `250` -> `"250 ALL"`, `1000` -> `"1.000 ALL"`. Throws outside 1..100000 rather than formatting a
+ * `250` -> `"250 lekë"`, `1000` -> `"1.000 lekë"`. Throws outside 1..100000 rather than formatting a
  * value that could never have been stored. Applies no catalog minimum:
- * `formatFixedDiscountAll(1)` is `"1 ALL"`.
+ * `formatFixedDiscountAll(1)` is `"1 lek"`.
  */
 export function formatFixedDiscountAll(amountOffAll: number): string {
   if (!isValidFixedDiscountAll(amountOffAll)) throw new Error(INVALID_DOMAIN_MESSAGE);
-  return `${groupDigits(String(amountOffAll), ".")} ALL`;
+  // ALBANIAN-1 (Renato 10-28, 2b): "1 lek", otherwise "lekë".
+  return `${groupDigits(String(amountOffAll), ".")} ${amountOffAll === 1 ? "lek" : "lekë"}`;
 }
 
 /** The three columns that decide what a discount code does. */

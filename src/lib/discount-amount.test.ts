@@ -145,7 +145,7 @@ describe("parseFixedDiscountAll: rejected inputs", () => {
     ["empty", ""],
     ["spaces", "   "],
     ["tab and newline", "\t\n"],
-    ["currency suffix", "250 ALL"],
+    ["currency suffix", "250 lekë"],
     ["currency prefix", "ALL 250"],
     ["lek suffix", "250L"],
     ["dollar", "$5"],
@@ -184,14 +184,14 @@ describe("parseFixedDiscountAll: rejected inputs", () => {
 
 describe("formatFixedDiscountAll", () => {
   it.each([
-    [1, "1 ALL"],
-    [98, "98 ALL"],
-    [99, "99 ALL"],
-    [250, "250 ALL"],
-    [999, "999 ALL"],
-    [1000, "1.000 ALL"],
-    [12345, "12.345 ALL"],
-    [100_000, "100.000 ALL"],
+    [1, "1 lek"],
+    [98, "98 lekë"],
+    [99, "99 lekë"],
+    [250, "250 lekë"],
+    [999, "999 lekë"],
+    [1000, "1.000 lekë"],
+    [12345, "12.345 lekë"],
+    [100_000, "100.000 lekë"],
   ])("%d -> %j (no catalog minimum applied)", (input, expected) => {
     expect(formatFixedDiscountAll(input)).toBe(expected);
   });
@@ -220,11 +220,11 @@ describe("describeDiscountCode", () => {
   });
 
   it("fixed ALL codes are displayed in lek without the catalog minimum", () => {
-    expect(describeDiscountCode({ ...none, amount_off_all: 1 })).toEqual({ kind: "fixed_all", label: "1 ALL off" });
-    expect(describeDiscountCode({ ...none, amount_off_all: 50 })).toEqual({ kind: "fixed_all", label: "50 ALL off" });
+    expect(describeDiscountCode({ ...none, amount_off_all: 1 })).toEqual({ kind: "fixed_all", label: "1 lek off" });
+    expect(describeDiscountCode({ ...none, amount_off_all: 50 })).toEqual({ kind: "fixed_all", label: "50 lekë off" });
     expect(describeDiscountCode({ ...none, amount_off_all: 2500 })).toEqual({
       kind: "fixed_all",
-      label: "2.500 ALL off",
+      label: "2.500 lekë off",
     });
   });
 

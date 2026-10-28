@@ -348,9 +348,9 @@ describe("BalancePage: amounts are separated by currency (Patch 4)", () => {
     expect(html).toContain(">USD</h2>");
     expect(html).toContain(">ALL</h2>");
     expect(html).toContain("USD 10.00"); // USD available
-    expect(html).toContain("1.234 ALL"); // ALL available
+    expect(html).toContain("1.234 lekë"); // ALL available
     expect(html).toContain("-USD 10.05"); // USD lifetime refunds
-    expect(html).toContain("-1.234,05 ALL"); // ALL lifetime refunds
+    expect(html).toContain("-1.234,05 lekë"); // ALL lifetime refunds
     // A cross-currency sum of the two available balances appears nowhere.
     expect(html).not.toContain("1.244,00");
     expect(html).not.toContain("USD 1,244.00");
@@ -359,17 +359,17 @@ describe("BalancePage: amounts are separated by currency (Patch 4)", () => {
   it("activity and payout rows each keep their own currency, qindarka included", async () => {
     const html = await renderBalance();
     expect(html).toContain("USD 6.99");
-    expect(html).toContain("799,20 ALL");
-    expect(html).toContain("-8 ALL");
+    expect(html).toContain("799,20 lekë");
+    expect(html).toContain("-8 lekë");
     expect(html).toContain("USD 25.00");
-    expect(html).toContain("10.000 ALL");
+    expect(html).toContain("10.000 lekë");
   });
 
   it("a malformed currency is shown as unavailable, never guessed as USD or ALL", async () => {
     const html = await renderBalance();
     expect(html).toContain("Amount unavailable (currency unknown)");
     expect(html).not.toContain("USD 5.00");
-    expect(html).not.toMatch(/(?<![\d.,])5 ALL/);
+    expect(html).not.toMatch(/(?<![\d.,])5 lekë/);
   });
 
   it("no bare dollar sign appears anywhere on the page", async () => {

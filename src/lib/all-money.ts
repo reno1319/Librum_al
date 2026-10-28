@@ -26,18 +26,19 @@
 // Albanian convention, the same one `formatCatalogPriceAll` already
 // uses: comma as the decimal separator, dot as the thousands separator,
 // two displayed decimals only when the amount has qindarka (FIX1 X5: a
-// whole-lek amount shows no ",00"), an explicit `ALL` suffix rather
-// than a symbol so it can never be read as a dollar amount.
+// whole-lek amount shows no ",00"), and the word "lekë" ("lek" for
+// exactly one) as a suffix rather than a symbol, so it can never be
+// read as a dollar amount (ALBANIAN-1, Renato 10-28: was "ALL").
 //
-//   0        -> "Free"
-//   9900     -> "99 ALL"
-//   17910    -> "179,10 ALL"
-//   10000000 -> "100.000 ALL"
+//   0        -> "Falas"
+//   9900     -> "99 lekë"
+//   17910    -> "179,10 lekë"
+//   10000000 -> "100.000 lekë"
 
 import { formatTransactionMinorUnits } from "@/lib/transaction-money";
 
 /** Reader-facing label for a zero amount -- never "0,00 ALL". */
-export const ALL_FREE_LABEL = "Free";
+export const ALL_FREE_LABEL = "Falas";
 
 // Fixed, non-sensitive message: never echoes the offending value back.
 const INVALID_MINOR_MESSAGE =

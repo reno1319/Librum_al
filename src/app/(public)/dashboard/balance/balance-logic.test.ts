@@ -72,8 +72,8 @@ describe("formatMinorAmount", () => {
   });
 
   it("formats ALL minor units WITH the qindarka (the old Intl path dropped them)", () => {
-    expect(formatMinorAmount(17910, "ALL")).toBe("179,10 ALL");
-    expect(formatMinorAmount(123456, "ALL")).toBe("1.234,56 ALL");
+    expect(formatMinorAmount(17910, "ALL")).toBe("179,10 lekë");
+    expect(formatMinorAmount(123456, "ALL")).toBe("1.234,56 lekë");
   });
 
   it("never renders an unsupported currency as if it were a supported one", () => {
@@ -86,12 +86,12 @@ describe("formatMinorAmount", () => {
 
   it("never clamps a negative balance to zero -- renders the negative sign", () => {
     expect(formatMinorAmount(-800, "USD")).toBe("-USD 8.00");
-    expect(formatMinorAmount(-800, "ALL")).toBe("-8 ALL");
+    expect(formatMinorAmount(-800, "ALL")).toBe("-8 lekë");
   });
 
   it("formats zero without throwing", () => {
     expect(formatMinorAmount(0, "USD")).toBe("USD 0.00");
-    expect(formatMinorAmount(0, "ALL")).toBe("0 ALL");
+    expect(formatMinorAmount(0, "ALL")).toBe("0 lekë");
   });
 
   it("a malformed ledger currency is never guessed", () => {

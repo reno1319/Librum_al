@@ -129,9 +129,9 @@ describe("BookstorePage: redesign step 3 layout", () => {
     const feature = html.slice(html.indexOf("featured-book-title") - 200, html.indexOf("</section>"));
     expect(feature).toContain("New on Librum");
     expect(feature).toContain("Book 10");
-    expect(feature).toContain("199 ALL");
+    expect(feature).toContain("199 lekë");
     expect(feature).toContain("Read sample");
-    expect(feature).toContain(`Buy · 199 ALL`);
+    expect(feature).toContain(`Buy · 199 lekë`);
     expect(feature).toContain('href="/books/book-10"');
   });
 
@@ -152,7 +152,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(feature).toContain("Librum&#x27;s choice");
     expect(feature).not.toContain("New on Librum");
     expect(feature).toContain("Book 04");
-    expect(feature).toContain("Buy · 199 ALL");
+    expect(feature).toContain("Buy · 199 lekë");
     expect(feature).toContain("An Author");
     expect(html).not.toContain("New on Librum");
     // The pick still appears in the All books grid in its normal place.

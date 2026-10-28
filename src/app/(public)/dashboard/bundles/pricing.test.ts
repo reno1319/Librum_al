@@ -183,7 +183,7 @@ const REJECTED: Array<[string, unknown]> = [
   ["malformed dot grouping", "1.50.000"],
   ["mixed grouping", "1.234,56"],
   ["a currency symbol", "$25"],
-  ["a currency suffix", "199 ALL"],
+  ["a currency suffix", "199 lekë"],
   ["Infinity", "Infinity"],
   ["NaN", "NaN"],
   ["a non-string File value", new File(["199"], "price.txt")],

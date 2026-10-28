@@ -173,8 +173,8 @@ describe("AdminRefundRequestDetailPage: request and items share the request's cu
     expect(rpc).toHaveBeenCalledWith("list_refund_request_currencies", {
       p_refund_request_ids: [REFUND_ID],
     });
-    expect(html).toContain("1.598,40 ALL");
-    expect(html.match(/799,20 ALL/g)).toHaveLength(2);
+    expect(html).toContain("1.598,40 lekë");
+    expect(html.match(/799,20 lekë/g)).toHaveLength(2);
     expect(html).not.toContain("USD");
     // React inlines its own form-replay script (which names `$$reactFormReplay`);
     // only the rendered markup is checked for a dollar sign.
