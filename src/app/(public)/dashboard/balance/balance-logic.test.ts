@@ -102,10 +102,10 @@ describe("formatMinorAmount", () => {
 
 describe("entryTypeLabel", () => {
   it("labels every known entry_type", () => {
-    expect(entryTypeLabel("sale")).toBe("Sale");
-    expect(entryTypeLabel("refund")).toBe("Refund");
-    expect(entryTypeLabel("payout")).toBe("Payout");
-    expect(entryTypeLabel("adjustment")).toBe("Adjustment");
+    expect(entryTypeLabel("sale")).toBe("Shitje");
+    expect(entryTypeLabel("refund")).toBe("Rimbursim");
+    expect(entryTypeLabel("payout")).toBe("Pagesë për autorin");
+    expect(entryTypeLabel("adjustment")).toBe("Rregullim");
   });
 });
 
@@ -165,18 +165,20 @@ describe("resolveActivityPage", () => {
 
 describe("payoutStatusLabel", () => {
   it("labels every known payout status with safe, factual, non-promissory copy", () => {
-    expect(payoutStatusLabel("pending")).toBe("Pending");
-    expect(payoutStatusLabel("processing")).toBe("Processing");
-    expect(payoutStatusLabel("paid")).toBe("Paid");
-    expect(payoutStatusLabel("failed")).toBe("Failed");
-    expect(payoutStatusLabel("cancelled")).toBe("Cancelled");
+    expect(payoutStatusLabel("pending")).toBe("Në pritje");
+    expect(payoutStatusLabel("processing")).toBe("Në përpunim");
+    expect(payoutStatusLabel("paid")).toBe("E paguar");
+    expect(payoutStatusLabel("failed")).toBe("Dështoi");
+    expect(payoutStatusLabel("cancelled")).toBe("E anuluar");
   });
 
   it("never labels reconciling as failed or paid -- it means Librum is still confirming the outcome", () => {
     const label = payoutStatusLabel("reconciling");
-    expect(label.toLowerCase()).not.toContain("fail");
-    expect(label.toLowerCase()).not.toBe("paid");
-    expect(label).toBe("Under review");
+    // ALBANIAN-11: never "Dështoi" (failed) or "E paguar" (paid).
+    expect(label).not.toBe(payoutStatusLabel("failed"));
+    expect(label).not.toBe(payoutStatusLabel("paid"));
+    expect(label.toLowerCase()).not.toMatch(/dësht|paguar/);
+    expect(label).toBe("Në kontroll");
   });
 });
 

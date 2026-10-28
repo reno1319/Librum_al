@@ -70,16 +70,16 @@ describe("discountExpiryInstant", () => {
 describe("discountExpiryDisplayDate", () => {
   it("shows the picked day for a new code, in winter and in summer", () => {
     expect(discountExpiryDisplayDate("2026-11-01T23:00:00.000Z")).toBe(
-      new Date(Date.UTC(2026, 10, 1, 12)).toLocaleDateString(undefined, { timeZone: "UTC" }),
+      "1 nëntor 2026",
     );
     expect(discountExpiryDisplayDate("2026-07-10T22:00:00.000Z")).toBe(
-      new Date(Date.UTC(2026, 6, 10, 12)).toLocaleDateString(undefined, { timeZone: "UTC" }),
+      "10 korrik 2026",
     );
   });
 
   it("shows the same day as before for a code stored at midnight UTC", () => {
     expect(discountExpiryDisplayDate("2026-11-01T00:00:00+00:00")).toBe(
-      new Date(Date.UTC(2026, 10, 1, 12)).toLocaleDateString(undefined, { timeZone: "UTC" }),
+      "1 nëntor 2026",
     );
   });
 });

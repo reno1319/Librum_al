@@ -23,6 +23,7 @@ import {
   isBankPayoutSetupEnabled,
 } from "./balance-logic";
 import { AUTHOR_EARNINGS_SETTLEMENT_DAYS } from "@/lib/settlement-policy";
+import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { isSchedulerEnabled } from "@/lib/payout-scheduler";
 import { computeNextPayoutCycleDate, formatPayoutCycleDate } from "@/lib/payout-cycle";
 import { PageHeader } from "@/components/ui/page-header";
@@ -36,7 +37,7 @@ import type { AuthorPayoutOverviewRow } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Financial balance",
+  title: "Bilanci",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -159,13 +160,13 @@ export default async function BalancePage({
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
 
       <div className="mt-2">
         <PageHeader
-          title="Financial balance"
-          description={`Your ledger balance across every sale, refund, adjustment, and payout. New sales settle ${AUTHOR_EARNINGS_SETTLEMENT_DAYS} days after purchase, once Librum's refund window has closed, and become available for payout at that point${schedulerEnabled ? "." : " — an exact payout date isn't scheduled yet."}`}
+          title="Bilanci"
+          description={`Bilanci juaj për çdo shitje, rimbursim, rregullim dhe pagesë. Shitjet e reja konfirmohen ${AUTHOR_EARNINGS_SETTLEMENT_DAYS} ditë pas blerjes, kur mbyllet afati i rimbursimit në Librum, dhe atëherë bëhen të disponueshme për pagesë${schedulerEnabled ? "." : ", por data e saktë e pagesës nuk është caktuar ende."}`}
         />
       </div>
 
@@ -191,20 +192,20 @@ export default async function BalancePage({
         className="mt-4"
         title={
           schedulerEnabled
-            ? `Next payout cycle: ${formatPayoutCycleDate(computeNextPayoutCycleDate())}`
+            ? `Cikli i radhës i pagesave: ${formatPayoutCycleDate(computeNextPayoutCycleDate())}`
             : undefined
         }
       >
         {schedulerEnabled
-          ? "Once your available balance meets your payout threshold, it will be reserved for payout during this cycle."
-          : "Monthly payout scheduling is not yet active."}
+          ? "Kur bilanci juaj i disponueshëm arrin pragun e pagesës, ai rezervohet për pagesë në këtë cikël."
+          : "Pagesat mujore për autorët nuk janë aktivizuar ende."}
       </Alert>
 
       {isEmpty ? (
         <EmptyState
           className="mt-8"
-          title="No ledger activity yet."
-          description="Once a sale is recorded to your ledger, your balance and activity will appear here."
+          title="Ende nuk ka lëvizje në bilanc."
+          description="Kur të regjistrohet një shitje, bilanci dhe lëvizjet tuaja do të shfaqen këtu."
         />
       ) : (
         <>
@@ -226,53 +227,53 @@ export default async function BalancePage({
 
                 <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-4">
                   <BalanceCard
-                    label="Available for payout"
+                    label="Gati për pagesë"
                     amountMinor={availableForPayout}
                     currency={row.currency}
                     emphasize
                   />
                   {reserved > 0 && (
-                    <BalanceCard label="Reserved for payout" amountMinor={reserved} currency={row.currency} />
+                    <BalanceCard label="E rezervuar për pagesë" amountMinor={reserved} currency={row.currency} />
                   )}
                   <BalanceCard
-                    label="Pending settlement"
+                    label="Në pritje të konfirmimit"
                     amountMinor={row.pending_minor}
                     currency={row.currency}
                   />
                   <BalanceCard
-                    label="Net earnings"
+                    label="Fitimet neto"
                     amountMinor={row.net_earnings_minor}
                     currency={row.currency}
                   />
                   <BalanceCard
-                    label="Paid out"
+                    label="E paguar deri tani"
                     amountMinor={row.paid_out_minor}
                     currency={row.currency}
                   />
                 </div>
 
                 {overview?.threshold_configured === false && (
-                  <p className="mt-3 text-xs text-muted">Payout threshold not configured yet.</p>
+                  <p className="mt-3 text-xs text-muted">Pragu i pagesës nuk është caktuar ende.</p>
                 )}
                 {overview?.threshold_reached && (
-                  <p className="mt-3 text-xs text-muted">Threshold reached.</p>
+                  <p className="mt-3 text-xs text-muted">Pragu u arrit.</p>
                 )}
 
                 <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
                   <div>
-                    <dt className="text-muted">Lifetime sales</dt>
+                    <dt className="text-muted">Shitjet gjithsej</dt>
                     <dd className="font-medium">
                       {formatMinorAmount(row.lifetime_sale_minor, row.currency)}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted">Refunds</dt>
+                    <dt className="text-muted">Rimbursimet</dt>
                     <dd className="font-medium">
                       {formatMinorAmount(row.lifetime_refund_minor, row.currency)}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted">Adjustments</dt>
+                    <dt className="text-muted">Rregullimet</dt>
                     <dd className="font-medium">
                       {formatMinorAmount(row.lifetime_adjustment_minor, row.currency)}
                     </dd>
@@ -282,9 +283,9 @@ export default async function BalancePage({
             );
           })}
 
-          <h2 className="mt-10 font-serif text-xl font-normal">Recent activity</h2>
+          <h2 className="mt-10 font-serif text-xl font-normal">Lëvizjet e fundit</h2>
           {activity.length === 0 ? (
-            <EmptyState className="mt-4" title="No activity yet." />
+            <EmptyState className="mt-4" title="Ende nuk ka lëvizje." />
           ) : (
             <ul className="mt-4 divide-y divide-border">
               {activity.map((entry) => (
@@ -297,11 +298,7 @@ export default async function BalancePage({
                     {entry.book_title ?? "—"}
                   </span>
                   <span className="text-sm text-muted">
-                    {new Date(entry.created_at).toLocaleDateString(undefined, {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                    })}
+                    {formatTimestampAsDate(entry.created_at)}
                   </span>
                   <span className="text-sm font-semibold text-primary">
                     {formatMinorAmount(entry.amount_minor, entry.currency)}
@@ -314,9 +311,9 @@ export default async function BalancePage({
           {/* LEDGER-1E-C: safe payout history -- amount/currency/status/date
               only, via list_author_payout_history(). No provider/reference/
               failure detail, no controls -- this is reporting only. */}
-          <h2 className="mt-10 font-serif text-xl font-normal">Payout history</h2>
+          <h2 className="mt-10 font-serif text-xl font-normal">Historiku i pagesave</h2>
           {payoutHistory.length === 0 ? (
-            <EmptyState className="mt-4" title="No payouts yet." />
+            <EmptyState className="mt-4" title="Ende nuk ka pagesa." />
           ) : (
             <ul className="mt-4 divide-y divide-border">
               {payoutHistory.map((payout) => (
@@ -326,11 +323,7 @@ export default async function BalancePage({
                 >
                   <span className="font-serif font-medium">{payoutStatusLabel(payout.status)}</span>
                   <span className="text-sm text-muted">
-                    {new Date(payout.created_at).toLocaleDateString(undefined, {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                    })}
+                    {formatTimestampAsDate(payout.created_at)}
                   </span>
                   <span className="text-sm font-semibold text-primary">
                     {formatMinorAmount(payout.amount_minor, payout.currency)}
@@ -365,17 +358,17 @@ export default async function BalancePage({
           migration foundation exists for (the old Stripe Payouts page
           is gone; /dashboard/payouts redirects here). */
       <section className="mt-10 border-t border-border pt-8">
-        <h2 className="font-serif text-xl font-normal">Payout setup</h2>
+        <h2 className="font-serif text-xl font-normal">Konfigurimi i pagesave</h2>
 
         <div className="mt-4 rounded-card border border-border bg-surface p-4 shadow-sm">
-          <h3 className="font-serif text-base font-normal">Bank account</h3>
+          <h3 className="font-serif text-base font-normal">Llogaria bankare</h3>
 
           {destination && !isEditingBank ? (
             <>
-              <p className="mt-2 text-sm font-medium text-emerald-700">&#10003; Added</p>
+              <p className="mt-2 text-sm font-medium text-emerald-700">&#10003; U shtua</p>
               <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
                 <div>
-                  <dt className="text-muted">Account holder</dt>
+                  <dt className="text-muted">Mbajtësi i llogarisë</dt>
                   <dd className="font-medium">{destination.beneficiary_name}</dd>
                 </div>
                 <div>
@@ -383,7 +376,7 @@ export default async function BalancePage({
                   <dd className="font-medium">{maskIban(destination.iban)}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted">Currency</dt>
+                  <dt className="text-muted">Monedha</dt>
                   <dd className="font-medium">{destination.currency}</dd>
                 </div>
               </dl>
@@ -391,26 +384,26 @@ export default async function BalancePage({
                 href="/dashboard/balance?editBank=1"
                 className={buttonClasses("outline", "sm", "mt-4")}
               >
-                Change bank account
+                Ndryshoni llogarinë bankare
               </Link>
             </>
           ) : (
             <>
               <p className="mt-2 text-sm text-muted">
                 {destination
-                  ? "Changing your bank account affects future payouts only. Any payout already being processed keeps the bank details frozen for that payout."
-                  : "Add a bank account to become eligible for payouts once payouts are activated."}
+                  ? "Ndryshimi i llogarisë bankare vlen vetëm për pagesat e ardhshme. Një pagesë që po përpunohet mban të dhënat bankare që kishte."
+                  : "Shtoni një llogari bankare që të keni të drejtë për pagesa, kur pagesat të aktivizohen."}
               </p>
 
               <form action={saveAuthorPayoutDestination} className="mt-4 flex flex-col gap-4">
                 <label className="flex flex-col gap-1 text-sm">
-                  Account holder name
+                  Emri i mbajtësit të llogarisë
                   <input
                     name="beneficiaryName"
                     type="text"
                     required
                     autoComplete="off"
-                    placeholder="Full name on the bank account"
+                    placeholder="Emri i plotë në llogarinë bankare"
                     className={formControlClasses}
                   />
                 </label>
@@ -426,23 +419,23 @@ export default async function BalancePage({
                     className={formControlClasses}
                   />
                   <span className="text-sm text-muted">
-                    We check that this is a validly formatted IBAN — this confirms the format
-                    only, not that the account belongs to you.
+                    Kontrollojmë që IBAN-i të ketë formatin e duhur. Kjo konfirmon vetëm formatin,
+                    jo që llogaria është juaja.
                   </span>
                 </label>
 
                 <div className="flex flex-col gap-1 text-sm">
-                  <span>Currency</span>
-                  <span className="text-muted">{PAYOUT_DESTINATION_CURRENCY} (Albanian Lek)</span>
+                  <span>Monedha</span>
+                  <span className="text-muted">{PAYOUT_DESTINATION_CURRENCY} (lek shqiptar)</span>
                 </div>
 
                 <div className="mt-1 flex flex-wrap gap-3">
                   <button type="submit" className={buttonClasses("primary", "md")}>
-                    Save bank account
+                    Ruani llogarinë bankare
                   </button>
                   {destination && (
                     <Link href="/dashboard/balance" className={buttonClasses("outline", "md")}>
-                      Cancel
+                      Anuloni
                     </Link>
                   )}
                 </div>
@@ -452,20 +445,20 @@ export default async function BalancePage({
         </div>
 
         <div className="mt-4 rounded-card border border-border bg-surface p-4 shadow-sm">
-          <h3 className="font-serif text-base font-normal">Payout threshold</h3>
+          <h3 className="font-serif text-base font-normal">Pragu i pagesës</h3>
           <p className="mt-2 text-sm text-muted">
             {minimumPolicyConfigured
-              ? "Payout threshold is ready to be set."
-              : "Payout threshold will become available when Librum activates its minimum payout policy."}
+              ? "Pragu i pagesës është gati për t'u caktuar."
+              : "Pragu i pagesës do të jetë i disponueshëm kur Librum të aktivizojë rregullat për shumën minimale të pagesës."}
           </p>
         </div>
       </section>
       )}
 
       <Alert variant="info" className="mt-10">
-        Looking for unit sales and page views? See{" "}
+        Kërkoni kopjet e shitura dhe shikimet e faqeve? Shikoni{" "}
         <Link href="/dashboard/sales" className="font-medium underline">
-          Sales
+          Shitjet
         </Link>
         .
       </Alert>

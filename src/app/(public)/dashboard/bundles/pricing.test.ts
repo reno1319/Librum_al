@@ -263,7 +263,7 @@ describe("createBundle: canonical ALL price parsing (ALL-WIRING-5)", () => {
 
   it("existing validation is intact: a missing title is still refused before any write", async () => {
     await expect(createBundle(form("199", { title: "   " }))).rejects.toMatchObject({
-      target: "/dashboard/bundles?error=Plot%C3%ABsoni%20%C3%A7do%20fush%C3%AB",
+      target: "/dashboard/bundles?error=Plot%C3%ABsoni%20t%C3%AB%20gjitha%20fushat",
     });
     expect(writes).toEqual([]);
   });

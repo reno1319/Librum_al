@@ -140,9 +140,9 @@ export type DiscountDisplay =
 
 /** Shown beside every legacy USD code. */
 export const LEGACY_USD_DISCOUNT_NOTICE =
-  "Legacy USD discount: not applicable to ALL checkout";
+  "Zbritje e vjetër në USD: nuk vlen për pagesat në lekë";
 
-const UNRECOGNIZED_DISCOUNT_LABEL = "Unrecognized discount";
+const UNRECOGNIZED_DISCOUNT_LABEL = "Zbritje e panjohur";
 
 // USD minor units rendered by slicing the integer's own digits, so no
 // division or float step can round the historical value.
@@ -179,14 +179,14 @@ export function describeDiscountCode(code: DiscountValueColumns): DiscountDispla
     if (!Number.isSafeInteger(percent_off) || percent_off < 1 || percent_off > 100) {
       return { kind: "unrecognized", label: UNRECOGNIZED_DISCOUNT_LABEL };
     }
-    return { kind: "percent", label: `${percent_off}% off` };
+    return { kind: "percent", label: `${percent_off}% zbritje` };
   }
 
   if (amount_off_all !== null && amount_off_all !== undefined) {
     if (!isValidFixedDiscountAll(amount_off_all)) {
       return { kind: "unrecognized", label: UNRECOGNIZED_DISCOUNT_LABEL };
     }
-    return { kind: "fixed_all", label: `${formatFixedDiscountAll(amount_off_all)} off` };
+    return { kind: "fixed_all", label: `${formatFixedDiscountAll(amount_off_all)} zbritje` };
   }
 
   if (!Number.isSafeInteger(amount_off_cents) || (amount_off_cents as number) < 1) {
@@ -194,7 +194,7 @@ export function describeDiscountCode(code: DiscountValueColumns): DiscountDispla
   }
   return {
     kind: "legacy_usd",
-    label: `${formatLegacyUsdCents(amount_off_cents as number)} off`,
+    label: `${formatLegacyUsdCents(amount_off_cents as number)} zbritje`,
     notice: LEGACY_USD_DISCOUNT_NOTICE,
   };
 }

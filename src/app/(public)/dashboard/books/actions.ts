@@ -688,7 +688,7 @@ export async function createBook(formData: FormData) {
   const manuscriptProvided = manuscriptStoragePath !== "" || (!!manuscript && manuscript.size > 0);
 
   if (!title || !coverProvided || !manuscriptProvided) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni çdo fushë")}`);
+    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   // A parse failure performs NO insert and NO update. This redirect is
@@ -775,7 +775,7 @@ export async function createBook(formData: FormData) {
   // return type honest.
   const coverResult = await resolveCoverInput(supabase, user.id, formData, "/dashboard/books/new");
   if (!coverResult.present) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni çdo fushë")}`);
+    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   const manuscriptResult = await resolveManuscriptInput(
@@ -785,7 +785,7 @@ export async function createBook(formData: FormData) {
     "/dashboard/books/new",
   );
   if (!manuscriptResult.present) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni çdo fushë")}`);
+    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   const bookId = randomUUID();
@@ -1142,7 +1142,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   const parsedPrice = parseCatalogPriceAll(formData.get("price"));
 
   if (!title) {
-    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Plotësoni çdo fushë")}`);
+    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   // A parse failure performs no update. Above every Supabase mutation

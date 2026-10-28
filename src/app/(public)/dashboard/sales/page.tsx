@@ -23,7 +23,7 @@ import type { Metadata } from "next";
 import { chartDayLabels } from "@/lib/chart-day-labels";
 
 export const metadata: Metadata = {
-  title: "Sales",
+  title: "Shitjet",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -174,7 +174,7 @@ export default async function SalesPage() {
       authorId: user.id,
       error: lostDisputedError,
     });
-    throw new Error("Could not load sales data. Please try again.");
+    throw new Error("Të dhënat e shitjeve nuk u ngarkuan. Provoni përsëri.");
   }
 
   const lostDisputedPaymentIntentIds = new Set(
@@ -202,7 +202,7 @@ export default async function SalesPage() {
         authorId: user.id,
         error: currencyError,
       });
-      throw new Error("Could not load sales data. Please try again.");
+      throw new Error("Të dhënat e shitjeve nuk u ngarkuan. Provoni përsëri.");
     }
     for (const row of (currencyRows ?? []) as PurchaseCurrencyRow[]) {
       currencyByPurchaseId.set(
@@ -262,50 +262,50 @@ export default async function SalesPage() {
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
 
       <div className="mt-2">
-        <PageHeader title="Sales" description="Your net revenue, after Librum's platform fee." />
+        <PageHeader title="Shitjet" description="Të ardhurat tuaja neto, pas tarifës së platformës së Librum." />
       </div>
 
       <p className="mt-3 text-sm text-muted">
-        This is an estimate from your order history. For your official ledger
-        balance, pending settlement, and payout history, see{" "}
+        Ky është një vlerësim nga historiku i porosive tuaja. Për bilancin zyrtar,
+        shumat që presin konfirmimin dhe historikun e pagesave, shikoni{" "}
         <Link href="/dashboard/balance" className="font-medium text-primary underline underline-offset-2 hover:decoration-2">
-          Financial balance
+          Bilanci
         </Link>
         .
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
-          <p className="text-sm text-muted">Net revenue</p>
+          <p className="text-sm text-muted">Të ardhurat neto</p>
           <p className="mt-1 font-serif text-2xl font-semibold text-primary">
-            <CurrencyTotalsText totals={summary.netTotals} emptyLabel="No sales yet" />
+            <CurrencyTotalsText totals={summary.netTotals} emptyLabel="Ende pa shitje" />
           </p>
           {summary.netTotals.unresolvedCount > 0 && (
             <p className="mt-1 text-xs text-muted">
               {summary.netTotals.unresolvedCount === 1
-                ? "1 sale is not included: its currency could not be determined."
-                : `${summary.netTotals.unresolvedCount} sales are not included: their currency could not be determined.`}
+                ? "1 shitje nuk përfshihet: monedha e saj nuk u përcaktua dot."
+                : `${summary.netTotals.unresolvedCount} shitje nuk përfshihen: monedha e tyre nuk u përcaktua dot.`}
             </p>
           )}
         </div>
         <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
-          <p className="text-sm text-muted">Units</p>
+          <p className="text-sm text-muted">Kopje të shitura</p>
           <p className="mt-1 font-serif text-2xl font-semibold">
             {totalUnitsSold}
           </p>
         </div>
         <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
-          <p className="text-sm text-muted">Book page views</p>
+          <p className="text-sm text-muted">Shikime të faqeve të librave</p>
           <p className="mt-1 font-serif text-2xl font-semibold">
             {totalViews}
           </p>
         </div>
         <div className="rounded-card border border-border bg-surface p-4 shadow-sm">
-          <p className="text-sm text-muted">Published books</p>
+          <p className="text-sm text-muted">Libra të publikuar</p>
           <p className="mt-1 font-serif text-2xl font-semibold">
             {publishedCount}
           </p>
@@ -313,7 +313,7 @@ export default async function SalesPage() {
       </div>
 
       <h2 className="mt-10 font-serif text-xl font-normal">
-        Net revenue, last {CHART_DAYS} days
+        Të ardhurat neto, {CHART_DAYS} ditët e fundit
       </h2>
       {summary.dailySeries.length === 0 ? (
         <div className="mt-4 flex h-32 items-end gap-1.5 rounded-card border border-border bg-surface p-4 shadow-sm">
@@ -340,7 +340,7 @@ export default async function SalesPage() {
                   <div
                     key={day.date.toISOString()}
                     className="flex h-full flex-1 flex-col items-center justify-end gap-1"
-                    title={`${day.date.toLocaleDateString(undefined, {
+                    title={`${day.date.toLocaleDateString("sq", {
                       month: "short",
                       day: "numeric",
                     })}: ${formatTransactionMinorUnits(day.netMinor, series.currency)}`}
@@ -361,10 +361,10 @@ export default async function SalesPage() {
       )}
 
       <h2 className="mt-10 font-serif text-xl font-normal">
-        By book
+        Sipas librit
       </h2>
       {summary.perBook.length === 0 ? (
-        <EmptyState className="mt-4" title="No books yet." />
+        <EmptyState className="mt-4" title="Ende nuk keni libra." />
       ) : (
         <ul className="mt-4 divide-y divide-border">
           {summary.perBook.map((book) => {
@@ -376,16 +376,16 @@ export default async function SalesPage() {
               >
                 <span className="font-serif font-medium">{book.title}</span>
                 <span className="text-sm text-muted">
-                  {views} view{views === 1 ? "" : "s"}
+                  {views} {views === 1 ? "shikim" : "shikime"}
                 </span>
                 <span className="text-sm text-muted">
-                  {book.unitsSold} unit{book.unitsSold === 1 ? "" : "s"}
+                  {book.unitsSold} kopje
                 </span>
                 <span className="text-sm font-semibold text-primary">
-                  <CurrencyTotalsText totals={book.net} emptyLabel="No revenue" />
+                  <CurrencyTotalsText totals={book.net} emptyLabel="Pa të ardhura" />
                   {book.net.unresolvedCount > 0 && (
                     <span className="block text-xs font-normal text-muted">
-                      + {book.net.unresolvedCount} with unknown currency
+                      + {book.net.unresolvedCount} me monedhë të panjohur
                     </span>
                   )}
                 </span>
