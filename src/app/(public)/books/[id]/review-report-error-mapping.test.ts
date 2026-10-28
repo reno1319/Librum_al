@@ -71,7 +71,7 @@ describe("submitReview: ERR-2 error-message mapping", () => {
 
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
     expect(redirectedTo).toContain(
-      encodeURIComponent("We couldn't save your review. Please try again."),
+      encodeURIComponent("Nuk e ruajtëm dot vlerësimin tuaj. Provoni përsëri."),
     );
     expect(redirectedTo).not.toContain("row-level security");
   });
@@ -84,7 +84,7 @@ describe("submitReview: ERR-2 error-message mapping", () => {
     await expect(submitReview("book-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining("error=Please+choose+a+rating"),
+      expect.stringContaining("error=Zgjidhni%20yjet."),
     );
     expect(mockUpsertReview).not.toHaveBeenCalled();
   });
@@ -123,7 +123,7 @@ describe("submitReport: ERR-2 error-message mapping", () => {
 
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
     expect(redirectedTo).toContain(
-      encodeURIComponent("We couldn't submit your report. Please try again."),
+      encodeURIComponent("Nuk e dërguam dot raportimin tuaj. Provoni përsëri."),
     );
     expect(redirectedTo).not.toContain("duplicate key");
     expect(mockReportedStaffEmail).not.toHaveBeenCalled();
@@ -136,7 +136,7 @@ describe("submitReport: ERR-2 error-message mapping", () => {
     await expect(submitReport("book-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining("error=Please+choose+a+reason"),
+      expect.stringContaining("error=Zgjidhni%20nj%C3%AB%20arsye."),
     );
     expect(mockInsertReport).not.toHaveBeenCalled();
     expect(mockReportedStaffEmail).not.toHaveBeenCalled();

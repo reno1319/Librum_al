@@ -204,12 +204,12 @@ describe("BookDetailPage: stale-checkout conflict notice", () => {
   it("renders the frozen amount read back from the row, and says the new price is not applied", async () => {
     const { html, rpc } = await render({ checkout_conflict: INTENT_ID }, { quoteRows: heldQuote });
     expect(rpc).toHaveBeenCalledWith("get_book_checkout_quote", { p_intent_id: INTENT_ID, p_book_id: BOOK_ID });
-    expect(html).toContain("already have a checkout in progress");
+    expect(html).toContain("tashmë një pagesë të nisur");
     // The FROZEN 4.99, not the book's current 7.99.
     expect(html).toContain("4,99 lekë");
     expect(html).not.toContain("4.99 lekë");
     expect(html).toContain("not");
-    expect(html).toContain("Continue that checkout");
+    expect(html).toContain("Vazhdoni atë pagesë");
   });
 
   it("puts the intent id in the resume form, and never an amount", async () => {
@@ -236,12 +236,12 @@ describe("BookDetailPage: stale-checkout conflict notice", () => {
   it("renders nothing and makes no quote call for a non-UUID conflict parameter", async () => {
     const { html, rpc } = await render({ checkout_conflict: "../../etc/passwd" }, { quoteRows: heldQuote });
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
-    expect(html).not.toContain("already have a checkout in progress");
+    expect(html).not.toContain("tashmë një pagesë të nisur");
   });
 
   it("renders nothing when the RPC returns no row (a foreign or mismatched intent)", async () => {
     const { html } = await render({ checkout_conflict: INTENT_ID }, { quoteRows: [] });
-    expect(html).not.toContain("already have a checkout in progress");
+    expect(html).not.toContain("tashmë një pagesë të nisur");
   });
 
   it.each(["fulfilled", "completed", "superseded", "expired", "not_conflicting"])(
@@ -250,20 +250,20 @@ describe("BookDetailPage: stale-checkout conflict notice", () => {
       { checkout_conflict: INTENT_ID },
       { quoteRows: [{ ...heldQuote[0], quote_state }] },
     );
-    expect(html).not.toContain("Continue that checkout");
+    expect(html).not.toContain("Vazhdoni atë pagesë");
   });
 
   it("makes no quote call at all for an anonymous visitor", async () => {
     const { rpc, html } = await render({ checkout_conflict: INTENT_ID }, { user: null, quoteRows: heldQuote });
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
-    expect(html).not.toContain("already have a checkout in progress");
+    expect(html).not.toContain("tashmë një pagesë të nisur");
   });
 
   it("renders the lapsed-quote notice and offers no resume", async () => {
     const { html } = await render({ checkout_expired: "1" });
-    expect(html).toContain("lapsed before it could be resumed");
-    expect(html).toContain("nothing was charged");
-    expect(html).not.toContain("Continue that checkout");
+    expect(html).toContain("kaloi para se ta vazhdonit");
+    expect(html).toContain("nuk u tarifua asgjë");
+    expect(html).not.toContain("Vazhdoni atë pagesë");
   });
 });
 
@@ -336,12 +336,12 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     // The notice, the frozen amount, the form, its hidden fields and the
     // button -- each asserted individually, so a partial regression
     // cannot hide behind one surviving check.
-    expect(html).not.toContain("already have a checkout in progress");
+    expect(html).not.toContain("tashmë një pagesë të nisur");
     expect(html).not.toContain("4.99 lekë");
     expect(html).not.toContain('name="resume_existing"');
     expect(html).not.toContain('name="expected_intent_id"');
     expect(html).not.toContain(INTENT_ID);
-    expect(html).not.toContain("Continue that checkout");
+    expect(html).not.toContain("Vazhdoni atë pagesë");
     // No copy inviting the reader to start or resume a checkout.
     expect(html).not.toMatch(/start a new one|finish that checkout/i);
   });
@@ -352,15 +352,15 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
       { book: UNPRICED_BOOK, quoteRows: heldQuote },
     );
 
-    expect(html).not.toContain("Buy ebook");
-    expect(html).not.toContain("Get ebook");
-    expect(html).not.toContain('placeholder="Promo code (optional)"');
+    expect(html).not.toContain("Blini e-librin");
+    expect(html).not.toContain("Merreni e-librin");
+    expect(html).not.toContain('placeholder="Kodi promocional (opsional)"');
     expect(html).not.toContain('name="code"');
-    expect(html).not.toContain("Log in to buy");
-    expect(html).not.toContain("Log in to get this book");
+    expect(html).not.toContain("Hyni për ta blerë");
+    expect(html).not.toContain("Hyni për ta marrë këtë libër");
     // What it DOES show: the unavailable state, and the two things that
     // remain legitimate -- saving it for later, and the sample.
-    expect(html).toContain("Not available right now");
+    expect(html).toContain("Nuk mund të blihet tani");
   });
 
   it("checkout_expired=1 on a null-priced book shows no lapsed-checkout invitation", async () => {
@@ -370,14 +370,14 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     );
 
     expect(html).toContain("Çmimi nuk është i disponueshëm");
-    expect(html).not.toContain("lapsed before it could be resumed");
+    expect(html).not.toContain("kaloi para se ta vazhdonit");
     // The specific false sentence: a null-priced book has no current
     // purchasable price to start a new checkout at.
-    expect(html).not.toContain("You can start a new one at the current price");
-    expect(html).not.toContain("start a new one at the current price");
-    expect(html).not.toContain("Buy ebook");
-    expect(html).not.toContain("Get ebook");
-    expect(html).not.toContain('placeholder="Promo code (optional)"');
+    expect(html).not.toContain("Mund të nisni një pagesë të re me çmimin aktual");
+    expect(html).not.toContain("pagesë të re me çmimin aktual");
+    expect(html).not.toContain("Blini e-librin");
+    expect(html).not.toContain("Merreni e-librin");
+    expect(html).not.toContain('placeholder="Kodi promocional (opsional)"');
   });
 
   // The gate is the PURCHASE STATE, not merely "is price_all null" --
@@ -390,8 +390,8 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     );
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
     expect(html).toContain("Çmimi nuk është i disponueshëm");
-    expect(html).not.toContain("Continue that checkout");
-    expect(html).not.toContain("Log in to buy");
+    expect(html).not.toContain("Vazhdoni atë pagesë");
+    expect(html).not.toContain("Hyni për ta blerë");
   });
 
   it("a FREE book exposes no paid-checkout resume surface either", async () => {
@@ -400,10 +400,10 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
       { book: { ...BOOK_ROW, price_all: 0 }, quoteRows: heldQuote },
     );
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
-    expect(html).not.toContain("already have a checkout in progress");
-    expect(html).not.toContain("Continue that checkout");
+    expect(html).not.toContain("tashmë një pagesë të nisur");
+    expect(html).not.toContain("Vazhdoni atë pagesë");
     // ...while its own legitimate free acquisition is untouched.
-    expect(html).toContain("Get ebook — Free");
+    expect(html).toContain("Merreni e-librin — Falas");
   });
 
   // Positive control, in this same block, so the two live side by side:
@@ -420,25 +420,25 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
       p_intent_id: INTENT_ID,
       p_book_id: BOOK_ID,
     });
-    expect(html).toContain("already have a checkout in progress");
+    expect(html).toContain("tashmë një pagesë të nisur");
     // The server-read FROZEN amount (4.99 lekë), not the book's own
     // current catalog price (250 lek).
     expect(html).toContain("4,99 lekë");
     expect(html).not.toContain("4.99 lekë");
-    expect(html).not.toContain("250 lekë</strong>. That is the amount");
+    expect(html).not.toContain("250 lekë</strong>. Kjo është shuma");
     expect(html).toContain('name="resume_existing"');
     expect(html).toContain('name="expected_intent_id"');
     expect(html).toContain(`value="${INTENT_ID}"`);
-    expect(html).toContain("Continue that checkout");
+    expect(html).toContain("Vazhdoni atë pagesë");
     // Only the intent id travels: never a client-supplied amount.
     expect(html).not.toMatch(/name="(price|amount|price_cents|price_cents_at_checkout)"/);
   });
 
   it("checkout_expired=1 on a PAID, unowned book still shows the lapsed notice", async () => {
     const { html } = await render({ checkout_expired: "1" }, { book: BOOK_ROW });
-    expect(html).toContain("lapsed before it could be resumed");
-    expect(html).toContain("nothing was charged");
-    expect(html).not.toContain("Continue that checkout");
+    expect(html).toContain("kaloi para se ta vazhdonit");
+    expect(html).toContain("nuk u tarifua asgjë");
+    expect(html).not.toContain("Vazhdoni atë pagesë");
   });
 });
 
@@ -460,7 +460,7 @@ describe("BookDetailPage: cancelled POK payment notice", () => {
     return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
   }
 
-  const NOTICE = "Payment was cancelled or did not go through.";
+  const NOTICE = "Pagesa u anulua ose nuk u krye.";
 
   it("shows the notice on an unowned book", async () => {
     expect(await render({ canceled: "true" })).toContain(NOTICE);
@@ -512,33 +512,33 @@ describe("BookDetailPage: redesign step 3", () => {
 
   it("a paid book's price card carries the mockup's three lines and the existing security note", async () => {
     const html = await render({ user: { id: "reader" } });
-    expect(html).toContain("Buy ebook — 250 lekë");
-    expect(html).toContain("EPUB, no DRM. Read on your phone, tablet or e-reader.");
-    expect(html).toContain("Download anytime from your Librum library.");
-    expect(html).toContain("Pay by card.");
+    expect(html).toContain("Blini e-librin — 250 lekë");
+    expect(html).toContain("EPUB, pa DRM. Lexojeni në telefon, tablet ose lexues elektronik.");
+    expect(html).toContain("Shkarkojeni kurdo nga Biblioteka juaj në Librum.");
+    expect(html).toContain("Paguani me kartë.");
     expect(html).not.toContain("POK app");
-    expect(html).toMatch(/Secure checkout( with POK)?\./);
+    expect(html).toMatch(/Pagesë e sigurt( me POK)?\./);
     expect(html).not.toContain("DRM-free EPUB. Download it anytime from your Librum Library.");
   });
 
   it("a free book keeps its existing sentence and none of the paid lines", async () => {
     const html = await render({ user: { id: "reader" }, book: { ...BOOK_ROW, price_all: 0 } });
-    expect(html).toContain("Get ebook — Free");
-    expect(html).toContain("Free — no payment required.");
-    expect(html).not.toContain("Pay by card.");
+    expect(html).toContain("Merreni e-librin — Falas");
+    expect(html).toContain("Falas, pa pagesë.");
+    expect(html).not.toContain("Paguani me kartë.");
   });
 
   it("the breadcrumb links the bookstore and the book's genre", async () => {
     const html = await render({ user: null, book: { ...BOOK_ROW, genre: "Poezi" } });
-    expect(html).toContain('aria-label="Breadcrumb"');
+    expect(html).toContain('aria-label="Rruga e navigimit"');
     expect(html).toContain('href="/bookstore?genre=Poezi"');
   });
 
   // FIX1 (X4): no star row until the first review.
   it("shows no stars and no '0 out of 5 stars' before the first review, and keeps the words", async () => {
     const html = await render({ user: null });
-    expect(html).toContain("No reviews yet");
-    expect(html).not.toContain("out of 5 stars");
+    expect(html).toContain("Ende pa vlerësime");
+    expect(html).not.toContain("nga 5 yje");
     expect(html).not.toContain("★");
   });
 
@@ -550,13 +550,13 @@ describe("BookDetailPage: redesign step 3", () => {
   });
 
   it("About the Author offers Follow to a signed-in reader, Following once followed", async () => {
-    expect(await render({ user: { id: "reader" } })).toMatch(/>Follow<\/button>/);
-    expect(await render({ user: { id: "reader" }, following: true })).toMatch(/>Following<\/button>/);
+    expect(await render({ user: { id: "reader" } })).toMatch(/>Ndiqni<\/button>/);
+    expect(await render({ user: { id: "reader" }, following: true })).toMatch(/>Po e ndiqni<\/button>/);
   });
 
-  it("a visitor gets the author page's own Log in to follow link; the author gets no follow control", async () => {
+  it("a visitor gets the author page's own Hyni për ta ndjekur link; the author gets no follow control", async () => {
     const anon = await render({ user: null });
-    expect(anon).toContain("Log in to follow");
+    expect(anon).toContain("Hyni për ta ndjekur");
     expect(anon).toContain('href="/login?next=/authors/pen-an-author"');
     const author = await render({ user: { id: "author" } });
     expect(author).not.toContain("Follow");

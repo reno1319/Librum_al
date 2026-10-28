@@ -42,7 +42,7 @@ export function whatsappShareHref(message: string): string {
 
 // A book with no byline to show is shared by its title alone.
 export function bookShareMessage(title: string, byline: string | null, url: string): string {
-  return byline ? `${title} by ${byline} on Librum: ${url}` : `${title} on Librum: ${url}`;
+  return byline ? `${title} nga ${byline} në Librum: ${url}` : `${title} në Librum: ${url}`;
 }
 
 // Published books only (a draft or unpublished page isn't worth

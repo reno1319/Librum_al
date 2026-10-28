@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// iPhone step (I4): with no author photo, "About the author" shows the
+// iPhone step (I4): with no author photo, "Rreth autorit" shows the
 // author's initials (as the author's own page does) instead of an empty
 // circle. Rendered from the real Server Component over a stubbed client.
 
@@ -74,13 +74,13 @@ async function render(book: typeof BOOK): Promise<string> {
 }
 
 function aboutTheAuthor(html: string): string {
-  const start = html.indexOf(">About the author</h2>");
+  const start = html.indexOf(">Rreth autorit</h2>");
   expect(start).toBeGreaterThan(-1);
   return html.slice(start, html.indexOf("</section>", start));
 }
 
-describe("Book page: About the author placeholder (I4)", () => {
-  // PEN-NAMES-1 (3a): "About the author" is the book's pen name, so the
+describe("Book page: Rreth autorit placeholder (I4)", () => {
+  // PEN-NAMES-1 (3a): "Rreth autorit" is the book's pen name, so the
   // initials are the pen name's.
   it("no photo -> the pen name's initials, aria-hidden, in the page's own circle", async () => {
     const section = aboutTheAuthor(await render(BOOK));

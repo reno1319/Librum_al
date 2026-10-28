@@ -152,5 +152,5 @@ export function resolveCheckoutSecurityNote(params: {
 }): string | null {
   if (!params.paidCheckoutAvailable) return null;
   if (resolveCatalogPriceState(params.priceAll) !== "paid") return null;
-  return params.usePok ? " Secure checkout with POK." : " Secure checkout.";
+  return params.usePok ? " Pagesë e sigurt me POK." : " Pagesë e sigurt.";
 }

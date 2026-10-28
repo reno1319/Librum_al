@@ -29,7 +29,7 @@ const BASE_BOOK = {
   description: "About it.", language: null, created_at: "2026-09-01T00:00:00Z",
   published_at: null,
 };
-const STRIP = "Preview. This book isn&#x27;t in the Bookstore.";
+const STRIP = "Parapamje. Ky libër nuk është në Librari.";
 
 function queryStub(listResult: unknown, rowResult?: unknown) {
   let single = false;
@@ -78,12 +78,12 @@ async function render(opts: { user: { id: string } | null; book: Record<string, 
 }
 
 describe("the author's preview of an unpublished book", () => {
-  it("shows the Preview strip, Read sample, and the author's own box (Manage book, Download EPUB)", async () => {
+  it("shows the Preview strip, Read sample, and the author's own box (Menaxhoni librin, Shkarkoni EPUB)", async () => {
     const html = await render({ user: { id: AUTHOR_ID }, book: BASE_BOOK });
     expect(html).toContain(STRIP);
-    expect(html.indexOf(STRIP)).toBeLessThan(html.indexOf('aria-label="Breadcrumb"'));
+    expect(html.indexOf(STRIP)).toBeLessThan(html.indexOf('aria-label="Rruga e navigimit"'));
     expect(html).toContain("Lexoni një pjesë");
-    expect(html).toContain("Manage book");
+    expect(html).toContain("Menaxhoni librin");
     expect(html).toContain(`href="/api/books/${BOOK_ID}/download"`);
     expect(html).not.toContain(">Buy");
   });
@@ -95,14 +95,14 @@ describe("the author's preview of an unpublished book", () => {
     });
     expect(html).not.toContain(STRIP);
     expect(html).toContain("Lexoni një pjesë");
-    expect(html).toContain("Manage book");
+    expect(html).toContain("Menaxhoni librin");
   });
 
   it("an earlier buyer of an unpublished book sees no Preview strip and no Read sample", async () => {
     const html = await render({ user: { id: READER_ID }, book: BASE_BOOK, owned: true });
     expect(html).not.toContain(STRIP);
     expect(html).not.toContain("Lexoni një pjesë");
-    expect(html).toContain("You own this book");
+    expect(html).toContain("Ky libër është i juaji");
   });
 
   it("anyone else gets a 404 for an unpublished book", async () => {

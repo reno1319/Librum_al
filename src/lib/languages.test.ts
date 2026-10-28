@@ -36,9 +36,9 @@ describe("isSupportedLanguage", () => {
 
 describe("getLanguageLabel", () => {
   it("returns the human label for every launch code", () => {
-    expect(getLanguageLabel("sq")).toBe("Albanian");
-    expect(getLanguageLabel("en")).toBe("English");
-    expect(getLanguageLabel("it")).toBe("Italian");
+    expect(getLanguageLabel("sq")).toBe("Shqip");
+    expect(getLanguageLabel("en")).toBe("Anglisht");
+    expect(getLanguageLabel("it")).toBe("Italisht");
   });
 
   it("falls back to the raw code itself for an unrecognized value, never throwing", () => {

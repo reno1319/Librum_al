@@ -4,7 +4,7 @@ import path from "path";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART D: public Book Detail's new
 // bibliographic metadata rows (Subtitle near the title; Language,
-// Publisher, Edition, Originally published, and Published on Librum in
+// Publisher, Edition, Botuar për herë të parë, and Botuar në Librum in
 // the metadata dl). Same source-level regression convention this
 // codebase already established for the Edit page and the New Book
 // wizard (no DOM-rendering harness exists here) -- these assert
@@ -43,16 +43,16 @@ describe("Book Detail: metadata dl row order and conditional rendering", () => {
   const dlBlock = block('<dl className="mt-4 grid', "</dl>");
 
   it("Format remains always visible, unconditional", () => {
-    expect(dlBlock).toContain("Ebook · EPUB");
+    expect(dlBlock).toContain("E-libër · EPUB");
     // Format's <div> is the only one with no preceding {book.x && (
     // guard -- confirmed by it appearing before the first conditional.
-    const formatIndex = dlBlock.indexOf("Ebook · EPUB");
+    const formatIndex = dlBlock.indexOf("E-libër · EPUB");
     const firstConditionalIndex = dlBlock.indexOf("&&");
     expect(formatIndex).toBeLessThan(firstConditionalIndex);
   });
 
-  it("renders rows in the exact order: Format, Language, Genre, Series, Publisher, Edition, Originally published, Published on Librum, ISBN", () => {
-    const labels = ["Format", "Language", "Genre", "Series", "Publisher", "Edition", "Originally published", "Published on Librum", "ISBN"];
+  it("renders rows in the exact order: Formati, Gjuha, Zhanri, Seria, Botuesi, Botimi, Botuar për herë të parë, Botuar në Librum, ISBN", () => {
+    const labels = ["Formati", "Gjuha", "Zhanri", "Seria", "Botuesi", "Botimi", "Botuar për herë të parë", "Botuar në Librum", "ISBN"];
     const positions = labels.map((label) => {
       const idx = dlBlock.indexOf(label);
       expect(idx, `expected to find label "${label}"`).toBeGreaterThan(-1);
@@ -85,12 +85,12 @@ describe("Book Detail: metadata dl row order and conditional rendering", () => {
     expect(editionRow).toContain("{book.edition}");
   });
 
-  it("Originally published uses formatDateOnly() (date-only, no timezone noise) and renders only when present", () => {
+  it("Botuar për herë të parë uses formatDateOnly() (date-only, no timezone noise) and renders only when present", () => {
     const dateRow = dlBlock.match(/\{book\.original_publication_date && \([\s\S]*?\)\)?\}/)![0];
     expect(dateRow).toContain("formatDateOnly(book.original_publication_date)");
   });
 
-  it("Published on Librum requires BOTH a published book AND a real published_at -- never created_at/updated_at, never guessed for a legacy null", () => {
+  it("Botuar në Librum requires BOTH a published book AND a real published_at -- never created_at/updated_at, never guessed for a legacy null", () => {
     const publishedRow = dlBlock.match(/\{book\.status === "published" && book\.published_at && \([\s\S]*?\)\)?\}/)![0];
     expect(publishedRow).toContain("formatTimestampAsDate(book.published_at)");
     expect(publishedRow).not.toContain("created_at");

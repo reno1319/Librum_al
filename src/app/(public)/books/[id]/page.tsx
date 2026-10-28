@@ -646,15 +646,15 @@ export default async function BookDetailPage({
           role="status"
           className="mb-4 rounded-[3px] border-l-4 border-[#806510] bg-[#fbf6e8] px-3 py-2 text-sm font-medium text-foreground"
         >
-          Preview. This book isn&apos;t in the Bookstore.
+          Parapamje. Ky libër nuk është në Librari.
         </p>
       )}
       {/* REDESIGN STEP 3 (P1): Bookstore › Genre › Title. */}
-      <nav aria-label="Breadcrumb" className="text-sm text-muted">
+      <nav aria-label="Rruga e navigimit" className="text-sm text-muted">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <li>
             <Link href="/bookstore" className={BREADCRUMB_LINK_CLASSES}>
-              Bookstore
+              Libraria
             </Link>
           </li>
           {book.genre && (
@@ -688,7 +688,7 @@ export default async function BookDetailPage({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={coverUrl}
-              alt={`${book.title} cover`}
+              alt={`Kopertina e librit ${book.title}`}
               fetchPriority="high"
               className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
             />
@@ -710,7 +710,7 @@ export default async function BookDetailPage({
 
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">
-            {book.genre ? `${book.genre} · Ebook` : "Ebook"}
+            {book.genre ? `${book.genre} · E-libër` : "E-libër"}
           </p>
           <h1 className="mt-3 font-serif text-4xl leading-[1.08] font-normal text-primary sm:text-5xl">
             {book.title}
@@ -731,7 +731,7 @@ export default async function BookDetailPage({
           {/* REDESIGN STEP 3: author and series on one line, as in the
               mockup ("by <author> · Book 1 of <series>"). */}
           <p className="mt-4 text-foreground">
-            by{" "}
+            nga{" "}
             {penNamePath ? (
               <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
                 {bookByline}
@@ -742,7 +742,7 @@ export default async function BookDetailPage({
             {seriesInfo && (
               <>
                 {" · "}
-                {book.series_position ? `Book ${book.series_position} of ` : "Part of "}
+                {book.series_position ? `Libri ${book.series_position} i serisë ` : "Pjesë e serisë "}
                 <Link href={`/series/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
                   {seriesInfo.title}
                 </Link>
@@ -767,8 +767,8 @@ export default async function BookDetailPage({
             {reviewCount > 0 && <StarRating rating={averageRating} />}
             <span className="text-muted">
               {reviewCount > 0
-                ? `${averageRating.toFixed(1)} · ${reviewCount} review${reviewCount === 1 ? "" : "s"}`
-                : "No reviews yet"}
+                ? `${averageRating.toFixed(1).replace(".", ",")} · ${reviewCount} ${reviewCount === 1 ? "vlerësim" : "vlerësime"}`
+                : "Ende pa vlerësime"}
             </span>
           </div>
 
@@ -794,11 +794,11 @@ export default async function BookDetailPage({
                 // no promise about acquiring the book, because there is
                 // no acquisition form on the page in that state.
                 <p className="text-sm text-muted">
-                  This book doesn&apos;t have a price yet, so it can&apos;t be bought or downloaded right now.
+                  Ky libër nuk ka ende çmim, prandaj nuk mund të blihet ose të shkarkohet tani.
                 </p>
               ) : book.price_all === 0 ? (
                 <p className="text-sm text-muted">
-                  Free — no payment required. You&apos;ll get a DRM-free EPUB you can download anytime from your Librum Library.
+                  Falas, pa pagesë. Do të merrni një EPUB pa DRM që mund ta shkarkoni kurdo nga Biblioteka juaj në Librum.
                   {checkoutSecurityNote}
                 </p>
               ) : (
@@ -807,17 +807,17 @@ export default async function BookDetailPage({
                 // app" until Renato's C1 answer (b): it comes back only once
                 // paying with the POK app is proven in our checkout.
                 <ul className="flex flex-col gap-1.5 text-sm text-muted">
-                  <li>EPUB, no DRM. Read on your phone, tablet or e-reader.</li>
-                  <li>Download anytime from your Librum library.</li>
-                  <li>Pay by card.</li>
+                  <li>EPUB, pa DRM. Lexojeni në telefon, tablet ose lexues elektronik.</li>
+                  <li>Shkarkojeni kurdo nga Biblioteka juaj në Librum.</li>
+                  <li>Paguani me kartë.</li>
                   {checkoutSecurityNote && <li>{checkoutSecurityNote.trim()}</li>}
                 </ul>
               ))}
 
             {purchaseState === "owned" && book.status !== "published" && (
               <p className="text-sm font-medium text-amber-700">
-                This book is no longer available for sale. You can still
-                download your copy anytime.
+                Ky libër nuk shitet më. Kopjen tuaj mund ta shkarkoni
+                përsëri kurdo.
               </p>
             )}
           </div>
@@ -830,7 +830,7 @@ export default async function BookDetailPage({
                 rel="noopener noreferrer"
                 className={`${INLINE_LINK_CLASSES} text-sm`}
               >
-                Share on WhatsApp
+                Ndajeni në WhatsApp
               </a>
             </p>
           )}
@@ -839,14 +839,14 @@ export default async function BookDetailPage({
             <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
               {owned ? (
                 <>
-                  Purchase complete — thank you!{" "}
+                  Blerja u krye. Faleminderit!{" "}
                   <Link href="/library" className="focus-ring rounded-sm font-medium underline">
-                    Go to your library
+                    Shkoni te Biblioteka juaj
                   </Link>{" "}
-                  to download it anytime.
+                  për ta shkarkuar kurdo.
                 </>
               ) : (
-                "Purchase complete — thank you! It may take a few seconds to show as owned below."
+                "Blerja u krye. Faleminderit! Mund të duhen disa sekonda që libri të shfaqet më poshtë si i juaji."
               )}
             </p>
           )}
@@ -854,25 +854,25 @@ export default async function BookDetailPage({
             <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
               {owned ? (
                 <>
-                  Added to your library!{" "}
+                  U shtua në Bibliotekën tuaj!{" "}
                   <Link href="/library" className="focus-ring rounded-sm font-medium underline">
-                    Go to your library
+                    Shkoni te Biblioteka juaj
                   </Link>{" "}
-                  to download it anytime.
+                  për ta shkarkuar kurdo.
                 </>
               ) : (
-                "Added to your library! It may take a few seconds to show as owned below."
+                "U shtua në Bibliotekën tuaj! Mund të duhen disa sekonda që libri të shfaqet më poshtë si i juaji."
               )}
             </p>
           )}
           {reviewStatus === "success" && (
             <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
-              Thanks for your review!
+              Faleminderit për vlerësimin!
             </p>
           )}
           {reportStatus === "success" && (
             <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
-              Thanks — we&apos;ve received your report and will take a look.
+              Faleminderit! E morëm raportimin tuaj dhe do ta shqyrtojmë.
             </p>
           )}
           {/* STALE-CHECKOUT-1: the held-quote conflict notice. It states
@@ -885,10 +885,10 @@ export default async function BookDetailPage({
           {heldQuote && canResumePaidCheckout && (
             <div className="mt-4 max-w-[32.5rem] rounded-[3px] bg-amber-50 px-3 py-2 text-sm text-amber-800">
               <p className="font-medium">
-                You already have a checkout in progress for this book.
+                Keni tashmë një pagesë të nisur për këtë libër.
               </p>
               <p className="mt-1">
-                It is held at{" "}
+                Shuma e saj e ruajtur është{" "}
                 <strong>
                   {/* ALL-TXN-CURRENCY-4: a FROZEN checkout amount, in the
                       intent's own frozen currency -- never "any non-ALL
@@ -898,13 +898,13 @@ export default async function BookDetailPage({
                     provenanceFromStoredCurrency(heldQuote.currency),
                   )}
                 </strong>
-                . That is the amount you would pay. Today&apos;s price and any
-                promo code you just entered are <strong>not</strong> applied to
-                it.
+                . Kjo është shuma që do të paguanit. Çmimi i sotëm dhe kodi
+                promocional që sapo vendosët <strong>nuk</strong> zbatohen për
+                të.
               </p>
               <p className="mt-1">
-                You can finish that checkout, or wait for it to lapse and start
-                a new one at the current price.
+                Mund ta përfundoni atë pagesë, ose të prisni t&apos;i kalojë afati
+                dhe të nisni një të re me çmimin aktual.
               </p>
               <form
                 action={buyBook.bind(null, book.id)}
@@ -917,7 +917,7 @@ export default async function BookDetailPage({
                   value={heldQuote.intent_id}
                 />
                 <button type="submit" className={buttonClasses("primary", "sm")}>
-                  Continue that checkout
+                  Vazhdoni atë pagesë
                 </button>
               </form>
             </div>
@@ -934,8 +934,8 @@ export default async function BookDetailPage({
               offer. */}
           {checkoutExpired === "1" && canResumePaidCheckout && (
             <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              That checkout lapsed before it could be resumed, so nothing was
-              charged. You can start a new one at the current price.
+              Afati i asaj pagese kaloi para se ta vazhdonit, prandaj nuk u
+              tarifua asgjë. Mund të nisni një pagesë të re me çmimin aktual.
             </p>
           )}
           {/* QA-FIX-2: POK sends both a cancel and a failed payment here,
@@ -947,8 +947,8 @@ export default async function BookDetailPage({
               role="status"
               className="mt-4 max-w-[32.5rem] rounded-[3px] bg-amber-50 px-3 py-2 text-sm text-amber-800"
             >
-              Payment was cancelled or did not go through. You can try again
-              whenever you&apos;re ready.
+              Pagesa u anulua ose nuk u krye. Mund të provoni përsëri
+              kur të jeni gati.
             </p>
           )}
           {error && (
@@ -974,7 +974,7 @@ export default async function BookDetailPage({
               access. */}
           {book.description && (
             <section className="mt-10">
-              <h2 className={SECTION_HEADING}>About this book</h2>
+              <h2 className={SECTION_HEADING}>Rreth librit</h2>
               <p className="mt-4 max-w-[42.5rem] leading-relaxed whitespace-pre-line text-foreground/90">
                 {book.description}
               </p>
@@ -990,7 +990,7 @@ export default async function BookDetailPage({
               Book Details
               ============================================================ */}
           <section className="mt-10">
-            <h2 className={SECTION_HEADING}>Book details</h2>
+            <h2 className={SECTION_HEADING}>Të dhënat e librit</h2>
             {/* REDESIGN STEP 3 (P3/D5): a light grid card, as in the
                 mockup. Every row is unchanged: Format and Genre remain
                 always/near-always present (genre is required at
@@ -1004,26 +1004,26 @@ export default async function BookDetailPage({
                 only book.publisher itself, or not at all. */}
             <dl className="mt-4 grid max-w-[42.5rem] grid-cols-2 gap-x-6 gap-y-5 rounded-[4px] border border-border bg-surface p-5 sm:grid-cols-3">
               <div>
-                <dt className={DETAIL_LABEL_CLASSES}>Format</dt>
-                <dd className={DETAIL_VALUE_CLASSES}>Ebook · EPUB</dd>
+                <dt className={DETAIL_LABEL_CLASSES}>Formati</dt>
+                <dd className={DETAIL_VALUE_CLASSES}>E-libër · EPUB</dd>
               </div>
               {book.language && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Language</dt>
+                  <dt className={DETAIL_LABEL_CLASSES}>Gjuha</dt>
                   <dd className={DETAIL_VALUE_CLASSES}>{getLanguageLabel(book.language)}</dd>
                 </div>
               )}
               {book.genre && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Genre</dt>
+                  <dt className={DETAIL_LABEL_CLASSES}>Zhanri</dt>
                   <dd className={DETAIL_VALUE_CLASSES}>{book.genre}</dd>
                 </div>
               )}
               {seriesInfo && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Series</dt>
+                  <dt className={DETAIL_LABEL_CLASSES}>Seria</dt>
                   <dd className={DETAIL_VALUE_CLASSES}>
-                    {book.series_position ? `Book ${book.series_position} of ` : ""}
+                    {book.series_position ? `Libri ${book.series_position} i serisë ` : ""}
                     <Link href={`/series/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
                       {seriesInfo.title}
                     </Link>
@@ -1032,19 +1032,19 @@ export default async function BookDetailPage({
               )}
               {book.publisher && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Publisher</dt>
+                  <dt className={DETAIL_LABEL_CLASSES}>Botuesi</dt>
                   <dd className={DETAIL_VALUE_CLASSES}>{book.publisher}</dd>
                 </div>
               )}
               {book.edition && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Edition</dt>
+                  <dt className={DETAIL_LABEL_CLASSES}>Botimi</dt>
                   <dd className={DETAIL_VALUE_CLASSES}>{book.edition}</dd>
                 </div>
               )}
               {book.original_publication_date && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Originally published</dt>
+                  <dt className={DETAIL_LABEL_CLASSES}>Botuar për herë të parë</dt>
                   <dd className={DETAIL_VALUE_CLASSES}>
                     {formatDateOnly(book.original_publication_date)}
                   </dd>
@@ -1062,7 +1062,7 @@ export default async function BookDetailPage({
                   actually have. */}
               {book.status === "published" && book.published_at && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Published on Librum</dt>
+                  <dt className={DETAIL_LABEL_CLASSES}>Botuar në Librum</dt>
                   <dd className={DETAIL_VALUE_CLASSES}>
                     {formatTimestampAsDate(book.published_at)}
                   </dd>
@@ -1085,7 +1085,7 @@ export default async function BookDetailPage({
           own page.
           ============================================================ */}
       <section className="mt-14">
-        <h2 className={SECTION_HEADING}>About the author</h2>
+        <h2 className={SECTION_HEADING}>Rreth autorit</h2>
         <div className="mt-4 flex flex-wrap items-center gap-6 rounded-[4px] border border-border bg-surface p-6 sm:p-7">
           {authorAvatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -1133,7 +1133,7 @@ export default async function BookDetailPage({
                 href={penNamePath}
                 className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
               >
-                View author profile &rarr;
+                Shikoni profilin e autorit &rarr;
               </Link>
             )}
           </div>
@@ -1155,7 +1155,7 @@ export default async function BookDetailPage({
                     "rounded-[3px] px-5 py-3 font-semibold",
                   )}
                 >
-                  {isFollowingAuthor ? "Following" : "Follow"}
+                  {isFollowingAuthor ? "Po e ndiqni" : "Ndiqni"}
                 </button>
               </form>
             ) : (
@@ -1165,7 +1165,7 @@ export default async function BookDetailPage({
                 href={`/login?next=${penNamePath}`}
                 className={buttonClasses("outline", "md", "rounded-[3px] border-primary px-5 py-3 font-semibold")}
               >
-                Log in to follow
+                Hyni për ta ndjekur
               </Link>
             ))}
         </div>
@@ -1175,7 +1175,7 @@ export default async function BookDetailPage({
           Reviews
           ============================================================ */}
       <section className="mt-14">
-        <h2 className={SECTION_HEADING}>Reviews</h2>
+        <h2 className={SECTION_HEADING}>Vlerësimet</h2>
 
         {owned && (
           <form
@@ -1183,10 +1183,10 @@ export default async function BookDetailPage({
             className="mt-4 flex max-w-[42.5rem] flex-col gap-3 rounded-[4px] border border-border bg-surface p-5"
           >
             <p className="text-sm font-medium">
-              {myReview ? "Update your review" : "Leave a review"}
+              {myReview ? "Përditësoni vlerësimin tuaj" : "Lini një vlerësim"}
             </p>
             <label className="flex flex-col gap-1 text-sm">
-              Rating
+              Yjet
               <select
                 name="rating"
                 required
@@ -1194,7 +1194,7 @@ export default async function BookDetailPage({
                 className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
               >
                 <option value="" disabled>
-                  Choose a rating
+                  Zgjidhni yjet
                 </option>
                 <option value="5">★★★★★</option>
                 <option value="4">★★★★☆</option>
@@ -1204,7 +1204,7 @@ export default async function BookDetailPage({
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              Review (optional)
+              Komenti (opsional)
               <textarea
                 name="body"
                 rows={3}
@@ -1216,13 +1216,13 @@ export default async function BookDetailPage({
               type="submit"
               className={buttonClasses("primary", "md", "w-fit rounded-[3px]")}
             >
-              {myReview ? "Update review" : "Submit review"}
+              {myReview ? "Përditësoni vlerësimin" : "Dërgoni vlerësimin"}
             </button>
           </form>
         )}
 
         {allReviews.length === 0 ? (
-          <p className="mt-4 text-muted">No reviews yet.</p>
+          <p className="mt-4 text-muted">Ende nuk ka vlerësime.</p>
         ) : (
           <ul className="mt-6 flex max-w-[42.5rem] flex-col gap-4">
             {allReviews.map((review) => (
@@ -1230,7 +1230,7 @@ export default async function BookDetailPage({
                 <div className="flex items-center gap-2">
                   <StarRating rating={review.rating} />
                   <span className="text-sm font-medium">
-                    {review.reviewer_name ?? "A Librum reader"}
+                    {review.reviewer_name ?? "Një lexues i Librum"}
                   </span>
                 </div>
                 {review.body && (
@@ -1260,7 +1260,7 @@ export default async function BookDetailPage({
               href={`/series/${seriesInfo.id}`}
               className="focus-ring shrink-0 rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
             >
-              View series &rarr;
+              Shikoni serinë &rarr;
             </Link>
           </div>
 
@@ -1276,10 +1276,10 @@ export default async function BookDetailPage({
                   href={`/books/${previousInSeries.id}`}
                   className="focus-ring group flex flex-col rounded-sm"
                 >
-                  <span className="text-xs text-muted">&larr; Previous in series</span>
+                  <span className="text-xs text-muted">&larr; I mëparshmi në seri</span>
                   <span className="font-serif text-lg text-primary underline underline-offset-2 group-hover:decoration-2">
                     {previousInSeries.series_position != null
-                      ? `Book ${previousInSeries.series_position} — `
+                      ? `Libri ${previousInSeries.series_position} — `
                       : ""}
                     {previousInSeries.title}
                   </span>
@@ -1292,10 +1292,10 @@ export default async function BookDetailPage({
                   href={`/books/${nextInSeries.id}`}
                   className="focus-ring group flex flex-col rounded-sm sm:items-end sm:text-right"
                 >
-                  <span className="text-xs text-muted">Next in series &rarr;</span>
+                  <span className="text-xs text-muted">I radhës në seri &rarr;</span>
                   <span className="font-serif text-lg text-primary underline underline-offset-2 group-hover:decoration-2">
                     {nextInSeries.series_position != null
-                      ? `Book ${nextInSeries.series_position} — `
+                      ? `Libri ${nextInSeries.series_position} — `
                       : ""}
                     {nextInSeries.title}
                   </span>
@@ -1313,7 +1313,7 @@ export default async function BookDetailPage({
                   <span className="font-medium">
                     {entry.series_position != null && `${entry.series_position}. `}
                     {entry.title}{" "}
-                    <span className="text-xs text-muted">(this book)</span>
+                    <span className="text-xs text-muted">(ky libër)</span>
                   </span>
                 ) : (
                   <Link href={`/books/${entry.id}`} className={INLINE_LINK_CLASSES}>
@@ -1331,12 +1331,12 @@ export default async function BookDetailPage({
           More by this author / You might also like
           ============================================================ */}
       <BookShelf
-        title={authorName ? `More by ${authorName}` : "More by this author"}
+        title={authorName ? `Më shumë nga ${authorName}` : "Më shumë nga ky autor"}
         books={moreByAuthor ?? []}
         supabase={supabase}
       />
       <BookShelf
-        title="You might also like"
+        title="Mund t'ju pëlqejnë edhe"
         books={youMightLike}
         supabase={supabase}
       />
@@ -1350,7 +1350,7 @@ export default async function BookDetailPage({
             href={`/books/${book.id}/report`}
             className="focus-ring rounded-sm underline underline-offset-2 hover:decoration-2"
           >
-            Report this book
+            Raportoni këtë libër
           </Link>
         </p>
       )}
@@ -1387,7 +1387,7 @@ async function unfollowAuthorFromBook(penNameId: string, bookId: string) {
 
 // PAID-CHECKOUT-SURFACE-1: the one reader-facing sentence for a paid book
 // while paid checkout is closed. Deliberately says nothing about why.
-const PAID_CHECKOUT_UNAVAILABLE_NOTICE = "Buying this book isn't available yet.";
+const PAID_CHECKOUT_UNAVAILABLE_NOTICE = "Ky libër nuk mund të blihet ende.";
 
 // REDESIGN STEP 3 (P2): full-width actions inside the price card -- the
 // primary one large, the secondary one outlined under it.
@@ -1430,7 +1430,7 @@ function PurchasePanel({
   const wishlistForm = (
     <form action={(wishlisted ? removeFromWishlist : addToWishlist).bind(null, bookId)}>
       <button type="submit" className={SECONDARY_ACTION_CLASSES}>
-        {wishlisted ? "Remove from wishlist" : "Save for later"}
+        {wishlisted ? "Hiqeni nga Lista e dëshirave" : "Ruajeni për më vonë"}
       </button>
     </form>
   );
@@ -1438,12 +1438,12 @@ function PurchasePanel({
   if (state === "author") {
     return (
       <div className="flex flex-col gap-3">
-        <span className="text-sm text-muted">This is your book</span>
+        <span className="text-sm text-muted">Ky është libri juaj</span>
         <Link href={`/dashboard/books/${bookId}/edit`} className={PRIMARY_ACTION_CLASSES}>
-          Manage book
+          Menaxhoni librin
         </Link>
         <a href={`/api/books/${bookId}/download`} className={SECONDARY_ACTION_CLASSES}>
-          Download EPUB
+          Shkarkoni EPUB
         </a>
       </div>
     );
@@ -1452,14 +1452,14 @@ function PurchasePanel({
   if (state === "owned") {
     return (
       <div className="flex flex-col gap-3">
-        <span className={STATUS_PILL_CLASSES}>You own this book</span>
+        <span className={STATUS_PILL_CLASSES}>Ky libër është i juaji</span>
         <a href={`/api/books/${bookId}/download`} className={PRIMARY_ACTION_CLASSES}>
-          Download EPUB
+          Shkarkoni EPUB
         </a>
         {downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
         {/* TRUST PACK (item 5, 1. a): the reader help page, next to Download. */}
         <Link href="/help/reading" className="w-fit text-xs text-muted underline underline-offset-2 hover:text-foreground">
-          How to read your book
+          Si ta lexoni librin
         </Link>
       </div>
     );
@@ -1477,7 +1477,7 @@ function PurchasePanel({
   if (state === "anonymous-unavailable") {
     return (
       <div className="flex flex-col gap-3">
-        <span className={`${STATUS_PILL_CLASSES} text-muted`}>Not available right now</span>
+        <span className={`${STATUS_PILL_CLASSES} text-muted`}>Nuk mund të blihet tani</span>
       </div>
     );
   }
@@ -1485,7 +1485,7 @@ function PurchasePanel({
   if (state === "unavailable-unowned") {
     return (
       <div className="flex flex-col gap-3">
-        <span className={`${STATUS_PILL_CLASSES} text-muted`}>Not available right now</span>
+        <span className={`${STATUS_PILL_CLASSES} text-muted`}>Nuk mund të blihet tani</span>
         {wishlistForm}
       </div>
     );
@@ -1513,7 +1513,7 @@ function PurchasePanel({
     return (
       <div className="flex flex-col gap-3">
         <Link href={`/login?next=/books/${bookId}`} className={PRIMARY_ACTION_CLASSES}>
-          {state === "anonymous-free" ? "Log in to get this book" : "Log in to buy"}
+          {state === "anonymous-free" ? "Hyni për ta marrë këtë libër" : "Hyni për ta blerë"}
         </Link>
       </div>
     );
@@ -1527,7 +1527,7 @@ function PurchasePanel({
       {state === "free-unowned" ? (
         <form action={getFreeBook.bind(null, bookId)}>
           <button type="submit" className={PRIMARY_ACTION_CLASSES}>
-            Get ebook — Free
+            Merreni e-librin — Falas
           </button>
         </form>
       ) : (
@@ -1535,12 +1535,12 @@ function PurchasePanel({
           <input
             name="code"
             type="text"
-            aria-label="Promo code (optional)"
-            placeholder="Promo code (optional)"
+            aria-label="Kodi promocional (opsional)"
+            placeholder="Kodi promocional (opsional)"
             className="focus-ring w-full rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2.5 text-sm"
           />
           <button type="submit" className={PRIMARY_ACTION_CLASSES}>
-            Buy ebook — {formattedPrice}
+            Blini e-librin — {formattedPrice}
           </button>
         </form>
       )}

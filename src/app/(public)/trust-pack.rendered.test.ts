@@ -122,7 +122,7 @@ describe("TRUST PACK 6: share on WhatsApp", () => {
   it("is a plain link built by bookWhatsappShareHref, with no WhatsApp script", () => {
     expect(book).toContain("bookWhatsappShareHref(book, bookByline)");
     expect(book).toMatch(/href=\{whatsappShareHref\}\s+target="_blank"\s+rel="noopener noreferrer"/);
-    expect(book).toContain("Share on WhatsApp");
+    expect(book).toContain("Ndajeni në WhatsApp");
     expect(book).not.toMatch(/<script|next\/script/);
   });
 });

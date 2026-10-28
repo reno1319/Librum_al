@@ -172,7 +172,7 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
   });
 
   it("review names show reviewer_name with a generic fallback, never a profiles field", () => {
-    expect(source).toContain('review.reviewer_name ?? "A Librum reader"');
+    expect(source).toContain('review.reviewer_name ?? "Një lexues i Librum"');
     expect(source).not.toMatch(/review\.profiles[^`]/); // the one hit left is a backticked comment
   });
 
