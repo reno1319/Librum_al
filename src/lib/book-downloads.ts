@@ -25,7 +25,7 @@ import {
 type SessionClient = Awaited<ReturnType<typeof createClient>>;
 type ServiceClient = ReturnType<typeof createAdminClient>;
 
-export const DOWNLOAD_CANCEL_WARNING = "Downloading ends your right to cancel this purchase.";
+export const DOWNLOAD_CANCEL_WARNING = "Shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.";
 
 // --------------------------------------------------------------
 // The buyer's own states (my_purchase_download_states)
@@ -71,7 +71,7 @@ export function buyerDownloadNote(state: MyDownloadState | undefined, now: Date 
     return DOWNLOAD_CANCEL_WARNING;
   }
   if (state.firstDownloadedAt) {
-    return `Downloaded ${formatTimestampAsDate(state.firstDownloadedAt)}`;
+    return `Shkarkuar më ${formatTimestampAsDate(state.firstDownloadedAt)}`;
   }
   return null;
 }

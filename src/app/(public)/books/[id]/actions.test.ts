@@ -174,17 +174,17 @@ describe("buyBook: POK provider selection", () => {
   });
   it("POK failure never falls back to Stripe", async () => {
     mockStartPok.mockRejectedValue(new Error("timeout"));
-    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Could+not+start+checkout" });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Pagesa%20nuk%20mund%20t%C3%AB%20nisej.%20Provoni%20p%C3%ABrs%C3%ABri." });
   });
   it("an unsafe-to-resume checkout gets an honest message, never the generic one", async () => {
     mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_CANNOT_RESUME"));
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: "/books/book?error=We%20can't%20safely%20reopen%20this%20checkout.%20If%20you%20already%20paid%2C%20check%20your%20library%3B%20otherwise%2C%20please%20contact%20support%20to%20complete%20this%20purchase.",
+      target: "/books/book?error=Nuk%20mund%20ta%20rihapim%20me%20siguri%20k%C3%ABt%C3%AB%20pages%C3%AB.%20N%C3%ABse%20keni%20paguar%20tashm%C3%AB%2C%20shikoni%20Bibliotek%C3%ABn%20tuaj%3B%20p%C3%ABrndryshe%20na%20kontaktoni%20p%C3%ABr%20ta%20p%C3%ABrfunduar%20blerjen.",
     });
   });
   it("invalid sandbox configuration fails before an intent is minted", async () => {
     mockPokConfig.mockImplementation(() => { throw new Error("POK_STAGING_ONLY"); });
-    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Could+not+start+checkout" });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Pagesa%20nuk%20mund%20t%C3%AB%20nisej.%20Provoni%20p%C3%ABrs%C3%ABri." });
     expect(rpc).not.toHaveBeenCalled(); expect(mockStartPok).not.toHaveBeenCalled();
   });
   // APP A CORRECTION 2: startPokCheckout()'s own defense-in-depth
@@ -770,8 +770,8 @@ describe("buyBook: stale-checkout quote statuses", () => {
   }
 
   it.each([
-    ["blocked_legacy_attempt", "An earlier checkout for this book must finish or expire before you can start a new one."],
-    ["supersession_rate_limited", "Too many checkout attempts for this book. Please try again later."],
+    ["blocked_legacy_attempt", "Një pagesë e mëparshme për këtë libër duhet të përfundojë ose t'i kalojë afati para se të nisni një të re."],
+    ["supersession_rate_limited", "Keni bërë shumë përpjekje pagese për këtë libër. Provoni përsëri më vonë."],
   ])("maps the %s status to its own honest message, never the generic one", async (status, text) => {
     quote(status);
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: msg(text) });
@@ -792,7 +792,7 @@ describe("buyBook: stale-checkout quote statuses", () => {
     quote(status);
     mockProbe.mockResolvedValue({ kind: "ambiguous" });
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: msg("We can't safely reopen your previous checkout yet. Please try again in a few minutes."),
+      target: msg("Ende nuk mund ta rihapim me siguri pagesën tuaj të mëparshme. Provoni përsëri pas disa minutash."),
     });
     expect(mockProbe).toHaveBeenCalledWith(
       expect.objectContaining({ intentId: INTENT, merchantId: "merchant" }),
@@ -885,7 +885,7 @@ describe("buyBook: stale-checkout quote statuses", () => {
   it("fails closed rather than looping when the re-evaluation changes again", async () => {
     quote("expected_intent_changed");
     await expect(buyBook("book", resumeForm(INTENT))).rejects.toMatchObject({
-      target: msg("We can't safely reopen your previous checkout yet. Please try again in a few minutes."),
+      target: msg("Ende nuk mund ta rihapim me siguri pagesën tuaj të mëparshme. Provoni përsëri pas disa minutash."),
     });
     expect(mockStartPok).not.toHaveBeenCalled();
   });
@@ -924,14 +924,14 @@ describe("buyBook: stale-checkout quote statuses", () => {
     quote("reused");
     mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_ATTEMPT_RETIRED"));
     await expect(buyBook("book", resumeForm(INTENT))).rejects.toMatchObject({
-      target: msg("We can't safely reopen your previous checkout yet. Please try again in a few minutes."),
+      target: msg("Ende nuk mund ta rihapim me siguri pagesën tuaj të mëparshme. Provoni përsëri pas disa minutash."),
     });
     expect(mockStartPok).toHaveBeenCalledTimes(1);
   });
 
   it.each([
-    ["POK_CHECKOUT_IN_PROGRESS", "Your checkout is starting. Please try again in a moment."],
-    ["POK_CHECKOUT_AMBIGUOUS", "We can't safely reopen your previous checkout yet. Please try again in a few minutes."],
+    ["POK_CHECKOUT_IN_PROGRESS", "Pagesa juaj po niset. Provoni përsëri pas pak."],
+    ["POK_CHECKOUT_AMBIGUOUS", "Ende nuk mund ta rihapim me siguri pagesën tuaj të mëparshme. Provoni përsëri pas disa minutash."],
   ])("maps the %s sentinel to its own message", async (sentinel, text) => {
     quote("minted");
     mockStartPok.mockRejectedValue(new Error(sentinel));
@@ -941,9 +941,9 @@ describe("buyBook: stale-checkout quote statuses", () => {
   it.each([
     [{ kind: "fulfilled", bookId: "book" }, "/books/book?purchase=success"],
     [{ kind: "fulfilment_pending", bookId: "book" },
-      "/books/book?error=We%20haven't%20been%20able%20to%20confirm%20your%20payment%20yet.%20Check%20your%20library%20in%20a%20few%20minutes%20before%20paying%20again."],
+      "/books/book?error=Ende%20nuk%20e%20kemi%20konfirmuar%20pages%C3%ABn%20tuaj.%20Shikoni%20Bibliotek%C3%ABn%20tuaj%20pas%20disa%20minutash%20para%20se%20t%C3%AB%20paguani%20p%C3%ABrs%C3%ABri."],
     [{ kind: "blocked", bookId: "book" },
-      "/books/book?error=This%20purchase%20needs%20review.%20If%20you%20already%20paid%2C%20check%20your%20library%3B%20otherwise%20please%20contact%20support."],
+      "/books/book?error=Kjo%20blerje%20duhet%20kontrolluar.%20N%C3%ABse%20keni%20paguar%20tashm%C3%AB%2C%20shikoni%20Bibliotek%C3%ABn%20tuaj%3B%20p%C3%ABrndryshe%20na%20kontaktoni."],
   ] as const)("routes the %j checkout result away from a second payable link", async (result, target) => {
     quote("minted");
     mockStartPok.mockResolvedValue(result);
@@ -953,7 +953,7 @@ describe("buyBook: stale-checkout quote statuses", () => {
   it("fails closed on a malformed quote row rather than guessing a price", async () => {
     quoteRows = [{ intent_id: INTENT, price_cents_at_checkout: null, expires_at: null, quote_status: "minted" }];
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: "/books/book?error=Could+not+start+checkout",
+      target: "/books/book?error=Pagesa%20nuk%20mund%20t%C3%AB%20nisej.%20Provoni%20p%C3%ABrs%C3%ABri.",
     });
     expect(mockStartPok).not.toHaveBeenCalled();
   });
@@ -1009,7 +1009,7 @@ describe("buyBook: the catalog price decides, and null is neither free nor paid"
     bookRow = { ...bookRow, price_all: priceAll };
 
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: "/books/book?error=This+book+isn%27t+available+to+buy+right+now",
+      target: "/books/book?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20blihet%20tani.",
     });
 
     expect(rpc).not.toHaveBeenCalledWith("create_book_checkout_intent", expect.anything());
@@ -1120,9 +1120,9 @@ describe("buyBook: the two new discount rejections are honest and charge nothing
   );
 
   it.each([
-    ["discount_not_applicable", "can't be used for this book"],
-    ["discount_below_minimum", "below Librum's minimum price"],
-    ["discount_used_up", "has been used up"],
+    ["discount_not_applicable", "nuk vlen për këtë libër"],
+    ["discount_below_minimum", "nën minimumin e Librum"],
+    ["discount_used_up", "nuk ka më përdorime"],
   ])("%s gets its OWN message, naming the real reason", async (status, fragment) => {
     quote(status);
     await expect(buyBook("book", new FormData())).rejects.toBeInstanceOf(RedirectSignal);
@@ -1136,7 +1136,7 @@ describe("buyBook: the two new discount rejections are honest and charge nothing
       quote(status);
       await expect(buyBook("book", new FormData())).rejects.toBeInstanceOf(RedirectSignal);
       const target = decodeURIComponent(mockRedirect.mock.calls.at(-1)?.[0] as string);
-      expect(target).toMatch(/nothing was charged/i);
+      expect(target).toMatch(/nuk u tarifua asgjë/i);
       expect(target).not.toMatch(/discount applied|code applied|applied your/i);
       // No clamped or "adjusted" price is ever quoted back.
       expect(target).not.toMatch(/\d+[.,]\d{2}/);
@@ -1154,7 +1154,7 @@ describe("buyBook: the two new discount rejections are honest and charge nothing
     }
     expect(new Set(seen).size).toBe(seen.length);
     for (const message of seen) {
-      expect(message).not.toContain("Could not start checkout");
+      expect(message).not.toContain("Pagesa nuk mund të nisej");
     }
   });
 });
@@ -1187,12 +1187,12 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
   let quoteCalls: number;
 
   const NOT_APPLICABLE =
-    "That promo code can't be used for this book, so nothing was charged. Remove the code to buy at the current price.";
+    "Ky kod promocional nuk vlen për këtë libër, prandaj nuk u tarifua asgjë. Hiqeni kodin për ta blerë me çmimin aktual.";
   const BELOW_MINIMUM =
-    "That promo code would bring this book below Librum's minimum price, so it can't be used and nothing was charged.";
-  const USED_UP = "This promo code has been used up, so nothing was charged.";
+    "Ky kod promocional do ta ulte çmimin e librit nën minimumin e Librum, prandaj nuk mund të përdoret dhe nuk u tarifua asgjë.";
+  const USED_UP = "Ky kod promocional nuk ka më përdorime të mbetura, prandaj nuk u tarifua asgjë.";
   const GENERIC_AMBIGUOUS =
-    "We can't safely reopen your previous checkout yet. Please try again in a few minutes.";
+    "Ende nuk mund ta rihapim me siguri pagesën tuaj të mëparshme. Provoni përsëri pas disa minutash.";
 
   function msg(text: string) {
     return `/books/book?error=${encodeURIComponent(text)}`;
@@ -1277,7 +1277,7 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
     // ...never the generic "try again in a few minutes".
     expect(target).not.toContain(GENERIC_AMBIGUOUS);
     // States plainly that nothing was charged.
-    expect(target).toMatch(/nothing was charged/i);
+    expect(target).toMatch(/nuk u tarifua asgjë/i);
     // Never claims the code was applied.
     expect(target).not.toMatch(/discount applied|code applied|applied your/i);
     // Quotes no amount at all -- neither an adjusted one nor a

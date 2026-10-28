@@ -262,9 +262,9 @@ describe("AccountPurchasesPage: download line (DOWNLOADS-1)", () => {
       ],
     });
     expect(rpc).toHaveBeenCalledWith("my_purchase_download_states");
-    expect(html).toContain("Downloading ends your right to cancel this purchase.");
-    expect(html.match(/Downloading ends your right to cancel/g)).toHaveLength(1);
-    expect(html).toContain("Downloaded ");
+    expect(html).toContain("Shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.");
+    expect(html.match(/Shkarkimi i jep fund të drejtës suaj/g)).toHaveLength(1);
+    expect(html).toContain("Shkarkuar më ");
   });
 
   it("shows no line when nothing is known", async () => {
@@ -272,7 +272,7 @@ describe("AccountPurchasesPage: download line (DOWNLOADS-1)", () => {
       purchases: [purchaseRow("p1", "b1", 0, null, RECENT)],
       currencies: [{ purchase_id: "p1", currency_state: "free", currency: null }],
     });
-    expect(html).not.toContain("Downloading ends your right to cancel");
-    expect(html).not.toContain("Downloaded ");
+    expect(html).not.toContain("Shkarkimi i jep fund të drejtës suaj");
+    expect(html).not.toContain("Shkarkuar më ");
   });
 });

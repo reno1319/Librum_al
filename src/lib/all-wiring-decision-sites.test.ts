@@ -142,7 +142,7 @@ describe("decision sites 2-3 of 13: resolveBookPurchaseState, anonymous and auth
 describe("decision site 4 of 13: resolveCheckoutSecurityNote", () => {
   it("only the paid row gets a checkout note", () => {
     expect(resolveCheckoutSecurityNote({ priceAll: LEGACY_PAID.price_all, usePok: true, paidCheckoutAvailable: true })).toBe(
-      " Secure checkout with POK.",
+      " Pagesë e sigurt me POK.",
     );
     expect(resolveCheckoutSecurityNote({ priceAll: UNPRICED.price_all, usePok: true, paidCheckoutAvailable: true })).toBeNull();
     expect(resolveCheckoutSecurityNote({ priceAll: FREE.price_all, usePok: true, paidCheckoutAvailable: true })).toBeNull();

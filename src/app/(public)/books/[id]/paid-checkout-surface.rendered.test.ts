@@ -47,7 +47,7 @@ const HELD_QUOTE = [{
   discount_code_id: null, expires_at: "2026-09-15T10:30:00Z",
   provider_window_ends_at: "2026-09-15T10:30:00Z", quote_state: "unresolved_conflict",
 }];
-const NOTICE = "Buying this book isn&#x27;t available yet.";
+const NOTICE = "Ky libër nuk mund të blihet ende.";
 
 function queryStub(listResult: unknown, rowResult?: unknown) {
   let single = false;
@@ -145,18 +145,18 @@ const CLOSED: Array<[string, () => void]> = [
 
 /** Every paid checkout initiation or resume surface, asserted one by one. */
 function expectNoPaidCheckoutSurface(html: string) {
-  expect(html).not.toContain("Log in to buy");
+  expect(html).not.toContain("Hyni për ta blerë");
   expect(html).not.toContain(`/login?next=/books/${BOOK_U_ID}`);
   expect(html).not.toContain('name="code"');
-  expect(html).not.toContain("Promo code");
-  expect(html).not.toContain("Buy ebook");
+  expect(html).not.toContain("Kodi promocional");
+  expect(html).not.toContain("Blini e-librin");
   expect(html).not.toContain('name="resume_existing"');
   expect(html).not.toContain('name="expected_intent_id"');
   expect(html).not.toContain(INTENT_ID);
-  expect(html).not.toContain("Continue that checkout");
-  expect(html).not.toContain("already have a checkout in progress");
-  expect(html).not.toContain("lapsed before it could be resumed");
-  expect(html).not.toContain("start a new one at the current price");
+  expect(html).not.toContain("Vazhdoni atë pagesë");
+  expect(html).not.toContain("tashmë një pagesë të nisur");
+  expect(html).not.toContain("kaloi para se ta vazhdonit");
+  expect(html).not.toContain("pagesë të re me çmimin aktual");
   // No claim that any checkout exists, and nothing about configuration.
   for (const claim of ["Secure checkout", "POK", "Stripe", "PAID_CHECKOUT_MODE", "controlled_staging", "NEXT_PUBLIC"]) {
     expect(html).not.toContain(claim);
@@ -173,7 +173,7 @@ afterEach(() => vi.unstubAllEnvs());
 describe.each(CLOSED)("paid checkout closed: %s", (_label, configure) => {
   beforeEach(configure);
 
-  it("anonymous: the valid ALL price shows, 'Log in to buy' does not, and one neutral notice does", async () => {
+  it("anonymous: the valid ALL price shows, 'Hyni për ta blerë' does not, and one neutral notice does", async () => {
     const { html, rpc } = await render({ user: null });
     expect(html).toContain("199 lekë");
     expectNoPaidCheckoutSurface(html);
@@ -188,7 +188,7 @@ describe.each(CLOSED)("paid checkout closed: %s", (_label, configure) => {
     expect(countOf(html, NOTICE)).toBe(1);
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
     // Wishlist and sample stay where they applied before.
-    expect(html).toContain("Save for later");
+    expect(html).toContain("Ruajeni për më vonë");
     expect(html).toContain("Lexoni një pjesë");
   });
 });
@@ -196,9 +196,9 @@ describe.each(CLOSED)("paid checkout closed: %s", (_label, configure) => {
 describe("paid checkout open: exact controlled-staging mode on protected staging", () => {
   beforeEach(openPaidCheckout);
 
-  it("anonymous: 'Log in to buy' is restored and no unavailable notice shows", async () => {
+  it("anonymous: 'Hyni për ta blerë' is restored and no unavailable notice shows", async () => {
     const { html } = await render({ user: null });
-    expect(html).toContain("Log in to buy");
+    expect(html).toContain("Hyni për ta blerë");
     expect(html).toContain(`/login?next=/books/${BOOK_U_ID}`);
     expect(html).not.toContain(NOTICE);
   });
@@ -207,11 +207,11 @@ describe("paid checkout open: exact controlled-staging mode on protected staging
     const { html, rpc } = await render({ user: { id: READER_ID } });
     expect(rpc).toHaveBeenCalledWith("get_book_checkout_quote", { p_intent_id: INTENT_ID, p_book_id: BOOK_U_ID });
     expect(html).toContain('name="code"');
-    expect(html).toContain("Buy ebook — 199 lekë");
-    expect(html).toContain("Continue that checkout");
+    expect(html).toContain("Blini e-librin — 199 lekë");
+    expect(html).toContain("Vazhdoni atë pagesë");
     expect(html).toContain(`value="${INTENT_ID}"`);
     expect(html).toContain("179,10 lekë");
-    expect(html).toContain("lapsed before it could be resumed");
+    expect(html).toContain("kaloi para se ta vazhdonit");
     expect(html).not.toContain(NOTICE);
   });
 });
@@ -225,38 +225,38 @@ describe("states that never had a paid checkout are unchanged, open or closed", 
       configure();
       const free = { ...BOOK_U, price_all: 0 };
       const reader = await render({ user: { id: READER_ID }, book: free });
-      expect(reader.html).toContain("Get ebook — Free");
+      expect(reader.html).toContain("Merreni e-librin — Falas");
       expect(reader.html).not.toContain(NOTICE);
       expect(reader.rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
       const anon = await render({ user: null, book: free });
-      expect(anon.html).toContain("Log in to get this book");
+      expect(anon.html).toContain("Hyni për ta marrë këtë libër");
       expect(anon.html).not.toContain(NOTICE);
     });
 
-    it(`unpriced book (${label}): 'Not available right now', and not the checkout notice`, async () => {
+    it(`unpriced book (${label}): 'Nuk mund të blihet tani', and not the checkout notice`, async () => {
       configure();
       const { html } = await render({ user: { id: READER_ID }, book: { ...BOOK_U, price_all: null } });
-      expect(html).toContain("Not available right now");
+      expect(html).toContain("Nuk mund të blihet tani");
       expect(html).not.toContain(NOTICE);
-      expect(html).not.toContain("Buy ebook");
+      expect(html).not.toContain("Blini e-librin");
     });
 
-    it(`author (${label}): Manage book, no checkout surface and no notice`, async () => {
+    it(`author (${label}): Menaxhoni librin, no checkout surface and no notice`, async () => {
       configure();
       const { html, rpc } = await render({ user: { id: AUTHOR_ID } });
-      expect(html).toContain("Manage book");
+      expect(html).toContain("Menaxhoni librin");
       expect(html).toContain("199 lekë");
       expect(html).not.toContain(NOTICE);
-      expect(html).not.toContain("Buy ebook");
+      expect(html).not.toContain("Blini e-librin");
       expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
     });
 
-    it(`owner (${label}): 'You own this book', no checkout surface and no notice`, async () => {
+    it(`owner (${label}): 'Ky libër është i juaji', no checkout surface and no notice`, async () => {
       configure();
       const { html, rpc } = await render({ user: { id: READER_ID }, owned: true });
-      expect(html).toContain("You own this book");
+      expect(html).toContain("Ky libër është i juaji");
       expect(html).not.toContain(NOTICE);
-      expect(html).not.toContain("Buy ebook");
+      expect(html).not.toContain("Blini e-librin");
       expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
     });
   }
@@ -278,10 +278,10 @@ describe("Fixture Book U on staging with PAID_CHECKOUT_MODE absent", () => {
     expect(html).not.toContain("Buy");
   });
 
-  it("its author sees 199 ALL and Manage book", async () => {
+  it("its author sees 199 ALL and Menaxhoni librin", async () => {
     const { html } = await render({ user: { id: AUTHOR_ID }, searchParams: {} });
     expect(html).toContain("199 lekë");
-    expect(html).toContain("Manage book");
+    expect(html).toContain("Menaxhoni librin");
   });
 
   it("anonymous and reader views: no login-to-buy, no Buy/promo/resume, no quote RPC, one neutral notice", async () => {
@@ -292,7 +292,7 @@ describe("Fixture Book U on staging with PAID_CHECKOUT_MODE absent", () => {
       expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
       // Still 199 lekë: nothing in rendering moves U back to free.
       expect(html).toContain("199 lekë");
-      expect(html).not.toContain("Get ebook — Free");
+      expect(html).not.toContain("Merreni e-librin — Falas");
     }
   });
 });

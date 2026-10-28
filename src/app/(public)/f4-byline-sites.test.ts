@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // 2026-10-19): every place a BOOK's author name shows uses
 // resolveBookByline -- the book's pen name, embedded from the
 // public_pen_names view as `pen` -- and links to that pen name's page.
-// The places that named the AUTHOR (book page "About the author" and
+// The places that named the AUTHOR (book page "Rreth autorit" and
 // "More by", the author page, Following, the follower email) now name
 // the pen name too (3a, 4a).
 
@@ -70,11 +70,11 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
 });
 
 describe("PEN-NAMES-1: places that named the author now name the pen name", () => {
-  it("book page: About the author and More by ... use the pen name and link to its page (3a)", () => {
+  it("book page: Rreth autorit and More by ... use the pen name and link to its page (3a)", () => {
     const source = readSrc("app/(public)/books/[id]/page.tsx");
     expect(source).toContain("const authorName = bookByline;");
     expect(source).toContain('<p className="font-serif text-[1.375rem] text-primary">{authorName}</p>');
-    expect(source).toContain("title={authorName ? `More by ${authorName}` : \"More by this author\"}");
+    expect(source).toContain("title={authorName ? `Më shumë nga ${authorName}` : \"Më shumë nga ky autor\"}");
     expect(source).toContain('.eq("pen_name_id", book.pen_name_id)');
     expect(source).toMatch(/<Link href=\{penNamePath\} className=\{INLINE_LINK_CLASSES\}>\s*\{bookByline\}/);
     expect(source).not.toMatch(/\/authors\/\$\{book\.author_id\}/);

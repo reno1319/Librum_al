@@ -11,9 +11,9 @@
 // validation already reads it (createBook()/updateBook() in
 // src/app/(public)/dashboard/books/actions.ts).
 export const LANGUAGES = [
-  { code: "sq", label: "Albanian" },
-  { code: "en", label: "English" },
-  { code: "it", label: "Italian" },
+  { code: "sq", label: "Shqip" },
+  { code: "en", label: "Anglisht" },
+  { code: "it", label: "Italisht" },
 ] as const;
 
 export type LanguageCode = (typeof LANGUAGES)[number]["code"];
