@@ -6,8 +6,8 @@
 // has a price -- the Bookstore lists only priced books, and an unpriced
 // pick would render "Buy · Price unavailable". Otherwise it shows the
 // newest book as "New on Librum", exactly as before F5.
-export const LIBRUMS_CHOICE_LABEL = "Librum's choice";
-export const NEW_ON_LIBRUM_LABEL = "New on Librum";
+export const LIBRUMS_CHOICE_LABEL = "Zgjedhja e Librum";
+export const NEW_ON_LIBRUM_LABEL = "I ri në Librum";
 
 export function resolveBookstoreFeature<T extends { price_all: number | null }>(
   pick: T | null,

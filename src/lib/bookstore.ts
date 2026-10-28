@@ -7,10 +7,10 @@
 export type BookstoreSort = "" | "bestselling" | "price_asc" | "price_desc";
 
 export const BOOKSTORE_SORT_OPTIONS: { value: BookstoreSort; label: string }[] = [
-  { value: "", label: "Newest" },
-  { value: "bestselling", label: "Bestselling" },
-  { value: "price_asc", label: "Price: low to high" },
-  { value: "price_desc", label: "Price: high to low" },
+  { value: "", label: "Më të rejat" },
+  { value: "bestselling", label: "Më të shiturat" },
+  { value: "price_asc", label: "Çmimi: nga më i ulëti" },
+  { value: "price_desc", label: "Çmimi: nga më i larti" },
 ];
 
 const KNOWN_SORTS = new Set<string>(BOOKSTORE_SORT_OPTIONS.map((o) => o.value));

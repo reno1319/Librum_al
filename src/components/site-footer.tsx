@@ -57,7 +57,7 @@ export function SiteFooter() {
           <span className="font-serif text-[1.625rem]">Librum</span>
           <p className="mt-2 text-[0.9375rem] leading-relaxed text-primary-foreground/80">
             Libra elektronikë të pavarur, të botuar drejtpërdrejt nga ata
-            që i shkruan.
+            që i shkruajnë.
           </p>
           <p className="mt-3 text-[0.9375rem] text-primary-foreground/80">
             Pyetje?{" "}

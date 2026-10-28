@@ -88,7 +88,7 @@ export async function generateMetadata({
 
   return {
     title: authorPublicName,
-    description: `Books and author information for ${authorPublicName} on Librum.`,
+    description: `Librat dhe të dhënat për autorin ${authorPublicName} në Librum.`,
   };
 }
 
@@ -323,7 +323,7 @@ export default async function AuthorProfilePage({
               because it's already a real, cheap, authoritative count
               (admin-client select, see above), not added fresh here. */}
           <p className="mt-1 text-xs text-muted">
-            {followerCount} follower{followerCount === 1 ? "" : "s"}
+            {followerCount} ndjekës
           </p>
 
           {/* 7a: bio and links only when the author added them -- no
@@ -361,7 +361,7 @@ export default async function AuthorProfilePage({
                   type="submit"
                   className={buttonClasses(isFollowing ? "outline" : "primary", "md")}
                 >
-                  {isFollowing ? "Following" : "Follow"}
+                  {isFollowing ? "Po e ndiqni" : "Ndiqni"}
                 </button>
               </form>
             ) : (
@@ -369,7 +369,7 @@ export default async function AuthorProfilePage({
                 href={`/login?next=${authorPagePath(id)}`}
                 className={`${buttonClasses("outline", "md")} mt-4`}
               >
-                Log in to follow
+                Hyni për ta ndjekur
               </Link>
             ))}
         </div>
@@ -379,7 +379,7 @@ export default async function AuthorProfilePage({
           Books by this author -- the page's primary content.
           ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
-        <h2 className="font-serif text-xl font-normal">Books by {authorPublicName}</h2>
+        <h2 className="font-serif text-xl font-normal">Librat nga {authorPublicName}</h2>
 
         {publishedBooks.length === 0 ? (
           // LIBRUM 2.0 PRODUCT-2 PRE-COMMIT CORRECTION: EmptyState
@@ -389,8 +389,8 @@ export default async function AuthorProfilePage({
           // an author with books actually publishing would produce.
           <div className="mt-6 max-w-2xl">
             <EmptyState
-              title="No published books yet."
-              description="Books from this author will appear here when they are published."
+              title="Ende nuk ka libra të botuar."
+              description="Librat e këtij autori do të shfaqen këtu kur të botohen."
             />
           </div>
         ) : (
@@ -434,7 +434,7 @@ export default async function AuthorProfilePage({
           ============================================================ */}
       {seriesGroups.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
-          <h2 className="font-serif text-xl font-normal">Series</h2>
+          <h2 className="font-serif text-xl font-normal">Seritë</h2>
           <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {seriesGroups.map((group) => (
               <li
@@ -448,7 +448,7 @@ export default async function AuthorProfilePage({
                   {group.title}
                 </Link>
                 <p className="mt-0.5 text-xs text-muted">
-                  {group.bookCount} book{group.bookCount === 1 ? "" : "s"}
+                  {group.bookCount} {group.bookCount === 1 ? "libër" : "libra"}
                 </p>
                 <div className="mt-3 flex gap-2.5">
                   {group.covers.map((book) => {
@@ -487,7 +487,7 @@ export default async function AuthorProfilePage({
                   href={`/series/${group.id}`}
                   className="focus-ring mt-3 inline-block rounded-sm text-xs font-medium text-primary underline underline-offset-2 hover:decoration-2"
                 >
-                  View series &rarr;
+                  Shikoni serinë &rarr;
                 </Link>
               </li>
             ))}
@@ -503,7 +503,7 @@ export default async function AuthorProfilePage({
           ============================================================ */}
       {bundles && bundles.length > 0 && (
         <section className="mt-12 border-t border-border pt-8">
-          <h2 className="font-serif text-xl font-normal">Bundles</h2>
+          <h2 className="font-serif text-xl font-normal">Paketat</h2>
           <ul className="mt-6 flex max-w-[42.5rem] flex-col gap-3">
             {bundles.map((bundle) => (
               <li key={bundle.id}>

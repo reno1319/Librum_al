@@ -65,6 +65,6 @@ export function resolveActiveCheckoutProvider(params: {
 // Moved here from the deleted src/lib/connect-account.ts (Stripe
 // removal, pipeline item 10); the wording is unchanged.
 export const BOOK_CHECKOUT_UNAVAILABLE_MESSAGE =
-  "This book isn't available for purchase right now";
+  "Ky libër nuk mund të blihet tani";
 export const BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE =
-  "This bundle isn't available for purchase right now";
+  "Kjo paketë nuk mund të blihet tani";

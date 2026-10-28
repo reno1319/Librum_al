@@ -189,7 +189,7 @@ describe.each(CLOSED)("paid checkout closed: %s", (_label, configure) => {
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
     // Wishlist and sample stay where they applied before.
     expect(html).toContain("Save for later");
-    expect(html).toContain("Read sample");
+    expect(html).toContain("Lexoni një pjesë");
   });
 });
 
