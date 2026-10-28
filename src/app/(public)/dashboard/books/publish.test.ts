@@ -293,7 +293,7 @@ describe("publishBook: draft -> published", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published", published_at: expect.any(String) }),
@@ -310,7 +310,7 @@ describe("publishBook: draft -> published", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(expect.objectContaining({ status: "published" }));
   });
@@ -326,7 +326,7 @@ describe("publishBook: draft -> published", () => {
 
       await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-      expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+      expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
       expect(mockProfileSelectResult).not.toHaveBeenCalled();
     }
   });
@@ -360,7 +360,7 @@ describe("publishBook: draft -> published", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload.mock.calls[0][0]).not.toHaveProperty("published_at");
   });
@@ -381,7 +381,7 @@ describe("publishBook: draft -> published", () => {
     // this is correctly recognized as a republish, not a first
     // publication, and no notification is sent.
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     // published_at itself is still preserved, since it was already set.
     expect(mockBookUpdatePayload.mock.calls[0][0]).not.toHaveProperty("published_at");
   });
@@ -393,7 +393,7 @@ describe("publishBook: draft -> published", () => {
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
-    expect(mockRedirect).not.toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).not.toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
   });
 
@@ -404,7 +404,7 @@ describe("publishBook: draft -> published", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     // The mutation itself is unaffected by the later notification failure.
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
@@ -425,7 +425,7 @@ describe("publishBook: draft -> published", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       "publishBook: sendNewBookEmails failed after a successful publish",
@@ -443,7 +443,7 @@ describe("publishBook: draft -> published", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       "publishBook: revalidatePath failed after a successful publish",
       expect.objectContaining({ bookId: BOOK_ID }),
@@ -534,7 +534,7 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
     );
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockSendNewBookEmails).toHaveBeenCalledOnce();
   });
 
@@ -548,7 +548,7 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
@@ -567,7 +567,7 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
     // never names `status`, which authenticated cannot insert.
     expect(mockBookInsert.mock.calls[0][0]).not.toHaveProperty("status");
     const target = mockRedirect.mock.calls[0][0];
-    expect(target).toContain("success=Saved+as+draft");
+    expect(target).toContain("success=U%20ruajt%20si%20draft");
     expect(target).not.toContain("db exploded");
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
   });
@@ -580,7 +580,7 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
     );
@@ -601,7 +601,7 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });
@@ -620,7 +620,7 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     // createBook() generates its own bookId via randomUUID() (a fresh
     // value each run, unlike publishBook()'s caller-supplied BOOK_ID),
     // so only the message and the field's presence are asserted here.
@@ -695,7 +695,7 @@ describe("performPublish: recovery-session defense-in-depth (AUTH-1C)", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
     );
@@ -740,7 +740,7 @@ describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
@@ -756,7 +756,7 @@ describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
   });
@@ -783,7 +783,7 @@ describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
   it("with the capability allowed, a paid book publishes and no profile is ever read", async () => {
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
@@ -799,7 +799,7 @@ describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
@@ -814,7 +814,7 @@ describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
@@ -833,7 +833,7 @@ describe("performPublish: paid-publishing mode gate (PAID-MODE-1)", () => {
     ).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard?success=U%20ruajt%20si%20draft&error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(mockBookInsert).toHaveBeenCalled();
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
@@ -881,8 +881,8 @@ describe("performPublish: the missing-ALL-price blocker (ALL-WIRING-2)", () => {
     const paidTarget = decodeURIComponent(mockRedirect.mock.calls.at(-1)?.[0] as string);
 
     expect(missingTarget).not.toBe(paidTarget);
-    expect(missingTarget).toContain("price in lek");
-    expect(paidTarget).not.toContain("price in lek");
+    expect(missingTarget).toContain("çmimin e librit në lekë");
+    expect(paidTarget).not.toContain("çmimin e librit në lekë");
     // It points the author at their own edit page, where the fix is.
     expect(missingTarget.startsWith(`/dashboard/books/${BOOK_ID}/edit?error=`)).toBe(true);
   });
@@ -898,7 +898,7 @@ describe("performPublish: the missing-ALL-price blocker (ALL-WIRING-2)", () => {
 
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(decodeURIComponent(mockRedirect.mock.calls.at(-1)?.[0] as string)).toContain(
-      "price in lek",
+      "çmimin e librit në lekë",
     );
   });
 
@@ -929,7 +929,7 @@ describe("performPublish: the missing-ALL-price blocker (ALL-WIRING-2)", () => {
 
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(decodeURIComponent(mockRedirect.mock.calls.at(-1)?.[0] as string)).toContain(
-      "price in lek",
+      "çmimin e librit në lekë",
     );
   });
 
@@ -944,7 +944,7 @@ describe("performPublish: the missing-ALL-price blocker (ALL-WIRING-2)", () => {
     expect(mockBookInsert).toHaveBeenCalledTimes(1);
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(decodeURIComponent(mockRedirect.mock.calls.at(-1)?.[0] as string)).toContain(
-      "price in lek",
+      "çmimin e librit në lekë",
     );
   });
 });
@@ -967,7 +967,7 @@ describe("performPublish: price_all is the SOLE free/paid authority (ALL-WIRING-
 
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
   });
 
@@ -980,7 +980,7 @@ describe("performPublish: price_all is the SOLE free/paid authority (ALL-WIRING-
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
       expect.objectContaining({ status: "published" }),
     );
@@ -1006,9 +1006,9 @@ describe("performPublish: a description is required (FIX1 X16)", () => {
   beforeEach(resetMocks);
 
   const MISSING_FULL =
-    "/dashboard?success=Saved+as+draft&error=" +
+    "/dashboard?success=U%20ruajt%20si%20draft&error=" +
     encodeURIComponent(
-      "Add a description before publishing. Your book will still be saved as a draft.",
+      "Shtoni një përshkrim para publikimit. Libri juaj ruhet gjithsesi si draft.",
     );
 
   for (const [label, description] of [
@@ -1036,7 +1036,7 @@ describe("performPublish: a description is required (FIX1 X16)", () => {
 
       expect(mockBookUpdatePayload).not.toHaveBeenCalled();
       expect(mockRedirect).toHaveBeenCalledWith(
-        `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Add a description before publishing.")}`,
+        `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Shtoni një përshkrim para publikimit.")}`,
       );
     });
   }
@@ -1058,7 +1058,7 @@ describe("performPublish: a description is required (FIX1 X16)", () => {
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Set this book's price in lek before publishing it.")}`,
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Vendosni çmimin e librit në lekë para se ta publikoni.")}`,
     );
   });
 
@@ -1067,7 +1067,7 @@ describe("performPublish: a description is required (FIX1 X16)", () => {
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
   });
 
   it("saving a draft without a description is unchanged", async () => {
@@ -1092,7 +1092,7 @@ describe("createBook: ISBN check (FIX1 X9)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/new?error=${encodeURIComponent("Enter a valid ISBN-10 or ISBN-13, or leave it blank.")}`,
+      `/dashboard/books/new?error=${encodeURIComponent("Shkruani një ISBN-10 ose ISBN-13 të vlefshëm, ose lëreni bosh.")}`,
     );
     expect(mockBookInsert).not.toHaveBeenCalled();
     expect(mockUploadCover).not.toHaveBeenCalled();
@@ -1192,7 +1192,7 @@ describe("performPublish: In review (ADMIN-3)", () => {
   it("a draft whose approval matches its files publishes as before (3a)", async () => {
     bookReviewsDoubleState.approvalValid = true;
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["getBookReviewState"]);
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(expect.objectContaining({ status: "published" }));
     expect(mockReviewStaffEmail).not.toHaveBeenCalled();
@@ -1245,7 +1245,7 @@ describe("performPublish: In review (ADMIN-3)", () => {
     bookReviewsDoubleState.approvalValid = false;
     bookReviewsDoubleState.requestResult = { ok: false, reason: "already_approved" };
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Your+book+is+now+live");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
   });
 
   it.each(["LB462", "LB463"])("%s on the guarded write: the book changed while editing", async (code) => {

@@ -249,7 +249,7 @@ const { PAID_REPRICING_UNAVAILABLE_MESSAGE, CATALOG_ROW_CHANGED_MESSAGE } = awai
 
 const BOOK_DENIED = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`;
 const BOOK_CHANGED = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`;
-const BOOK_SAVED = "/dashboard?success=Book+updated";
+const BOOK_SAVED = "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua";
 const BUNDLE_DENIED = `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`;
 const BUNDLE_CHANGED = `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`;
 const BUNDLE_SAVED = "/dashboard/bundles?success=Bundle+updated";
@@ -396,7 +396,7 @@ describe("updateBook while paid publishing is closed", () => {
     expect(book()).toMatchObject({ status: "draft", price_all: 199 });
 
     expect(await redirectOf(publishBook(BOOK_ID))).toBe(
-      "/dashboard?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(book()).toMatchObject({ status: "draft", price_all: 199 });
   });
@@ -552,7 +552,7 @@ describe("updateBundle while paid publishing is OPEN on protected staging", () =
 // LIVE-PRICE-CONFIRM-1 (Renato 10-24, "2. a", "3. a"): a new price on a
 // LIVE book or bundle needs the tick carrying exactly that new price.
 // ============================================================
-const PRICE_CONFIRM = encodeURIComponent("It's live, so tick the box under the price to confirm the new price.");
+const PRICE_CONFIRM = encodeURIComponent("Lexuesit e shohin tashmë këtë çmim, ndaj shënoni kutinë nën çmim për të konfirmuar çmimin e ri.");
 const BOOK_CONFIRM = `/dashboard/books/${BOOK_ID}/edit?error=${PRICE_CONFIRM}`;
 const BUNDLE_CONFIRM = `/dashboard/bundles/${BUNDLE_ID}/edit?error=${PRICE_CONFIRM}`;
 
@@ -727,7 +727,7 @@ describe("the publish/update race, books", () => {
 
     const target = await redirectOf(updateBook(BOOK_ID, bookForm("199")));
 
-    expect(concurrent).toBe("/dashboard?success=Your+book+is+now+live");
+    expect(concurrent).toBe("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(target).toBe(BOOK_CHANGED);
     expect(book()).toMatchObject({ status: "published", price_all: 0 });
   });

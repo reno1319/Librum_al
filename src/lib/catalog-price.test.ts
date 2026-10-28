@@ -561,3 +561,13 @@ describe("formatCatalogAmountAll", () => {
     }
   });
 });
+
+// ALBANIAN-9: digits with the thousands dot, no unit.
+describe("groupAllDigits", () => {
+  it("groups thousands with a dot", async () => {
+    const { groupAllDigits } = await import("./catalog-price");
+    expect(groupAllDigits(99)).toBe("99");
+    expect(groupAllDigits(1500)).toBe("1.500");
+    expect(groupAllDigits(100000)).toBe("100.000");
+  });
+});

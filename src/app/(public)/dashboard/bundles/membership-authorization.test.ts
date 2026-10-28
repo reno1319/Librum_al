@@ -179,7 +179,7 @@ const SAVE_UNCONFIRMED =
   encodeURIComponent("We could not confirm whether your changes were saved. Reload this bundle to check before trying again.");
 const SAVE_CHANGED =
   EDIT +
-  encodeURIComponent("This title changed while you were editing it, so nothing was saved. Reload the page and try again.");
+  encodeURIComponent("Ky titull ndryshoi ndërsa po e redaktonit, ndaj nuk u ruajt asgjë. Rifreskoni faqen dhe provoni përsëri.");
 const CREATED = "/dashboard/bundles?success=Bundle+created+as+a+draft";
 const UPDATED = "/dashboard/bundles?success=Bundle+updated";
 

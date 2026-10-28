@@ -55,12 +55,12 @@ type Status = "idle" | "uploading" | "success" | "error";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MANUSCRIPTS_BUCKET = "manuscripts";
-const GENERIC_ERROR = "We couldn't upload your cover. Please try again.";
-const TOO_LARGE_ERROR = "This cover is larger than the 5 MB limit.";
-const UNSUPPORTED_FORMAT_ERROR = "Unsupported cover format. Use JPEG or PNG.";
+const GENERIC_ERROR = "Kopertina juaj nuk u ngarkua. Provoni përsëri.";
+const TOO_LARGE_ERROR = "Kjo kopertinë e kalon kufirin prej 5 MB.";
+const UNSUPPORTED_FORMAT_ERROR = "Format kopertine i papranuar. Përdorni JPEG ose PNG.";
 // FIX1 (X10): Renato's W-C pick -- warn, but allow.
 const MIN_RECOMMENDED_COVER_HEIGHT = 1000;
-const SMALL_COVER_WARNING = "This image is smaller than 1000px tall, so it may look blurry.";
+const SMALL_COVER_WARNING = "Ky imazh është më pak se 1000px i lartë, ndaj mund të duket i turbullt.";
 
 export function CoverField({
   authorId,
@@ -265,7 +265,7 @@ export function CoverField({
 
       {isReplaceMode && (
         <>
-          <p className="text-sm font-semibold text-foreground">Current cover</p>
+          <p className="text-sm font-semibold text-foreground">Kopertina aktuale</p>
           {displayedPreview ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -281,7 +281,7 @@ export function CoverField({
 
       <label className={PICKER_BOX_CLASSES}>
         <span className="font-semibold text-foreground">
-          {status === "success" ? "Replace cover" : isReplaceMode ? "Replace cover image" : "Cover image"}
+          {status === "success" ? "Zëvendësoni kopertinën" : isReplaceMode ? "Zëvendësoni imazhin e kopertinës" : "Imazhi i kopertinës"}
         </span>
         <input
           type="file"
@@ -290,8 +290,8 @@ export function CoverField({
           onChange={(e) => handleCoverChange(e.target.files?.[0] ?? null)}
         />
         <span className="text-sm text-muted">
-          JPEG or PNG · up to 5 MB.
-          {isReplaceMode ? " Leave blank to keep the current cover." : ""}
+          JPEG ose PNG · deri në 5 MB.
+          {isReplaceMode ? " Lëreni bosh për të mbajtur kopertinën aktuale." : ""}
         </span>
       </label>
 
@@ -306,13 +306,13 @@ export function CoverField({
 
       {status === "uploading" && (
         <p role="status" className="text-sm text-muted">
-          Uploading cover…
+          Po ngarkohet kopertina…
         </p>
       )}
 
       {status === "success" && readyFileName && (
         <p role="status" className="text-sm font-semibold text-primary">
-          Cover ready — {readyFileName}
+          Kopertina gati: {readyFileName}
         </p>
       )}
 

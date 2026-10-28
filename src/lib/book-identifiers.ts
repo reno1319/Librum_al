@@ -4,10 +4,10 @@
 // imports, no environment, the clock passed in.
 
 /** Fixed wording (Renato's W-B) for a filled ISBN that isn't one. */
-export const INVALID_ISBN_MESSAGE = "Enter a valid ISBN-10 or ISBN-13, or leave it blank.";
+export const INVALID_ISBN_MESSAGE = "Shkruani një ISBN-10 ose ISBN-13 të vlefshëm, ose lëreni bosh.";
 
 /** Fixed wording (Renato's W-B) for an "Originally published" date after today. */
-export const FUTURE_DATE_MESSAGE = "This date can't be in the future.";
+export const FUTURE_DATE_MESSAGE = "Kjo datë nuk mund të jetë në të ardhmen.";
 
 /**
  * True for a real ISBN-10 or ISBN-13 (checksum verified; hyphens and
