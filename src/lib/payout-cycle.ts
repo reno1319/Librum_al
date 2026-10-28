@@ -81,7 +81,8 @@ export function computeNextPayoutCycleDate(now: Date = new Date()): string {
 export function formatPayoutCycleDate(cycleDate: string): string {
   const hour = String(PAYOUT_CYCLE_CRON_HOUR_UTC).padStart(2, "0");
   const instant = new Date(`${cycleDate}T${hour}:00:00Z`);
-  return new Intl.DateTimeFormat("en-GB", {
+  // ALBANIAN-2: Albanian month names ("15 nëntor 2026").
+  return new Intl.DateTimeFormat("sq", {
     timeZone: PAYOUT_CYCLE_TIMEZONE,
     day: "numeric",
     month: "long",

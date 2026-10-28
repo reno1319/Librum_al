@@ -73,12 +73,12 @@ function hasValidCookie(request: NextRequest, key: string): boolean {
 }
 
 const LOCKED_PAGE_HTML = `<!doctype html>
-<html lang="en">
+<html lang="sq">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Librum is under construction</title>
+<title>Librum është në ndërtim</title>
 <style>
   body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
     background: #f7f3ea; color: #1c2420; font-family: Georgia, "Times New Roman", serif; }
@@ -91,8 +91,7 @@ const LOCKED_PAGE_HTML = `<!doctype html>
 <body>
 <main>
 <h1>Librum</h1>
-<p>Our site is under construction. We open soon.</p>
-<p lang="sq">Librum po ndërtohet. Hapemi së shpejti.</p>
+<p>Faqja jonë është në ndërtim. Hapemi së shpejti.</p>
 <p><a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a></p>
 </main>
 </body>

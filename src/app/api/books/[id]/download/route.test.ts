@@ -276,7 +276,7 @@ describe("GET /api/books/[id]/download", () => {
 
       expect(response.status).toBe(403);
       const body = await response.json();
-      expect(body.error).toMatch(/password/i);
+      expect(body.error).toMatch(/fjalëkalim/i);
       expect(mockCreateClient).not.toHaveBeenCalled();
       expect(mockCreateAdminClient).not.toHaveBeenCalled();
       expect(mockWatermarkEpub).not.toHaveBeenCalled();

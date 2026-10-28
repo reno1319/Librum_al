@@ -9,6 +9,7 @@ import {
   isOwnBookManuscriptPath,
 } from "@/lib/book-storage-path";
 import { readDownloadFilePath } from "@/lib/book-reviews";
+import { downloadFileName } from "@/lib/download-file-name";
 
 // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the exact row this route may act
 // on. `id` and `author_id` come back from the database with the path so
@@ -73,7 +74,7 @@ export async function GET(
   const cookieStore = await cookies();
   if (isRecoverySessionActive(cookieStore)) {
     return NextResponse.json(
-      { error: "Finish resetting your password before downloading." },
+      { error: "Përfundoni ndryshimin e fjalëkalimit para se të shkarkoni." },
       { status: 403 },
     );
   }
@@ -243,7 +244,7 @@ export async function GET(
     }
   }
 
-  const fileName = `${book.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.epub`;
+  const fileName = downloadFileName(book.title);
 
   return new NextResponse(new Uint8Array(fileBytes), {
     headers: {

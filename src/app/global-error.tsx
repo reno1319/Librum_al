@@ -42,7 +42,7 @@ export default function GlobalError({
   }, [error]);
 
   return (
-    <html lang="en">
+    <html lang="sq">
       <body
         style={{
           margin: 0,
@@ -68,13 +68,13 @@ export default function GlobalError({
               color: "#6b6b6b",
             }}
           >
-            Error
+            Gabim
           </p>
           <h1 style={{ marginTop: "0.5rem", fontSize: "1.75rem", fontWeight: 600 }}>
-            Something went wrong
+            Diçka shkoi keq
           </h1>
           <p style={{ marginTop: "0.75rem", color: "#6b6b6b" }}>
-            We couldn&apos;t load Librum. Please try again.
+            Librum nuk u hap dot. Ju lutemi provoni përsëri.
           </p>
           <div
             style={{
@@ -99,14 +99,14 @@ export default function GlobalError({
                 cursor: "pointer",
               }}
             >
-              Try again
+              Provoni përsëri
             </button>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- deliberate: this file's entire premise is that the root layout (and everything Next's client-side router depends on) may itself have failed, so the recovery link stays a plain anchor rather than next/link. */}
             <a
               href="/"
               style={{ fontSize: "0.875rem", color: "#6b6b6b", textDecoration: "underline" }}
             >
-              Go home
+              Shkoni te faqja kryesore
             </a>
           </div>
         </div>

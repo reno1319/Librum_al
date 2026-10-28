@@ -75,19 +75,19 @@ describe("computeNextPayoutCycleDate", () => {
 
 describe("formatPayoutCycleDate", () => {
   it("winter (CET, UTC+1): displayed day remains the 5th", () => {
-    expect(formatPayoutCycleDate("2026-01-05")).toBe("5 January 2026");
+    expect(formatPayoutCycleDate("2026-01-05")).toBe("5 janar 2026");
   });
 
   it("summer (CEST, UTC+2): displayed day remains the 5th", () => {
-    expect(formatPayoutCycleDate("2026-07-05")).toBe("5 July 2026");
+    expect(formatPayoutCycleDate("2026-07-05")).toBe("5 korrik 2026");
   });
 
   it("December", () => {
-    expect(formatPayoutCycleDate("2026-12-05")).toBe("5 December 2026");
+    expect(formatPayoutCycleDate("2026-12-05")).toBe("5 dhjetor 2026");
   });
 
   it("leap-year February", () => {
-    expect(formatPayoutCycleDate("2028-02-05")).toBe("5 February 2028");
+    expect(formatPayoutCycleDate("2028-02-05")).toBe("5 shkurt 2028");
   });
 
   it("never depends on server-local timezone -- explicit Europe/Tirane regardless of TZ env", () => {
@@ -97,6 +97,6 @@ describe("formatPayoutCycleDate", () => {
     // the source itself never being changed to rely on the default
     // locale/timezone.
     const result = formatPayoutCycleDate("2026-06-05");
-    expect(result).toBe("5 June 2026");
+    expect(result).toBe("5 qershor 2026");
   });
 });

@@ -32,10 +32,12 @@ const libreCaslonText = Libre_Caslon_Text({
 // as-is without the template appending a redundant second "| Librum".
 export const metadata: Metadata = {
   title: {
-    default: "Librum — self-publish your ebooks",
+    default: "Librum — botoni librat tuaj elektronikë",
     template: "%s | Librum",
   },
-  description: "A self-publishing platform for digital ebooks.",
+  description: "Platformë shqiptare për botimin dhe shitjen e librave elektronikë.",
+  // ALBANIAN-2: the whole public site is Albanian (Renato 10-28).
+  openGraph: { locale: "sq_AL" },
 };
 
 // ADMIN-1A.5 FINAL PRE-COMMIT ADMIN LAYOUT CORRECTION: SiteHeader/
@@ -58,7 +60,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
+      lang="sq"
       className={`${libreFranklin.variable} ${geistMono.variable} ${libreCaslonText.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">{children}</body>

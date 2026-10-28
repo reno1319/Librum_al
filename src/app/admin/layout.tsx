@@ -17,5 +17,14 @@
 // or an AdminShell wrap back into this file -- that logic belongs in
 // admin/(protected)/layout.tsx now, exactly once.
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  // ALBANIAN-2 (Renato 10-28, "D b"): admin stays English while the
+  // public site is Albanian. There is one root <html lang="sq">, so the
+  // admin tree says so on its own wrapper; `display: contents` keeps
+  // the wrapper out of the layout (admin pages still sit directly in the
+  // root body's flex column).
+  return (
+    <div lang="en" className="contents">
+      {children}
+    </div>
+  );
 }
