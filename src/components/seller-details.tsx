@@ -8,13 +8,13 @@ export function SellerDetailsBlock({ seller = SELLER }: { seller?: SellerDetails
   }
   return (
     <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-      <dt className="text-muted">Company</dt>
+      <dt className="text-muted">Kompania</dt>
       <dd>{seller.name}</dd>
       <dt className="text-muted">NIPT</dt>
       <dd>{seller.nipt}</dd>
-      <dt className="text-muted">Address</dt>
+      <dt className="text-muted">Adresa</dt>
       <dd>{seller.address}</dd>
-      <dt className="text-muted">Phone</dt>
+      <dt className="text-muted">Telefoni</dt>
       <dd>{seller.phone}</dd>
     </dl>
   );

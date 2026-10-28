@@ -33,8 +33,8 @@ describe("TRUST PACK 6: WhatsApp contact, once a number is filled in", () => {
 
   it("Privacy names WhatsApp in the processors, messages and retention", () => {
     const text = toText(renderToStaticMarkup(PrivacyPage()));
-    expect(text).toContain("WhatsApp (Meta) — if you message us on WhatsApp, WhatsApp handles that chat, and we see your phone number and WhatsApp name.");
-    expect(text).toContain("the emails and WhatsApp messages you send us and our replies.");
-    expect(text).toContain("Emails and WhatsApp chats with us: up to 2 years after your last message.");
+    expect(text).toContain("WhatsApp (Meta) — nëse na shkruani në WhatsApp, bisedën e trajton WhatsApp, dhe ne shohim numrin tuaj të telefonit dhe emrin tuaj në WhatsApp.");
+    expect(text).toContain("emailet dhe mesazhet në WhatsApp që na dërgoni dhe përgjigjet tona.");
+    expect(text).toContain("Emailet dhe bisedat në WhatsApp me ne: deri në 2 vjet pas mesazhit tuaj të fundit.");
   });
 });

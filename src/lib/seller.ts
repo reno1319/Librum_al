@@ -19,7 +19,7 @@ export const SELLER: SellerDetails = {
 };
 
 export const SELLER_PENDING_TEXT =
-  "Librum's company details (registered name, NIPT, address and phone number) will be added here once the company's registration is complete.";
+  "Të dhënat e kompanisë Librum (emri i regjistruar, NIPT-i, adresa dhe numri i telefonit) do të shtohen këtu sapo të përfundojë regjistrimi i kompanisë.";
 
 // All four or nothing: a half-filled block would look like an error to
 // a reader and to POK's review.

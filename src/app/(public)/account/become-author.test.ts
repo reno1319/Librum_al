@@ -473,10 +473,10 @@ describe("becomeAuthor: AUTHOR-AGE-1 18+ tick", () => {
     expect(ageCalls[0].id).toBe(USER_ID);
     expect(Object.keys(ageCalls[0].attributes)).toEqual(["app_metadata"]);
     const meta = ageCalls[0].attributes.app_metadata ?? {};
-    expect(meta.author_age_statement_version).toBe("author-age-v1");
+    expect(meta.author_age_statement_version).toBe("author-age-v2");
     expect(Number.isNaN(Date.parse(String(meta.author_age_confirmed_at)))).toBe(false);
     // SECURITY-9A: the same write records the Terms.
-    expect(meta.terms_version).toBe("terms-2026-10");
+    expect(meta.terms_version).toBe("terms-sq-1");
     expect(meta.terms_accepted_at).toBe(meta.author_age_confirmed_at);
     expect(order).toEqual(["age", "role"]);
   });

@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import { SellerDetailsBlock } from "@/components/seller-details";
+import { POLICY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Refund Policy",
-  description: "When you can get your money back for a Librum ebook, and how to ask.",
+  title: "Politika e rimbursimit",
+  description: "Kur mund t'i merrni paratë mbrapsht për një libër elektronik të Librum, dhe si ta kërkoni.",
 };
 
 // REFUND POLICY (Renato, 10-19: refunds for problems, reply within 5
@@ -20,130 +21,132 @@ export const metadata: Metadata = {
 // book in them was downloaded (3. a), and the company details from
 // src/lib/seller.ts (4. a). "Downloaded" is read from the download log
 // of pipeline item 3, and the checkout agreement ships with the live
-// POK build; buying stays off until both exist (2. a). The date must
-// match the month this goes live.
+// POK build; buying stays off until both exist (2. a).
+//
+// ALBANIAN-14 (Renato 10-28: 1. a, 3. b, 4. a): the Albanian text is the
+// only one, sentence for sentence; the date comes from
+// src/lib/policy-dates.ts and is set to the release day.
 export default function RefundsPage() {
   return (
     <main className="flex-1">
       <PageBand
-        eyebrow="Terms and Privacy"
-        title="Refund Policy"
-        lead="This page explains when you can get your money back for an ebook bought on Librum."
+        eyebrow="Kushtet dhe privatësia"
+        title="Politika e rimbursimit"
+        lead="Kjo faqe shpjegon kur mund t'i merrni paratë mbrapsht për një libër elektronik të blerë në Librum."
       />
 
       <div className={SECTION_CONTAINER}>
         <div className="max-w-2xl">
-          <p className="text-sm text-muted">Last updated: October 2026</p>
+          <p className="text-sm text-muted">{POLICY_LAST_UPDATED_LINE}</p>
 
           <div className="mt-8 flex flex-col gap-8 text-foreground/90">
             <section>
               <h2 className="font-serif text-xl font-normal text-primary">
-                Cancel within 14 days
+                Anulimi brenda 14 ditëve
               </h2>
               <p className="mt-2">
-                You can cancel a purchase for any reason within 14 days of
-                buying it, as long as you haven&apos;t downloaded the book
-                yet.
+                Mund ta anuloni një blerje për çfarëdo arsye brenda 14
+                ditëve nga blerja, për sa kohë nuk e keni shkarkuar ende
+                librin.
               </p>
               <p className="mt-2">
-                Before you pay, you&apos;re asked to agree that the book is
-                delivered to your library straight away and that you lose
-                this right to cancel when you first download it. Your
-                purchase receipt email confirms this.
+                Para se të paguani, ju kërkohet të pranoni që libri
+                dorëzohet menjëherë në bibliotekën tuaj dhe që e humbni këtë
+                të drejtë anulimi kur e shkarkoni për herë të parë. Emaili i
+                konfirmimit të blerjes e përsërit këtë.
               </p>
               <p className="mt-2">
-                A bundle can be cancelled only if none of its books has been
-                downloaded.
+                Një paketë mund të anulohet vetëm nëse asnjë nga librat e
+                saj nuk është shkarkuar.
               </p>
             </section>
 
             <section>
               <h2 className="font-serif text-xl font-normal text-primary">
-                Problems with a book
+                Probleme me një libër
               </h2>
               <p className="mt-2">
-                At any time, including after you&apos;ve downloaded it, we
-                refund a purchase if:
+                Në çdo kohë, edhe pasi ta keni shkarkuar librin, jua
+                rimbursojmë blerjen nëse:
               </p>
               <ul className="mt-2 list-disc pl-5">
                 <li>
-                  the book never appeared in your library, or the download
-                  doesn&apos;t work;
+                  libri nuk u shfaq kurrë në bibliotekën tuaj, ose
+                  shkarkimi nuk funksionon;
                 </li>
                 <li>
-                  the file is damaged or can&apos;t be opened, and we
-                  can&apos;t fix it for you;
+                  skedari është i dëmtuar ose nuk hapet, dhe nuk mund
+                  t&apos;jua rregullojmë;
                 </li>
                 <li>
-                  you were charged twice for the same book, or charged the
-                  wrong amount;
+                  u tarifuat dy herë për të njëjtin libër, ose u tarifuat me
+                  shumë të gabuar;
                 </li>
                 <li>
-                  someone bought it with your card or account without your
-                  permission.
+                  dikush e bleu me kartën ose me llogarinë tuaj pa lejen
+                  tuaj.
                 </li>
               </ul>
-              <p className="mt-2">Tell us as soon as you notice the problem.</p>
+              <p className="mt-2">Na tregoni sapo ta vini re problemin.</p>
               <p className="mt-2">
-                Apart from these problems, we don&apos;t refund a book after
-                you&apos;ve downloaded it. Free books have nothing to refund.
+                Përveç këtyre problemeve, nuk e rimbursojmë një libër pasi ta
+                keni shkarkuar. Për librat falas nuk ka asgjë për
+                t&apos;u rimbursuar.
               </p>
             </section>
 
             <section>
               <h2 className="font-serif text-xl font-normal text-primary">
-                How to ask
+                Si ta kërkoni
               </h2>
               <p className="mt-2">
-                Write to{" "}
+                Na shkruani te{" "}
                 <a href="mailto:support@librum.al" className="text-primary underline">
                   support@librum.al
                 </a>{" "}
-                from your account&apos;s email address, with the title of the
-                book, the date you bought it, and either &quot;I want to
-                cancel&quot; or what went wrong. We reply within 5 working
-                days.
+                nga adresa e emailit e llogarisë suaj, me titullin e librit,
+                datën e blerjes, dhe ose &quot;Dua ta anuloj&quot; ose çfarë
+                shkoi keq. Përgjigjemi brenda 5 ditëve të punës.
               </p>
             </section>
 
             <section>
               <h2 className="font-serif text-xl font-normal text-primary">
-                What happens next
+                Çfarë ndodh më pas
               </h2>
               <p className="mt-2">
-                If you cancel within the 14 days, we send your money back
-                within 14 days of your request. For other refunds, we send it
-                once we approve your request.
+                Nëse anuloni brenda 14 ditëve, jua kthejmë paratë brenda 14
+                ditëve nga kërkesa juaj. Për rimbursimet e tjera, jua
+                kthejmë pasi ta miratojmë kërkesën tuaj.
               </p>
               <p className="mt-2">
-                We return the amount you paid, normally to the card you paid
-                with, through our payment provider POK. Your bank decides how
-                long it takes to show on your statement. Your access to the
-                refunded book or bundle may be removed.
+                Ju kthejmë shumën që paguat, zakonisht në kartën me të cilën
+                paguat, përmes ofruesit tonë të pagesave POK. Sa kohë duhet
+                që shuma të shfaqet në pasqyrën tuaj e vendos banka juaj.
+                Aksesi juaj te libri ose paketa e rimbursuar mund të hiqet.
               </p>
             </section>
 
             <section>
               <h2 className="font-serif text-xl font-normal text-primary">
-                Disputes with your bank
+                Kundërshtimet te banka juaj
               </h2>
               <p className="mt-2">
-                You can also dispute a payment with your bank. Opening a
-                dispute doesn&apos;t remove your access. If the bank decides
-                against the payment, your access to that book may be
-                removed.
+                Mund ta kundërshtoni një pagesë edhe te banka juaj. Hapja e
+                një kundërshtimi nuk jua heq aksesin. Nëse banka vendos
+                kundër pagesës, aksesi juaj te ai libër mund të hiqet.
               </p>
             </section>
 
             <section>
               <h2 className="font-serif text-xl font-normal text-primary">
-                Who sells your books
+                Kush jua shet librat
               </h2>
               <SellerDetailsBlock />
               <p className="mt-2">
-                The full rules are in our{" "}
+                Rregullat e plota janë te{" "}
                 <Link href="/terms" className="text-primary underline">
-                  Terms of Service
+                  Kushtet e përdorimit
                 </Link>
                 .
               </p>
@@ -151,10 +154,10 @@ export default function RefundsPage() {
 
             <section>
               <h2 className="font-serif text-xl font-normal text-primary">
-                Contact
+                Kontakti
               </h2>
               <p className="mt-2">
-                Questions about this policy? Write to{" "}
+                Keni pyetje për këtë politikë? Na shkruani te{" "}
                 <a href="mailto:support@librum.al" className="text-primary underline">
                   support@librum.al
                 </a>
