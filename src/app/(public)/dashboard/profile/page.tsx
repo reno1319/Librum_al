@@ -15,7 +15,7 @@ import type { Metadata } from "next";
 const PUBLIC_AUTHOR_NAME_MAX_LENGTH = 120;
 
 export const metadata: Metadata = {
-  title: "Author profile",
+  title: "Profili i autorit",
 };
 
 export default async function EditProfilePage({
@@ -45,11 +45,11 @@ export default async function EditProfilePage({
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
 
       <div className="mt-2">
-        <PageHeader title="Edit your profile" description="Manage your account and, if you're an author, how you're credited to readers." />
+        <PageHeader title="Ndryshoni profilin" description="Menaxhoni llogarinë tuaj dhe, nëse jeni autor, emrin me të cilin ju njohin lexuesit." />
       </div>
 
       {error && (
@@ -59,13 +59,13 @@ export default async function EditProfilePage({
       )}
       {success && (
         <Alert variant="success" className="mt-4">
-          Profile updated.
+          Profili u përditësua.
         </Alert>
       )}
 
       <form action={updateProfile} className="mt-6 flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">
-          Account name
+          Emri i llogarisë
           <input
             name="displayName"
             type="text"
@@ -90,7 +90,7 @@ export default async function EditProfilePage({
               account posts -- which is a separate identity concept the
               caption must not imply is covered. */}
           <span className="text-sm text-muted">
-            Your account name. Not shown to readers as your author name once you set a public author name below.
+            Emri i llogarisë suaj. Nuk u shfaqet lexuesve si emër autori pasi të vendosni më poshtë emrin publik të autorit.
           </span>
         </label>
 
@@ -101,7 +101,7 @@ export default async function EditProfilePage({
             source of truth updateProfile() itself uses. */}
         {profile?.role === "author" && (
           <label className="flex flex-col gap-1 text-sm">
-            Public author name
+            Emri publik i autorit
             <input
               name="publicAuthorName"
               type="text"
@@ -111,28 +111,28 @@ export default async function EditProfilePage({
               className={formControlClasses}
             />
             <span className="text-sm text-muted">
-              This is the name readers will see on your books and author page.
+              Ky është emri që lexuesit do të shohin te librat tuaj dhe te faqja juaj e autorit.
             </span>
             {/* PEN-NAMES-1: the Public author name is the default pen
                 name; each pen name's own bio, photo and links are what
                 readers see. */}
             <span className="text-sm text-muted">
-              It is also your default pen name. Set the bio, photo and links readers see for each
-              pen name in{" "}
+              Është edhe pseudonimi juaj kryesor. Biografinë, foton dhe lidhjet që shohin lexuesit për çdo
+              pseudonim i vendosni te{" "}
               <Link href="/dashboard/pen-names" className="underline underline-offset-2">
-                Pen names
+                Pseudonimet
               </Link>
               .
             </span>
             <span className="text-sm text-muted">
-              If you publish under a pen name, set it before publishing. The author name may be
-              embedded in your EPUB file.
+              Nëse botoni me pseudonim, vendoseni para publikimit. Emri i autorit mund të
+              futet brenda skedarit tuaj EPUB.
             </span>
           </label>
         )}
 
         <button type="submit" className={buttonClasses("primary", "md", "mt-2")}>
-          Save
+          Ruani
         </button>
       </form>
     </main>

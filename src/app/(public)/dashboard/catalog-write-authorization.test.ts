@@ -829,7 +829,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
     tables.bundles = [];
     tables.bundle_books = [];
     expect(await redirectOf(createBundle(bundleForm("299", "New bundle")))).toBe(
-      "/dashboard/bundles?success=Bundle+created+as+a+draft",
+      "/dashboard/bundles?success=Paketa%20u%20krijua%20si%20draft",
     );
     expect(writes.filter((w) => w.via === "session")).toEqual([]);
     expect(catalogWrites()).toHaveLength(1);
@@ -914,7 +914,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
 
   it("updateBundle: details AND membership in ONE trusted update_bundle_with_membership call", async () => {
     expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")))).toBe(
-      "/dashboard/bundles?success=Bundle+updated",
+      "/dashboard/bundles?success=Paketa%20u%20p%C3%ABrdit%C3%ABsua",
     );
     expect(bundleRow()).toMatchObject({ title: "Bundle, edited", price_all: 299, status: "draft" });
     // No separate bundles update exists any more, on either client.

@@ -557,11 +557,11 @@ describe("author bundle dashboard and edit form (rendered)", () => {
     expect(html).not.toContain("25.00");
   });
 
-  it("the create form takes whole lek in a decimal text field labelled ALL", async () => {
+  it("the create form takes whole lek in a decimal text field labelled in lekë", async () => {
     install({ books: OWN_BOOKS, bundles: [], bundle_books: [], pen_names: [{ id: PEN, name: "Arta Autore", is_default: true, author_id: AUTHOR }] }, AUTHOR);
     const html = await render(BundlesDashboardPage({ searchParams: Promise.resolve({}) }));
 
-    expect(html).toContain("Bundle price (ALL)");
+    expect(html).toContain("Çmimi i paketës (lekë)");
     const input = priceInput(html);
     expect(input).toContain('type="text"');
     expect(input).toContain('inputMode="decimal"');
@@ -590,7 +590,7 @@ describe("author bundle dashboard and edit form (rendered)", () => {
     expect(input).toContain('value=""');
     expect(html).not.toContain("25.00");
     expect(html).not.toContain("2500");
-    expect(html).toContain("Bundle price (ALL)");
+    expect(html).toContain("Çmimi i paketës (lekë)");
     noDollarOrUsd(html);
   });
 

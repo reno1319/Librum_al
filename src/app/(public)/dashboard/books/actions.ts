@@ -184,7 +184,7 @@ function resolveBoundedOptionalText(
     // file now; fieldLabel is always one of this file's own hardcoded
     // call-site labels ("Nëntitulli"/"Botuesi"/"Botimi"), never user input.
     redirect(
-      `${errorPath}?error=${encodeURIComponent(`${fieldLabel} duhet të ketë deri në ${maxLength} shenja`)}`,
+      `${errorPath}?error=${encodeURIComponent(`${fieldLabel} mund të ketë deri në ${maxLength} karaktere`)}`,
     );
   }
   return { present, value };

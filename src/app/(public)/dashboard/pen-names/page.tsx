@@ -20,7 +20,7 @@ import {
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Pen names",
+  title: "Pseudonimet",
 };
 
 // PEN-NAMES-1 (migration 20261019184512): Dashboard > Pen names. Each pen
@@ -67,13 +67,13 @@ export default async function PenNamesPage({
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
 
       <div className="mt-2">
         <PageHeader
-          title="Pen names"
-          description="Each pen name has its own author page with its books. Readers see a bio, photo or links only if you add them."
+          title="Pseudonimet"
+          description="Çdo pseudonim ka faqen e vet të autorit me librat e tij. Lexuesit shohin biografinë, foton ose lidhjet vetëm nëse i shtoni."
         />
       </div>
 
@@ -89,11 +89,11 @@ export default async function PenNamesPage({
       )}
 
       <p className="mt-4 text-sm text-muted">
-        To add a pen name, type a new name in the Pen name box under a book&apos;s title.
+        Për të shtuar një pseudonim, shkruani një emër të ri te kutia Pseudonimi nën titullin e një libri.
       </p>
 
       {(penNames ?? []).length === 0 ? (
-        <EmptyState className="mt-6" description="No pen names yet." />
+        <EmptyState className="mt-6" description="Ende nuk keni asnjë pseudonim." />
       ) : (
         <ul className="mt-6 flex flex-col gap-6">
           {(penNames ?? []).map((penName) => {
@@ -109,13 +109,13 @@ export default async function PenNamesPage({
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h2 className="min-w-0 break-words font-serif text-xl font-normal text-primary">{penName.name}</h2>
                   <p className="text-xs text-muted">
-                    {penName.is_default ? "Default · " : ""}
-                    {count} {count === 1 ? "book" : "books"}
+                    {penName.is_default ? "Kryesori · " : ""}
+                    {count} {count === 1 ? "libër" : "libra"}
                   </p>
                 </div>
                 {penName.is_default && (
                   <p className="mt-1 text-sm text-muted">
-                    Your Public author name, used for books without another pen name.
+                    Emri juaj publik i autorit, që përdoret për librat pa një pseudonim tjetër.
                   </p>
                 )}
                 {used && (
@@ -123,7 +123,7 @@ export default async function PenNamesPage({
                     href={authorPagePath(penName.id)}
                     className="focus-ring mt-1 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
                   >
-                    View author page &rarr;
+                    Shikoni faqen e autorit &rarr;
                   </Link>
                 )}
 
@@ -132,12 +132,12 @@ export default async function PenNamesPage({
                   {photoUrl && (
                     <label className="flex items-center gap-2 text-sm">
                       <input type="checkbox" name="removePhoto" className="focus-ring size-4" />
-                      Remove photo
+                      Hiqeni foton
                     </label>
                   )}
 
                   <label className="flex flex-col gap-1 text-sm">
-                    Name
+                    Emri
                     <input
                       name="name"
                       type="text"
@@ -149,19 +149,19 @@ export default async function PenNamesPage({
                   </label>
 
                   <label className="flex flex-col gap-1 text-sm">
-                    Bio (optional)
+                    Biografia (opsionale)
                     <textarea
                       name="bio"
                       rows={4}
                       maxLength={PEN_NAME_BIO_MAX_LENGTH}
                       defaultValue={penName.bio ?? ""}
-                      placeholder="A few sentences readers see on this pen name's author page."
+                      placeholder="Disa fjali që lexuesit i shohin në faqen e autorit të këtij pseudonimi."
                       className={formControlClasses}
                     />
                   </label>
 
                   <fieldset className="flex flex-col gap-2 text-sm">
-                    <legend className="mb-1">Links (optional, up to {PEN_NAME_MAX_LINKS})</legend>
+                    <legend className="mb-1">Lidhjet (opsionale, deri në {PEN_NAME_MAX_LINKS})</legend>
                     {Array.from({ length: PEN_NAME_MAX_LINKS }, (_, i) => (
                       <input
                         key={i}
@@ -171,17 +171,17 @@ export default async function PenNamesPage({
                         maxLength={PEN_NAME_LINK_MAX_LENGTH}
                         pattern="https://.*"
                         placeholder="https://"
-                        aria-label={`Link ${i + 1}`}
+                        aria-label={`Lidhja ${i + 1}`}
                         defaultValue={links[i] ?? ""}
                         className={formControlClasses}
                       />
                     ))}
-                    <span className="text-muted">Full web addresses starting with https://.</span>
+                    <span className="text-muted">Adresa të plota interneti që fillojnë me https://.</span>
                   </fieldset>
 
                   <div className="flex flex-wrap items-center gap-3">
                     <button type="submit" className={buttonClasses("primary", "md")}>
-                      Save
+                      Ruani
                     </button>
                   </div>
                 </form>
@@ -192,7 +192,7 @@ export default async function PenNamesPage({
                       type="submit"
                       className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
                     >
-                      Delete pen name
+                      Fshini pseudonimin
                     </button>
                   </form>
                 )}

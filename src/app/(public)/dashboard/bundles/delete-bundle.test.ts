@@ -105,8 +105,8 @@ const { isBundleId, isConfirmedBundleDeletion } = await import("@/lib/bundle-del
 
 const UNCONFIRMED_TARGET =
   "/dashboard/bundles?error=" +
-  encodeURIComponent("We could not confirm that the bundle was deleted. Reload this page to check before trying again.");
-const SUCCESS_TARGET = "/dashboard/bundles?success=Bundle+deleted";
+  encodeURIComponent("Nuk mundëm të konfirmojmë që paketa u fshi. Rifreskoni këtë faqe për ta kontrolluar para se të provoni përsëri.");
+const SUCCESS_TARGET = "/dashboard/bundles?success=Paketa%20u%20fshi";
 
 let consoleError: ReturnType<typeof vi.spyOn>;
 

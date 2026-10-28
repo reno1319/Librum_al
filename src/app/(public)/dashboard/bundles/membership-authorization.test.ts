@@ -168,20 +168,20 @@ vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => m
 
 const { createBundle, updateBundle } = await import("./actions");
 
-const CREATE_FAILED = "/dashboard/bundles?error=" + encodeURIComponent("Could not create the bundle. Please try again.");
+const CREATE_FAILED = "/dashboard/bundles?error=" + encodeURIComponent("Paketa nuk u krijua dot. Provoni përsëri.");
 const CREATE_UNCONFIRMED =
   "/dashboard/bundles?error=" +
-  encodeURIComponent("We could not confirm whether the bundle was created. Check your bundles before trying again.");
+  encodeURIComponent("Nuk mundëm të konfirmojmë nëse paketa u krijua. Kontrolloni paketat tuaja para se të provoni përsëri.");
 const EDIT = `/dashboard/bundles/${BUNDLE_ID}/edit?error=`;
-const SAVE_ROLLED_BACK = EDIT + encodeURIComponent("Could not save the bundle, so nothing was changed. Please try again.");
+const SAVE_ROLLED_BACK = EDIT + encodeURIComponent("Paketa nuk u ruajt dot, ndaj nuk ndryshoi asgjë. Provoni përsëri.");
 const SAVE_UNCONFIRMED =
   EDIT +
-  encodeURIComponent("We could not confirm whether your changes were saved. Reload this bundle to check before trying again.");
+  encodeURIComponent("Nuk mundëm të konfirmojmë nëse ndryshimet tuaja u ruajtën. Rifreskoni këtë paketë për ta kontrolluar para se të provoni përsëri.");
 const SAVE_CHANGED =
   EDIT +
   encodeURIComponent("Ky titull ndryshoi ndërsa po e redaktonit, ndaj nuk u ruajt asgjë. Rifreskoni faqen dhe provoni përsëri.");
-const CREATED = "/dashboard/bundles?success=Bundle+created+as+a+draft";
-const UPDATED = "/dashboard/bundles?success=Bundle+updated";
+const CREATED = "/dashboard/bundles?success=Paketa%20u%20krijua%20si%20draft";
+const UPDATED = "/dashboard/bundles?success=Paketa%20u%20p%C3%ABrdit%C3%ABsua";
 
 function form(bookIds: string[] = [BOOK_A, BOOK_B], extra: Record<string, string> = {}): FormData {
   const fd = new FormData();
@@ -379,13 +379,13 @@ describe("createBundle: one trusted call, bound to the server", () => {
     ["maintenance", () => vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active"), () => form(), "/dashboard/bundles?error="],
     ["recovery session", () => (recoveryActive = true), () => form(), "/reset-password"],
     ["signed out", () => (signedIn = false), () => form(), "/login"],
-    ["missing title", () => undefined, () => form([BOOK_A, BOOK_B], { title: "  " }), "/dashboard/bundles?error=Please+fill+in+every+field"],
+    ["missing title", () => undefined, () => form([BOOK_A, BOOK_B], { title: "  " }), "/dashboard/bundles?error=Plot%C3%ABsoni%20%C3%A7do%20fush%C3%AB"],
     ["invalid price", () => undefined, () => form([BOOK_A, BOOK_B], { price: "5" }), "/dashboard/bundles?error="],
-    ["one book", () => undefined, () => form([BOOK_A]), "/dashboard/bundles?error=Choose+at+least+2+books"],
-    ["no books", () => undefined, () => form([]), "/dashboard/bundles?error=Choose+at+least+2+books"],
-    ["duplicate book ids", () => undefined, () => form([BOOK_A, BOOK_A]), "/dashboard/bundles?error=Choose+only+your+own+published+books"],
-    ["a duplicate among three", () => undefined, () => form([BOOK_A, BOOK_B, BOOK_A]), "/dashboard/bundles?error=Choose+only+your+own+published+books"],
-    ["another author's or unpublished book", () => (ownPublishedBooks = [BOOK_A]), () => form([BOOK_A, BOOK_B]), "/dashboard/bundles?error=Choose+only+your+own+published+books"],
+    ["one book", () => undefined, () => form([BOOK_A]), "/dashboard/bundles?error=Zgjidhni%20t%C3%AB%20pakt%C3%ABn%202%20libra"],
+    ["no books", () => undefined, () => form([]), "/dashboard/bundles?error=Zgjidhni%20t%C3%AB%20pakt%C3%ABn%202%20libra"],
+    ["duplicate book ids", () => undefined, () => form([BOOK_A, BOOK_A]), "/dashboard/bundles?error=Zgjidhni%20vet%C3%ABm%20librat%20tuaj%20t%C3%AB%20publikuar"],
+    ["a duplicate among three", () => undefined, () => form([BOOK_A, BOOK_B, BOOK_A]), "/dashboard/bundles?error=Zgjidhni%20vet%C3%ABm%20librat%20tuaj%20t%C3%AB%20publikuar"],
+    ["another author's or unpublished book", () => (ownPublishedBooks = [BOOK_A]), () => form([BOOK_A, BOOK_B]), "/dashboard/bundles?error=Zgjidhni%20vet%C3%ABm%20librat%20tuaj%20t%C3%AB%20publikuar"],
   ];
 
   it.each(refusals)("%s: refused before privileged authority exists", async (_label, arrange, makeForm, target) => {
@@ -536,12 +536,12 @@ describe("updateBundle: the owned bundle, the authenticated author, ONE atomic s
     ["recovery session", () => (recoveryActive = true), () => form(), "/reset-password"],
     ["signed out", () => (signedIn = false), () => form(), "/login"],
     ["not the author's bundle", () => (existingBundle = null), () => form(), "/dashboard/bundles"],
-    ["missing title", () => undefined, () => form([BOOK_A, BOOK_B], { title: "" }), "Please+fill+in+every+field"],
+    ["missing title", () => undefined, () => form([BOOK_A, BOOK_B], { title: "" }), "Plot%C3%ABsoni%20%C3%A7do%20fush%C3%AB"],
     ["invalid price", () => undefined, () => form([BOOK_A, BOOK_B], { price: "1e3" }), `/dashboard/bundles/${BUNDLE_ID}/edit?error=`],
     ["paid repricing of a published bundle while closed", () => (existingBundle = { id: BUNDLE_ID, status: "published", price_all: 0 }), () => form([BOOK_A, BOOK_B], { price: "299" }), `/dashboard/bundles/${BUNDLE_ID}/edit?error=`],
-    ["one book", () => undefined, () => form([BOOK_A]), "Choose+at+least+2+books"],
-    ["duplicate book ids", () => undefined, () => form([BOOK_B, BOOK_B]), "Choose+only+your+own+published+books"],
-    ["another author's or unpublished book", () => (ownPublishedBooks = [BOOK_B]), () => form([BOOK_A, BOOK_B]), "Choose+only+your+own+published+books"],
+    ["one book", () => undefined, () => form([BOOK_A]), "Zgjidhni%20t%C3%AB%20pakt%C3%ABn%202%20libra"],
+    ["duplicate book ids", () => undefined, () => form([BOOK_B, BOOK_B]), "Zgjidhni%20vet%C3%ABm%20librat%20tuaj%20t%C3%AB%20publikuar"],
+    ["another author's or unpublished book", () => (ownPublishedBooks = [BOOK_B]), () => form([BOOK_A, BOOK_B]), "Zgjidhni%20vet%C3%ABm%20librat%20tuaj%20t%C3%AB%20publikuar"],
   ];
 
   it.each(refusals)("%s: refused before privileged authority exists", async (_label, arrange, makeForm, fragment) => {

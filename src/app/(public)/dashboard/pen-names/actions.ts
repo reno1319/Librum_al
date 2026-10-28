@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { groupAllDigits } from "@/lib/catalog-price";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
 import { IMAGE_CACHE_CONTROL_SECONDS, PEN_NAME_PHOTO_SIZE, shrinkImageToJpeg } from "@/lib/cover-resize";
 import { AVATARS_BUCKET } from "@/lib/avatar-path";
@@ -31,10 +32,10 @@ import {
 //     name, through the same writer, filtered by id AND author.
 
 const PAGE = "/dashboard/pen-names";
-const SAVE_ERROR = "We couldn't save this pen name. Please try again.";
-const PHOTO_ERROR = "We couldn't save the photo. Please try again.";
-const DELETE_ERROR = "We couldn't delete this pen name. Please try again.";
-const IN_USE_MESSAGE = "This pen name is still used by a book, series or bundle, so it can't be deleted.";
+const SAVE_ERROR = "Pseudonimi nuk u ruajt dot. Provoni përsëri.";
+const PHOTO_ERROR = "Fotoja nuk u ruajt dot. Provoni përsëri.";
+const DELETE_ERROR = "Pseudonimi nuk u fshi dot. Provoni përsëri.";
+const IN_USE_MESSAGE = "Ky pseudonim përdoret ende nga një libër, seri ose paketë, ndaj nuk mund të fshihet.";
 // Same private staging area and key shape AvatarField uses.
 const STAGING_BUCKET = "manuscripts";
 
@@ -73,22 +74,22 @@ async function readStagedPhoto(
   tempPath: string,
 ) {
   if (!tempPath.startsWith(`${userId}/tmp/avatar/`) || !/\.(jpe?g|png)$/i.test(tempPath) || tempPath.includes("..")) {
-    fail("That photo reference is no longer valid. Please choose your file again.");
+    fail("Kjo foto nuk është më e vlefshme. Zgjidheni skedarin përsëri.");
   }
   const { data, error } = await supabase.storage.from(STAGING_BUCKET).download(tempPath);
   if (error || !data) {
     console.error("pen names: staged photo download failed:", error);
-    fail("Could not read your uploaded photo. Please try again.");
+    fail("Fotoja e ngarkuar nuk u lexua dot. Provoni përsëri.");
   }
   const bytes = Buffer.from(await data.arrayBuffer());
-  if (bytes.length > PEN_NAME_PHOTO_MAX_BYTES) fail("This image is larger than the 5 MB limit.");
+  if (bytes.length > PEN_NAME_PHOTO_MAX_BYTES) fail("Ky imazh e kalon kufirin prej 5 MB.");
   const kind = await detectCoverImageKind(
     new File([new Uint8Array(bytes)], "pen-name", { type: "application/octet-stream" }),
   );
-  if (!kind) fail("That doesn't look like a valid JPEG or PNG image.");
+  if (!kind) fail("Ky nuk duket si imazh i vlefshëm JPEG ose PNG.");
   // COVERS-1: the stored photo is always the shrunk JPEG.
   const shrunk = await shrinkImageToJpeg(bytes, PEN_NAME_PHOTO_SIZE);
-  if (!shrunk) fail("Could not read your uploaded photo. Please try again.");
+  if (!shrunk) fail("Fotoja e ngarkuar nuk u lexua dot. Provoni përsëri.");
   const { extension, contentType } = resolveVerifiedCoverStorageDetails("jpeg");
   return { bytes: shrunk, extension, contentType };
 }
@@ -100,7 +101,7 @@ export async function updatePenName(penNameId: string, formData: FormData) {
   if (!name.ok) fail(name.message);
   const bio = String(formData.get("bio") ?? "").trim();
   if (bio.length > PEN_NAME_BIO_MAX_LENGTH) {
-    fail(`The bio must be ${PEN_NAME_BIO_MAX_LENGTH} characters or fewer.`);
+    fail(`Biografia mund të ketë deri në ${groupAllDigits(PEN_NAME_BIO_MAX_LENGTH)} karaktere.`);
   }
   const links = parsePenNameLinks(formData.getAll("links"));
   if (!links.ok) fail(links.message);
@@ -178,12 +179,12 @@ export async function updatePenName(penNameId: string, formData: FormData) {
 
   revalidatePath(PAGE);
   revalidatePath(authorPagePath(row.id));
-  redirect(`${PAGE}?success=${encodeURIComponent("Pen name saved.")}`);
+  redirect(`${PAGE}?success=${encodeURIComponent("Pseudonimi u ruajt.")}`);
 }
 
 export async function deletePenName(penNameId: string) {
   const { supabase, user, row } = await requireOwnPenName(penNameId);
-  if (row.is_default) fail("Your default pen name can't be deleted. It is your Public author name.");
+  if (row.is_default) fail("Pseudonimi kryesor nuk mund të fshihet. Është emri juaj publik i autorit.");
 
   // "Unused" = no book (any status), series or bundle. The foreign keys
   // refuse deleting a used pen name anyway; this gives the clear message.
@@ -215,5 +216,5 @@ export async function deletePenName(penNameId: string) {
   }
 
   revalidatePath(PAGE);
-  redirect(`${PAGE}?success=${encodeURIComponent("Pen name deleted.")}`);
+  redirect(`${PAGE}?success=${encodeURIComponent("Pseudonimi u fshi.")}`);
 }

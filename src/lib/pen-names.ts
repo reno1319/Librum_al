@@ -83,15 +83,15 @@ export function parsePenNameLinks(values: readonly unknown[]): PenNameLinksResul
     .map((value) => (typeof value === "string" ? value.trim() : ""))
     .filter((value) => value !== "");
   if (links.length > PEN_NAME_MAX_LINKS) {
-    return { ok: false, message: `Add at most ${PEN_NAME_MAX_LINKS} links.` };
+    return { ok: false, message: `Shtoni deri në ${PEN_NAME_MAX_LINKS} lidhje.` };
   }
   for (const link of links) {
     if (!isAllowedPenNameLink(link)) {
-      return { ok: false, message: "Each link must be a full web address starting with https://." };
+      return { ok: false, message: "Çdo lidhje duhet të jetë një adresë e plotë interneti që fillon me https://." };
     }
   }
   if (new Set(links).size !== links.length) {
-    return { ok: false, message: "Each link can be added only once." };
+    return { ok: false, message: "Çdo lidhje mund të shtohet vetëm një herë." };
   }
   return { ok: true, links };
 }
@@ -100,9 +100,9 @@ export type PenNameNameResult = { ok: true; name: string } | { ok: false; messag
 
 export function parsePenNameName(value: unknown): PenNameNameResult {
   const name = typeof value === "string" ? value.trim() : "";
-  if (!name) return { ok: false, message: "A pen name can't be empty." };
+  if (!name) return { ok: false, message: "Pseudonimi nuk mund të jetë bosh." };
   if (name.length > PEN_NAME_MAX_LENGTH) {
-    return { ok: false, message: `A pen name must be ${PEN_NAME_MAX_LENGTH} characters or fewer.` };
+    return { ok: false, message: `Pseudonimi mund të ketë deri në ${PEN_NAME_MAX_LENGTH} karaktere.` };
   }
   return { ok: true, name };
 }
@@ -112,11 +112,11 @@ export function parsePenNameName(value: unknown): PenNameNameResult {
 // unique violation, 23505, is mapped only where the caller knows it is
 // the pen name's own name index).
 export const PEN_NAME_MIXED_MESSAGE =
-  "A series or bundle holds books of one pen name only. Choose books under the same pen name.";
+  "Një seri ose paketë mban vetëm libra me të njëjtin pseudonim. Zgjidhni libra me të njëjtin pseudonim.";
 export const PEN_NAME_LOCKED_MESSAGE =
-  "This book is in a series or bundle. Take it out first, then change its pen name.";
+  "Ky libër është në një seri ose paketë. Hiqeni prej saj më parë, pastaj ndryshojini pseudonimin.";
 export const PEN_NAME_TAKEN_MESSAGE =
-  "You already use this name as one of your pen names. Choose another name, or rename that pen name first.";
+  "Këtë emër e përdorni tashmë si një nga pseudonimet tuaja. Zgjidhni një emër tjetër, ose ndryshoni më parë emrin e atij pseudonimi.";
 
 export function penNameErrorMessage(error: { code?: string | null } | null | undefined): string | null {
   switch (error?.code) {
