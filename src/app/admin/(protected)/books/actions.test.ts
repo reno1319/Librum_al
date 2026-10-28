@@ -134,7 +134,7 @@ describe("unpublishBookAsStaff", () => {
     });
     expect(mockSendEmail).toHaveBeenCalledWith("ana@example.com", {
       title: "Kënga e fundit",
-      reasonLabel: "Copyright complaint",
+      reasonLabel: "Ankesë për të drejtën e autorit",
       message: "Send proof.",
       bundleTitles: ["Set A"],
     });
@@ -299,6 +299,8 @@ describe("approveBookReviewAsStaff", () => {
     });
     expect(mockNewBookEmails).toHaveBeenCalledWith(expect.anything(), { bookId: BOOK_ID, authorId: AUTHOR_ID });
     expect(mockApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID });
+    // ALBANIAN-12: the author's own email goes before the follower batches.
+    expect(mockApprovedEmail.mock.invocationCallOrder[0]).toBeLessThan(mockNewBookEmails.mock.invocationCallOrder[0]);
     expect(mockRetention).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
       authorId: AUTHOR_ID,
       bookId: BOOK_ID,
@@ -386,7 +388,7 @@ describe("sendBackBookReviewAsStaff", () => {
     });
     expect(mockSentBackEmail).toHaveBeenCalledWith("ana@example.com", {
       title: "Kënga e fundit",
-      reasonLabel: "Wrong or broken file",
+      reasonLabel: "Skedar i gabuar ose i dëmtuar",
       message: "Fix the file.",
     });
     expect(mockRetention).toHaveBeenCalledWith(expect.anything(), expect.anything(), {

@@ -8,7 +8,7 @@ import { requireStaff } from "@/lib/staff";
 import { sendBookApprovedEmail, sendBookSentBackEmail, sendBookTakedownEmail, sendNewBookEmails } from "@/lib/email";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
-import { takedownReasonLabel } from "@/lib/takedown-reasons";
+import { authorTakedownReasonLabel } from "@/lib/takedown-reasons";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { checkPublishGate } from "@/lib/publish-readiness";
 import { removeUnretainedManuscripts } from "@/lib/book-reviews";
@@ -163,7 +163,7 @@ async function notifyAuthorAndRevalidate(
         const titleById = new Map((bundles ?? []).map((b) => [b.id, b.title]));
         await sendBookTakedownEmail(email, {
           title: takedown.book_title,
-          reasonLabel: takedownReasonLabel(takedown.reason),
+          reasonLabel: authorTakedownReasonLabel(takedown.reason),
           message: takedown.message_to_author,
           bundleTitles: bundleIds.map((id) => titleById.get(id)).filter((t): t is string => !!t),
         });
@@ -297,6 +297,18 @@ export async function approveBookReviewAsStaff(formData: FormData) {
     redirect(withQuery(bookPath, "error", mapReviewRpcError(error)));
   }
 
+  // ALBANIAN-12: the author's own email goes first, so the follower
+  // batches (which pause between batches) can't hold it up.
+  try {
+    const { data: author } = await admin.auth.admin.getUserById(book.author_id);
+    const email = author?.user?.email;
+    if (email) await sendBookApprovedEmail(email, { title: book.title, bookId: book.id });
+  } catch (followUpError) {
+    console.error("approveBookReviewAsStaff: the author email failed after a successful approval", {
+      bookId: book.id,
+      error: followUpError,
+    });
+  }
   try {
     // J: followers hear only about a FIRST publication (unchanged rule).
     if (firstPublication === true) {
@@ -304,16 +316,6 @@ export async function approveBookReviewAsStaff(formData: FormData) {
     }
   } catch (followUpError) {
     console.error("approveBookReviewAsStaff: the followers email failed after a successful approval", {
-      bookId: book.id,
-      error: followUpError,
-    });
-  }
-  try {
-    const { data: author } = await admin.auth.admin.getUserById(book.author_id);
-    const email = author?.user?.email;
-    if (email) await sendBookApprovedEmail(email, { title: book.title, bookId: book.id });
-  } catch (followUpError) {
-    console.error("approveBookReviewAsStaff: the author email failed after a successful approval", {
       bookId: book.id,
       error: followUpError,
     });
@@ -390,7 +392,7 @@ export async function sendBackBookReviewAsStaff(formData: FormData) {
       if (email) {
         await sendBookSentBackEmail(email, {
           title: review.book_title,
-          reasonLabel: takedownReasonLabel(review.reason),
+          reasonLabel: authorTakedownReasonLabel(review.reason),
           message: review.message_to_author,
         });
       }
