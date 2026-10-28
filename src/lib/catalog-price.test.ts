@@ -53,7 +53,7 @@ describe("parseCatalogPriceAll: accepted paid forms", () => {
   });
 
   // Owner-confirmed normalization: leading zeros on a paid amount are
-  // accepted, not rejected -- "099" and "00099" both mean 99 ALL, the
+  // accepted, not rejected -- "099" and "00099" both mean 99 lekë, the
   // same value "99" alone means.
   it("accepts and normalizes zero-prefixed paid forms (099, 00099, with dot/comma zero-decimals)", () => {
     expect(parseCatalogPriceAll("099")).toEqual({ ok: true, priceAll: 99 });
@@ -154,7 +154,7 @@ describe("parseCatalogPriceAll: rejected", () => {
     expect(parseCatalogPriceAll("1e2")).toEqual({ ok: false });
   });
 
-  // FIX1 (X5): the thousands dot the site itself displays ("1.500 ALL")
+  // FIX1 (X5): the thousands dot the site itself displays ("1.500 lekë")
   // and a thousands space are accepted in groups of three; a comma is
   // never a grouping separator, and "1.50" stays a (refused) decimal.
   it("accepts a thousands dot in groups of three", () => {
@@ -312,23 +312,23 @@ describe("classifyCatalogPrice: domain enforcement", () => {
 // thousands separator, always exactly two display decimals.
 describe("formatCatalogPriceAll: formatting and domain enforcement", () => {
   it("formats 0 as 0 ALL", () => {
-    expect(formatCatalogPriceAll(0)).toBe("0 ALL");
+    expect(formatCatalogPriceAll(0)).toBe("0 lekë");
   });
 
   it("formats 99 as 99 ALL", () => {
-    expect(formatCatalogPriceAll(99)).toBe("99 ALL");
+    expect(formatCatalogPriceAll(99)).toBe("99 lekë");
   });
 
   it("formats 199 as 199 ALL", () => {
-    expect(formatCatalogPriceAll(199)).toBe("199 ALL");
+    expect(formatCatalogPriceAll(199)).toBe("199 lekë");
   });
 
   it("formats 1000 as 1.000 ALL", () => {
-    expect(formatCatalogPriceAll(1000)).toBe("1.000 ALL");
+    expect(formatCatalogPriceAll(1000)).toBe("1.000 lekë");
   });
 
   it("formats the maximum (100000) as 100.000 ALL", () => {
-    expect(formatCatalogPriceAll(100_000)).toBe("100.000 ALL");
+    expect(formatCatalogPriceAll(100_000)).toBe("100.000 lekë");
   });
 
   it("throws for values below the floor, above the maximum, negative, fractional, NaN, Infinity, or unsafe integers", () => {
@@ -347,7 +347,7 @@ describe("formatCatalogPriceAll: formatting and domain enforcement", () => {
   // validator, not the generic negative-value case above.
   it("throws for numeric negative zero, while positive zero still formats as 0 ALL", () => {
     expect(() => formatCatalogPriceAll(-0)).toThrow();
-    expect(formatCatalogPriceAll(0)).toBe("0 ALL");
+    expect(formatCatalogPriceAll(0)).toBe("0 lekë");
   });
 
   it("never includes the raw invalid value in the thrown message", () => {
@@ -499,10 +499,10 @@ describe("formatCatalogPriceLabel", () => {
   });
 
   it("a paid price reads as lek, in the Albanian convention", () => {
-    expect(formatCatalogPriceLabel(99)).toBe("99 ALL");
-    expect(formatCatalogPriceLabel(199)).toBe("199 ALL");
-    expect(formatCatalogPriceLabel(1000)).toBe("1.000 ALL");
-    expect(formatCatalogPriceLabel(100000)).toBe("100.000 ALL");
+    expect(formatCatalogPriceLabel(99)).toBe("99 lekë");
+    expect(formatCatalogPriceLabel(199)).toBe("199 lekë");
+    expect(formatCatalogPriceLabel(1000)).toBe("1.000 lekë");
+    expect(formatCatalogPriceLabel(100000)).toBe("100.000 lekë");
   });
 
   it("never renders a dollar sign, for any input in or out of the domain", () => {
@@ -548,11 +548,11 @@ describe("formatCatalogAmountAll", () => {
   });
 
   it("formats sums and differences outside the single-price domain", () => {
-    expect(formatCatalogAmountAll(1)).toBe("1 ALL");
-    expect(formatCatalogAmountAll(71)).toBe("71 ALL");
-    expect(formatCatalogAmountAll(100_001)).toBe("100.001 ALL");
-    expect(formatCatalogAmountAll(250_000)).toBe("250.000 ALL");
-    expect(formatCatalogAmountAll(100_000_000)).toBe("100.000.000 ALL");
+    expect(formatCatalogAmountAll(1)).toBe("1 lek");
+    expect(formatCatalogAmountAll(71)).toBe("71 lekë");
+    expect(formatCatalogAmountAll(100_001)).toBe("100.001 lekë");
+    expect(formatCatalogAmountAll(250_000)).toBe("250.000 lekë");
+    expect(formatCatalogAmountAll(100_000_000)).toBe("100.000.000 lekë");
   });
 
   it("rejects anything that is not a non-negative safe integer", () => {

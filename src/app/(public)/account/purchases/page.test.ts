@@ -134,7 +134,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
     expect(rpc).toHaveBeenCalledWith("list_purchase_currencies", { p_purchase_ids: ["p1"] });
     expect(html).toContain("· USD 9.99");
     expect(html).toContain('Total spent: <span><span class="font-semibold text-primary">USD 9.99</span></span>');
-    expect(html).not.toContain("9,99 ALL");
+    expect(html).not.toContain("9,99 lekë");
     expect(html).not.toMatch(/\$\d/);
   });
 
@@ -143,7 +143,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       purchases: [purchaseRow("p2", "b2", 17910, "pok_order_1", RECENT)],
       currencies: [{ purchase_id: "p2", currency_state: "resolved", currency: "ALL" }],
     });
-    expect(html).toContain("· 179,10 ALL");
+    expect(html).toContain("· 179,10 lekë");
     expect(html).not.toContain("USD 179.10");
     expect(html).not.toMatch(/\$\d/);
   });
@@ -160,9 +160,9 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       ],
     });
     expect(html).toContain("· USD 9.99");
-    expect(html).toContain("· 179,10 ALL");
+    expect(html).toContain("· 179,10 lekë");
     // Totals: ALL then USD, separate, never summed (999 + 17910 = 18909).
-    expect(html).toMatch(/179,10 ALL<\/span><\/span><span> · <span class="font-semibold text-primary">USD 9.99/);
+    expect(html).toMatch(/179,10 lekë<\/span><\/span><span> · <span class="font-semibold text-primary">USD 9.99/);
     expect(html).not.toMatch(/189[.,]09/);
     expect(html).not.toMatch(/\$\d/);
   });
@@ -239,9 +239,9 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
         { purchase_id: "p7", currency_state: "resolved", currency: "ALL" },
       ],
     });
-    expect(html).toContain("One purchase · 2 books · 12 ALL");
-    // Counted once, at the snapshot total -- not 24 ALL.
-    expect(html).not.toContain("24 ALL");
+    expect(html).toContain("One purchase · 2 books · 12 lekë");
+    // Counted once, at the snapshot total -- not 24 lekë.
+    expect(html).not.toContain("24 lekë");
     expect(html).not.toMatch(/\$\d/);
   });
 });

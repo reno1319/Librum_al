@@ -922,10 +922,10 @@ describe("AdminFinancePage: transaction currency (Patch 4)", () => {
     const html = await renderHtml();
     // Desktop table + mobile card list: each amount appears exactly twice.
     expect(occurrences(html, "USD 19.99")).toBe(2);
-    expect(occurrences(html, "179,10 ALL")).toBe(2);
+    expect(occurrences(html, "179,10 lekë")).toBe(2);
     expect(html).not.toMatch(/\$\d/);
     // Negative controls: neither amount is relabelled.
-    expect(html).not.toContain("19,99 ALL");
+    expect(html).not.toContain("19,99 lekë");
     expect(html).not.toContain("USD 179.10");
   });
 
@@ -939,7 +939,7 @@ describe("AdminFinancePage: transaction currency (Patch 4)", () => {
       data: [makeMismatchRow({ amount_cents: 500, currency: "USD" })],
     });
     const html = await renderHtml();
-    expect(occurrences(html, "99 ALL")).toBe(2);
+    expect(occurrences(html, "99 lekë")).toBe(2);
     expect(html).toContain("USD 5.00");
     expect(html).not.toMatch(/\$\d/);
   });

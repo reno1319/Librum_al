@@ -206,8 +206,8 @@ describe("BookDetailPage: stale-checkout conflict notice", () => {
     expect(rpc).toHaveBeenCalledWith("get_book_checkout_quote", { p_intent_id: INTENT_ID, p_book_id: BOOK_ID });
     expect(html).toContain("already have a checkout in progress");
     // The FROZEN 4.99, not the book's current 7.99.
-    expect(html).toContain("4,99 ALL");
-    expect(html).not.toContain("4.99 ALL");
+    expect(html).toContain("4,99 lekë");
+    expect(html).not.toContain("4.99 lekë");
     expect(html).toContain("not");
     expect(html).toContain("Continue that checkout");
   });
@@ -227,8 +227,8 @@ describe("BookDetailPage: stale-checkout conflict notice", () => {
       { checkout_conflict: INTENT_ID, price_cents_at_checkout: "1", amount: "1" },
       { quoteRows: heldQuote },
     );
-    expect(html).toContain("4,99 ALL");
-    expect(html).not.toContain("4.99 ALL");
+    expect(html).toContain("4,99 lekë");
+    expect(html).not.toContain("4.99 lekë");
     expect(html).not.toContain("0.01");
     expect(html).not.toContain("0,01");
   });
@@ -337,7 +337,7 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     // button -- each asserted individually, so a partial regression
     // cannot hide behind one surviving check.
     expect(html).not.toContain("already have a checkout in progress");
-    expect(html).not.toContain("4.99 ALL");
+    expect(html).not.toContain("4.99 lekë");
     expect(html).not.toContain('name="resume_existing"');
     expect(html).not.toContain('name="expected_intent_id"');
     expect(html).not.toContain(INTENT_ID);
@@ -421,11 +421,11 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
       p_book_id: BOOK_ID,
     });
     expect(html).toContain("already have a checkout in progress");
-    // The server-read FROZEN amount (4.99 ALL), not the book's own
+    // The server-read FROZEN amount (4.99 lekë), not the book's own
     // current catalog price (250 lek).
-    expect(html).toContain("4,99 ALL");
-    expect(html).not.toContain("4.99 ALL");
-    expect(html).not.toContain("250 ALL</strong>. That is the amount");
+    expect(html).toContain("4,99 lekë");
+    expect(html).not.toContain("4.99 lekë");
+    expect(html).not.toContain("250 lekë</strong>. That is the amount");
     expect(html).toContain('name="resume_existing"');
     expect(html).toContain('name="expected_intent_id"');
     expect(html).toContain(`value="${INTENT_ID}"`);
@@ -512,7 +512,7 @@ describe("BookDetailPage: redesign step 3", () => {
 
   it("a paid book's price card carries the mockup's three lines and the existing security note", async () => {
     const html = await render({ user: { id: "reader" } });
-    expect(html).toContain("Buy ebook — 250 ALL");
+    expect(html).toContain("Buy ebook — 250 lekë");
     expect(html).toContain("EPUB, no DRM. Read on your phone, tablet or e-reader.");
     expect(html).toContain("Download anytime from your Librum library.");
     expect(html).toContain("Pay by card.");

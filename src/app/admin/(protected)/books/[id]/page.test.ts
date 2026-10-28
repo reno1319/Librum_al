@@ -151,7 +151,7 @@ describe("AdminBookPage", () => {
 
   it("shows the book, its open report and its rights history", async () => {
     const html = await render("moderator");
-    expect(html).toContain("Live · Paid · 499 ALL");
+    expect(html).toContain("Live · Paid · 499 lekë");
     expect(html).toContain("Kënga e fundit");
     expect(html).toContain("by Ana Pena · published");
     expect(html).toContain("Account name: Ana Kola");

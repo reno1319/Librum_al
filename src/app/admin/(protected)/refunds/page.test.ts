@@ -150,13 +150,13 @@ describe("AdminRefundsPage: request amounts carry their own currency (Patch 4)",
       p_refund_request_ids: ["r1", "r2", "r3", "r4"],
     });
     expect(html).toContain("USD 6.99");
-    expect(html).toContain("799,20 ALL");
+    expect(html).toContain("799,20 lekë");
     expect(html).toContain("Amount unavailable (conflicting currency records)");
     expect(html).toContain("Amount unavailable (currency unknown)");
     expect(html).not.toContain("USD 42.00");
-    expect(html).not.toContain("42 ALL");
+    expect(html).not.toContain("42 lekë");
     expect(html).not.toContain("USD 51.00");
-    expect(html).not.toContain("51 ALL");
+    expect(html).not.toContain("51 lekë");
     expect(html).not.toMatch(/\$/);
   });
 

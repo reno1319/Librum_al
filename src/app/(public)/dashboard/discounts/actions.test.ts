@@ -192,7 +192,7 @@ describe("createDiscountCode: ALL fixed discounts and payload shape", () => {
 
   it.each([
     "0", "0,00", "100001", "250,50", "250.5", "250.000", "1e3", "+250", "-250",
-    "1.000", "1,000", "1 000", "", "   ", "abc", "250 ALL", "$5", "9".repeat(400),
+    "1.000", "1,000", "1 000", "", "   ", "abc", "250 lekë", "$5", "9".repeat(400),
   ])("invalid fixed input %j never reaches the insert", async (value) => {
     const outcome = await submit({ ...BASE_FIELDS, type: "amount_all", value });
     expect(outcome).toMatchObject({ target: FIXED_ERROR });

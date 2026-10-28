@@ -9,7 +9,7 @@ import { platformFeeCents, PLATFORM_FEE_PERCENT } from "./pricing";
 // derived-from-platformFeeCents contract are unchanged.
 describe("calculateAuthorEarnings", () => {
   it("computes a standard paid price for one sale", () => {
-    const result = calculateAuthorEarnings(999, 1); // 999 ALL
+    const result = calculateAuthorEarnings(999, 1); // 999 lekë
     expect(result).toEqual({
       grossMinor: 99_900,
       platformFeeMinor: 19_980, // round(99900 * 0.20)
@@ -73,7 +73,7 @@ describe("calculateAuthorEarnings", () => {
 
   // ALL-WIRING-2: the price domain is Librum's own. A value the catalog
   // could never hold must not produce a plausible-looking estimate --
-  // 50 ALL and 100001 ALL are not prices an author can save, and 9.99
+  // 50 lekë and 100001 lekë are not prices an author can save, and 9.99
   // is not a price at all.
   it("treats any value outside the catalog domain as zero", () => {
     const zero = { grossMinor: 0, platformFeeMinor: 0, authorEarningsMinor: 0 };
