@@ -82,7 +82,7 @@ describe("the author's preview of an unpublished book", () => {
     const html = await render({ user: { id: AUTHOR_ID }, book: BASE_BOOK });
     expect(html).toContain(STRIP);
     expect(html.indexOf(STRIP)).toBeLessThan(html.indexOf('aria-label="Breadcrumb"'));
-    expect(html).toContain("Read sample");
+    expect(html).toContain("Lexoni një pjesë");
     expect(html).toContain("Manage book");
     expect(html).toContain(`href="/api/books/${BOOK_ID}/download"`);
     expect(html).not.toContain(">Buy");
@@ -94,14 +94,14 @@ describe("the author's preview of an unpublished book", () => {
       book: { ...BASE_BOOK, status: "published", published_at: "2026-09-02T00:00:00Z" },
     });
     expect(html).not.toContain(STRIP);
-    expect(html).toContain("Read sample");
+    expect(html).toContain("Lexoni një pjesë");
     expect(html).toContain("Manage book");
   });
 
   it("an earlier buyer of an unpublished book sees no Preview strip and no Read sample", async () => {
     const html = await render({ user: { id: READER_ID }, book: BASE_BOOK, owned: true });
     expect(html).not.toContain(STRIP);
-    expect(html).not.toContain("Read sample");
+    expect(html).not.toContain("Lexoni një pjesë");
     expect(html).toContain("You own this book");
   });
 

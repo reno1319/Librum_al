@@ -381,7 +381,7 @@ describe("author public bundle rail (rendered)", () => {
   it("an author whose only bundle is unpriced shows no Bundles section", async () => {
     install(tables([UNPRICED]));
     const html = await render(AuthorProfilePage({ params: Promise.resolve({ id: PEN }) }));
-    expect(html).not.toContain(">Bundles<");
+    expect(html).not.toContain(">Paketat<");
     expect(html).not.toContain("Unpriced Collection");
   });
 });
@@ -425,9 +425,9 @@ describe("bundle detail page (rendered)", () => {
     expect(priceLine(html)).toContain("Çmimi nuk është i disponueshëm");
     expect(priceLine(html)).not.toContain("Falas");
     expect(html).not.toContain("25.00");
-    expect(html).not.toContain("you save");
-    expect(html).toContain("Not available right now");
-    expect(html).not.toContain("Bundle checkout coming soon");
+    expect(html).not.toContain("kurseni");
+    expect(html).toContain("Nuk mund të blihet tani");
+    expect(html).not.toContain("Blerja e paketave vjen së shpejti");
     noDollarOrUsd(html);
   });
 
@@ -445,7 +445,7 @@ describe("bundle detail page (rendered)", () => {
     const html = await detail(PAID, [A, B]);
     const line = priceLine(html);
     expect(line).toContain('<span class="line-through">270 lekë</span>');
-    expect(line).toContain("you save 71 lekë");
+    expect(line).toContain("kurseni 71 lekë");
     expect(html).not.toContain("999");
   });
 
@@ -455,7 +455,7 @@ describe("bundle detail page (rendered)", () => {
     const html = await detail(PAID, [freeMember, pricey]);
     // 0 + 300 = 300; 300 - 199 = 101.
     expect(priceLine(html)).toContain("300 lekë");
-    expect(priceLine(html)).toContain("you save 101 lekë");
+    expect(priceLine(html)).toContain("kurseni 101 lekë");
   });
 
   it("one unpriced member withholds the comparison entirely -- it is never counted as zero", async () => {
@@ -463,7 +463,7 @@ describe("bundle detail page (rendered)", () => {
     // or with a cheaper bundle a FALSE saving. Either way, not shown.
     const unpricedMember = book("book-null", "Libri Pa Çmim", null, 900);
     const html = await detail(bundle("bundle-cheap-26", "Cheap Collection", 99, 0), [A, unpricedMember]);
-    expect(html).not.toContain("you save");
+    expect(html).not.toContain("kurseni");
     expect(html).not.toContain("line-through");
     // The member is still listed, with its own honest state.
     expect(html).toContain("Libri Pa Çmim");
@@ -473,13 +473,13 @@ describe("bundle detail page (rendered)", () => {
 
   it("a member this viewer cannot resolve also withholds the comparison", async () => {
     const html = await detail(bundle("bundle-cheap-27", "Cheap Collection", 99, 0), [A, B, null]);
-    expect(html).not.toContain("you save");
+    expect(html).not.toContain("kurseni");
   });
 
   it("a zero or negative difference is never presented as a saving", async () => {
     for (const bundlePrice of [270, 300]) {
       const html = await detail(bundle("bundle-even-28", "Even Collection", bundlePrice, 0), [A, B]);
-      expect(html).not.toContain("you save");
+      expect(html).not.toContain("kurseni");
       expect(html).not.toContain("line-through");
     }
   });
@@ -487,8 +487,8 @@ describe("bundle detail page (rendered)", () => {
   it("a free bundle reads Free, may state its saving, and is not called paid bundle checkout", async () => {
     const html = await detail(FREE, [A, B]);
     expect(priceLine(html)).toContain(">Falas<");
-    expect(priceLine(html)).toContain("you save 270 lekë");
-    expect(html).toContain("Bundle checkout coming soon");
+    expect(priceLine(html)).toContain("kurseni 270 lekë");
+    expect(html).toContain("Blerja e paketave vjen së shpejti");
     expect(html).not.toMatch(/paid bundle checkout/i);
     expect(html).not.toContain("15.00");
   });
@@ -530,7 +530,7 @@ describe("bundle detail page (rendered)", () => {
     const html = await detail(draftUnpriced, [A, B], AUTHOR);
     expect(html).toContain("Draft Unpriced");
     expect(html).toContain("Çmimi nuk është i disponueshëm");
-    expect(html).toContain("This is your bundle");
+    expect(html).toContain("Kjo është paketa juaj");
 
     await expect(detail(draftUnpriced, [A, B], READER)).rejects.toThrow();
   });

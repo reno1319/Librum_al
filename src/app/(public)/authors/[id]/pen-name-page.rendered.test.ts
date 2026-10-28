@@ -168,7 +168,7 @@ describe("PEN-NAMES-1 Author Page", () => {
     expect(html).not.toContain("Libri i Penës B");
     expect(html).not.toContain("Pako B");
     expect(html).not.toContain("Arben Leka");
-    expect(html).toContain("1 follower");
+    expect(html).toContain("1 ndjekës");
     expect(log.find((q) => q.table === "public_pen_names")?.select).toBe("id, name, bio, avatar_path, links");
     expect(log.filter((q) => q.table === "public_books" || q.table === "public_bundles").every((q) => q.filters.includes("eq:pen_name_id"))).toBe(true);
     expect(log.some((q) => q.table === "books" || q.table === "bundles" || q.table === "series")).toBe(false);
@@ -218,22 +218,22 @@ describe("PEN-NAMES-1 Author Page", () => {
     install();
     expect(await generateMetadata({ params: Promise.resolve({ id: PEN_A }) })).toEqual({
       title: "Ëngjëll Çela",
-      description: "Books and author information for Ëngjëll Çela on Librum.",
+      description: "Librat dhe të dhënat për autorin Ëngjëll Çela në Librum.",
     });
   });
 
   it("a signed-in reader gets Follow / Following for this pen name", async () => {
     install({ user: READER });
-    expect(await render()).toMatch(/>Follow<\/button>/);
+    expect(await render()).toMatch(/>Ndiqni<\/button>/);
     install({ user: READER, follows: [{ follower_id: READER, pen_name_id: PEN_A }] });
-    expect(await render()).toMatch(/>Following<\/button>/);
+    expect(await render()).toMatch(/>Po e ndiqni<\/button>/);
   });
 
   it("the author gets no Follow control on their own pen name", async () => {
     install({ user: ACCOUNT });
     const html = await render();
-    expect(html).not.toContain(">Follow<");
-    expect(html).not.toContain("Log in to follow");
+    expect(html).not.toContain(">Ndiqni<");
+    expect(html).not.toContain("Hyni për ta ndjekur");
   });
 
   it("staff with reports.resolve see the account behind the pen name and Remove links (13a); nobody else does", async () => {

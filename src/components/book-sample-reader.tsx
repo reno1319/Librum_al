@@ -137,12 +137,12 @@ export function BookSampleReader({
             : "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
         }
       >
-        Read sample
+        Lexoni një pjesë
       </button>
 
       <dialog
         ref={dialogRef}
-        aria-label={`Sample of ${bookTitle}`}
+        aria-label={`Pjesë nga ${bookTitle}`}
         onClick={(e) => {
           // A click directly on the ::backdrop lands on the <dialog>
           // element itself (never on its content, which is nested
@@ -173,16 +173,16 @@ export function BookSampleReader({
             ============================================================ */}
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4 sm:px-8">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted">Read sample</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted">Pjesë nga libri</p>
             <p className="mt-1 truncate font-serif text-xl font-semibold text-foreground">
               {bookTitle}
             </p>
-            {author && <p className="mt-0.5 truncate text-sm text-muted">by {author}</p>}
+            {author && <p className="mt-0.5 truncate text-sm text-muted">nga {author}</p>}
           </div>
           <button
             type="button"
             onClick={close}
-            aria-label="Close sample"
+            aria-label="Mbyllni pjesën"
             className="focus-ring flex size-9 shrink-0 items-center justify-center rounded-sm text-foreground hover:bg-surface-hover"
           >
             <IconClose className="size-5" aria-hidden="true" />
@@ -195,7 +195,7 @@ export function BookSampleReader({
         <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-8 sm:px-8">
           {state.status === "loading" && (
             <div className="mx-auto flex max-w-[65ch] flex-col gap-4">
-              <p className="text-sm text-muted">Preparing sample…</p>
+              <p className="text-sm text-muted">Po përgatitet pjesa…</p>
               <div aria-hidden="true" className="flex animate-pulse flex-col gap-3">
                 <div className="h-3 w-11/12 rounded bg-border" />
                 <div className="h-3 w-full rounded bg-border" />
@@ -207,13 +207,13 @@ export function BookSampleReader({
 
           {(state.status === "error" || (state.status === "ready" && sections.length === 0)) && (
             <div className="flex min-h-[16rem] flex-col items-center justify-center gap-3 text-center">
-              <p className="text-sm text-muted">Sample unavailable for this book.</p>
+              <p className="text-sm text-muted">Për këtë libër nuk ka pjesë për lexim.</p>
               <button
                 type="button"
                 onClick={() => loadSample(bookId, updateState)}
                 className={buttonClasses("outline", "sm")}
               >
-                Try again
+                Provoni përsëri
               </button>
             </div>
           )}
@@ -243,10 +243,10 @@ export function BookSampleReader({
                   disabled={index === 0}
                   className={buttonClasses("outline", "sm")}
                 >
-                  Previous
+                  E mëparshmja
                 </button>
                 <span className="text-xs text-muted">
-                  {index + 1} of {sections.length}
+                  {index + 1} nga {sections.length}
                 </span>
                 <button
                   type="button"
@@ -254,7 +254,7 @@ export function BookSampleReader({
                   disabled={index === sections.length - 1}
                   className={buttonClasses("outline", "sm")}
                 >
-                  Next
+                  Tjetra
                 </button>
               </div>
             )}
@@ -265,7 +265,7 @@ export function BookSampleReader({
                 itself. Deliberately not tied to `index`/section count in
                 any way, so it can never be misread as reading progress. */}
             <p className="text-center text-xs text-muted">
-              Sample · approximately {state.data.approximatePercent}% of book
+              Pjesë · rreth {state.data.approximatePercent}% e librit
             </p>
           </div>
         )}

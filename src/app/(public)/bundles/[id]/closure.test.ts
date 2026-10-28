@@ -64,7 +64,7 @@ const { buyBundle } = await import("./actions");
 
 const BUNDLE_ID = "bundle-1";
 const EXPECTED_TARGET =
-  `/bundles/${BUNDLE_ID}?error=` + encodeURIComponent("This bundle isn't available for purchase right now");
+  `/bundles/${BUNDLE_ID}?error=` + encodeURIComponent("Kjo paketë nuk mund të blihet tani");
 
 const STAGING = {
   VERCEL_ENV: "preview",

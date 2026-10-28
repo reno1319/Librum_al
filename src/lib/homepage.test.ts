@@ -5,15 +5,15 @@ describe("resolveHomepageCta", () => {
   it("logged out: hero and final both point at signup with author role intent", () => {
     const result = resolveHomepageCta({ user: null, role: null });
 
-    expect(result.hero).toEqual({ label: "Publish your book", href: "/signup?role=author" });
-    expect(result.final).toEqual({ label: "Publish your book", href: "/signup?role=author" });
+    expect(result.hero).toEqual({ label: "Publikoni librin tuaj", href: "/signup?role=author" });
+    expect(result.final).toEqual({ label: "Publikoni librin tuaj", href: "/signup?role=author" });
   });
 
   it("author: hero goes to Dashboard, final goes to the create-book flow", () => {
     const result = resolveHomepageCta({ user: { id: "author-1" }, role: "author" });
 
-    expect(result.hero).toEqual({ label: "Go to Dashboard", href: "/dashboard" });
-    expect(result.final).toEqual({ label: "Start a new book", href: "/dashboard/books/new" });
+    expect(result.hero).toEqual({ label: "Shkoni te Paneli i autorit", href: "/dashboard" });
+    expect(result.final).toEqual({ label: "Filloni një libër të ri", href: "/dashboard/books/new" });
   });
 
   it("reader: no publishing CTA anywhere on the page -- no reader -> author role conversion exists", () => {
@@ -51,23 +51,23 @@ describe("computeAuthorSharePercent", () => {
 });
 
 describe("resolveAuthorPageCta", () => {
-  it("signed out: the home page's Publish your book", () => {
+  it("signed out: the home page's Publikoni librin tuaj", () => {
     expect(resolveAuthorPageCta({ user: null, role: null })).toEqual({
-      label: "Publish your book",
+      label: "Publikoni librin tuaj",
       href: "/signup?role=author",
     });
   });
 
-  it("author: the home page's final Start a new book", () => {
+  it("author: the home page's final Filloni një libër të ri", () => {
     expect(resolveAuthorPageCta({ user: { id: "a" }, role: "author" })).toEqual({
-      label: "Start a new book",
+      label: "Filloni një libër të ri",
       href: "/dashboard/books/new",
     });
   });
 
-  it("reader: Become an author, on the account page's section", () => {
+  it("reader: Bëhuni autor, on the account page's section", () => {
     expect(resolveAuthorPageCta({ user: { id: "r" }, role: "reader" })).toEqual({
-      label: "Become an author",
+      label: "Bëhuni autor",
       href: "/account#become-author",
     });
   });

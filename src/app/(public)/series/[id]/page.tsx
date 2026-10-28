@@ -142,8 +142,8 @@ export async function generateMetadata({
   return {
     title: data.series.title,
     description: authorName
-      ? `Books in the ${data.series.title} series by ${authorName} on Librum.`
-      : `Books in the ${data.series.title} series on Librum.`,
+      ? `Librat e serisë ${data.series.title} nga ${authorName} në Librum.`
+      : `Librat e serisë ${data.series.title} në Librum.`,
   };
 }
 
@@ -180,13 +180,13 @@ export default async function SeriesPage({
           author_id/title/created_at -- see schema.sql), so none is
           invented or derived from book descriptions.
           ============================================================ */}
-      <p className="text-xs font-medium uppercase tracking-wide text-muted">Series</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted">Seri</p>
       <h1 className="mt-1 font-serif text-3xl font-normal text-foreground sm:text-4xl">
         {series.title}
       </h1>
       {series.pen && (
         <p className="mt-2 text-sm text-muted">
-          by{" "}
+          nga{" "}
           <Link
             href={authorPagePath(series.pen.id)}
             className="focus-ring rounded-sm font-medium text-foreground hover:underline"
@@ -196,7 +196,7 @@ export default async function SeriesPage({
         </p>
       )}
       <p className="mt-1 text-xs text-muted">
-        {books.length} book{books.length === 1 ? "" : "s"}
+        {books.length} {books.length === 1 ? "libër" : "libra"}
       </p>
 
       {/* ============================================================
@@ -207,14 +207,14 @@ export default async function SeriesPage({
           PRODUCT-3 brief.
           ============================================================ */}
       <section className="mt-12 border-t border-border pt-8">
-        <h2 className="font-serif text-xl font-normal">Books in this series</h2>
+        <h2 className="font-serif text-xl font-normal">Librat e kësaj serie</h2>
         <ol className="mt-6 grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {books.map((book) => {
             const coverUrl = book.cover_path
               ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
               : null;
             const positionLabel =
-              book.series_position != null ? `Book ${book.series_position}` : "In this series";
+              book.series_position != null ? `Libri ${book.series_position}` : "Në këtë seri";
 
             return (
               <li key={book.id}>

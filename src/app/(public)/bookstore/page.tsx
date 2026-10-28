@@ -27,8 +27,8 @@ import { DismissableDetails } from "@/components/dismissable-details";
 import { OrnateShelf, ORNATE_SHELF_SIZE, type OrnateShelfBook } from "@/components/ornate-shelf";
 
 export const metadata: Metadata = {
-  title: "Bookstore",
-  description: "Discover independent ebooks published by Albanian-language authors on Librum.",
+  title: "Libraria",
+  description: "Zbuloni libra elektronikë të pavarur nga autorë që shkruajnë shqip në Librum.",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -427,7 +427,7 @@ export default async function BookstorePage({
 
         {freeBooks.length > 0 && (
           <CoverShelf
-            heading="Free to start reading"
+            heading="Libra falas"
             seeAllHref={buildBookstoreHref({}, { maxPrice: "0" })}
             books={freeBooks}
             supabase={supabase}
@@ -475,13 +475,13 @@ function BookstoreToolbar({
       <div className="flex items-end justify-between gap-x-12">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
-            Librum Bookstore
+            Libraria Librum
           </p>
           <h1 className="mt-2 font-serif text-4xl font-normal leading-tight text-primary sm:text-[2.5rem]">
-            Discover independent books.
+            Zbuloni libra të pavarur.
           </h1>
           <p className="mt-2 text-muted">
-            Books published directly by Albanian-language authors.
+            Libra të botuar drejtpërdrejt nga autorë që shkruajnë shqip.
           </p>
 
           <form
@@ -492,14 +492,14 @@ function BookstoreToolbar({
             className="mt-6 flex w-full min-w-0 sm:max-w-[35rem]"
           >
             <label htmlFor="bookstore-q" className="sr-only">
-              Search books or authors
+              Kërkoni libra ose autorë
             </label>
             <input
               id="bookstore-q"
               type="search"
               name="q"
               defaultValue={q ?? ""}
-              placeholder="Search books or authors"
+              placeholder="Kërkoni libra ose autorë"
               className="focus-ring min-w-0 flex-1 rounded-l-[3px] border border-r-0 border-[#8c8472] bg-surface px-4 py-3 text-base"
             />
 
@@ -515,14 +515,14 @@ function BookstoreToolbar({
               type="submit"
               className="focus-ring shrink-0 rounded-r-[3px] bg-primary px-5 text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
             >
-              Search
+              Kërkoni
             </button>
           </form>
         </div>
 
         {shelfBooks.length > 0 && (
           <div className="hidden shrink-0 md:block [zoom:0.7]">
-            <OrnateShelf books={shelfBooks} label="Newest books" />
+            <OrnateShelf books={shelfBooks} label="Librat më të rinj" />
           </div>
         )}
       </div>
@@ -537,17 +537,17 @@ function BookstoreToolbar({
             genre, or "All genres"; the list opens under it. */}
         <DismissableDetails className="group relative text-sm">
           <summary className={DROPDOWN_SUMMARY_CLASSES}>
-            {genre ?? "All genres"}
+            {genre ?? "Të gjitha zhanret"}
             <ChevronIcon />
           </summary>
           <nav
-            aria-label="Genres"
+            aria-label="Zhanret"
             className="absolute left-0 z-20 mt-2 w-[min(26rem,calc(100vw-2rem))] rounded-[3px] border border-border bg-surface p-2 shadow-md"
           >
             <ul className="grid gap-0.5 sm:grid-cols-2">
               <li>
                 <GenreLink
-                  label="All genres"
+                  label="Të gjitha zhanret"
                   href={buildBookstoreHref(query, { genre: undefined })}
                   active={!genre}
                 />
@@ -568,7 +568,7 @@ function BookstoreToolbar({
             htmlFor="bookstore-sort"
             className={`${FILTER_CONTROL_CLASSES} has-[select:focus-visible]:shadow-[var(--focus-ring)]`}
           >
-            <span className="font-normal text-muted">Sort by</span>
+            <span className="font-normal text-muted">Renditni sipas</span>
             <span className="relative flex flex-1 items-center">
               <select
                 id="bookstore-sort"
@@ -591,7 +591,7 @@ function BookstoreToolbar({
 
           <DismissableDetails className="group relative text-sm">
             <summary className={DROPDOWN_SUMMARY_CLASSES}>
-              Price range (ALL)
+              Çmimi (lekë)
               <ChevronIcon />
             </summary>
             <form
@@ -605,7 +605,7 @@ function BookstoreToolbar({
 
               <div>
                 <label htmlFor="bookstore-min-price" className="block text-xs text-muted">
-                  Min
+                  Nga
                 </label>
                 <input
                   id="bookstore-min-price"
@@ -620,28 +620,28 @@ function BookstoreToolbar({
               </div>
               <div>
                 <label htmlFor="bookstore-max-price" className="block text-xs text-muted">
-                  Max
+                  Deri
                 </label>
                 <input
                   id="bookstore-max-price"
                   type="number"
                   name="maxPrice"
                   defaultValue={maxPrice ?? ""}
-                  placeholder="Any"
+                  placeholder="Pa kufi"
                   min="0"
                   step="1"
                   className="focus-ring w-24 rounded-[3px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm"
                 />
               </div>
               <button type="submit" className={buttonClasses("outline", "sm", "rounded-[3px]")}>
-                Apply
+                Zbatoni
               </button>
             </form>
           </DismissableDetails>
 
           {isFiltered && (
             <Link href="/bookstore" className={`${TEXT_LINK_CLASSES} ml-1 justify-self-start`}>
-              Clear filters
+              Hiqni filtrat
             </Link>
           )}
         </div>
@@ -735,7 +735,7 @@ function FeaturedBook({
         <p className="text-muted">
           {authorName && book.pen && (
             <>
-              by{" "}
+              nga{" "}
               <Link
                 href={authorPagePath(book.pen.id)}
                 className="focus-ring rounded-sm hover:underline"
@@ -755,14 +755,14 @@ function FeaturedBook({
         <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-3">
           {priceState === "free" ? (
             <Link href={`/books/${book.id}`} className={FEATURE_CTA_CLASSES}>
-              Get ebook — Free
+              Merreni e-librin — Falas
             </Link>
           ) : (
             // Renato (r2, 14:09Z "1. b"): the mockup's Buy button, linking
             // to the book page, which owns the purchase -- shown even while
             // paid checkout is closed there.
             <Link href={`/books/${book.id}`} className={FEATURE_CTA_CLASSES}>
-              Buy · {priceLabel}
+              Blini · {priceLabel}
             </Link>
           )}
           <BookSampleReader bookId={book.id} bookTitle={book.title} variant="text" />
@@ -819,7 +819,7 @@ function CoverShelf({
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className={SECTION_HEADING}>{heading}</h2>
         <Link href={seeAllHref} className={TEXT_LINK_CLASSES}>
-          See all
+          Shikoni të gjitha
         </Link>
       </div>
       <ul className="-mx-4 mt-5 flex gap-5 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 md:grid-cols-4 lg:grid-cols-6">
@@ -854,8 +854,8 @@ function BookGrid({
     return (
       <EmptyState
         className="mt-10"
-        title="We couldn't load the bookstore right now."
-        description="Please try again in a moment."
+        title="Libraria nuk u hap dot tani."
+        description="Ju lutemi provoni përsëri pas pak."
       />
     );
   }
@@ -864,21 +864,21 @@ function BookGrid({
     return isFiltered ? (
       <EmptyState
         className="mt-10"
-        title="No books match your search."
+        title="Asnjë libër nuk përputhet me kërkimin tuaj."
         action={
           <Link href="/bookstore" className={buttonClasses("outline", "sm")}>
-            Clear filters
+            Hiqni filtrat
           </Link>
         }
       />
     ) : (
       <EmptyState
         className="mt-10"
-        title="No books are available yet."
-        description="Check back soon."
+        title="Ende nuk ka libra."
+        description="Kthehuni së shpejti."
         action={
           <Link href="/" className={TEXT_LINK_CLASSES}>
-            Back to Home
+            Kthehuni te Kryefaqja
           </Link>
         }
       />
@@ -887,8 +887,8 @@ function BookGrid({
 
   const countLine =
     totalMatched <= SEARCH_RESULT_LIMIT
-      ? `${totalMatched} ${totalMatched === 1 ? "book" : "books"}`
-      : `Showing the first ${SEARCH_RESULT_LIMIT} books`;
+      ? `${totalMatched} ${totalMatched === 1 ? "libër" : "libra"}`
+      : `Po shfaqen ${SEARCH_RESULT_LIMIT} librat e parë`;
 
   // REDESIGN STEP 3 (Renato D3, "List sample 1"): on the unfiltered view
   // this is the "All books" grid under the shelves; a filtered view
@@ -900,7 +900,7 @@ function BookGrid({
           isFiltered ? "" : "justify-between"
         }`}
       >
-        {!isFiltered && <h2 className={SECTION_HEADING}>All books</h2>}
+        {!isFiltered && <h2 className={SECTION_HEADING}>Të gjithë librat</h2>}
         <p className="text-sm text-muted">{countLine}</p>
       </div>
       <ul className="mt-6 grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
@@ -932,8 +932,8 @@ function BundlesSection({
   return (
     <section className="mt-14">
       <div className="border-b border-border pb-3">
-        <h2 className={SECTION_HEADING}>Bundles</h2>
-        <p className="mt-1 text-sm text-muted">Multiple books in one collection.</p>
+        <h2 className={SECTION_HEADING}>Paketat</h2>
+        <p className="mt-1 text-sm text-muted">Disa libra në një koleksion.</p>
       </div>
       <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {bundles.map((bundle) => {
@@ -942,7 +942,7 @@ function BundlesSection({
             .map((m) => m.books?.cover_path ?? null)
             .slice(0, BUNDLE_COVER_LIMIT);
           const authorName = bundle.pen?.name ?? null;
-          const countLabel = `${members.length} ${members.length === 1 ? "book" : "books"}`;
+          const countLabel = `${members.length} ${members.length === 1 ? "libër" : "libra"}`;
           // Offsets are taken from the right so the front cover always
           // sits in the same place however many covers there are.
           const offsets = BUNDLE_COVER_OFFSETS.slice(BUNDLE_COVER_LIMIT - Math.max(covers.length, 1));
@@ -998,16 +998,16 @@ function AuthorBand({ signedIn }: { signedIn: boolean }) {
   return (
     <section className="mt-16 flex flex-wrap items-center justify-between gap-5 rounded-[4px] bg-primary p-6 text-primary-foreground sm:p-8">
       <div className="flex flex-col gap-1.5">
-        <h2 className="font-serif text-[1.625rem] font-normal">Are you an author?</h2>
+        <h2 className="font-serif text-[1.625rem] font-normal">Jeni autor?</h2>
         <p className="text-primary-foreground/80">
-          Publish your book on Librum and earn royalties on every sale.
+          Botoni librin tuaj në Librum dhe fitoni honorar nga çdo shitje.
         </p>
       </div>
       <Link
         href={signedIn ? "/dashboard/books/new" : "/signup?role=author"}
         className="focus-ring inline-flex items-center justify-center rounded-[3px] bg-accent px-6 py-3.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground"
       >
-        Start publishing
+        Filloni të publikoni
       </Link>
     </section>
   );

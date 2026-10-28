@@ -21,8 +21,8 @@ import type { Metadata } from "next";
 // scope here). Also sidesteps having to independently replicate the
 // page's own unpublished/visibility gate just for a title.
 export const metadata: Metadata = {
-  title: "Bundle",
-  description: "A book bundle available on Librum.",
+  title: "Paketë",
+  description: "Një paketë librash në Librum.",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -142,12 +142,12 @@ export default async function BundleDetailPage({
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
       <span className="text-xs uppercase tracking-wide text-muted">
-        Bundle
+        Paketë
       </span>
       <h1 className="font-serif text-3xl font-normal">{bundle.title}</h1>
       {bundle.pen && (
         <p className="mt-1 text-sm text-muted">
-          by{" "}
+          nga{" "}
           <Link href={authorPagePath(bundle.pen.id)} className="hover:underline">
             {bundle.pen.name}
           </Link>
@@ -162,8 +162,8 @@ export default async function BundleDetailPage({
 
       {purchase === "success" && (
         <p className="mt-4 rounded-card bg-green-50 px-3 py-2 text-sm text-green-700">
-          Purchase complete — thank you! It may take a few seconds to show
-          as owned below.
+          Blerja u krye. Faleminderit! Mund të duhen disa sekonda që librat
+          të shfaqen më poshtë si tuajat.
         </p>
       )}
       {error && (
@@ -179,15 +179,15 @@ export default async function BundleDetailPage({
         {savings && (
           <span className="text-sm text-muted">
             <span className="line-through">{savings.originalTotal}</span>{" "}
-            — you save {savings.savings}
+            — kurseni {savings.savings}
           </span>
         )}
 
         {isAuthor ? (
-          <span className="text-sm text-muted">This is your bundle</span>
+          <span className="text-sm text-muted">Kjo është paketa juaj</span>
         ) : ownsEverything ? (
           <span className="rounded-control bg-surface-hover px-4 py-2 text-sm font-medium">
-            You own every book in this bundle
+            I keni të gjithë librat e kësaj pakete
           </span>
         ) : (
           // STRIPE-DISABLE-1: bundle checkout is unavailable under every
@@ -210,7 +210,7 @@ export default async function BundleDetailPage({
       </div>
 
       <h2 className="mt-10 font-serif text-xl font-normal">
-        {books.length} book{books.length === 1 ? "" : "s"} in this bundle
+        {books.length} {books.length === 1 ? "libër" : "libra"} në këtë paketë
       </h2>
       {/* V1: exactly the Bookstore "All books" grid (bookstore/page.tsx),
           so a wide page adds columns instead of growing the cards. */}

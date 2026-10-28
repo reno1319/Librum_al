@@ -52,9 +52,9 @@ import type { Metadata } from "next";
 // already IS the full brand title, so applying the template on top of it
 // would produce "Librum — Self-Publish Your Ebook | Librum".
 export const metadata: Metadata = {
-  title: { absolute: "Librum — Self-Publish Your Ebook" },
+  title: { absolute: "Librum — Vetëbotim për libra elektronikë" },
   description:
-    "The self-publishing platform built for Albanian-language authors. Publish independently, set your own price, and reach readers through Librum.",
+    "Platforma e vetëbotimit e ndërtuar për autorët që shkruajnë shqip. Botoni në mënyrë të pavarur, vendosni vetë çmimin dhe arrini te lexuesit përmes Librum.",
 };
 
 // BRASS_CTA_CLASSES, TEXT_LINK_CLASSES, the section frame
@@ -222,7 +222,7 @@ export default async function Home({
     <main className="flex-1">
       {account === "deleted" && (
         <div className="page-container pt-10">
-          <Alert variant="success">Your account has been deleted.</Alert>
+          <Alert variant="success">Llogaria juaj u fshi.</Alert>
         </div>
       )}
 
@@ -251,10 +251,10 @@ export default async function Home({
 function HeroSection({ cta, fan }: { cta: HomepageCta | null; fan: FanCover<Cover>[] }) {
   const authorShare = computeAuthorSharePercent();
   const proofPoints = [
-    `${authorShare}% author share`,
-    "You set the price",
-    "No setup fee",
-    "No monthly subscription",
+    `${authorShare}% për autorin`,
+    "Çmimin e vendosni ju",
+    "Pa tarifë fillestare",
+    "Pa abonim mujor",
   ];
   const showFan = fan.length === HOME_SLOT_COUNT;
 
@@ -273,16 +273,16 @@ function HeroSection({ cta, fan }: { cta: HomepageCta | null; fan: FanCover<Cove
           }`}
         >
           <div className="max-w-xl">
-            <Eyebrow>Self-publishing for Albanian-language authors</Eyebrow>
+            <Eyebrow>Vetëbotim për autorët që shkruajnë shqip</Eyebrow>
             <h1 className="mt-5 font-serif text-4xl font-normal leading-[1.1] sm:text-5xl lg:text-[3.5rem]">
-              Publish your book.
+              Botoni librin tuaj.
               <br />
-              <span className="italic text-accent">Your way.</span>
+              <span className="italic text-accent">Siç e doni ju.</span>
             </h1>
             <p className="mt-5 max-w-md text-base leading-relaxed text-primary-foreground/85 md:text-lg">
-              The self-publishing platform built for Albanian-language
-              authors. Publish independently, set your own price, and reach
-              readers through Librum.
+              Platforma e vetëbotimit e ndërtuar për autorët që shkruajnë
+              shqip. Botoni në mënyrë të pavarur, vendosni vetë çmimin dhe
+              arrini te lexuesit përmes Librum.
             </p>
 
             {/* REDESIGN STEP 2: the mockup's two hero buttons. The
@@ -295,7 +295,7 @@ function HeroSection({ cta, fan }: { cta: HomepageCta | null; fan: FanCover<Cove
                 </Link>
               )}
               <Link href="/how-it-works" className={OUTLINE_ON_DARK_CTA_CLASSES}>
-                Read the full guide &rarr;
+                Lexoni udhëzuesin e plotë &rarr;
               </Link>
             </div>
 
@@ -372,16 +372,16 @@ function HeroMedia() {
 
 const WHY_LIBRUM_PILLARS: { heading: string; body: string }[] = [
   {
-    heading: "A new path to publishing",
-    body: "Librum gives Albanian-language writers a direct way to bring their work to readers.",
+    heading: "Një rrugë e re drejt botimit",
+    body: "Librum u jep shkrimtarëve që shkruajnë shqip një rrugë të drejtpërdrejtë për t'ua sjellë veprën lexuesve.",
   },
   {
-    heading: "Stay in control",
-    body: "You set your price, manage your listing, and control when your book is published.",
+    heading: "Kontrolli mbetet te ju",
+    body: "Ju vendosni çmimin, kujdeseni për faqen e librit dhe vendosni kur botohet libri juaj.",
   },
   {
-    heading: "Find your readers",
-    body: "Once published, your book becomes available to readers through the Librum Bookstore.",
+    heading: "Gjeni lexuesit tuaj",
+    body: "Pasi botohet, libri juaj u del lexuesve në Librarinë e Librum.",
   },
 ];
 
@@ -389,10 +389,10 @@ function WhyLibrumSection() {
   return (
     <section className="bg-background">
       <div className={SECTION_CONTAINER}>
-        <h2 className={SECTION_HEADING}>Why Librum</h2>
+        <h2 className={SECTION_HEADING}>Pse Librum</h2>
         <p className="mt-3 max-w-xl text-foreground/80">
-          A direct way for Albanian-language writers to publish
-          professionally and reach readers.
+          Një rrugë e drejtpërdrejtë që shkrimtarët që shkruajnë shqip të
+          botojnë në mënyrë profesionale dhe të arrijnë te lexuesit.
         </p>
 
         <div className="mt-8 grid gap-8 sm:grid-cols-3">
@@ -421,20 +421,20 @@ function WhyLibrumSection() {
 
 const PUBLISHING_STEPS: { title: string; body: string }[] = [
   {
-    title: "Prepare your manuscript",
-    body: "Have your finished book ready as an EPUB file — or a DOCX file, which Librum converts into an EPUB for you — along with a cover image.",
+    title: "Përgatitni dorëshkrimin",
+    body: "Mbajeni gati librin e përfunduar si skedar EPUB, ose si skedar DOCX që Librum e kthen në EPUB për ju, bashkë me një imazh për kopertinën.",
   },
   {
-    title: "Create your book",
-    body: "Add your title, description, genre, cover, and publishing information.",
+    title: "Krijoni librin",
+    body: "Shtoni titullin, përshkrimin, zhanrin, kopertinën dhe të dhënat e botimit.",
   },
   {
-    title: "Set your price and publish",
-    body: "Choose your price, review your listing, and publish when you're ready.",
+    title: "Vendosni çmimin dhe botojeni",
+    body: "Zgjidhni çmimin, kontrolloni faqen e librit dhe botojeni kur të jeni gati.",
   },
   {
-    title: "Sell and earn",
-    body: "Paid publishing and author payout setup have not launched yet. Authors can continue to publish free books while Librum completes its payment and payout systems.",
+    title: "Shisni dhe fitoni",
+    body: "Botimi me pagesë dhe pagesat për autorët nuk kanë nisur ende. Autorët mund të vazhdojnë të botojnë libra falas ndërsa Librum përfundon sistemet e pagesave.",
   },
 ];
 
@@ -442,7 +442,7 @@ function PublishInFourStepsSection() {
   return (
     <section className="border-y border-border bg-surface">
       <div className={SECTION_CONTAINER}>
-        <h2 className={SECTION_HEADING}>Publish in four steps</h2>
+        <h2 className={SECTION_HEADING}>Botoni në katër hapa</h2>
         {/* Each step spans three shared grid rows (numeral, heading,
             text), so the four steps line up row by row however long their
             headings are. REDESIGN STEP 2 r7 (Renato's card "Remove
@@ -480,25 +480,25 @@ function EarningsSection() {
         <div>
           <span className="font-serif text-6xl font-normal text-primary sm:text-7xl lg:text-8xl">{authorShare}%</span>
           <p className="mt-1 text-sm font-medium uppercase tracking-wide text-muted">
-            Author share
+            Pjesa e autorit
           </p>
         </div>
         <div className="sm:border-l sm:border-accent sm:pl-14">
-          <p className="text-sm font-semibold uppercase tracking-wide text-primary">Earnings</p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-primary">Fitimet</p>
           <h2 className={`mt-2 ${SECTION_HEADING}`}>
-            Keep more of every eligible sale.
+            Mbani më shumë nga çdo shitje që kualifikohet.
           </h2>
           <p className="mt-3 leading-relaxed text-foreground/90">
-            Librum keeps a {PLATFORM_FEE_PERCENT}% platform fee. No setup
-            fee. No monthly subscription.
+            Librum mban një tarifë platforme prej {PLATFORM_FEE_PERCENT}%. Pa
+            tarifë fillestare. Pa abonim mujor.
           </p>
           {/* r9: moved here from the deleted tools section ("Track your
               sales"), word for word. */}
           <p className="mt-2 leading-relaxed text-foreground/90">
-            Follow units sold and revenue from your author dashboard.
+            Ndiqni kopjet e shitura dhe të ardhurat te Paneli i autorit.
           </p>
           <Link href="/pricing" className={`${TEXT_LINK_CLASSES} mt-4 inline-block`}>
-            See how earnings work &rarr;
+            Shikoni si funksionojnë fitimet &rarr;
           </Link>
         </div>
       </div>
@@ -528,9 +528,9 @@ function PublishedWithLibrumSection({ books }: { books: Cover[] }) {
   return (
     <section className="border-y border-border bg-surface">
       <div className={SECTION_CONTAINER}>
-        <h2 className={SECTION_HEADING}>Published with Librum</h2>
+        <h2 className={SECTION_HEADING}>Botuar me Librum</h2>
         <p className="mt-3 max-w-md text-muted">
-          Books brought to readers by independent Librum authors.
+          Libra që autorë të pavarur të Librum ua sjellin lexuesve.
         </p>
 
         <ul className="mt-8 grid gap-8 lg:grid-cols-3 lg:gap-10">
@@ -578,7 +578,7 @@ function PublishedWithLibrumSection({ books }: { books: Cover[] }) {
 
         <div className="mt-8">
           <Link href="/bookstore" className={TEXT_LINK_CLASSES}>
-            See published books &rarr;
+            Shikoni librat e botuar &rarr;
           </Link>
         </div>
       </div>
