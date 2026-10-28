@@ -538,7 +538,7 @@ function PublishedWithLibrumSection({ books }: { books: Cover[] }) {
             <li key={book.id}>
               <Link
                 href={`/books/${book.id}`}
-                aria-label={`View ${book.title} on Librum`}
+                aria-label={`Shikoni ${book.title} në Librum`}
                 className="focus-ring group/book flex gap-5 rounded-[3px]"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}

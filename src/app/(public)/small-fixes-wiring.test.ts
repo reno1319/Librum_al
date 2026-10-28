@@ -67,7 +67,7 @@ describe("FIX1 X12: header on one row, a quiet Log out, one word for it", () => 
   });
 
   it("draws Log out as a text link, not the outline button", () => {
-    const logout = header.match(/<button type="submit" className=\{(\w+)\}>\s*Log out/);
+    const logout = header.match(/<button type="submit" className=\{(\w+)\}>\s*Dilni/);
     expect(logout?.[1]).toBe("QUIET_LINK_ON_DARK_CLASSES");
   });
 

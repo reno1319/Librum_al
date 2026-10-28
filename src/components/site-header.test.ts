@@ -20,20 +20,20 @@ describe("buildSiteHeaderNav", () => {
     });
 
     expect(nav.primaryLinks.map((l) => l.label)).toEqual([
-      "Home",
-      "About",
-      "How it works",
-      "Earnings",
-      "Bookstore",
+      "Kryefaqja",
+      "Rreth nesh",
+      "Si funksionon",
+      "Fitimet",
+      "Libraria",
       "Blog",
     ]);
-    expect(nav.primaryLinks.some((l) => l.label === "Library")).toBe(false);
-    expect(nav.primaryLinks.some((l) => l.label === "Dashboard")).toBe(false);
+    expect(nav.primaryLinks.some((l) => l.label === "Biblioteka ime")).toBe(false);
+    expect(nav.primaryLinks.some((l) => l.label === "Paneli i autorit")).toBe(false);
     expect(nav.headerName).toBeNull();
     expect(nav.showLogout).toBe(false);
     expect(nav.showAccountLink).toBe(true);
     expect(nav.accountHref).toBe("/login");
-    expect(nav.accountLabel).toBe("Log in or sign up");
+    expect(nav.accountLabel).toBe("Hyni ose regjistrohuni");
     expect(nav.recoveryLabel).toBeNull();
   });
 
@@ -45,16 +45,16 @@ describe("buildSiteHeaderNav", () => {
       recoveryActive: false,
     });
 
-    expect(nav.primaryLinks.some((l) => l.href === "/library" && l.label === "Library")).toBe(
+    expect(nav.primaryLinks.some((l) => l.href === "/library" && l.label === "Biblioteka ime")).toBe(
       true,
     );
     expect(nav.primaryLinks.some((l) => l.href === "/blog" && l.label === "Blog")).toBe(true);
-    expect(nav.primaryLinks.some((l) => l.label === "Dashboard")).toBe(false);
+    expect(nav.primaryLinks.some((l) => l.label === "Paneli i autorit")).toBe(false);
     expect(nav.headerName).not.toBeNull();
     expect(nav.showAccountLink).toBe(true);
     expect(nav.showLogout).toBe(true);
     expect(nav.accountHref).toBe("/account");
-    expect(nav.accountLabel).toBe("Account");
+    expect(nav.accountLabel).toBe("Llogaria");
     expect(nav.recoveryLabel).toBeNull();
   });
 
@@ -67,9 +67,9 @@ describe("buildSiteHeaderNav", () => {
     });
 
     expect(
-      nav.primaryLinks.some((l) => l.href === "/dashboard" && l.label === "Dashboard"),
+      nav.primaryLinks.some((l) => l.href === "/dashboard" && l.label === "Paneli i autorit"),
     ).toBe(true);
-    expect(nav.primaryLinks.some((l) => l.label === "Library")).toBe(false);
+    expect(nav.primaryLinks.some((l) => l.label === "Biblioteka ime")).toBe(false);
     expect(nav.headerName).not.toBeNull();
     expect(nav.showAccountLink).toBe(true);
     expect(nav.showLogout).toBe(true);
@@ -88,7 +88,7 @@ describe("buildSiteHeaderNav", () => {
     expect(nav.headerName).toBeNull();
     expect(nav.showAccountLink).toBe(false);
     expect(nav.showLogout).toBe(true);
-    expect(nav.recoveryLabel).toBe("Password recovery");
+    expect(nav.recoveryLabel).toBe("Rikthimi i fjalëkalimit");
   });
 
   it("recovery active for an authenticated author: no Dashboard, same recovery-only shape as the reader case", () => {
@@ -100,11 +100,11 @@ describe("buildSiteHeaderNav", () => {
     });
 
     expect(nav.primaryLinks).toEqual([]);
-    expect(nav.primaryLinks.some((l) => l.label === "Dashboard")).toBe(false);
+    expect(nav.primaryLinks.some((l) => l.label === "Paneli i autorit")).toBe(false);
     expect(nav.headerName).toBeNull();
     expect(nav.showAccountLink).toBe(false);
     expect(nav.showLogout).toBe(true);
-    expect(nav.recoveryLabel).toBe("Password recovery");
+    expect(nav.recoveryLabel).toBe("Rikthimi i fjalëkalimit");
   });
 
   it("recovery active overrides user/role state entirely -- even with a fully populated user/profile, ordinary authenticated nav stays suppressed", () => {
@@ -139,7 +139,7 @@ describe("buildSiteHeaderNav", () => {
       recoveryActive: false,
     });
 
-    expect(afterRecovery.primaryLinks.some((l) => l.label === "Library")).toBe(true);
+    expect(afterRecovery.primaryLinks.some((l) => l.label === "Biblioteka ime")).toBe(true);
     expect(afterRecovery.headerName).not.toBeNull();
     expect(afterRecovery.showAccountLink).toBe(true);
     expect(afterRecovery.showLogout).toBe(true);
@@ -181,8 +181,8 @@ describe("SiteHeader name link (source)", () => {
     const { readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const source = readFileSync(fileURLToPath(new URL("./site-header.tsx", import.meta.url)), "utf8");
-    expect(source).toContain("aria-label={`Hello, ${nav.headerName}, ${nav.accountLabel}`}");
-    expect(source).toContain('<span className="shrink-0 whitespace-pre">Hello, </span>');
+    expect(source).toContain("aria-label={`Përshëndetje, ${nav.headerName}, ${nav.accountLabel}`}");
+    expect(source).toContain('<span className="shrink-0 whitespace-pre">Përshëndetje, </span>');
     expect(source).toContain('<span className="min-w-0 max-w-[12ch] truncate">{nav.headerName}</span>');
     expect(source).not.toContain("xl:inline");
   });

@@ -14,7 +14,7 @@ import { fanDrawOrder, type FanCover } from "@/lib/home-picks-logic";
 
 type FanBook = { id: string; title: string; author: string | null; url: string };
 
-export const SPONSORED_LABEL = "Sponsored";
+export const SPONSORED_LABEL = "Sponsorizuar";
 
 // Literal class strings so Tailwind generates them. Widths are shares
 // of the column, so the fan shrinks with the screen. On desktop (lg)
@@ -29,7 +29,7 @@ export function HomeCoverFan({ covers }: { covers: FanCover<FanBook>[] }) {
   const ordered = fanDrawOrder(covers);
   return (
     <div className="mx-auto w-full min-w-0 max-w-[520px] lg:mx-0 lg:max-w-none">
-      <ul className="flex items-center justify-center py-4 sm:py-6" aria-label="Featured books">
+      <ul className="flex items-center justify-center py-4 sm:py-6" aria-label="Libra të zgjedhur">
         {ordered.map((cover) => {
           const middle = cover.slot === 1;
           return (
@@ -39,7 +39,7 @@ export function HomeCoverFan({ covers }: { covers: FanCover<FanBook>[] }) {
             >
               <Link
                 href={`/books/${cover.book.id}`}
-                aria-label={`View ${cover.book.title} on Librum${cover.sponsored ? ` (${SPONSORED_LABEL.toLowerCase()})` : ""}`}
+                aria-label={`Shikoni ${cover.book.title} në Librum${cover.sponsored ? ` (${SPONSORED_LABEL.toLowerCase()})` : ""}`}
                 className="focus-ring group/cover relative block rounded-[3px]"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}

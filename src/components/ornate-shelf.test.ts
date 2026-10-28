@@ -42,7 +42,7 @@ describe("OrnateShelf", () => {
     const html = render(books(5));
     for (let i = 1; i <= 5; i++) {
       expect(html).toContain(`href="/books/b${i}"`);
-      expect(html).toContain(`aria-label="View Libri ${i} on Librum"`);
+      expect(html).toContain(`aria-label="Shikoni Libri ${i} në Librum"`);
     }
     expect(html).toMatch(/^<div[^>]*>.*<ul aria-label="Newest books"/);
   });

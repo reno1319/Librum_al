@@ -63,7 +63,7 @@ async function render() {
 async function fanAndShowcase() {
   const html = await render();
   const cut = html.indexOf(">Published with Librum</h2>");
-  const names = (part: string) => [...part.matchAll(/aria-label="View (Book \d\d on Librum[^"]*)"/g)].map((m) => m[1].replace(" on Librum", ""));
+  const names = (part: string) => [...part.matchAll(/aria-label="Shikoni (Book \d\d në Librum[^"]*)"/g)].map((m) => m[1].replace(" në Librum", ""));
   return { fan: names(cut === -1 ? html : html.slice(0, cut)), showcase: cut === -1 ? [] : names(html.slice(cut)) };
 }
 
@@ -106,7 +106,7 @@ describe("home cover fan", () => {
     slots = [{ slot: 1, book_id: "book-01", sponsored: true }];
     const { fan } = await fanAndShowcase();
     expect(fan).toEqual(["Book 08", "Book 09", "Book 07"]);
-    expect(fan.join()).not.toContain("sponsored");
+    expect(fan.join()).not.toContain("sponsorizuar");
   });
 
   it("Sponsored shows only on a paid slot's cover, and the link says so", async () => {
@@ -115,8 +115,8 @@ describe("home cover fan", () => {
       { slot: 3, book_id: "book-03", sponsored: false },
     ];
     const html = await render();
-    expect((await fanAndShowcase()).fan).toEqual(["Book 09", "Book 01 (sponsored)", "Book 03"]);
-    expect(html.match(/>Sponsored</g)).toHaveLength(1);
+    expect((await fanAndShowcase()).fan).toEqual(["Book 09", "Book 01 (sponsorizuar)", "Book 03"]);
+    expect(html.match(/>Sponsorizuar</g)).toHaveLength(1);
   });
 
   it("Librum's choice is not on the home page any more", async () => {
@@ -129,7 +129,7 @@ describe("home cover fan", () => {
     rows = [book(1), book(2)];
     const html = await render();
     expect(html).toContain("/images/author-hero.jpg");
-    expect(html).not.toContain('aria-label="Featured books"');
+    expect(html).not.toContain('aria-label="Libra të zgjedhur"');
     expect((await fanAndShowcase()).showcase).toEqual(["Book 02", "Book 01"]);
   });
 

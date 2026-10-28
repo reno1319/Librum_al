@@ -35,14 +35,14 @@ describe("discount code actions: maintenance-mode gate", () => {
 
   it("toggleDiscountCode throws the stable maintenance error and never reaches Supabase", async () => {
     await expect(toggleDiscountCode("code-1", true)).rejects.toThrow(
-      "Librum is temporarily unavailable for scheduled maintenance",
+      "Librum është përkohësisht i padisponueshëm për mirëmbajtje të planifikuar",
     );
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 
   it("deleteDiscountCode throws the stable maintenance error and never reaches Supabase", async () => {
     await expect(deleteDiscountCode("code-1")).rejects.toThrow(
-      "Librum is temporarily unavailable for scheduled maintenance",
+      "Librum është përkohësisht i padisponueshëm për mirëmbajtje të planifikuar",
     );
     expect(mockCreateClient).not.toHaveBeenCalled();
   });

@@ -176,9 +176,9 @@ describe("staff labels", () => {
 
   it("amounts: paid, free, older order without a currency", () => {
     expect(staffAmountLabel(purchase({ amountMinor: 49900 }))).toBe(formatTransactionAmount(49900, { state: "resolved", currency: "ALL" }));
-    expect(staffAmountLabel(purchase({ paymentId: null, amountMinor: 0, currency: null }))).toBe("Free");
+    expect(staffAmountLabel(purchase({ paymentId: null, amountMinor: 0, currency: null }))).toBe("Falas");
     expect(staffAmountLabel(purchase({ paymentId: null, amountMinor: 999, currency: null }))).toBe(
-      "Amount unavailable (currency unknown)",
+      "Shuma nuk është e disponueshme (monedhë e panjohur)",
     );
   });
 });

@@ -66,7 +66,7 @@ describe("TRUST PACK 1-2: How to read your book", () => {
 
   it("ends with the support email and the reply promise", () => {
     expect(html).toContain('href="mailto:support@librum.al"');
-    expect(text).toContain("We reply within 3 working days.");
+    expect(text).toContain("Përgjigjemi brenda 3 ditëve të punës.");
   });
 });
 
@@ -76,7 +76,7 @@ describe("TRUST PACK 1: links to the reader help page", () => {
     const text = toText(html);
     expect(text).toContain("How do I open a book I downloaded?");
     expect(html).toContain('href="/help/reading"');
-    expect(text).toContain("Get in touch . We reply within 3 working days.");
+    expect(text).toContain("Get in touch . Përgjigjemi brenda 3 ditëve të punës.");
   });
 
   it("the Library and the book page's owned panel link to it", () => {
@@ -91,7 +91,7 @@ describe("TRUST PACK 5-6: Contact, footer and Privacy", () => {
   it("Contact shows the email and the promise, and no WhatsApp link while the number is empty", () => {
     const html = renderToStaticMarkup(ContactPage());
     expect(html).toContain('href="mailto:support@librum.al"');
-    expect(toText(html)).toContain("We reply within 3 working days.");
+    expect(toText(html)).toContain("Përgjigjemi brenda 3 ditëve të punës.");
     expect(html).not.toContain("wa.me");
     expect(html).not.toContain("WhatsApp");
   });
@@ -99,7 +99,7 @@ describe("TRUST PACK 5-6: Contact, footer and Privacy", () => {
   it("the footer shows the promise under the email", () => {
     const html = renderToStaticMarkup(SiteFooter());
     expect(html).toContain('href="mailto:support@librum.al"');
-    expect(toText(html)).toContain("We reply within 3 working days.");
+    expect(toText(html)).toContain("Përgjigjemi brenda 3 ditëve të punës.");
   });
 
   it("Privacy doesn't mention WhatsApp while the number is empty", () => {

@@ -256,8 +256,8 @@ describe("BalancePage: maintenance-mode gate", () => {
     const { renderToStaticMarkup } = await import("react-dom/server");
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
 
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockGetAuthorFinancialSummary).not.toHaveBeenCalled();
     expect(mockListAuthorFinancialActivity).not.toHaveBeenCalled();
@@ -367,7 +367,7 @@ describe("BalancePage: amounts are separated by currency (Patch 4)", () => {
 
   it("a malformed currency is shown as unavailable, never guessed as USD or ALL", async () => {
     const html = await renderBalance();
-    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toContain("USD 5.00");
     expect(html).not.toMatch(/(?<![\d.,])5 lekë/);
   });

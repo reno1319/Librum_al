@@ -222,7 +222,7 @@ describe("formatTransactionAmount", () => {
     expect(formatTransactionAmount(999, { state: "unknown" })).toBe(CURRENCY_UNKNOWN_LABEL);
     expect(formatTransactionAmount(999, { state: "conflict" })).toBe(CURRENCY_CONFLICT_LABEL);
     expect(formatTransactionAmount(999, { state: "unsupported", currency: "EUR" })).toBe(
-      "Amount unavailable (unsupported currency EUR)",
+      "Shuma nuk është e disponueshme (monedhë e pambështetur EUR)",
     );
     for (const label of [
       formatTransactionAmount(999, { state: "unknown" }),

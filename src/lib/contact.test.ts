@@ -15,7 +15,7 @@ import { TEAM, visibleTeam } from "./team";
 describe("TRUST PACK: contact details", () => {
   it("promises a reply within 3 working days at support@librum.al", () => {
     expect(SUPPORT_EMAIL).toBe("support@librum.al");
-    expect(REPLY_PROMISE).toBe("We reply within 3 working days.");
+    expect(REPLY_PROMISE).toBe("Përgjigjemi brenda 3 ditëve të punës.");
   });
 
   it("is empty until the number is on the WhatsApp Business app (Renato 10-24, b)", () => {
