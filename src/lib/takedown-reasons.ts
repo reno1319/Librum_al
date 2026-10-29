@@ -105,7 +105,7 @@ function withFinalStop(text: string): string {
 
 /**
  * The author's notice, as separate lines in reading order:
- * "Hequr nga Librum më <date>. Arsyeja: <label>.", the message,
+ * "Hequr nga Libraria më <date>. Arsyeja: <label>.", the message,
  * "Hoqëm nga publikimi edhe: <titles>." (when any), and the questions line.
  */
 export function buildAuthorTakedownNoticeLines(
@@ -113,7 +113,7 @@ export function buildAuthorTakedownNoticeLines(
   formatDate: (iso: string) => string,
 ): string[] {
   const lines = [
-    `Hequr nga Librum më ${formatDate(notice.takenDownAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`,
+    `Hequr nga Libraria më ${formatDate(notice.takenDownAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`,
     withFinalStop(notice.message),
   ];
   if (notice.bundleTitles.length > 0) {

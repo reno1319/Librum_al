@@ -284,7 +284,7 @@ describe("sendBookApprovedEmail / sendBookSentBackEmail", () => {
     await sendBookApprovedEmail("ana@example.com", { title: "<b>Kënga</b>", bookId: "22222222-2222-4222-8222-222222222222" });
     const args = sendMock.mock.calls[0][0];
     expect(args.to).toBe("ana@example.com");
-    expect(args.subject).toBe("Libri juaj “<b>Kënga</b>” u publikua në Librum");
+    expect(args.subject).toBe('Libri juaj "<b>Kënga</b>" u publikua në Librum');
     expect(args.html).toContain("E kontrolluam dhe tani është në Librari.");
     expect(args.html).toContain("&lt;b&gt;Kënga&lt;/b&gt;");
     expect(args.html).not.toContain("<b>Kënga</b>");
@@ -298,7 +298,7 @@ describe("sendBookApprovedEmail / sendBookSentBackEmail", () => {
       message: "Line one <script>x</script>\nLine two",
     });
     const args = sendMock.mock.calls[0][0];
-    expect(args.subject).toBe("Librum jua ktheu “T & Co” për ndryshime");
+    expect(args.subject).toBe('Librum jua ktheu "T & Co" për ndryshime');
     expect(args.html).toContain("<strong>T &amp; Co</strong>");
     expect(args.html).toContain("Arsyeja: Skedar i gabuar ose i dëmtuar");
     expect(args.html).toContain("Rregullojeni dhe dërgojeni përsëri për shqyrtim.");

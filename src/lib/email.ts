@@ -375,7 +375,7 @@ export async function sendBookApprovedEmail(to: string, { title, bookId }: { tit
   const origin = resolveSiteOrigin();
   await sendEmail(
     to,
-    `Libri juaj “${title}” u publikua në Librum`,
+    `Libri juaj "${title}" u publikua në Librum`,
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">Libri juaj <strong>${escapeEmailHtml(title)}</strong> u publikua në Librum</h1>
         <p>E kontrolluam dhe tani është në Librari.</p>
@@ -391,7 +391,7 @@ export async function sendBookSentBackEmail(
   const origin = resolveSiteOrigin();
   await sendEmail(
     to,
-    `Librum jua ktheu “${title}” për ndryshime`,
+    `Librum jua ktheu "${title}" për ndryshime`,
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">Librum jua ktheu librin <strong>${escapeEmailHtml(title)}</strong> për ndryshime</h1>
         <p>Arsyeja: ${escapeEmailHtml(reasonLabel)}</p>

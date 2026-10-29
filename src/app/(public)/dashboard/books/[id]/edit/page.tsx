@@ -699,7 +699,7 @@ export default async function EditBookPage({
               Gjendja:{" "}
               <span className="font-medium">
                 {takedown.notice
-                  ? "Hequr nga Librum"
+                  ? "Hequr nga Libraria"
                   : inReview
                     ? IN_REVIEW_LABEL
                     : book.status === "draft"
