@@ -13,6 +13,18 @@ import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
 import { recordAgreements } from "@/lib/agreement-records";
 import { createAuthorRoleWriteClient } from "@/lib/author-role-write-client";
 import { ACCOUNT_NAME_MAX_LENGTH, ACCOUNT_NAME_TOO_LONG_MESSAGE } from "@/lib/account-name";
+import {
+  AUTH_ENTER_EMAIL_MESSAGE,
+  AUTH_FILL_ALL_FIELDS_MESSAGE,
+  AUTH_LOGIN_FAILED_MESSAGE,
+  AUTH_NAME_EMPTY_MESSAGE,
+  AUTH_PASSWORD_CHANGED_MESSAGE,
+  AUTH_PASSWORD_TOO_SHORT_MESSAGE,
+  AUTH_PASSWORDS_DIFFER_MESSAGE,
+  AUTH_RESET_LINK_EXPIRED_MESSAGE,
+  AUTH_RESET_SEND_FAILED_MESSAGE,
+  AUTH_TERMS_REQUIRED_MESSAGE,
+} from "@/lib/auth-page-messages";
 
 // Supabase's own wrong-password message, which auth-error.ts translates.
 const INVALID_CREDENTIALS_MESSAGE = "Invalid login credentials";
@@ -42,11 +54,11 @@ export async function signup(formData: FormData) {
   const role = resolveSignupRole(formData.get("role"));
 
   if (!email || !password || !rawDisplayName) {
-    redirect(`/signup?error=${encodeURIComponent("Plotësoni të gjitha fushat.")}`);
+    redirect(`/signup?error=${encodeURIComponent(AUTH_FILL_ALL_FIELDS_MESSAGE)}`);
   }
   if (!displayName) {
     // The same message the profile page shows for an empty name.
-    redirect(`/signup?error=${encodeURIComponent("Emri nuk mund të jetë bosh.")}`);
+    redirect(`/signup?error=${encodeURIComponent(AUTH_NAME_EMPTY_MESSAGE)}`);
   }
   if (displayName.length > ACCOUNT_NAME_MAX_LENGTH) {
     redirect(`/signup?error=${encodeURIComponent(ACCOUNT_NAME_TOO_LONG_MESSAGE)}`);
@@ -63,9 +75,7 @@ export async function signup(formData: FormData) {
 
   if (!acceptedTerms) {
     redirect(
-      `/signup?error=${encodeURIComponent(
-        "Duhet të pranoni Kushtet e përdorimit para se të krijoni llogarinë.",
-      )}`,
+      `/signup?error=${encodeURIComponent(AUTH_TERMS_REQUIRED_MESSAGE)}`,
     );
   }
 
@@ -227,7 +237,7 @@ export async function login(formData: FormData) {
   // asserting it away.
   const signedInUser = data.user;
   if (!signedInUser) {
-    redirect(loginErrorPath("Hyrja nuk u krye. Provoni përsëri.", next));
+    redirect(loginErrorPath(AUTH_LOGIN_FAILED_MESSAGE, next));
   }
 
   // LAUNCH-1 P1-11 STALE-MARKER CORRECTION: signInWithPassword resolving
@@ -284,7 +294,7 @@ export async function requestPasswordReset(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
 
   if (!email) {
-    redirect(`/forgot-password?error=${encodeURIComponent("Shkruani emailin.")}`);
+    redirect(`/forgot-password?error=${encodeURIComponent(AUTH_ENTER_EMAIL_MESSAGE)}`);
   }
 
   const supabase = await createClient();
@@ -303,9 +313,7 @@ export async function requestPasswordReset(formData: FormData) {
     // could contain sensitive request information.
     console.error("requestPasswordReset: password-reset provider request threw");
     redirect(
-      `/forgot-password?error=${encodeURIComponent(
-        "Nuk mundëm ta dërgojmë emailin e rivendosjes tani. Prisni pak dhe provoni përsëri.",
-      )}`,
+      `/forgot-password?error=${encodeURIComponent(AUTH_RESET_SEND_FAILED_MESSAGE)}`,
     );
   }
 
@@ -319,9 +327,7 @@ export async function requestPasswordReset(formData: FormData) {
       status: resetError.status ?? null,
     });
     redirect(
-      `/forgot-password?error=${encodeURIComponent(
-        "Nuk mundëm ta dërgojmë emailin e rivendosjes tani. Prisni pak dhe provoni përsëri.",
-      )}`,
+      `/forgot-password?error=${encodeURIComponent(AUTH_RESET_SEND_FAILED_MESSAGE)}`,
     );
   }
 
@@ -338,9 +344,7 @@ export async function updatePassword(formData: FormData) {
 
   if (!user) {
     redirect(
-      `/login?error=${encodeURIComponent(
-        "Kjo lidhje për rivendosjen ka skaduar. Kërkoni një të re nga faqja e hyrjes.",
-      )}`,
+      `/login?error=${encodeURIComponent(AUTH_RESET_LINK_EXPIRED_MESSAGE)}`,
     );
   }
 
@@ -349,12 +353,12 @@ export async function updatePassword(formData: FormData) {
 
   if (!password || password.length < 6) {
     redirect(
-      `/reset-password?error=${encodeURIComponent("Fjalëkalimi duhet të ketë të paktën 6 karaktere.")}`,
+      `/reset-password?error=${encodeURIComponent(AUTH_PASSWORD_TOO_SHORT_MESSAGE)}`,
     );
   }
 
   if (password !== confirmPassword) {
-    redirect(`/reset-password?error=${encodeURIComponent("Fjalëkalimet nuk përputhen.")}`);
+    redirect(`/reset-password?error=${encodeURIComponent(AUTH_PASSWORDS_DIFFER_MESSAGE)}`);
   }
 
   const { error } = await supabase.auth.updateUser({ password });
@@ -383,6 +387,6 @@ export async function updatePassword(formData: FormData) {
   await supabase.auth.signOut();
 
   redirect(
-    `/login?success=${encodeURIComponent("Fjalëkalimi u ndryshua. Hyni me fjalëkalimin e ri.")}`,
+    `/login?success=${encodeURIComponent(AUTH_PASSWORD_CHANGED_MESSAGE)}`,
   );
 }

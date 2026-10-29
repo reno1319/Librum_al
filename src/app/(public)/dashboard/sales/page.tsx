@@ -20,7 +20,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
-import { chartDayLabels } from "@/lib/chart-day-labels";
+import { chartDayLabels, chartDayTitle } from "@/lib/chart-day-labels";
 
 export const metadata: Metadata = {
   title: "Shitjet",
@@ -340,10 +340,7 @@ export default async function SalesPage() {
                   <div
                     key={day.date.toISOString()}
                     className="flex h-full flex-1 flex-col items-center justify-end gap-1"
-                    title={`${day.date.toLocaleDateString("sq", {
-                      month: "short",
-                      day: "numeric",
-                    })}: ${formatTransactionMinorUnits(day.netMinor, series.currency)}`}
+                    title={`${chartDayTitle(day.date)}: ${formatTransactionMinorUnits(day.netMinor, series.currency)}`}
                   >
                     <div
                       className="w-full rounded-t bg-primary"

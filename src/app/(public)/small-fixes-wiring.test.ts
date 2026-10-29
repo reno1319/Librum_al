@@ -90,7 +90,7 @@ describe("FIX1 X12: header on one row, a quiet Log out, one word for it", () => 
 
 describe("FIX1 X13: chart labels carry the month", () => {
   it("the first bar names its month", () => {
-    expect(chartDayLabels([new Date(2026, 9, 12)])[0]).toEqual({ day: "12", month: "Tet" });
+    expect(chartDayLabels([new Date(Date.UTC(2026, 9, 12))])[0]).toEqual({ day: "12", month: "tet" });
   });
 });
 

@@ -13,10 +13,10 @@ export function ResumeRedirect({ to }: { to: string }) {
 
   return (
     <main className="mx-auto flex min-h-[60vh] w-full max-w-sm flex-col justify-center px-4">
-      <p className="text-sm text-muted">Finishing your purchase…</p>
+      <p className="text-sm text-muted">Po e përfundojmë blerjen…</p>
       <p className="mt-2 text-sm">
         <a href={to} className="focus-ring rounded-sm font-medium text-primary underline">
-          Continue
+          Vazhdoni
         </a>
       </p>
     </main>
