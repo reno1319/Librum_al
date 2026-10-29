@@ -24,6 +24,7 @@ import { Alert } from "@/components/ui/alert";
 import type { PublicBook, PublicBundle, PublicSeries } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { canonicalMetadata } from "@/lib/seo";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
 // dashboard or a social profile -- see the PRODUCT-2 audit.
@@ -108,7 +109,9 @@ export default async function AuthorProfilePage({
   }
 
   const { id } = await params;
-  const { success, error } = (await searchParams) ?? {};
+  const { success: rawSuccess, error: rawError } = (await searchParams) ?? {};
+  const success = pageSuccessMessage(rawSuccess);
+  const error = pageErrorMessage(rawError);
   const supabase = await createClient();
 
   // LIBRUM 2.0 PRODUCT-2: getUser() and the pen name fetch are

@@ -8,6 +8,7 @@ import { updateBlogPostAction, publishBlogPostAction, unpublishBlogPostAction, d
 import { PublishButton, UnpublishButton, DeleteDraftButton } from "../blog-status-actions";
 import type { BlogCategory, BlogPostStatus } from "@/lib/types";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Edit article",
@@ -45,7 +46,9 @@ export default async function EditBlogPostPage({
   // read-only holder to land on a form whose only purpose is mutation.
   const { userId } = await requireStaff("blog.manage");
   const { id } = await params;
-  const { error, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+  const error = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
 
   const supabase = await createClient();
   const { data: post } = await supabase

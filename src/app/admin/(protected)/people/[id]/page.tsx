@@ -27,6 +27,7 @@ import {
 import { accessFixNeeded, type AccessFix } from "../suspension-logic";
 import { liftSuspensionAsStaff, retryAccountAccessAsStaff, suspendAccountAsStaff } from "./actions";
 import { SuspensionPanel } from "./suspension-panel";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Person",
@@ -116,7 +117,9 @@ export default async function AdminPersonPage({
   const viewer = await requireStaff("people.view");
 
   const { id } = await params;
-  const { error: errorMessage, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+  const errorMessage = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
   if (!isUuid(id)) notFound();
 
   const supabase = await createClient();

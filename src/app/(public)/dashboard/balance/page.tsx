@@ -35,6 +35,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { AuthorPayoutOverviewRow } from "@/lib/types";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Bilanci",
@@ -66,7 +67,9 @@ export default async function BalancePage({
     return <MaintenanceNotice />;
   }
 
-  const { editBank, error: queryError, success: querySuccess } = await searchParams;
+  const { editBank, error: rawQueryError, success: rawQuerySuccess } = await searchParams;
+  const queryError = pageErrorMessage(rawQueryError);
+  const querySuccess = pageSuccessMessage(rawQuerySuccess);
   const supabase = await createClient();
   const {
     data: { user },

@@ -26,6 +26,7 @@ import {
   type CurrencyProvenance,
 } from "@/lib/transaction-money";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Blerjet dhe rimbursimet",
@@ -87,7 +88,11 @@ export default async function AccountPurchasesPage({
     return <MaintenanceNotice />;
   }
 
-  const { error, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+
+  const error = pageErrorMessage(rawError);
+
+  const success = pageSuccessMessage(rawSuccess);
   const supabase = await createClient();
   const {
     data: { user },

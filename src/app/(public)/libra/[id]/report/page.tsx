@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { submitReport } from "../actions";
 import { REPORT_REASONS, REPORT_REASON_LABELS } from "@/lib/report-reasons";
 import type { Metadata } from "next";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Raportoni një libër",
@@ -17,7 +18,8 @@ export default async function ReportBookPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error: rawError } = await searchParams;
+  const error = pageErrorMessage(rawError);
 
   const supabase = await createClient();
   const {

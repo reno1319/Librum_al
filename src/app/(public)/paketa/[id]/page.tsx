@@ -14,6 +14,7 @@ import {
 import type { PublicBook, PublicBundle } from "@/lib/types";
 import type { Metadata } from "next";
 import { bundlePagePath, canonicalMetadata } from "@/lib/seo";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 SEO-1: static title, not "<bundle title> | Librum" -- same
 // reasoning as the author profile page (generateMetadata() can't see
@@ -77,7 +78,8 @@ export default async function BundleDetailPage({
   }
 
   const { id } = await params;
-  const { purchase, error } = await searchParams;
+  const { purchase, error: rawError } = await searchParams;
+  const error = pageErrorMessage(rawError);
 
   const supabase = await createClient();
   const {

@@ -10,6 +10,7 @@ import { resolvePublicAuthorName } from "@/lib/author-name";
 import { ACCOUNT_NAME_MAX_LENGTH } from "@/lib/account-name";
 import type { Profile } from "@/lib/types";
 import type { Metadata } from "next";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 AUTHOR-1A
 const PUBLIC_AUTHOR_NAME_MAX_LENGTH = 120;
@@ -23,7 +24,8 @@ export default async function EditProfilePage({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  const { error, success } = await searchParams;
+  const { error: rawError, success } = await searchParams;
+  const error = pageErrorMessage(rawError);
   const supabase = await createClient();
   const {
     data: { user },

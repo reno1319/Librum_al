@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { BlogEditorForm } from "../blog-editor-form";
 import { createBlogPostAction } from "../actions";
 import type { Metadata } from "next";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "New article",
@@ -17,7 +18,8 @@ export default async function NewBlogPostPage({
   // blog.manage, not blog.view -- creating an article is a mutation,
   // gated the same way every other blog.manage-only surface is.
   const { userId } = await requireStaff("blog.manage");
-  const { error } = await searchParams;
+  const { error: rawError } = await searchParams;
+  const error = pageErrorMessage(rawError);
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
