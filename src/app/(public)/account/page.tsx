@@ -11,6 +11,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Llogaria",
@@ -30,7 +31,8 @@ export default async function AccountPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error: rawError } = await searchParams;
+  const error = pageErrorMessage(rawError);
   const supabase = await createClient();
   const {
     data: { user },

@@ -26,6 +26,7 @@ import {
 } from "../actions";
 import { UnpublishForm } from "./unpublish-form";
 import { SendBackForm } from "./send-back-form";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Book",
@@ -107,7 +108,9 @@ export default async function AdminBookPage({
   const canReview = roleHasPermission(role, "books.review");
 
   const { id } = await params;
-  const { report: reportParam, error, success } = await searchParams;
+  const { report: reportParam, error: rawError, success: rawSuccess } = await searchParams;
+  const error = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
   if (!isUuid(id)) notFound();
 
   const admin = createAdminClient();

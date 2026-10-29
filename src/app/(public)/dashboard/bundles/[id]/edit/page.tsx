@@ -12,6 +12,7 @@ import { PriceChangeConfirm } from "@/components/price-change-confirm";
 import { MAXIMUM_CATALOG_PRICE_ALL, MINIMUM_PAID_CATALOG_PRICE_ALL, groupAllDigits } from "@/lib/catalog-price";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 SEO-1: static title, same reasoning as the book-edit route
 // -- avoids a metadata-only query and its own auth/ownership check for
@@ -40,7 +41,8 @@ export default async function EditBundlePage({
   }
 
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error: rawError } = await searchParams;
+  const error = pageErrorMessage(rawError);
 
   const supabase = await createClient();
   const {

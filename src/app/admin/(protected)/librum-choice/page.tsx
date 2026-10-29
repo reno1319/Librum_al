@@ -19,6 +19,7 @@ import {
   removeLibrumChoiceFromForm,
   setHomeSlotFromForm,
 } from "./actions";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Featured picks",
@@ -119,7 +120,11 @@ export default async function AdminLibrumChoicePage({
 }) {
   await requireStaff("catalog.feature");
 
-  const { q: rawQ, success, error } = await searchParams;
+  const { q: rawQ, success: rawSuccess, error: rawError } = await searchParams;
+
+  const success = pageSuccessMessage(rawSuccess);
+
+  const error = pageErrorMessage(rawError);
   const q = parseLibrumChoiceSearch(rawQ);
   const supabase = await createClient();
 

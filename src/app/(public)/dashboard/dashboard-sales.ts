@@ -27,6 +27,7 @@ import {
   excludeLostDisputedRows,
   selectTransactionOnlySnapshots,
   summarizeSalesRevenue,
+  tiranaDayStart,
   type SalesBundleSnapshot,
   type SalesPurchase,
 } from "./sales/revenue-logic";
@@ -48,10 +49,13 @@ export type DashboardSalesSummary = {
 
 export type DashboardSalesResult = { ok: true; summary: DashboardSalesSummary } | { ok: false };
 
-// Server-local calendar months. SQ-16 moved the Sales page's daily
-// chart to Tirana days; these month cards are not moved yet (carry-over).
-function monthStart(now: Date, monthsBack: number): Date {
-  return new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
+// B14: Tirana calendar months, like the Sales page's Tirana chart days
+// (SQ-16) -- not the server's months (UTC on Vercel), so a sale at 00:30
+// on the 1st in Tirana counts in the new month. A month is numbered
+// year * 12 + month of the row's Tirana date.
+function tiranaMonthNumber(value: string | Date): number {
+  const day = tiranaDayStart(value);
+  return day.getUTCFullYear() * 12 + day.getUTCMonth();
 }
 
 function inRange(value: string, from: Date, to: Date | null): boolean {
@@ -83,14 +87,13 @@ export function summarizeDashboardSales(params: {
   );
   const isSale = (purchase: SalesPurchase) => !freeBookIds.has(purchase.book_id);
 
-  const thisMonthStart = monthStart(now, 0);
-  const lastMonthStart = monthStart(now, 1);
+  const thisMonth = tiranaMonthNumber(now);
+  const isThisMonth = (value: string) => tiranaMonthNumber(value) >= thisMonth;
+  const isLastMonth = (value: string) => tiranaMonthNumber(value) === thisMonth - 1;
   const recentStart = new Date(now.getTime() - RECENT_SALES_DAYS * 24 * 60 * 60 * 1000);
 
-  const thisMonthPurchases = purchases.filter((p) => inRange(p.created_at, thisMonthStart, null));
-  const thisMonthSnapshots = transactionOnlySnapshots.filter((s) =>
-    inRange(s.fulfilled_at, thisMonthStart, null),
-  );
+  const thisMonthPurchases = purchases.filter((p) => isThisMonth(p.created_at));
+  const thisMonthSnapshots = transactionOnlySnapshots.filter((s) => isThisMonth(s.fulfilled_at));
 
   const recentCopiesByBookId = new Map<string, number>();
   for (const purchase of purchases) {
@@ -100,9 +103,7 @@ export function summarizeDashboardSales(params: {
 
   return {
     salesThisMonth: thisMonthPurchases.filter(isSale).length,
-    salesLastMonth: purchases.filter(
-      (p) => isSale(p) && inRange(p.created_at, lastMonthStart, thisMonthStart),
-    ).length,
+    salesLastMonth: purchases.filter((p) => isSale(p) && isLastMonth(p.created_at)).length,
     netThisMonth: netTotalsFor(thisMonthPurchases, thisMonthSnapshots),
     netAllTime: netTotalsFor(purchases, transactionOnlySnapshots),
     recentCopiesByBookId,

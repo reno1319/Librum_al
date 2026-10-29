@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -309,16 +310,27 @@ export async function approveBookReviewAsStaff(formData: FormData) {
       error: followUpError,
     });
   }
-  try {
-    // J: followers hear only about a FIRST publication (unchanged rule).
-    if (firstPublication === true) {
-      await sendNewBookEmails(admin, { bookId: book.id, authorId: book.author_id });
+  // J: followers hear only about a FIRST publication (unchanged rule).
+  // B6: their emails go out after the page has answered (Next's after()),
+  // so a long follower list can't slow down or time out Approve. Logged,
+  // never rethrown, whether scheduling or sending fails.
+  if (firstPublication === true) {
+    const logFollowersFailure = (followUpError: unknown) =>
+      console.error("approveBookReviewAsStaff: the followers email failed after a successful approval", {
+        bookId: book.id,
+        error: followUpError,
+      });
+    try {
+      after(async () => {
+        try {
+          await sendNewBookEmails(admin, { bookId: book.id, authorId: book.author_id });
+        } catch (followUpError) {
+          logFollowersFailure(followUpError);
+        }
+      });
+    } catch (followUpError) {
+      logFollowersFailure(followUpError);
     }
-  } catch (followUpError) {
-    console.error("approveBookReviewAsStaff: the followers email failed after a successful approval", {
-      bookId: book.id,
-      error: followUpError,
-    });
   }
 
   // N3: the previously approved file is no longer the buyers' file.

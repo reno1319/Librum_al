@@ -2,6 +2,7 @@
 
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -78,6 +79,28 @@ import {
   isPriceChangeConfirmed,
   PRICE_CHANGE_CONFIRM_MESSAGE,
 } from "@/lib/price-change-confirm";
+
+// B6: the follower emails go out after the page has answered (Next's
+// after()), so a long follower list can't slow down or time out Publish.
+// Best effort, as before: a failure -- scheduling or sending -- is only
+// logged, never rethrown, so it can never turn a committed publish into
+// a reported failure. It still runs when the action ends in redirect().
+function sendNewBookEmailsAfterResponse(caller: string, ids: { bookId: string; authorId: string }) {
+  const logFailure = (error: unknown) =>
+    console.error(`${caller}: sendNewBookEmails failed after a successful publish`, { ...ids, error });
+  try {
+    const admin = createAdminClient();
+    after(async () => {
+      try {
+        await sendNewBookEmails(admin, ids);
+      } catch (error) {
+        logFailure(error);
+      }
+    });
+  } catch (error) {
+    logFailure(error);
+  }
+}
 
 // ALL-WIRING-2: one message for every rejected catalog price, built
 // from the module's own constants so it can never drift from the rule
@@ -1018,16 +1041,7 @@ export async function createBook(formData: FormData) {
     // outside every try/catch so its NEXT_REDIRECT signal is never
     // swallowed. See publishBook() for the full rationale.
     if (publishResult.wasNewlyPublished) {
-      try {
-        const admin = createAdminClient();
-        await sendNewBookEmails(admin, { bookId, authorId: user.id });
-      } catch (error) {
-        console.error("createBook: sendNewBookEmails failed after a successful publish", {
-          bookId,
-          authorId: user.id,
-          error,
-        });
-      }
+      sendNewBookEmailsAfterResponse("createBook", { bookId, authorId: user.id });
     }
 
     try {
@@ -2179,16 +2193,7 @@ export async function publishBook(bookId: string) {
   // NEXT_REDIRECT signal that a surrounding catch would otherwise
   // swallow, turning a successful publish into the generic error page.
   if (result.wasNewlyPublished) {
-    try {
-      const admin = createAdminClient();
-      await sendNewBookEmails(admin, { bookId, authorId: user.id });
-    } catch (error) {
-      console.error("publishBook: sendNewBookEmails failed after a successful publish", {
-        bookId,
-        authorId: user.id,
-        error,
-      });
-    }
+    sendNewBookEmailsAfterResponse("publishBook", { bookId, authorId: user.id });
   }
 
   try {

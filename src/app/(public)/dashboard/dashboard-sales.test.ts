@@ -31,17 +31,99 @@ describe("summarizeDashboardSales", () => {
     const summary = summarizeDashboardSales({
       books: BOOKS,
       purchases: [
-        purchase("paid", new Date(2026, 9, 1, 0, 0, 1), 49900),
-        purchase("paid", new Date(2026, 9, 16), 49900),
-        purchase("free", new Date(2026, 9, 16), 0),
-        purchase("paid", new Date(2026, 8, 30, 23, 59), 49900),
-        purchase("paid", new Date(2026, 7, 31), 49900),
+        purchase("paid", new Date("2026-10-01T12:00:00Z"), 49900),
+        purchase("paid", new Date("2026-10-16T12:00:00Z"), 49900),
+        purchase("free", new Date("2026-10-16T12:00:00Z"), 0),
+        purchase("paid", new Date("2026-09-30T12:00:00Z"), 49900),
+        purchase("paid", new Date("2026-08-31T12:00:00Z"), 49900),
       ],
       transactionOnlySnapshots: [],
-      now: NOW,
+      now: new Date("2026-10-17T13:00:00Z"),
     });
     expect(summary.salesThisMonth).toBe(2);
     expect(summary.salesLastMonth).toBe(1);
+  });
+
+  // B14: Tirana calendar months, whatever the server's time zone. Summer
+  // (CEST, UTC+2): 1 Oct starts at 2026-09-30T22:00Z. Winter (CET,
+  // UTC+1): 1 Dec starts at 2026-11-30T23:00Z.
+  it.each([
+    {
+      season: "summer time",
+      now: "2026-10-17T13:00:00Z",
+      thisMonth: ["2026-09-30T22:00:00Z", "2026-09-30T22:30:00Z"],
+      lastMonth: ["2026-09-30T21:59:59Z", "2026-08-31T22:00:00Z"],
+      older: ["2026-08-31T21:59:59Z"],
+    },
+    {
+      season: "winter time",
+      now: "2026-12-10T10:00:00Z",
+      thisMonth: ["2026-11-30T23:00:00Z", "2026-11-30T23:30:00Z"],
+      lastMonth: ["2026-11-30T22:59:59Z", "2026-10-31T23:00:00Z"],
+      older: ["2026-10-31T22:59:59Z"],
+    },
+  ])("month cards follow Tirana months in $season", ({ now, thisMonth, lastMonth, older }) => {
+    const at = (values: string[], amount: number) => values.map((value) => purchase("paid", new Date(value), amount));
+    const summary = summarizeDashboardSales({
+      books: BOOKS,
+      purchases: [...at(thisMonth, 10000), ...at(lastMonth, 20000), ...at(older, 40000)],
+      transactionOnlySnapshots: [
+        {
+          stripe_checkout_session_id: "cs_edge",
+          stripe_payment_intent_id: "pi_edge",
+          total_amount_cents: 100000,
+          fulfilled_at: thisMonth[0],
+          currency: "ALL",
+        },
+        {
+          stripe_checkout_session_id: "cs_before",
+          stripe_payment_intent_id: "pi_before",
+          total_amount_cents: 300000,
+          fulfilled_at: lastMonth[0],
+          currency: "ALL",
+        },
+      ],
+      now: new Date(now),
+    });
+    expect(summary.salesThisMonth).toBe(2);
+    expect(summary.salesLastMonth).toBe(2);
+    const thisMonthOnly = summarizeDashboardSales({
+      books: BOOKS,
+      purchases: at(thisMonth, 10000),
+      transactionOnlySnapshots: [
+        {
+          stripe_checkout_session_id: "cs_edge",
+          stripe_payment_intent_id: "pi_edge",
+          total_amount_cents: 100000,
+          fulfilled_at: thisMonth[0],
+          currency: "ALL",
+        },
+      ],
+      now: new Date(now),
+    });
+    expect(summary.netThisMonth).toEqual(thisMonthOnly.netAllTime);
+  });
+
+  it("month cards ignore the server's own time zone", () => {
+    const previous = process.env.TZ;
+    try {
+      for (const tz of ["UTC", "America/Los_Angeles", "Pacific/Auckland"]) {
+        process.env.TZ = tz;
+        const summary = summarizeDashboardSales({
+          books: BOOKS,
+          purchases: [
+            purchase("paid", new Date("2026-09-30T22:30:00Z"), 49900),
+            purchase("paid", new Date("2026-09-30T21:30:00Z"), 49900),
+          ],
+          transactionOnlySnapshots: [],
+          now: new Date("2026-10-01T09:00:00Z"),
+        });
+        expect([tz, summary.salesThisMonth, summary.salesLastMonth]).toEqual([tz, 1, 1]);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.TZ;
+      else process.env.TZ = previous;
+    }
   });
 
   it("net revenue this month and all time are summarizeSalesRevenue's netTotals for those rows", () => {

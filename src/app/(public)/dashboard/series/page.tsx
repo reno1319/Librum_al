@@ -9,6 +9,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import type { Series } from "@/lib/types";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Seritë",
@@ -19,7 +20,9 @@ export default async function SeriesPage({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  const { error, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+  const error = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
   const supabase = await createClient();
   const {
     data: { user },

@@ -362,6 +362,19 @@ describe("GET /api/books/[id]/download", () => {
       expect(response.headers.get("content-disposition")).toBe('attachment; filename="test-book.epub"');
     });
 
+    // B6: an Albanian title reaches the header through the real route as
+    // its ASCII slug (the saved file name).
+    it("an Albanian title becomes an ASCII file name in Content-Disposition", async () => {
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ bookResult: bookRow({ title: "Ëndrra e çmendur" }) }));
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient());
+      mockWatermarkEpub.mockResolvedValue({ watermarked: true, bytes: Buffer.from("watermarked") });
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-disposition")).toBe('attachment; filename="endrra-e-cmendur.epub"');
+    });
+
     it("an entitled non-author reader downloads the author's canonical manuscript", async () => {
       const adminClient = makeFakeAdminClient();
       mockCreateClient.mockResolvedValue(makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: true }));

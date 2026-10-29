@@ -68,9 +68,11 @@ export async function watermarkEpub(bytes: Buffer, email: string): Promise<Water
 
     const opfXml = await opfFile.async("string");
     const notice = `<dc:rights>Kjo kopje është licencuar për ${escapeXml(email)}. Ju lutemi, mos e shpërndani.</dc:rights>`;
+    // B15: a replacer function, so a "$" pattern in the email ($&, $',
+    // $1 ...) is inserted as plain text, never read as a replacement code.
     const updatedOpf = opfXml.replace(
       /(<[a-zA-Z0-9:]*metadata[^>]*>)/i,
-      `$1${notice}`,
+      (metadataTag: string) => `${metadataTag}${notice}`,
     );
 
     // Metadata tag not found in the shape we expected — bail out rather

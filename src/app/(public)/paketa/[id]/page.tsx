@@ -13,6 +13,8 @@ import {
 } from "@/lib/bundle-catalog";
 import type { PublicBook, PublicBundle } from "@/lib/types";
 import type { Metadata } from "next";
+import { bundlePagePath, canonicalMetadata } from "@/lib/seo";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 SEO-1: static title, not "<bundle title> | Librum" -- same
 // reasoning as the author profile page (generateMetadata() can't see
@@ -20,10 +22,25 @@ import type { Metadata } from "next";
 // metadata-only query or a React.cache() restructure, both out of
 // scope here). Also sidesteps having to independently replicate the
 // page's own unpublished/visibility gate just for a title.
-export const metadata: Metadata = {
-  title: "Paketë",
-  description: "Një paketë librash në Librum.",
-};
+//
+// P2 (Renato 4b): plus the canonical /paketa/<id> link. Built from the
+// address alone (no bundle query, so the page's own visibility gate
+// stays the only one), and only for a well-formed id, so a malformed
+// address never gets a canonical link echoing it.
+const BUNDLE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  return {
+    title: "Paketë",
+    description: "Një paketë librash në Librum.",
+    ...(BUNDLE_ID_PATTERN.test(id) ? canonicalMetadata(bundlePagePath(id.toLowerCase())) : {}),
+  };
+}
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see V3 §3.
@@ -61,7 +78,8 @@ export default async function BundleDetailPage({
   }
 
   const { id } = await params;
-  const { purchase, error } = await searchParams;
+  const { purchase, error: rawError } = await searchParams;
+  const error = pageErrorMessage(rawError);
 
   const supabase = await createClient();
   const {

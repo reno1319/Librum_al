@@ -17,6 +17,7 @@ import { formatTransactionAmount } from "@/lib/transaction-money";
 import { loadRefundRequestCurrencies, refundRequestCurrency } from "../refund-currency";
 import { loadStaffDisplayNames } from "@/lib/staff-display-names";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 SEO-1: static title, not a dynamic one built from the
 // requester/reader's name -- this is an admin-only page, and reusing
@@ -81,7 +82,9 @@ export default async function AdminRefundRequestDetailPage({
   }
 
   const { id } = await params;
-  const { error, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+  const error = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
 
   // ADMIN-1A final pre-commit correction: src/app/admin/layout.tsx's
   // requireStaff("admin.access") only proves the caller is SOME staff

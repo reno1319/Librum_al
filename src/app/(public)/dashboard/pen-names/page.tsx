@@ -18,6 +18,7 @@ import {
   type OwnPenName,
 } from "@/lib/pen-names";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Pseudonimet",
@@ -37,7 +38,9 @@ export default async function PenNamesPage({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  const { error, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+  const error = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
   const supabase = await createClient();
   const {
     data: { user },

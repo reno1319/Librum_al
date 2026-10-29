@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { BLOG_CATEGORY_LABELS } from "@/lib/blog-categories";
 import type { BlogPostStatus } from "@/lib/types";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Blog",
@@ -53,7 +54,9 @@ export default async function AdminBlogListPage({
   const canManage = await hasPermission("blog.manage");
 
   const supabase = await createClient();
-  const { status: statusParam, success, error } = await searchParams;
+  const { status: statusParam, success: rawSuccess, error: rawError } = await searchParams;
+  const success = pageSuccessMessage(rawSuccess);
+  const error = pageErrorMessage(rawError);
   const activeFilter: BlogPostStatus | "all" =
     statusParam === "draft" || statusParam === "published" ? statusParam : "all";
 

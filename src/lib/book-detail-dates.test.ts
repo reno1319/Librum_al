@@ -14,6 +14,12 @@ describe("formatTimestampAsDate: Albanian, Tirana day", () => {
     expect(formatTimestampAsDate("2026-10-28T23:30:00.000Z")).toBe("29 tetor 2026");
   });
 
+  // B6: summer time (CEST, UTC+2) -- a fixed UTC+1 would say 28 korrik.
+  it("uses Tirana summer time (UTC+2) around midnight", () => {
+    expect(formatTimestampAsDate("2026-07-28T22:30:00.000Z")).toBe("29 korrik 2026");
+    expect(formatTimestampAsDate("2026-07-28T21:59:00.000Z")).toBe("28 korrik 2026");
+  });
+
   it("does not depend on the host time zone", () => {
     const originalTZ = process.env.TZ;
     process.env.TZ = "America/Los_Angeles";

@@ -11,6 +11,7 @@ import { LibraryBookCard } from "@/components/library-book-card";
 import { resolveBookByline } from "@/lib/book-byline";
 import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Biblioteka ime",
@@ -41,7 +42,9 @@ export default async function LibraryPage({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  const { error, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+  const error = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
   const supabase = await createClient();
   const {
     data: { user },

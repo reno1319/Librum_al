@@ -47,6 +47,8 @@ import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import { bookWhatsappShareHref } from "@/lib/contact";
+import { bookPagePath, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
 // -- Bookstore (UI-4) owns discovery/browsing, this page owns "should I
@@ -206,10 +208,10 @@ export async function generateMetadata({
   const coverUrl = book.cover_path
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
     : null;
-
   return {
     title,
     description,
+    ...canonicalMetadata(bookPagePath(book.id)),
     openGraph: {
       title: ogTitle,
       description,
@@ -273,11 +275,12 @@ export default async function BookDetailPage({
     free: freeStatus,
     review: reviewStatus,
     report: reportStatus,
-    error,
+    error: rawError,
     checkout_conflict: checkoutConflict,
     checkout_expired: checkoutExpired,
     canceled,
   } = await searchParams;
+  const error = pageErrorMessage(rawError);
 
   const supabase = await createClient();
 
@@ -635,9 +638,26 @@ export default async function BookDetailPage({
   const authorName = bookByline;
   // TRUST PACK (item 5, 6. a): a plain wa.me link, nothing loaded from WhatsApp.
   const whatsappShareHref = bookWhatsappShareHref(book, bookByline);
+  // P2: schema.org Book data for Google, only on a published book (the
+  // author's own preview and an earlier buyer's view of an unpublished
+  // book carry none, the same rule as generateMetadata's).
+  const jsonLdOrigin = book.status === "published" ? siteOriginOrNull() : null;
+  const bookJsonLd = jsonLdOrigin
+    ? serializeJsonLd(
+        buildBookJsonLd(book, {
+          origin: jsonLdOrigin,
+          coverUrl,
+          pen: book.pen,
+          paidCheckoutOn: paidCheckoutAvailable,
+        }),
+      )
+    : null;
 
   return (
     <main className="page-container flex-1 pt-5 pb-16 sm:pt-6">
+      {bookJsonLd && (
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: bookJsonLd }} />
+      )}
       {/* PREVIEW-1 (A5, Renato 1a): the author's own unpublished book is
           their "Preview my book" page. Not "only you can see this": a
           reader who bought the book before it was unpublished still can. */}
