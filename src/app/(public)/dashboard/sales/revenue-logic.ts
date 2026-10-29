@@ -127,10 +127,23 @@ export type SalesRevenueSummary = {
   chartDates: Date[];
 };
 
-function localDayStart(value: string | Date): Date {
-  const date = new Date(value);
-  date.setHours(0, 0, 0, 0);
-  return date;
+// SQ-16 (Renato 10-29, "3. a"): chart days are Tirana calendar days
+// (glossary R4), not the server's (UTC on Vercel), so a sale at 00:30
+// in Tirana lands on that day's bar. Each day is a Date at UTC midnight
+// of the Tirana date; chart-day-labels.ts reads it with getUTC*.
+export const SALES_CHART_TIME_ZONE = "Europe/Tirane";
+
+const TIRANA_CALENDAR_DAY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: SALES_CHART_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+export function tiranaDayStart(value: string | Date): Date {
+  const parts = TIRANA_CALENDAR_DAY.formatToParts(new Date(value));
+  const field = (type: "year" | "month" | "day") => Number(parts.find((part) => part.type === type)?.value);
+  return new Date(Date.UTC(field("year"), field("month") - 1, field("day")));
 }
 
 export function summarizeSalesRevenue(params: {
@@ -182,10 +195,10 @@ export function summarizeSalesRevenue(params: {
     // cross-currency revenue comparison.
     .sort((a, b) => b.unitsSold - a.unitsSold || a.title.localeCompare(b.title));
 
-  const todayStart = localDayStart(params.today);
+  const todayStart = tiranaDayStart(params.today);
   const chartDates = Array.from({ length: chartDays }, (_, i) => {
     const date = new Date(todayStart);
-    date.setDate(date.getDate() - (chartDays - 1 - i));
+    date.setUTCDate(date.getUTCDate() - (chartDays - 1 - i));
     return date;
   });
 
@@ -193,7 +206,7 @@ export function summarizeSalesRevenue(params: {
     const days = chartDates.map((date) => ({ date, netMinor: 0 }));
     for (const row of revenueRows) {
       if (row.provenance.state !== "resolved" || row.provenance.currency !== currency) continue;
-      const rowDay = localDayStart(row.at).getTime();
+      const rowDay = tiranaDayStart(row.at).getTime();
       const bucket = days.find((d) => d.date.getTime() === rowDay);
       if (bucket) bucket.netMinor += row.netMinor;
     }

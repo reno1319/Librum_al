@@ -204,3 +204,56 @@ describe("summarizeSalesRevenue / selectTransactionOnlySnapshots (Patch 4)", () 
     expect(summary.perBook.map((b) => b.id)).toEqual(["b2", "b1"]);
   });
 });
+
+// SQ-16 (Renato 10-29, "3. a"): chart days follow the Tirana calendar.
+describe("summarizeSalesRevenue chart days (SQ-16, Tirana time)", () => {
+  const ALL = { state: "resolved", currency: "ALL" } as const;
+
+  function chartFor(today: string, createdAt: string) {
+    return summarizeSalesRevenue({
+      books: [{ id: "b1", title: "Alpha" }],
+      purchases: [
+        {
+          book_id: "b1",
+          amount_cents: 10000,
+          created_at: createdAt,
+          stripe_checkout_session_id: "cs_1",
+          stripe_payment_intent_id: "pi_1",
+          currency: ALL,
+        },
+      ],
+      transactionOnlySnapshots: [],
+      today: new Date(today),
+      chartDays: 3,
+    });
+  }
+
+  const dayKey = (date: Date) => date.toISOString().slice(0, 10);
+
+  it("a sale at 00:30 Tirana (winter, UTC+1) lands on that Tirana day, not the UTC day before", () => {
+    const summary = chartFor("2026-10-29T10:00:00Z", "2026-10-28T23:30:00Z");
+    expect(summary.chartDates.map(dayKey)).toEqual(["2026-10-27", "2026-10-28", "2026-10-29"]);
+    expect(summary.dailySeries[0].days.map((d) => d.netMinor)).toEqual([0, 0, 8000]);
+  });
+
+  it("a sale at 01:30 Tirana (summer, UTC+2) lands on that Tirana day", () => {
+    const summary = chartFor("2026-07-16T10:00:00Z", "2026-07-15T23:30:00Z");
+    expect(summary.dailySeries[0].days.map((d) => d.netMinor)).toEqual([0, 0, 8000]);
+  });
+
+  it("today itself is the Tirana date: 23:30 UTC on the 28th is already the 29th in Tirana", () => {
+    const summary = chartFor("2026-10-28T23:30:00Z", "2026-10-28T23:30:00Z");
+    expect(summary.chartDates.map(dayKey).at(-1)).toBe("2026-10-29");
+    expect(summary.dailySeries[0].days.at(-1)!.netMinor).toBe(8000);
+  });
+
+  it("a sale at 23:30 Tirana stays on that day", () => {
+    const summary = chartFor("2026-10-29T10:00:00Z", "2026-10-28T22:30:00Z");
+    expect(summary.dailySeries[0].days.map((d) => d.netMinor)).toEqual([0, 8000, 0]);
+  });
+
+  it("the days run across the end of summer time without a gap or a repeat", () => {
+    const summary = chartFor("2026-10-26T10:00:00Z", "2026-10-26T10:00:00Z");
+    expect(summary.chartDates.map(dayKey)).toEqual(["2026-10-24", "2026-10-25", "2026-10-26"]);
+  });
+});

@@ -91,6 +91,8 @@ describe("Dashboard Balance: payout-cycle notice", () => {
     expect(notice.toLowerCase()).not.toContain("mbërri");
     expect(notice.toLowerCase()).not.toContain("bank");
     expect(notice.toLowerCase()).not.toContain("paratë tuaja");
+    // SQ-16 (SQ-11 audit N3): every case of "your money", not only one.
+    expect(notice.toLowerCase()).not.toMatch(/(^|[^a-zçë])par(a|atë|ave|anë|et|ë)\s+(tuaja|tuaj|tuat)\b/);
     expect(notice.toLowerCase()).not.toContain("data e pagesës");
   });
 

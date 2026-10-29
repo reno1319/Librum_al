@@ -228,6 +228,21 @@ describe("createDiscountCode: ALL fixed discounts and payload shape", () => {
       target: `/dashboard/discounts?error=${encodeURIComponent("Ky kod ekziston tashmë për këtë libër")}`,
     });
   });
+
+  // SQ-16 (SQ-11 audit N2): any other database error shows the fixed
+  // Albanian message, and the database's own text never reaches the URL.
+  it("any other database error shows the fixed message, never the database text", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    stub = recordingClient({ insertError: { code: "23514", message: "violates check constraint discount_codes_secret" } });
+    mockCreateClient.mockImplementation(async () => stub.client);
+    const outcome = await submit({ ...BASE_FIELDS, type: "amount_all", value: "250" });
+    expect(outcome).toMatchObject({
+      target: `/dashboard/discounts?error=${encodeURIComponent("Kodi nuk u krijua dot. Provoni përsëri.")}`,
+    });
+    expect(JSON.stringify(outcome)).not.toContain("constraint");
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("constraint");
+    errorSpy.mockRestore();
+  });
 });
 
 describe("createDiscountCode / toggle / delete: authorization is preserved", () => {

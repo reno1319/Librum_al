@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { login } from "@/app/(public)/auth/actions";
 import { translateAuthErrorMessage } from "@/lib/auth-error";
+import { authSuccessMessage } from "@/lib/auth-page-messages";
 import { Alert } from "@/components/ui/alert";
 import { SUSPENDED_MESSAGE } from "@/lib/suspension-gate";
 import { buttonClasses } from "@/components/ui/button";
@@ -18,6 +19,8 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string; success?: string; next?: string; suspended?: string }>;
 }) {
   const { error, success, next, suspended } = await searchParams;
+  // SQ-16: only Librum's own success line, never text from the address.
+  const successMessage = authSuccessMessage(success);
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
@@ -37,9 +40,9 @@ export default async function LoginPage({
           {translateAuthErrorMessage(error)}
         </Alert>
       )}
-      {success && (
+      {successMessage && (
         <Alert variant="success" className="mt-4">
-          {success}
+          {successMessage}
         </Alert>
       )}
 

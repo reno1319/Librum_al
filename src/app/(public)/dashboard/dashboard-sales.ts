@@ -48,8 +48,8 @@ export type DashboardSalesSummary = {
 
 export type DashboardSalesResult = { ok: true; summary: DashboardSalesSummary } | { ok: false };
 
-// Server-local calendar months, the same clock summarizeSalesRevenue()
-// already uses for the Sales page's daily chart.
+// Server-local calendar months. SQ-16 moved the Sales page's daily
+// chart to Tirana days; these month cards are not moved yet (carry-over).
 function monthStart(now: Date, monthsBack: number): Date {
   return new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
 }
