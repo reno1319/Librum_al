@@ -81,9 +81,9 @@ describe("proxy matcher", () => {
 
   it.each([
     "/",
-    "/books/x.png",
-    "/books/x.svg",
-    "/authors/x.webp",
+    "/libra/x.png",
+    "/libra/x.svg",
+    "/autore/x.webp",
     "/admin/books/x.jpg",
     "/x.png",
     "/x.gif",
@@ -96,7 +96,7 @@ describe("proxy matcher", () => {
     "/images/other.jpg",
     "/images/author-hero.jpgx",
     "/images/author-hero.jpg/x",
-    "/books/next.svg",
+    "/libra/next.svg",
     "/nextXsvg",
     "/unlock",
     "/api/health",
@@ -106,11 +106,11 @@ describe("proxy matcher", () => {
 
   it("locks an image-looking page path, GET and Server Action POST alike", async () => {
     vi.stubEnv("SITE_LOCK_KEY", KEY);
-    expect(runsProxy("/books/x.png")).toBe(true);
-    const get = await proxy(new NextRequest("https://librum.al/books/x.png"));
+    expect(runsProxy("/libra/x.png")).toBe(true);
+    const get = await proxy(new NextRequest("https://librum.al/libra/x.png"));
     expect(get.status).toBe(503);
     const post = await proxy(
-      new NextRequest("https://librum.al/books/x.png", {
+      new NextRequest("https://librum.al/libra/x.png", {
         method: "POST",
         headers: { "next-action": "0123456789abcdef0123456789abcdef01234567" },
       }),

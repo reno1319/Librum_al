@@ -52,7 +52,7 @@ export const dynamic = "force-dynamic";
 
 // PEN-NAMES-1 (migration 20261019184512): every byline on this page is
 // the book's (or bundle's) pen name, embedded from the public_pen_names
-// view as `pen` -- no account columns -- and links to /authors/<pen
+// view as `pen` -- no account columns -- and links to /autore/<pen
 // name id>.
 // PEN-NAMES-2: every read on this page goes through the public views.
 type BookWithAuthor = PublicBook & {
@@ -486,7 +486,7 @@ function BookstoreToolbar({
 
           <form
             id="bookstore-search"
-            action="/bookstore"
+            action="/librari"
             method="get"
             role="search"
             className="mt-6 flex w-full min-w-0 sm:max-w-[35rem]"
@@ -595,7 +595,7 @@ function BookstoreToolbar({
               <ChevronIcon />
             </summary>
             <form
-              action="/bookstore"
+              action="/librari"
               method="get"
               className="absolute left-0 z-20 mt-2 flex w-max items-end gap-3 rounded-[3px] border border-border bg-surface p-3 shadow-md sm:right-0 sm:left-auto"
             >
@@ -640,7 +640,7 @@ function BookstoreToolbar({
           </DismissableDetails>
 
           {isFiltered && (
-            <Link href="/bookstore" className={`${TEXT_LINK_CLASSES} ml-1 justify-self-start`}>
+            <Link href="/librari" className={`${TEXT_LINK_CLASSES} ml-1 justify-self-start`}>
               Hiqni filtrat
             </Link>
           )}
@@ -728,7 +728,7 @@ function FeaturedBook({
          
           className="font-serif text-3xl font-normal leading-tight text-primary sm:text-[2.5rem]"
         >
-          <Link href={`/books/${book.id}`} className="focus-ring rounded-sm hover:underline">
+          <Link href={`/libra/${book.id}`} className="focus-ring rounded-sm hover:underline">
             {book.title}
           </Link>
         </h2>
@@ -754,14 +754,14 @@ function FeaturedBook({
         )}
         <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-3">
           {priceState === "free" ? (
-            <Link href={`/books/${book.id}`} className={FEATURE_CTA_CLASSES}>
+            <Link href={`/libra/${book.id}`} className={FEATURE_CTA_CLASSES}>
               Merreni e-librin — Falas
             </Link>
           ) : (
             // Renato (r2, 14:09Z "1. b"): the mockup's Buy button, linking
             // to the book page, which owns the purchase -- shown even while
             // paid checkout is closed there.
-            <Link href={`/books/${book.id}`} className={FEATURE_CTA_CLASSES}>
+            <Link href={`/libra/${book.id}`} className={FEATURE_CTA_CLASSES}>
               Blini · {priceLabel}
             </Link>
           )}
@@ -771,7 +771,7 @@ function FeaturedBook({
 
       <div className="flex flex-[1_1_20rem] items-center justify-center bg-primary p-8 sm:p-10">
         <Link
-          href={`/books/${book.id}`}
+          href={`/libra/${book.id}`}
           aria-label={book.title}
           className="focus-ring block w-36 rounded-[3px] sm:w-[12.5rem]"
         >
@@ -866,7 +866,7 @@ function BookGrid({
         className="mt-10"
         title="Asnjë libër nuk përputhet me kërkimin tuaj."
         action={
-          <Link href="/bookstore" className={buttonClasses("outline", "sm")}>
+          <Link href="/librari" className={buttonClasses("outline", "sm")}>
             Hiqni filtrat
           </Link>
         }
@@ -950,7 +950,7 @@ function BundlesSection({
           return (
             <li key={bundle.id}>
               <Link
-                href={`/bundles/${bundle.id}`}
+                href={`/paketa/${bundle.id}`}
                 className="focus-ring group flex h-full items-center gap-4 rounded-[4px] border border-border bg-surface p-[18px] transition-colors hover:bg-surface-hover"
               >
                 <div aria-hidden="true" className="relative h-[110px] w-24 shrink-0">

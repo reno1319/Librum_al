@@ -79,7 +79,7 @@ export function buildSiteHeaderNav(params: {
     { href: "/about", label: "Rreth nesh" },
     { href: "/how-it-works", label: "Si funksionon" },
     { href: "/pricing", label: "Fitimet" },
-    { href: "/bookstore", label: "Libraria" },
+    { href: "/librari", label: "Libraria" },
     { href: "/blog", label: "Blog" },
   ];
   if (user) {

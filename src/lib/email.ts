@@ -113,7 +113,7 @@ export async function sendPurchaseEmails(
   ]);
 
   const amount = formatEmailAmount(amountCents, currency);
-  const bookUrl = `${origin}/books/${bookId}`;
+  const bookUrl = `${origin}/libra/${bookId}`;
 
   if (reader?.user?.email) {
     await sendEmail(
@@ -165,7 +165,7 @@ export async function sendBundlePurchaseEmails(
   ]);
 
   const amount = formatEmailAmount(amountCents, currency);
-  const bundleUrl = `${origin}/bundles/${bundleId}`;
+  const bundleUrl = `${origin}/paketa/${bundleId}`;
 
   if (reader?.user?.email) {
     await sendEmail(
@@ -232,7 +232,7 @@ export async function sendSnapshotBundlePurchaseEmails(
   // this purchase did -- link to the reader's library instead when
   // there's no bundle_id to point at, since that's always a valid
   // destination for what they just bought.
-  const bundleUrl = bundleId ? `${origin}/bundles/${bundleId}` : `${origin}/library`;
+  const bundleUrl = bundleId ? `${origin}/paketa/${bundleId}` : `${origin}/library`;
 
   if (reader?.user?.email) {
     await sendEmail(
@@ -294,7 +294,7 @@ export async function sendNewBookEmails(
   if (!penName || !follows || follows.length === 0) return;
 
   const authorName = escapeEmailHtml(penName.name);
-  const bookUrl = `${origin}/books/${bookId}`;
+  const bookUrl = `${origin}/libra/${bookId}`;
   const subject = `${penName.name} publikoi një libër të ri`;
   const html = `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
           <h1 style="font-size: 20px;">Libër i ri nga ${authorName}</h1>
@@ -379,7 +379,7 @@ export async function sendBookApprovedEmail(to: string, { title, bookId }: { tit
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">Libri juaj <strong>${escapeEmailHtml(title)}</strong> u publikua në Librum</h1>
         <p>E kontrolluam dhe tani është në Librari.</p>
-        <p><a href="${origin}/books/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
+        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
       </div>`,
   );
 }

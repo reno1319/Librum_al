@@ -22,7 +22,7 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 // "/auth/" is the one deliberate exception, and DOES keep its trailing
 // slash -- there is no bare "/auth" page (only "/auth/callback", an
 // internal route handler), and a bare "/auth" prefix would also match
-// the fully public "/authors/[id]" pages ("/authors" starts with the
+// the fully public "/autore/[id]" pages ("/autore" starts with the
 // literal string "/auth"). Confirmed by reading the route inventory
 // before writing this, not assumed.
 //

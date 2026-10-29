@@ -11,7 +11,7 @@ import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { PublicBook } from "@/lib/types";
 
 // LIBRUM 2.0 PRODUCT-3: the public series page didn't exist before this
-// pass -- see the PRODUCT-3 audit (no /series/[id] route, no series
+// pass -- see the PRODUCT-3 audit (no /seri/[id] route, no series
 // links anywhere pointed at one). A pure discovery surface, entirely
 // public and entirely without user-specific state: unlike Book Detail
 // or the author page, a series itself has no ownership/purchase/follow
@@ -21,7 +21,7 @@ import type { PublicBook } from "@/lib/types";
 
 // PEN-NAMES-1 (migration 20261019184512): a series belongs to one pen
 // name (11a); its byline is that pen name, embedded from the
-// public_pen_names view as `pen`, linking to /authors/<pen name id>.
+// public_pen_names view as `pen`, linking to /autore/<pen name id>.
 type PublicSeries = {
   id: string;
   title: string;

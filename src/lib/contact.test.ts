@@ -46,13 +46,13 @@ describe("TRUST PACK: WhatsApp share link", () => {
     expect(whatsappShareHref("a b&c")).toBe("https://wa.me/?text=a%20b%26c");
     const href = bookWhatsappShareHref(book, "Ana", () => "https://librum.al");
     expect(href).toBe(
-      `https://wa.me/?text=${encodeURIComponent("Kronikë & Gur? nga Ana në Librum: https://librum.al/books/b1")}`,
+      `https://wa.me/?text=${encodeURIComponent("Kronikë & Gur? nga Ana në Librum: https://librum.al/libra/b1")}`,
     );
   });
 
   it("drops the byline when the book has none", () => {
     expect(bookWhatsappShareHref(book, null, () => "https://librum.al")).toBe(
-      `https://wa.me/?text=${encodeURIComponent("Kronikë & Gur? në Librum: https://librum.al/books/b1")}`,
+      `https://wa.me/?text=${encodeURIComponent("Kronikë & Gur? në Librum: https://librum.al/libra/b1")}`,
     );
   });
 

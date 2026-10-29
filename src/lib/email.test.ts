@@ -288,7 +288,7 @@ describe("sendBookApprovedEmail / sendBookSentBackEmail", () => {
     expect(args.html).toContain("E kontrolluam dhe tani është në Librari.");
     expect(args.html).toContain("&lt;b&gt;Kënga&lt;/b&gt;");
     expect(args.html).not.toContain("<b>Kënga</b>");
-    expect(args.html).toContain("/books/22222222-2222-4222-8222-222222222222");
+    expect(args.html).toContain("/libra/22222222-2222-4222-8222-222222222222");
   });
 
   it("sends back with the reason label and the escaped message, linking to the dashboard", async () => {

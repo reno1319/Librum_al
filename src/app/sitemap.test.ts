@@ -34,7 +34,7 @@ describe("sitemap", () => {
       "/about",
       "/how-it-works",
       "/pricing",
-      "/bookstore",
+      "/librari",
       "/help",
       "/help/reading",
       "/contact",

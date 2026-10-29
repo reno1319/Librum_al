@@ -82,7 +82,7 @@ function resultTarget(result: LibrumChoiceResult): string {
 
 function revalidateAfterChange(): void {
   revalidatePath("/");
-  revalidatePath("/bookstore");
+  revalidatePath("/librari");
   revalidatePath(PAGE_PATH);
 }
 

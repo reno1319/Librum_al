@@ -10,7 +10,7 @@ const mockCreateClient = vi.fn(() => {
   throw SENTINEL;
 });
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
-vi.mock("@/app/(public)/books/[id]/actions", () => ({ removeFromWishlist: vi.fn() }));
+vi.mock("@/app/(public)/libra/[id]/actions", () => ({ removeFromWishlist: vi.fn() }));
 
 const { default: WishlistPage } = await import("./page");
 

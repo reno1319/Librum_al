@@ -230,7 +230,7 @@ describe("Edit page: a live book (C)", () => {
 // PREVIEW-1 (A5, Renato 6a): the Publishing section links to the book's
 // own page (the preview) in every state before it's live, in a new tab.
 describe("Edit page: Shikoni faqen e librit para botimit (PREVIEW-1)", () => {
-  const LINK = `<a target="_blank" rel="noopener" class="focus-ring rounded-sm font-medium text-foreground underline" href="/books/${BOOK_ID}">`;
+  const LINK = `<a target="_blank" rel="noopener" class="focus-ring rounded-sm font-medium text-foreground underline" href="/libra/${BOOK_ID}">`;
   function publishing(html: string): string {
     return html.slice(html.indexOf(">Publikimi</h2>"), html.indexOf(">Zona e rrezikut</h2>"));
   }
@@ -260,6 +260,6 @@ describe("Edit page: Shikoni faqen e librit para botimit (PREVIEW-1)", () => {
     book.status = "published";
     const html = await render();
     expect(html).not.toContain("Shikoni faqen e librit para botimit");
-    expect(html).not.toContain(`href="/books/${BOOK_ID}"`);
+    expect(html).not.toContain(`href="/libra/${BOOK_ID}"`);
   });
 });

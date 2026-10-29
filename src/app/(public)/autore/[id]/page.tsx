@@ -32,7 +32,7 @@ import { CoverPlaceholder } from "@/components/cover-placeholder";
 // author_id: the name, the books, series and bundles under that pen
 // name only, and the follower count of that pen name. Bio, photo and
 // links show only when the author added them (2a, 7a, 8a); nothing
-// links to the author's other pen names. An old /authors/<account id>
+// links to the author's other pen names. An old /autore/<account id>
 // URL has no row in the view and is "not found" like any unknown id.
 // Staff with reports.resolve (13a) also see the account behind the pen
 // name and a "Remove links" button (audited in the database).
@@ -120,7 +120,7 @@ export default async function AuthorProfilePage({
   ] = await Promise.all([supabase.auth.getUser(), getPublicPenName(id)]);
 
   // Covers "no pen name with this id", "pen name not used by any book,
-  // series or bundle" and every old /authors/<account id> URL alike.
+  // series or bundle" and every old /autore/<account id> URL alike.
   if (!author) {
     notFound();
   }
@@ -425,7 +425,7 @@ export default async function AuthorProfilePage({
           covers rather than icons, still capped at 4 and still nowhere
           near BookCard's own size -- not a carousel, no new queries,
           groupPublishedBooksBySeries() itself untouched.
-          LIBRUM 2.0 PRODUCT-3: now that a real /series/[id] page
+          LIBRUM 2.0 PRODUCT-3: now that a real /seri/[id] page
           exists, these cards became genuine navigation entry points --
           the title and a small "View series" link both go there;
           cover thumbnails keep linking straight to their own book, same
@@ -442,7 +442,7 @@ export default async function AuthorProfilePage({
                 className="rounded-card border border-border bg-surface p-4 shadow-sm"
               >
                 <Link
-                  href={`/series/${group.id}`}
+                  href={`/seri/${group.id}`}
                   className="focus-ring rounded-sm font-serif font-medium text-foreground hover:underline"
                 >
                   {group.title}
@@ -459,7 +459,7 @@ export default async function AuthorProfilePage({
                     return (
                       <Link
                         key={book.id}
-                        href={`/books/${book.id}`}
+                        href={`/libra/${book.id}`}
                         aria-label={book.title}
                         className="focus-ring block w-16 shrink-0 rounded-[2px]"
                       >
@@ -484,7 +484,7 @@ export default async function AuthorProfilePage({
                   })}
                 </div>
                 <Link
-                  href={`/series/${group.id}`}
+                  href={`/seri/${group.id}`}
                   className="focus-ring mt-3 inline-block rounded-sm text-xs font-medium text-primary underline underline-offset-2 hover:decoration-2"
                 >
                   Shikoni serinë &rarr;
@@ -508,7 +508,7 @@ export default async function AuthorProfilePage({
             {bundles.map((bundle) => (
               <li key={bundle.id}>
                 <Link
-                  href={`/bundles/${bundle.id}`}
+                  href={`/paketa/${bundle.id}`}
                   className="focus-ring flex flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
                 >
                   <span className="font-serif font-medium">{bundle.title}</span>

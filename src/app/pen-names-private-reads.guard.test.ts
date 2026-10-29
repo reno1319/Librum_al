@@ -67,9 +67,9 @@ const PUBLIC_FILES = [
 // The own-row checks the brief lists (isAuthor and "your review"), plus
 // deleteAccount's own-books read. Each must carry an own-row filter.
 const PUBLIC_BASE_READS: Record<string, string[]> = {
-  "app/(public)/books/[id]/page.tsx": ["books", "reviews"],
-  "app/(public)/books/[id]/actions.ts": ["books"],
-  "app/(public)/bundles/[id]/page.tsx": ["bundles"],
+  "app/(public)/libra/[id]/page.tsx": ["books", "reviews"],
+  "app/(public)/libra/[id]/actions.ts": ["books"],
+  "app/(public)/paketa/[id]/page.tsx": ["bundles"],
   "app/(public)/account/actions.ts": ["books"],
   // The author's own book for the rights declaration (16a).
   "lib/book-rights.ts": ["books"],

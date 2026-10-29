@@ -31,7 +31,7 @@ export const dynamic = "force-dynamic";
 
 // PEN-NAMES-1 (migration 20261019184512): a bundle belongs to one pen
 // name (11a); its byline is that pen name, embedded from the
-// public_pen_names view as `pen`, linking to /authors/<pen name id>.
+// public_pen_names view as `pen`, linking to /autore/<pen name id>.
 //
 // ALL-WIRING-5: the bundle's own columns are selected by name, and the
 // legacy `price_cents` is not among them -- this page's price, its

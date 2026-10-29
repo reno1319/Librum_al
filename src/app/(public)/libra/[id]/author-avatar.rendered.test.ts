@@ -105,7 +105,7 @@ describe("Book page: Rreth autorit placeholder (I4)", () => {
   it("bio and links only when set; links are nofollow ugc, https only, and the profile link goes to the pen name's page", async () => {
     const plain = aboutTheAuthor(await render(BOOK));
     expect(plain).not.toContain("rel=");
-    expect(plain).toContain('href="/authors/f0000000-1414-4000-8000-000000000001"');
+    expect(plain).toContain('href="/autore/f0000000-1414-4000-8000-000000000001"');
     expect(plain).not.toContain(BOOK.author_id);
 
     const section = aboutTheAuthor(

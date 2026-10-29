@@ -187,7 +187,7 @@ describe("pickLibrumChoiceFromForm", () => {
     expect(await redirectOf(pickLibrumChoiceFromForm(pickForm()))).toBe(SAVED);
     expect(bookReads).toEqual([{ columns: "id, price_all", filters: [["id", BOOK]] }]);
     expect(rpcCalls).toEqual([{ name: "set_librum_choice", params: { p_book_id: BOOK } }]);
-    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/bookstore", "/admin/librum-choice"]);
+    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/librari", "/admin/librum-choice"]);
   });
 
   it("a free book (0) counts as priced", async () => {
@@ -262,7 +262,7 @@ describe("removeLibrumChoiceFromForm", () => {
     expect(await redirectOf(removeLibrumChoiceFromForm())).toBe(SAVED);
     expect(mockRequireStaff.mock.calls).toEqual([["catalog.feature"], ["catalog.feature"]]);
     expect(rpcCalls).toEqual([{ name: "clear_librum_choice", params: undefined }]);
-    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/bookstore", "/admin/librum-choice"]);
+    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/librari", "/admin/librum-choice"]);
   });
 
   it.each([
@@ -344,7 +344,7 @@ describe("setHomeSlotFromForm", () => {
     rpcResults.set_home_featured_slot = { data: "ok", error: null };
     expect(await redirectOf(setHomeSlotFromForm(slotForm({ slot: "1", bookId: BOOK, sponsored: "on" })))).toBe(SAVED);
     expect(rpcCalls[0].params).toMatchObject({ p_slot: 1, p_book_id: BOOK, p_sponsored: true });
-    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/bookstore", "/admin/librum-choice"]);
+    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/librari", "/admin/librum-choice"]);
   });
 
   it("Paid not ticked (absent from the form) -> sponsored false", async () => {
@@ -396,7 +396,7 @@ describe("removeHomeSlotFromForm", () => {
   it("clears the slot, revalidates, Saved.", async () => {
     expect(await redirectOf(removeHomeSlotFromForm(slotForm({ slot: "2" })))).toBe(SAVED);
     expect(rpcCalls).toEqual([{ name: "clear_home_featured_slot", params: { p_slot: 2 } }]);
-    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/bookstore", "/admin/librum-choice"]);
+    expect(mockRevalidatePath.mock.calls.map((c) => c[0])).toEqual(["/", "/librari", "/admin/librum-choice"]);
   });
 
   it("a bad slot -> Something went wrong, no call", async () => {

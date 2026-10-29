@@ -140,13 +140,13 @@ describe("unpublishBookAsStaff", () => {
     });
     for (const path of [
       "/",
-      "/bookstore",
-      `/books/${BOOK_ID}`,
+      "/librari",
+      `/libra/${BOOK_ID}`,
       "/admin/books",
       `/admin/books/${BOOK_ID}`,
       "/dashboard",
-      "/bundles/bundle-1",
-      "/authors/pen-1",
+      "/paketa/bundle-1",
+      "/autore/pen-1",
       `/admin/reports/${REPORT_ID}`,
       "/admin/reports",
       "/admin",
@@ -306,7 +306,7 @@ describe("approveBookReviewAsStaff", () => {
       bookId: BOOK_ID,
       caller: "approveBookReviewAsStaff",
     });
-    for (const path of ["/", "/bookstore", `/books/${BOOK_ID}`, "/authors/pen-1", "/admin/books", `/admin/books/${BOOK_ID}`, "/dashboard"]) {
+    for (const path of ["/", "/librari", `/libra/${BOOK_ID}`, "/autore/pen-1", "/admin/books", `/admin/books/${BOOK_ID}`, "/dashboard"]) {
       expect(mockRevalidatePath).toHaveBeenCalledWith(path);
     }
     expect(target).toBe(`/admin/books/${BOOK_ID}?success=${encodeURIComponent("Book approved. It's live in the Bookstore now.")}`);

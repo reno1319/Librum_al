@@ -1720,14 +1720,14 @@ export async function updateBook(bookId: string, formData: FormData) {
   await removeProvenBookStorageObjects(supabase, removals, "updateBook");
 
   revalidatePath("/dashboard");
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
   revalidatePath("/");
   if (filesChanged && (wasLive || wasPending)) {
     if (reviewRequestFailed) {
       redirect(`/dashboard/books/${bookId}/edit?success=${encodeURIComponent(LIVE_FILES_REQUEST_FAILED_MESSAGE)}`);
     }
     if (wasLive) {
-      revalidatePath("/bookstore");
+      revalidatePath("/librari");
       redirect(`/dashboard?success=${encodeURIComponent(LIVE_FILES_SAVED_MESSAGE)}`);
     }
   }
@@ -2605,7 +2605,7 @@ export async function addContributor(bookId: string, formData: FormData) {
   }
 
   revalidatePath(`/dashboard/books/${bookId}/edit`);
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
   redirect(`/dashboard/books/${bookId}/edit?success=${encodeURIComponent("Bashkëpunëtori u shtua")}`);
 }
 
@@ -2635,5 +2635,5 @@ export async function removeContributor(bookId: string, contributorId: string) {
   await supabase.from("book_contributors").delete().eq("id", contributorId);
 
   revalidatePath(`/dashboard/books/${bookId}/edit`);
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
 }

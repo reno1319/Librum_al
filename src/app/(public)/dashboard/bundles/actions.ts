@@ -365,7 +365,7 @@ export async function updateBundle(bundleId: string, formData: FormData) {
     });
     if (outcome === "unconfirmed") {
       revalidatePath("/dashboard/bundles");
-      revalidatePath(`/bundles/${bundleId}`);
+      revalidatePath(`/paketa/${bundleId}`);
     }
     const message =
       outcome === "changed"
@@ -377,7 +377,7 @@ export async function updateBundle(bundleId: string, formData: FormData) {
   }
 
   revalidatePath("/dashboard/bundles");
-  revalidatePath(`/bundles/${bundleId}`);
+  revalidatePath(`/paketa/${bundleId}`);
   redirect(`/dashboard/bundles?success=${encodeURIComponent("Paketa u përditësua")}`);
 }
 

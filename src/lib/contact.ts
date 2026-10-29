@@ -60,5 +60,5 @@ export function bookWhatsappShareHref(
   } catch {
     return null;
   }
-  return whatsappShareHref(bookShareMessage(book.title, byline, `${base}/books/${book.id}`));
+  return whatsappShareHref(bookShareMessage(book.title, byline, `${base}/libra/${book.id}`));
 }

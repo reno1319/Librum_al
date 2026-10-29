@@ -81,7 +81,7 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 // needed any more. (REDESIGN STEP 2 brings covers back to the hero as a
 // shelf, per Renato's chosen A2 mockup -- see HeroShelf -- reusing these
 // same fetched covers, still one query.) `title` is now selected alongside `id`/`cover_path`
-// -- covers became real links to /books/{id} in this pass, and a linked,
+// -- covers became real links to /libra/{id} in this pass, and a linked,
 // otherwise-decorative cover image needs SOME accessible name (see
 // PublishedWithLibrumSection's aria-label) -- this is the same single
 // query, extended by one scalar column, not a new query.
@@ -509,7 +509,7 @@ function EarningsSection() {
 // ============================================================
 // Section 5 — Published with Librum: real published covers as proof.
 // REDESIGN STEP 2: a white section in the mockup's frame (r8: three
-// featured books, see below). Non-commerce: books link to /books/{id} (proof that
+// featured books, see below). Non-commerce: books link to /libra/{id} (proof that
 // Librum books reach the public marketplace) but never show price/Buy/
 // wishlist/rating.
 // ============================================================
@@ -537,7 +537,7 @@ function PublishedWithLibrumSection({ books }: { books: Cover[] }) {
           {books.map((book) => (
             <li key={book.id}>
               <Link
-                href={`/books/${book.id}`}
+                href={`/libra/${book.id}`}
                 aria-label={`Shikoni ${book.title} në Librum`}
                 className="focus-ring group/book flex gap-5 rounded-[3px]"
               >
@@ -577,7 +577,7 @@ function PublishedWithLibrumSection({ books }: { books: Cover[] }) {
         </ul>
 
         <div className="mt-8">
-          <Link href="/bookstore" className={TEXT_LINK_CLASSES}>
+          <Link href="/librari" className={TEXT_LINK_CLASSES}>
             Shikoni librat e botuar &rarr;
           </Link>
         </div>

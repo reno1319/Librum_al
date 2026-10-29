@@ -20,8 +20,8 @@ import { resolveWizardPriceSummary } from "@/app/(public)/dashboard/books/new/wi
 // The remaining three are server actions with database side effects and
 // are driven, with a Supabase double, in their own files:
 //
-//   buyBook          -> src/app/(public)/books/[id]/actions.test.ts
-//   getFreeBook      -> src/app/(public)/books/[id]/actions.test.ts
+//   buyBook          -> src/app/(public)/libra/[id]/actions.test.ts
+//   getFreeBook      -> src/app/(public)/libra/[id]/actions.test.ts
 //   performPublish   -> src/app/(public)/dashboard/books/publish.test.ts
 //
 // This file exists as a single place where the SAME two rows are put to

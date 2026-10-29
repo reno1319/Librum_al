@@ -17,8 +17,8 @@ import { canonicalPenNamePhotoPath, isPenNamePhotoPath } from "./pen-name-photo-
 // and the database's own refusals.
 
 describe("authorPagePath", () => {
-  it("is /authors/<pen name id>", () => {
-    expect(authorPagePath("bbbbbbbb-0000-4000-8000-00000000000a")).toBe("/authors/bbbbbbbb-0000-4000-8000-00000000000a");
+  it("is /autore/<pen name id>", () => {
+    expect(authorPagePath("bbbbbbbb-0000-4000-8000-00000000000a")).toBe("/autore/bbbbbbbb-0000-4000-8000-00000000000a");
   });
 });
 

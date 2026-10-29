@@ -15,8 +15,8 @@ import {
   resetErrorAlertThrottle,
 } from "@/lib/error-alerts";
 
-const REQUEST = { path: "/books/abc?key=s3cret-key-value", method: "GET" };
-const CONTEXT = { routePath: "/(public)/books/[id]", routeType: "render" };
+const REQUEST = { path: "/libra/abc?key=s3cret-key-value", method: "GET" };
+const CONTEXT = { routePath: "/(public)/libra/[id]", routeType: "render" };
 const T0 = Date.UTC(2026, 9, 27, 20, 0, 0);
 
 beforeEach(() => {
@@ -38,9 +38,9 @@ describe("reportServerError", () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
     const [to, subject, html] = sendEmail.mock.calls[0]!;
     expect(to).toBe("support@librum.al");
-    expect(subject).toBe("Site error: render /(public)/books/[id]");
+    expect(subject).toBe("Site error: render /(public)/libra/[id]");
     expect(html).toContain("2026-10-27T20:00:00.000Z");
-    expect(html).toContain("GET /books/abc<");
+    expect(html).toContain("GET /libra/abc<");
     expect(html).toContain("TypeError");
     expect(html).toContain("123456");
     expect(html).toContain("Cannot read properties of undefined");
@@ -143,12 +143,12 @@ describe("cleanPath", () => {
   });
 
   it("blanks emails (also percent-encoded), ids, tokens and hex runs in the path", () => {
-    expect(cleanPath("/authors/ana@example.com")).toBe("/authors/[email]");
-    expect(cleanPath("/authors/ana%40example.com/books")).toBe("/authors/[email]/books");
+    expect(cleanPath("/autore/ana@example.com")).toBe("/autore/[email]");
+    expect(cleanPath("/autore/ana%40example.com/books")).toBe("/autore/[email]/books");
     expect(cleanPath("/admin/people/123e4567-e89b-12d3-a456-426614174000")).toBe("/admin/people/[token]");
     expect(cleanPath("/x/abcdefghijklmnopqrstuvwxyzABCDEF012345")).toBe("/x/[token]");
     expect(cleanPath("/x/deadbeefdeadbeef/y")).toBe("/x/[hex]/y");
-    expect(cleanPath("/books/new")).toBe("/books/new");
+    expect(cleanPath("/libra/new")).toBe("/libra/new");
   });
 
   it("keeps a malformed path as it is, still cleaned", () => {

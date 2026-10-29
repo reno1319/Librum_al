@@ -217,7 +217,7 @@ export default async function AdminBookReportDetailPage({
         {book && (
           <p className="mt-2 text-xs text-muted">
             {book.status === "published" ? (
-              <Link href={`/books/${report.book_id}`} className="text-primary underline">
+              <Link href={`/libra/${report.book_id}`} className="text-primary underline">
                 View public book page
               </Link>
             ) : takenDown ? (

@@ -674,7 +674,7 @@ export async function startPokCheckout(input: {
       expiresAfterMinutes: claim.grantedWindowMinutes,
       webhookUrl: `${origin.origin}/api/payments/pok/webhook?${query}`,
       redirectUrl: `${origin.origin}/payments/pok/return?${query}`,
-      failRedirectUrl: `${origin.origin}/books/${intent.book_id}?canceled=true`,
+      failRedirectUrl: `${origin.origin}/libra/${intent.book_id}?canceled=true`,
     });
 
     // MINIMUM identity, in memory, before the first write: enough to be

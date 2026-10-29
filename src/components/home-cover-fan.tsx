@@ -38,7 +38,7 @@ export function HomeCoverFan({ covers }: { covers: FanCover<FanBook>[] }) {
               className={`relative ${middle ? `z-10 -mx-[4%] ${COVER_WIDTH.middle}` : `z-0 ${COVER_WIDTH.side}`}`}
             >
               <Link
-                href={`/books/${cover.book.id}`}
+                href={`/libra/${cover.book.id}`}
                 aria-label={`Shikoni ${cover.book.title} në Librum${cover.sponsored ? ` (${SPONSORED_LABEL.toLowerCase()})` : ""}`}
                 className="focus-ring group/cover relative block rounded-[3px]"
               >

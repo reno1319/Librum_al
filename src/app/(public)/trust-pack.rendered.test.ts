@@ -92,7 +92,7 @@ describe("TRUST PACK 1: links to the reader help page", () => {
 
   it("the Library and the book page's owned panel link to it", () => {
     expect(read("src/app/(public)/library/page.tsx")).toContain('href="/help/reading"');
-    const book = read("src/app/(public)/books/[id]/page.tsx");
+    const book = read("src/app/(public)/libra/[id]/page.tsx");
     const owned = book.slice(book.indexOf('if (state === "owned")'), book.indexOf("ALL-WIRING-2: a book with no authored"));
     expect(owned).toContain('href="/help/reading"');
   });
@@ -137,7 +137,7 @@ describe("TRUST PACK 5-6: Contact, footer and Privacy", () => {
 });
 
 describe("TRUST PACK 6: share on WhatsApp", () => {
-  const book = read("src/app/(public)/books/[id]/page.tsx");
+  const book = read("src/app/(public)/libra/[id]/page.tsx");
 
   it("is a plain link built by bookWhatsappShareHref, with no WhatsApp script", () => {
     expect(book).toContain("bookWhatsappShareHref(book, bookByline)");

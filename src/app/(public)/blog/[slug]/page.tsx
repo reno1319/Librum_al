@@ -27,7 +27,7 @@ type PublicBlogPostDetail = {
 };
 
 // LIBRUM 2.0 BLOG-1D: mirrors Book Detail's own PERF-1 pattern exactly
-// (src/app/(public)/books/[id]/page.tsx's getBookForDetail) --
+// (src/app/(public)/libra/[id]/page.tsx's getBookForDetail) --
 // generateMetadata() and the page component are separate invocations
 // Next.js calls for the same request; cache() (React's per-request
 // memoization, cleared once the request finishes, never a persistent/

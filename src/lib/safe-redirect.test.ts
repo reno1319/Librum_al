@@ -13,7 +13,7 @@ describe("resolveSafeInternalPath: accepts legitimate same-site destinations", (
   });
 
   it("simple internal path", () => {
-    expect(resolveSafeInternalPath("/books/123")).toBe("/books/123");
+    expect(resolveSafeInternalPath("/libra/123")).toBe("/libra/123");
   });
 
   it("path with a query string", () => {
@@ -21,8 +21,8 @@ describe("resolveSafeInternalPath: accepts legitimate same-site destinations", (
   });
 
   it("path with both a query string and a fragment survive together, unmodified", () => {
-    expect(resolveSafeInternalPath("/books/123?from=checkout#details")).toBe(
-      "/books/123?from=checkout#details",
+    expect(resolveSafeInternalPath("/libra/123?from=checkout#details")).toBe(
+      "/libra/123?from=checkout#details",
     );
   });
 
@@ -53,9 +53,9 @@ describe("resolveSafeInternalPath: accepts legitimate same-site destinations", (
   });
 
   it("a doubled internal path separator stays internal", () => {
-    const result = resolveSafeInternalPath("/books//123");
+    const result = resolveSafeInternalPath("/libra//123");
     expect(result).not.toBeNull();
-    expect(result).toBe("/books//123");
+    expect(result).toBe("/libra//123");
   });
 });
 

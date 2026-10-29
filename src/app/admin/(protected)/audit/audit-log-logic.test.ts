@@ -486,7 +486,7 @@ describe("pen_name.links_removed (PEN-NAMES-1)", () => {
 
   it("the target links to the pen name's Author Page", () => {
     const id = "9e000000-0000-4000-8000-0000000000a2";
-    expect(resolveAuditTargetDisplay("pen_names", id).href).toBe(`/authors/${id}`);
+    expect(resolveAuditTargetDisplay("pen_names", id).href).toBe(`/autore/${id}`);
     expect(resolveAuditTargetDisplay("pen_names", id).label).toMatch(/^Pen name · /);
   });
 });

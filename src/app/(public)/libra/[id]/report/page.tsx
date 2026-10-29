@@ -25,7 +25,7 @@ export default async function ReportBookPage({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?next=/books/${id}/report`);
+    redirect(`/login?next=/libra/${id}/report`);
   }
 
   // PEN-NAMES-2: public_books, like every public read of a book.
@@ -41,7 +41,7 @@ export default async function ReportBookPage({
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
-      <Link href={`/books/${id}`} className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
+      <Link href={`/libra/${id}`} className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Kthehuni te libri
       </Link>
       <h1 className="mt-2 font-serif text-3xl font-normal">

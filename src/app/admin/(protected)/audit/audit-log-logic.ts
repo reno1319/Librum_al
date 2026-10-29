@@ -360,7 +360,7 @@ export function resolveAuditTargetDisplay(targetType: string, targetId: string |
   // PEN-NAMES-1: a pen name's own Author Page (public, keyed by the pen
   // name id).
   if (targetId && targetType === "pen_names") {
-    return { label, href: `/authors/${targetId}` };
+    return { label, href: `/autore/${targetId}` };
   }
   // ADMIN-2-TAKEDOWN: the admin book page (src/app/admin/(protected)/
   // books/[id]/page.tsx).

@@ -10,7 +10,7 @@ describe("SiteFooter FOOTER_GROUPS", () => {
   it("includes a Blog link in Discover, alongside Bookstore, without removing anything", () => {
     const discoverHrefs = FOOTER_GROUPS.Zbuloni.map((l) => l.href);
     expect(discoverHrefs).toContain("/blog");
-    expect(discoverHrefs).toContain("/bookstore");
+    expect(discoverHrefs).toContain("/librari");
     expect(discoverHrefs).toContain("/about");
   });
 

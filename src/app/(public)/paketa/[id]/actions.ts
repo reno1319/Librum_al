@@ -13,11 +13,11 @@ export async function buyBundle(bundleId: string) {
   // unconditionally disabled below and never reaches Supabase or any
   // provider today.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    redirectForMaintenance(`/bundles/${bundleId}`);
+    redirectForMaintenance(`/paketa/${bundleId}`);
   }
 
   // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks the
-  // /bundles/[id] page itself while a recovery session is active, so
+  // /paketa/[id] page itself while a recovery session is active, so
   // this is the second layer against a crafted direct POST. Runs before
   // any Supabase call below.
   await redirectIfRecoverySessionActive();
@@ -28,7 +28,7 @@ export async function buyBundle(bundleId: string) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?next=/bundles/${bundleId}`);
+    redirect(`/login?next=/paketa/${bundleId}`);
   }
 
   // STRIPE-DISABLE-1: paid bundle checkout is unavailable under every
@@ -42,5 +42,5 @@ export async function buyBundle(bundleId: string) {
   // invocation. The corresponding Stripe Checkout Session creation call
   // site that used to follow further down this function has been
   // removed entirely, not merely made unreachable.
-  redirect(`/bundles/${bundleId}?error=${encodeURIComponent(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+  redirect(`/paketa/${bundleId}?error=${encodeURIComponent(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
 }

@@ -113,7 +113,7 @@ export default async function LibraryPage({
           title="Biblioteka juaj është bosh."
           description="Librat që merrni në Librum do të shfaqen këtu."
           action={
-            <Link href="/bookstore" className={buttonClasses("primary", "md")}>
+            <Link href="/librari" className={buttonClasses("primary", "md")}>
               Shfletoni Librarinë
             </Link>
           }

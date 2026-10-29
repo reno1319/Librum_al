@@ -322,7 +322,7 @@ export default async function AccountPurchasesPage({
                           >
                             <div>
                               <Link
-                                href={`/books/${purchase.book_id}`}
+                                href={`/libra/${purchase.book_id}`}
                                 className="font-serif font-medium hover:underline"
                               >
                                 {purchase.books.title}

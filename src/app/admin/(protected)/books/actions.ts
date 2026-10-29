@@ -117,8 +117,8 @@ async function notifyAuthorAndRevalidate(
 ): Promise<void> {
   const paths = new Set<string>([
     "/",
-    "/bookstore",
-    `/books/${bookId}`,
+    "/librari",
+    `/libra/${bookId}`,
     "/admin/books",
     `/admin/books/${bookId}`,
     "/dashboard",
@@ -146,7 +146,7 @@ async function notifyAuthorAndRevalidate(
       : { data: null };
 
     const bundleIds = takedown?.bundle_ids ?? [];
-    for (const id of bundleIds) paths.add(`/bundles/${id}`);
+    for (const id of bundleIds) paths.add(`/paketa/${id}`);
 
     const [{ data: bundles }, { data: book }] = await Promise.all([
       bundleIds.length > 0
@@ -154,7 +154,7 @@ async function notifyAuthorAndRevalidate(
         : Promise.resolve({ data: [] as { id: string; title: string }[] }),
       admin.from("books").select("pen_name_id").eq("id", bookId).maybeSingle<{ pen_name_id: string | null }>(),
     ]);
-    if (book?.pen_name_id) paths.add(`/authors/${book.pen_name_id}`);
+    if (book?.pen_name_id) paths.add(`/autore/${book.pen_name_id}`);
 
     if (takedown?.author_id) {
       const { data: author } = await admin.auth.admin.getUserById(takedown.author_id);
@@ -331,9 +331,9 @@ export async function approveBookReviewAsStaff(formData: FormData) {
   revalidateAll(
     [
       "/",
-      "/bookstore",
-      `/books/${book.id}`,
-      ...(book.pen_name_id ? [`/authors/${book.pen_name_id}`] : []),
+      "/librari",
+      `/libra/${book.id}`,
+      ...(book.pen_name_id ? [`/autore/${book.pen_name_id}`] : []),
       "/admin",
       "/admin/books",
       bookPath,

@@ -168,7 +168,7 @@ function makeClient(tables: Record<string, Row[]>, userId: string | null, log: Q
 let currentClient: ReturnType<typeof makeClient>;
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => currentClient }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => currentClient }));
-vi.mock("./authors/[id]/actions", () => ({
+vi.mock("./autore/[id]/actions", () => ({
   followPenName: vi.fn(),
   unfollowPenName: vi.fn(),
   removePenNameLinks: vi.fn(),
@@ -176,7 +176,7 @@ vi.mock("./authors/[id]/actions", () => ({
 // PEN-NAMES-1: the author page asks whether a signed-in viewer is staff
 // with reports.resolve; nobody is here.
 vi.mock("@/lib/staff", () => ({ hasPermission: async () => false }));
-vi.mock("./bundles/[id]/actions", () => ({ buyBundle: vi.fn() }));
+vi.mock("./paketa/[id]/actions", () => ({ buyBundle: vi.fn() }));
 vi.mock("./dashboard/bundles/actions", () => ({
   createBundle: vi.fn(),
   updateBundle: vi.fn(),
@@ -185,9 +185,9 @@ vi.mock("./dashboard/bundles/actions", () => ({
   deleteBundle: vi.fn(),
 }));
 
-const { default: BookstorePage } = await import("./bookstore/page");
-const { default: AuthorProfilePage } = await import("./authors/[id]/page");
-const { default: BundleDetailPage } = await import("./bundles/[id]/page");
+const { default: BookstorePage } = await import("./librari/page");
+const { default: AuthorProfilePage } = await import("./autore/[id]/page");
+const { default: BundleDetailPage } = await import("./paketa/[id]/page");
 const { default: BundlesDashboardPage } = await import("./dashboard/bundles/page");
 const { default: EditBundlePage } = await import("./dashboard/bundles/[id]/edit/page");
 

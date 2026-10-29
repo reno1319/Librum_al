@@ -37,7 +37,7 @@ export function BookCard({
   return (
     <div className="flex flex-col gap-1">
       <Link
-        href={`/books/${book.id}`}
+        href={`/libra/${book.id}`}
         className="focus-ring group flex flex-col gap-3 rounded-[3px]"
       >
         {coverUrl ? (
