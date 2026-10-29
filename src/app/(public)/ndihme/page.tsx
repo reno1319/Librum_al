@@ -69,7 +69,7 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
       },
       {
         q: "Çfarë ndodh nëse një blerës fiton një kundërshtim të pagesës?",
-        a: `Nëse kundërshtimi zgjidhet përfundimisht kundër pagesës, Librum mund t'ju kërkojë vetëm të ardhurat që mbajtët realisht nga ajo shitje, asnjëherë më shumë. Nuk paguani kurrë pjesën prej ${PLATFORM_FEE_PERCENT}% të tarifës së platformës së Librum për një kundërshtim të humbur, dhe sipas rregullave aktuale Librum paguan vetë tarifën që merr për kundërshtimin ofruesi i pagesave.`,
+        a: `Nëse kundërshtimi zgjidhet përfundimisht kundër pagesës, Librum mund të rikuperojë nga ju vetëm të ardhurat që mbajtët realisht nga ajo shitje, asnjëherë më shumë. Nuk paguani kurrë pjesën prej ${PLATFORM_FEE_PERCENT}% të tarifës së platformës së Librum për një kundërshtim të humbur, dhe sipas rregullave aktuale Librum paguan vetë tarifën që merr për kundërshtimin ofruesi i pagesave.`,
       },
     ],
   },
@@ -80,7 +80,7 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
       {
         q: "Si ta hap një libër që kam shkarkuar?",
         a: "Librat e Librum janë skedarë EPUB pa DRM. Hapen në Apple Books, Google Play Books dhe në shumicën e aplikacioneve të tjera të leximit, ndërsa Kindle i merr përmes shërbimit Send to Kindle të Amazon.",
-        link: { href: "/help/reading", label: "Si ta lexoni librin tuaj, hap pas hapi" },
+        link: { href: "/ndihme/leximi", label: "Si ta lexoni librin tuaj, hap pas hapi" },
       },
       {
         q: "Si funksionojnë rimbursimet?",
@@ -180,7 +180,7 @@ export default async function HelpPage() {
 
           <p className="text-sm text-muted">
             Nuk e gjetët përgjigjen?{" "}
-            <Link href="/contact" className="text-primary underline">
+            <Link href="/kontakt" className="text-primary underline">
               Na kontaktoni
             </Link>
             . {REPLY_PROMISE}

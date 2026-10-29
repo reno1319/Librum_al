@@ -13,7 +13,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve({ auth: { getUser: () => Promise.resolve({ data: { user: null } }) } }),
 }));
 
-const { default: HowItWorksPage } = await import("./how-it-works/page");
+const { default: HowItWorksPage } = await import("./si-funksionon/page");
 const renderHowItWorks = async () => renderToStaticMarkup(await HowItWorksPage());
 
 // FIX1: source-level guards for the small fixes that have no page-level
@@ -132,17 +132,17 @@ describe("FIX1 X15: one heading style", () => {
   it("no serif heading on a public or dashboard page is bold", () => {
     const files = [
       "src/components/ui/page-header.tsx",
-      "src/app/(public)/how-it-works/page.tsx",
+      "src/app/(public)/si-funksionon/page.tsx",
       "src/app/(public)/dashboard/books/[id]/edit/page.tsx",
       "src/app/(public)/dashboard/balance/page.tsx",
-      "src/app/(public)/terms/page.tsx",
+      "src/app/(public)/kushtet/page.tsx",
       "src/app/(public)/account/page.tsx",
       "src/components/page-bands.tsx",
-      "src/app/(public)/about/page.tsx",
-      "src/app/(public)/help/page.tsx",
-      "src/app/(public)/pricing/page.tsx",
-      "src/app/(public)/privacy/page.tsx",
-      "src/app/(public)/refunds/page.tsx",
+      "src/app/(public)/rreth-nesh/page.tsx",
+      "src/app/(public)/ndihme/page.tsx",
+      "src/app/(public)/fitimet/page.tsx",
+      "src/app/(public)/privatesia/page.tsx",
+      "src/app/(public)/rimbursimet/page.tsx",
     ];
     for (const file of files) {
       const headings = read(file).match(/<h[1-4]\b[^>]*font-serif[^>]*>/g) ?? [];
@@ -155,7 +155,7 @@ describe("FIX1 X15: one heading style", () => {
 
 describe("AUTHOR PAGES REDESIGN: the Terms contents box", () => {
   it("lists every numbered section heading, in order, by its anchor", () => {
-    const source = read("src/app/(public)/terms/page.tsx");
+    const source = read("src/app/(public)/kushtet/page.tsx");
     const list = source.match(/const SECTION_TITLES = \[([\s\S]*?)\];/)![1];
     const titles = [...list.matchAll(/"([^"]+)"/g)].map((m) => m[1].replace("'", "&apos;"));
     const headings = [...source.matchAll(/<section id="section-(\d+)"[^>]*>\s*<h2[^>]*>\s*<span[^>]*>\1\.<\/span> ([^\n<]+)/g)];

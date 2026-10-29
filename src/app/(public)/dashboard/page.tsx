@@ -172,7 +172,7 @@ export default async function DashboardPage({
               >
                 Libër i ri
               </Link>
-              <Link href="/how-it-works" className={TEXT_LINK_CLASSES}>
+              <Link href="/si-funksionon" className={TEXT_LINK_CLASSES}>
                 Si funksionon botimi
               </Link>
             </div>

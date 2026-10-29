@@ -70,15 +70,15 @@ describe("VISITOR STATS: which pages count", () => {
       "/paketa/abc",
       "/blog",
       "/blog/a-post",
-      "/help",
-      "/help/reading",
-      "/about",
-      "/contact",
-      "/how-it-works",
-      "/pricing",
-      "/privacy",
-      "/refunds",
-      "/terms",
+      "/ndihme",
+      "/ndihme/leximi",
+      "/rreth-nesh",
+      "/kontakt",
+      "/si-funksionon",
+      "/fitimet",
+      "/privatesia",
+      "/rimbursimet",
+      "/kushtet",
     ]) {
       expect(isCountedPath(p), p).toBe(true);
     }
@@ -151,8 +151,8 @@ describe("VISITOR STATS: what is sent", () => {
   });
 
   it("keeps the event type and doesn't change the original event", () => {
-    const original = { type: "event" as const, url: `${ORIGIN}/help?x=1` };
-    expect(prepareVisitEvent(original)).toEqual({ type: "event", url: `${ORIGIN}/help` });
-    expect(original.url).toBe(`${ORIGIN}/help?x=1`);
+    const original = { type: "event" as const, url: `${ORIGIN}/ndihme?x=1` };
+    expect(prepareVisitEvent(original)).toEqual({ type: "event", url: `${ORIGIN}/ndihme` });
+    expect(original.url).toBe(`${ORIGIN}/ndihme?x=1`);
   });
 });

@@ -294,7 +294,7 @@ function HeroSection({ cta, fan }: { cta: HomepageCta | null; fan: FanCover<Cove
                   {cta.label}
                 </Link>
               )}
-              <Link href="/how-it-works" className={OUTLINE_ON_DARK_CTA_CLASSES}>
+              <Link href="/si-funksionon" className={OUTLINE_ON_DARK_CTA_CLASSES}>
                 Lexoni udhëzuesin e plotë &rarr;
               </Link>
             </div>
@@ -497,7 +497,7 @@ function EarningsSection() {
           <p className="mt-2 leading-relaxed text-foreground/90">
             Ndiqni kopjet e shitura dhe të ardhurat te Paneli i autorit.
           </p>
-          <Link href="/pricing" className={`${TEXT_LINK_CLASSES} mt-4 inline-block`}>
+          <Link href="/fitimet" className={`${TEXT_LINK_CLASSES} mt-4 inline-block`}>
             Shikoni si funksionojnë fitimet &rarr;
           </Link>
         </div>

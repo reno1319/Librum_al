@@ -62,7 +62,7 @@ export function resolveAuthorPageCta(params: {
 // LIBRUM 2.0 UI-3: the single source authors' displayed share derives
 // from -- PLATFORM_FEE_PERCENT (src/lib/pricing.ts), never a literal
 // "80" written on the homepage itself. Both numbers stay derived, not
-// duplicated, matching how /pricing already computes this.
+// duplicated, matching how /fitimet already computes this.
 export function computeAuthorSharePercent(): number {
   return 100 - PLATFORM_FEE_PERCENT;
 }

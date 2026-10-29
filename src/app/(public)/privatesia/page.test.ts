@@ -16,7 +16,7 @@ const text = html
   .replace(/\s+/g, " ");
 const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
 
-describe("POLICY PAGES: /privacy", () => {
+describe("POLICY PAGES: /privatesia", () => {
   it("is titled Politika e privatësisë", () => {
     expect(metadata.title).toBe("Politika e privatësisë");
     expect(html).toMatch(/<h1[^>]*>Politika e privatësisë<\/h1>/);

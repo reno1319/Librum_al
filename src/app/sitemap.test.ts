@@ -31,16 +31,16 @@ describe("sitemap", () => {
     const paths = entries.map((entry) => new URL(entry.url).pathname);
     for (const path of [
       "/",
-      "/about",
-      "/how-it-works",
-      "/pricing",
+      "/rreth-nesh",
+      "/si-funksionon",
+      "/fitimet",
       "/librari",
-      "/help",
-      "/help/reading",
-      "/contact",
-      "/terms",
-      "/privacy",
-      "/refunds",
+      "/ndihme",
+      "/ndihme/leximi",
+      "/kontakt",
+      "/kushtet",
+      "/privatesia",
+      "/rimbursimet",
     ]) {
       expect(paths).toContain(path);
     }

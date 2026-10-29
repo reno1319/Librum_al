@@ -48,7 +48,7 @@ export default function ContactPage() {
 
       <p className="mt-8 text-sm text-muted">
         Nuk arrini ta hapni një libër? Shihni{" "}
-        <Link href="/help/reading" className="text-primary underline">
+        <Link href="/ndihme/leximi" className="text-primary underline">
           si ta lexoni librin tuaj
         </Link>
         .

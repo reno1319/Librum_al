@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 // repository renders Server Components in 18 test files already, with
 // renderToStaticMarkup from react-dom/server and a stubbed Supabase
 // client, no DOM library and no jsdom environment -- see
-// ./books/[id]/page.test.ts, which this same patch extends. Rendering
+// ./libra/[id]/page.test.ts, which this same patch extends. Rendering
 // is available here; it needs no new dependency.
 //
 // So the limitation below is a CHOICE OF THIS FILE, not a property of

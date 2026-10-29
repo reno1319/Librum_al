@@ -946,7 +946,7 @@ export function UploadWizard({
               </div>
             )}
 
-            <Link href="/pricing" className={`${TEXT_LINK_CLASSES} mt-4 block`}>
+            <Link href="/fitimet" className={`${TEXT_LINK_CLASSES} mt-4 block`}>
               Nuk e dini çfarë çmimi të vendosni? Shikoni llogaritësin e fitimeve &rarr;
             </Link>
           </div>

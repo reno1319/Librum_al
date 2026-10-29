@@ -59,7 +59,7 @@ export type WizardPriceSummary = {
 //
 // ALL-WIRING-2: it now delegates to calculateAuthorEarnings() outright
 // rather than calling platformFeeCents() beside it, so the wizard, the
-// public /pricing calculator and the ledger cannot disagree even by a
+// public /fitimet calculator and the ledger cannot disagree even by a
 // rounding step.
 export function resolveWizardPriceSummary(price: string): WizardPriceSummary {
   const parsed = parseCatalogPriceAll(price);

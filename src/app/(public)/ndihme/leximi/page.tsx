@@ -102,7 +102,7 @@ export default function ReadingHelpPage() {
               të drejtë. Sa kohë që mund ta anuloni ende, do të shihni një
               kujtesë pranë butonit të shkarkimit. Librat falas nuk kanë asgjë
               për të anuluar. Hollësitë janë te faqja{" "}
-              <Link href="/refunds" className={LINK_CLASSES}>
+              <Link href="/rimbursimet" className={LINK_CLASSES}>
                 Rimbursimet
               </Link>
               .

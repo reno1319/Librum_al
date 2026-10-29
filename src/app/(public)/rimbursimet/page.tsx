@@ -145,7 +145,7 @@ export default function RefundsPage() {
               <SellerDetailsBlock />
               <p className="mt-2">
                 Rregullat e plota janë te{" "}
-                <Link href="/terms" className="text-primary underline">
+                <Link href="/kushtet" className="text-primary underline">
                   Kushtet e përdorimit
                 </Link>
                 .

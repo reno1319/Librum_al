@@ -18,7 +18,7 @@ const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
 const section = (n: number) =>
   source.match(new RegExp(`<section id="section-${n}"[\\s\\S]*?</section>`))![0];
 
-describe("POLICY PAGES: /terms", () => {
+describe("POLICY PAGES: /kushtet", () => {
   it("is titled Kushtet e përdorimit", () => {
     expect(metadata.title).toBe("Kushtet e përdorimit");
     expect(html).toMatch(/<h1[^>]*>Kushtet e përdorimit<\/h1>/);
