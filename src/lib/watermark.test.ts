@@ -63,6 +63,26 @@ describe("watermarkEpub", () => {
     expect(opfXml).not.toContain(`o'brien+test<x>@example.com`);
   });
 
+  // B15: "$" patterns in an email are text, never replacement codes.
+  // ("$'" and "$&" both reach the replace containing "$&".)
+  it.each(["a$&b@example.com", "a$1b@example.com", "a$`b@example.com", "a$'b@example.com", "a$$b@example.com"])(
+    "a $ pattern in the email (%s) is stamped literally, once",
+    async (email) => {
+      const result = await watermarkEpub(await buildValidEpub(), email);
+
+      expect(result.watermarked).toBe(true);
+      const resultZip = await JSZip.loadAsync(result.bytes);
+      const opfXml = await resultZip.file("OEBPS/content.opf")!.async("string");
+      const escaped = email.replace(/&/g, "&amp;").replace(/'/g, "&apos;");
+      const expectedOpf = OPF_WITH_METADATA.replace(
+        `<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">`,
+        () =>
+          `<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:rights>Kjo kopje është licencuar për ${escaped}. Ju lutemi, mos e shpërndani.</dc:rights>`,
+      );
+      expect(opfXml).toBe(expectedOpf);
+    },
+  );
+
   it("missing META-INF/container.xml: watermarked=false, unsupported_structure, original bytes byte-identical", async () => {
     const zip = new JSZip();
     zip.file("mimetype", "application/epub+zip", { compression: "STORE" });

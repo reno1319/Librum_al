@@ -49,6 +49,22 @@ vi.mock("@/lib/email", () => ({
   sendBookSentBackEmail: (to: string, args: unknown) => mockSentBackEmail(to, args),
   sendNewBookEmails: (admin: unknown, args: unknown) => mockNewBookEmails(admin, args),
 }));
+// B6: follower emails are scheduled with next/server's after(). By
+// default a task starts on the next microtask, so its send is visible
+// once the action settles (and every "no email" assertion still means
+// something); mockHeldAfterTasks holds tasks back to prove the page
+// answers first.
+const mockAfterRuns: Promise<unknown>[] = [];
+let mockHeldAfterTasks: (() => Promise<unknown>)[] | null = null;
+vi.mock("next/server", () => ({
+  after: (task: () => Promise<unknown>) => {
+    if (mockHeldAfterTasks) mockHeldAfterTasks.push(task);
+    else mockAfterRuns.push(Promise.resolve().then(task));
+  },
+}));
+async function settleAfterTasks() {
+  await Promise.all(mockAfterRuns.splice(0));
+}
 let rightsState: "present" | "none" | "unavailable" = "present";
 vi.mock("./admin-book-reads", () => ({ readRightsStateForStaff: async () => rightsState }));
 let paidAllowed = false;
@@ -243,6 +259,8 @@ function resetReviewMocks(): void {
   mockApprovedEmail.mockReset().mockResolvedValue(undefined);
   mockSentBackEmail.mockReset().mockResolvedValue(undefined);
   mockNewBookEmails.mockReset().mockResolvedValue(undefined);
+  mockAfterRuns.length = 0;
+  mockHeldAfterTasks = null;
   mockRetention.mockReset().mockResolvedValue(undefined);
   rightsState = "present";
   paidAllowed = false;
@@ -310,6 +328,28 @@ describe("approveBookReviewAsStaff", () => {
       expect(mockRevalidatePath).toHaveBeenCalledWith(path);
     }
     expect(target).toBe(`/admin/books/${BOOK_ID}?success=${encodeURIComponent("Book approved. It's live in the Bookstore now.")}`);
+  });
+
+  it("sends the follower emails only after the page has answered; the author's email goes before", async () => {
+    const held: (() => Promise<unknown>)[] = [];
+    mockHeldAfterTasks = held;
+    const target = await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(target).toContain("?success=");
+    expect(mockApprovedEmail).toHaveBeenCalledOnce();
+    expect(held).toHaveLength(1);
+    expect(mockNewBookEmails).not.toHaveBeenCalled();
+    await held[0]();
+    expect(mockNewBookEmails).toHaveBeenCalledWith(expect.anything(), { bookId: BOOK_ID, authorId: AUTHOR_ID });
+  });
+
+  it("a followers email failure after the page has answered is only logged", async () => {
+    mockNewBookEmails.mockRejectedValue(new Error("smtp"));
+    expect(await redirectOf(() => approveBookReviewAsStaff(approveForm()))).toContain("?success=");
+    await settleAfterTasks();
+    expect(console.error).toHaveBeenCalledWith(
+      "approveBookReviewAsStaff: the followers email failed after a successful approval",
+      expect.objectContaining({ bookId: BOOK_ID }),
+    );
   });
 
   it("a republication (not the first) emails no followers", async () => {

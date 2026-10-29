@@ -57,6 +57,8 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: () => Promise.resolve({ get: () => undefined }) }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ __emailAdmin: true }) }));
 vi.mock("@/lib/email", () => ({ sendNewBookEmails: vi.fn(async () => undefined) }));
+// B6: the follower emails are scheduled with after(); run them at once.
+vi.mock("next/server", () => ({ after: (task: () => unknown) => void task() }));
 // F4 (P4): performPublish now reads the book's rights declaration
 // (src/lib/book-rights.ts). This suite is about catalog writes, so the
 // declaration is present and recording succeeds; the rights gate itself

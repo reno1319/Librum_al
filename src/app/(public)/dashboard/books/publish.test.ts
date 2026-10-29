@@ -180,6 +180,22 @@ vi.mock("@/lib/book-takedowns", () => ({
 vi.mock("@/lib/email", () => ({
   sendNewBookEmails: (admin: unknown, args: unknown) => mockSendNewBookEmails(admin, args),
 }));
+// B6: follower emails are scheduled with next/server's after(). By
+// default a task starts on the next microtask, so its send is visible
+// once the action settles (and every "no email" assertion still means
+// something); mockHeldAfterTasks holds tasks back to prove the page
+// answers first.
+const mockAfterRuns: Promise<unknown>[] = [];
+let mockHeldAfterTasks: (() => Promise<unknown>)[] | null = null;
+vi.mock("next/server", () => ({
+  after: (task: () => Promise<unknown>) => {
+    if (mockHeldAfterTasks) mockHeldAfterTasks.push(task);
+    else mockAfterRuns.push(Promise.resolve().then(task));
+  },
+}));
+async function settleAfterTasks() {
+  await Promise.all(mockAfterRuns.splice(0));
+}
 // ADMIN-ALERTS-1: the staff email after a successful review request.
 const mockReviewStaffEmail = vi.fn(async (_args: unknown) => {
   void _args;
@@ -279,6 +295,8 @@ function resetMocks() {
   mockUploadManuscript.mockReset().mockResolvedValue({ error: null });
   mockCreateAdminClient.mockReset().mockReturnValue({ __isAdminClient: true });
   mockSendNewBookEmails.mockClear().mockResolvedValue(undefined);
+  mockAfterRuns.length = 0;
+  mockHeldAfterTasks = null;
   mockCookieStore.get.mockReset().mockImplementation(() => undefined);
   mockRevalidatePath.mockReset();
   mockTakedownState.mockReset().mockResolvedValue({ kind: "none" });
@@ -403,6 +421,7 @@ describe("publishBook: draft -> published", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+    await settleAfterTasks();
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     // The mutation itself is unaffected by the later notification failure.
@@ -449,6 +468,23 @@ describe("publishBook: draft -> published", () => {
       expect.objectContaining({ bookId: BOOK_ID }),
     );
     consoleErrorSpy.mockRestore();
+  });
+
+  it("schedules the follower emails for after the page has answered", async () => {
+    mockBookSelectResult.mockReturnValue(bookRow({ status: "draft", price_all: 0, published_at: null }));
+    const held: (() => Promise<unknown>)[] = [];
+    mockHeldAfterTasks = held;
+
+    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
+    expect(held).toHaveLength(1);
+    expect(mockSendNewBookEmails).not.toHaveBeenCalled();
+    await held[0]();
+    expect(mockSendNewBookEmails).toHaveBeenCalledWith(
+      { __isAdminClient: true },
+      { bookId: BOOK_ID, authorId: USER_ID },
+    );
   });
 
   it("sends the new-book notification only on a genuine draft -> published transition", async () => {
@@ -579,6 +615,7 @@ describe("createBook: publish intent (PUBLISHING-UX-1 Part B)", () => {
     const formData = await buildFormData({ intent: "publish", price: "0" });
 
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
+    await settleAfterTasks();
 
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(mockBookUpdatePayload).toHaveBeenCalledWith(
