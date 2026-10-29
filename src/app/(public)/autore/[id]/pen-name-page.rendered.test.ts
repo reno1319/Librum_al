@@ -219,6 +219,8 @@ describe("PEN-NAMES-1 Author Page", () => {
     expect(await generateMetadata({ params: Promise.resolve({ id: PEN_A }) })).toEqual({
       title: "Ëngjëll Çela",
       description: "Librat dhe të dhënat për autorin Ëngjëll Çela në Librum.",
+      // P2 (Renato 4b): canonical-links.test.ts covers the address itself.
+      alternates: { canonical: expect.stringMatching(new RegExp(`/autore/${PEN_A}$`)) },
     });
   });
 

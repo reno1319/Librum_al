@@ -1,15 +1,12 @@
 import type { MetadataRoute } from "next";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
+import { authorPagePath } from "@/lib/pen-names";
+import { bookPagePath, bundlePagePath, seriesPagePath } from "@/lib/seo";
 
-// LIBRUM 2.0 LAUNCH-FIX-1A SEO-2: static public/marketing routes only
-// for this pass -- per-entity pages (books/authors/series/bundles) are
-// dynamic, and a correct dynamic sitemap needs its own bounded,
-// published-only query design (pagination, per-table "is this actually
-// public" filtering matching each page's own RLS-backed query) that
-// this small reliability pass deliberately doesn't take on. See this
-// pass's own report for the explicit follow-up recommendation -- this
-// is a conscious scope decision, not an oversight.
+// LIBRUM 2.0 LAUNCH-FIX-1A SEO-2: static public/marketing routes. The
+// per-entity pages (books/authors/series/bundles) were left for a later
+// pass; P2 adds them below (catalogSitemapEntries).
 //
 // /products and /program are intentionally absent: IA-1A (this same
 // pass) retired both routes as orphaned, unlinked placeholders. Auth
@@ -64,6 +61,96 @@ async function blogSitemapEntries(origin: string): Promise<MetadataRoute.Sitemap
   }));
 }
 
+// P2 (Renato 10-29): books, authors, series and bundles. Each list
+// matches what the public pages themselves show (3a): a published book
+// with an authored price (Librari's rule, 2a), the pen names and series
+// of those books (an author or series page lists exactly those), and a
+// published, priced bundle. `.eq("status", "published")` is explicit
+// even though anon RLS already implies it: public_books/public_bundles
+// also return an author's own drafts to that author, and this sitemap
+// must read the same for a signed-in author as for a crawler. Authors
+// are /autore/<pen name id> -- never an account id.
+//
+// Supabase returns at most 1000 rows per request, so both lists are read
+// in id-ordered pages, up to SITEMAP_MAX_PAGES pages each (far beyond
+// today's catalog; a sitemap file holds 50,000 addresses at most).
+const SITEMAP_PAGE_SIZE = 1000;
+const SITEMAP_MAX_PAGES = 20;
+
+type SitemapBookRow = {
+  id: string;
+  pen_name_id: string | null;
+  series_id: string | null;
+  updated_at: string;
+};
+type SitemapBundleRow = { id: string; updated_at: string };
+
+async function readAllPages<T>(
+  readPage: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let page = 0; page < SITEMAP_MAX_PAGES; page++) {
+    const from = page * SITEMAP_PAGE_SIZE;
+    const { data } = await readPage(from, from + SITEMAP_PAGE_SIZE - 1);
+    const pageRows = data ?? [];
+    rows.push(...pageRows);
+    if (pageRows.length < SITEMAP_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+function latest(map: Map<string, Date>, key: string, date: Date) {
+  const current = map.get(key);
+  if (!current || date > current) map.set(key, date);
+}
+
+async function catalogSitemapEntries(origin: string): Promise<MetadataRoute.Sitemap> {
+  const supabase = await createClient();
+  const [books, bundles] = await Promise.all([
+    readAllPages<SitemapBookRow>((from, to) =>
+      supabase
+        .from("public_books")
+        .select("id, pen_name_id, series_id, updated_at")
+        .eq("status", "published")
+        .not("price_all", "is", null)
+        .order("id")
+        .range(from, to)
+        .returns<SitemapBookRow[]>(),
+    ),
+    readAllPages<SitemapBundleRow>((from, to) =>
+      supabase
+        .from("public_bundles")
+        .select("id, updated_at")
+        .eq("status", "published")
+        .not("price_all", "is", null)
+        .order("id")
+        .range(from, to)
+        .returns<SitemapBundleRow[]>(),
+    ),
+  ]);
+
+  const authors = new Map<string, Date>();
+  const series = new Map<string, Date>();
+  for (const book of books) {
+    const updated = new Date(book.updated_at);
+    if (book.pen_name_id) latest(authors, book.pen_name_id, updated);
+    if (book.series_id) latest(series, book.series_id, updated);
+  }
+
+  return [
+    ...books.map((book) => ({
+      url: `${origin}${bookPagePath(book.id)}`,
+      lastModified: new Date(book.updated_at),
+    })),
+    ...[...authors].map(([id, lastModified]) => ({ url: `${origin}${authorPagePath(id)}`, lastModified })),
+    ...[...series].map(([id, lastModified]) => ({ url: `${origin}${seriesPagePath(id)}`, lastModified })),
+    ...bundles.map((bundle) => ({
+      url: `${origin}${bundlePagePath(bundle.id)}`,
+      lastModified: new Date(bundle.updated_at),
+    })),
+  ];
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const origin = resolveSiteOrigin();
 
@@ -73,5 +160,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }));
   const blogIndexEntry: MetadataRoute.Sitemap = [{ url: `${origin}/blog`, lastModified: new Date() }];
 
-  return [...staticEntries, ...blogIndexEntry, ...(await blogSitemapEntries(origin))];
+  const [blogEntries, catalogEntries] = await Promise.all([
+    blogSitemapEntries(origin),
+    catalogSitemapEntries(origin),
+  ]);
+
+  return [...staticEntries, ...blogIndexEntry, ...blogEntries, ...catalogEntries];
 }

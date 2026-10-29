@@ -9,6 +9,7 @@ import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { PublicBook } from "@/lib/types";
+import { canonicalMetadata, seriesPagePath } from "@/lib/seo";
 
 // LIBRUM 2.0 PRODUCT-3: the public series page didn't exist before this
 // pass -- see the PRODUCT-3 audit (no /seri/[id] route, no series
@@ -144,6 +145,7 @@ export async function generateMetadata({
     description: authorName
       ? `Librat e serisë ${data.series.title} nga ${authorName} në Librum.`
       : `Librat e serisë ${data.series.title} në Librum.`,
+    ...canonicalMetadata(seriesPagePath(data.series.id)),
   };
 }
 

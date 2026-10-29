@@ -90,6 +90,14 @@ describe("TRUST PACK 1: links to the reader help page", () => {
     expect(text).toContain("Nëse ndryshoni kopertinën ose skedarin e librit, libri del nga Libraria derisa Librum ta miratojë.");
   });
 
+  // A4 (Renato 5b): where an Albanian author gets an ISBN, Albania only.
+  it("Help says where to get an ISBN in Albania, and that Librum doesn't need one", async () => {
+    const text = toText(renderToStaticMarkup(await HelpPage()));
+    expect(text).toContain("Ku ta marr numrin ISBN për librin tim?");
+    expect(text).toContain("Në Shqipëri, numrin ISBN e jep Biblioteka Kombëtare e Shqipërisë.");
+    expect(text).toContain("Për të botuar në Librum nuk ju duhet ISBN");
+  });
+
   // ALBANIAN-15 (SQ-14 audit): the lost-dispute answer says "recover", as the Terms do.
   it("Help says Librum recovers only what the author kept from a lost dispute", async () => {
     const text = toText(renderToStaticMarkup(await HelpPage()));
@@ -149,7 +157,9 @@ describe("TRUST PACK 6: share on WhatsApp", () => {
     expect(book).toContain("bookWhatsappShareHref(book, bookByline)");
     expect(book).toMatch(/href=\{whatsappShareHref\}\s+target="_blank"\s+rel="noopener noreferrer"/);
     expect(book).toContain("Ndajeni në WhatsApp");
-    expect(book).not.toMatch(/<script|next\/script/);
+    // P2: the page's one script is its own schema.org data block.
+    expect(book).not.toMatch(/<script(?! type="application\/ld\+json")|next\/script/);
+    expect(book.match(/<script/g)).toHaveLength(1);
   });
 });
 
