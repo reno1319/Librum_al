@@ -123,7 +123,7 @@ export default async function LibraryPage({
         {/* TRUST PACK (item 5, 1. a): one link above the grid, not one per card. */}
         <p className="mt-4 text-sm text-muted">
           Nuk e dini si ta hapni një libër në telefon ose në Kindle?{" "}
-          <Link href="/help/reading" className="text-primary underline">
+          <Link href="/ndihme/leximi" className="text-primary underline">
             Si ta lexoni librin tuaj
           </Link>
           .

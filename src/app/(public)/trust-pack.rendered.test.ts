@@ -12,11 +12,11 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve({ auth: { getUser: () => Promise.resolve({ data: { user: null } }) } }),
 }));
 
-const { default: ReadingHelpPage, metadata: readingMetadata, SEND_TO_KINDLE_HREF } = await import("./help/reading/page");
-const { default: ContactPage } = await import("./contact/page");
-const { default: PrivacyPage } = await import("./privacy/page");
-const { default: HelpPage } = await import("./help/page");
-const { default: AboutPage } = await import("./about/page");
+const { default: ReadingHelpPage, metadata: readingMetadata, SEND_TO_KINDLE_HREF } = await import("./ndihme/leximi/page");
+const { default: ContactPage } = await import("./kontakt/page");
+const { default: PrivacyPage } = await import("./privatesia/page");
+const { default: HelpPage } = await import("./ndihme/page");
+const { default: AboutPage } = await import("./rreth-nesh/page");
 const { SiteFooter } = await import("@/components/site-footer");
 
 const toText = (html: string) =>
@@ -63,7 +63,7 @@ describe("TRUST PACK 1-2: How to read your book", () => {
     expect(html).toContain('href="/library"');
     expect(text).toContain("brenda 14 ditëve, për sa kohë nuk e keni shkarkuar ende librin");
     expect(text).toContain("Shkarkimi i parë e mbyll këtë të drejtë.");
-    expect(html).toContain('href="/refunds"');
+    expect(html).toContain('href="/rimbursimet"');
   });
 
   it("ends with the support email and the reply promise", () => {
@@ -77,7 +77,7 @@ describe("TRUST PACK 1: links to the reader help page", () => {
     const html = renderToStaticMarkup(await HelpPage());
     const text = toText(html);
     expect(text).toContain("Si ta hap një libër që kam shkarkuar?");
-    expect(html).toContain('href="/help/reading"');
+    expect(html).toContain('href="/ndihme/leximi"');
     expect(text).toContain("Si ta lexoni librin tuaj, hap pas hapi");
     expect(text).toContain("Na kontaktoni . Përgjigjemi brenda 3 ditëve të punës.");
   });
@@ -90,11 +90,17 @@ describe("TRUST PACK 1: links to the reader help page", () => {
     expect(text).toContain("Nëse ndryshoni kopertinën ose skedarin e librit, libri del nga Libraria derisa Librum ta miratojë.");
   });
 
+  // ALBANIAN-15 (SQ-14 audit): the lost-dispute answer says "recover", as the Terms do.
+  it("Help says Librum recovers only what the author kept from a lost dispute", async () => {
+    const text = toText(renderToStaticMarkup(await HelpPage()));
+    expect(text).toContain("Librum mund të rikuperojë nga ju vetëm të ardhurat që mbajtët realisht nga ajo shitje, asnjëherë më shumë.");
+  });
+
   it("the Library and the book page's owned panel link to it", () => {
-    expect(read("src/app/(public)/library/page.tsx")).toContain('href="/help/reading"');
+    expect(read("src/app/(public)/library/page.tsx")).toContain('href="/ndihme/leximi"');
     const book = read("src/app/(public)/libra/[id]/page.tsx");
     const owned = book.slice(book.indexOf('if (state === "owned")'), book.indexOf("ALL-WIRING-2: a book with no authored"));
-    expect(owned).toContain('href="/help/reading"');
+    expect(owned).toContain('href="/ndihme/leximi"');
   });
 });
 
@@ -130,8 +136,8 @@ describe("TRUST PACK 5-6: Contact, footer and Privacy", () => {
   });
 
   it("the Contact link and the Privacy lines come from the same value", () => {
-    expect(read("src/app/(public)/contact/page.tsx")).toContain("whatsappChatHref()");
-    const privacy = read("src/app/(public)/privacy/page.tsx");
+    expect(read("src/app/(public)/kontakt/page.tsx")).toContain("whatsappChatHref()");
+    const privacy = read("src/app/(public)/privatesia/page.tsx");
     expect(privacy.match(/isWhatsappContactLive\(\)/g)).toHaveLength(3);
   });
 });

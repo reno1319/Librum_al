@@ -14,8 +14,8 @@ vi.mock("@/lib/contact", async (importOriginal) => {
   };
 });
 
-const { default: ContactPage } = await import("./contact/page");
-const { default: PrivacyPage } = await import("./privacy/page");
+const { default: ContactPage } = await import("./kontakt/page");
+const { default: PrivacyPage } = await import("./privatesia/page");
 
 const toText = (html: string) =>
   html

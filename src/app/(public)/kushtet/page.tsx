@@ -94,7 +94,7 @@ export default function TermsPage() {
                 Duke krijuar një llogari ose duke përdorur Librum, ju
                 pranoni këto Kushte. Nëse nuk i pranoni, mos e përdorni
                 Librum. Si i trajtojmë të dhënat personale shpjegohet në{" "}
-                <Link href="/privacy" className="text-primary underline">
+                <Link href="/privatesia" className="text-primary underline">
                   Politikën e privatësisë
                 </Link>
                 .
@@ -290,7 +290,7 @@ export default function TermsPage() {
               <p className="mt-2">
                 Pas kësaj, rimbursimi është ende i mundur nëse diçka shkon
                 keq me blerjen tuaj, siç përshkruhet në{" "}
-                <Link href="/refunds" className="text-primary underline">
+                <Link href="/rimbursimet" className="text-primary underline">
                   Politikën e rimbursimit
                 </Link>
                 .
@@ -377,7 +377,7 @@ export default function TermsPage() {
                 rimbursimet, kundërshtimet e pagesave dhe çdo detyrim ligjor
                 ose kontabël përkatës vazhdojnë të trajtohen veçmas, siç
                 përshkruhet në{" "}
-                <Link href="/privacy" className="text-primary underline">
+                <Link href="/privatesia" className="text-primary underline">
                   Politikën e privatësisë
                 </Link>
                 .

@@ -152,7 +152,7 @@ export default async function HowItWorksPage() {
       <div className="page-container py-10">
         <p className="text-sm text-foreground/90">
           Keni pyetje? Shihni{" "}
-          <Link href="/help" className={TEXT_LINK_CLASSES}>
+          <Link href="/ndihme" className={TEXT_LINK_CLASSES}>
             faqen e ndihmës
           </Link>
           .

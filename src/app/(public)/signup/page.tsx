@@ -118,11 +118,11 @@ export default async function SignupPage({
           />
           <label htmlFor="accept_terms">
             Pranoj{" "}
-            <Link href="/terms" className="focus-ring rounded-sm font-medium text-primary underline">
+            <Link href="/kushtet" className="focus-ring rounded-sm font-medium text-primary underline">
               Kushtet e përdorimit
             </Link>{" "}
             dhe kam lexuar{" "}
-            <Link href="/privacy" className="focus-ring rounded-sm font-medium text-primary underline">
+            <Link href="/privatesia" className="focus-ring rounded-sm font-medium text-primary underline">
               Politikën e privatësisë
             </Link>
             .

@@ -149,7 +149,7 @@ export default async function AccountPage({
                 />
                 <label htmlFor="become_author_accept_terms">
                   Pranoj{" "}
-                  <Link href="/terms" className="focus-ring rounded-sm font-medium text-primary underline">
+                  <Link href="/kushtet" className="focus-ring rounded-sm font-medium text-primary underline">
                     Kushtet e përdorimit
                   </Link>
                   .

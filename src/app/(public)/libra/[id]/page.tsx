@@ -1458,7 +1458,7 @@ function PurchasePanel({
         </a>
         {downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
         {/* TRUST PACK (item 5, 1. a): the reader help page, next to Download. */}
-        <Link href="/help/reading" className="w-fit text-xs text-muted underline underline-offset-2 hover:text-foreground">
+        <Link href="/ndihme/leximi" className="w-fit text-xs text-muted underline underline-offset-2 hover:text-foreground">
           Si ta lexoni librin
         </Link>
       </div>

@@ -20,7 +20,7 @@ const text = html
 const root = path.join(__dirname, "..", "..", "..", "..");
 const read = (relative: string) => readFileSync(path.join(root, relative), "utf8");
 
-describe("REFUND POLICY: /refunds", () => {
+describe("REFUND POLICY: /rimbursimet", () => {
   it("is titled Politika e rimbursimit", () => {
     expect(metadata.title).toBe("Politika e rimbursimit");
     expect(html).toMatch(/<h1[^>]*>Politika e rimbursimit<\/h1>/);
@@ -50,7 +50,7 @@ describe("REFUND POLICY: /refunds", () => {
       expect(text).toContain(sentence);
     }
     expect(html).toContain('href="mailto:support@librum.al"');
-    expect(html).toContain('href="/terms"');
+    expect(html).toContain('href="/kushtet"');
   });
 
   it("no longer refuses every refund after delivery, and shows no blank slots", () => {
@@ -60,7 +60,7 @@ describe("REFUND POLICY: /refunds", () => {
   });
 
   it("is marked as a lawyer-review draft in the code only", () => {
-    expect(read("src/app/(public)/refunds/page.tsx")).toContain("LAWYER-REVIEW DRAFT");
+    expect(read("src/app/(public)/rimbursimet/page.tsx")).toContain("LAWYER-REVIEW DRAFT");
     expect(text).not.toMatch(/\bdraft\b|lawyer/i);
   });
 
@@ -73,10 +73,10 @@ describe("REFUND POLICY: /refunds", () => {
 
 describe("REFUND POLICY: Terms section 9 links the policy", () => {
   it("keeps the money paragraph and links the policy", () => {
-    const source = read("src/app/(public)/terms/page.tsx");
+    const source = read("src/app/(public)/kushtet/page.tsx");
     const section9 = source.match(/<section id="section-9"[\s\S]*?<\/section>/)![0];
     expect(section9).toContain("të ardhurat përkatëse të autorit anulohen");
-    expect(section9).toContain('<Link href="/refunds" className="text-primary underline">');
+    expect(section9).toContain('<Link href="/rimbursimet" className="text-primary underline">');
     expect(section9).toContain("Politikën e rimbursimit");
   });
 });

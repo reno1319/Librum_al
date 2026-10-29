@@ -76,9 +76,9 @@ export function buildSiteHeaderNav(params: {
   // and their relative order is unchanged.
   const primaryLinks: NavItem[] = [
     { href: "/", label: "Kryefaqja" },
-    { href: "/about", label: "Rreth nesh" },
-    { href: "/how-it-works", label: "Si funksionon" },
-    { href: "/pricing", label: "Fitimet" },
+    { href: "/rreth-nesh", label: "Rreth nesh" },
+    { href: "/si-funksionon", label: "Si funksionon" },
+    { href: "/fitimet", label: "Fitimet" },
     { href: "/librari", label: "Libraria" },
     { href: "/blog", label: "Blog" },
   ];

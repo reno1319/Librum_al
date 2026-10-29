@@ -13,7 +13,7 @@ import { formControlClasses } from "@/lib/form-styles";
 // (no tax logic exists anywhere in this app to model). Purely
 // informational: no network request, no Supabase/provider call, no form
 // submission -- it's a "use client" island for live recompute-on-type
-// only, the rest of /pricing stays a Server Component.
+// only, the rest of /fitimet stays a Server Component.
 //
 // ALL-WIRING-2: prices are ALL. The input is a text field with a
 // decimal keyboard rather than `type="number"`, because the Albanian

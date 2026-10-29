@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 //
 // The BEHAVIOUR is proved elsewhere, by rendering and by driving the
 // actions: ./bundle-catalog.rendered.test.ts, ./dashboard/bundles/
-// pricing.test.ts and publish.test.ts, ./bundles/[id]/closure.test.ts,
+// pricing.test.ts and publish.test.ts, ./paketa/[id]/closure.test.ts,
 // and src/lib/bundle-catalog.test.ts. This file exists so a later edit
 // cannot quietly put a legacy read back on a surface that one of those
 // tests happens not to exercise. Comments are stripped first, so a file

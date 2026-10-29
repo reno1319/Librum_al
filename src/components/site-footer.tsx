@@ -21,20 +21,20 @@ export const FOOTER_GROUPS = {
   Zbuloni: [
     { href: "/librari", label: "Libraria" },
     { href: "/blog", label: "Blog" },
-    { href: "/about", label: "Rreth nesh" },
+    { href: "/rreth-nesh", label: "Rreth nesh" },
   ],
   Publikoni: [
-    { href: "/how-it-works", label: "Si funksionon" },
-    { href: "/pricing", label: "Fitimet" },
+    { href: "/si-funksionon", label: "Si funksionon" },
+    { href: "/fitimet", label: "Fitimet" },
   ],
   Mbështetje: [
-    { href: "/help", label: "Ndihmë" },
-    { href: "/contact", label: "Kontakt" },
+    { href: "/ndihme", label: "Ndihmë" },
+    { href: "/kontakt", label: "Kontakt" },
   ],
   Ligjore: [
-    { href: "/terms", label: "Kushtet e përdorimit" },
-    { href: "/privacy", label: "Privatësia" },
-    { href: "/refunds", label: "Rimbursimet" },
+    { href: "/kushtet", label: "Kushtet e përdorimit" },
+    { href: "/privatesia", label: "Privatësia" },
+    { href: "/rimbursimet", label: "Rimbursimet" },
   ],
 };
 

@@ -11,7 +11,7 @@ describe("SiteFooter FOOTER_GROUPS", () => {
     const discoverHrefs = FOOTER_GROUPS.Zbuloni.map((l) => l.href);
     expect(discoverHrefs).toContain("/blog");
     expect(discoverHrefs).toContain("/librari");
-    expect(discoverHrefs).toContain("/about");
+    expect(discoverHrefs).toContain("/rreth-nesh");
   });
 
   it("does not add Blog to any unrelated group", () => {
@@ -24,7 +24,7 @@ describe("SiteFooter FOOTER_GROUPS", () => {
 
 describe("REFUND POLICY: footer Legal group", () => {
   it("lists Terms, Privacy and Refunds, in that order", () => {
-    expect(FOOTER_GROUPS.Ligjore.map((l) => l.href)).toEqual(["/terms", "/privacy", "/refunds"]);
-    expect(FOOTER_GROUPS.Ligjore.find((l) => l.href === "/refunds")?.label).toBe("Rimbursimet");
+    expect(FOOTER_GROUPS.Ligjore.map((l) => l.href)).toEqual(["/kushtet", "/privatesia", "/rimbursimet"]);
+    expect(FOOTER_GROUPS.Ligjore.find((l) => l.href === "/rimbursimet")?.label).toBe("Rimbursimet");
   });
 });

@@ -57,6 +57,6 @@ describe("account page", () => {
     const tick = form.match(/<input[^>]*name="accept_terms"[^>]*>/)?.[0] ?? "";
     expect(tick).toContain('type="checkbox"');
     expect(tick).toContain("required");
-    expect(form).toContain('href="/terms"');
+    expect(form).toContain('href="/kushtet"');
   });
 });

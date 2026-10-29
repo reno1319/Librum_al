@@ -66,7 +66,7 @@ export default async function AboutPage() {
               pagesë dhe pagesat për autorët nuk janë aktivizuar ende: autorët
               mund të vazhdojnë të publikojnë libra falas, ndërsa Librum
               përfundon sistemet e pagesave. Shihni{" "}
-              <Link href="/how-it-works" className="text-primary underline">
+              <Link href="/si-funksionon" className="text-primary underline">
                 si funksionon vetëbotimi
               </Link>{" "}
               për të gjithë procesin.
@@ -96,11 +96,11 @@ export default async function AboutPage() {
                 <h2 className="font-serif text-lg font-normal text-primary">Keni pyetje?</h2>
                 <p className="mt-1 text-sm text-foreground/90">
                   Shihni fillimisht{" "}
-                  <Link href="/help" className="text-primary underline">
+                  <Link href="/ndihme" className="text-primary underline">
                     faqen e ndihmës
                   </Link>
                   , ose{" "}
-                  <Link href="/contact" className="text-primary underline">
+                  <Link href="/kontakt" className="text-primary underline">
                     na kontaktoni
                   </Link>
                   .
