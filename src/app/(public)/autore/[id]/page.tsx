@@ -23,6 +23,7 @@ import {
 import { Alert } from "@/components/ui/alert";
 import type { PublicBook, PublicBundle, PublicSeries } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
+import { canonicalMetadata } from "@/lib/seo";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
 // dashboard or a social profile -- see the PRODUCT-2 audit.
@@ -89,6 +90,7 @@ export async function generateMetadata({
   return {
     title: authorPublicName,
     description: `Librat dhe të dhënat për autorin ${authorPublicName} në Librum.`,
+    ...canonicalMetadata(authorPagePath(penName.id)),
   };
 }
 

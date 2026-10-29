@@ -46,6 +46,11 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
         a: "Po. Çdo libër ka fushën opsionale \"Pseudonimi\" poshtë titullit.",
       },
       {
+        // A4 (Renato 5b): where an Albanian author gets an ISBN.
+        q: "Ku ta marr numrin ISBN për librin tim?",
+        a: "Në Shqipëri, numrin ISBN e jep Biblioteka Kombëtare e Shqipërisë. Libri elektronik duhet të ketë numrin e vet ISBN, të ndryshëm nga ai i librit të shtypur. Për të botuar në Librum nuk ju duhet ISBN: fusha \"ISBN\" është opsionale.",
+      },
+      {
         q: "A mund ta ndryshoj çmimin pasi e kam publikuar?",
         a: `Po. Hapni \"Ndryshoni\" te libri dhe ndryshoni çmimin. Një çmim me pagesë është të paktën ${MINIMUM_PAID_CATALOG_PRICE_ALL} lekë.`,
       },
