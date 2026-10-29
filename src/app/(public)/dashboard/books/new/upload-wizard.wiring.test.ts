@@ -30,7 +30,7 @@ describe("UploadWizard: actual step order and indicator wiring", () => {
     expect(match).not.toBeNull();
     const steps = match![1].split(",").map((s) => s.trim().replace(/^"|"$/g, "")).filter(Boolean);
     // REDESIGN STEP 5: Renato's three steps, in his own words.
-    expect(steps).toEqual(["Details", "Manuscript & cover", "Price"]);
+    expect(steps).toEqual(["Të dhënat", "Dorëshkrimi dhe kopertina", "Çmimi"]);
   });
 
   it("the rendered step indicator (<ol>...STEPS.map...) consumes that same STEPS array -- not a parallel unused constant", () => {
@@ -51,7 +51,7 @@ describe("UploadWizard: aria-current on the active step", () => {
 
   it("the active state is not color-only -- it reads \"Step n of 3\" and its name is bold", () => {
     const olBlock = source.match(/<ol[\s\S]*?<\/ol>/)![0];
-    expect(olBlock).toContain("Step {i + 1} of {STEPS.length}");
+    expect(olBlock).toContain("Hapi {i + 1} nga {STEPS.length}");
     expect(olBlock).toContain('<span className="text-sm font-bold text-primary">{label}</span>');
   });
 
@@ -85,7 +85,7 @@ describe("UploadWizard: one-form architecture", () => {
     expect(nextButton![0]).toMatch(/type="button"/);
   });
 
-  it("the final-step actions (Save as draft / Publish book) are real submit controls", () => {
+  it("the final-step actions (Ruajeni si draft / Publish book) are real submit controls", () => {
     const saveButtonsBlock = source.match(/function SaveButtons\(\)[\s\S]*?\n}/)![0];
     const submitButtons = saveButtonsBlock.match(/<button[\s\S]*?<\/button>/g) ?? [];
     expect(submitButtons.length).toBe(2);
@@ -98,17 +98,19 @@ describe("UploadWizard: one-form architecture", () => {
 describe("UploadWizard: native intent controls (critical)", () => {
   const saveButtonsBlock = source.match(/function SaveButtons\(\)[\s\S]*?\n}/)![0];
 
-  it("Save as draft submits name=\"intent\" value=\"draft\"", () => {
+  it("Ruajeni si draft submits name=\"intent\" value=\"draft\"", () => {
     expect(saveButtonsBlock).toMatch(/name="intent"\s*\n\s*value="draft"/);
-    expect(saveButtonsBlock).toContain("Save as draft");
+    expect(saveButtonsBlock).toContain("Ruajeni si draft");
   });
 
   // ADMIN-3-REVIEW (B): a new book has no approval, so the publish
   // intent's button reads "Send for review" (the intent value is kept).
+  // ALBANIAN-9: the label is the shared SEND_FOR_REVIEW_LABEL.
   it("Send for review submits name=\"intent\" value=\"publish\"", () => {
     expect(saveButtonsBlock).toMatch(/name="intent"\s*\n\s*value="publish"/);
-    expect(saveButtonsBlock).toContain("Send for review");
+    expect(saveButtonsBlock).toContain("{SEND_FOR_REVIEW_LABEL}");
     expect(saveButtonsBlock).not.toContain("Publish book");
+    expect(saveButtonsBlock).not.toContain("Publikoni");
   });
 
   it("there is no hidden mutable intent field anywhere in the form", () => {
@@ -211,42 +213,32 @@ describe("UploadWizard: shared pending state", () => {
   });
 });
 
-describe("UploadWizard: Language control", () => {
-  it("imports and renders from the shared LANGUAGES vocabulary, not a duplicate hardcoded list", () => {
-    expect(source).toContain('import { LANGUAGES } from "@/lib/languages";');
-    const languageSelect = source.match(/<select\s+name="language"[\s\S]*?<\/select>/);
-    expect(languageSelect).not.toBeNull();
-    expect(languageSelect![0]).toContain("{LANGUAGES.map(");
-    // No second, independently-hardcoded language array anywhere in
-    // this file -- a duplicate list would look like a { code: ...,
-    // label: ... } object literal, the exact shape LANGUAGES itself
-    // uses in languages.ts. None of that shape exists here.
-    expect(source).not.toMatch(/code:\s*["']/);
-    expect(source.match(/LANGUAGES\.map\(/g)?.length).toBe(1);
+// ALBANIAN-9 (Renato 10-28 "1. a"): no language picker; every new
+// book is submitted as Albanian through one hidden field.
+describe("UploadWizard: no Language control", () => {
+  it("renders no language select and imports no language vocabulary", () => {
+    expect(source).not.toMatch(/<select\s+name="language"/);
+    expect(source).not.toContain("@/lib/languages");
+    expect(source).not.toContain("LANGUAGE_ERROR");
   });
 
-  it("defaults to \"sq\" (Albanian)", () => {
-    expect(source).toContain('useState("sq")');
-    const languageStateLine = source.split("\n").find((l) => l.includes("[language, setLanguage]"));
-    expect(languageStateLine).toContain('useState("sq")');
-  });
-
-  it("submits name=\"language\"", () => {
-    expect(source).toMatch(/<select\n\s+name="language"/);
+  it("submits language=sq through one hidden field, and the converter gets the same value", () => {
+    expect(source).toContain('const BOOK_LANGUAGE = "sq";');
+    expect(source).toContain('<input type="hidden" name="language" value={BOOK_LANGUAGE} />');
+    expect(source.match(/name="language"/g)?.length).toBe(1);
+    expect(source).toContain("bookLanguage={BOOK_LANGUAGE}");
   });
 });
 
 describe("UploadWizard: Step 1 gate uses the tested helper, required vs optional matches spec", () => {
   it("goNext's step-1 check calls canAdvanceFromBookDetails with the real field state", () => {
-    expect(source).toContain("canAdvanceFromBookDetails({ title, language, genre })");
+    expect(source).toContain("canAdvanceFromBookDetails({ title, genre })");
   });
 
-  it("title, language, and genre are the only step-1 fields marked required", () => {
-    const titleBlock = source.match(/Title\s*<input[\s\S]*?\/>/)![0];
-    const languageBlock = source.match(/<select\s+name="language"[\s\S]*?<\/select>/)![0];
+  it("title and genre are the only step-1 fields marked required", () => {
+    const titleBlock = source.match(/Titulli\s*<input[\s\S]*?\/>/)![0];
     const genreBlock = source.match(/<select\s+name="genre"[\s\S]*?<\/select>/)![0];
     expect(titleBlock).toContain("required");
-    expect(languageBlock).toContain("required");
     expect(genreBlock).toContain("required");
   });
 
@@ -272,14 +264,14 @@ describe("UploadWizard: Step 2 (Cover & Manuscript) gate and ready-state copy", 
     );
   });
 
-  it("CoverField shows persistent \"Cover ready\" text and relabels to \"Replace cover\" once ready", () => {
-    expect(coverFieldSource).toContain("Cover ready");
-    expect(coverFieldSource).toContain("Replace cover");
+  it("CoverField shows persistent \"Kopertina gati\" text and relabels to \"Zëvendësoni kopertinën\" once ready", () => {
+    expect(coverFieldSource).toContain("Kopertina gati");
+    expect(coverFieldSource).toContain("Zëvendësoni kopertinën");
   });
 
-  it("ManuscriptField shows persistent \"Manuscript ready\" text and relabels to \"Replace manuscript\" once ready", () => {
-    expect(manuscriptFieldSource).toContain("Manuscript ready");
-    expect(manuscriptFieldSource).toContain("Replace manuscript");
+  it("ManuscriptField shows persistent \"Dorëshkrimi gati\" text and relabels to \"Zëvendësoni dorëshkrimin\" once ready", () => {
+    expect(manuscriptFieldSource).toContain("Dorëshkrimi gati");
+    expect(manuscriptFieldSource).toContain("Zëvendësoni dorëshkrimin");
   });
 });
 
@@ -303,7 +295,7 @@ describe("UploadWizard: price/earnings state comes from one shared helper", () =
 
   it("shows a distinct free-book state", () => {
     expect(source).toContain("isFreeBook");
-    expect(source).toContain("Free book");
+    expect(source).toContain("Libër falas");
   });
 });
 
@@ -320,8 +312,8 @@ describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
 
   it("offers exactly two radios, Paid and Free, in one fieldset", () => {
     expect(start).toBeGreaterThan(-1);
-    expect(priceBlock).toContain('["paid", "Paid"]');
-    expect(priceBlock).toContain('["free", "Free"]');
+    expect(priceBlock).toContain('["paid", "Me pagesë"]');
+    expect(priceBlock).toContain('["free", "Falas"]');
     // F4: the Rights choice is a second fieldset on this step, so the
     // Paid / Free count is taken from the first fieldset only.
     const pricingFieldset = priceBlock.slice(priceBlock.indexOf("<fieldset"), priceBlock.indexOf("</fieldset>"));
@@ -348,9 +340,9 @@ describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
     }
   });
 
-  it("keeps the existing \"Price (ALL)\" label; the ALL suffix is decoration only", () => {
-    expect(priceBlock).toContain("Price (ALL)");
-    expect(priceBlock).toMatch(/aria-hidden="true"[\s\S]{0,120}>\s*ALL\s*</);
+  it("keeps the \"Çmimi (lekë)\" label; the lekë suffix is decoration only", () => {
+    expect(priceBlock).toContain("Çmimi (lekë)");
+    expect(priceBlock).toMatch(/aria-hidden="true"[\s\S]{0,120}>\s*lekë\s*</);
   });
 
   it("an invalid paid price blocks both final buttons in the submit handler, with Q7's wording", () => {
@@ -361,19 +353,20 @@ describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
     // FIX1 (X8): the message now sits under the price box.
     expect(handler).toContain("setPriceError(PAID_PRICE_ERROR);");
     expect(source).toContain(
-      "const PAID_PRICE_ERROR = `Enter a price in lek: a whole number from ${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}.`;",
+      "const PAID_PRICE_ERROR = `Shkruani çmimin në lekë: një numër i plotë nga ${MINIMUM_PAID_CATALOG_PRICE_ALL} deri në ${groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}.`;",
     );
   });
 
   it("no sentence still offers \"0 for a free ebook\" or \"(0, or\"", () => {
     expect(source).not.toContain("0 for a free ebook");
+    expect(source).not.toContain("0 për e-libër falas");
     expect(source).not.toContain("(0, or");
   });
 
   it("renders the readiness block, without the unreachable missing-price line, and no Review summary", () => {
-    expect(priceBlock).toContain("Readiness");
+    expect(priceBlock).toContain("Gatishmëria");
     expect(priceBlock).toContain("readiness.paidPublishingBlocked");
-    expect(priceBlock).toContain("Looks good — ready to send for review.");
+    expect(priceBlock).toContain("Gjithçka duket mirë: gati për t&apos;u dërguar për shqyrtim.");
     expect(source).not.toContain("ready to publish");
     expect(source).not.toContain("Set a price in lek on the previous step");
     expect(source).not.toContain("Double check the basics below");
@@ -381,7 +374,7 @@ describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
   });
 
   it("the preview card uses the book card's own price label and the real cover/title/author", () => {
-    expect(priceBlock).toContain("How readers will see it");
+    expect(priceBlock).toContain("Si do ta shohin lexuesit");
     expect(priceBlock).toContain("formatCatalogPriceLabel(priceAll)");
     expect(priceBlock).toContain("cover.previewUrl");
     // F4 (P5): the byline -- the typed pen name, else the author name.
@@ -407,10 +400,9 @@ describe("UploadWizard: FIX1 per-field messages and wording", () => {
   const pageSource = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
 
   it("uses Renato's W-B wording for the step-1 fields, beside each field", () => {
-    expect(source).toContain('const TITLE_ERROR = "Add a title.";');
-    expect(source).toContain('const LANGUAGE_ERROR = "Choose a language.";');
-    expect(source).toContain('const GENRE_ERROR = "Choose a genre.";');
-    for (const id of ["wizard-title-error", "wizard-language-error", "wizard-genre-error", "wizard-isbn-error", "wizard-date-error", "wizard-price-error"]) {
+    expect(source).toContain('const TITLE_ERROR = "Shtoni një titull.";');
+    expect(source).toContain('const GENRE_ERROR = "Zgjidhni një zhanër.";');
+    for (const id of ["wizard-title-error", "wizard-genre-error", "wizard-isbn-error", "wizard-date-error", "wizard-price-error"]) {
       expect(source).toContain(`<FieldError id="${id}"`);
       expect(source).toContain(`"${id}" : undefined`);
     }
@@ -431,29 +423,29 @@ describe("UploadWizard: FIX1 per-field messages and wording", () => {
 
   it("keeps the step-2 sentence, now under the file fields", () => {
     expect(source).toContain(
-      'const FILES_ERROR = "Add both a cover image and a manuscript file to continue.";',
+      'const FILES_ERROR = "Shtoni edhe kopertinën, edhe skedarin e dorëshkrimit për të vazhduar.";',
     );
     expect(source.indexOf("{shownFilesError && (")).toBeGreaterThan(source.indexOf("<ManuscriptField"));
   });
 
   it("moves the cover tip under the cover field and out of the Tips box", () => {
-    const tip = "Covers work best as a portrait image, at least 1000px tall.";
+    const tip = "Kopertina duket më mirë si imazh vertikal, të paktën 1000px i lartë.";
     expect(source.match(new RegExp(tip.replace(/\./g, "\\."), "g"))?.length).toBe(1);
     expect(source.indexOf(tip)).toBeGreaterThan(source.indexOf("<CoverField"));
     expect(source.indexOf(tip)).toBeLessThan(source.indexOf("<ManuscriptField"));
   });
 
-  it("opens Create a series first in a new tab, said for screen readers", () => {
+  it("opens Krijoni fillimisht një seri in a new tab, said for screen readers", () => {
     const link = source.match(/<Link\s+href="\/dashboard\/series"[\s\S]*?<\/Link>/)![0];
     expect(link).toContain('target="_blank"');
     expect(link).toContain('rel="noopener"');
-    expect(link).toContain("(opens in a new tab)");
+    expect(link).toContain("(hapet në një skedë të re)");
   });
 
   it("labels the description \"Description\" and shows the missing-description blocker in Readiness", () => {
     expect(source).not.toContain("Description (optional)");
     expect(source).toContain(
-      '"Add a description before publishing. Your book will still be saved as a draft."',
+      '"Shtoni një përshkrim para publikimit. Libri juaj ruhet gjithsesi si draft."',
     );
     expect(source).toContain("{readiness.missingDescription && (");
     expect(source).toContain("!readiness.missingDescription &&");
@@ -462,6 +454,8 @@ describe("UploadWizard: FIX1 per-field messages and wording", () => {
   it("replaces the false 'saved as a draft first' sentence with W-A", () => {
     expect(pageSource).not.toContain("saved as a draft first");
     // ADMIN-3-REVIEW (B): the final button's new label.
-    expect(pageSource).toContain("Nothing is saved until you press Save as draft or Send for review.");
+    expect(pageSource).toContain(
+      "Asgjë nuk ruhet derisa të shtypni &quot;Ruajeni si draft&quot; ose &quot;Dërgojeni për shqyrtim&quot;.",
+    );
   });
 });

@@ -4,8 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 // HOME-PICKS-1 (Renato 2026-10-25): the home hero is a fan of three
 // covers -- the staff picks for slots 1-3, each empty or no-longer-live
 // slot filled by the newest book not already shown -- with a Sponsored
-// tag on paid slots only. Librum's choice is not on the home page any
-// more. "Published with Librum" skips the fan's books while enough
+// tag on paid slots only. Zgjedhja e Librum is not on the home page any
+// more. "Botuar me Librum" skips the fan's books while enough
 // others exist. Rendered against an in-memory books table that evaluates
 // the filters the page asks for (public_books' own row filter is not
 // modelled: the page asks for status = published itself).
@@ -48,7 +48,7 @@ function book(n: number, extra: Row = {}): Row {
   const day = String(n).padStart(2, "0");
   return {
     id: `book-${day}`, title: `Book ${day}`, status: "published", price_all: 199,
-    genre: "Fiction", cover_path: `c/${day}.png`, description: `About ${day}.`, pen_name: null,
+    genre: "Letërsi artistike", cover_path: `c/${day}.png`, description: `About ${day}.`, pen_name: null,
     created_at: `2026-10-${day}T00:00:00Z`, pen: { id: "pen-an-author", name: "An Author" }, ...extra,
   };
 }
@@ -62,8 +62,8 @@ async function render() {
 // The fan draws slot 2, slot 1 (middle), slot 3.
 async function fanAndShowcase() {
   const html = await render();
-  const cut = html.indexOf(">Published with Librum</h2>");
-  const names = (part: string) => [...part.matchAll(/aria-label="View (Book \d\d on Librum[^"]*)"/g)].map((m) => m[1].replace(" on Librum", ""));
+  const cut = html.indexOf(">Botuar me Librum</h2>");
+  const names = (part: string) => [...part.matchAll(/aria-label="Shikoni (Book \d\d në Librum[^"]*)"/g)].map((m) => m[1].replace(" në Librum", ""));
   return { fan: names(cut === -1 ? html : html.slice(0, cut)), showcase: cut === -1 ? [] : names(html.slice(cut)) };
 }
 
@@ -106,7 +106,7 @@ describe("home cover fan", () => {
     slots = [{ slot: 1, book_id: "book-01", sponsored: true }];
     const { fan } = await fanAndShowcase();
     expect(fan).toEqual(["Book 08", "Book 09", "Book 07"]);
-    expect(fan.join()).not.toContain("sponsored");
+    expect(fan.join()).not.toContain("sponsorizuar");
   });
 
   it("Sponsored shows only on a paid slot's cover, and the link says so", async () => {
@@ -115,11 +115,11 @@ describe("home cover fan", () => {
       { slot: 3, book_id: "book-03", sponsored: false },
     ];
     const html = await render();
-    expect((await fanAndShowcase()).fan).toEqual(["Book 09", "Book 01 (sponsored)", "Book 03"]);
-    expect(html.match(/>Sponsored</g)).toHaveLength(1);
+    expect((await fanAndShowcase()).fan).toEqual(["Book 09", "Book 01 (sponsorizuar)", "Book 03"]);
+    expect(html.match(/>Sponsorizuar</g)).toHaveLength(1);
   });
 
-  it("Librum's choice is not on the home page any more", async () => {
+  it("Zgjedhja e Librum is not on the home page any more", async () => {
     rows[0] = book(1, { librum_choice_at: "2026-10-18T09:00:00Z" });
     const { fan, showcase } = await fanAndShowcase();
     expect([...fan, ...showcase]).not.toContain("Book 01");
@@ -129,7 +129,7 @@ describe("home cover fan", () => {
     rows = [book(1), book(2)];
     const html = await render();
     expect(html).toContain("/images/author-hero.jpg");
-    expect(html).not.toContain('aria-label="Featured books"');
+    expect(html).not.toContain('aria-label="Libra të zgjedhur"');
     expect((await fanAndShowcase()).showcase).toEqual(["Book 02", "Book 01"]);
   });
 
@@ -155,7 +155,7 @@ describe("home cover fan", () => {
 
   it("the middle cover loads first; every cover is a real cover image with an empty alt", async () => {
     const html = await render();
-    const fan = html.slice(0, html.indexOf(">Published with Librum</h2>"));
+    const fan = html.slice(0, html.indexOf(">Botuar me Librum</h2>"));
     expect(fan.match(/<img[^>]*src="https:\/\/cdn\.example\/c\/\d\d\.png"[^>]*alt=""/g)).toHaveLength(3);
     // The one high-priority cover image is the middle one (slot 1, the newest here).
     const high = fan.match(/<img[^>]*fetchPriority="high"[^>]*>/gi) ?? [];

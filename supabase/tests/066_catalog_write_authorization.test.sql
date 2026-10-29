@@ -355,7 +355,7 @@ select pg_temp.expect_error('authenticated', 'e0660000-0000-0000-0000-0000000000
   $q$insert into public.books (id, author_id, title, subtitle, description, keywords, isbn, language,
        publisher, edition, original_publication_date, genre, series_id, series_position, price_all)
      values ('e0661000-0000-0000-0000-0000000000c6', 'e0660000-0000-0000-0000-00000000000a', 'createBook paid draft',
-       null, 'desc', '', null, 'sq', null, null, null, 'Fiction',
+       null, 'desc', '', null, 'sq', null, null, null, 'Letërsi artistike',
        'e0663000-0000-0000-0000-00000000000a', 3, 199)$q$,
   '42501', 'permission denied for table books', 'part2 (PEN-NAMES-2): a direct paid draft insert by authenticated is denied by the ACL');
 
@@ -365,7 +365,7 @@ select pg_temp.expect_ok('service_role', null,
   $q$insert into public.books (id, author_id, title, subtitle, description, keywords, isbn, language,
        publisher, edition, original_publication_date, genre, series_id, series_position, price_all)
      values ('e0661000-0000-0000-0000-0000000000c6', 'e0660000-0000-0000-0000-00000000000a', 'createBook paid draft',
-       null, 'desc', '', null, 'sq', null, null, null, 'Fiction',
+       null, 'desc', '', null, 'sq', null, null, null, 'Letërsi artistike',
        'e0663000-0000-0000-0000-00000000000a', 3, 199)$q$,
   1, 'part2 (PEN-NAMES-2): the trusted writer''s paid draft insert, omitting status, succeeds');
 

@@ -501,8 +501,8 @@ export function OrnateShelf({ books, label }: { books: OrnateShelfBook[]; label:
           return (
             <li key={book.id} className="flex">
               <Link
-                href={`/books/${book.id}`}
-                aria-label={`View ${book.title} on Librum`}
+                href={`/libra/${book.id}`}
+                aria-label={`Shikoni ${book.title} në Librum`}
                 className="focus-ring relative block overflow-hidden no-underline transition-transform duration-150 hover:-translate-y-1 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
                 style={{
                   width: binding.width,

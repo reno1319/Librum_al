@@ -7,20 +7,36 @@
 // page.tsx's "Purchased <date>" line), so this isn't a new formatting
 // convention, just the smallest shared place to put it now that two
 // call sites need it identically.
+//
+// ALBANIAN-2 (Renato 10-28): Albanian dates ("28 tetor 2026" -- months
+// are lowercase in Albanian, and a full month name reads better than the
+// short "tet"), always the same locale on the server and in the browser,
+// never the runtime's default.
+export const SQ_LOCALE = "sq";
+export const TIRANA_TIME_ZONE = "Europe/Tirane";
+
 const READER_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
   year: "numeric",
-  month: "short",
+  month: "long",
   day: "numeric",
 };
 
 // A real instant (e.g. published_at) -- formatted as a plain date, no
 // time-of-day, matching this page's existing date-display convention.
 export function formatTimestampAsDate(timestamp: string): string {
-  return new Date(timestamp).toLocaleDateString(undefined, READER_DATE_OPTIONS);
+  // ALBANIAN-2: a real instant is shown as its day in Tirana, so the
+  // date no longer depends on which time zone the server runs in.
+  return new Date(timestamp).toLocaleDateString(SQ_LOCALE, {
+    ...READER_DATE_OPTIONS,
+    timeZone: TIRANA_TIME_ZONE,
+  });
 }
 
 // A date-only SQL `date` column (e.g. original_publication_date,
 // "YYYY-MM-DD") -- deliberately NOT `new Date(dateOnly)` directly.
+// ALBANIAN-2: a calendar day has no time zone, so it is parsed and
+// formatted in UTC on both sides (the reasoning below still holds: the
+// parse and the format share one reference and can never disagree).
 // That parses a bare "YYYY-MM-DD" string as UTC midnight, and
 // .toLocaleDateString() then converts it to the server's local
 // timezone -- in any negative UTC offset, that rolls the displayed day
@@ -30,5 +46,8 @@ export function formatTimestampAsDate(timestamp: string): string {
 // the SAME timezone reference and can never disagree, regardless of
 // what timezone this code happens to run in.
 export function formatDateOnly(dateOnly: string): string {
-  return new Date(`${dateOnly}T00:00:00`).toLocaleDateString(undefined, READER_DATE_OPTIONS);
+  return new Date(`${dateOnly}T00:00:00Z`).toLocaleDateString(SQ_LOCALE, {
+    ...READER_DATE_OPTIONS,
+    timeZone: "UTC",
+  });
 }

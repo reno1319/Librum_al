@@ -164,7 +164,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 
 const { deleteAccount } = await import("./actions");
 
-async function run(extra: Record<string, string> = {}, confirmation = "DELETE"): Promise<string> {
+async function run(extra: Record<string, string> = {}, confirmation = "FSHI"): Promise<string> {
   const fd = new FormData();
   fd.set("confirmation", confirmation);
   for (const [k, v] of Object.entries(extra)) fd.set(k, v);
@@ -184,7 +184,7 @@ const COVER_WARNING =
   "deleteAccount: stored book cover_path values that are not this user's canonical keys were skipped; count:";
 const MANUSCRIPT_WARNING =
   "deleteAccount: stored book file_path values that are not this user's canonical keys were skipped; count:";
-const PREPARE_ERROR = "/account?error=Unable+to+prepare+account+deletion.+Try+again.";
+const PREPARE_ERROR = "/account?error=Nuk%20mund%C3%ABm%20ta%20p%C3%ABrgatisim%20fshirjen%20e%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.";
 
 function expectNothingIrreversible() {
   expect(adminClientsCreated).toBe(0);
@@ -515,7 +515,7 @@ describe("destructive ordering (13-16)", () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
     deleteUserError = { message: "restrict violation" };
-    expect(await run()).toBe("/account?error=Something+went+wrong+deleting+your+account.+Please+try+again");
+    expect(await run()).toBe("/account?error=Di%C3%A7ka%20shkoi%20keq%20gjat%C3%AB%20fshirjes%20s%C3%AB%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.");
     expect(storageCalls).toEqual([]);
     expect(signOut).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();
@@ -607,20 +607,20 @@ describe("17, 18: existing gates stay ahead of the books read", () => {
 
   it("active staff: blocked before the books read", async () => {
     staffResult = { data: { role: "owner" }, error: null };
-    expect(await run()).toBe("/account?error=Remove+this+account+from+Librum+staff+before+deleting+the+account.");
+    expect(await run()).toBe("/account?error=Hiqeni%20k%C3%ABt%C3%AB%20llogari%20nga%20stafi%20i%20Librum%20para%20se%20ta%20fshini.");
     expect(events).toEqual(["read:staff"]);
     expectNothingIrreversible();
   });
 
   it("staff lookup error: blocked before the books read", async () => {
     staffResult = { data: null, error: { message: "x" } };
-    expect(await run()).toBe("/account?error=Unable+to+verify+account+eligibility+for+deletion.+Try+again.");
+    expect(await run()).toBe("/account?error=Nuk%20mund%C3%ABm%20t%C3%AB%20kontrollojm%C3%AB%20n%C3%ABse%20kjo%20llogari%20mund%20t%C3%AB%20fshihet.%20Provoni%20p%C3%ABrs%C3%ABri.");
     expect(events).toEqual(["read:staff"]);
     expectNothingIrreversible();
   });
 
-  it.each(["", "delete", "DELETE ", "Delete"])("wrong confirmation %j: blocked before the books read", async (confirmation) => {
-    expect(await run({}, confirmation)).toBe("/account?error=Type+DELETE+to+confirm");
+  it.each(["", "fshi", "FSHI ", "Fshi", "DELETE"])("wrong confirmation %j: blocked before the books read", async (confirmation) => {
+    expect(await run({}, confirmation)).toBe("/account?error=Shkruani%20FSHI%20p%C3%ABr%20ta%20konfirmuar.");
     expect(events).toEqual(["read:staff"]);
     expectNothingIrreversible();
   });
@@ -634,7 +634,7 @@ describe("17, 18: existing gates stay ahead of the books read", () => {
 
   it("18: acquisition history still blocks, checked over this user's book ids, before any privileged call", async () => {
     purchaseCount = 1;
-    expect(await run()).toContain("/account?error=Your+account+can%27t+be+deleted");
+    expect(await run()).toContain("/account?error=Llogaria%20juaj%20nuk%20mund%20t%C3%AB%20fshihet");
     expect(purchaseBookIds).toEqual([BOOK_ID]);
     expectNothingIrreversible();
   });
@@ -645,7 +645,7 @@ describe("17, 18: existing gates stay ahead of the books read", () => {
       { id: OTHER_BOOK_ID, cover_path: VICTIM_COVER, file_path: VICTIM_MANUSCRIPT },
     ]);
     purchaseCount = 2;
-    expect(await run()).toContain("/account?error=Your+account+can%27t+be+deleted");
+    expect(await run()).toContain("/account?error=Llogaria%20juaj%20nuk%20mund%20t%C3%AB%20fshihet");
     expect(purchaseBookIds).toEqual([BOOK_ID, OTHER_BOOK_ID]);
     expectNothingIrreversible();
   });

@@ -69,6 +69,11 @@ function groupThousands(wholeDigits: string, separator: string): string {
  * Negative amounts (ledger refunds, adjustments, negative balances) keep
  * their sign; `-0` renders as zero.
  */
+// "lek" only for exactly one whole lek; "lekë" for everything else.
+export function lekUnit(whole: string, minor = "00"): string {
+  return whole === "1" && minor === "00" ? "lek" : "lekë";
+}
+
 export function formatTransactionMinorUnits(
   amountMinor: number,
   currency: TransactionCurrency,
@@ -87,8 +92,11 @@ export function formatTransactionMinorUnits(
     // FIX1 (X5): a whole-lek amount drops the ",00" ("199 ALL",
     // "1.500 ALL"); an amount with qindarka keeps both decimals
     // ("179,10 ALL"). Still a slice of the digit string, never a division.
+    // ALBANIAN-1 (Renato 10-28, 2b): the unit reads "lekë", and exactly
+    // one whole lek reads "1 lek" (Albanian singular); any other amount,
+    // with or without qindarka, is plural.
     const fraction = minor === "00" ? "" : `,${minor}`;
-    return `${sign}${groupThousands(whole, ".")}${fraction} ALL`;
+    return `${sign}${groupThousands(whole, ".")}${fraction} ${lekUnit(whole, minor)}`;
   }
   return `${sign}USD ${groupThousands(whole, ",")}.${minor}`;
 }
@@ -156,13 +164,13 @@ export function provenanceFromStoredCurrency(currency: unknown): CurrencyProvena
   return fromCurrencyCode(currency);
 }
 
-export const CURRENCY_UNKNOWN_LABEL = "Amount unavailable (currency unknown)";
-export const CURRENCY_CONFLICT_LABEL = "Amount unavailable (conflicting currency records)";
-export const INVALID_AMOUNT_LABEL = "Amount unavailable (invalid amount)";
-export const FREE_ACQUISITION_LABEL = "Free";
+export const CURRENCY_UNKNOWN_LABEL = "Shuma nuk është e disponueshme (monedhë e panjohur)";
+export const CURRENCY_CONFLICT_LABEL = "Shuma nuk është e disponueshme (të dhëna kontradiktore për monedhën)";
+export const INVALID_AMOUNT_LABEL = "Shuma nuk është e disponueshme (vlerë e pavlefshme)";
+export const FREE_ACQUISITION_LABEL = "Falas";
 
 export function unsupportedCurrencyLabel(currency: string): string {
-  return `Amount unavailable (unsupported currency ${currency})`;
+  return `Shuma nuk është e disponueshme (monedhë e pambështetur ${currency})`;
 }
 
 /**

@@ -79,13 +79,13 @@ export function ClosingCtaBand({ cta }: { cta: HomepageCta }) {
     <section className="bg-primary text-primary-foreground">
       <div className="mx-auto w-full max-w-content px-4 py-12 text-center sm:px-6 md:py-14">
         <h2 className="font-serif text-3xl font-normal sm:text-[2.875rem] sm:leading-tight">
-          Ready to publish your book?
+          Gati për të botuar librin tuaj?
         </h2>
         <p className="mt-3 text-lg text-primary-foreground/85">
-          Create your first book on Librum and publish on your terms.
+          Krijoni librin tuaj të parë në Librum dhe botojeni me kushtet tuaja.
         </p>
         {/* REDESIGN STEP 2: both lines above the button, as in the mockup. */}
-        <p className="mt-2 text-primary-foreground/80">No setup fee. No monthly subscription.</p>
+        <p className="mt-2 text-primary-foreground/80">Pa tarifë fillestare. Pa abonim mujor.</p>
         <Link href={cta.href} className={`${BRASS_CTA_CLASSES} mt-6`}>
           {cta.label}
         </Link>

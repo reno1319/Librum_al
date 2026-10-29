@@ -36,12 +36,12 @@ function readSrc(relativePath: string): string {
 // deliberately excluded -- see the classification list below this
 // array).
 const READER_FACING_ATTRIBUTION_FILES = [
-  "app/(public)/bookstore/page.tsx",
+  "app/(public)/librari/page.tsx",
   "components/book-shelf.tsx",
-  "app/(public)/books/[id]/page.tsx",
-  "app/(public)/authors/[id]/page.tsx",
-  "app/(public)/series/[id]/page.tsx",
-  "app/(public)/bundles/[id]/page.tsx",
+  "app/(public)/libra/[id]/page.tsx",
+  "app/(public)/autore/[id]/page.tsx",
+  "app/(public)/seri/[id]/page.tsx",
+  "app/(public)/paketa/[id]/page.tsx",
   "app/(public)/library/page.tsx",
   "app/(public)/wishlist/page.tsx",
   "app/(public)/following/page.tsx",
@@ -67,11 +67,11 @@ describe("PEN-NAMES-1 privacy contract: every reader-facing author name is a pen
   it.each(READER_FACING_ATTRIBUTION_FILES)("%s never reads an author byline from public_author_profiles or resolvePublicAuthorName", (file) => {
     const source = readSrc(file);
     const authorJoins = (source.match(/public_author_profiles\(public_author_name[^)]*\)/g) ?? []).filter(
-      (join) => join !== "public_author_profiles(public_author_name)" || file !== "app/(public)/books/[id]/page.tsx",
+      (join) => join !== "public_author_profiles(public_author_name)" || file !== "app/(public)/libra/[id]/page.tsx",
     );
     expect(authorJoins).toEqual([]);
     expect(source).not.toMatch(/\.from\("public_author_profiles"\)/);
-    if (file !== "app/(public)/books/[id]/page.tsx") {
+    if (file !== "app/(public)/libra/[id]/page.tsx") {
       const code = source
         .split("\n")
         .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
@@ -103,12 +103,12 @@ describe("PEN-NAMES-1 privacy contract: every reader-facing author name is a pen
     expect(source).not.toMatch(/\.from\("author_follows"\)/);
   });
 
-  it("no reader-facing page links to /authors/<account id> any more", () => {
+  it("no reader-facing page links to /autore/<account id> any more", () => {
     for (const file of READER_FACING_ATTRIBUTION_FILES) {
-      expect(readSrc(file)).not.toMatch(/\/authors\/\$\{[a-zA-Z.?]*author_id\}/);
+      expect(readSrc(file)).not.toMatch(/\/autore\/\$\{[a-zA-Z.?]*author_id\}/);
     }
     for (const file of ["components/book-card.tsx", "components/library-book-card.tsx"]) {
-      expect(readSrc(file)).not.toMatch(/\/authors\/\$\{/);
+      expect(readSrc(file)).not.toMatch(/\/autore\/\$\{/);
       expect(readSrc(file)).toContain("authorPagePath(");
     }
   });
@@ -147,7 +147,7 @@ describe("AUTHOR-1B / AUTHOR-1C privacy contract: no raw .display_name render fo
 });
 
 describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no longer leaks a raw display_name either", () => {
-  const source = readSrc("app/(public)/books/[id]/page.tsx");
+  const source = readSrc("app/(public)/libra/[id]/page.tsx");
 
   // LIBRUM 2.0 AUTHOR-1C superseded the AUTHOR-1B decision to leave the
   // reviewer join untouched: once the database itself no longer permits
@@ -172,7 +172,7 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
   });
 
   it("review names show reviewer_name with a generic fallback, never a profiles field", () => {
-    expect(source).toContain('review.reviewer_name ?? "A Librum reader"');
+    expect(source).toContain('review.reviewer_name ?? "Një lexues i Librum"');
     expect(source).not.toMatch(/review\.profiles[^`]/); // the one hit left is a backticked comment
   });
 

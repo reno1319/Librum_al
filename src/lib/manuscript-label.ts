@@ -6,5 +6,5 @@
 export function getManuscriptLabel(filePath: string | null | undefined): string | null {
   const name = filePath?.split("/").pop() ?? "";
   if (name === "") return null;
-  return name.toLowerCase().endsWith(".epub") ? "EPUB file" : "file";
+  return name.toLowerCase().endsWith(".epub") ? "skedar EPUB" : "skedar";
 }

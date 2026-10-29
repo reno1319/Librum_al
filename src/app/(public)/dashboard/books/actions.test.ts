@@ -213,7 +213,7 @@ async function buildFormData(overrides: Record<string, string> = {}): Promise<Fo
   formData.set("description", overrides.description ?? "A description.");
   formData.set("keywords", "");
   formData.set("isbn", "");
-  formData.set("genre", "Fiction");
+  formData.set("genre", "Letërsi artistike");
   formData.set("price", "0");
   formData.set(
     "cover",
@@ -372,7 +372,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Subtitle+must+be+300+characters+or+fewer",
+      "/dashboard/books/new?error=N%C3%ABntitulli%20mund%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20300%20karaktere",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -394,7 +394,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Publisher+must+be+200+characters+or+fewer",
+      "/dashboard/books/new?error=Botuesi%20mund%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20200%20karaktere",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -415,7 +415,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Edition+must+be+100+characters+or+fewer",
+      "/dashboard/books/new?error=Botimi%20mund%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20100%20karaktere",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -448,7 +448,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Please+choose+a+supported+language",
+      "/dashboard/books/new?error=Zgjidhni%20nj%C3%AB%20gjuh%C3%AB%20t%C3%AB%20pranuar",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -471,7 +471,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Enter+a+valid+original+publication+date",
+      "/dashboard/books/new?error=Shkruani%20nj%C3%AB%20dat%C3%AB%20t%C3%AB%20vlefshme%20t%C3%AB%20botimit%20t%C3%AB%20par%C3%AB",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -483,7 +483,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Enter+a+valid+original+publication+date",
+      "/dashboard/books/new?error=Shkruani%20nj%C3%AB%20dat%C3%AB%20t%C3%AB%20vlefshme%20t%C3%AB%20botimit%20t%C3%AB%20par%C3%AB",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -496,7 +496,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Original+publication+date+can%27t+be+in+the+future",
+      "/dashboard/books/new?error=Data%20e%20botimit%20t%C3%AB%20par%C3%AB%20nuk%20mund%20t%C3%AB%20jet%C3%AB%20n%C3%AB%20t%C3%AB%20ardhmen",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -704,7 +704,7 @@ describe("updateBook: bibliographic metadata (PUBLISHING-UX-1 Part B FINAL PRE-C
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Subtitle+must+be+300+characters+or+fewer`,
+      `/dashboard/books/${BOOK_ID}/edit?error=N%C3%ABntitulli%20mund%20t%C3%AB%20ket%C3%AB%20deri%20n%C3%AB%20300%20karaktere`,
     );
     expect(mockUpdate).not.toHaveBeenCalled();
   });
@@ -718,7 +718,7 @@ describe("updateBook: bibliographic metadata (PUBLISHING-UX-1 Part B FINAL PRE-C
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Please+choose+a+supported+language`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Zgjidhni%20nj%C3%AB%20gjuh%C3%AB%20t%C3%AB%20pranuar`,
     );
     expect(mockUpdate).not.toHaveBeenCalled();
   });
@@ -733,7 +733,7 @@ describe("updateBook: bibliographic metadata (PUBLISHING-UX-1 Part B FINAL PRE-C
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Original+publication+date+can%27t+be+in+the+future`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Data%20e%20botimit%20t%C3%AB%20par%C3%AB%20nuk%20mund%20t%C3%AB%20jet%C3%AB%20n%C3%AB%20t%C3%AB%20ardhmen`,
     );
     expect(mockUpdate).not.toHaveBeenCalled();
   });
@@ -799,7 +799,7 @@ describe("updateBook: unchanged-language preservation (PUBLISHING-UX-1 Part D FI
     // page (no error query param) -- never the "Please choose a
     // supported language" rejection.
     expect(mockRedirect).not.toHaveBeenCalledWith(
-      expect.stringContaining("Please+choose+a+supported+language"),
+      expect.stringContaining("Zgjidhni%20nj%C3%AB%20gjuh%C3%AB%20t%C3%AB%20pranuar"),
     );
     expect(mockUpdate).toHaveBeenCalledOnce();
     const payload = mockUpdate.mock.calls[0][0];
@@ -841,7 +841,7 @@ describe("updateBook: unchanged-language preservation (PUBLISHING-UX-1 Part D FI
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Please+choose+a+supported+language`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Zgjidhni%20nj%C3%AB%20gjuh%C3%AB%20t%C3%AB%20pranuar`,
     );
     expect(mockUpdate).not.toHaveBeenCalled();
   });
@@ -856,7 +856,7 @@ describe("updateBook: unchanged-language preservation (PUBLISHING-UX-1 Part D FI
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Please+choose+a+supported+language`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Zgjidhni%20nj%C3%AB%20gjuh%C3%AB%20t%C3%AB%20pranuar`,
     );
     expect(mockUpdate).not.toHaveBeenCalled();
   });
@@ -913,7 +913,7 @@ describe("createBook: language remains strict -- unaffected by updateBook's pres
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Please+choose+a+supported+language",
+      "/dashboard/books/new?error=Zgjidhni%20nj%C3%AB%20gjuh%C3%AB%20t%C3%AB%20pranuar",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -1022,7 +1022,7 @@ describe("createBook: manuscriptStoragePath reference (CB-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=This+file+doesn%27t+appear+to+be+a+valid+EPUB",
+      "/dashboard/books/new?error=Ky%20skedar%20nuk%20duket%20si%20EPUB%20i%20vlefsh%C3%ABm",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -1051,7 +1051,7 @@ describe("createBook: manuscriptStoragePath reference (CB-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=This%20EPUB%20uses%20encryption%2FDRM%20that%20Librum%20does%20not%20support.",
+      "/dashboard/books/new?error=Ky%20EPUB%20p%C3%ABrdor%20enkriptim%2FDRM%20q%C3%AB%20Librum%20nuk%20e%20mb%C3%ABshtet.",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -1070,7 +1070,7 @@ describe("createBook: create atomicity when the final manuscript write fails (CB
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Could+not+upload+your+manuscript.+Please+try+again",
+      "/dashboard/books/new?error=Dor%C3%ABshkrimi%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
     // Deliberately NOT cleaned up on failure -- see actions.ts's own
@@ -1083,7 +1083,7 @@ describe("createBook: create atomicity when the final manuscript write fails (CB
 // ADMIN-3-REVIEW (C): the book in these doubles is live, so a new file
 // or cover takes it out of the Bookstore until Librum approves it.
 const LIVE_FILES_SAVED_REDIRECT = `/dashboard?success=${encodeURIComponent(
-  "Saved. Your book is out of the Bookstore until Librum approves the new file or cover.",
+  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
 )}`;
 
 describe("updateBook: manuscriptStoragePath reference (CB-1)", () => {
@@ -1162,7 +1162,7 @@ describe("updateBook: update atomicity when the final manuscript write fails (CB
     // row still names the old, still-valid manuscript, nothing is
     // saved, and the temporary upload is kept for a retry.
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Could+not+upload+your+manuscript.+Please+try+again`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Dor%C3%ABshkrimi%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri`,
     );
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockRemoveManuscript).not.toHaveBeenCalled();
@@ -1177,7 +1177,7 @@ describe("resolveManuscriptInput: temp-path authorization (CB-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=That+manuscript+reference+is+no+longer+valid.+Please+choose+your+file+again",
+      "/dashboard/books/new?error=Dor%C3%ABshkrimi%20i%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
     expect(mockDownloadManuscript).not.toHaveBeenCalled();
   });
@@ -1187,7 +1187,7 @@ describe("resolveManuscriptInput: temp-path authorization (CB-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=That+manuscript+reference+is+no+longer+valid.+Please+choose+your+file+again",
+      "/dashboard/books/new?error=Dor%C3%ABshkrimi%20i%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
     expect(mockDownloadManuscript).not.toHaveBeenCalled();
   });
@@ -1197,7 +1197,7 @@ describe("resolveManuscriptInput: temp-path authorization (CB-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=That+manuscript+reference+is+no+longer+valid.+Please+choose+your+file+again",
+      "/dashboard/books/new?error=Dor%C3%ABshkrimi%20i%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
   });
 
@@ -1206,7 +1206,7 @@ describe("resolveManuscriptInput: temp-path authorization (CB-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=That+manuscript+reference+is+no+longer+valid.+Please+choose+your+file+again",
+      "/dashboard/books/new?error=Dor%C3%ABshkrimi%20i%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
   });
 
@@ -1217,7 +1217,7 @@ describe("resolveManuscriptInput: temp-path authorization (CB-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Could+not+read+your+uploaded+manuscript.+Please+try+again",
+      "/dashboard/books/new?error=Dor%C3%ABshkrimi%20i%20ngarkuar%20nuk%20u%20lexua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -1295,7 +1295,7 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
     const formData = await buildFormDataWithCoverPath(tempPath);
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/books/new?error=Cover+image+must+be+under+5MB");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/books/new?error=Imazhi%20i%20kopertin%C3%ABs%20duhet%20t%C3%AB%20jet%C3%AB%20n%C3%ABn%205%20MB");
     expect(mockInsert).not.toHaveBeenCalled();
     expect(mockUploadCover).not.toHaveBeenCalled();
   });
@@ -1308,7 +1308,7 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image",
+      "/dashboard/books/new?error=Ky%20nuk%20duket%20si%20imazh%20i%20vlefsh%C3%ABm%20JPEG%20ose%20PNG",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -1325,7 +1325,7 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Could+not+read+your+uploaded+cover.+Please+try+again",
+      "/dashboard/books/new?error=Kopertina%20e%20ngarkuar%20nuk%20u%20lexua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
     expect(mockUploadCover).not.toHaveBeenCalled();
@@ -1345,7 +1345,7 @@ describe("createBook: create atomicity when the final cover write fails (COVER-1
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Could+not+upload+your+cover+image.+Please+try+again",
+      "/dashboard/books/new?error=Imazhi%20i%20kopertin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
     // Deliberately NOT cleaned up on failure -- same retry-friendly
@@ -1410,7 +1410,7 @@ describe("updateBook: update atomicity when the final cover write fails (COVER-1
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Imazhi%20i%20kopertin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri`,
     );
     expect(mockUpdate).not.toHaveBeenCalled();
     // The staged temp cover is kept for a retry.
@@ -1426,7 +1426,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=That+cover+reference+is+no+longer+valid.+Please+choose+your+file+again",
+      "/dashboard/books/new?error=Kopertina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
     expect(mockDownloadManuscript).not.toHaveBeenCalled();
   });
@@ -1436,7 +1436,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=That+cover+reference+is+no+longer+valid.+Please+choose+your+file+again",
+      "/dashboard/books/new?error=Kopertina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
   });
 
@@ -1445,7 +1445,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=That+cover+reference+is+no+longer+valid.+Please+choose+your+file+again",
+      "/dashboard/books/new?error=Kopertina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
   });
 
@@ -1454,7 +1454,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=That+cover+reference+is+no+longer+valid.+Please+choose+your+file+again",
+      "/dashboard/books/new?error=Kopertina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
   });
 
@@ -1465,7 +1465,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Could+not+read+your+uploaded+cover.+Please+try+again",
+      "/dashboard/books/new?error=Kopertina%20e%20ngarkuar%20nuk%20u%20lexua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });

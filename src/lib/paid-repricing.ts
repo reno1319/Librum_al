@@ -150,11 +150,11 @@ export function isExactlyOneRowWritten(rows: unknown): boolean {
 // "Paid publishing isn't available right now" follows, and tells the
 // author which edits remain open to them.
 export const PAID_REPRICING_UNAVAILABLE_MESSAGE =
-  "Paid publishing isn't available right now, so a published title can't get a new paid price. " +
-  "You can keep its current price or make it free.";
+  "Publikimi me pagesë nuk është i mundur tani, ndaj një titull i publikuar nuk mund të marrë çmim të ri me pagesë. " +
+  "Mund ta mbani çmimin aktual ose ta bëni falas.";
 
 // Author-facing message for a guarded write that matched no row: the row
 // changed between the read and the write (for example it was published
 // in the meantime), so nothing was saved.
 export const CATALOG_ROW_CHANGED_MESSAGE =
-  "This title changed while you were editing it, so nothing was saved. Reload the page and try again.";
+  "Ky titull ndryshoi ndërsa po e redaktonit, ndaj nuk u ruajt asgjë. Rifreskoni faqen dhe provoni përsëri.";

@@ -13,7 +13,7 @@ import { formControlClasses } from "@/lib/form-styles";
 // (no tax logic exists anywhere in this app to model). Purely
 // informational: no network request, no Supabase/provider call, no form
 // submission -- it's a "use client" island for live recompute-on-type
-// only, the rest of /pricing stays a Server Component.
+// only, the rest of /fitimet stays a Server Component.
 //
 // ALL-WIRING-2: prices are ALL. The input is a text field with a
 // decimal keyboard rather than `type="number"`, because the Albanian
@@ -51,11 +51,11 @@ export function EarningsCalculator() {
     <div className="grid gap-8 rounded-[4px] border border-border bg-surface p-5 sm:p-7 md:grid-cols-2">
       <div className="flex flex-col gap-4">
         <p className="text-[0.8125rem] font-semibold uppercase tracking-[0.14em] text-[#8a6d12]">
-          Earnings calculator
+          Llogaritësi i fitimeve
         </p>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-semibold">Book price (ALL)</span>
+          <span className="font-semibold">Çmimi i librit (lekë)</span>
           <input
             type="text"
             inputMode="decimal"
@@ -66,7 +66,7 @@ export function EarningsCalculator() {
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-semibold">Number of sales</span>
+          <span className="font-semibold">Numri i shitjeve</span>
           <input
             type="number"
             inputMode="numeric"
@@ -83,38 +83,38 @@ export function EarningsCalculator() {
       <div aria-live="polite" className="border-t border-border pt-6 md:border-t-0 md:border-l md:pt-0 md:pl-8">
         {isFreeBook ? (
           <div>
-            <p className="font-serif text-lg font-semibold text-foreground">Free book</p>
-            <p className="mt-1 text-sm text-muted">No author earnings from sales.</p>
+            <p className="font-serif text-lg font-semibold text-foreground">Libër falas</p>
+            <p className="mt-1 text-sm text-muted">Autori nuk fiton nga shitjet.</p>
           </div>
         ) : !priceValid || !salesValid ? (
           <p className="text-sm text-muted">
-            Enter a price in lek (0, or 99 to 100.000) and a whole number of
-            sales (1 or more) to see an estimate.
+            Shkruani një çmim në lekë (0, ose nga 99 deri në 100.000) dhe një numër
+            të plotë shitjesh (1 ose më shumë) për të parë një vlerësim.
           </p>
         ) : (
           <>
             <div className="flex flex-col gap-3 text-sm">
               <div className="flex items-baseline justify-between gap-4">
-                <span className="text-muted">Gross sales</span>
-                <span className="font-serif text-lg font-semibold text-foreground">
+                <span className="text-muted">Shitjet bruto</span>
+                <span className="whitespace-nowrap font-serif text-lg font-semibold text-foreground">
                   {formatAllMinorUnits(estimate.grossMinor)}
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-4">
-                <span className="text-muted">Librum platform fee ({PLATFORM_FEE_PERCENT}%)</span>
-                <span className="font-serif text-lg font-semibold text-muted">
+                <span className="text-muted">Tarifa e platformës së Librum ({PLATFORM_FEE_PERCENT}%)</span>
+                <span className="whitespace-nowrap font-serif text-lg font-semibold text-muted">
                   -{formatAllMinorUnits(estimate.platformFeeMinor)}
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-4 border-t border-border pt-3">
-                <span className="font-medium text-foreground">Estimated author earnings</span>
-                <span className="font-serif text-[2rem] leading-none font-normal text-primary">
+                <span className="font-medium text-foreground">Fitimi i vlerësuar i autorit</span>
+                <span className="whitespace-nowrap font-serif text-[2rem] leading-none font-normal text-primary">
                   {formatAllMinorUnits(estimate.authorEarningsMinor)}
                 </span>
               </div>
             </div>
             <p className="mt-4 text-xs text-muted">
-              Before taxes and any banking or currency-conversion fees that may apply.
+              Para taksave dhe tarifave të mundshme bankare ose të këmbimit valutor.
             </p>
           </>
         )}

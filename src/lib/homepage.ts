@@ -25,14 +25,14 @@ export function resolveHomepageCta(params: {
   const { user, role } = params;
 
   if (!user) {
-    const cta: HomepageCta = { label: "Publish your book", href: "/signup?role=author" };
+    const cta: HomepageCta = { label: "Publikoni librin tuaj", href: "/signup?role=author" };
     return { hero: cta, final: cta };
   }
 
   if (role === "author") {
     return {
-      hero: { label: "Go to Dashboard", href: "/dashboard" },
-      final: { label: "Start a new book", href: "/dashboard/books/new" },
+      hero: { label: "Shkoni te Paneli i autorit", href: "/dashboard" },
+      final: { label: "Filloni një libër të ri", href: "/dashboard/books/new" },
     };
   }
 
@@ -54,7 +54,7 @@ export function resolveAuthorPageCta(params: {
   role: string | null;
 }): HomepageCta | null {
   if (params.user && params.role === "reader") {
-    return { label: "Become an author", href: "/account#become-author" };
+    return { label: "Bëhuni autor", href: "/account#become-author" };
   }
   return resolveHomepageCta(params).final;
 }
@@ -62,7 +62,7 @@ export function resolveAuthorPageCta(params: {
 // LIBRUM 2.0 UI-3: the single source authors' displayed share derives
 // from -- PLATFORM_FEE_PERCENT (src/lib/pricing.ts), never a literal
 // "80" written on the homepage itself. Both numbers stay derived, not
-// duplicated, matching how /pricing already computes this.
+// duplicated, matching how /fitimet already computes this.
 export function computeAuthorSharePercent(): number {
   return 100 - PLATFORM_FEE_PERCENT;
 }

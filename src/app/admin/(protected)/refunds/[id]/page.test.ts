@@ -61,8 +61,8 @@ describe("AdminRefundRequestDetailPage: maintenance-mode gate", () => {
     });
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
 
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockRequireStaff).not.toHaveBeenCalled();
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockFrom).not.toHaveBeenCalled();
@@ -173,8 +173,8 @@ describe("AdminRefundRequestDetailPage: request and items share the request's cu
     expect(rpc).toHaveBeenCalledWith("list_refund_request_currencies", {
       p_refund_request_ids: [REFUND_ID],
     });
-    expect(html).toContain("1.598,40 ALL");
-    expect(html.match(/799,20 ALL/g)).toHaveLength(2);
+    expect(html).toContain("1.598,40 lekë");
+    expect(html.match(/799,20 lekë/g)).toHaveLength(2);
     expect(html).not.toContain("USD");
     // React inlines its own form-replay script (which names `$$reactFormReplay`);
     // only the rendered markup is checked for a dollar sign.
@@ -192,7 +192,7 @@ describe("AdminRefundRequestDetailPage: request and items share the request's cu
   it("an unknown currency is shown as unavailable on the total and on every item, never as USD or ALL", async () => {
     setup(null);
     const html = await render();
-    expect(html.match(/Amount unavailable \(currency unknown\)/g)).toHaveLength(3);
+    expect(html.match(/Shuma nuk është e disponueshme \(monedhë e panjohur\)/g)).toHaveLength(3);
     expect(html).not.toContain("USD");
     expect(html).not.toContain(" ALL");
     // React inlines its own form-replay script (which names `$$reactFormReplay`);

@@ -168,7 +168,7 @@ function makeClient(tables: Record<string, Row[]>, userId: string | null, log: Q
 let currentClient: ReturnType<typeof makeClient>;
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => currentClient }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => currentClient }));
-vi.mock("./authors/[id]/actions", () => ({
+vi.mock("./autore/[id]/actions", () => ({
   followPenName: vi.fn(),
   unfollowPenName: vi.fn(),
   removePenNameLinks: vi.fn(),
@@ -176,7 +176,7 @@ vi.mock("./authors/[id]/actions", () => ({
 // PEN-NAMES-1: the author page asks whether a signed-in viewer is staff
 // with reports.resolve; nobody is here.
 vi.mock("@/lib/staff", () => ({ hasPermission: async () => false }));
-vi.mock("./bundles/[id]/actions", () => ({ buyBundle: vi.fn() }));
+vi.mock("./paketa/[id]/actions", () => ({ buyBundle: vi.fn() }));
 vi.mock("./dashboard/bundles/actions", () => ({
   createBundle: vi.fn(),
   updateBundle: vi.fn(),
@@ -185,9 +185,9 @@ vi.mock("./dashboard/bundles/actions", () => ({
   deleteBundle: vi.fn(),
 }));
 
-const { default: BookstorePage } = await import("./bookstore/page");
-const { default: AuthorProfilePage } = await import("./authors/[id]/page");
-const { default: BundleDetailPage } = await import("./bundles/[id]/page");
+const { default: BookstorePage } = await import("./librari/page");
+const { default: AuthorProfilePage } = await import("./autore/[id]/page");
+const { default: BundleDetailPage } = await import("./paketa/[id]/page");
 const { default: BundlesDashboardPage } = await import("./dashboard/bundles/page");
 const { default: EditBundlePage } = await import("./dashboard/bundles/[id]/edit/page");
 
@@ -291,7 +291,7 @@ describe("bookstore bundle rail (rendered)", () => {
     const html = await render(BookstorePage({ searchParams: Promise.resolve({}) }));
 
     expect(html).toContain("Paid Collection");
-    expect(html).toContain("199 ALL");
+    expect(html).toContain("199 lekë");
     expect(html).toContain("Free Collection");
     expect(html).not.toContain("Unpriced Collection");
     expect(html).not.toContain("Draft Collection");
@@ -302,8 +302,8 @@ describe("bookstore bundle rail (rendered)", () => {
     const html = await render(BookstorePage({ searchParams: Promise.resolve({}) }));
 
     const rail = html.slice(html.indexOf("Paid Collection"));
-    expect(rail).toContain("199 ALL");
-    expect(rail).not.toContain(">Free<");
+    expect(rail).toContain("199 lekë");
+    expect(rail).not.toContain(">Falas<");
     expect(html).not.toContain("$0.00");
   });
 
@@ -312,7 +312,7 @@ describe("bookstore bundle rail (rendered)", () => {
     const html = await render(BookstorePage({ searchParams: Promise.resolve({}) }));
 
     expect(html).toContain("Free Collection");
-    expect(html).toContain(">Free<");
+    expect(html).toContain(">Falas<");
     expect(html).not.toContain("15.00");
   });
 
@@ -320,7 +320,7 @@ describe("bookstore bundle rail (rendered)", () => {
     const html = await render(BookstorePage({ searchParams: Promise.resolve({}) }));
     noDollarOrUsd(html);
     expect(html).not.toContain("25.00");
-    expect(html).not.toContain("Price unavailable");
+    expect(html).not.toContain("Çmimi nuk është i disponueshëm");
   });
 
   it("asks for price_all, filters on it, and never selects or filters on price_cents", async () => {
@@ -358,9 +358,9 @@ describe("author public bundle rail (rendered)", () => {
     const html = await render(AuthorProfilePage({ params: Promise.resolve({ id: PEN }) }));
 
     expect(html).toContain("Paid Collection");
-    expect(html).toContain("199 ALL");
+    expect(html).toContain("199 lekë");
     expect(html).toContain("Free Collection");
-    expect(html).toContain(">Free<");
+    expect(html).toContain(">Falas<");
     expect(html).not.toContain("Unpriced Collection");
     expect(html).not.toContain("Draft Collection");
     expect(html).not.toContain("Someone Else");
@@ -381,7 +381,7 @@ describe("author public bundle rail (rendered)", () => {
   it("an author whose only bundle is unpriced shows no Bundles section", async () => {
     install(tables([UNPRICED]));
     const html = await render(AuthorProfilePage({ params: Promise.resolve({ id: PEN }) }));
-    expect(html).not.toContain(">Bundles<");
+    expect(html).not.toContain(">Paketat<");
     expect(html).not.toContain("Unpriced Collection");
   });
 });
@@ -422,19 +422,19 @@ describe("bundle detail page (rendered)", () => {
     const html = await detail(UNPRICED, [A, B]);
 
     expect(html).toContain("Unpriced Collection");
-    expect(priceLine(html)).toContain("Price unavailable");
-    expect(priceLine(html)).not.toContain("Free");
+    expect(priceLine(html)).toContain("Çmimi nuk është i disponueshëm");
+    expect(priceLine(html)).not.toContain("Falas");
     expect(html).not.toContain("25.00");
-    expect(html).not.toContain("you save");
-    expect(html).toContain("Not available right now");
-    expect(html).not.toContain("Bundle checkout coming soon");
+    expect(html).not.toContain("kurseni");
+    expect(html).toContain("Nuk mund të blihet tani");
+    expect(html).not.toContain("Blerja e paketave vjen së shpejti");
     noDollarOrUsd(html);
   });
 
   it("199 / price_cents 0 renders 199 ALL, never Free or $0.00", async () => {
     const html = await detail(PAID, [A, B]);
-    expect(priceLine(html)).toContain("199 ALL");
-    expect(priceLine(html)).not.toContain("Free");
+    expect(priceLine(html)).toContain("199 lekë");
+    expect(priceLine(html)).not.toContain("Falas");
     expect(html).not.toContain("$0.00");
     noDollarOrUsd(html);
   });
@@ -444,8 +444,8 @@ describe("bundle detail page (rendered)", () => {
     // 0 for the bundle) would have produced a four-digit dollar saving.
     const html = await detail(PAID, [A, B]);
     const line = priceLine(html);
-    expect(line).toContain('<span class="line-through">270 ALL</span>');
-    expect(line).toContain("you save 71 ALL");
+    expect(line).toContain('<span class="line-through">270 lekë</span>');
+    expect(line).toContain("kurseni 71 lekë");
     expect(html).not.toContain("999");
   });
 
@@ -454,8 +454,8 @@ describe("bundle detail page (rendered)", () => {
     const pricey = book("book-c", "Libri C", 300, 1);
     const html = await detail(PAID, [freeMember, pricey]);
     // 0 + 300 = 300; 300 - 199 = 101.
-    expect(priceLine(html)).toContain("300 ALL");
-    expect(priceLine(html)).toContain("you save 101 ALL");
+    expect(priceLine(html)).toContain("300 lekë");
+    expect(priceLine(html)).toContain("kurseni 101 lekë");
   });
 
   it("one unpriced member withholds the comparison entirely -- it is never counted as zero", async () => {
@@ -463,32 +463,32 @@ describe("bundle detail page (rendered)", () => {
     // or with a cheaper bundle a FALSE saving. Either way, not shown.
     const unpricedMember = book("book-null", "Libri Pa Çmim", null, 900);
     const html = await detail(bundle("bundle-cheap-26", "Cheap Collection", 99, 0), [A, unpricedMember]);
-    expect(html).not.toContain("you save");
+    expect(html).not.toContain("kurseni");
     expect(html).not.toContain("line-through");
     // The member is still listed, with its own honest state.
     expect(html).toContain("Libri Pa Çmim");
-    expect(html).toContain("Price unavailable");
-    expect(html).toContain("150 ALL");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
+    expect(html).toContain("150 lekë");
   });
 
   it("a member this viewer cannot resolve also withholds the comparison", async () => {
     const html = await detail(bundle("bundle-cheap-27", "Cheap Collection", 99, 0), [A, B, null]);
-    expect(html).not.toContain("you save");
+    expect(html).not.toContain("kurseni");
   });
 
   it("a zero or negative difference is never presented as a saving", async () => {
     for (const bundlePrice of [270, 300]) {
       const html = await detail(bundle("bundle-even-28", "Even Collection", bundlePrice, 0), [A, B]);
-      expect(html).not.toContain("you save");
+      expect(html).not.toContain("kurseni");
       expect(html).not.toContain("line-through");
     }
   });
 
   it("a free bundle reads Free, may state its saving, and is not called paid bundle checkout", async () => {
     const html = await detail(FREE, [A, B]);
-    expect(priceLine(html)).toContain(">Free<");
-    expect(priceLine(html)).toContain("you save 270 ALL");
-    expect(html).toContain("Bundle checkout coming soon");
+    expect(priceLine(html)).toContain(">Falas<");
+    expect(priceLine(html)).toContain("kurseni 270 lekë");
+    expect(html).toContain("Blerja e paketave vjen së shpejti");
     expect(html).not.toMatch(/paid bundle checkout/i);
     expect(html).not.toContain("15.00");
   });
@@ -508,9 +508,9 @@ describe("bundle detail page (rendered)", () => {
     const unpricedMember = book("book-null", "Libri Pa Çmim", null, 900);
     const html = await detail(PAID, [A, unpricedMember]);
     expect(html).toContain("Libri A");
-    expect(html).toContain("150 ALL");
+    expect(html).toContain("150 lekë");
     expect(html).toContain("Libri Pa Çmim");
-    expect(html).toContain("Price unavailable");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).not.toContain("9.00");
   });
 
@@ -529,8 +529,8 @@ describe("bundle detail page (rendered)", () => {
 
     const html = await detail(draftUnpriced, [A, B], AUTHOR);
     expect(html).toContain("Draft Unpriced");
-    expect(html).toContain("Price unavailable");
-    expect(html).toContain("This is your bundle");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
+    expect(html).toContain("Kjo është paketa juaj");
 
     await expect(detail(draftUnpriced, [A, B], READER)).rejects.toThrow();
   });
@@ -547,21 +547,21 @@ describe("author bundle dashboard and edit form (rendered)", () => {
     const html = await render(BundlesDashboardPage({ searchParams: Promise.resolve({}) }));
 
     expect(html).toContain("Unpriced Collection");
-    expect(html).toContain("Price unavailable");
+    expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).toContain("Paid Collection");
-    expect(html).toContain("199 ALL");
+    expect(html).toContain("199 lekë");
     expect(html).toContain("Free Collection");
     expect(html).toContain("Draft Collection");
-    expect(html).toContain("299 ALL");
+    expect(html).toContain("299 lekë");
     noDollarOrUsd(html);
     expect(html).not.toContain("25.00");
   });
 
-  it("the create form takes whole lek in a decimal text field labelled ALL", async () => {
+  it("the create form takes whole lek in a decimal text field labelled in lekë", async () => {
     install({ books: OWN_BOOKS, bundles: [], bundle_books: [], pen_names: [{ id: PEN, name: "Arta Autore", is_default: true, author_id: AUTHOR }] }, AUTHOR);
     const html = await render(BundlesDashboardPage({ searchParams: Promise.resolve({}) }));
 
-    expect(html).toContain("Bundle price (ALL)");
+    expect(html).toContain("Çmimi i paketës (lekë)");
     const input = priceInput(html);
     expect(input).toContain('type="text"');
     expect(input).toContain('inputMode="decimal"');
@@ -590,7 +590,7 @@ describe("author bundle dashboard and edit form (rendered)", () => {
     expect(input).toContain('value=""');
     expect(html).not.toContain("25.00");
     expect(html).not.toContain("2500");
-    expect(html).toContain("Bundle price (ALL)");
+    expect(html).toContain("Çmimi i paketës (lekë)");
     noDollarOrUsd(html);
   });
 
@@ -642,7 +642,7 @@ describe("bundle catalog pages: first-statement maintenance gate (ALL-WIRING-5)"
     ],
   ])("%s renders the maintenance notice without touching Supabase", async (_label, page) => {
     const html = await render(page() as Promise<unknown>);
-    expect(html).toContain("Scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
     expect(log).toEqual([]);
   });
 });

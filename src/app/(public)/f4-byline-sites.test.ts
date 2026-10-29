@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // 2026-10-19): every place a BOOK's author name shows uses
 // resolveBookByline -- the book's pen name, embedded from the
 // public_pen_names view as `pen` -- and links to that pen name's page.
-// The places that named the AUTHOR (book page "About the author" and
+// The places that named the AUTHOR (book page "Rreth autorit" and
 // "More by", the author page, Following, the follower email) now name
 // the pen name too (3a, 4a).
 
@@ -17,7 +17,7 @@ function readSrc(relativePath: string): string {
 const BYLINE_SITES: [file: string, expected: string[]][] = [
   ["components/book-shelf.tsx", ["authorName={resolveBookByline(book)}"]],
   [
-    "app/(public)/bookstore/page.tsx",
+    "app/(public)/librari/page.tsx",
     [
       // FeaturedBook (its "by" line and no-cover placeholder) and both card shelves.
       "const authorName = resolveBookByline(book);",
@@ -29,7 +29,7 @@ const BYLINE_SITES: [file: string, expected: string[]][] = [
   // HOME-PICKS-1: the newest list and the fan's picks share toCover.
   ["app/(public)/page.tsx", ["author: resolveBookByline(b),"]],
   [
-    "app/(public)/books/[id]/page.tsx",
+    "app/(public)/libra/[id]/page.tsx",
     ["const bookByline = resolveBookByline(book);", "authorName={bookByline}", "{bookByline}"],
   ],
   ["app/api/books/[id]/sample/route.ts", ["author: resolveBookByline(book),"]],
@@ -45,7 +45,7 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
 
   // BOOKSTORE ORNATE SHELF: the fourth site is the ornate shelf's author line.
   it("the bookstore resolves every book name through the byline (four sites), the bundle line through the bundle's pen name", () => {
-    const source = readSrc("app/(public)/bookstore/page.tsx");
+    const source = readSrc("app/(public)/librari/page.tsx");
     expect(source.match(/resolveBookByline\(book\)/g)).toHaveLength(4);
     expect(source).toContain("author: resolveBookByline(book),");
     expect(source).toContain("const authorName = bundle.pen?.name ?? null;");
@@ -56,7 +56,7 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
     for (const file of [
       "app/(public)/page.tsx",
       "app/api/books/[id]/sample/route.ts",
-      "app/(public)/bookstore/page.tsx",
+      "app/(public)/librari/page.tsx",
       "app/(public)/library/page.tsx",
       "app/(public)/wishlist/page.tsx",
       "lib/librum-choice.ts",
@@ -70,18 +70,18 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
 });
 
 describe("PEN-NAMES-1: places that named the author now name the pen name", () => {
-  it("book page: About the author and More by ... use the pen name and link to its page (3a)", () => {
-    const source = readSrc("app/(public)/books/[id]/page.tsx");
+  it("book page: Rreth autorit and More by ... use the pen name and link to its page (3a)", () => {
+    const source = readSrc("app/(public)/libra/[id]/page.tsx");
     expect(source).toContain("const authorName = bookByline;");
     expect(source).toContain('<p className="font-serif text-[1.375rem] text-primary">{authorName}</p>');
-    expect(source).toContain("title={authorName ? `More by ${authorName}` : \"More by this author\"}");
+    expect(source).toContain("title={authorName ? `Më shumë nga ${authorName}` : \"Më shumë nga ky autor\"}");
     expect(source).toContain('.eq("pen_name_id", book.pen_name_id)');
     expect(source).toMatch(/<Link href=\{penNamePath\} className=\{INLINE_LINK_CLASSES\}>\s*\{bookByline\}/);
-    expect(source).not.toMatch(/\/authors\/\$\{book\.author_id\}/);
+    expect(source).not.toMatch(/\/autore\/\$\{book\.author_id\}/);
   });
 
   it("the author page names its pen name and lists only that pen name's books and bundles (1a)", () => {
-    const source = readSrc("app/(public)/authors/[id]/page.tsx");
+    const source = readSrc("app/(public)/autore/[id]/page.tsx");
     expect(source).toContain("const authorPublicName = author.name;");
     expect(source.match(/\.eq\("pen_name_id", id\)/g)?.length).toBeGreaterThanOrEqual(4);
     expect(source).not.toMatch(/\.eq\("author_id", id\)/);
@@ -98,7 +98,8 @@ describe("PEN-NAMES-1: places that named the author now name the pen name", () =
   it("the follower email names the book's pen name (4a)", () => {
     const source = readSrc("lib/email.ts");
     expect(source).not.toContain("resolveBookByline");
-    expect(source).toContain("const authorName = penName.name;");
+    expect(source).toContain("const authorName = escapeEmailHtml(penName.name);");
+    expect(source).toContain("const subject = `${penName.name} publikoi një libër të ri`;");
   });
 
   it("the staff report page still shows the account's names (staff-only)", () => {

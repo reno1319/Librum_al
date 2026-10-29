@@ -5,7 +5,7 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 // Contact, at the bottom of Help and in the footer).
 export const SUPPORT_EMAIL = "support@librum.al";
 
-export const REPLY_PROMISE = "We reply within 3 working days.";
+export const REPLY_PROMISE = "Përgjigjemi brenda 3 ditëve të punës.";
 
 // 6. a: the WhatsApp contact stays hidden until a number is filled in
 // here, in international form with the plus sign ("+355 6X XXX XXXX";
@@ -42,7 +42,7 @@ export function whatsappShareHref(message: string): string {
 
 // A book with no byline to show is shared by its title alone.
 export function bookShareMessage(title: string, byline: string | null, url: string): string {
-  return byline ? `${title} by ${byline} on Librum: ${url}` : `${title} on Librum: ${url}`;
+  return byline ? `${title} nga ${byline} në Librum: ${url}` : `${title} në Librum: ${url}`;
 }
 
 // Published books only (a draft or unpublished page isn't worth
@@ -60,5 +60,5 @@ export function bookWhatsappShareHref(
   } catch {
     return null;
   }
-  return whatsappShareHref(bookShareMessage(book.title, byline, `${base}/books/${book.id}`));
+  return whatsappShareHref(bookShareMessage(book.title, byline, `${base}/libra/${book.id}`));
 }

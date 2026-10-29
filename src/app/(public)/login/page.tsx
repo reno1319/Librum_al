@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { login } from "@/app/(public)/auth/actions";
 import { translateAuthErrorMessage } from "@/lib/auth-error";
+import { authSuccessMessage } from "@/lib/auth-page-messages";
 import { Alert } from "@/components/ui/alert";
 import { SUSPENDED_MESSAGE } from "@/lib/suspension-gate";
 import { buttonClasses } from "@/components/ui/button";
@@ -8,8 +9,8 @@ import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Log in",
-  description: "Log in to your Librum account.",
+  title: "Hyni",
+  description: "Hyni në llogarinë tuaj në Librum.",
 };
 
 export default async function LoginPage({
@@ -18,11 +19,13 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string; success?: string; next?: string; suspended?: string }>;
 }) {
   const { error, success, next, suspended } = await searchParams;
+  // SQ-16: only Librum's own success line, never text from the address.
+  const successMessage = authSuccessMessage(success);
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
-      <h1 className="font-serif text-3xl font-normal">Log in</h1>
-      <p className="mt-1 text-sm text-muted">Welcome back to Librum.</p>
+      <h1 className="font-serif text-3xl font-normal">Hyni</h1>
+      <p className="mt-1 text-sm text-muted">Mirë se u kthyet në Librum.</p>
 
       {/* PEOPLE-2: set only by Proxy when it cuts off a suspended
           session. A banned sign-in gets the wrong-password message
@@ -37,16 +40,16 @@ export default async function LoginPage({
           {translateAuthErrorMessage(error)}
         </Alert>
       )}
-      {success && (
+      {successMessage && (
         <Alert variant="success" className="mt-4">
-          {success}
+          {successMessage}
         </Alert>
       )}
 
       <form action={login} className="mt-6 flex flex-col gap-4">
         {next && <input type="hidden" name="next" value={next} />}
         <label className="flex flex-col gap-1 text-sm">
-          Email
+          Adresa e emailit
           <input
             name="email"
             type="email"
@@ -57,7 +60,7 @@ export default async function LoginPage({
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          Password
+          Fjalëkalimi
           <input
             name="password"
             type="password"
@@ -68,20 +71,20 @@ export default async function LoginPage({
         </label>
 
         <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
-          Log in
+          Hyni
         </button>
       </form>
 
       <p className="mt-4 text-sm text-muted">
         <Link href="/forgot-password" className="focus-ring rounded-sm underline underline-offset-2 hover:decoration-2">
-          Forgot your password?
+          Keni harruar fjalëkalimin?
         </Link>
       </p>
 
       <p className="mt-2 text-sm text-muted">
-        No account yet?{" "}
+        Nuk keni ende llogari?{" "}
         <Link href="/signup" className="focus-ring rounded-sm font-medium text-primary underline">
-          Sign up
+          Regjistrohuni
         </Link>
       </p>
     </main>

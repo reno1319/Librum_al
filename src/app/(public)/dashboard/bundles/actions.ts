@@ -25,6 +25,7 @@ import {
 import { isBundleId, isConfirmedBundleDeletion } from "@/lib/bundle-delete";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
+  groupAllDigits,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
   parseCatalogPriceAll,
   resolveCatalogPriceState,
@@ -41,30 +42,30 @@ import { PEN_NAME_MIXED_MESSAGE, penNameErrorMessage } from "@/lib/pen-names";
 // it states -- the same shape createBook/updateBook use. It never
 // repeats what the author typed.
 const BUNDLE_PRICE_ERROR_MESSAGE =
-  `Enter the bundle price in lek: 0 for a free bundle, or a whole number from ` +
-  `${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}`;
+  `Shkruani çmimin e paketës në lekë: 0 për paketë falas, ose një numër të plotë nga ` +
+  `${MINIMUM_PAID_CATALOG_PRICE_ALL} deri në ${groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}`;
 
-const MISSING_BUNDLE_PRICE_MESSAGE = "Set a valid ALL price before publishing this bundle.";
+const MISSING_BUNDLE_PRICE_MESSAGE = "Vendosni çmimin e paketës në lekë para se ta publikoni.";
 
 // Fixed messages for a failed bundle write. The database's own error
 // text used to be redirected into the page verbatim; it is logged
 // server-side instead and never shown.
-const BUNDLE_CREATE_FAILED_MESSAGE = "Could not create the bundle. Please try again.";
-const BUNDLE_UNPUBLISH_FAILED_MESSAGE = "Could not unpublish the bundle. Please try again.";
+const BUNDLE_CREATE_FAILED_MESSAGE = "Paketa nuk u krijua dot. Provoni përsëri.";
+const BUNDLE_UNPUBLISH_FAILED_MESSAGE = "Paketa nuk u hoq dot nga publikimi. Provoni përsëri.";
 // BUNDLE-MEMBERSHIP-AUTH-1: a trusted bundle write either failed in the
 // database -- whose transaction then rolled back, so nothing changed --
 // or ended in a way the action cannot confirm (a lost or malformed
 // response). The messages say exactly which, and nothing more.
-const BUNDLE_SAVE_ROLLED_BACK_MESSAGE = "Could not save the bundle, so nothing was changed. Please try again.";
+const BUNDLE_SAVE_ROLLED_BACK_MESSAGE = "Paketa nuk u ruajt dot, ndaj nuk ndryshoi asgjë. Provoni përsëri.";
 const BUNDLE_SAVE_UNCONFIRMED_MESSAGE =
-  "We could not confirm whether your changes were saved. Reload this bundle to check before trying again.";
+  "Nuk mundëm të konfirmojmë nëse ndryshimet tuaja u ruajtën. Rifreskoni këtë paketë për ta kontrolluar para se të provoni përsëri.";
 const BUNDLE_CREATE_UNCONFIRMED_MESSAGE =
-  "We could not confirm whether the bundle was created. Check your bundles before trying again.";
+  "Nuk mundëm të konfirmojmë nëse paketa u krijua. Kontrolloni paketat tuaja para se të provoni përsëri.";
 // BUNDLE-DELETE-SAFETY-1: shown for every delete that did not prove it
 // removed exactly the requested bundle. It never says the bundle is
 // gone, and never repeats what the database said.
 const BUNDLE_DELETE_UNCONFIRMED_MESSAGE =
-  "We could not confirm that the bundle was deleted. Reload this page to check before trying again.";
+  "Nuk mundëm të konfirmojmë që paketa u fshi. Rifreskoni këtë faqe për ta kontrolluar para se të provoni përsëri.";
 
 // PHASE-2C bundle-membership-integrity: an explicit `.returns<T[]>()`
 // shape for performBundlePublish()'s own bundle_books->books membership
@@ -86,7 +87,7 @@ async function resolveBookSelection(
   const bookIds = formData.getAll("bookIds").map(String);
 
   if (bookIds.length < 2) {
-    return { bookIds: null, error: "Choose+at+least+2+books" };
+    return { bookIds: null, error: encodeURIComponent("Zgjidhni të paktën 2 libra") };
   }
 
   // BUNDLE-MEMBERSHIP-AUTH-1: a repeated id is refused outright rather
@@ -94,7 +95,7 @@ async function resolveBookSelection(
   // trusted writer refuses duplicates too; this keeps the request from
   // ever reaching it.
   if (new Set(bookIds).size !== bookIds.length) {
-    return { bookIds: null, error: "Choose+only+your+own+published+books" };
+    return { bookIds: null, error: encodeURIComponent("Zgjidhni vetëm librat tuaj të publikuar") };
   }
 
   const { data: books } = await supabase
@@ -105,7 +106,7 @@ async function resolveBookSelection(
     .in("id", bookIds);
 
   if (!books || books.length !== bookIds.length) {
-    return { bookIds: null, error: "Choose+only+your+own+published+books" };
+    return { bookIds: null, error: encodeURIComponent("Zgjidhni vetëm librat tuaj të publikuar") };
   }
 
   // PEN-NAMES-1 (11a): one pen name per bundle -- and, from the create
@@ -151,7 +152,7 @@ export async function createBundle(formData: FormData) {
   const parsedPrice = parseCatalogPriceAll(formData.get("price"));
 
   if (!title) {
-    redirect("/dashboard/bundles?error=Please+fill+in+every+field");
+    redirect(`/dashboard/bundles?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   // A rejected price performs NO insert: this redirect precedes every
@@ -218,7 +219,7 @@ export async function createBundle(formData: FormData) {
   }
 
   revalidatePath("/dashboard/bundles");
-  redirect("/dashboard/bundles?success=Bundle+created+as+a+draft");
+  redirect(`/dashboard/bundles?success=${encodeURIComponent("Paketa u krijua si draft")}`);
 }
 
 export async function updateBundle(bundleId: string, formData: FormData) {
@@ -260,7 +261,7 @@ export async function updateBundle(bundleId: string, formData: FormData) {
   const parsedPrice = parseCatalogPriceAll(formData.get("price"));
 
   if (!title) {
-    redirect(`/dashboard/bundles/${bundleId}/edit?error=Please+fill+in+every+field`);
+    redirect(`/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   // Precedes the single trusted save (details AND membership)
@@ -364,7 +365,7 @@ export async function updateBundle(bundleId: string, formData: FormData) {
     });
     if (outcome === "unconfirmed") {
       revalidatePath("/dashboard/bundles");
-      revalidatePath(`/bundles/${bundleId}`);
+      revalidatePath(`/paketa/${bundleId}`);
     }
     const message =
       outcome === "changed"
@@ -376,8 +377,8 @@ export async function updateBundle(bundleId: string, formData: FormData) {
   }
 
   revalidatePath("/dashboard/bundles");
-  revalidatePath(`/bundles/${bundleId}`);
-  redirect("/dashboard/bundles?success=Bundle+updated");
+  revalidatePath(`/paketa/${bundleId}`);
+  redirect(`/dashboard/bundles?success=${encodeURIComponent("Paketa u përditësua")}`);
 }
 
 type PerformBundlePublishResult =
@@ -581,10 +582,10 @@ export async function publishBundle(bundleId: string) {
     // identical situation -- it names no variable, environment or payout
     // state.
     if (result.reason === "paid_mode_required") {
-      redirect("/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now");
+      redirect(`/dashboard/bundles?error=${encodeURIComponent("Publikimi me pagesë nuk është i mundur tani")}`);
     }
     if (result.reason === "insufficient_members") {
-      redirect("/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books");
+      redirect(`/dashboard/bundles?error=${encodeURIComponent("Kjo paketë ka nevojë për të paktën 2 libra të publikuar")}`);
     }
     redirect("/dashboard/bundles");
   }
@@ -689,5 +690,5 @@ export async function deleteBundle(bundleId: string) {
   }
 
   revalidatePath("/dashboard/bundles");
-  redirect("/dashboard/bundles?success=Bundle+deleted");
+  redirect(`/dashboard/bundles?success=${encodeURIComponent("Paketa u fshi")}`);
 }

@@ -61,7 +61,7 @@ describe("createSeries: ERR-2 error-message mapping", () => {
 
     const redirectedTo = mockRedirect.mock.calls[0][0] as string;
     expect(redirectedTo).toContain(
-      encodeURIComponent("We couldn't create the series. Please try again."),
+      encodeURIComponent("Seria nuk u krijua dot. Provoni përsëri."),
     );
     expect(redirectedTo).not.toContain("row-level security");
   });
@@ -73,7 +73,7 @@ describe("createSeries: ERR-2 error-message mapping", () => {
     await expect(createSeries(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining("error=Please+enter+a+series+title"),
+      expect.stringContaining("error=Shkruani%20titullin%20e%20seris%C3%AB"),
     );
     expect(mockInsertSeries).not.toHaveBeenCalled();
   });
@@ -99,7 +99,7 @@ describe("createSeries: PEN-NAMES-1 (11a) pen name", () => {
     formData.set("title", "Saga");
     formData.set("penNameId", "pen-other");
     await expect(createSeries(formData)).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect.mock.calls[0][0]).toContain(encodeURIComponent("Please choose one of your pen names."));
+    expect(mockRedirect.mock.calls[0][0]).toContain(encodeURIComponent("Zgjidhni një nga pseudonimet tuaja."));
     expect(mockInsertSeries).not.toHaveBeenCalled();
   });
 

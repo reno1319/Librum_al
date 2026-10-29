@@ -145,7 +145,7 @@ describe("parseFixedDiscountAll: rejected inputs", () => {
     ["empty", ""],
     ["spaces", "   "],
     ["tab and newline", "\t\n"],
-    ["currency suffix", "250 ALL"],
+    ["currency suffix", "250 lekë"],
     ["currency prefix", "ALL 250"],
     ["lek suffix", "250L"],
     ["dollar", "$5"],
@@ -184,14 +184,14 @@ describe("parseFixedDiscountAll: rejected inputs", () => {
 
 describe("formatFixedDiscountAll", () => {
   it.each([
-    [1, "1 ALL"],
-    [98, "98 ALL"],
-    [99, "99 ALL"],
-    [250, "250 ALL"],
-    [999, "999 ALL"],
-    [1000, "1.000 ALL"],
-    [12345, "12.345 ALL"],
-    [100_000, "100.000 ALL"],
+    [1, "1 lek"],
+    [98, "98 lekë"],
+    [99, "99 lekë"],
+    [250, "250 lekë"],
+    [999, "999 lekë"],
+    [1000, "1.000 lekë"],
+    [12345, "12.345 lekë"],
+    [100_000, "100.000 lekë"],
   ])("%d -> %j (no catalog minimum applied)", (input, expected) => {
     expect(formatFixedDiscountAll(input)).toBe(expected);
   });
@@ -214,36 +214,36 @@ describe("describeDiscountCode", () => {
   const none = { percent_off: null, amount_off_cents: null, amount_off_all: null };
 
   it("percentage codes are displayed exactly as before", () => {
-    expect(describeDiscountCode({ ...none, percent_off: 1 })).toEqual({ kind: "percent", label: "1% off" });
-    expect(describeDiscountCode({ ...none, percent_off: 20 })).toEqual({ kind: "percent", label: "20% off" });
-    expect(describeDiscountCode({ ...none, percent_off: 100 })).toEqual({ kind: "percent", label: "100% off" });
+    expect(describeDiscountCode({ ...none, percent_off: 1 })).toEqual({ kind: "percent", label: "1% zbritje" });
+    expect(describeDiscountCode({ ...none, percent_off: 20 })).toEqual({ kind: "percent", label: "20% zbritje" });
+    expect(describeDiscountCode({ ...none, percent_off: 100 })).toEqual({ kind: "percent", label: "100% zbritje" });
   });
 
   it("fixed ALL codes are displayed in lek without the catalog minimum", () => {
-    expect(describeDiscountCode({ ...none, amount_off_all: 1 })).toEqual({ kind: "fixed_all", label: "1 ALL off" });
-    expect(describeDiscountCode({ ...none, amount_off_all: 50 })).toEqual({ kind: "fixed_all", label: "50 ALL off" });
+    expect(describeDiscountCode({ ...none, amount_off_all: 1 })).toEqual({ kind: "fixed_all", label: "1 lek zbritje" });
+    expect(describeDiscountCode({ ...none, amount_off_all: 50 })).toEqual({ kind: "fixed_all", label: "50 lekë zbritje" });
     expect(describeDiscountCode({ ...none, amount_off_all: 2500 })).toEqual({
       kind: "fixed_all",
-      label: "2.500 ALL off",
+      label: "2.500 lekë zbritje",
     });
   });
 
   it("legacy amount_off_cents codes are USD, marked inapplicable, and never labelled as ALL", () => {
     const display = describeDiscountCode({ ...none, amount_off_cents: 500 });
-    expect(display).toEqual({ kind: "legacy_usd", label: "USD 5.00 off", notice: LEGACY_USD_DISCOUNT_NOTICE });
-    expect(LEGACY_USD_DISCOUNT_NOTICE).toMatch(/legacy/i);
-    expect(LEGACY_USD_DISCOUNT_NOTICE).toMatch(/not applicable to ALL checkout/);
+    expect(display).toEqual({ kind: "legacy_usd", label: "USD 5.00 zbritje", notice: LEGACY_USD_DISCOUNT_NOTICE });
+    expect(LEGACY_USD_DISCOUNT_NOTICE).toMatch(/e vjetër/i);
+    expect(LEGACY_USD_DISCOUNT_NOTICE).toMatch(/nuk vlen për pagesat në lekë/);
     // The number is never presented as lek, in either spelling.
     expect(display.label).not.toMatch(/ALL/);
     expect(display.label).not.toMatch(/5,00|500,00/);
   });
 
   it.each([
-    [1, "USD 0.01 off"],
-    [99, "USD 0.99 off"],
-    [100, "USD 1.00 off"],
-    [1999, "USD 19.99 off"],
-    [123456, "USD 1,234.56 off"],
+    [1, "USD 0.01 zbritje"],
+    [99, "USD 0.99 zbritje"],
+    [100, "USD 1.00 zbritje"],
+    [1999, "USD 19.99 zbritje"],
+    [123456, "USD 1,234.56 zbritje"],
   ])("legacy cents %d render exactly as %j (integer slicing, no float)", (cents, label) => {
     expect(describeDiscountCode({ ...none, amount_off_cents: cents }).label).toBe(label);
   });
@@ -264,7 +264,7 @@ describe("describeDiscountCode", () => {
       { ...none, amount_off_cents: -500 },
       { ...none, amount_off_cents: 1.5 },
     ]) {
-      expect(describeDiscountCode(shape)).toEqual({ kind: "unrecognized", label: "Unrecognized discount" });
+      expect(describeDiscountCode(shape)).toEqual({ kind: "unrecognized", label: "Zbritje e panjohur" });
     }
   });
 });

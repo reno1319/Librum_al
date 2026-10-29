@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { resolveSiteOrigin } from "@/lib/site-url";
+import { QUESTIONS_LINE } from "@/lib/book-review-copy";
 import { formatTransactionMinorUnits, type TransactionCurrency } from "@/lib/transaction-money";
 
 const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
@@ -38,6 +39,47 @@ export async function sendEmail(to: string, subject: string, html: string) {
   }
 }
 
+// ALBANIAN-12 (PC2): Resend's batch endpoint takes up to 100 emails per
+// call, and the account allows about 2 calls a second, so one email per
+// follower in parallel would be refused past the first few. Batches go
+// one after another with a pause between them. Best effort, like
+// sendEmail: a refused or failed batch is logged (never an address) and
+// the next batch is still tried.
+export const EMAIL_BATCH_SIZE = 100;
+export const EMAIL_BATCH_PAUSE_MS = 600;
+
+type EmailMessage = { to: string; subject: string; html: string };
+
+export async function sendEmailBatch(
+  messages: EmailMessage[],
+  { pauseMs = EMAIL_BATCH_PAUSE_MS }: { pauseMs?: number } = {},
+) {
+  if (messages.length === 0) return;
+  if (!process.env.RESEND_API_KEY) {
+    console.warn(`RESEND_API_KEY not set — skipping ${messages.length} email(s) "${messages[0].subject}"`);
+    return;
+  }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  for (let start = 0; start < messages.length; start += EMAIL_BATCH_SIZE) {
+    if (start > 0 && pauseMs > 0) await new Promise((resolve) => setTimeout(resolve, pauseMs));
+    const batch = messages.slice(start, start + EMAIL_BATCH_SIZE).map((m) => ({ from: FROM, ...m }));
+    try {
+      const { error } = await resend.batch.send(batch);
+      if (error) {
+        console.error("Failed to send email batch: Resend refused it", {
+          subject: batch[0].subject,
+          count: batch.length,
+          name: error.name ?? null,
+          statusCode: error.statusCode ?? null,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to send email batch:", error);
+    }
+  }
+}
+
 // ALL-TXN-CURRENCY-4: every purchase email states its amount in the
 // transaction's own, explicitly supplied currency, through the shared
 // integer-only formatter -- never a hard-coded "$". There is no default:
@@ -71,16 +113,16 @@ export async function sendPurchaseEmails(
   ]);
 
   const amount = formatEmailAmount(amountCents, currency);
-  const bookUrl = `${origin}/books/${bookId}`;
+  const bookUrl = `${origin}/libra/${bookId}`;
 
   if (reader?.user?.email) {
     await sendEmail(
       reader.user.email,
-      "Your Librum purchase receipt",
+      "Konfirmimi i blerjes suaj në Librum",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Thanks for your purchase!</h1>
-        <p>You bought <strong>${book.title}</strong> for ${amount}.</p>
-        <p><a href="${bookUrl}">View your book</a></p>
+        <h1 style="font-size: 20px;">Faleminderit për blerjen!</h1>
+        <p>Bletë librin <strong>${escapeEmailHtml(book.title)}</strong> për ${amount}.</p>
+        <p><a href="${bookUrl}">Shikoni librin</a></p>
       </div>`,
     );
   }
@@ -88,11 +130,11 @@ export async function sendPurchaseEmails(
   if (author?.user?.email) {
     await sendEmail(
       author.user.email,
-      "You made a sale on Librum",
+      "Bëtë një shitje në Librum",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">You made a sale!</h1>
-        <p><strong>${book.title}</strong> just sold for ${amount}.</p>
-        <p><a href="${origin}/dashboard/sales">View your sales</a></p>
+        <h1 style="font-size: 20px;">Bëtë një shitje!</h1>
+        <p><strong>${escapeEmailHtml(book.title)}</strong> sapo u shit për ${amount}.</p>
+        <p><a href="${origin}/dashboard/sales">Shikoni shitjet tuaja</a></p>
       </div>`,
     );
   }
@@ -123,16 +165,16 @@ export async function sendBundlePurchaseEmails(
   ]);
 
   const amount = formatEmailAmount(amountCents, currency);
-  const bundleUrl = `${origin}/bundles/${bundleId}`;
+  const bundleUrl = `${origin}/paketa/${bundleId}`;
 
   if (reader?.user?.email) {
     await sendEmail(
       reader.user.email,
-      "Your Librum purchase receipt",
+      "Konfirmimi i blerjes suaj në Librum",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Thanks for your purchase!</h1>
-        <p>You bought the <strong>${bundle.title}</strong> bundle for ${amount}.</p>
-        <p><a href="${bundleUrl}">View your bundle</a></p>
+        <h1 style="font-size: 20px;">Faleminderit për blerjen!</h1>
+        <p>Bletë paketën <strong>${escapeEmailHtml(bundle.title)}</strong> për ${amount}.</p>
+        <p><a href="${bundleUrl}">Shikoni paketën</a></p>
       </div>`,
     );
   }
@@ -140,11 +182,11 @@ export async function sendBundlePurchaseEmails(
   if (author?.user?.email) {
     await sendEmail(
       author.user.email,
-      "You made a sale on Librum",
+      "Bëtë një shitje në Librum",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">You made a sale!</h1>
-        <p>Your <strong>${bundle.title}</strong> bundle just sold for ${amount}.</p>
-        <p><a href="${origin}/dashboard/sales">View your sales</a></p>
+        <h1 style="font-size: 20px;">Bëtë një shitje!</h1>
+        <p>Paketa juaj <strong>${escapeEmailHtml(bundle.title)}</strong> sapo u shit për ${amount}.</p>
+        <p><a href="${origin}/dashboard/sales">Shikoni shitjet tuaja</a></p>
       </div>`,
     );
   }
@@ -190,16 +232,16 @@ export async function sendSnapshotBundlePurchaseEmails(
   // this purchase did -- link to the reader's library instead when
   // there's no bundle_id to point at, since that's always a valid
   // destination for what they just bought.
-  const bundleUrl = bundleId ? `${origin}/bundles/${bundleId}` : `${origin}/library`;
+  const bundleUrl = bundleId ? `${origin}/paketa/${bundleId}` : `${origin}/library`;
 
   if (reader?.user?.email) {
     await sendEmail(
       reader.user.email,
-      "Your Librum purchase receipt",
+      "Konfirmimi i blerjes suaj në Librum",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Thanks for your purchase!</h1>
-        <p>You bought the <strong>${bundleTitle}</strong> bundle for ${amount}.</p>
-        <p><a href="${bundleUrl}">View your bundle</a></p>
+        <h1 style="font-size: 20px;">Faleminderit për blerjen!</h1>
+        <p>Bletë paketën <strong>${escapeEmailHtml(bundleTitle)}</strong> për ${amount}.</p>
+        <p><a href="${bundleUrl}">Shikoni paketën</a></p>
       </div>`,
     );
   }
@@ -207,11 +249,11 @@ export async function sendSnapshotBundlePurchaseEmails(
   if (author?.user?.email) {
     await sendEmail(
       author.user.email,
-      "You made a sale on Librum",
+      "Bëtë një shitje në Librum",
       `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">You made a sale!</h1>
-        <p>Your <strong>${bundleTitle}</strong> bundle just sold for ${amount}.</p>
-        <p><a href="${origin}/dashboard/sales">View your sales</a></p>
+        <h1 style="font-size: 20px;">Bëtë një shitje!</h1>
+        <p>Paketa juaj <strong>${escapeEmailHtml(bundleTitle)}</strong> sapo u shit për ${amount}.</p>
+        <p><a href="${origin}/dashboard/sales">Shikoni shitjet tuaja</a></p>
       </div>`,
     );
   }
@@ -219,9 +261,10 @@ export async function sendSnapshotBundlePurchaseEmails(
 
 // Only called on a genuine first publish (draft -> published), not on
 // every unpublish/republish toggle — see the check in publishBook.
-// Follower emails are looked up one at a time via the admin auth API,
-// same as the reader/author lookups above; fine at this project's
-// scale, but would need a bulk lookup if follower counts ever got large.
+// Follower emails are looked up through the admin auth API, at most
+// EMAIL_BATCH_SIZE at a time, and sent through sendEmailBatch
+// (ALBANIAN-12, PC2). The pen name and title are escaped in the HTML,
+// and the footer tells the reader how to stop these emails.
 export async function sendNewBookEmails(
   admin: ReturnType<typeof createAdminClient>,
   { bookId, authorId }: { bookId: string; authorId: string },
@@ -250,25 +293,28 @@ export async function sendNewBookEmails(
 
   if (!penName || !follows || follows.length === 0) return;
 
-  const authorName = penName.name;
-  const bookUrl = `${origin}/books/${bookId}`;
+  const authorName = escapeEmailHtml(penName.name);
+  const bookUrl = `${origin}/libra/${bookId}`;
+  const subject = `${penName.name} publikoi një libër të ri`;
+  const html = `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+          <h1 style="font-size: 20px;">Libër i ri nga ${authorName}</h1>
+          <p><strong>${escapeEmailHtml(book.title)}</strong> sapo doli në Librari.</p>
+          <p><a href="${bookUrl}">Shikoni librin</a></p>
+          <p style="font-size: 12px; color: #666;">E morët këtë email sepse ndiqni ${authorName} në Librum. Që të mos merrni më email të tillë, hapni <a href="${origin}/following">Autorët që ndiqni</a> dhe shtypni "Mos ndiqni më".</p>
+        </div>`;
 
-  await Promise.all(
-    follows.map(async ({ follower_id: followerId }) => {
-      const { data: follower } = await admin.auth.admin.getUserById(followerId);
-      if (!follower?.user?.email) return;
+  const emails: string[] = [];
+  for (let start = 0; start < follows.length; start += EMAIL_BATCH_SIZE) {
+    const found = await Promise.all(
+      follows.slice(start, start + EMAIL_BATCH_SIZE).map(async ({ follower_id: followerId }) => {
+        const { data: follower } = await admin.auth.admin.getUserById(followerId);
+        return follower?.user?.email ?? null;
+      }),
+    );
+    for (const email of found) if (email) emails.push(email);
+  }
 
-      await sendEmail(
-        follower.user.email,
-        `${authorName} just published a new book`,
-        `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-          <h1 style="font-size: 20px;">New from ${authorName}</h1>
-          <p><strong>${book.title}</strong> just went live.</p>
-          <p><a href="${bookUrl}">View the book</a></p>
-        </div>`,
-      );
-    }),
-  );
+  await sendEmailBatch(emails.map((to) => ({ to, subject, html })));
 }
 
 // ADMIN-2-TAKEDOWN (S8): every author- or staff-supplied value in the
@@ -303,20 +349,20 @@ export async function sendBookTakedownEmail(
   const origin = resolveSiteOrigin();
   const bundlesLine =
     bundleTitles.length > 0
-      ? `<p>We also unpublished: ${bundleTitles.map((t) => `<strong>${escapeEmailHtml(t)}</strong>`).join(", ")}.</p>`
+      ? `<p>Hoqëm nga publikimi edhe: ${bundleTitles.map((t) => `<strong>${escapeEmailHtml(t)}</strong>`).join(", ")}.</p>`
       : "";
 
   await sendEmail(
     to,
-    "Librum took your book down",
+    "Librum e hoqi librin tuaj nga Libraria",
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">We took <strong>${escapeEmailHtml(title)}</strong> down</h1>
-        <p>Reason: ${escapeEmailHtml(reasonLabel)}</p>
+        <h1 style="font-size: 20px;">E hoqëm librin <strong>${escapeEmailHtml(title)}</strong> nga Libraria</h1>
+        <p>Arsyeja: ${escapeEmailHtml(reasonLabel)}</p>
         <p>${escapeEmailHtmlWithBreaks(message)}</p>
         ${bundlesLine}
-        <p>You can't publish it again until we review it. Readers who already bought it keep it.</p>
-        <p>Questions? Write to support@librum.al</p>
-        <p><a href="${origin}/dashboard">Open your dashboard</a></p>
+        <p>Nuk mund ta publikoni përsëri derisa ta shqyrtojmë. Lexuesit që e kanë blerë e mbajnë.</p>
+        <p>${QUESTIONS_LINE}</p>
+        <p><a href="${origin}/dashboard">Hapni panelin e autorit</a></p>
       </div>`,
   );
 }
@@ -329,11 +375,11 @@ export async function sendBookApprovedEmail(to: string, { title, bookId }: { tit
   const origin = resolveSiteOrigin();
   await sendEmail(
     to,
-    `Your book “${title}” is live on Librum`,
+    `Libri juaj "${title}" u publikua në Librum`,
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Your book <strong>${escapeEmailHtml(title)}</strong> is live on Librum</h1>
-        <p>We checked it and it's now in the Bookstore.</p>
-        <p><a href="${origin}/books/${encodeURIComponent(bookId)}">See your book</a></p>
+        <h1 style="font-size: 20px;">Libri juaj <strong>${escapeEmailHtml(title)}</strong> u publikua në Librum</h1>
+        <p>E kontrolluam dhe tani është në Librari.</p>
+        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
       </div>`,
   );
 }
@@ -345,13 +391,14 @@ export async function sendBookSentBackEmail(
   const origin = resolveSiteOrigin();
   await sendEmail(
     to,
-    `Librum sent “${title}” back`,
+    `Librum jua ktheu "${title}" për ndryshime`,
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Librum sent <strong>${escapeEmailHtml(title)}</strong> back</h1>
-        <p>Reason: ${escapeEmailHtml(reasonLabel)}</p>
+        <h1 style="font-size: 20px;">Librum jua ktheu librin <strong>${escapeEmailHtml(title)}</strong> për ndryshime</h1>
+        <p>Arsyeja: ${escapeEmailHtml(reasonLabel)}</p>
         <p>${escapeEmailHtmlWithBreaks(message)}</p>
-        <p>Fix it and send it for review again. Questions? Write to support@librum.al</p>
-        <p><a href="${origin}/dashboard">Open your dashboard</a></p>
+        <p>Rregullojeni dhe dërgojeni përsëri për shqyrtim.</p>
+        <p>${QUESTIONS_LINE}</p>
+        <p><a href="${origin}/dashboard">Hapni panelin e autorit</a></p>
       </div>`,
   );
 }
@@ -363,12 +410,12 @@ export async function sendBookSentBackEmail(
 export async function sendAccountSuspendedEmail(to: string) {
   await sendEmail(
     to,
-    "Your Librum account is suspended",
+    "Llogaria juaj në Librum u pezullua",
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Your Librum account is suspended</h1>
-        <p>You can't sign in to Librum for now.</p>
-        <p>If you publish books on Librum, they are out of the Bookstore while your account is suspended. Readers who already bought them keep them.</p>
-        <p>Questions? Write to support@librum.al</p>
+        <h1 style="font-size: 20px;">Llogaria juaj në Librum u pezullua</h1>
+        <p>Për momentin nuk mund të hyni në Librum.</p>
+        <p>Nëse publikoni libra në Librum, ata nuk janë në Librari sa kohë që llogaria juaj është e pezulluar. Lexuesit që i kanë blerë i mbajnë.</p>
+        <p>${QUESTIONS_LINE}</p>
       </div>`,
   );
 }
@@ -377,13 +424,13 @@ export async function sendAccountSuspensionLiftedEmail(to: string) {
   const origin = resolveSiteOrigin();
   await sendEmail(
     to,
-    "Your Librum account is active again",
+    "Llogaria juaj në Librum është sërish aktive",
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Your Librum account is active again</h1>
-        <p>You can sign in again.</p>
-        <p>If you publish books on Librum, they are back in the Bookstore, except any that need review or were taken down.</p>
-        <p>Questions? Write to support@librum.al</p>
-        <p><a href="${origin}/login">Log in</a></p>
+        <h1 style="font-size: 20px;">Llogaria juaj në Librum është sërish aktive</h1>
+        <p>Mund të hyni përsëri.</p>
+        <p>Nëse publikoni libra në Librum, ata janë sërish në Librari, përveç atyre që presin shqyrtim ose që janë hequr.</p>
+        <p>${QUESTIONS_LINE}</p>
+        <p><a href="${origin}/login">Hyni</a></p>
       </div>`,
   );
 }

@@ -81,14 +81,14 @@ export function formatBundleSavingsAll(
 }
 
 /** Shown in place of a checkout control for a bundle with no ALL price. */
-export const BUNDLE_UNAVAILABLE_NOTICE = "Not available right now";
+export const BUNDLE_UNAVAILABLE_NOTICE = "Nuk mund të blihet tani";
 
 /**
  * Shown in place of a checkout control for an explicitly priced bundle,
  * free or paid. Deliberately neutral: bundle checkout is closed under
  * every configuration, and a free bundle is not "paid bundle checkout".
  */
-export const BUNDLE_CHECKOUT_COMING_SOON_NOTICE = "Bundle checkout coming soon";
+export const BUNDLE_CHECKOUT_COMING_SOON_NOTICE = "Blerja e paketave vjen së shpejti";
 
 /**
  * The non-interactive notice a reader sees where a checkout control

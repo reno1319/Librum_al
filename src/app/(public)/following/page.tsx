@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { unfollowPenName } from "@/app/(public)/authors/[id]/actions";
+import { unfollowPenName } from "@/app/(public)/autore/[id]/actions";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
@@ -16,8 +16,8 @@ import type { Metadata } from "next";
 type FollowedPenName = Pick<PublicPenName, "id" | "name" | "avatar_path">;
 
 export const metadata: Metadata = {
-  title: "Following",
-  description: "Authors you follow on Librum.",
+  title: "Autorët që ndiqni",
+  description: "Autorët që ndiqni në Librum.",
 };
 
 export default async function FollowingPage() {
@@ -57,14 +57,14 @@ export default async function FollowingPage() {
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
       <PageHeader
-        title="Authors you follow"
-        description="You'll get an email whenever one of them publishes a new book."
+        title="Autorët që ndiqni"
+        description="Do të merrni një email sa herë që njëri prej tyre boton një libër të ri."
       />
 
       {orderedAuthors.length === 0 ? (
         <EmptyState
           className="mt-8"
-          title="You're not following any authors yet."
+          title="Nuk ndiqni ende asnjë autor."
         />
       ) : (
         <ul className="mt-8 flex flex-col gap-3">
@@ -97,7 +97,7 @@ export default async function FollowingPage() {
                 </Link>
                 <form action={unfollowPenName.bind(null, author.id)}>
                   <button type="submit" className={buttonClasses("outline", "sm")}>
-                    Unfollow
+                    Mos ndiqni më
                   </button>
                 </form>
               </li>

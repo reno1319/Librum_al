@@ -8,7 +8,7 @@ import { requireStaff } from "@/lib/staff";
 import { sendBookApprovedEmail, sendBookSentBackEmail, sendBookTakedownEmail, sendNewBookEmails } from "@/lib/email";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
-import { takedownReasonLabel } from "@/lib/takedown-reasons";
+import { authorTakedownReasonLabel } from "@/lib/takedown-reasons";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { checkPublishGate } from "@/lib/publish-readiness";
 import { removeUnretainedManuscripts } from "@/lib/book-reviews";
@@ -117,8 +117,8 @@ async function notifyAuthorAndRevalidate(
 ): Promise<void> {
   const paths = new Set<string>([
     "/",
-    "/bookstore",
-    `/books/${bookId}`,
+    "/librari",
+    `/libra/${bookId}`,
     "/admin/books",
     `/admin/books/${bookId}`,
     "/dashboard",
@@ -146,7 +146,7 @@ async function notifyAuthorAndRevalidate(
       : { data: null };
 
     const bundleIds = takedown?.bundle_ids ?? [];
-    for (const id of bundleIds) paths.add(`/bundles/${id}`);
+    for (const id of bundleIds) paths.add(`/paketa/${id}`);
 
     const [{ data: bundles }, { data: book }] = await Promise.all([
       bundleIds.length > 0
@@ -154,7 +154,7 @@ async function notifyAuthorAndRevalidate(
         : Promise.resolve({ data: [] as { id: string; title: string }[] }),
       admin.from("books").select("pen_name_id").eq("id", bookId).maybeSingle<{ pen_name_id: string | null }>(),
     ]);
-    if (book?.pen_name_id) paths.add(`/authors/${book.pen_name_id}`);
+    if (book?.pen_name_id) paths.add(`/autore/${book.pen_name_id}`);
 
     if (takedown?.author_id) {
       const { data: author } = await admin.auth.admin.getUserById(takedown.author_id);
@@ -163,7 +163,7 @@ async function notifyAuthorAndRevalidate(
         const titleById = new Map((bundles ?? []).map((b) => [b.id, b.title]));
         await sendBookTakedownEmail(email, {
           title: takedown.book_title,
-          reasonLabel: takedownReasonLabel(takedown.reason),
+          reasonLabel: authorTakedownReasonLabel(takedown.reason),
           message: takedown.message_to_author,
           bundleTitles: bundleIds.map((id) => titleById.get(id)).filter((t): t is string => !!t),
         });
@@ -297,6 +297,18 @@ export async function approveBookReviewAsStaff(formData: FormData) {
     redirect(withQuery(bookPath, "error", mapReviewRpcError(error)));
   }
 
+  // ALBANIAN-12: the author's own email goes first, so the follower
+  // batches (which pause between batches) can't hold it up.
+  try {
+    const { data: author } = await admin.auth.admin.getUserById(book.author_id);
+    const email = author?.user?.email;
+    if (email) await sendBookApprovedEmail(email, { title: book.title, bookId: book.id });
+  } catch (followUpError) {
+    console.error("approveBookReviewAsStaff: the author email failed after a successful approval", {
+      bookId: book.id,
+      error: followUpError,
+    });
+  }
   try {
     // J: followers hear only about a FIRST publication (unchanged rule).
     if (firstPublication === true) {
@@ -304,16 +316,6 @@ export async function approveBookReviewAsStaff(formData: FormData) {
     }
   } catch (followUpError) {
     console.error("approveBookReviewAsStaff: the followers email failed after a successful approval", {
-      bookId: book.id,
-      error: followUpError,
-    });
-  }
-  try {
-    const { data: author } = await admin.auth.admin.getUserById(book.author_id);
-    const email = author?.user?.email;
-    if (email) await sendBookApprovedEmail(email, { title: book.title, bookId: book.id });
-  } catch (followUpError) {
-    console.error("approveBookReviewAsStaff: the author email failed after a successful approval", {
       bookId: book.id,
       error: followUpError,
     });
@@ -329,9 +331,9 @@ export async function approveBookReviewAsStaff(formData: FormData) {
   revalidateAll(
     [
       "/",
-      "/bookstore",
-      `/books/${book.id}`,
-      ...(book.pen_name_id ? [`/authors/${book.pen_name_id}`] : []),
+      "/librari",
+      `/libra/${book.id}`,
+      ...(book.pen_name_id ? [`/autore/${book.pen_name_id}`] : []),
       "/admin",
       "/admin/books",
       bookPath,
@@ -390,7 +392,7 @@ export async function sendBackBookReviewAsStaff(formData: FormData) {
       if (email) {
         await sendBookSentBackEmail(email, {
           title: review.book_title,
-          reasonLabel: takedownReasonLabel(review.reason),
+          reasonLabel: authorTakedownReasonLabel(review.reason),
           message: review.message_to_author,
         });
       }

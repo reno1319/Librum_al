@@ -173,7 +173,7 @@ describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
     await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining(encodeURIComponent("Public author name can't be empty")),
+      expect.stringContaining(encodeURIComponent("Emri publik i autorit nuk mund të jetë bosh")),
     );
     expect(mockUpdateProfile).not.toHaveBeenCalled();
   });
@@ -184,7 +184,7 @@ describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
     await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining(encodeURIComponent("Public author name can't be empty")),
+      expect.stringContaining(encodeURIComponent("Emri publik i autorit nuk mund të jetë bosh")),
     );
     expect(mockUpdateProfile).not.toHaveBeenCalled();
   });
@@ -196,7 +196,7 @@ describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
     await expect(updateProfile(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/profile?error=${encodeURIComponent("Name must be 120 characters or fewer")}`,
+      `/dashboard/profile?error=${encodeURIComponent("Emri mund të ketë deri në 120 karaktere")}`,
     );
     expect(mockUpdateProfile).not.toHaveBeenCalled();
   });
@@ -223,7 +223,7 @@ describe("updateProfile: public_author_name (LIBRUM 2.0 AUTHOR-1A)", () => {
 
     expect(mockRedirect).toHaveBeenCalledWith(
       expect.stringContaining(
-        encodeURIComponent("Public author name must be 120 characters or fewer"),
+        encodeURIComponent("Emri publik i autorit mund të ketë deri në 120 karaktere"),
       ),
     );
     expect(mockUpdateProfile).not.toHaveBeenCalled();

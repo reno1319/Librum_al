@@ -98,11 +98,11 @@ export function AuthorBookRow({
   const isFree = resolveCatalogPriceState(book.price_all) === "free";
 
   const meta = isDraft
-    ? "Ebook · Draft"
+    ? "E-libër · Draft"
     : [
-        "Ebook",
+        "E-libër",
         book.genre,
-        book.published_at ? `Published ${formatTimestampAsDate(book.published_at)}` : "Published",
+        book.published_at ? `Publikuar më ${formatTimestampAsDate(book.published_at)}` : "I publikuar",
       ]
         .filter(Boolean)
         .join(" · ");
@@ -110,11 +110,9 @@ export function AuthorBookRow({
   const showRecent = !isDraft && recentCopies !== null;
   const recentNoun = isFree
     ? recentCopies === 1
-      ? "download"
-      : "downloads"
-    : recentCopies === 1
-      ? "sale"
-      : "sales";
+      ? "shkarkim"
+      : "shkarkime"
+    : "shitje";
 
   return (
     <li className="flex flex-wrap items-center gap-x-5 gap-y-3 px-4 py-4 sm:px-5 sm:py-5">
@@ -141,20 +139,20 @@ export function AuthorBookRow({
             phone mockup; from sm up they are their own columns. */}
         <p className="text-sm text-muted sm:hidden">
           {priceLabel}
-          {showRecent && ` · ${recentCopies} ${recentNoun} (30 days)`}
+          {showRecent && ` · ${recentCopies} ${recentNoun} (30 ditë)`}
         </p>
         <div className="mt-1 flex flex-wrap items-center gap-2">
           {isTakenDown ? (
-            <span className={`${TAG_CLASSES} bg-[#f6e3df] text-[#8e2a1e]`}>TAKEN DOWN</span>
+            <span className={`${TAG_CLASSES} bg-[#f6e3df] text-[#8e2a1e]`}>HEQUR NGA LIBRARIA</span>
           ) : isInReview ? (
             <span className={`${TAG_CLASSES} bg-[#fbf0d4] text-[#806510]`}>{IN_REVIEW_LABEL.toUpperCase()}</span>
           ) : isDraft ? (
             <span className={`${TAG_CLASSES} bg-reader-tint text-[#7a5a00]`}>DRAFT</span>
           ) : (
-            <span className={`${TAG_CLASSES} bg-[#e1f0e7] text-[#1e5c3e]`}>LIVE</span>
+            <span className={`${TAG_CLASSES} bg-[#e1f0e7] text-[#1e5c3e]`}>I PUBLIKUAR</span>
           )}
           {!isTakenDown && !isInReview && isDraft && missing.length > 0 && (
-            <span className="text-[0.8125rem] text-muted">Missing: {missing.join(" · ")}</span>
+            <span className="text-[0.8125rem] text-muted">{`Për t'u bërë: ${missing.join(" · ")}`}</span>
           )}
         </div>
         {takedown && (
@@ -178,7 +176,7 @@ export function AuthorBookRow({
       </div>
 
       <div className="hidden w-36 shrink-0 flex-col gap-0.5 sm:flex">
-        <span className="text-xs uppercase tracking-wide text-muted">Price</span>
+        <span className="text-xs uppercase tracking-wide text-muted">Çmimi</span>
         <span className="font-semibold text-foreground">{priceLabel}</span>
       </div>
 
@@ -186,7 +184,7 @@ export function AuthorBookRow({
         {showRecent && (
           <>
             <span className="text-xs uppercase tracking-wide text-muted">
-              {isFree ? "Downloads" : "Sales"} (30 days)
+              {isFree ? "Shkarkime" : "Shitje"} (30 ditë)
             </span>
             <span className="font-semibold text-foreground">{recentCopies}</span>
           </>
@@ -199,43 +197,43 @@ export function AuthorBookRow({
             href={`/dashboard/books/${book.id}/edit`}
             className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] bg-accent px-4 text-sm font-bold text-accent-foreground transition-colors hover:bg-[#c9a42c]"
           >
-            Continue setup
+            Vazhdoni përgatitjen
           </Link>
         ) : (
           <Link
             href={`/dashboard/books/${book.id}/edit`}
             className={buttonClasses("outline", "sm", "min-h-11 rounded-[3px] border-[#c9c0ae] px-4 font-semibold")}
           >
-            Edit
+            Ndryshoni
           </Link>
         )}
 
         <DismissableDetails className="sm:relative" closeOnFocusOut>
           <summary
-            aria-label={`More actions for ${book.title}`}
+            aria-label={`Më shumë veprime për ${book.title}`}
             className="focus-ring flex size-11 cursor-pointer list-none items-center justify-center rounded-[3px] border border-[#c9c0ae] bg-surface text-base font-bold text-foreground select-none hover:bg-surface-hover [&::-webkit-details-marker]:hidden"
           >
             <span aria-hidden="true">···</span>
           </summary>
           {/* Phone: the buttons have a full-width line of their own, and
               the menu opens under it from the left edge, so it never runs
-              off the screen however wide "Continue setup" is. From sm up
+              off the screen however wide "Vazhdoni përgatitjen" is. From sm up
               they end the row and it opens leftwards under the ···. */}
           <div className="absolute left-0 top-full z-10 mt-1 w-60 sm:left-auto sm:right-0 rounded-[3px] border border-border bg-surface py-1 shadow-md">
             <ul>
               <li>
                 <Link href={`/dashboard/books/${book.id}/edit#details`} className={MENU_ITEM_CLASSES}>
-                  Edit details
+                  Ndryshoni të dhënat
                 </Link>
               </li>
               <li>
                 <Link href={`/dashboard/books/${book.id}/edit#files`} className={MENU_ITEM_CLASSES}>
-                  Change manuscript or cover
+                  Ndryshoni dorëshkrimin ose kopertinën
                 </Link>
               </li>
               <li>
                 <Link href={`/dashboard/books/${book.id}/edit#pricing`} className={MENU_ITEM_CLASSES}>
-                  Change price
+                  Ndryshoni çmimin
                 </Link>
               </li>
               {/* PREVIEW-1 (A5, Renato 6a): before it's live (draft, in
@@ -243,21 +241,21 @@ export function AuthorBookRow({
                   the author's preview of it. */}
               {book.status !== "published" && (
                 <li>
-                  <Link href={`/books/${book.id}`} className={MENU_ITEM_CLASSES}>
-                    Preview
+                  <Link href={`/libra/${book.id}`} className={MENU_ITEM_CLASSES}>
+                    Shikoni librin para botimit
                   </Link>
                 </li>
               )}
               {book.status === "published" && (
                 <>
                   <li>
-                    <Link href={`/books/${book.id}`} className={MENU_ITEM_CLASSES}>
-                      View in Bookstore
+                    <Link href={`/libra/${book.id}`} className={MENU_ITEM_CLASSES}>
+                      Shikojeni në Librari
                     </Link>
                   </li>
                   <li>
                     <Link href={`/dashboard/books/${book.id}/edit#publishing`} className={MENU_ITEM_CLASSES}>
-                      Unpublish
+                      Hiqeni nga publikimi
                     </Link>
                   </li>
                 </>

@@ -26,16 +26,16 @@ export const dynamic = "force-dynamic";
 
 const STATIC_PUBLIC_ROUTES = [
   "",
-  "/about",
-  "/how-it-works",
-  "/pricing",
-  "/bookstore",
-  "/help",
-  "/help/reading",
-  "/contact",
-  "/terms",
-  "/privacy",
-  "/refunds",
+  "/rreth-nesh",
+  "/si-funksionon",
+  "/fitimet",
+  "/librari",
+  "/ndihme",
+  "/ndihme/leximi",
+  "/kontakt",
+  "/kushtet",
+  "/privatesia",
+  "/rimbursimet",
 ];
 
 // LIBRUM 2.0 BLOG-1D: the first dynamic, DB-backed entries this sitemap

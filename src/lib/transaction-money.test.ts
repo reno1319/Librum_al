@@ -23,28 +23,51 @@ const USD: CurrencyProvenance = { state: "resolved", currency: "USD" };
 
 describe("formatTransactionMinorUnits: ALL (100 minor units per lek)", () => {
   it.each([
-    [0, "0 ALL"],
-    [1, "0,01 ALL"],
-    [99, "0,99 ALL"],
-    [100, "1 ALL"],
-    [9900, "99 ALL"],
-    [12345, "123,45 ALL"],
-    [17910, "179,10 ALL"],
-    [123456, "1.234,56 ALL"],
-    [10000000, "100.000 ALL"],
-    [123456789012, "1.234.567.890,12 ALL"],
+    [0, "0 lekë"],
+    [1, "0,01 lekë"],
+    [99, "0,99 lekë"],
+    [100, "1 lek"],
+    [9900, "99 lekë"],
+    [12345, "123,45 lekë"],
+    [17910, "179,10 lekë"],
+    [123456, "1.234,56 lekë"],
+    [10000000, "100.000 lekë"],
+    [123456789012, "1.234.567.890,12 lekë"],
   ])("%i -> %s", (minor, expected) => {
     expect(formatTransactionMinorUnits(minor, "ALL")).toBe(expected);
   });
 
   it.each([
-    [-1, "-0,01 ALL"],
-    [-99, "-0,99 ALL"],
-    [-100, "-1 ALL"],
-    [-12345, "-123,45 ALL"],
-    [-123456, "-1.234,56 ALL"],
+    [-1, "-0,01 lekë"],
+    [-99, "-0,99 lekë"],
+    [-100, "-1 lek"],
+    [-12345, "-123,45 lekë"],
+    [-123456, "-1.234,56 lekë"],
   ])("negative %i -> %s", (minor, expected) => {
     expect(formatTransactionMinorUnits(minor, "ALL")).toBe(expected);
+  });
+});
+
+// ALBANIAN-1 (Renato 10-28, 2b): exactly one whole lek (with or without
+// a minus sign) reads "lek"; every other amount, qindarka included,
+// reads "lekë".
+describe("formatTransactionMinorUnits: lek / lekë", () => {
+  it.each([
+    [100, "1 lek"],
+    [-100, "-1 lek"],
+    [101, "1,01 lekë"],
+    [99, "0,99 lekë"],
+    [0, "0 lekë"],
+    [200, "2 lekë"],
+    [100100, "1.001 lekë"],
+  ])("%i -> %s", (minor, expected) => {
+    expect(formatTransactionMinorUnits(minor, "ALL")).toBe(expected);
+  });
+
+  it("never prints the old ALL code", () => {
+    for (const minor of [1, 100, 17910, 10000000]) {
+      expect(formatTransactionMinorUnits(minor, "ALL")).not.toContain("ALL");
+    }
   });
 });
 
@@ -85,12 +108,12 @@ describe("formatTransactionMinorUnits: the same amount never reads the same in t
   });
 
   it("-0 renders as zero, not negative zero", () => {
-    expect(formatTransactionMinorUnits(-0, "ALL")).toBe("0 ALL");
+    expect(formatTransactionMinorUnits(-0, "ALL")).toBe("0 lekë");
     expect(formatTransactionMinorUnits(-0, "USD")).toBe("USD 0.00");
   });
 
   it("the largest safe integer formats exactly, with no floating-point drift", () => {
-    expect(formatTransactionMinorUnits(Number.MAX_SAFE_INTEGER, "ALL")).toBe("90.071.992.547.409,91 ALL");
+    expect(formatTransactionMinorUnits(Number.MAX_SAFE_INTEGER, "ALL")).toBe("90.071.992.547.409,91 lekë");
     expect(formatTransactionMinorUnits(-Number.MAX_SAFE_INTEGER, "USD")).toBe("-USD 90,071,992,547,409.91");
   });
 });
@@ -191,7 +214,7 @@ describe("provenanceFromStoredCurrency", () => {
 
 describe("formatTransactionAmount", () => {
   it("formats a resolved amount in its own currency", () => {
-    expect(formatTransactionAmount(17910, ALL)).toBe("179,10 ALL");
+    expect(formatTransactionAmount(17910, ALL)).toBe("179,10 lekë");
     expect(formatTransactionAmount(999, USD)).toBe("USD 9.99");
   });
 
@@ -199,7 +222,7 @@ describe("formatTransactionAmount", () => {
     expect(formatTransactionAmount(999, { state: "unknown" })).toBe(CURRENCY_UNKNOWN_LABEL);
     expect(formatTransactionAmount(999, { state: "conflict" })).toBe(CURRENCY_CONFLICT_LABEL);
     expect(formatTransactionAmount(999, { state: "unsupported", currency: "EUR" })).toBe(
-      "Amount unavailable (unsupported currency EUR)",
+      "Shuma nuk është e disponueshme (monedhë e pambështetur EUR)",
     );
     for (const label of [
       formatTransactionAmount(999, { state: "unknown" }),

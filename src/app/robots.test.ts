@@ -33,7 +33,7 @@ describe("robots", () => {
 
   it("does not disallow public discovery routes", () => {
     const disallowed = rule.disallow as string[];
-    for (const path of ["/bookstore", "/books", "/authors", "/series", "/bundles"]) {
+    for (const path of ["/librari", "/libra", "/autore", "/seri", "/paketa"]) {
       expect(disallowed.some((d) => path.startsWith(d))).toBe(false);
     }
   });

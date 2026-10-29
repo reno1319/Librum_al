@@ -7,8 +7,8 @@ import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Reset password",
-  description: "Request a password reset link for your Librum account.",
+  title: "Rivendosni fjalëkalimin",
+  description: "Kërkoni një lidhje për të rivendosur fjalëkalimin e llogarisë suaj në Librum.",
 };
 
 export default async function ForgotPasswordPage({
@@ -20,7 +20,7 @@ export default async function ForgotPasswordPage({
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
-      <h1 className="font-serif text-3xl font-normal">Reset your password</h1>
+      <h1 className="font-serif text-3xl font-normal">Rivendosni fjalëkalimin</h1>
 
       {error && (
         <Alert variant="error" className="mt-4">
@@ -30,18 +30,18 @@ export default async function ForgotPasswordPage({
 
       {success ? (
         <Alert variant="success" className="mt-4">
-          If that email has an account, we&apos;ve sent a link to reset your
-          password.
+          Nëse ky email ka një llogari, ju dërguam një lidhje për të rivendosur
+          fjalëkalimin.
         </Alert>
       ) : (
         <>
           <p className="mt-1 text-sm text-muted">
-            Enter your email and we&apos;ll send you a password reset link.
+            Shkruani emailin dhe do t&apos;ju dërgojmë një lidhje për të rivendosur fjalëkalimin.
           </p>
 
           <form action={requestPasswordReset} className="mt-6 flex flex-col gap-4">
             <label className="flex flex-col gap-1 text-sm">
-              Email
+              Adresa e emailit
               <input
                 name="email"
                 type="email"
@@ -52,7 +52,7 @@ export default async function ForgotPasswordPage({
             </label>
 
             <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
-              Send reset link
+              Dërgoni lidhjen
             </button>
           </form>
         </>
@@ -60,7 +60,7 @@ export default async function ForgotPasswordPage({
 
       <p className="mt-6 text-sm text-muted">
         <Link href="/login" className="focus-ring rounded-sm font-medium text-primary underline">
-          Back to log in
+          Kthehuni te hyrja
         </Link>
       </p>
     </main>

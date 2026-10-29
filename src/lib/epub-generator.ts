@@ -27,7 +27,7 @@ export type EpubGeneratorInput = {
   sections: DocSection[];
   images: DocImage[];
   // LIBRUM 2.0 PUBLISHING-UX-1 PART B: optional -- omitted, null, or
-  // blank all resolve to "und" exactly as every caller already got
+  // blank all resolve to DEFAULT_EPUB_LANGUAGE ("sq" since SQ-17; was "und")
   // before this field existed (see resolveEpubLanguageCode() below).
   // No caller in this codebase passes a real value yet (books.language
   // did not exist until migration 044, and threading a live value from
@@ -38,14 +38,25 @@ export type EpubGeneratorInput = {
   language?: string | null;
 };
 
-// Falls back to "und" (the real, standards-defined ISO 639-2 code for
-// "undetermined") for an absent/null/blank language -- never guesses,
-// never crashes. See renderOpf()'s own PRE-COMMIT CORRECTION comment
-// below for why "und" specifically, not omission.
+// SQ-17: falls back to "sq" for an absent/null/blank language. Every
+// book on Librum is Albanian (Renato 10-28, ALBANIAN-9), and the Edit
+// Book page sends no language, so the old "und" left re-uploaded Word
+// books with no language for e-readers (hyphenation, read-aloud).
+export const DEFAULT_EPUB_LANGUAGE = "sq";
+
 function resolveEpubLanguageCode(language: string | null | undefined): string {
   const trimmed = language?.trim();
-  return trimmed ? trimmed : "und";
+  return trimmed ? trimmed : DEFAULT_EPUB_LANGUAGE;
 }
+
+// SQ-17: the reader-facing words Librum writes into a generated EPUB.
+export const EPUB_TOC_TITLE = "Përmbajtja";
+export const EPUB_TOC_ONLY_ENTRY = "Fillimi";
+export const EPUB_UNTITLED_SECTION = "Pjesë";
+// Placeholders docx-actions.ts packages with until the real title and
+// author name are known (normally replaced at once).
+export const UNTITLED_MANUSCRIPT_TITLE = "Dorëshkrim pa titull";
+export const UNKNOWN_AUTHOR_NAME = "Autor i panjohur";
 
 const XML_ESCAPE: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 function escapeXml(text: string): string {
@@ -76,7 +87,7 @@ function chapterFilename(index: number): string {
   return `chapter-${index + 1}.xhtml`;
 }
 
-function renderChapterXhtml(section: DocSection, index: number): string {
+function renderChapterXhtml(section: DocSection, index: number, language: string): string {
   const headingHtml = section.heading
     ? `<h1>${escapeXml(section.heading)}</h1>\n`
     : index === 0
@@ -84,10 +95,10 @@ function renderChapterXhtml(section: DocSection, index: number): string {
       : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${escapeXml(language)}" lang="${escapeXml(language)}">
 <head>
 <meta charset="utf-8"/>
-<title>${escapeXml(section.heading ?? "Section")}</title>
+<title>${escapeXml(section.heading ?? EPUB_UNTITLED_SECTION)}</title>
 <link rel="stylesheet" type="text/css" href="styles.css"/>
 </head>
 <body>
@@ -97,7 +108,7 @@ ${headingHtml}${section.html}
 `;
 }
 
-function renderNavXhtml(sections: DocSection[]): string {
+function renderNavXhtml(sections: DocSection[], language: string): string {
   const items = sections
     .map((section, i) =>
       section.heading
@@ -110,17 +121,17 @@ function renderNavXhtml(sections: DocSection[]): string {
   // no Heading 1 at all still needs a minimal, valid single entry
   // rather than an empty <ol>, per the brief's own "if no chapter
   // headings: use a minimal valid navigation entry" rule.
-  const list = items || `<li><a href="${chapterFilename(0)}">Start</a></li>`;
+  const list = items || `<li><a href="${chapterFilename(0)}">${EPUB_TOC_ONLY_ENTRY}</a></li>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${escapeXml(language)}" lang="${escapeXml(language)}">
 <head>
 <meta charset="utf-8"/>
-<title>Table of Contents</title>
+<title>${EPUB_TOC_TITLE}</title>
 </head>
 <body>
 <nav epub:type="toc" id="toc">
-<h1>Table of Contents</h1>
+<h1>${EPUB_TOC_TITLE}</h1>
 <ol>
 ${list}
 </ol>
@@ -159,7 +170,8 @@ function renderOpf(input: EpubGeneratorInput, modifiedAt: string): string {
   //
   // LIBRUM 2.0 PUBLISHING-UX-1 PART B: books.language now exists
   // (migration 044) -- resolveEpubLanguageCode() above still falls
-  // back to "und" for every caller that omits/nulls `input.language`
+  // back to a default for every caller that omits/nulls `input.language`
+  // (SQ-17: "sq", every book being Albanian; it was "und")
   // (which is every current caller; see this input type's own comment),
   // so this remains byte-for-byte the same output as before for any
   // book without a real language value, and only emits a real code once
@@ -217,7 +229,7 @@ ${spineItems}
 // that explicitly passes it (Part C's own wizard, once Book Details
 // collects a real Language before Files is ever reached) gets its
 // dc:language patched too, via the same resolveEpubLanguageCode()
-// fallback-to-"und" resolution generateEpub() already uses -- one
+// fallback resolution generateEpub() already uses ("sq" since SQ-17) -- one
 // resolution rule, shared, never two independently-invented ones.
 // LIBRUM 2.0 AUTHOR-1B: `authorName` MUST already be the caller's
 // resolved reader-facing name (resolvePublicAuthorName(profile) --
@@ -299,11 +311,15 @@ export async function generateEpub(input: EpubGeneratorInput): Promise<Buffer> {
 
   const modifiedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   zip.file("OEBPS/content.opf", renderOpf(input, modifiedAt));
-  zip.file("OEBPS/nav.xhtml", renderNavXhtml(input.sections));
+  // SQ-17: the pages carry the book's language too. patchEpubMetadata()
+  // only rewrites the OPF, so a later language change reaches dc:language
+  // but not these pages; every book is Albanian, so they agree.
+  const language = resolveEpubLanguageCode(input.language);
+  zip.file("OEBPS/nav.xhtml", renderNavXhtml(input.sections, language));
   zip.file("OEBPS/styles.css", STYLESHEET);
 
   input.sections.forEach((section, i) => {
-    zip.file(`OEBPS/${chapterFilename(i)}`, renderChapterXhtml(section, i));
+    zip.file(`OEBPS/${chapterFilename(i)}`, renderChapterXhtml(section, i, language));
   });
 
   for (const image of input.images) {

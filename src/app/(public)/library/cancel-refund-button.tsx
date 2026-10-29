@@ -14,14 +14,14 @@ export function CancelRefundButton() {
       className="rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-surface-hover disabled:opacity-60"
       onClick={(e) => {
         const confirmed = window.confirm(
-          "Cancel this refund request? You can submit a new one later if you change your mind.",
+          "Ta anuloni këtë kërkesë për rimbursim? Mund të dërgoni një të re më vonë nëse ndërroni mendje.",
         );
         if (!confirmed) {
           e.preventDefault();
         }
       }}
     >
-      {pending ? "Cancelling…" : "Cancel refund request"}
+      {pending ? "Duke anuluar…" : "Anuloni kërkesën për rimbursim"}
     </button>
   );
 }

@@ -14,8 +14,11 @@ import { AUTHOR_AGE_STATEMENT_VERSION } from "@/lib/author-age-statement";
 // authors from before AUTHOR-AGE-1 (skipped on purpose, Renato "5. a").
 //
 // Changing the Terms means a new TERMS_VERSION, so a record still says
-// which Terms the person agreed to ("Last updated: October 2026").
-export const TERMS_VERSION = "terms-2026-10";
+// which Terms the person agreed to. "terms-2026-10" was the English
+// text; "terms-sq-1" is the Albanian one (ALBANIAN-14, Renato 10-28
+// "2. a": it applies to new sign-ups and new authors, and nobody is
+// asked to accept again). Its date is POLICY_LAST_UPDATED.
+export const TERMS_VERSION = "terms-sq-1";
 
 // The sign-up form's and the Become-an-author form's Terms checkbox.
 export const TERMS_FIELD = "accept_terms";

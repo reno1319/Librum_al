@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// AUTHOR-AGE-1 (Renato 10-24, "6. a"): the "I'm 18 or older" tick on
+// AUTHOR-AGE-1 (Renato 10-24, "6. a"): the "Jam 18 vjeç ose më shumë" tick on
 // the sign-up page (shown only while "Author" is chosen) and on the
 // account page's "Become an author" form. The server checks are tested
 // in auth/actions.test.ts and account/become-author.test.ts.
@@ -23,7 +23,8 @@ describe("sign-up page", () => {
     const tick = html.match(/<input[^>]*name="confirm_author_age"[^>]*>/)?.[0] ?? "";
     expect(tick).toContain('type="checkbox"');
     expect(tick).not.toContain("required");
-    expect(html).toContain("I&#x27;m 18 or older");
+    expect(html).toContain("Jam 18 vjeç ose më shumë");
+    expect(html).not.toContain("18 or older");
     expect(html).toContain("hidden items-start gap-2 group-has-[[value=author]:checked]:flex");
     expect(html).toMatch(/<form[^>]*class="group /);
   });
@@ -31,10 +32,10 @@ describe("sign-up page", () => {
   it("an age refusal comes back with Author chosen and the message shown", async () => {
     const html = await renderSignup({
       role: "author",
-      error: "Authors must be 18 or older. Tick the box to confirm.",
+      error: "Autorët duhet të jenë 18 vjeç ose më shumë. Shënoni kutinë për ta konfirmuar.",
     });
     expect(html).toContain('<input type="radio" name="role" checked="" value="author"/>');
-    expect(html).toContain("Authors must be 18 or older. Tick the box to confirm.");
+    expect(html).toContain("Autorët duhet të jenë 18 vjeç ose më shumë. Shënoni kutinë për ta konfirmuar.");
   });
 });
 
@@ -43,7 +44,7 @@ describe("account page", () => {
   const source = readFileSync(path.join(root, "src/app/(public)/account/page.tsx"), "utf8");
 
   it("the Become an author form carries a required tick with the shared wording", () => {
-    const form = source.slice(source.indexOf("<form action={becomeAuthor}"), source.indexOf("Become an author\n"));
+    const form = source.slice(source.indexOf("<form action={becomeAuthor}"), source.indexOf("Bëhuni autor\n"));
     expect(form).toContain("name={AUTHOR_AGE_FIELD}");
     expect(form).toContain('type="checkbox"');
     expect(form).toContain("required");
@@ -52,10 +53,10 @@ describe("account page", () => {
 
   // SECURITY-9A (Renato, "2. a"): the Terms tick sits next to the 18+ one.
   it("the Become an author form also carries a required Terms tick", () => {
-    const form = source.slice(source.indexOf("<form action={becomeAuthor}"), source.indexOf("Become an author\n"));
+    const form = source.slice(source.indexOf("<form action={becomeAuthor}"), source.indexOf("Bëhuni autor\n"));
     const tick = form.match(/<input[^>]*name="accept_terms"[^>]*>/)?.[0] ?? "";
     expect(tick).toContain('type="checkbox"');
     expect(tick).toContain("required");
-    expect(form).toContain('href="/terms"');
+    expect(form).toContain('href="/kushtet"');
   });
 });

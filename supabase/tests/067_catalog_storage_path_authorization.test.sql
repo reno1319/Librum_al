@@ -283,7 +283,7 @@ select pg_temp.expect_error('authenticated', 'e0670000-0000-0000-0000-0000000000
   $q$insert into public.books (id, author_id, title, subtitle, description, keywords, isbn, language,
        publisher, edition, original_publication_date, genre, series_id, series_position, price_all)
      values ('e0671000-0000-0000-0000-0000000000c1', 'e0670000-0000-0000-0000-00000000000a', 'pathless draft',
-       null, 'desc', '', null, 'sq', null, null, null, 'Fiction',
+       null, 'desc', '', null, 'sq', null, null, null, 'Letërsi artistike',
        'e0673000-0000-0000-0000-00000000000a', 2, 199)$q$,
   '42501', 'permission denied for table books', 'part2 (PEN-NAMES-2): a pathless paid draft is no longer directly insertable');
 
@@ -337,7 +337,7 @@ select pg_temp.expect_error('authenticated', 'e0670000-0000-0000-0000-0000000000
        publisher, edition, original_publication_date, genre, series_id, series_position, price_all,
        cover_path, file_path)
      values ('e0671000-0000-0000-0000-0000000000c4', 'e0670000-0000-0000-0000-00000000000a', 'old createBook shape',
-       null, 'desc', '', null, 'sq', null, null, null, 'Fiction', null, null, 199,
+       null, 'desc', '', null, 'sq', null, null, null, 'Letërsi artistike', null, null, 199,
        'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000c4-cover.png',
        'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000c4.epub')$q$,
   '42501', 'permission denied for table books', 'part2: the pre-Patch-8 createBook session insert is refused');
@@ -400,7 +400,7 @@ select pg_temp.expect_ok('authenticated', 'e0670000-0000-0000-0000-00000000000a'
 select pg_temp.expect_ok('service_role', null,
   $q$insert into public.books (id, author_id, title, description, keywords, genre, price_all, cover_path, file_path)
      values ('e0671000-0000-0000-0000-0000000000e1', 'e0670000-0000-0000-0000-00000000000a', 'trusted create',
-       'desc', '', 'Fiction', 199,
+       'desc', '', 'Letërsi artistike', 199,
        'e0675000-0000-0000-0000-0000000000e1/cover.png',
        'e0670000-0000-0000-0000-00000000000a/e0671000-0000-0000-0000-0000000000e1.epub')
      returning id$q$,

@@ -58,10 +58,10 @@ type Status = "idle" | "converting" | "success" | "error";
 
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
 const MANUSCRIPTS_BUCKET = "manuscripts";
-const GENERIC_ERROR = "We couldn't process this manuscript. Please try again.";
-const TOO_LARGE_ERROR = "This manuscript is larger than the 50 MB limit.";
+const GENERIC_ERROR = "Ky dorëshkrim nuk u përpunua dot. Provoni përsëri.";
+const TOO_LARGE_ERROR = "Ky dorëshkrim e kalon kufirin prej 50 MB.";
 const UPLOAD_FAILED_ERROR =
-  "We couldn't upload your manuscript. Please check your connection and try again.";
+  "Dorëshkrimi juaj nuk u ngarkua. Kontrolloni lidhjen dhe provoni përsëri.";
 
 export function ManuscriptField({
   bookTitle,
@@ -485,7 +485,7 @@ export function ManuscriptField({
       <input ref={hiddenPathInputRef} type="hidden" name="manuscriptStoragePath" />
 
       <fieldset className="flex flex-col gap-2 text-sm">
-        <legend className="mb-1 font-semibold text-foreground">Manuscript format</legend>
+        <legend className="mb-1 font-semibold text-foreground">Formati i dorëshkrimit</legend>
         <div className="grid gap-3 sm:grid-cols-2">
           <label
             className={`${FORMAT_CARD_CLASSES} ${mode === "epub" ? FORMAT_CARD_SELECTED_CLASSES : FORMAT_CARD_IDLE_CLASSES}`}
@@ -497,7 +497,7 @@ export function ManuscriptField({
               className="focus-ring mt-0.5 h-5 w-5 shrink-0 accent-primary"
             />
             <span>
-              <strong className="font-bold">EPUB</strong> — best if your ebook is already professionally formatted
+              <strong className="font-bold">EPUB</strong>: më i miri nëse e-libri juaj është formatuar tashmë në mënyrë profesionale
             </span>
           </label>
           <label
@@ -510,7 +510,7 @@ export function ManuscriptField({
               className="focus-ring mt-0.5 h-5 w-5 shrink-0 accent-primary"
             />
             <span>
-              <strong className="font-bold">DOCX</strong> — Librum converts it into a reflowable EPUB
+              <strong className="font-bold">DOCX</strong>: Librum e kthen në EPUB që përshtatet me ekranin
             </span>
           </label>
         </div>
@@ -520,7 +520,7 @@ export function ManuscriptField({
         <div className="flex flex-col gap-2">
           <label className={PICKER_BOX_CLASSES}>
             <span className="font-semibold text-foreground">
-              {status === "success" ? "Replace manuscript" : "Manuscript file"}
+              {status === "success" ? "Zëvendësoni dorëshkrimin" : "Skedari i dorëshkrimit"}
             </span>
             <input
               type="file"
@@ -530,19 +530,19 @@ export function ManuscriptField({
               onChange={(e) => handleEpubChange(e.target.files?.[0] ?? null)}
             />
             <span className="text-sm text-muted">
-              EPUB · up to 50 MB.
+              EPUB · deri në 50 MB.
             </span>
           </label>
 
           {status === "converting" && (
             <p role="status" className="text-sm text-muted">
-              Uploading manuscript…
+              Po ngarkohet dorëshkrimi…
             </p>
           )}
 
           {status === "success" && readyName && (
             <p role="status" className="text-sm font-semibold text-primary">
-              Manuscript ready — {readyName}
+              Dorëshkrimi gati: {readyName}
             </p>
           )}
 
@@ -559,7 +559,7 @@ export function ManuscriptField({
         <div className="flex flex-col gap-2">
           <label className={PICKER_BOX_CLASSES}>
             <span className="font-semibold text-foreground">
-              {status === "success" ? "Replace manuscript" : "Manuscript file"}
+              {status === "success" ? "Zëvendësoni dorëshkrimin" : "Skedari i dorëshkrimit"}
             </span>
             <input
               type="file"
@@ -568,17 +568,17 @@ export function ManuscriptField({
               disabled={status === "converting"}
               onChange={(e) => handleDocxChange(e.target.files?.[0] ?? null)}
             />
-            <span className="text-sm text-muted">DOCX · up to 50 MB.</span>
+            <span className="text-sm text-muted">DOCX · deri në 50 MB.</span>
           </label>
           <p className="text-sm text-muted">
-            Librum preserves common manuscript structure such as headings, paragraphs,
-            basic formatting, lists, links, and supported images. Complex Word-specific
-            layout may require review after conversion.
+            Librum ruan strukturën e zakonshme të dorëshkrimit: titujt, paragrafët,
+            formatimin bazë, listat, lidhjet dhe imazhet e pranuara. Faqosja e ndërlikuar
+            e Word-it mund të duhet kontrolluar pas kthimit.
           </p>
 
           {status === "converting" && (
             <p role="status" className="text-sm text-muted">
-              Converting manuscript…
+              Po kthehet dorëshkrimi…
             </p>
           )}
 
@@ -594,11 +594,11 @@ export function ManuscriptField({
           {status === "success" && (
             <div role="status" className="rounded-card border-l-4 border-primary bg-surface px-3 py-2 text-sm">
               <p className="font-medium text-foreground">
-                Manuscript ready{readyName ? ` — ${readyName}` : ""}
+                Dorëshkrimi gati{readyName ? `: ${readyName}` : ""}
               </p>
               <p className="mt-1 text-muted">
-                Your generated EPUB passed Librum&apos;s validation. Review the ebook
-                before publishing.
+                EPUB-i i krijuar kaloi kontrollin e Librum. Shikojeni e-librin
+                para publikimit.
               </p>
               {warnings.length > 0 && (
                 <ul className="mt-2 flex list-disc flex-col gap-1 pl-4 text-xs text-muted">

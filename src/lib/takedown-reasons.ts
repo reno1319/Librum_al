@@ -27,13 +27,30 @@ export function takedownReasonLabel(reason: string): string {
   return isTakedownReason(reason) ? TAKEDOWN_REASON_LABELS[reason] : TAKEDOWN_REASON_LABELS.other;
 }
 
+// ALBANIAN-8: the same reasons as the author reads them. The English
+// labels above stay as they are: staff pages show them (admin stays
+// English) and admin_unpublish_book() writes them into admin_notes.
+export const AUTHOR_TAKEDOWN_REASON_LABELS: Record<TakedownReason, string> = {
+  copyright: "Ankesë për të drejtën e autorit",
+  content_rules: "Shkel rregullat e përmbajtjes",
+  broken_file: "Skedar i gabuar ose i dëmtuar",
+  author_asked: "Me kërkesën e autorit",
+  other: "Tjetër",
+};
+
+/** The author's label for a stored reason; an unknown code reads "Tjetër". */
+export function authorTakedownReasonLabel(reason: string): string {
+  return isTakedownReason(reason) ? AUTHOR_TAKEDOWN_REASON_LABELS[reason] : AUTHOR_TAKEDOWN_REASON_LABELS.other;
+}
+
 // S7: the message box is prefilled per reason; "Other" starts empty, so
-// staff must write it.
+// staff must write it. ALBANIAN-8: the message goes to the author, so
+// it is Albanian although the staff form around it stays English.
 export const TAKEDOWN_PREFILL_MESSAGES: Record<TakedownReason, string> = {
-  copyright: "We received a copyright complaint about this book. Please reply with proof that you hold the rights.",
-  content_rules: "This book breaks Librum's content rules, so we have taken it down.",
-  broken_file: "The book file is wrong or doesn't open properly. Please upload a corrected file and write to us.",
-  author_asked: "We took this book down at your request.",
+  copyright: "Morëm një ankesë për të drejtën e autorit për këtë libër. Ju lutemi na dërgoni prova që i keni të drejtat.",
+  content_rules: "Ky libër shkel rregullat e përmbajtjes së Librum, prandaj e hoqëm.",
+  broken_file: "Skedari i librit është i gabuar ose nuk hapet si duhet. Ju lutemi ngarkoni një skedar të korrigjuar dhe na shkruani.",
+  author_asked: "E hoqëm këtë libër me kërkesën tuaj.",
   other: "",
 };
 
@@ -50,11 +67,11 @@ export function takedownReasonForReport(reportReason: string | null | undefined)
 export const TAKEDOWN_MESSAGE_MAX_LENGTH = 2000;
 
 export const SUPPORT_EMAIL = "support@librum.al";
-const QUESTIONS_LINE = `Questions? Write to ${SUPPORT_EMAIL}`;
+const QUESTIONS_LINE = `Pyetje? Na shkruani te ${SUPPORT_EMAIL}`;
 
-export const TAKEN_DOWN_PUBLISH_MESSAGE = `Librum took this book down. You can't publish it again until we review it. ${QUESTIONS_LINE}`;
+export const TAKEN_DOWN_PUBLISH_MESSAGE = `Librum e hoqi këtë libër. Nuk mund ta publikoni përsëri derisa ta shqyrtojmë. ${QUESTIONS_LINE}`;
 
-export const TAKEN_DOWN_DELETE_MESSAGE = `This book was taken down by Librum and can't be deleted until we review it. ${QUESTIONS_LINE}`;
+export const TAKEN_DOWN_DELETE_MESSAGE = `Ky libër u hoq nga Librum dhe nuk mund të fshihet derisa ta shqyrtojmë. ${QUESTIONS_LINE}`;
 
 // R1: authenticated holds SELECT on these columns of book_takedowns and
 // no others, so `select *` or `select id` fails with 42501 for an
@@ -88,19 +105,19 @@ function withFinalStop(text: string): string {
 
 /**
  * The author's notice, as separate lines in reading order:
- * "Taken down by Librum on <date>. Reason: <label>.", the message,
- * "We also unpublished: <titles>." (when any), and the questions line.
+ * "Hequr nga Libraria më <date>. Arsyeja: <label>.", the message,
+ * "Hoqëm nga publikimi edhe: <titles>." (when any), and the questions line.
  */
 export function buildAuthorTakedownNoticeLines(
   notice: AuthorTakedownNotice,
   formatDate: (iso: string) => string,
 ): string[] {
   const lines = [
-    `Taken down by Librum on ${formatDate(notice.takenDownAt)}. Reason: ${takedownReasonLabel(notice.reason)}.`,
+    `Hequr nga Libraria më ${formatDate(notice.takenDownAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`,
     withFinalStop(notice.message),
   ];
   if (notice.bundleTitles.length > 0) {
-    lines.push(`We also unpublished: ${notice.bundleTitles.join(", ")}.`);
+    lines.push(`Hoqëm nga publikimi edhe: ${notice.bundleTitles.join(", ")}.`);
   }
   lines.push(QUESTIONS_LINE);
   return lines;
@@ -119,14 +136,14 @@ export function isSendBackReason(value: unknown): value is SendBackReason {
 }
 
 // N7: the message box is prefilled per reason; "Other" starts empty, so
-// staff must write it.
+// staff must write it. ALBANIAN-8: Albanian, it goes to the author.
 export const SEND_BACK_PREFILL_MESSAGES: Record<SendBackReason, string> = {
   copyright:
-    "We couldn't confirm you hold the rights to this book. Please reply with proof that you do, then send it for review again.",
+    "Nuk mundëm të konfirmojmë që i keni të drejtat për këtë libër. Ju lutemi na dërgoni prova, pastaj dërgojeni përsëri për shqyrtim.",
   content_rules:
-    "This book breaks Librum's content rules, so we can't publish it. Please read the rules, change the book and send it again.",
+    "Ky libër shkel rregullat e përmbajtjes së Librum, prandaj nuk mund ta publikojmë. Ju lutemi lexoni rregullat, ndryshoni librin dhe dërgojeni përsëri.",
   broken_file:
-    "The book file is wrong or doesn't open properly. Please upload a corrected file and send it for review again.",
+    "Skedari i librit është i gabuar ose nuk hapet si duhet. Ju lutemi ngarkoni një skedar të korrigjuar dhe dërgojeni përsëri për shqyrtim.",
   other: "",
 };
 

@@ -11,7 +11,9 @@ const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
 
 describe("Dashboard Profile: Account name / Public author name split", () => {
   it("labels the display_name field 'Account name', not 'Name' or 'Legal name'", () => {
-    expect(source).toContain("Account name");
+    // ALBANIAN-10: the labels are Albanian ("Emri i llogarisë" / "Emri publik i autorit").
+    expect(source).toContain("Emri i llogarisë");
+    expect(source).not.toMatch(/>\s*Emri\s*</);
     expect(source).not.toMatch(/>\s*Name\s*</);
     // "Legal name" is allowed to appear inside a comment explaining it's
     // deliberately NOT used as a label (Librum has no legal-name/KYC
@@ -30,24 +32,24 @@ describe("Dashboard Profile: Account name / Public author name split", () => {
 
   it("the reader-facing supporting copy sits under Public author name, not under Account name", () => {
     const accountBlock = source.slice(
-      source.indexOf("Account name"),
-      source.indexOf("Public author name"),
+      source.indexOf("Emri i llogarisë"),
+      source.indexOf("Emri publik i autorit"),
     );
     const publicNameBlock = source.slice(
-      source.indexOf("Public author name"),
+      source.indexOf("Emri publik i autorit"),
       source.indexOf("<button"),
     );
-    expect(accountBlock).not.toContain("readers will see");
-    expect(publicNameBlock).toContain("This is the name readers will see on your books and author page.");
+    expect(accountBlock).not.toContain("lexuesit do të shohin");
+    expect(publicNameBlock).toContain("Ky është emri që lexuesit do të shohin te librat tuaj dhe te faqja juaj e autorit.");
   });
 
   it("includes the EPUB pen-name timing note near the Public author name field, concise and non-alarmist", () => {
     const publicNameBlock = source.slice(
-      source.indexOf("Public author name"),
+      source.indexOf("Emri publik i autorit"),
       source.indexOf("<button"),
     );
-    expect(publicNameBlock).toContain("If you publish under a pen name, set it before publishing.");
-    expect(publicNameBlock).toContain("embedded in your EPUB file");
+    expect(publicNameBlock).toContain("Nëse botoni me pseudonim, vendoseni para publikimit.");
+    expect(publicNameBlock).toContain("futet brenda skedarit tuaj EPUB");
   });
 
   it("PEN-NAMES-1 r4 (18a): no Bio box and no photo field -- both are edited per pen name", () => {

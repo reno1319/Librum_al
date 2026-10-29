@@ -48,13 +48,17 @@ describe("isPriceChangeConfirmed", () => {
 describe("priceChangeConfirmText", () => {
   it("names the old and new price in plain words", () => {
     expect(priceChangeConfirmText(500, 300)).toBe(
-      "Yes, change the price from 500 lek to 300 lek. Readers see the new price right away.",
+      "Po, ndryshojeni çmimin në 300 lekë (deri tani: 500 lekë). Lexuesit e shohin çmimin e ri menjëherë.",
     );
     expect(priceChangeConfirmText(500, 0)).toBe(
-      "Yes, change the price from 500 lek to free. Readers see the new price right away.",
+      "Po, bëjeni falas (deri tani: 500 lekë). Lexuesit e shohin çmimin e ri menjëherë.",
     );
     expect(priceChangeConfirmText(null, 0)).toBe(
-      "Yes, change the price from no price to free. Readers see the new price right away.",
+      "Po, bëjeni falas (deri tani: pa çmim). Lexuesit e shohin çmimin e ri menjëherë.",
+    );
+    // ALBANIAN-9: thousands with a dot, like every other price.
+    expect(priceChangeConfirmText(1500, 12000)).toBe(
+      "Po, ndryshojeni çmimin në 12.000 lekë (deri tani: 1.500 lekë). Lexuesit e shohin çmimin e ri menjëherë.",
     );
   });
 });

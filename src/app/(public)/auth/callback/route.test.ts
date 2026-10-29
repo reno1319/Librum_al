@@ -173,7 +173,7 @@ describe("GET /auth/callback", () => {
     // signal (see isRecoveryAttempt()) -- the safe error copy must be
     // the recovery-specific one, never "Could not confirm your email".
     expect(location.searchParams.get("error")).toBe(
-      "This password reset link is invalid or has expired. Please request a new one.",
+      "Kjo lidhje për rivendosjen e fjalëkalimit nuk vlen ose ka skaduar. Kërkoni një të re.",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
   });
@@ -184,7 +184,7 @@ describe("GET /auth/callback", () => {
     const location = new URL(response.headers.get("location")!);
     expect(location.pathname).toBe("/login");
     expect(location.searchParams.get("error")).toBe(
-      "This confirmation link is invalid or has expired. Please request a new one.",
+      "Kjo lidhje konfirmimi nuk vlen ose ka skaduar. Kërkoni një të re.",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(mockExchangeCodeForSession).not.toHaveBeenCalled();
@@ -395,7 +395,7 @@ describe("GET /auth/callback: token_hash/verifyOtp() path (AUTH-1E)", () => {
     const location = new URL(response.headers.get("location")!);
     expect(location.pathname).toBe("/login");
     expect(location.searchParams.get("error")).toBe(
-      "This confirmation link is invalid or has expired. Please request a new one.",
+      "Kjo lidhje konfirmimi nuk vlen ose ka skaduar. Kërkoni një të re.",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
   });
@@ -415,7 +415,7 @@ describe("GET /auth/callback: token_hash/verifyOtp() path (AUTH-1E)", () => {
     const location = new URL(response.headers.get("location")!);
     expect(location.pathname).toBe("/login");
     expect(location.searchParams.get("error")).toBe(
-      "This password reset link is invalid or has expired. Please request a new one.",
+      "Kjo lidhje për rivendosjen e fjalëkalimit nuk vlen ose ka skaduar. Kërkoni një të re.",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
   });
@@ -447,7 +447,7 @@ describe("GET /auth/callback: token_hash/verifyOtp() path (AUTH-1E)", () => {
     const location = new URL(response.headers.get("location")!);
     expect(location.pathname).toBe("/login");
     expect(location.searchParams.get("error")).toBe(
-      "This confirmation link is invalid or has expired. Please request a new one.",
+      "Kjo lidhje konfirmimi nuk vlen ose ka skaduar. Kërkoni një të re.",
     );
   });
 
@@ -484,7 +484,7 @@ describe("GET /auth/callback: token_hash/verifyOtp() path (AUTH-1E)", () => {
       expect(mockVerifyOtp).not.toHaveBeenCalled();
       const location = new URL(response.headers.get("location")!);
       expect(location.searchParams.get("error")).toBe(
-        "This password reset link is invalid or has expired. Please request a new one.",
+        "Kjo lidhje për rivendosjen e fjalëkalimit nuk vlen ose ka skaduar. Kërkoni një të re.",
       );
     });
   });

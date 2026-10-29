@@ -10,7 +10,7 @@ import type { Series } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "New book",
+  title: "Libër i ri",
 };
 
 export default async function NewBookPage({
@@ -75,16 +75,16 @@ export default async function NewBookPage({
         href="/dashboard"
         className="focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
       >
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
       <h1 className="mt-4 font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
-        Add a book
+        Shtoni një libër
       </h1>
       {/* FIX1 (X7): Renato's W-A wording. The sentence it replaces said
           a draft was kept from the start; nothing is saved until a
           final button is pressed (no autosave, his D2). */}
       <p className="mt-2 text-muted">
-        Nothing is saved until you press Save as draft or Send for review.
+        Asgjë nuk ruhet derisa të shtypni &quot;Ruajeni si draft&quot; ose &quot;Dërgojeni për shqyrtim&quot;.
       </p>
 
       {error && (

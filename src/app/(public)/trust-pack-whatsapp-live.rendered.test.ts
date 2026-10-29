@@ -14,8 +14,8 @@ vi.mock("@/lib/contact", async (importOriginal) => {
   };
 });
 
-const { default: ContactPage } = await import("./contact/page");
-const { default: PrivacyPage } = await import("./privacy/page");
+const { default: ContactPage } = await import("./kontakt/page");
+const { default: PrivacyPage } = await import("./privatesia/page");
 
 const toText = (html: string) =>
   html
@@ -28,13 +28,13 @@ describe("TRUST PACK 6: WhatsApp contact, once a number is filled in", () => {
   it("Contact shows the chat link in a new tab, without referrer", () => {
     const html = renderToStaticMarkup(ContactPage());
     expect(html).toContain('href="https://wa.me/355600000000" target="_blank" rel="noopener noreferrer"');
-    expect(toText(html)).toContain("Chat on WhatsApp");
+    expect(toText(html)).toContain("Na shkruani në WhatsApp (hapet në një skedë të re)");
   });
 
   it("Privacy names WhatsApp in the processors, messages and retention", () => {
     const text = toText(renderToStaticMarkup(PrivacyPage()));
-    expect(text).toContain("WhatsApp (Meta) — if you message us on WhatsApp, WhatsApp handles that chat, and we see your phone number and WhatsApp name.");
-    expect(text).toContain("the emails and WhatsApp messages you send us and our replies.");
-    expect(text).toContain("Emails and WhatsApp chats with us: up to 2 years after your last message.");
+    expect(text).toContain("WhatsApp (Meta) — nëse na shkruani në WhatsApp, bisedën e trajton WhatsApp, dhe ne shohim numrin tuaj të telefonit dhe emrin tuaj në WhatsApp.");
+    expect(text).toContain("emailet dhe mesazhet në WhatsApp që na dërgoni dhe përgjigjet tona.");
+    expect(text).toContain("Emailet dhe bisedat në WhatsApp me ne: deri në 2 vjet pas mesazhit tuaj të fundit.");
   });
 });

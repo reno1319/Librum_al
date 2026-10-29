@@ -54,12 +54,12 @@ describe("Dashboard Balance: payout-cycle notice", () => {
   });
 
   it("shows the exact approved neutral disabled-state copy", () => {
-    expect(source).toContain("Monthly payout scheduling is not yet active.");
+    expect(source).toContain("Pagesat mujore për autorët nuk janë aktivizuar ende.");
   });
 
   it("the enabled-state heading is computed from the real helpers, never a hardcoded date", () => {
     expect(source).toContain(
-      "`Next payout cycle: ${formatPayoutCycleDate(computeNextPayoutCycleDate())}`",
+      "`Cikli i radhës i pagesave: ${formatPayoutCycleDate(computeNextPayoutCycleDate())}`",
     );
   });
 
@@ -87,15 +87,18 @@ describe("Dashboard Balance: payout-cycle notice", () => {
       source.indexOf("LEDGER-1E-D-G: forward-looking payout-cycle policy notice"),
       source.indexOf("{isEmpty ? ("),
     );
-    expect(notice.toLowerCase()).not.toContain("arrive");
+    // ALBANIAN-11: the Albanian forms of the same forbidden phrasing.
+    expect(notice.toLowerCase()).not.toContain("mbërri");
     expect(notice.toLowerCase()).not.toContain("bank");
-    expect(notice.toLowerCase()).not.toContain("your money");
-    expect(notice).not.toContain("Payment date");
+    expect(notice.toLowerCase()).not.toContain("paratë tuaja");
+    // SQ-16 (SQ-11 audit N3): every case of "your money", not only one.
+    expect(notice.toLowerCase()).not.toMatch(/(^|[^a-zçë])par(a|atë|ave|anë|et|ë)\s+(tuaja|tuaj|tuat)\b/);
+    expect(notice.toLowerCase()).not.toContain("data e pagesës");
   });
 
   it("the page header description no longer claims a payout date is unscheduled once the scheduler is enabled (no future self-contradiction against the notice above)", () => {
     expect(source).toContain(
-      `schedulerEnabled ? "." : " — an exact payout date isn't scheduled yet."`,
+      `schedulerEnabled ? "." : ", por data e saktë e pagesës nuk është caktuar ende."`,
     );
   });
 });
@@ -136,7 +139,7 @@ describe("Dashboard Balance: Payout setup section", () => {
   });
 
   it("renders the Payout setup section OUTSIDE the isEmpty ternary, so it is always visible", () => {
-    const sectionIndex = source.indexOf('<h2 className="font-serif text-xl font-normal">Payout setup</h2>');
+    const sectionIndex = source.indexOf('<h2 className="font-serif text-xl font-normal">Konfigurimi i pagesave</h2>');
     const ternaryCloseIndex = source.indexOf("        </>\n      )}\n\n      {/* BANK-PAYOUT-1E");
     expect(sectionIndex).toBeGreaterThan(-1);
     expect(ternaryCloseIndex).toBeGreaterThan(-1);
@@ -145,12 +148,12 @@ describe("Dashboard Balance: Payout setup section", () => {
 
   it("no-destination state: shows the approved neutral setup prompt, no alarm styling implied", () => {
     expect(source).toContain(
-      "Add a bank account to become eligible for payouts once payouts are activated.",
+      "Shtoni një llogari bankare që të keni të drejtë për pagesa, kur pagesat të aktivizohen.",
     );
   });
 
   it("configured-destination state: shows a compact '✓ Added' status with account holder, masked IBAN, and currency", () => {
-    expect(source).toContain("&#10003; Added");
+    expect(source).toContain("&#10003; U shtua");
     expect(source).toContain("{destination.beneficiary_name}");
     expect(source).toContain("{destination.currency}");
   });
@@ -167,22 +170,22 @@ describe("Dashboard Balance: Payout setup section", () => {
   });
 
   it("provides a 'Change bank account' affordance when a destination already exists", () => {
-    expect(source).toContain("Change bank account");
+    expect(source).toContain("Ndryshoni llogarinë bankare");
     expect(source).toContain('href="/dashboard/balance?editBank=1"');
   });
 
   it("explains that changing the bank account affects future payouts only, with the frozen-snapshot guarantee stated accurately", () => {
     expect(source).toContain(
-      "Changing your bank account affects future payouts only. Any payout already being processed keeps the bank details frozen for that payout.",
+      "Ndryshimi i llogarisë bankare vlen vetëm për pagesat e ardhshme. Një pagesë që po përpunohet mban të dhënat bankare që kishte.",
     );
   });
 
   it("threshold unavailable state: shows the approved copy when no minimum policy is configured, without inventing a number", () => {
     expect(source).toContain(
-      "Payout threshold will become available when Librum activates its minimum payout policy.",
+      "Pragu i pagesës do të jetë i disponueshëm kur Librum të aktivizojë rregullat për shumën minimale të pagesës.",
     );
     // Never a hardcoded numeric threshold anywhere near this copy.
-    const thresholdSectionIndex = source.indexOf("Payout threshold</h3>");
+    const thresholdSectionIndex = source.indexOf("Pragu i pagesës</h3>");
     const sectionSnippet = source.slice(thresholdSectionIndex, thresholdSectionIndex + 400);
     expect(sectionSnippet).not.toMatch(/\d+(?:\.\d+)?\s*(ALL|USD|EUR|Lek)/);
   });
@@ -218,15 +221,16 @@ describe("Dashboard Balance: Payout setup section", () => {
   });
 
   it("never claims independent account-ownership verification -- 'format' is qualified, 'verified' alone about the account never appears", () => {
-    expect(source).toContain("this confirms the format");
-    expect(source).toContain("not that the account belongs to you");
+    expect(source).toContain("Kjo konfirmon vetëm formatin");
+    expect(source).toContain("jo që llogaria është juaja");
+    expect(source.toLowerCase()).not.toContain("llogaria u verifikua");
     expect(source.toLowerCase()).not.toContain("account verified");
     expect(source.toLowerCase()).not.toContain("bank account verified");
   });
 
   it("this new section carries no Stripe-specific payout promise", () => {
-    const setupSectionIndex = source.indexOf('<h2 className="font-serif text-xl font-normal">Payout setup</h2>');
-    const finalAlertIndex = source.indexOf('Looking for unit sales and page views?');
+    const setupSectionIndex = source.indexOf('<h2 className="font-serif text-xl font-normal">Konfigurimi i pagesave</h2>');
+    const finalAlertIndex = source.indexOf('Kërkoni kopjet e shitura dhe shikimet e faqeve?');
     const setupSection = source.slice(setupSectionIndex, finalAlertIndex);
     expect(setupSection.toLowerCase()).not.toContain("stripe");
   });
@@ -256,8 +260,8 @@ describe("BalancePage: maintenance-mode gate", () => {
     const { renderToStaticMarkup } = await import("react-dom/server");
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
 
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockGetAuthorFinancialSummary).not.toHaveBeenCalled();
     expect(mockListAuthorFinancialActivity).not.toHaveBeenCalled();
@@ -348,9 +352,9 @@ describe("BalancePage: amounts are separated by currency (Patch 4)", () => {
     expect(html).toContain(">USD</h2>");
     expect(html).toContain(">ALL</h2>");
     expect(html).toContain("USD 10.00"); // USD available
-    expect(html).toContain("1.234 ALL"); // ALL available
+    expect(html).toContain("1.234 lekë"); // ALL available
     expect(html).toContain("-USD 10.05"); // USD lifetime refunds
-    expect(html).toContain("-1.234,05 ALL"); // ALL lifetime refunds
+    expect(html).toContain("-1.234,05 lekë"); // ALL lifetime refunds
     // A cross-currency sum of the two available balances appears nowhere.
     expect(html).not.toContain("1.244,00");
     expect(html).not.toContain("USD 1,244.00");
@@ -359,17 +363,17 @@ describe("BalancePage: amounts are separated by currency (Patch 4)", () => {
   it("activity and payout rows each keep their own currency, qindarka included", async () => {
     const html = await renderBalance();
     expect(html).toContain("USD 6.99");
-    expect(html).toContain("799,20 ALL");
-    expect(html).toContain("-8 ALL");
+    expect(html).toContain("799,20 lekë");
+    expect(html).toContain("-8 lekë");
     expect(html).toContain("USD 25.00");
-    expect(html).toContain("10.000 ALL");
+    expect(html).toContain("10.000 lekë");
   });
 
   it("a malformed currency is shown as unavailable, never guessed as USD or ALL", async () => {
     const html = await renderBalance();
-    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toContain("USD 5.00");
-    expect(html).not.toMatch(/(?<![\d.,])5 ALL/);
+    expect(html).not.toMatch(/(?<![\d.,])5 lekë/);
   });
 
   it("no bare dollar sign appears anywhere on the page", async () => {

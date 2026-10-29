@@ -62,7 +62,7 @@ describe("bundle actions: maintenance-mode gate", () => {
 
   it("unpublishBundle throws the stable maintenance error before the recovery-session check or any Supabase call", async () => {
     await expect(unpublishBundle(BUNDLE_ID)).rejects.toThrow(
-      "Librum is temporarily unavailable for scheduled maintenance",
+      "Librum është përkohësisht i padisponueshëm për mirëmbajtje të planifikuar",
     );
     expect(mockRedirectIfRecoverySessionActive).not.toHaveBeenCalled();
     expect(mockCreateClient).not.toHaveBeenCalled();
@@ -70,7 +70,7 @@ describe("bundle actions: maintenance-mode gate", () => {
 
   it("deleteBundle throws the stable maintenance error before the recovery-session check or any Supabase call", async () => {
     await expect(deleteBundle(BUNDLE_ID)).rejects.toThrow(
-      "Librum is temporarily unavailable for scheduled maintenance",
+      "Librum është përkohësisht i padisponueshëm për mirëmbajtje të planifikuar",
     );
     expect(mockRedirectIfRecoverySessionActive).not.toHaveBeenCalled();
     expect(mockCreateClient).not.toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe("bundle actions: maintenance-mode gate", () => {
     // validation, not the maintenance gate; proves the gate itself is
     // off and the function proceeds into its normal logic.
     await expect(createBundle(new FormData())).rejects.toMatchObject({
-      target: "/dashboard/bundles?error=Please+fill+in+every+field",
+      target: "/dashboard/bundles?error=Plot%C3%ABsoni%20t%C3%AB%20gjitha%20fushat",
     });
     expect(mockCreateClient).toHaveBeenCalled();
   });

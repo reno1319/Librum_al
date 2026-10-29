@@ -74,7 +74,7 @@ describe("no viewport blocks pinch zoom (I1)", () => {
 
 describe("Bookstore filter row is 16px on phones, 14px from 640px (I1b)", () => {
   it("FILTER_CONTROL_CLASSES uses text-base sm:text-sm, not a bare text-sm", () => {
-    const page = readFileSync(join(__dirname, "(public)/bookstore/page.tsx"), "utf8");
+    const page = readFileSync(join(__dirname, "(public)/librari/page.tsx"), "utf8");
     const at = page.indexOf("const FILTER_CONTROL_CLASSES =");
     const classes = page.slice(at, page.indexOf(";", at)).match(/"([^"]*)"/)![1].split(" ");
     expect(classes).toContain("text-base");

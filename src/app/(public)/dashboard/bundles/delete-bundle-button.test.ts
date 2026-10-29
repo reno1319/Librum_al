@@ -160,8 +160,8 @@ describe("DeleteBundleButton: explicit confirmation", () => {
   it("renders a plain, enabled button (not a submit) whose accessible name names the exact bundle", () => {
     const html = renderToStaticMarkup(createElement(DeleteBundleButton, DISPOSABLE_TARGET));
     expect(html).toContain('type="button"');
-    expect(html).toContain(`aria-label="Delete bundle “${DISPOSABLE.title}”"`);
-    expect(html).toContain(">Delete</button>");
+    expect(html).toContain(`aria-label="Fshini paketën &quot;${DISPOSABLE.title}&quot;"`);
+    expect(html).toContain(">Fshini</button>");
     expect(html).not.toMatch(/\sdisabled(=|\s|>)/);
     expect(html).not.toContain("aria-busy");
     expect(html).not.toContain("<form");
@@ -170,12 +170,12 @@ describe("DeleteBundleButton: explicit confirmation", () => {
 
   it("the confirmation shows the exact title, the bundle's state, and that it cannot be undone", () => {
     expect(bundleDeleteConfirmationMessage({ title: DISPOSABLE.title, status: "draft" })).toBe(
-      `Delete the draft bundle "${DISPOSABLE.title}"?\n\nThis can't be undone. The books in it are not deleted.`,
+      `Ta fshini paketën draft "${DISPOSABLE.title}"?\n\nKy veprim nuk mund të zhbëhet. Librat në të nuk fshihen.`,
     );
     expect(bundleDeleteConfirmationMessage({ title: FIXTURE.title, status: "published" })).toBe(
-      `Delete the published bundle "Fixture Bundle"?\n\nThis can't be undone. The books in it are not deleted.`,
+      `Ta fshini paketën e publikuar "Fixture Bundle"?\n\nKy veprim nuk mund të zhbëhet. Librat në të nuk fshihen.`,
     );
-    expect(bundleDeleteConfirmationMessage({ title: "T", status: "something" })).toContain('Delete the bundle "T"?');
+    expect(bundleDeleteConfirmationMessage({ title: "T", status: "something" })).toContain('Ta fshini paketën "T"?');
   });
 
   it("canceling calls no action and takes no lock", async () => {
@@ -262,17 +262,17 @@ describe("DeleteBundleButton: single-flight per mounted button", () => {
     const pendingView = disposable.view();
     expect(pendingView.props.disabled).toBe(true);
     expect(pendingView.props["aria-busy"]).toBe(true);
-    expect(pendingView.props.children).toBe("Deleting…");
-    expect(pendingView.props["aria-label"]).toBe(`Deleting bundle “${DISPOSABLE.title}”…`);
+    expect(pendingView.props.children).toBe("Po fshihet…");
+    expect(pendingView.props["aria-label"]).toBe(`Paketa "${DISPOSABLE.title}" po fshihet…`);
     const pendingHtml = renderToStaticMarkup(pendingView);
     expect(pendingHtml).toContain('disabled=""');
     expect(pendingHtml).toContain('aria-busy="true"');
-    expect(pendingHtml).toContain(">Deleting…</button>");
+    expect(pendingHtml).toContain(">Po fshihet…</button>");
 
     const idleView = fixture.view();
     expect(idleView.props.disabled).toBe(false);
     expect(idleView.props["aria-busy"]).toBeUndefined();
-    expect(idleView.props.children).toBe("Delete");
+    expect(idleView.props.children).toBe("Fshini");
     expect(fixture.instance.isLocked()).toBe(false);
   });
 
@@ -328,7 +328,7 @@ describe("DeleteBundleButton: single-flight per mounted button", () => {
     await flush();
     expect(button.instance.isLocked()).toBe(false);
     expect(button.view().props.disabled).toBe(false);
-    expect(button.view().props.children).toBe("Delete");
+    expect(button.view().props.children).toBe("Fshini");
 
     button.click();
     await flush();
@@ -363,7 +363,7 @@ describe("DeleteBundleButton: single-flight per mounted button", () => {
     const button = mount(DISPOSABLE_TARGET, { confirm, action });
     let redirectError: unknown;
     try {
-      realRedirect("/dashboard/bundles?success=Bundle+deleted");
+      realRedirect("/dashboard/bundles?success=Paketa%20u%20fshi");
     } catch (e) {
       redirectError = e;
     }
@@ -480,7 +480,7 @@ describe("BundlesPage: every row's controls target that row", () => {
         action: () => Promise<void>;
         children: ReactNode;
       }>[];
-      const expectedLabel = bundle.status === "draft" ? "Publish" : "Unpublish";
+      const expectedLabel = bundle.status === "draft" ? "Publikoni" : "Hiqeni nga publikimi";
       expect(forms.map((f) => textOf(f.props.children).trim())).toEqual([expectedLabel]);
 
       mockPublishBundle.mockClear();
@@ -497,14 +497,14 @@ describe("BundlesPage: every row's controls target that row", () => {
 
   it("the rendered page shows one named Delete per row and no delete form", async () => {
     const html = renderToStaticMarkup(await renderPageTree());
-    expect(html).toContain('aria-label="Delete bundle “Fixture Bundle”"');
-    expect(html).toContain(`aria-label="Delete bundle “${DISPOSABLE.title}”"`);
-    expect(html.match(/aria-label="Delete bundle /g)).toHaveLength(2);
+    expect(html).toContain('aria-label="Fshini paketën &quot;Fixture Bundle&quot;"');
+    expect(html).toContain(`aria-label="Fshini paketën &quot;${DISPOSABLE.title}&quot;"`);
+    expect(html.match(/aria-label="Fshini paketën /g)).toHaveLength(2);
     expect(html.match(/<form/g)).toHaveLength(3); // create, Unpublish, Publish
   });
 
   it("the page shows the success banner the confirmed delete redirects to", async () => {
-    const tree = (await BundlesPage({ searchParams: Promise.resolve({ success: "Bundle deleted" }) })) as ReactElement;
-    expect(renderToStaticMarkup(tree)).toContain("Bundle deleted");
+    const tree = (await BundlesPage({ searchParams: Promise.resolve({ success: "Paketa u fshi" }) })) as ReactElement;
+    expect(renderToStaticMarkup(tree)).toContain("Paketa u fshi");
   });
 });

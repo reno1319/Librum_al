@@ -70,10 +70,10 @@ describe("DashboardLayout menu", () => {
     role = "author";
     const element = await DashboardLayout({ children: "PAGE-CONTENT" });
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-    const menuAt = html.indexOf('<nav aria-label="Dashboard"');
+    const menuAt = html.indexOf('<nav aria-label="Paneli i autorit"');
     expect(menuAt).toBeGreaterThanOrEqual(0);
     expect(menuAt).toBeLessThan(html.indexOf("PAGE-CONTENT"));
-    expect(html.match(/<nav aria-label="Dashboard"/g)).toHaveLength(1);
+    expect(html.match(/<nav aria-label="Paneli i autorit"/g)).toHaveLength(1);
     expect(html).toContain('<div class="page-container pt-5 sm:pt-10"><nav');
   });
 });

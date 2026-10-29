@@ -11,24 +11,24 @@ describe("resolveBookstoreFeature (settled D7)", () => {
   type B = { id: string; price_all: number | null };
   const newest: B = { id: "new", price_all: 199 };
 
-  it("a priced pick -> Librum's choice", () => {
+  it("a priced pick -> Zgjedhja e Librum", () => {
     const pick = { id: "pick", price_all: 499 };
-    expect(resolveBookstoreFeature(pick, newest)).toEqual({ book: pick, label: "Librum's choice" });
+    expect(resolveBookstoreFeature(pick, newest)).toEqual({ book: pick, label: "Zgjedhja e Librum" });
   });
 
-  it("a free pick (0) is priced -> Librum's choice", () => {
+  it("a free pick (0) is priced -> Zgjedhja e Librum", () => {
     const pick = { id: "pick", price_all: 0 };
     expect(resolveBookstoreFeature(pick, newest)?.label).toBe(LIBRUMS_CHOICE_LABEL);
   });
 
-  it("an unpriced pick -> New on Librum with the newest book", () => {
+  it("an unpriced pick -> I ri në Librum with the newest book", () => {
     expect(resolveBookstoreFeature<B>({ id: "pick", price_all: null }, newest)).toEqual({
       book: newest,
-      label: "New on Librum",
+      label: "I ri në Librum",
     });
   });
 
-  it("no pick -> New on Librum with the newest book", () => {
+  it("no pick -> I ri në Librum with the newest book", () => {
     expect(resolveBookstoreFeature(null, newest)).toEqual({ book: newest, label: NEW_ON_LIBRUM_LABEL });
   });
 

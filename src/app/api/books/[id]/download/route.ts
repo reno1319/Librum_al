@@ -9,6 +9,7 @@ import {
   isOwnBookManuscriptPath,
 } from "@/lib/book-storage-path";
 import { readDownloadFilePath } from "@/lib/book-reviews";
+import { downloadFileName } from "@/lib/download-file-name";
 
 // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the exact row this route may act
 // on. `id` and `author_id` come back from the database with the path so
@@ -73,7 +74,7 @@ export async function GET(
   const cookieStore = await cookies();
   if (isRecoverySessionActive(cookieStore)) {
     return NextResponse.json(
-      { error: "Finish resetting your password before downloading." },
+      { error: "Përfundoni ndryshimin e fjalëkalimit para se të shkarkoni." },
       { status: 403 },
     );
   }
@@ -84,11 +85,11 @@ export async function GET(
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.redirect(new URL(`/login?next=/books/${id}`, request.url));
+    return NextResponse.redirect(new URL(`/login?next=/libra/${id}`, request.url));
   }
 
   const fileUnavailable = () =>
-    NextResponse.redirect(new URL(`/books/${id}?error=That+file+isn%27t+available`, request.url));
+    NextResponse.redirect(new URL(`/libra/${id}?error=${encodeURIComponent("Ky skedar nuk është i disponueshëm.")}`, request.url));
 
   // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: a query error fails closed even
   // when plausible row data rides along with it. The stored path is NOT
@@ -126,7 +127,7 @@ export async function GET(
 
   if (!owned) {
     return NextResponse.redirect(
-      new URL(`/books/${id}?error=Buy+this+book+to+download+it`, request.url),
+      new URL(`/libra/${id}?error=${encodeURIComponent("Blini këtë libër për ta shkarkuar.")}`, request.url),
     );
   }
 
@@ -176,7 +177,7 @@ export async function GET(
 
   if (downloadError || !fileBlob) {
     return NextResponse.redirect(
-      new URL(`/books/${id}?error=Could+not+download+that+file`, request.url),
+      new URL(`/libra/${id}?error=${encodeURIComponent("Skedari nuk u shkarkua dot.")}`, request.url),
     );
   }
 
@@ -238,12 +239,12 @@ export async function GET(
         code: recordError.code ?? null,
       });
       return NextResponse.redirect(
-        new URL(`/books/${id}?error=Could+not+download+that+file.+Please+try+again`, request.url),
+        new URL(`/libra/${id}?error=${encodeURIComponent("Skedari nuk u shkarkua dot. Provoni përsëri.")}`, request.url),
       );
     }
   }
 
-  const fileName = `${book.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.epub`;
+  const fileName = downloadFileName(book.title);
 
   return new NextResponse(new Uint8Array(fileBytes), {
     headers: {

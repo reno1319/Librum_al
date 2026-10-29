@@ -91,7 +91,7 @@ beforeEach(() => {
     keywords: "",
     isbn: null,
     language: "sq",
-    genre: "Fiction",
+    genre: "Letërsi artistike",
     publisher: null,
     edition: null,
     original_publication_date: null,
@@ -114,7 +114,7 @@ beforeEach(() => {
 });
 
 const WARNING =
-  "Changing the book file or cover takes your book out of the Bookstore until Librum approves it. Other changes go live at once.";
+  "Nëse ndryshoni skedarin e librit ose kopertinën, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
 const SENT_BACK = { reason: "broken_file", message: "The cover is blurry", sentBackAt: "2026-10-19T10:00:00Z" };
 function button(html: string, label: string): string {
   const end = html.indexOf(`${label}</button>`);
@@ -123,26 +123,26 @@ function button(html: string, label: string): string {
 }
 
 describe("Edit page: the publish control's label (B)", () => {
-  it("a draft without a valid approval: Send for review", async () => {
+  it("a draft without a valid approval: Dërgojeni për shqyrtim", async () => {
     const html = await render();
-    expect(button(html, "Send for review")).not.toContain('disabled=""');
-    expect(html).not.toContain("Publish book</button>");
-    expect(html).toContain("Ready to send for review.");
+    expect(button(html, "Dërgojeni për shqyrtim")).not.toContain('disabled=""');
+    expect(html).not.toContain("Publikoni</button>");
+    expect(html).toContain("Gati për t&#x27;u dërguar për shqyrtim.");
   });
 
   it("a draft whose approval still matches its files: Publish", async () => {
     reviewState = { kind: "ok", pending: false, approvalValid: true, latestSentBack: null };
     const html = await render();
-    expect(button(html, "Publish")).not.toContain('disabled=""');
-    expect(html).not.toContain("Send for review</button>");
-    expect(html).toContain("Ready to publish.");
+    expect(button(html, "Publikoni")).not.toContain('disabled=""');
+    expect(html).not.toContain("Dërgojeni për shqyrtim</button>");
+    expect(html).toContain("Gati për publikim.");
   });
 
   it("an unreadable review state disables the control with the generic sentence", async () => {
     reviewState = { kind: "unavailable" };
     const html = await render();
-    expect(button(html, "Send for review")).toContain('disabled=""');
-    expect(html).toContain("We couldn&#x27;t publish your book yet.");
+    expect(button(html, "Dërgojeni për shqyrtim")).toContain('disabled=""');
+    expect(html).toContain("Libri juaj nuk u publikua dot ende.");
   });
 });
 
@@ -151,21 +151,21 @@ describe("Edit page: in review (E, F)", () => {
     reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null };
   });
 
-  it("shows In review and Cancel review in place of the publish control, with no timing promise", async () => {
+  it("shows In review and Anuloni shqyrtimin in place of the publish control, with no timing promise", async () => {
     const html = await render();
-    expect(html).toContain("Status: <span class=\"font-medium\">In review</span>");
-    expect(button(html, "Cancel review")).not.toContain('disabled=""');
-    expect(html).not.toContain("Send for review</button>");
-    expect(html).not.toContain("Publish</button>");
-    const publishing = html.slice(html.indexOf(">Publishing</h2>"), html.indexOf(">Danger zone</h2>"));
-    expect(publishing).toContain("Librum is checking your book.");
+    expect(html).toContain("Gjendja: <span class=\"font-medium\">Në shqyrtim</span>");
+    expect(button(html, "Anuloni shqyrtimin")).not.toContain('disabled=""');
+    expect(html).not.toContain("Dërgojeni për shqyrtim</button>");
+    expect(html).not.toContain("Publikoni</button>");
+    const publishing = html.slice(html.indexOf(">Publikimi</h2>"), html.indexOf(">Zona e rrezikut</h2>"));
+    expect(publishing).toContain("Librum po e kontrollon librin tuaj.");
     expect(publishing).not.toMatch(/\b(hours?|days?|within|soon)\b/i);
   });
 
   it("an older send back is not shown while a new review is pending", async () => {
     reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: SENT_BACK };
     const html = await render();
-    expect(html).not.toContain("Librum sent this book back");
+    expect(html).not.toContain("Librum jua ktheu këtë libër");
   });
 
   it("a takedown keeps priority over In review", async () => {
@@ -174,8 +174,8 @@ describe("Edit page: in review (E, F)", () => {
       notice: { takenDownAt: "2026-10-19T10:00:00Z", reason: "copyright", message: "Proof please", bundleTitles: [] },
     };
     const html = await render();
-    expect(html).toContain("Taken down by Librum</span>");
-    expect(html).not.toContain("Cancel review</button>");
+    expect(html).toContain("Hequr nga Libraria</span>");
+    expect(html).not.toContain("Anuloni shqyrtimin</button>");
   });
 });
 
@@ -183,11 +183,11 @@ describe("Edit page: sent back (F)", () => {
   it("shows the send-back notice above the publish control", async () => {
     reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK };
     const html = await render();
-    expect(html).toContain("Librum sent this book back on Oct 19, 2026. Reason: ");
+    expect(html).toContain("Librum jua ktheu këtë libër për ndryshime më 19 tetor 2026. Arsyeja: ");
     expect(html).toContain("The cover is blurry.");
-    expect(html).toContain("Fix it and send it for review again.");
-    expect(html).toContain("Questions? Write to support@librum.al");
-    expect(html.indexOf("Librum sent this book back")).toBeLessThan(html.indexOf("Send for review</button>"));
+    expect(html).toContain("Rregullojeni dhe dërgojeni përsëri për shqyrtim.");
+    expect(html).toContain("Pyetje? Na shkruani te support@librum.al");
+    expect(html.indexOf("Librum jua ktheu këtë libër")).toBeLessThan(html.indexOf("Dërgojeni për shqyrtim</button>"));
   });
 
   it("a takedown notice replaces the send-back notice", async () => {
@@ -197,7 +197,7 @@ describe("Edit page: sent back (F)", () => {
       notice: { takenDownAt: "2026-10-19T10:00:00Z", reason: "copyright", message: "Proof please", bundleTitles: [] },
     };
     const html = await render();
-    expect(html).not.toContain("Librum sent this book back");
+    expect(html).not.toContain("Librum jua ktheu këtë libër");
   });
 });
 
@@ -209,15 +209,15 @@ describe("Edit page: a live book (C)", () => {
   it("warns near the file and cover fields, before the pickers", async () => {
     const html = await render();
     const warning = html.indexOf(WARNING);
-    expect(warning).toBeGreaterThan(html.indexOf(">Files</h2>"));
-    expect(warning).toBeLessThan(html.indexOf("Cover image"));
-    expect(html).toContain("Unpublish book</button>");
+    expect(warning).toBeGreaterThan(html.indexOf(">Skedarët</h2>"));
+    expect(warning).toBeLessThan(html.indexOf("Imazhi i kopertinës"));
+    expect(html).toContain("Hiqeni nga publikimi</button>");
   });
 
   it("never promises existing readers the new file on their next download", async () => {
     const html = await render();
     expect(html).not.toContain("updates the file existing readers receive");
-    expect(html).toContain("A new file is checked by Librum before readers receive it.");
+    expect(html).toContain("kontrollohet nga Librum para se ta marrin lexuesit.");
   });
 
   it("a draft shows no live-book warning", async () => {
@@ -229,10 +229,10 @@ describe("Edit page: a live book (C)", () => {
 
 // PREVIEW-1 (A5, Renato 6a): the Publishing section links to the book's
 // own page (the preview) in every state before it's live, in a new tab.
-describe("Edit page: Preview your book page (PREVIEW-1)", () => {
-  const LINK = `<a target="_blank" rel="noopener" class="focus-ring rounded-sm font-medium text-foreground underline" href="/books/${BOOK_ID}">`;
+describe("Edit page: Shikoni faqen e librit para botimit (PREVIEW-1)", () => {
+  const LINK = `<a target="_blank" rel="noopener" class="focus-ring rounded-sm font-medium text-foreground underline" href="/libra/${BOOK_ID}">`;
   function publishing(html: string): string {
-    return html.slice(html.indexOf(">Publishing</h2>"), html.indexOf(">Danger zone</h2>"));
+    return html.slice(html.indexOf(">Publikimi</h2>"), html.indexOf(">Zona e rrezikut</h2>"));
   }
 
   it.each<[string, () => void]>([
@@ -251,15 +251,15 @@ describe("Edit page: Preview your book page (PREVIEW-1)", () => {
     setUp();
     const html = publishing(await render());
     expect(html).toContain(LINK);
-    expect(html).toContain("Preview your book page<span class=\"sr-only\"> (opens in a new tab)</span>");
-    expect(html).toContain("Shows your last saved changes.");
+    expect(html).toContain("Shikoni faqen e librit para botimit<span class=\"sr-only\"> (hapet në një skedë të re)</span>");
+    expect(html).toContain("Tregon ndryshimet e ruajtura së fundmi.");
     expect(html.indexOf(LINK)).toBeGreaterThan(html.indexOf("Status:"));
   });
 
   it("a live book has no Preview link", async () => {
     book.status = "published";
     const html = await render();
-    expect(html).not.toContain("Preview your book page");
-    expect(html).not.toContain(`href="/books/${BOOK_ID}"`);
+    expect(html).not.toContain("Shikoni faqen e librit para botimit");
+    expect(html).not.toContain(`href="/libra/${BOOK_ID}"`);
   });
 });

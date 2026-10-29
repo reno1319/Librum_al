@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 // Never includes an environment value, secret, internal identifier, or
 // anything derived from request input.
 export const MAINTENANCE_MESSAGE =
-  "Librum is temporarily unavailable for scheduled maintenance. Please try again shortly.";
+  "Librum është përkohësisht i padisponueshëm për mirëmbajtje të planifikuar. Ju lutemi provoni përsëri pas pak.";
 
 // For a Server Action whose EXISTING convention on every other error
 // path is `redirect(\`${path}?error=...\`)` -- true of every mutating

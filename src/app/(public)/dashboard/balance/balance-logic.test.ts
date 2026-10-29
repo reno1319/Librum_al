@@ -72,13 +72,13 @@ describe("formatMinorAmount", () => {
   });
 
   it("formats ALL minor units WITH the qindarka (the old Intl path dropped them)", () => {
-    expect(formatMinorAmount(17910, "ALL")).toBe("179,10 ALL");
-    expect(formatMinorAmount(123456, "ALL")).toBe("1.234,56 ALL");
+    expect(formatMinorAmount(17910, "ALL")).toBe("179,10 lekë");
+    expect(formatMinorAmount(123456, "ALL")).toBe("1.234,56 lekë");
   });
 
   it("never renders an unsupported currency as if it were a supported one", () => {
     const formatted = formatMinorAmount(500, "EUR");
-    expect(formatted).toBe("Amount unavailable (unsupported currency EUR)");
+    expect(formatted).toBe("Shuma nuk është e disponueshme (monedhë e pambështetur EUR)");
     expect(formatted).not.toContain("$");
     expect(formatted).not.toContain("ALL");
     expect(formatted).not.toContain("USD");
@@ -86,26 +86,26 @@ describe("formatMinorAmount", () => {
 
   it("never clamps a negative balance to zero -- renders the negative sign", () => {
     expect(formatMinorAmount(-800, "USD")).toBe("-USD 8.00");
-    expect(formatMinorAmount(-800, "ALL")).toBe("-8 ALL");
+    expect(formatMinorAmount(-800, "ALL")).toBe("-8 lekë");
   });
 
   it("formats zero without throwing", () => {
     expect(formatMinorAmount(0, "USD")).toBe("USD 0.00");
-    expect(formatMinorAmount(0, "ALL")).toBe("0 ALL");
+    expect(formatMinorAmount(0, "ALL")).toBe("0 lekë");
   });
 
   it("a malformed ledger currency is never guessed", () => {
-    expect(formatMinorAmount(500, "")).toBe("Amount unavailable (currency unknown)");
-    expect(formatMinorAmount(500, "usd")).toBe("Amount unavailable (currency unknown)");
+    expect(formatMinorAmount(500, "")).toBe("Shuma nuk është e disponueshme (monedhë e panjohur)");
+    expect(formatMinorAmount(500, "usd")).toBe("Shuma nuk është e disponueshme (monedhë e panjohur)");
   });
 });
 
 describe("entryTypeLabel", () => {
   it("labels every known entry_type", () => {
-    expect(entryTypeLabel("sale")).toBe("Sale");
-    expect(entryTypeLabel("refund")).toBe("Refund");
-    expect(entryTypeLabel("payout")).toBe("Payout");
-    expect(entryTypeLabel("adjustment")).toBe("Adjustment");
+    expect(entryTypeLabel("sale")).toBe("Shitje");
+    expect(entryTypeLabel("refund")).toBe("Rimbursim");
+    expect(entryTypeLabel("payout")).toBe("Pagesë për autorin");
+    expect(entryTypeLabel("adjustment")).toBe("Rregullim");
   });
 });
 
@@ -165,18 +165,20 @@ describe("resolveActivityPage", () => {
 
 describe("payoutStatusLabel", () => {
   it("labels every known payout status with safe, factual, non-promissory copy", () => {
-    expect(payoutStatusLabel("pending")).toBe("Pending");
-    expect(payoutStatusLabel("processing")).toBe("Processing");
-    expect(payoutStatusLabel("paid")).toBe("Paid");
-    expect(payoutStatusLabel("failed")).toBe("Failed");
-    expect(payoutStatusLabel("cancelled")).toBe("Cancelled");
+    expect(payoutStatusLabel("pending")).toBe("Në pritje");
+    expect(payoutStatusLabel("processing")).toBe("Në përpunim");
+    expect(payoutStatusLabel("paid")).toBe("E paguar");
+    expect(payoutStatusLabel("failed")).toBe("Dështoi");
+    expect(payoutStatusLabel("cancelled")).toBe("E anuluar");
   });
 
   it("never labels reconciling as failed or paid -- it means Librum is still confirming the outcome", () => {
     const label = payoutStatusLabel("reconciling");
-    expect(label.toLowerCase()).not.toContain("fail");
-    expect(label.toLowerCase()).not.toBe("paid");
-    expect(label).toBe("Under review");
+    // ALBANIAN-11: never "Dështoi" (failed) or "E paguar" (paid).
+    expect(label).not.toBe(payoutStatusLabel("failed"));
+    expect(label).not.toBe(payoutStatusLabel("paid"));
+    expect(label.toLowerCase()).not.toMatch(/dësht|paguar/);
+    expect(label).toBe("Në kontroll");
   });
 });
 

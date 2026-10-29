@@ -48,8 +48,8 @@ export type DashboardSalesSummary = {
 
 export type DashboardSalesResult = { ok: true; summary: DashboardSalesSummary } | { ok: false };
 
-// Server-local calendar months, the same clock summarizeSalesRevenue()
-// already uses for the Sales page's daily chart.
+// Server-local calendar months. SQ-16 moved the Sales page's daily
+// chart to Tirana days; these month cards are not moved yet (carry-over).
 function monthStart(now: Date, monthsBack: number): Date {
   return new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
 }
@@ -109,12 +109,14 @@ export function summarizeDashboardSales(params: {
   };
 }
 
-// "+8 vs last month" / "−2 vs last month" / "Same as last month"
-// (Renato's D1 wording). The minus is U+2212, as in the brief.
+// "+8 krahasuar me muajin e kaluar" / "−2 …" / "Njëlloj si muajin e kaluar"
+// (Renato's D1 wording, ALBANIAN-8). The minus is U+2212, as in the brief.
 export function formatMonthComparison(thisMonth: number, lastMonth: number): string {
   const difference = thisMonth - lastMonth;
-  if (difference === 0) return "Same as last month";
-  return difference > 0 ? `+${difference} vs last month` : `−${-difference} vs last month`;
+  if (difference === 0) return "Njëlloj si muajin e kaluar";
+  return difference > 0
+    ? `+${difference} krahasuar me muajin e kaluar`
+    : `−${-difference} krahasuar me muajin e kaluar`;
 }
 
 type PurchaseRow = Omit<SalesPurchase, "currency"> & { id: string };

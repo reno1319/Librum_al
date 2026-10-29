@@ -68,12 +68,14 @@ describe("generateEpub", () => {
     expect(opf).not.toMatch(/isbn/i);
   });
 
-  it("writes dc:language as 'und' -- EPUB3's own required metadata, never a guessed language code", async () => {
+  // SQ-17: every book on Librum is Albanian, so an omitted language
+  // is "sq" (was "und", which left Edit Book's Word books unlabelled).
+  it("writes dc:language as 'sq' when no language is supplied", async () => {
     const bytes = await generateEpub(BASE_INPUT);
     const zip = await JSZip.loadAsync(bytes);
     const opf = await zip.file("OEBPS/content.opf")!.async("string");
-    expect(opf).toContain("<dc:language>und</dc:language>");
-    expect(opf).not.toMatch(/<dc:language>(en|sq|und-.+)<\/dc:language>/);
+    expect(opf).toContain("<dc:language>sq</dc:language>");
+    expect(opf).not.toContain("<dc:language>und</dc:language>");
   });
 
   // LIBRUM 2.0 PUBLISHING-UX-1 PART B: `language` is a new, optional
@@ -88,18 +90,18 @@ describe("generateEpub", () => {
     expect(opf).toContain("<dc:language>sq</dc:language>");
   });
 
-  it("falls back to 'und' for an explicit null language -- never crashes", async () => {
+  it("falls back to 'sq' for an explicit null language -- never crashes", async () => {
     const bytes = await generateEpub({ ...BASE_INPUT, language: null });
     const zip = await JSZip.loadAsync(bytes);
     const opf = await zip.file("OEBPS/content.opf")!.async("string");
-    expect(opf).toContain("<dc:language>und</dc:language>");
+    expect(opf).toContain("<dc:language>sq</dc:language>");
   });
 
-  it("falls back to 'und' for a blank/whitespace-only language", async () => {
+  it("falls back to 'sq' for a blank/whitespace-only language", async () => {
     const bytes = await generateEpub({ ...BASE_INPUT, language: "   " });
     const zip = await JSZip.loadAsync(bytes);
     const opf = await zip.file("OEBPS/content.opf")!.async("string");
-    expect(opf).toContain("<dc:language>und</dc:language>");
+    expect(opf).toContain("<dc:language>sq</dc:language>");
   });
 
   it("lists every chapter in the manifest and spine, in section order", async () => {
@@ -204,7 +206,7 @@ describe("patchEpubMetadata", () => {
     expect(patchedOpf).not.toContain(BASE_INPUT.authorName);
     // dc:language/dc:identifier/manifest/spine survive untouched --
     // only title/creator/modified were meant to change.
-    expect(patchedOpf).toContain("<dc:language>und</dc:language>");
+    expect(patchedOpf).toContain("<dc:language>sq</dc:language>");
     expect(patchedOpf).toContain(`urn:librum:book:${BASE_INPUT.bookId}`);
 
     const originalChapter = await originalZip.file("OEBPS/chapter-1.xhtml")!.async("string");
@@ -275,10 +277,10 @@ describe("patchEpubMetadata", () => {
   // LIBRUM 2.0 PUBLISHING-UX-1 PART C: the new, optional fourth
   // `language` parameter. The omitted-parameter case is already the
   // real-world regression the tests above protect (every call above
-  // passes only title+author, and dc:language still reads "und") --
+  // passes only title+author, and dc:language still reads "sq") --
   // these cover the parameter's own contract directly: an explicit
   // code patches dc:language, an explicit null/blank falls back to
-  // "und" via the same resolveEpubLanguageCode() generateEpub() itself
+  // "sq" via the same resolveEpubLanguageCode() generateEpub() itself
   // already uses (one resolution rule, shared, never two independently
   // invented ones).
   describe("language parameter", () => {
@@ -289,18 +291,18 @@ describe("patchEpubMetadata", () => {
       expect(opf).toContain(`<dc:language>${code}</dc:language>`);
     });
 
-    it("falls back to 'und' when language is explicitly null", async () => {
+    it("falls back to 'sq' when language is explicitly null", async () => {
       const original = await generateEpub(BASE_INPUT);
       const patched = await patchEpubMetadata(original, "New Title", "New Author", null);
       const opf = await (await JSZip.loadAsync(patched)).file("OEBPS/content.opf")!.async("string");
-      expect(opf).toContain("<dc:language>und</dc:language>");
+      expect(opf).toContain("<dc:language>sq</dc:language>");
     });
 
-    it("falls back to 'und' when language is explicitly blank/whitespace-only", async () => {
+    it("falls back to 'sq' when language is explicitly blank/whitespace-only", async () => {
       const original = await generateEpub(BASE_INPUT);
       const patched = await patchEpubMetadata(original, "New Title", "New Author", "   ");
       const opf = await (await JSZip.loadAsync(patched)).file("OEBPS/content.opf")!.async("string");
-      expect(opf).toContain("<dc:language>und</dc:language>");
+      expect(opf).toContain("<dc:language>sq</dc:language>");
     });
 
     it("leaves a previously-patched dc:language completely untouched when a later call omits the parameter", async () => {
@@ -432,4 +434,47 @@ describe("DOCX -> EPUB -> Read Sample round trip", () => {
     const allSampleText = sample.sections.map((s) => s.html).join(" ");
     expect(allSampleText).toContain("chapter 1, paragraph 1");
   }, 20000);
+});
+
+// SQ-17: the words Librum writes into a Word-made e-book are Albanian,
+// and every page names its language.
+describe("generated EPUB text (SQ-17)", () => {
+  async function files(input: Parameters<typeof generateEpub>[0]) {
+    const zip = await JSZip.loadAsync(await generateEpub(input));
+    const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+    const chapter = await zip.file("OEBPS/chapter-1.xhtml")!.async("string");
+    return { nav, chapter };
+  }
+
+  it("the table of contents page is titled Përmbajtja", async () => {
+    const { nav } = await files(BASE_INPUT);
+    expect(nav).toContain("<title>Përmbajtja</title>");
+    expect(nav).toContain("<h1>Përmbajtja</h1>");
+    expect(nav).not.toContain("Table of Contents");
+  });
+
+  it("a book with no chapter headings gets the single entry Fillimi and untitled pages named Pjesë", async () => {
+    const input = {
+      ...BASE_INPUT,
+      sections: BASE_INPUT.sections.map((section) => ({ ...section, heading: null })),
+    };
+    const { nav, chapter } = await files(input);
+    expect(nav).toContain(">Fillimi</a>");
+    expect(nav).not.toContain(">Start<");
+    expect(chapter).toContain("<title>Pjesë</title>");
+    expect(chapter).not.toContain("<title>Section</title>");
+  });
+
+  it("the contents and chapter pages carry the book language", async () => {
+    const plain = await files(BASE_INPUT);
+    expect(plain.nav).toContain('xml:lang="sq" lang="sq"');
+    expect(plain.chapter).toContain('xml:lang="sq" lang="sq"');
+    const english = await files({ ...BASE_INPUT, language: "en" });
+    expect(english.chapter).toContain('xml:lang="en" lang="en"');
+  });
+
+  it("generated pages are still a valid EPUB", async () => {
+    const result = await validateEpubStructure(await generateEpub(BASE_INPUT));
+    expect(result).toEqual({ valid: true });
+  });
 });

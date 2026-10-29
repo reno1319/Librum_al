@@ -341,7 +341,7 @@ describe("becomeAuthor: N3 name trim", () => {
   it.each(["", "   ", "\t\n"])("refuses a name that is empty after trimming (%j), with the profile page's message", async (name) => {
     profileResult = readerProfile({ display_name: name });
     const target = await run();
-    expect(target).toBe(`/account?error=${encodeURIComponent("Public author name can't be empty")}`);
+    expect(target).toBe(`/account?error=${encodeURIComponent("Emri publik i autorit nuk mund të jetë bosh.")}`);
     expect(writerCreated).toBe(0);
     expect(penWriterCreated).toBe(0);
   });
@@ -465,7 +465,7 @@ describe("becomeAuthor: legacy photo copied to the default pen name (17a after C
 });
 
 describe("becomeAuthor: AUTHOR-AGE-1 18+ tick", () => {
-  const AGE_ERROR = `/account?error=${encodeURIComponent("Authors must be 18 or older. Tick the box to confirm.")}`;
+  const AGE_ERROR = `/account?error=${encodeURIComponent("Autorët duhet të jenë 18 vjeç ose më shumë. Shënoni kutinë për ta konfirmuar.")}`;
 
   it("records the confirmation for the caller's own id, before the role write", async () => {
     expect((await run()).startsWith("/dashboard?success=")).toBe(true);
@@ -473,10 +473,10 @@ describe("becomeAuthor: AUTHOR-AGE-1 18+ tick", () => {
     expect(ageCalls[0].id).toBe(USER_ID);
     expect(Object.keys(ageCalls[0].attributes)).toEqual(["app_metadata"]);
     const meta = ageCalls[0].attributes.app_metadata ?? {};
-    expect(meta.author_age_statement_version).toBe("author-age-v1");
+    expect(meta.author_age_statement_version).toBe("author-age-v2");
     expect(Number.isNaN(Date.parse(String(meta.author_age_confirmed_at)))).toBe(false);
     // SECURITY-9A: the same write records the Terms.
-    expect(meta.terms_version).toBe("terms-2026-10");
+    expect(meta.terms_version).toBe("terms-sq-1");
     expect(meta.terms_accepted_at).toBe(meta.author_age_confirmed_at);
     expect(order).toEqual(["age", "role"]);
   });
@@ -530,7 +530,7 @@ describe("author role write boundary (static)", () => {
 // calling Supabase Auth directly never saw the sign-up's Terms tick.
 describe("becomeAuthor: SECURITY-9A Terms tick", () => {
   const TERMS_ERROR = `/account?error=${encodeURIComponent(
-    "You must agree to the Terms of Service before becoming an author.",
+    "Duhet të pranoni Kushtet e përdorimit para se të bëheni autor.",
   )}`;
 
   it.each([

@@ -38,7 +38,7 @@ export function LibraryBookCard({
   return (
     <li className="flex flex-col gap-1.5">
       <Link
-        href={`/books/${bookId}`}
+        href={`/libra/${bookId}`}
         className="focus-ring group flex flex-col gap-3 rounded-sm"
       >
         {coverUrl ? (
@@ -66,20 +66,20 @@ export function LibraryBookCard({
             href={authorPagePath(penNameId)}
             className="focus-ring w-fit rounded-sm text-xs text-muted hover:underline"
           >
-            by {authorName}
+            nga {authorName}
           </Link>
         ) : (
-          <span className="w-fit text-xs text-muted">by {authorName}</span>
+          <span className="w-fit text-xs text-muted">nga {authorName}</span>
         ))}
 
-      {!isPublished && <p className="text-xs text-muted">Unavailable in Bookstore</p>}
+      {!isPublished && <p className="text-xs text-muted">Nuk ofrohet në Librari</p>}
 
       {downloadable && (
         <a
           href={`/api/books/${bookId}/download`}
           className="focus-ring mt-1 w-fit rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
         >
-          Download EPUB
+          Shkarkoni EPUB
         </a>
       )}
       {downloadable && downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}

@@ -15,16 +15,8 @@ import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
 // submits) stays in the component, unchanged in kind from before this
 // module existed.
 
-export function canAdvanceFromBookDetails(params: {
-  title: string;
-  language: string;
-  genre: string;
-}): boolean {
-  return (
-    params.title.trim().length > 0 &&
-    params.language.trim().length > 0 &&
-    params.genre.trim().length > 0
-  );
+export function canAdvanceFromBookDetails(params: { title: string; genre: string }): boolean {
+  return params.title.trim().length > 0 && params.genre.trim().length > 0;
 }
 
 export function canAdvanceFromFiles(params: {
@@ -67,7 +59,7 @@ export type WizardPriceSummary = {
 //
 // ALL-WIRING-2: it now delegates to calculateAuthorEarnings() outright
 // rather than calling platformFeeCents() beside it, so the wizard, the
-// public /pricing calculator and the ledger cannot disagree even by a
+// public /fitimet calculator and the ledger cannot disagree even by a
 // rounding step.
 export function resolveWizardPriceSummary(price: string): WizardPriceSummary {
   const parsed = parseCatalogPriceAll(price);

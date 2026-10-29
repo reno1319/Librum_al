@@ -341,7 +341,7 @@ describe("publishBundle: paid-publishing readiness gate", () => {
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard/bundles?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
@@ -404,7 +404,7 @@ describe("publishBundle: bundle-membership-integrity gate (PHASE-2C)", () => {
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+      "/dashboard/bundles?error=Kjo%20paket%C3%AB%20ka%20nevoj%C3%AB%20p%C3%ABr%20t%C3%AB%20pakt%C3%ABn%202%20libra%20t%C3%AB%20publikuar",
     );
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
@@ -418,7 +418,7 @@ describe("publishBundle: bundle-membership-integrity gate (PHASE-2C)", () => {
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+      "/dashboard/bundles?error=Kjo%20paket%C3%AB%20ka%20nevoj%C3%AB%20p%C3%ABr%20t%C3%AB%20pakt%C3%ABn%202%20libra%20t%C3%AB%20publikuar",
     );
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
@@ -429,7 +429,7 @@ describe("publishBundle: bundle-membership-integrity gate (PHASE-2C)", () => {
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+      "/dashboard/bundles?error=Kjo%20paket%C3%AB%20ka%20nevoj%C3%AB%20p%C3%ABr%20t%C3%AB%20pakt%C3%ABn%202%20libra%20t%C3%AB%20publikuar",
     );
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
@@ -440,7 +440,7 @@ describe("publishBundle: bundle-membership-integrity gate (PHASE-2C)", () => {
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+      "/dashboard/bundles?error=Kjo%20paket%C3%AB%20ka%20nevoj%C3%AB%20p%C3%ABr%20t%C3%AB%20pakt%C3%ABn%202%20libra%20t%C3%AB%20publikuar",
     );
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
@@ -468,7 +468,7 @@ describe("publishBundle: bundle-membership-integrity gate (PHASE-2C)", () => {
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+      "/dashboard/bundles?error=Kjo%20paket%C3%AB%20ka%20nevoj%C3%AB%20p%C3%ABr%20t%C3%AB%20pakt%C3%ABn%202%20libra%20t%C3%AB%20publikuar",
     );
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
@@ -482,7 +482,7 @@ describe("publishBundle: bundle-membership-integrity gate (PHASE-2C)", () => {
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+      "/dashboard/bundles?error=Kjo%20paket%C3%AB%20ka%20nevoj%C3%AB%20p%C3%ABr%20t%C3%AB%20pakt%C3%ABn%202%20libra%20t%C3%AB%20publikuar",
     );
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });
@@ -538,7 +538,7 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard/bundles?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockMemberSelectResult).not.toHaveBeenCalled();
@@ -551,7 +551,7 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard/bundles?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
   });
@@ -578,7 +578,7 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now",
+      "/dashboard/bundles?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
     );
     expect(mockProfileSelectResult).not.toHaveBeenCalled();
     expect(mockMemberSelectResult).not.toHaveBeenCalled();
@@ -607,7 +607,7 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+      "/dashboard/bundles?error=Kjo%20paket%C3%AB%20ka%20nevoj%C3%AB%20p%C3%ABr%20t%C3%AB%20pakt%C3%ABn%202%20libra%20t%C3%AB%20publikuar",
     );
   });
 
@@ -630,8 +630,8 @@ describe("performBundlePublish: paid-publishing mode gate (PAID-MODE-1)", () => 
 describe("performBundlePublish: price_all three-way state (ALL-WIRING-5)", () => {
   const MISSING_PRICE_REDIRECT =
     `/dashboard/bundles/${BUNDLE_ID}/edit?error=` +
-    encodeURIComponent("Set a valid ALL price before publishing this bundle.");
-  const PAID_MODE_REDIRECT = "/dashboard/bundles?error=Paid+publishing+isn%27t+available+right+now";
+    encodeURIComponent("Vendosni çmimin e paketës në lekë para se ta publikoni.");
+  const PAID_MODE_REDIRECT = "/dashboard/bundles?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani";
 
   beforeEach(resetMocks);
 
@@ -754,7 +754,7 @@ describe("performBundlePublish: price_all three-way state (ALL-WIRING-5)", () =>
     await expect(publishBundle(BUNDLE_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/bundles?error=This+bundle+needs+at+least+2+published+books",
+      "/dashboard/bundles?error=Kjo%20paket%C3%AB%20ka%20nevoj%C3%AB%20p%C3%ABr%20t%C3%AB%20pakt%C3%ABn%202%20libra%20t%C3%AB%20publikuar",
     );
     expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
   });

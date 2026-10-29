@@ -18,23 +18,23 @@ import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 // infrastructure (see site-header.test.ts's own header comment), so
 // testing footer content means testing the data it renders from.
 export const FOOTER_GROUPS = {
-  Discover: [
-    { href: "/bookstore", label: "Bookstore" },
+  Zbuloni: [
+    { href: "/librari", label: "Libraria" },
     { href: "/blog", label: "Blog" },
-    { href: "/about", label: "About" },
+    { href: "/rreth-nesh", label: "Rreth nesh" },
   ],
-  Publish: [
-    { href: "/how-it-works", label: "How it works" },
-    { href: "/pricing", label: "Earnings" },
+  Publikoni: [
+    { href: "/si-funksionon", label: "Si funksionon" },
+    { href: "/fitimet", label: "Fitimet" },
   ],
-  Support: [
-    { href: "/help", label: "Help" },
-    { href: "/contact", label: "Contact" },
+  Mbështetje: [
+    { href: "/ndihme", label: "Ndihmë" },
+    { href: "/kontakt", label: "Kontakt" },
   ],
-  Legal: [
-    { href: "/terms", label: "Terms" },
-    { href: "/privacy", label: "Privacy" },
-    { href: "/refunds", label: "Refunds" },
+  Ligjore: [
+    { href: "/kushtet", label: "Kushtet e përdorimit" },
+    { href: "/privatesia", label: "Privatësia" },
+    { href: "/rimbursimet", label: "Rimbursimet" },
   ],
 };
 
@@ -56,11 +56,11 @@ export function SiteFooter() {
         <div className="max-w-xs">
           <span className="font-serif text-[1.625rem]">Librum</span>
           <p className="mt-2 text-[0.9375rem] leading-relaxed text-primary-foreground/80">
-            Independent ebooks, published directly by the people who wrote
-            them.
+            Libra elektronikë të pavarur, të botuar drejtpërdrejt nga ata
+            që i shkruajnë.
           </p>
           <p className="mt-3 text-[0.9375rem] text-primary-foreground/80">
-            Questions?{" "}
+            Pyetje?{" "}
             <a
               href={`mailto:${SUPPORT_EMAIL}`}
               className="focus-ring rounded-sm text-primary-foreground underline underline-offset-2 hover:decoration-2"
@@ -78,7 +78,7 @@ export function SiteFooter() {
               <p className="text-[0.9375rem] font-semibold text-primary-foreground">
                 {section}
               </p>
-              <nav className="mt-2 flex flex-col gap-1.5 text-[0.9375rem]">
+              <nav aria-label={section} className="mt-2 flex flex-col gap-1.5 text-[0.9375rem]">
                 {links.map((link) => (
                   <Link
                     key={link.href}
@@ -107,6 +107,7 @@ export function SiteFooter() {
             className="focus-ring rounded-sm hover:text-primary-foreground hover:underline"
           >
             Boto me L&amp;K ↗
+            <span className="sr-only"> (hapet në një skedë të re)</span>
           </a>
         </div>
       </div>

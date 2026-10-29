@@ -87,7 +87,11 @@ export function discountExpiryInstant(date: string): string | null {
  * (midnight UTC) shows the same day it always did.
  */
 export function discountExpiryDisplayDate(expiresAt: string): string {
-  return new Date(new Date(expiresAt).getTime() - 1).toLocaleDateString(undefined, {
+  // ALBANIAN-11: Albanian date ("28 tetor 2026").
+  return new Date(new Date(expiresAt).getTime() - 1).toLocaleDateString("sq", {
     timeZone: DISCOUNT_TIME_ZONE,
+    day: "numeric",
+    month: "long",
+    year: "numeric",
   });
 }

@@ -15,7 +15,7 @@ import { TEAM, visibleTeam } from "./team";
 describe("TRUST PACK: contact details", () => {
   it("promises a reply within 3 working days at support@librum.al", () => {
     expect(SUPPORT_EMAIL).toBe("support@librum.al");
-    expect(REPLY_PROMISE).toBe("We reply within 3 working days.");
+    expect(REPLY_PROMISE).toBe("Përgjigjemi brenda 3 ditëve të punës.");
   });
 
   it("is empty until the number is on the WhatsApp Business app (Renato 10-24, b)", () => {
@@ -46,13 +46,13 @@ describe("TRUST PACK: WhatsApp share link", () => {
     expect(whatsappShareHref("a b&c")).toBe("https://wa.me/?text=a%20b%26c");
     const href = bookWhatsappShareHref(book, "Ana", () => "https://librum.al");
     expect(href).toBe(
-      `https://wa.me/?text=${encodeURIComponent("Kronikë & Gur? by Ana on Librum: https://librum.al/books/b1")}`,
+      `https://wa.me/?text=${encodeURIComponent("Kronikë & Gur? nga Ana në Librum: https://librum.al/libra/b1")}`,
     );
   });
 
   it("drops the byline when the book has none", () => {
     expect(bookWhatsappShareHref(book, null, () => "https://librum.al")).toBe(
-      `https://wa.me/?text=${encodeURIComponent("Kronikë & Gur? on Librum: https://librum.al/books/b1")}`,
+      `https://wa.me/?text=${encodeURIComponent("Kronikë & Gur? në Librum: https://librum.al/libra/b1")}`,
     );
   });
 

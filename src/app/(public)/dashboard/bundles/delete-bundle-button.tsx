@@ -41,10 +41,10 @@ const browserDependencies: BundleDeleteDependencies = {
 };
 
 export function bundleDeleteConfirmationMessage({ title, status }: Omit<BundleDeleteTarget, "bundleId">): string {
-  const state = status === "published" ? "published " : status === "draft" ? "draft " : "";
+  const state = status === "published" ? " e publikuar" : status === "draft" ? " draft" : "";
   return (
-    `Delete the ${state}bundle "${title}"?\n\n` +
-    `This can't be undone. The books in it are not deleted.`
+    `Ta fshini paketën${state} "${title}"?\n\n` +
+    `Ky veprim nuk mund të zhbëhet. Librat në të nuk fshihen.`
   );
 }
 
@@ -95,11 +95,11 @@ export class DeleteBundleButton extends Component<BundleDeleteTarget, DeleteBund
         type="button"
         disabled={pending}
         aria-busy={pending || undefined}
-        aria-label={pending ? `Deleting bundle “${title}”…` : `Delete bundle “${title}”`}
+        aria-label={pending ? `Paketa "${title}" po fshihet…` : `Fshini paketën "${title}"`}
         className="focus-ring rounded-control border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
         onClick={this.requestDeletion}
       >
-        {pending ? "Deleting…" : "Delete"}
+        {pending ? "Po fshihet…" : "Fshini"}
       </button>
     );
   }

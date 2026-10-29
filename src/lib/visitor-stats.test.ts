@@ -62,23 +62,23 @@ describe("VISITOR STATS: which pages count", () => {
   it("counts the home page and public store pages, including their sub-pages", () => {
     for (const p of [
       "/",
-      "/bookstore",
-      "/books/abc",
-      "/books/abc/report",
-      "/authors/abc",
-      "/series/abc",
-      "/bundles/abc",
+      "/librari",
+      "/libra/abc",
+      "/libra/abc/report",
+      "/autore/abc",
+      "/seri/abc",
+      "/paketa/abc",
       "/blog",
       "/blog/a-post",
-      "/help",
-      "/help/reading",
-      "/about",
-      "/contact",
-      "/how-it-works",
-      "/pricing",
-      "/privacy",
-      "/refunds",
-      "/terms",
+      "/ndihme",
+      "/ndihme/leximi",
+      "/rreth-nesh",
+      "/kontakt",
+      "/si-funksionon",
+      "/fitimet",
+      "/privatesia",
+      "/rimbursimet",
+      "/kushtet",
     ]) {
       expect(isCountedPath(p), p).toBe(true);
     }
@@ -127,11 +127,11 @@ describe("VISITOR STATS: which pages count", () => {
 
 describe("VISITOR STATS: what is sent", () => {
   it("cuts everything after ? or #", () => {
-    expect(prepareVisitEvent(view(`${ORIGIN}/bookstore?q=my+search&genre=x`))).toEqual(
-      view(`${ORIGIN}/bookstore`),
+    expect(prepareVisitEvent(view(`${ORIGIN}/librari?q=my+search&genre=x`))).toEqual(
+      view(`${ORIGIN}/librari`),
     );
-    expect(prepareVisitEvent(view(`${ORIGIN}/books/abc#reviews`))).toEqual(
-      view(`${ORIGIN}/books/abc`),
+    expect(prepareVisitEvent(view(`${ORIGIN}/libra/abc#reviews`))).toEqual(
+      view(`${ORIGIN}/libra/abc`),
     );
     expect(prepareVisitEvent(view(`${ORIGIN}/?code=secret#access_token=x`))).toEqual(
       view(`${ORIGIN}/`),
@@ -151,8 +151,8 @@ describe("VISITOR STATS: what is sent", () => {
   });
 
   it("keeps the event type and doesn't change the original event", () => {
-    const original = { type: "event" as const, url: `${ORIGIN}/help?x=1` };
-    expect(prepareVisitEvent(original)).toEqual({ type: "event", url: `${ORIGIN}/help` });
-    expect(original.url).toBe(`${ORIGIN}/help?x=1`);
+    const original = { type: "event" as const, url: `${ORIGIN}/ndihme?x=1` };
+    expect(prepareVisitEvent(original)).toEqual({ type: "event", url: `${ORIGIN}/ndihme` });
+    expect(original.url).toBe(`${ORIGIN}/ndihme?x=1`);
   });
 });

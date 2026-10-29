@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 // repository renders Server Components in 18 test files already, with
 // renderToStaticMarkup from react-dom/server and a stubbed Supabase
 // client, no DOM library and no jsdom environment -- see
-// ./books/[id]/page.test.ts, which this same patch extends. Rendering
+// ./libra/[id]/page.test.ts, which this same patch extends. Rendering
 // is available here; it needs no new dependency.
 //
 // So the limitation below is a CHOICE OF THIS FILE, not a property of
@@ -61,11 +61,11 @@ function code(source: string): string {
 // having asked for any particular title, so a book with no authored ALL
 // price must not be among the ones offered.
 const DISCOVERY_SURFACES: Array<[string, string]> = [
-  ["the bookstore grid", "bookstore/page.tsx"],
+  ["the bookstore grid", "librari/page.tsx"],
   ["the homepage", "page.tsx"],
-  ["an author's page", "authors/[id]/page.tsx"],
-  ["a series page", "series/[id]/page.tsx"],
-  ["book detail's recommendation rails", "books/[id]/page.tsx"],
+  ["an author's page", "autore/[id]/page.tsx"],
+  ["a series page", "seri/[id]/page.tsx"],
+  ["book detail's recommendation rails", "libra/[id]/page.tsx"],
 ];
 
 // The surfaces that deliberately KEEP an unpriced row, each for a
@@ -79,7 +79,7 @@ const RETAINED_SURFACES: Array<[string, string, string]> = [
   ],
   [
     "a bundle's contents",
-    "bundles/[id]/page.tsx",
+    "paketa/[id]/page.tsx",
     "a bundle's membership is its composition -- hiding a member misrepresents what the bundle is, and bundle checkout is unconditionally closed anyway",
   ],
 ];
@@ -94,13 +94,13 @@ describe("null-priced books are excluded from every discovery surface", () => {
     // series neighbours, more-by-author, and you-might-like. One rail
     // left unfiltered would keep surfacing unbuyable books from the
     // page of a book the reader is already looking at.
-    const source = code(read("books/[id]/page.tsx"));
+    const source = code(read("libra/[id]/page.tsx"));
     const occurrences = source.split('.not("price_all", "is", null)').length - 1;
     expect(occurrences).toBe(3);
   });
 
   it("the bookstore's price RANGE filter is applied to price_all, not price_cents", () => {
-    const source = code(read("bookstore/page.tsx"));
+    const source = code(read("librari/page.tsx"));
     expect(source).toContain('.gte("price_all"');
     expect(source).toContain('.lte("price_all"');
     expect(source).not.toContain('.gte("price_cents"');
@@ -108,7 +108,7 @@ describe("null-priced books are excluded from every discovery surface", () => {
   });
 
   it("the bookstore's price SORT reads price_all", () => {
-    const source = code(read("bookstore/page.tsx"));
+    const source = code(read("librari/page.tsx"));
     expect(source).toMatch(/price_all\s*\?\?\s*0/);
     expect(source).not.toMatch(/a\.price_cents|b\.price_cents/);
   });
@@ -119,7 +119,7 @@ describe("null-priced books are excluded from every discovery surface", () => {
   // real server. What IS checkable from here is that the page still
   // calls that function and still passes the unrenamed parameters.
   it("the searched path still calls search_books with its original parameter names", () => {
-    const source = code(read("bookstore/page.tsx"));
+    const source = code(read("librari/page.tsx"));
     expect(source).toContain("search_books");
     expect(source).toContain("min_price_cents");
     expect(source).toContain("max_price_cents");
@@ -142,11 +142,11 @@ describe("the surfaces that deliberately keep an unpriced row", () => {
 
 describe("no active book surface renders a dollar sign or a legacy USD formatter", () => {
   const BOOK_SURFACES = [
-    "bookstore/page.tsx",
+    "librari/page.tsx",
     "page.tsx",
-    "authors/[id]/page.tsx",
-    "series/[id]/page.tsx",
-    "books/[id]/page.tsx",
+    "autore/[id]/page.tsx",
+    "seri/[id]/page.tsx",
+    "libra/[id]/page.tsx",
     "wishlist/page.tsx",
     "dashboard/page.tsx",
     "dashboard/books/page.tsx",
@@ -200,8 +200,8 @@ describe("bundle pricing moved to price_all in Patch 5 (ALL-WIRING-5)", () => {
   // done deliberately; these assertions now pin the NEW state, and
   // ./all-wiring-bundles.test.ts carries the full bundle guard.
   it.each([
-    ["the bookstore's bundle rail", "bookstore/page.tsx"],
-    ["an author's bundle rail", "authors/[id]/page.tsx"],
+    ["the bookstore's bundle rail", "librari/page.tsx"],
+    ["an author's bundle rail", "autore/[id]/page.tsx"],
   ])("%s prices bundles from bundle.price_all via the catalog label", (_label, file) => {
     const source = code(read(file));
     expect(source).toContain("formatCatalogPriceLabel(bundle.price_all)");
@@ -209,13 +209,13 @@ describe("bundle pricing moved to price_all in Patch 5 (ALL-WIRING-5)", () => {
   });
 
   it("bundle detail reads the bundle's own price from price_all, without filtering its members on it", () => {
-    const source = code(read("bundles/[id]/page.tsx"));
+    const source = code(read("paketa/[id]/page.tsx"));
     expect(source).not.toContain('.not("price_all", "is", null)');
     expect(source).toContain("formatCatalogPriceLabel(bundle.price_all)");
   });
 
   it("buyBundle is still unconditionally closed, and is not given a price_all path", () => {
-    const source = code(read("bundles/[id]/actions.ts"));
+    const source = code(read("paketa/[id]/actions.ts"));
     expect(source).not.toContain("price_all");
     expect(source).not.toContain("PAID_CHECKOUT_MODE");
     expect(source).not.toContain("canStartPaidCheckout");
@@ -225,7 +225,7 @@ describe("bundle pricing moved to price_all in Patch 5 (ALL-WIRING-5)", () => {
   // renders in the intent's OWN stored currency through the shared
   // transaction formatter -- no longer "ALL, else assume dollars".
   it("the held-quote notice renders the frozen amount in the intent's own currency (Patch 4)", () => {
-    const source = code(read("books/[id]/page.tsx"));
+    const source = code(read("libra/[id]/page.tsx"));
     expect(source).toContain("formatTransactionAmount(");
     expect(source).toContain("provenanceFromStoredCurrency(heldQuote.currency)");
     expect(source).not.toContain("formatAllPrice(");
@@ -234,7 +234,7 @@ describe("bundle pricing moved to price_all in Patch 5 (ALL-WIRING-5)", () => {
 });
 
 describe("book detail: an unpriced book offers no way to acquire it", () => {
-  const source = read("books/[id]/page.tsx");
+  const source = read("libra/[id]/page.tsx");
   const stripped = code(source);
 
   // The two unavailable states exist and are handled in PurchasePanel.

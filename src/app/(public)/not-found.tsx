@@ -10,7 +10,7 @@ import type { Metadata } from "next";
 // (see Next's own not-found docs), so nothing further is needed for
 // that.
 export const metadata: Metadata = {
-  title: "Page not found",
+  title: "Faqja nuk u gjet",
 };
 
 // LIBRUM 2.0 404-1: the not-found surface for the public/product route
@@ -50,20 +50,20 @@ export default function NotFound() {
       <div className="relative mx-auto w-full max-w-md text-center">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">404</p>
         <h1 className="mt-2 font-serif text-3xl font-normal text-foreground md:text-4xl">
-          Page not found
+          Faqja nuk u gjet
         </h1>
         <p className="mt-3 text-muted">
-          We couldn&apos;t find the page you&apos;re looking for.
+          Nuk e gjetëm faqen që po kërkoni.
         </p>
         <div className="mt-8 flex flex-col items-center gap-3">
           <Link href="/" className={buttonClasses("primary", "md")}>
-            Go home
+            Shkoni te faqja kryesore
           </Link>
           <Link
-            href="/bookstore"
+            href="/librari"
             className="focus-ring rounded-sm text-sm text-muted hover:underline"
           >
-            Browse the Bookstore
+            Shfletoni Librarinë
           </Link>
         </div>
       </div>

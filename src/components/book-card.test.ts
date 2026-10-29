@@ -9,7 +9,7 @@ import { AuthorBookRow } from "./author-book-row";
 const BOOK = {
   id: "c3d4e5f6-2222-4222-8222-abcdef222222",
   title: "Kënga e fundit",
-  genre: "Fiction",
+  genre: "Letërsi artistike",
   price_all: 0,
   pen_name_id: undefined,
 };

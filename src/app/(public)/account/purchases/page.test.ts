@@ -31,8 +31,8 @@ describe("AccountPurchasesPage: maintenance-mode gate", () => {
   it("renders the maintenance notice and performs zero Supabase calls", async () => {
     const element = await AccountPurchasesPage(pageArgs());
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 
@@ -133,8 +133,10 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
     });
     expect(rpc).toHaveBeenCalledWith("list_purchase_currencies", { p_purchase_ids: ["p1"] });
     expect(html).toContain("· USD 9.99");
-    expect(html).toContain('Total spent: <span><span class="font-semibold text-primary">USD 9.99</span></span>');
-    expect(html).not.toContain("9,99 ALL");
+    expect(html).toContain('Shpenzuar gjithsej: <span><span class="font-semibold text-primary">USD 9.99</span></span>');
+    // ALBANIAN-7: the purchase date in Albanian (the shared reader formatter).
+    expect(html).toMatch(/Blerë më \d{1,2} (janar|shkurt|mars|prill|maj|qershor|korrik|gusht|shtator|tetor|nëntor|dhjetor) \d{4} · USD 9\.99/);
+    expect(html).not.toContain("9,99 lekë");
     expect(html).not.toMatch(/\$\d/);
   });
 
@@ -143,7 +145,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       purchases: [purchaseRow("p2", "b2", 17910, "pok_order_1", RECENT)],
       currencies: [{ purchase_id: "p2", currency_state: "resolved", currency: "ALL" }],
     });
-    expect(html).toContain("· 179,10 ALL");
+    expect(html).toContain("· 179,10 lekë");
     expect(html).not.toContain("USD 179.10");
     expect(html).not.toMatch(/\$\d/);
   });
@@ -160,9 +162,9 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       ],
     });
     expect(html).toContain("· USD 9.99");
-    expect(html).toContain("· 179,10 ALL");
+    expect(html).toContain("· 179,10 lekë");
     // Totals: ALL then USD, separate, never summed (999 + 17910 = 18909).
-    expect(html).toMatch(/179,10 ALL<\/span><\/span><span> · <span class="font-semibold text-primary">USD 9.99/);
+    expect(html).toMatch(/179,10 lekë<\/span><\/span><span> · <span class="font-semibold text-primary">USD 9.99/);
     expect(html).not.toMatch(/189[.,]09/);
     expect(html).not.toMatch(/\$\d/);
   });
@@ -178,9 +180,9 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
         { purchase_id: "p3", currency_state: "unknown", currency: null },
       ],
     });
-    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toMatch(/42[.,]42/);
-    expect(html).toContain("1 purchase is not included because its currency could not be determined.");
+    expect(html).toContain("1 blerje nuk përfshihet sepse monedha e saj nuk u përcaktua dot.");
     expect(html).not.toMatch(/\$\d/);
   });
 
@@ -189,7 +191,7 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       purchases: [purchaseRow("p5", "b5", 1234, "pi_conflict", RECENT)],
       currencies: [{ purchase_id: "p5", currency_state: "conflict", currency: null }],
     });
-    expect(html).toContain("Amount unavailable (conflicting currency records)");
+    expect(html).toContain("Shuma nuk është e disponueshme (të dhëna kontradiktore për monedhën)");
     expect(html).not.toMatch(/12[.,]34/);
   });
 
@@ -198,11 +200,11 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       purchases: [purchaseRow("p1", "b1", 999, "pi_legacy", RECENT)],
       currencyError: { message: "function list_purchase_currencies does not exist" },
     });
-    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toContain("USD 9.99");
     expect(html).not.toMatch(/\$\d/);
     // The rest of the page still works.
-    expect(html).toContain("Download EPUB");
+    expect(html).toContain("Shkarkoni EPUB");
   });
 
   it("a free acquisition reads Free and adds nothing to any total", async () => {
@@ -210,8 +212,8 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
       purchases: [purchaseRow("p4", "b4", 0, null, RECENT)],
       currencies: [{ purchase_id: "p4", currency_state: "free", currency: null }],
     });
-    expect(html).toContain("· Free");
-    expect(html).toContain("Total spent: nothing yet");
+    expect(html).toContain("· Falas");
+    expect(html).toContain("Shpenzuar gjithsej: asgjë ende");
   });
 
   it("a bundle transaction's total uses the snapshot's own frozen currency", async () => {
@@ -239,9 +241,9 @@ describe("AccountPurchasesPage: transaction currency (Patch 4)", () => {
         { purchase_id: "p7", currency_state: "resolved", currency: "ALL" },
       ],
     });
-    expect(html).toContain("One purchase · 2 books · 12 ALL");
-    // Counted once, at the snapshot total -- not 24 ALL.
-    expect(html).not.toContain("24 ALL");
+    expect(html).toContain("Një blerje · 2 libra · 12 lekë");
+    // Counted once, at the snapshot total -- not 24 lekë.
+    expect(html).not.toContain("24 lekë");
     expect(html).not.toMatch(/\$\d/);
   });
 });
@@ -262,9 +264,9 @@ describe("AccountPurchasesPage: download line (DOWNLOADS-1)", () => {
       ],
     });
     expect(rpc).toHaveBeenCalledWith("my_purchase_download_states");
-    expect(html).toContain("Downloading ends your right to cancel this purchase.");
-    expect(html.match(/Downloading ends your right to cancel/g)).toHaveLength(1);
-    expect(html).toContain("Downloaded ");
+    expect(html).toContain("Shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.");
+    expect(html.match(/Shkarkimi i jep fund të drejtës suaj/g)).toHaveLength(1);
+    expect(html).toContain("Shkarkuar më ");
   });
 
   it("shows no line when nothing is known", async () => {
@@ -272,7 +274,7 @@ describe("AccountPurchasesPage: download line (DOWNLOADS-1)", () => {
       purchases: [purchaseRow("p1", "b1", 0, null, RECENT)],
       currencies: [{ purchase_id: "p1", currency_state: "free", currency: null }],
     });
-    expect(html).not.toContain("Downloading ends your right to cancel");
-    expect(html).not.toContain("Downloaded ");
+    expect(html).not.toContain("Shkarkimi i jep fund të drejtës suaj");
+    expect(html).not.toContain("Shkarkuar më ");
   });
 });

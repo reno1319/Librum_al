@@ -13,6 +13,18 @@ import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
 import { recordAgreements } from "@/lib/agreement-records";
 import { createAuthorRoleWriteClient } from "@/lib/author-role-write-client";
 import { ACCOUNT_NAME_MAX_LENGTH, ACCOUNT_NAME_TOO_LONG_MESSAGE } from "@/lib/account-name";
+import {
+  AUTH_ENTER_EMAIL_MESSAGE,
+  AUTH_FILL_ALL_FIELDS_MESSAGE,
+  AUTH_LOGIN_FAILED_MESSAGE,
+  AUTH_NAME_EMPTY_MESSAGE,
+  AUTH_PASSWORD_CHANGED_MESSAGE,
+  AUTH_PASSWORD_TOO_SHORT_MESSAGE,
+  AUTH_PASSWORDS_DIFFER_MESSAGE,
+  AUTH_RESET_LINK_EXPIRED_MESSAGE,
+  AUTH_RESET_SEND_FAILED_MESSAGE,
+  AUTH_TERMS_REQUIRED_MESSAGE,
+} from "@/lib/auth-page-messages";
 
 // Supabase's own wrong-password message, which auth-error.ts translates.
 const INVALID_CREDENTIALS_MESSAGE = "Invalid login credentials";
@@ -42,11 +54,11 @@ export async function signup(formData: FormData) {
   const role = resolveSignupRole(formData.get("role"));
 
   if (!email || !password || !rawDisplayName) {
-    redirect("/signup?error=Please+fill+in+every+field");
+    redirect(`/signup?error=${encodeURIComponent(AUTH_FILL_ALL_FIELDS_MESSAGE)}`);
   }
   if (!displayName) {
     // The same message the profile page shows for an empty name.
-    redirect("/signup?error=Name+can%27t+be+empty");
+    redirect(`/signup?error=${encodeURIComponent(AUTH_NAME_EMPTY_MESSAGE)}`);
   }
   if (displayName.length > ACCOUNT_NAME_MAX_LENGTH) {
     redirect(`/signup?error=${encodeURIComponent(ACCOUNT_NAME_TOO_LONG_MESSAGE)}`);
@@ -63,9 +75,7 @@ export async function signup(formData: FormData) {
 
   if (!acceptedTerms) {
     redirect(
-      `/signup?error=${encodeURIComponent(
-        "You must agree to the Terms of Service before creating an account.",
-      )}`,
+      `/signup?error=${encodeURIComponent(AUTH_TERMS_REQUIRED_MESSAGE)}`,
     );
   }
 
@@ -156,7 +166,7 @@ export async function signup(formData: FormData) {
 
 // SECURITY-9A: shown when an author sign-up ended as a reader.
 const AUTHOR_PENDING_MESSAGE =
-  "Your account was created as a reader account. To publish, use \"Become an author\" on this page.";
+  "Llogaria juaj u krijua si llogari lexuesi. Për të botuar, përdorni \"Bëhuni autor\" në këtë faqe.";
 
 // SECURITY-9A: the database makes every new account a reader, so an
 // author sign-up is switched here, with the author-role writer (the
@@ -227,7 +237,7 @@ export async function login(formData: FormData) {
   // asserting it away.
   const signedInUser = data.user;
   if (!signedInUser) {
-    redirect(loginErrorPath("Unable to complete login. Please try again.", next));
+    redirect(loginErrorPath(AUTH_LOGIN_FAILED_MESSAGE, next));
   }
 
   // LAUNCH-1 P1-11 STALE-MARKER CORRECTION: signInWithPassword resolving
@@ -284,7 +294,7 @@ export async function requestPasswordReset(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
 
   if (!email) {
-    redirect("/forgot-password?error=Enter+your+email");
+    redirect(`/forgot-password?error=${encodeURIComponent(AUTH_ENTER_EMAIL_MESSAGE)}`);
   }
 
   const supabase = await createClient();
@@ -303,9 +313,7 @@ export async function requestPasswordReset(formData: FormData) {
     // could contain sensitive request information.
     console.error("requestPasswordReset: password-reset provider request threw");
     redirect(
-      `/forgot-password?error=${encodeURIComponent(
-        "We couldn't send a reset email right now. Please wait and try again.",
-      )}`,
+      `/forgot-password?error=${encodeURIComponent(AUTH_RESET_SEND_FAILED_MESSAGE)}`,
     );
   }
 
@@ -319,9 +327,7 @@ export async function requestPasswordReset(formData: FormData) {
       status: resetError.status ?? null,
     });
     redirect(
-      `/forgot-password?error=${encodeURIComponent(
-        "We couldn't send a reset email right now. Please wait and try again.",
-      )}`,
+      `/forgot-password?error=${encodeURIComponent(AUTH_RESET_SEND_FAILED_MESSAGE)}`,
     );
   }
 
@@ -338,7 +344,7 @@ export async function updatePassword(formData: FormData) {
 
   if (!user) {
     redirect(
-      "/login?error=That+reset+link+has+expired.+Request+a+new+one+from+the+login+page.",
+      `/login?error=${encodeURIComponent(AUTH_RESET_LINK_EXPIRED_MESSAGE)}`,
     );
   }
 
@@ -346,11 +352,13 @@ export async function updatePassword(formData: FormData) {
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
 
   if (!password || password.length < 6) {
-    redirect("/reset-password?error=Password+must+be+at+least+6+characters");
+    redirect(
+      `/reset-password?error=${encodeURIComponent(AUTH_PASSWORD_TOO_SHORT_MESSAGE)}`,
+    );
   }
 
   if (password !== confirmPassword) {
-    redirect("/reset-password?error=Passwords+don%27t+match");
+    redirect(`/reset-password?error=${encodeURIComponent(AUTH_PASSWORDS_DIFFER_MESSAGE)}`);
   }
 
   const { error } = await supabase.auth.updateUser({ password });
@@ -378,5 +386,7 @@ export async function updatePassword(formData: FormData) {
   clearRecoverySession(cookieStore);
   await supabase.auth.signOut();
 
-  redirect("/login?success=Password+updated.+Log+in+with+your+new+password.");
+  redirect(
+    `/login?success=${encodeURIComponent(AUTH_PASSWORD_CHANGED_MESSAGE)}`,
+  );
 }

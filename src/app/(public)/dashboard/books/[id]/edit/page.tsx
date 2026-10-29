@@ -11,15 +11,15 @@ import {
   cancelBookReview,
 } from "../../actions";
 import { GENRES } from "@/lib/genres";
-import { LANGUAGES, isSupportedLanguage } from "@/lib/languages";
 import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
+  groupAllDigits,
 } from "@/lib/catalog-price";
 import { resolvePublishReadiness } from "@/lib/publish-readiness";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
-import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
+import { CONTRIBUTOR_ROLES, contributorRoleLabel } from "@/lib/contributor-roles";
 import { formControlClasses } from "@/lib/form-styles";
 import { DeleteBookButton } from "@/app/(public)/dashboard/delete-book-button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -60,7 +60,7 @@ import type { Metadata } from "next";
 // an unauthenticated request before the page body's own redirect ever
 // runs. Not worth either cost for a private, authenticated-only route.
 export const metadata: Metadata = {
-  title: "Edit book",
+  title: "Ndryshoni librin",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -85,7 +85,7 @@ const PEN_NAME_MAX_LENGTH = 120;
 // when the book's rights choice cannot be read (before the migration, or
 // a read error); Publish is disabled with it.
 const PUBLISH_NOT_POSSIBLE_YET_MESSAGE =
-  "We couldn't publish your book yet. Please try again from your dashboard";
+  "Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj";
 
 // QA: the "Save changes" fields whose typed values come back after
 // updateBook rejects the form. Plain fields only -- the cover and
@@ -99,7 +99,6 @@ const EDIT_BOOK_DRAFT_FIELDS = [
   "penName",
   "subtitle",
   "description",
-  "language",
   "genre",
   "keywords",
   "isbn",
@@ -256,11 +255,11 @@ export default async function EditBookPage({
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
 
       <div className="mt-2">
-        <PageHeader title="Edit book" description={book.title} />
+        <PageHeader title="Ndryshoni librin" description={book.title} />
       </div>
 
       {error && (
@@ -273,7 +272,7 @@ export default async function EditBookPage({
         storageKey={`librum:edit-book-draft:${book.id}`}
         fieldNames={EDIT_BOOK_DRAFT_FIELDS}
         restore={Boolean(error)}
-        notice="Your changes were not saved, but what you typed is still in the form below. Fix the problem above and save again. A cover or manuscript file you picked needs to be chosen again."
+        notice="Ndryshimet tuaja nuk u ruajtën, por ajo që shkruat është ende në formularin më poshtë. Rregulloni problemin më sipër dhe ruajeni përsëri. Kopertinën ose dorëshkrimin që zgjodhët duhet ta zgjidhni përsëri."
       />
       {success && (
         <Alert variant="success" className="mt-4">
@@ -289,10 +288,10 @@ export default async function EditBookPage({
             className="flex flex-col gap-10"
           >
             <section id="details" className="scroll-mt-6">
-              <h2 className="font-serif text-xl font-normal">Book details</h2>
+              <h2 className="font-serif text-xl font-normal">Të dhënat e librit</h2>
               <div className="mt-4 flex flex-col gap-4">
                 <label className="flex flex-col gap-1 text-sm">
-                  Title
+                  Titulli
                   <input
                     name="title"
                     type="text"
@@ -307,7 +306,7 @@ export default async function EditBookPage({
                     shown (pen names exist since PEN-NAMES-1). */}
                 {(
                   <label className="flex flex-col gap-1 text-sm">
-                    Pen name (optional)
+                    Pseudonimi (opsional)
                     <input
                       name="penName"
                       type="text"
@@ -326,20 +325,20 @@ export default async function EditBookPage({
                     )}
                     {authorPublicName && (
                       <span className="text-sm text-muted">
-                        Leave blank to use your author name, {authorPublicName}.
+                        Lëreni bosh për të përdorur emrin tuaj si autor, {authorPublicName}.
                       </span>
                     )}
                     {/* PEN-NAMES-1 (10a, 14a). */}
                     <span className="text-sm text-muted">
-                      A new name becomes a new pen name with its own author page.
+                      Një emër i ri bëhet pseudonim i ri me faqen e vet të autorit.
                       {book.series_id &&
-                        " This book is in a series: take it out of the series before changing its pen name."}
+                        " Ky libër është në një seri: hiqeni nga seria para se t'i ndryshoni pseudonimin."}
                     </span>
                   </label>
                 )}
 
                 <label className="flex flex-col gap-1 text-sm">
-                  Subtitle (optional)
+                  Nëntitulli (opsional)
                   <input
                     name="subtitle"
                     type="text"
@@ -350,7 +349,7 @@ export default async function EditBookPage({
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
-                  Description
+                  Përshkrimi
                   <textarea
                     name="description"
                     rows={4}
@@ -358,82 +357,17 @@ export default async function EditBookPage({
                     className={formControlClasses}
                   />
                   <span className="text-sm text-muted">
-                    A couple of sentences or more helps readers decide.
+                    Disa fjali ose më shumë i ndihmojnë lexuesit të vendosin.
                   </span>
                 </label>
 
-                {/* LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT
-                    LANGUAGE PRESERVATION CORRECTION: no defaultValue
-                    falls back to "sq" here -- see the historical-book-
-                    safety note on resolveLanguage() (actions.ts). An
-                    existing book with language=null shows the neutral
-                    "Select language" prompt; saving without touching
-                    this field resubmits that same empty selection,
-                    which resolveLanguage() treats as "still no
-                    language," never as a write of "sq."
-
-                    books.language carries no DB CHECK (migration 044's
-                    own comment explains why: the supported UI language
-                    set may grow without a migration), so a book can
-                    legitimately already hold a code this deployed
-                    LANGUAGES doesn't (yet) recognize. The earlier
-                    version of this field collapsed that case to the
-                    same blank defaultValue as a genuinely-null book --
-                    indistinguishable from "no language" once rendered,
-                    so saving ANY unrelated field (e.g. Description)
-                    would silently submit language="" and
-                    resolveLanguage() would clear the real stored value
-                    to null. That's the defect this correction fixes:
-                    the synthetic <option> below (rendered only for a
-                    non-null, unrecognized code) preserves the exact
-                    stored value as a real, selectable option instead,
-                    so an untouched save keeps submitting that same
-                    code, not blank.
-
-                    A native, plain <select>'s own defaultValue only
-                    takes effect if some <option> in the list actually
-                    has that value -- without the synthetic option, a
-                    browser given no matching option falls back to
-                    selecting the FIRST option ("Select language"),
-                    silently reproducing the exact bug this correction
-                    exists to fix. The synthetic option is therefore
-                    load-bearing, not cosmetic.
-
-                    KNOWN, EXPLICITLY REPORTED LIMITATION (see this
-                    task's own required trace): resolveLanguage()
-                    itself still rejects any non-empty value outside
-                    LANGUAGES with a redirect, BEFORE updateBook()'s own
-                    .update() call runs -- so resubmitting an untouched
-                    unsupported code no longer silently clears it, but
-                    it does still block that entire save (including
-                    whatever unrelated field the author actually meant
-                    to change) behind a "Please choose a supported
-                    language" error. Fixing that fully needs a
-                    server-side decision (a narrow preserve-unchanged-
-                    value rule in updateBook()) explicitly out of scope
-                    for this pass -- see this correction's own final
-                    report. */}
-                <label className="flex flex-col gap-1 text-sm">
-                  Language (optional)
-                  <select
-                    name="language"
-                    defaultValue={book.language ?? ""}
-                    className={formControlClasses}
-                  >
-                    <option value="">Select language</option>
-                    {book.language && !isSupportedLanguage(book.language) && (
-                      <option value={book.language}>Current language · {book.language}</option>
-                    )}
-                    {LANGUAGES.map((l) => (
-                      <option key={l.code} value={l.code}>
-                        {l.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {/* ALBANIAN-9: the book language picker is gone (Renato,
+                    10-28). The form sends no "language" field, so
+                    updateBook() leaves books.language untouched
+                    (resolveLanguageForUpdate "omit"). */}
 
                 <label className="flex flex-col gap-1 text-sm">
-                  Genre
+                  Zhanri
                   <select
                     name="genre"
                     required
@@ -441,7 +375,7 @@ export default async function EditBookPage({
                     className={formControlClasses}
                   >
                     <option value="" disabled>
-                      Choose a genre
+                      Zgjidhni një zhanër
                     </option>
                     {GENRES.map((genre) => (
                       <option key={genre} value={genre}>
@@ -453,41 +387,41 @@ export default async function EditBookPage({
 
                 <details className="rounded-card border border-border px-4 py-3">
                   <summary className="cursor-pointer text-sm font-medium text-foreground">
-                    Additional book details
+                    Të dhëna të tjera për librin
                   </summary>
                   <div className="mt-4 flex flex-col gap-4">
                     <label className="flex flex-col gap-1 text-sm">
-                      Keywords (optional)
+                      Fjalë kyçe (opsionale)
                       <input
                         name="keywords"
                         type="text"
                         defaultValue={book.keywords}
-                        placeholder="e.g. space opera, first contact, hard sci-fi"
+                        placeholder="p.sh. dashuri, luftë, histori familjare"
                         className={formControlClasses}
                       />
                       <span className="text-sm text-muted">
-                        Comma-separated. Helps readers find your book by terms
-                        beyond its genre — up to 15.
+                        Të ndara me presje. Ndihmojnë lexuesit ta gjejnë librin tuaj
+                        me fjalë përtej zhanrit, deri në 15.
                       </span>
                     </label>
 
                     <label className="flex flex-col gap-1 text-sm">
-                      ISBN (optional)
+                      ISBN (opsional)
                       <CheckedBookField
                         kind="isbn"
                         id="edit-book-isbn"
                         name="isbn"
                         defaultValue={book.isbn ?? ""}
-                        placeholder="e.g. 978-3-16-148410-0"
+                        placeholder="p.sh. 978-3-16-148410-0"
                       />
                       <span className="text-sm text-muted">
-                        Only if you already own one — Librum doesn&apos;t issue
-                        or register ISBNs. Leave blank to skip.
+                        Vetëm nëse e keni tashmë një të tillë. Librum nuk lëshon
+                        e as regjistron ISBN. Lëreni bosh nëse nuk keni.
                       </span>
                     </label>
 
                     <label className="flex flex-col gap-1 text-sm">
-                      Publisher / imprint (optional)
+                      Botuesi / shtëpia botuese (opsional)
                       <input
                         name="publisher"
                         type="text"
@@ -496,24 +430,24 @@ export default async function EditBookPage({
                         className={formControlClasses}
                       />
                       <span className="text-sm text-muted">
-                        The publishing name for this edition, if applicable.
+                        Emri botues i këtij botimi, nëse ka.
                       </span>
                     </label>
 
                     <label className="flex flex-col gap-1 text-sm">
-                      Edition (optional)
+                      Botimi (opsional)
                       <input
                         name="edition"
                         type="text"
                         defaultValue={book.edition ?? ""}
-                        placeholder="e.g. First edition, Revised edition"
+                        placeholder="p.sh. Botimi i parë, Botim i rishikuar"
                         maxLength={EDITION_MAX_LENGTH}
                         className={formControlClasses}
                       />
                     </label>
 
                     <label className="flex flex-col gap-1 text-sm">
-                      Originally published (optional)
+                      Botuar fillimisht (opsional)
                       <CheckedBookField
                         kind="pastDate"
                         id="edit-book-original-publication-date"
@@ -521,14 +455,14 @@ export default async function EditBookPage({
                         defaultValue={book.original_publication_date ?? ""}
                       />
                       <span className="text-sm text-muted">
-                        Only if this edition was first published elsewhere
-                        before arriving on Librum.
+                        Vetëm nëse ky botim është botuar diku tjetër
+                        para se të vinte në Librum.
                       </span>
                     </label>
 
                     {series && series.length === 0 && (
                       <p className="text-sm text-muted">
-                        Want to group this with other books as a series?{" "}
+                        Doni ta gruponi me libra të tjerë në një seri?{" "}
                         {/* FIX1 (X11): a new tab, so unsaved edits stay. */}
                         <Link
                           href="/dashboard/series"
@@ -536,23 +470,23 @@ export default async function EditBookPage({
                           rel="noopener"
                           className="focus-ring rounded-sm underline"
                         >
-                          Create a series first
-                          <span className="sr-only"> (opens in a new tab)</span>
+                          Krijoni fillimisht një seri
+                          <span className="sr-only"> (hapet në një skedë të re)</span>
                         </Link>
-                        , then come back here.
+                        , pastaj kthehuni këtu.
                       </p>
                     )}
 
                     {series && series.length > 0 && (
                       <div className="flex gap-3">
                         <label className="flex flex-1 flex-col gap-1 text-sm">
-                          Series (optional)
+                          Seria (opsionale)
                           <select
                             name="seriesId"
                             defaultValue={book.series_id ?? ""}
                             className={formControlClasses}
                           >
-                            <option value="">None</option>
+                            <option value="">Asnjë</option>
                             {series.map((s) => (
                               <option key={s.id} value={s.id}>
                                 {s.title}
@@ -561,7 +495,7 @@ export default async function EditBookPage({
                           </select>
                         </label>
                         <label className="flex flex-col gap-1 text-sm">
-                          Position
+                          Vendi në seri
                           <input
                             name="seriesPosition"
                             type="number"
@@ -583,7 +517,7 @@ export default async function EditBookPage({
                     choice changes. Sentences from RIGHTS_STATEMENTS. */}
                 {schemaFeatures.rights && rightsState.kind !== "unavailable" && (
                   <fieldset className="flex flex-col gap-3">
-                    <legend className="mb-3 font-bold text-foreground">Rights</legend>
+                    <legend className="mb-3 font-bold text-foreground">Të drejtat</legend>
                     {RIGHTS_BASES.map((basis) => (
                       <label
                         key={basis}
@@ -605,7 +539,7 @@ export default async function EditBookPage({
             </section>
 
             <section id="files" className="scroll-mt-6">
-              <h2 className="font-serif text-xl font-normal">Files</h2>
+              <h2 className="font-serif text-xl font-normal">Skedarët</h2>
               <div className="mt-4 flex flex-col gap-6">
                 {/* ADMIN-3-REVIEW (C): a live book's new file or cover
                     goes back through review; said before the pickers. */}
@@ -614,13 +548,13 @@ export default async function EditBookPage({
 
                 <div className="flex flex-col gap-2">
                   <p className="text-sm font-medium">
-                    {manuscriptLabel ? `Current manuscript: ${manuscriptLabel}` : "No manuscript on file"}
+                    {manuscriptLabel ? `Dorëshkrimi aktual: ${manuscriptLabel}` : "Nuk ka dorëshkrim"}
                   </p>
                   <p className="text-sm text-muted">
-                    Leave blank to keep your current manuscript. A new file is checked
-                    by Librum before readers receive it. Readers can preview
-                    approximately the first 10% of your ebook — generated
-                    automatically, no extra steps needed.
+                    Lëreni bosh për të mbajtur dorëshkrimin aktual. Një skedar i ri
+                    kontrollohet nga Librum para se ta marrin lexuesit. Lexuesit mund të
+                    shohin rreth 10% të parë të e-librit tuaj. Kjo krijohet
+                    automatikisht, pa hapa të tjerë.
                   </p>
                   <ManuscriptField
                     bookTitle={book.title}
@@ -632,7 +566,7 @@ export default async function EditBookPage({
             </section>
 
             <section id="pricing" className="scroll-mt-6">
-              <h2 className="font-serif text-xl font-normal">Pricing</h2>
+              <h2 className="font-serif text-xl font-normal">Çmimi</h2>
               <div className="mt-4">
                 {/* ALL-WIRING-2: an ALL text field, not a USD number
                     field. `type="number"` is wrong for this input in two
@@ -656,7 +590,7 @@ export default async function EditBookPage({
                     page has no per-field price error, so the border is
                     always the control colour. */}
                 <label className="flex flex-col gap-1 text-sm">
-                  Price (ALL)
+                  Çmimi (lekë)
                   <span className="flex w-full max-w-[17.5rem] items-stretch overflow-hidden rounded-[4px] border border-[#8c8472] bg-surface focus-within:shadow-[var(--focus-ring)]">
                     <input
                       name="price"
@@ -670,14 +604,14 @@ export default async function EditBookPage({
                       aria-hidden="true"
                       className="flex items-center bg-surface-hover px-4 font-bold text-foreground"
                     >
-                      ALL
+                      lekë
                     </span>
                   </span>
                   <span className="text-sm text-muted">
-                    Whole lek: 0 for a free ebook, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
-                    {MAXIMUM_CATALOG_PRICE_ALL}. Librum takes a{" "}
-                    {PLATFORM_FEE_PERCENT}% platform fee — you keep the rest of
-                    every sale.
+                    Lekë të plota: 0 për e-libër falas, ose nga {MINIMUM_PAID_CATALOG_PRICE_ALL} deri në{" "}
+                    {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}. Librum mban një tarifë platforme prej{" "}
+                    {PLATFORM_FEE_PERCENT}%; pjesa tjetër e çdo shitjeje
+                    është e juaja.
                   </span>
                 </label>
                 {/* LIVE-PRICE-CONFIRM-1: a live book's new price needs a
@@ -687,16 +621,16 @@ export default async function EditBookPage({
             </section>
 
             <button type="submit" className={buttonClasses("primary", "md", "w-fit")}>
-              Save changes
+              Ruani ndryshimet
             </button>
           </form>
 
           <section className="border-t border-border pt-8">
-            <h2 className="font-serif text-xl font-normal">People</h2>
+            <h2 className="font-serif text-xl font-normal">Bashkëpunëtorët</h2>
             <p className="mt-1 text-sm text-muted">
-              Credit anyone besides yourself — an illustrator, translator,
-              narrator, or co-author. Just a name and a role, no Librum account
-              needed.
+              Përmendni këdo tjetër përveç jush: ilustrues, përkthyes,
+              lexues ose bashkautor. Mjafton emri dhe roli; nuk duhet
+              llogari në Librum.
             </p>
 
             {contributors && contributors.length > 0 && (
@@ -707,14 +641,14 @@ export default async function EditBookPage({
                     className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface px-3 py-2"
                   >
                     <span>
-                      {c.name} <span className="text-muted">· {c.role}</span>
+                      {c.name} <span className="text-muted">· {contributorRoleLabel(c.role)}</span>
                     </span>
                     <form action={removeContributor.bind(null, book.id, c.id)}>
                       <button
                         type="submit"
                         className="focus-ring rounded-sm text-xs text-red-700 hover:underline"
                       >
-                        Remove
+                        Hiqeni
                       </button>
                     </form>
                   </li>
@@ -727,30 +661,30 @@ export default async function EditBookPage({
               className="mt-4 flex flex-wrap items-end gap-3"
             >
               <label className="flex flex-col gap-1 text-sm">
-                Name
+                Emri
                 <input
                   name="name"
                   type="text"
                   required
-                  placeholder="e.g. Jane Doe"
+                  placeholder="p.sh. Arta Hoxha"
                   className={formControlClasses}
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                Role
+                Roli
                 <select name="role" required defaultValue="" className={formControlClasses}>
                   <option value="" disabled>
-                    Choose a role
+                    Zgjidhni një rol
                   </option>
                   {CONTRIBUTOR_ROLES.map((role) => (
                     <option key={role} value={role}>
-                      {role}
+                      {contributorRoleLabel(role)}
                     </option>
                   ))}
                 </select>
               </label>
               <button type="submit" className={buttonClasses("outline", "md")}>
-                Add contributor
+                Shtoni bashkëpunëtor
               </button>
             </form>
           </section>
@@ -760,17 +694,17 @@ export default async function EditBookPage({
           {/* PHONE PASS (D3): the Dashboard row menu's Unpublish (and the
               other menu items above) jump to these section ids. */}
           <section id="publishing" className="scroll-mt-6 rounded-card border border-border bg-surface p-4 shadow-sm">
-            <h2 className="font-serif text-lg font-normal">Publishing</h2>
+            <h2 className="font-serif text-lg font-normal">Publikimi</h2>
             <p className="mt-2 text-sm">
-              Status:{" "}
+              Gjendja:{" "}
               <span className="font-medium">
                 {takedown.notice
-                  ? "Taken down by Librum"
+                  ? "Hequr nga Libraria"
                   : inReview
                     ? IN_REVIEW_LABEL
                     : book.status === "draft"
                       ? "Draft"
-                      : "Published"}
+                      : "I publikuar"}
               </span>
             </p>
 
@@ -781,15 +715,15 @@ export default async function EditBookPage({
             {book.status !== "published" && (
               <p className="mt-2 text-sm text-muted">
                 <Link
-                  href={`/books/${book.id}`}
+                  href={`/libra/${book.id}`}
                   target="_blank"
                   rel="noopener"
                   className="focus-ring rounded-sm font-medium text-foreground underline"
                 >
-                  Preview your book page
-                  <span className="sr-only"> (opens in a new tab)</span>
+                  Shikoni faqen e librit para botimit
+                  <span className="sr-only"> (hapet në një skedë të re)</span>
                 </Link>
-                . Shows your last saved changes.
+                . Tregon ndryshimet e ruajtura së fundmi.
               </p>
             )}
 
@@ -809,7 +743,7 @@ export default async function EditBookPage({
               // promise; the author may take it back to a draft.
               <>
                 <p className="mt-4 text-sm text-muted">
-                  Librum is checking your book. We&apos;ll tell you when it&apos;s live.
+                  Librum po e kontrollon librin tuaj. Do t&apos;ju njoftojmë kur të publikohet.
                 </p>
                 <form action={cancelBookReview.bind(null, book.id)} className="mt-4">
                   <button type="submit" className={buttonClasses("outline", "md", "w-full")}>
@@ -853,12 +787,12 @@ export default async function EditBookPage({
                 {readiness.missingAllPrice ? (
                   <Alert
                     variant="warning"
-                    title="This book needs a price before you can publish it."
+                    title="Ky libër ka nevojë për një çmim para se ta publikoni."
                     className="mt-4"
                   >
                     <p>
-                      Set a price in lek above — 0 for a free ebook — and save
-                      your changes.
+                      Vendosni çmimin në lekë më sipër (0 për e-libër falas) dhe ruani
+                      ndryshimet.
                     </p>
                   </Alert>
                 ) : readiness.missingDescription ? (
@@ -868,7 +802,7 @@ export default async function EditBookPage({
                   // because this book already is a draft.
                   <Alert
                     variant="warning"
-                    title="Add a description before publishing."
+                    title="Shtoni një përshkrim para publikimit."
                     className="mt-4"
                   />
                 ) : rightsState.kind === "unavailable" ||
@@ -880,25 +814,25 @@ export default async function EditBookPage({
                 ) : readiness.missingRights ? (
                   // F4 (P4): after the description, as performPublish()
                   // checks it.
-                  <Alert variant="warning" title="Choose the rights before publishing." className="mt-4" />
+                  <Alert variant="warning" title="Zgjidhni të drejtat para publikimit." className="mt-4" />
                 ) : readiness.paidPublishingBlocked ? (
                   <Alert
                     variant="warning"
-                    title="Paid publishing hasn't launched yet."
+                    title="Publikimi me pagesë nuk ka nisur ende."
                     className="mt-4"
                   >
-                    <p>You can publish free books now.</p>
+                    <p>Librat falas mund t&apos;i publikoni që tani.</p>
                   </Alert>
                 ) : (
                   <p className="mt-4 text-sm text-muted">
-                    {approvalValid ? "Ready to publish." : "Ready to send for review. Librum checks every book before it goes live."}
+                    {approvalValid ? "Gati për publikim." : "Gati për t'u dërguar për shqyrtim. Librum e kontrollon çdo libër para se të publikohet."}
                   </p>
                 )}
 
                 {readiness.recommended.length > 0 && (
                   <div className="mt-4">
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                      Recommended before publishing
+                      Të rekomanduara para publikimit
                     </p>
                     <ul className="mt-2 flex flex-col gap-1 text-sm">
                       {readiness.recommended.map((item) => (
@@ -937,12 +871,12 @@ export default async function EditBookPage({
             ) : (
               <>
                 <p className="mt-4 text-sm text-muted">
-                  Removes it from the Bookstore. Readers who already own it
-                  keep their download.
+                  E heq nga Libraria. Lexuesit që e kanë tashmë
+                  e mbajnë shkarkimin e tyre.
                 </p>
                 <form action={unpublishBook.bind(null, book.id)} className="mt-4">
                   <button type="submit" className={buttonClasses("outline", "md", "w-full")}>
-                    Unpublish book
+                    Hiqeni nga publikimi
                   </button>
                 </form>
               </>
@@ -950,8 +884,8 @@ export default async function EditBookPage({
           </section>
 
           <section className="rounded-card border border-dashed border-border p-4">
-            <h2 className="font-serif text-sm font-normal text-muted">Danger zone</h2>
-            <p className="mt-1 text-xs text-muted">This can&apos;t be undone.</p>
+            <h2 className="font-serif text-sm font-normal text-muted">Zona e rrezikut</h2>
+            <p className="mt-1 text-xs text-muted">Ky veprim nuk mund të zhbëhet.</p>
             <form action={deleteBook.bind(null, book.id)} className="mt-3">
               <DeleteBookButton title={book.title} />
             </form>

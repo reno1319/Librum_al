@@ -13,7 +13,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve({ auth: { getUser: () => Promise.resolve({ data: { user: null } }) } }),
 }));
 
-const { default: HowItWorksPage } = await import("./how-it-works/page");
+const { default: HowItWorksPage } = await import("./si-funksionon/page");
 const renderHowItWorks = async () => renderToStaticMarkup(await HowItWorksPage());
 
 // FIX1: source-level guards for the small fixes that have no page-level
@@ -46,7 +46,7 @@ describe("FIX1 X3: How it works numbers each step once", () => {
     const html = await renderHowItWorks();
     const numerals = [...html.matchAll(/<span class="[^"]*italic[^"]*">(\d\d)<\/span>/g)].map((m) => m[1]);
     expect(numerals).toEqual(["01", "02", "03", "04", "05", "06"]);
-    expect(html).toContain(">Sign up as an author</h3>");
+    expect(html).toContain(">Regjistrohuni si autor</h3>");
     expect(html).not.toMatch(/>\d\. /);
     expect(html).not.toContain("list-decimal");
   });
@@ -67,13 +67,12 @@ describe("FIX1 X12: header on one row, a quiet Log out, one word for it", () => 
   });
 
   it("draws Log out as a text link, not the outline button", () => {
-    const logout = header.match(/<button type="submit" className=\{(\w+)\}>\s*Log out/);
+    const logout = header.match(/<button type="submit" className=\{(\w+)\}>\s*Dilni/);
     expect(logout?.[1]).toBe("QUIET_LINK_ON_DARK_CLASSES");
   });
 
   it('says "Log out" everywhere, never "Sign out"', () => {
     for (const file of [
-      "src/app/(public)/account/page.tsx",
       "src/app/admin/admin-shell.tsx",
       "src/app/admin/admin-mobile-nav.tsx",
       "src/app/admin/login/page.tsx",
@@ -82,12 +81,16 @@ describe("FIX1 X12: header on one row, a quiet Log out, one word for it", () => 
       expect(source).toContain("Log out");
       expect(source).not.toMatch(/>\s*Sign out\s*</);
     }
+    // ALBANIAN-7: the reader's Account page says "Dilni", like the header.
+    const account = read("src/app/(public)/account/page.tsx");
+    expect(account).toMatch(/>\s*Dilni\s*</);
+    expect(account).not.toMatch(/>\s*(Log out|Sign out)\s*</);
   });
 });
 
 describe("FIX1 X13: chart labels carry the month", () => {
   it("the first bar names its month", () => {
-    expect(chartDayLabels([new Date(2026, 9, 12)])[0]).toEqual({ day: "12", month: "Oct" });
+    expect(chartDayLabels([new Date(Date.UTC(2026, 9, 12))])[0]).toEqual({ day: "12", month: "tet" });
   });
 });
 
@@ -113,9 +116,9 @@ describe("FIX1 X14: the cover placeholder", () => {
       "src/components/book-card.tsx",
       "src/components/library-book-card.tsx",
       "src/components/author-book-row.tsx",
-      "src/app/(public)/books/[id]/page.tsx",
-      "src/app/(public)/bookstore/page.tsx",
-      "src/app/(public)/authors/[id]/page.tsx",
+      "src/app/(public)/libra/[id]/page.tsx",
+      "src/app/(public)/librari/page.tsx",
+      "src/app/(public)/autore/[id]/page.tsx",
       "src/app/(public)/dashboard/books/new/upload-wizard.tsx",
     ]) {
       const source = read(file);
@@ -129,17 +132,17 @@ describe("FIX1 X15: one heading style", () => {
   it("no serif heading on a public or dashboard page is bold", () => {
     const files = [
       "src/components/ui/page-header.tsx",
-      "src/app/(public)/how-it-works/page.tsx",
+      "src/app/(public)/si-funksionon/page.tsx",
       "src/app/(public)/dashboard/books/[id]/edit/page.tsx",
       "src/app/(public)/dashboard/balance/page.tsx",
-      "src/app/(public)/terms/page.tsx",
+      "src/app/(public)/kushtet/page.tsx",
       "src/app/(public)/account/page.tsx",
       "src/components/page-bands.tsx",
-      "src/app/(public)/about/page.tsx",
-      "src/app/(public)/help/page.tsx",
-      "src/app/(public)/pricing/page.tsx",
-      "src/app/(public)/privacy/page.tsx",
-      "src/app/(public)/refunds/page.tsx",
+      "src/app/(public)/rreth-nesh/page.tsx",
+      "src/app/(public)/ndihme/page.tsx",
+      "src/app/(public)/fitimet/page.tsx",
+      "src/app/(public)/privatesia/page.tsx",
+      "src/app/(public)/rimbursimet/page.tsx",
     ];
     for (const file of files) {
       const headings = read(file).match(/<h[1-4]\b[^>]*font-serif[^>]*>/g) ?? [];
@@ -152,7 +155,7 @@ describe("FIX1 X15: one heading style", () => {
 
 describe("AUTHOR PAGES REDESIGN: the Terms contents box", () => {
   it("lists every numbered section heading, in order, by its anchor", () => {
-    const source = read("src/app/(public)/terms/page.tsx");
+    const source = read("src/app/(public)/kushtet/page.tsx");
     const list = source.match(/const SECTION_TITLES = \[([\s\S]*?)\];/)![1];
     const titles = [...list.matchAll(/"([^"]+)"/g)].map((m) => m[1].replace("'", "&apos;"));
     const headings = [...source.matchAll(/<section id="section-(\d+)"[^>]*>\s*<h2[^>]*>\s*<span[^>]*>\1\.<\/span> ([^\n<]+)/g)];

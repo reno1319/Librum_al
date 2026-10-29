@@ -23,8 +23,8 @@ describe("SalesPage: maintenance-mode gate", () => {
   it("renders the maintenance notice and performs zero Supabase calls", async () => {
     const element = await SalesPage();
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 
@@ -129,7 +129,7 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("splits net revenue and the daily chart by currency; never a combined figure, never a bare $", async () => {
-    // Platform fee is 20%: 1000 USD cents -> 800 net; 150000 ALL minor -> 120000 net.
+    // Platform fee is 20%: 1000 USD cents -> 800 net; 150000 lekë minor -> 120000 net.
     const { html, rpc } = await renderSales({
       books: BOOKS,
       purchases: [sale("p1", "b1", 1000, "pi_legacy"), sale("p2", "b2", 150000, "pok_new")],
@@ -139,7 +139,7 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
       ],
     });
     expect(rpc).toHaveBeenCalledWith("list_purchase_currencies", { p_purchase_ids: ["p1", "p2"] });
-    expect(html).toContain("1.200 ALL");
+    expect(html).toContain("1.200 lekë");
     expect(html).toContain("USD 8.00");
     // A cross-currency sum (800 + 120000 minor units) appears nowhere.
     expect(html).not.toContain("1.208,00");
@@ -161,11 +161,11 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
     });
     expect(html).toContain("USD 8.00");
     expect(html).not.toContain("USD 48.00");
-    expect(html).not.toContain("40 ALL");
-    expect(html).toContain("1 sale is not included: its currency could not be determined.");
-    expect(html).toContain("+ 1 with unknown currency");
+    expect(html).not.toContain("40 lekë");
+    expect(html).toContain("1 shitje nuk përfshihet: monedha e saj nuk u përcaktua dot.");
+    expect(html).toContain("+ 1 me monedhë të panjohur");
     // Units still count both books acquired.
-    expect(html).toMatch(/Units<\/p><p[^>]*>2<\/p>/);
+    expect(html).toMatch(/Kopje të shitura<\/p><p[^>]*>2<\/p>/);
   });
 
   it("a row the RPC did not return is unknown, not USD or ALL", async () => {
@@ -176,8 +176,8 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
     });
     expect(html).not.toContain("USD");
     expect(html).not.toContain(" ALL");
-    expect(html).toContain("No sales yet");
-    expect(html).toContain("1 sale is not included");
+    expect(html).toContain("Ende pa shitje");
+    expect(html).toContain("1 shitje nuk përfshihet");
   });
 
   it("a failed currency read throws instead of rendering guessed totals", async () => {
@@ -187,7 +187,7 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
         purchases: [sale("p1", "b1", 1000, "pi_legacy")],
         currencyError: { message: "boom" },
       }),
-    ).rejects.toThrow("Could not load sales data. Please try again.");
+    ).rejects.toThrow("Të dhënat e shitjeve nuk u ngarkuan. Provoni përsëri.");
   });
 
   it("lost-disputed sales stay excluded from the currency totals", async () => {
@@ -202,7 +202,7 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
     });
     expect(html).toContain("USD 8.00");
     expect(html).not.toContain("USD 24.00");
-    expect(html).toMatch(/Units<\/p><p[^>]*>1<\/p>/);
+    expect(html).toMatch(/Kopje të shitura<\/p><p[^>]*>1<\/p>/);
   });
 
   it("a transaction-only bundle snapshot lands in its own frozen currency; a represented one is not added again", async () => {
@@ -231,12 +231,12 @@ describe("SalesPage: transaction currency (Patch 4)", () => {
     });
     expect(html).toContain("USD 8.00");
     expect(html).not.toContain("USD 16.00");
-    expect(html).toContain("400 ALL");
+    expect(html).toContain("400 lekë");
   });
 
   it("an author with no sales sees the empty state and one empty chart", async () => {
     const { html, rpc } = await renderSales({ books: BOOKS, purchases: [] });
-    expect(html).toContain("No sales yet");
+    expect(html).toContain("Ende pa shitje");
     expect(rpc).not.toHaveBeenCalledWith("list_purchase_currencies", expect.anything());
     expect(html).not.toContain("<h3");
   });

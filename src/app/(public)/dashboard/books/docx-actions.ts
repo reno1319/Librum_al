@@ -3,7 +3,12 @@
 import { randomUUID } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { convertDocxToDocument, type ConversionWarning } from "@/lib/docx-converter";
-import { generateEpub, patchEpubMetadata } from "@/lib/epub-generator";
+import {
+  generateEpub,
+  patchEpubMetadata,
+  UNKNOWN_AUTHOR_NAME,
+  UNTITLED_MANUSCRIPT_TITLE,
+} from "@/lib/epub-generator";
 import { validateEpubStructure } from "@/lib/epub-validation";
 
 // LIBRUM 2.0 PRODUCT-5 413 CORRECTION: a confirmed production defect --
@@ -77,23 +82,23 @@ const MANUSCRIPTS_BUCKET = "manuscripts";
 const MAX_DOCX_BYTES = 50 * 1024 * 1024;
 
 const ERROR_MESSAGES: Record<string, string> = {
-  missing_path: "Choose a DOCX file to convert.",
-  not_authenticated: "Your session has expired. Please refresh the page and try again.",
-  unauthorized: "Something went wrong converting this document. Please try again.",
+  missing_path: "Zgjidhni një skedar DOCX për ta kthyer.",
+  not_authenticated: "Seanca juaj ka skaduar. Rifreskoni faqen dhe provoni përsëri.",
+  unauthorized: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
   temp_upload_failed:
-    "We couldn't upload your manuscript. Please check your connection and try again.",
-  temp_file_missing: "Something went wrong converting this document. Please try again.",
-  too_large: "DOCX manuscript must be under 50MB.",
-  invalid_zip: "That file doesn't look like a valid DOCX file.",
-  not_a_docx: "That file doesn't look like a valid DOCX file.",
+    "Dorëshkrimi juaj nuk u ngarkua. Kontrolloni lidhjen dhe provoni përsëri.",
+  temp_file_missing: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
+  too_large: "Dorëshkrimi DOCX duhet të jetë nën 50 MB.",
+  invalid_zip: "Ky skedar nuk duket si skedar DOCX i vlefshëm.",
+  not_a_docx: "Ky skedar nuk duket si skedar DOCX i vlefshëm.",
   macro_enabled_document_not_supported:
-    "Macro-enabled documents (.docm) aren't supported. Please save as a standard .docx file and try again.",
-  empty_document: "This document doesn't have any readable text to convert.",
-  conversion_failed: "Something went wrong converting this document. Please try again.",
-  too_large_uncompressed: "Document is too large to convert.",
-  too_complex: "Document is too complex to convert.",
+    "Dokumentet me makro (.docm) nuk pranohen. Ruajeni si skedar të zakonshëm .docx dhe provoni përsëri.",
+  empty_document: "Ky dokument nuk ka tekst të lexueshëm për t'u kthyer.",
+  conversion_failed: "Diçka shkoi keq gjatë kthimit të këtij dokumenti. Provoni përsëri.",
+  too_large_uncompressed: "Dokumenti është shumë i madh për t'u kthyer.",
+  too_complex: "Dokumenti është shumë i ndërlikuar për t'u kthyer.",
   generated_epub_invalid:
-    "Something went wrong generating your ebook. Please try again, or upload an EPUB directly.",
+    "Diçka shkoi keq gjatë krijimit të e-librit tuaj. Provoni përsëri ose ngarkoni drejtpërdrejt një EPUB.",
 };
 
 async function requireOwnedTempPath(tempPath: string) {
@@ -174,8 +179,8 @@ export async function parseDocxToDocument(tempDocxPath: string): Promise<ParseDo
     // (real, for Edit Book's already-known title; still blank, for the
     // wizard's Files step, in which case this placeholder is exactly
     // what would be applied anyway).
-    title: "Untitled manuscript",
-    authorName: "Unknown author",
+    title: UNTITLED_MANUSCRIPT_TITLE,
+    authorName: UNKNOWN_AUTHOR_NAME,
     sections: conversion.sections,
     images: conversion.images,
   });
@@ -218,7 +223,7 @@ export type RepackageResult = { success: true } | { success: false; error: strin
 // parameter, passed straight through to patchEpubMetadata()'s own
 // (also optional) fourth parameter -- omitted here means omitted
 // there, which leaves the generated EPUB's dc:language exactly as
-// parseDocxToDocument() first packaged it (always "und" today, since
+// parseDocxToDocument() first packaged it ("sq" since SQ-17, since
 // that function's own generateEpub() call never supplies a language
 // either -- see this function's own top-of-file comment for why that
 // stays unchanged: mirrors the pre-existing title/author bootstrap
@@ -244,8 +249,8 @@ export async function repackageWithTitle(
   }
 
   const epubBytes = Buffer.from(await fileData.arrayBuffer());
-  const title = bookTitle.trim() || "Untitled manuscript";
-  const author = authorName.trim() || "Unknown author";
+  const title = bookTitle.trim() || UNTITLED_MANUSCRIPT_TITLE;
+  const author = authorName.trim() || UNKNOWN_AUTHOR_NAME;
 
   let patched: Buffer;
   try {

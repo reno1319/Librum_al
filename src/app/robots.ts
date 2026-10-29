@@ -22,9 +22,10 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 // "/auth/" is the one deliberate exception, and DOES keep its trailing
 // slash -- there is no bare "/auth" page (only "/auth/callback", an
 // internal route handler), and a bare "/auth" prefix would also match
-// the fully public "/authors/[id]" pages ("/authors" starts with the
-// literal string "/auth"). Confirmed by reading the route inventory
-// before writing this, not assumed.
+// any public page whose address starts with those letters (the old
+// "/authors/[id]" pages did; their Albanian address "/autore" doesn't,
+// but the slash keeps a future one safe). Confirmed by reading the
+// route inventory before writing this, not assumed.
 //
 // force-dynamic: this file has no Request-time API of its own (reading
 // process.env is not one), so by Next's default caching rules it would

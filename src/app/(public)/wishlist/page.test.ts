@@ -10,7 +10,7 @@ const mockCreateClient = vi.fn(() => {
   throw SENTINEL;
 });
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
-vi.mock("@/app/(public)/books/[id]/actions", () => ({ removeFromWishlist: vi.fn() }));
+vi.mock("@/app/(public)/libra/[id]/actions", () => ({ removeFromWishlist: vi.fn() }));
 
 const { default: WishlistPage } = await import("./page");
 
@@ -24,8 +24,8 @@ describe("WishlistPage: maintenance-mode gate", () => {
   it("renders the maintenance notice and performs zero Supabase calls", async () => {
     const element = await WishlistPage();
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 

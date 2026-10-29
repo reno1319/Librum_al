@@ -67,7 +67,7 @@ describe("Route group structure: public routes actually moved, none left behind 
     "page.tsx",
     "login/page.tsx",
     "dashboard/page.tsx",
-    "books/[id]/page.tsx",
+    "libra/[id]/page.tsx",
     "account/page.tsx",
   ];
 

@@ -7,10 +7,10 @@
 export type BookstoreSort = "" | "bestselling" | "price_asc" | "price_desc";
 
 export const BOOKSTORE_SORT_OPTIONS: { value: BookstoreSort; label: string }[] = [
-  { value: "", label: "Newest" },
-  { value: "bestselling", label: "Bestselling" },
-  { value: "price_asc", label: "Price: low to high" },
-  { value: "price_desc", label: "Price: high to low" },
+  { value: "", label: "Më të rejat" },
+  { value: "bestselling", label: "Më të shiturat" },
+  { value: "price_asc", label: "Çmimi: nga më i ulëti" },
+  { value: "price_desc", label: "Çmimi: nga më i larti" },
 ];
 
 const KNOWN_SORTS = new Set<string>(BOOKSTORE_SORT_OPTIONS.map((o) => o.value));
@@ -92,12 +92,12 @@ export function parseBookstoreQuery(params: BookstoreQuery): ParsedBookstoreQuer
 
 const QUERY_KEYS = ["q", "genre", "sort", "minPrice", "maxPrice"] as const;
 
-// Builds a /bookstore?... href starting from the CURRENT query params,
+// Builds a /librari?... href starting from the CURRENT query params,
 // with `overrides` applied on top -- an override of `undefined` removes
 // that param entirely. Used by genre chips and "Clear filters" so
 // switching one control (e.g. genre) never silently discards the others
 // (e.g. an active search term or sort), unlike the pre-UI-4 genre grid,
-// which always linked to a bare `/bookstore?genre=X`.
+// which always linked to a bare `/librari?genre=X`.
 export function buildBookstoreHref(
   current: BookstoreQuery,
   overrides: Partial<BookstoreQuery>,
@@ -111,7 +111,7 @@ export function buildBookstoreHref(
   }
 
   const qs = params.toString();
-  return qs ? `/bookstore?${qs}` : "/bookstore";
+  return qs ? `/librari?${qs}` : "/librari";
 }
 
 // A genre chip toggles off when clicking the currently-active genre --

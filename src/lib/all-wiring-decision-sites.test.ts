@@ -20,8 +20,8 @@ import { resolveWizardPriceSummary } from "@/app/(public)/dashboard/books/new/wi
 // The remaining three are server actions with database side effects and
 // are driven, with a Supabase double, in their own files:
 //
-//   buyBook          -> src/app/(public)/books/[id]/actions.test.ts
-//   getFreeBook      -> src/app/(public)/books/[id]/actions.test.ts
+//   buyBook          -> src/app/(public)/libra/[id]/actions.test.ts
+//   getFreeBook      -> src/app/(public)/libra/[id]/actions.test.ts
 //   performPublish   -> src/app/(public)/dashboard/books/publish.test.ts
 //
 // This file exists as a single place where the SAME two rows are put to
@@ -142,7 +142,7 @@ describe("decision sites 2-3 of 13: resolveBookPurchaseState, anonymous and auth
 describe("decision site 4 of 13: resolveCheckoutSecurityNote", () => {
   it("only the paid row gets a checkout note", () => {
     expect(resolveCheckoutSecurityNote({ priceAll: LEGACY_PAID.price_all, usePok: true, paidCheckoutAvailable: true })).toBe(
-      " Secure checkout with POK.",
+      " Pagesë e sigurt me POK.",
     );
     expect(resolveCheckoutSecurityNote({ priceAll: UNPRICED.price_all, usePok: true, paidCheckoutAvailable: true })).toBeNull();
     expect(resolveCheckoutSecurityNote({ priceAll: FREE.price_all, usePok: true, paidCheckoutAvailable: true })).toBeNull();
@@ -212,7 +212,7 @@ describe("decision site 5 of 13: resolvePublishReadiness", () => {
 
 describe("decision site 6 of 13: the publish checklist's price item", () => {
   function priceItem(book: Parameters<typeof getPublishChecklist>[0]) {
-    return getPublishChecklist(book).find((item) => item.label.includes("price"));
+    return getPublishChecklist(book).find((item) => item.label.includes("çmimin"));
   }
 
   it("is done for the paid row and for the free row", () => {
@@ -365,7 +365,7 @@ describe("no pure decision site reads price_cents at all", () => {
       resolvePublishReadiness({ book: legacyOnly, paidPublishingAvailable: true, hasRightsDeclaration: true }).missingAllPrice,
     ).toBe(true);
     expect(
-      getPublishChecklist(legacyOnly).find((item) => item.label.includes("price"))?.done,
+      getPublishChecklist(legacyOnly).find((item) => item.label.includes("çmimin"))?.done,
     ).toBe(false);
     expect(
       resolveDashboardAttention({

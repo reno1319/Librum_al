@@ -8,15 +8,15 @@ import { FOOTER_GROUPS } from "./site-footer";
 // throughout this codebase.
 describe("SiteFooter FOOTER_GROUPS", () => {
   it("includes a Blog link in Discover, alongside Bookstore, without removing anything", () => {
-    const discoverHrefs = FOOTER_GROUPS.Discover.map((l) => l.href);
+    const discoverHrefs = FOOTER_GROUPS.Zbuloni.map((l) => l.href);
     expect(discoverHrefs).toContain("/blog");
-    expect(discoverHrefs).toContain("/bookstore");
-    expect(discoverHrefs).toContain("/about");
+    expect(discoverHrefs).toContain("/librari");
+    expect(discoverHrefs).toContain("/rreth-nesh");
   });
 
   it("does not add Blog to any unrelated group", () => {
     for (const [section, links] of Object.entries(FOOTER_GROUPS)) {
-      if (section === "Discover") continue;
+      if (section === "Zbuloni") continue;
       expect(links.some((l) => l.href === "/blog")).toBe(false);
     }
   });
@@ -24,7 +24,7 @@ describe("SiteFooter FOOTER_GROUPS", () => {
 
 describe("REFUND POLICY: footer Legal group", () => {
   it("lists Terms, Privacy and Refunds, in that order", () => {
-    expect(FOOTER_GROUPS.Legal.map((l) => l.href)).toEqual(["/terms", "/privacy", "/refunds"]);
-    expect(FOOTER_GROUPS.Legal.find((l) => l.href === "/refunds")?.label).toBe("Refunds");
+    expect(FOOTER_GROUPS.Ligjore.map((l) => l.href)).toEqual(["/kushtet", "/privatesia", "/rimbursimet"]);
+    expect(FOOTER_GROUPS.Ligjore.find((l) => l.href === "/rimbursimet")?.label).toBe("Rimbursimet");
   });
 });

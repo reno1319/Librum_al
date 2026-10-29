@@ -79,7 +79,7 @@ export function resolveSiteOrigin(): string {
   // concatenates `${origin}/some/path` itself, so a configured value
   // that already carries its own path/query/hash/credentials would
   // silently corrupt every URL built from it (e.g.
-  // "https://x.com/foo" + "/books/123" => "https://x.com/foo/books/123",
+  // "https://x.com/foo" + "/libra/123" => "https://x.com/foo/libra/123",
   // never what any call site intends). Applies in EVERY environment,
   // not just production -- a present-but-invalid shape is a
   // configuration bug regardless of NODE_ENV, the same posture already

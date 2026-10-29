@@ -25,7 +25,7 @@ vi.mock("../../../actions", () => ({
   cancelBookReview: { bind: () => async () => undefined },
 }));
 // ADMIN-3-REVIEW: a draft with no approval and nothing pending -- the
-// Publish control reads "Send for review" (its own states are in
+// Publish control reads "Dërgojeni për shqyrtim" (its own states are in
 // review-state.rendered.test.ts).
 vi.mock("@/lib/book-reviews", () => ({
   getBookReviewState: async () => ({ kind: "ok", pending: false, approvalValid: false, latestSentBack: null }),
@@ -84,8 +84,8 @@ function radio(html: string, basis: string): string {
 }
 
 function publishButton(html: string): string {
-  const start = html.lastIndexOf("<button", html.indexOf("Send for review</button>"));
-  return html.slice(start, html.indexOf("Send for review</button>"));
+  const start = html.lastIndexOf("<button", html.indexOf("Dërgojeni për shqyrtim</button>"));
+  return html.slice(start, html.indexOf("Dërgojeni për shqyrtim</button>"));
 }
 
 beforeEach(() => {
@@ -98,7 +98,7 @@ beforeEach(() => {
     keywords: "",
     isbn: null,
     language: "sq",
-    genre: "Fiction",
+    genre: "Letërsi artistike",
     publisher: null,
     edition: null,
     original_publication_date: null,
@@ -128,11 +128,11 @@ describe("Edit page: Pen name (P1)", () => {
   it("is rendered with the book's pen name and the help naming the author", async () => {
     book.pen = { id: "pen-jo", name: "Jo Pen" };
     const html = await render();
-    expect(html).toContain("Pen name (optional)");
+    expect(html).toContain("Pseudonimi (opsional)");
     const input = html.match(/<input[^>]*name="penName"[^>]*>/)![0];
     expect(input).toContain('maxLength="120"');
     expect(input).toContain('value="Jo Pen"');
-    expect(html).toContain("Leave blank to use your author name, Arben Leka.");
+    expect(html).toContain("Lëreni bosh për të përdorur emrin tuaj si autor, Arben Leka.");
     // Directly under Title.
     expect(html.indexOf('name="penName"')).toBeGreaterThan(html.indexOf('name="title"'));
     expect(html.indexOf('name="penName"')).toBeLessThan(html.indexOf('name="subtitle"'));
@@ -156,7 +156,7 @@ describe("Edit page: Pen name (P1)", () => {
 describe("Edit page: Rights (P3)", () => {
   it("a visible Rights legend and the two sentences from the constant, code point for code point", async () => {
     const html = await render();
-    expect(html).toContain('<legend class="mb-3 font-bold text-foreground">Rights</legend>');
+    expect(html).toContain('<legend class="mb-3 font-bold text-foreground">Të drejtat</legend>');
     for (const basis of ["own_rights", "public_domain"] as const) {
       const expected = RIGHTS_STATEMENTS[basis].text.replace(/'/g, "&#x27;");
       const label = html.match(new RegExp(`value="${basis}"[^>]*/><span[^>]*>([^<]*)</span>`));
@@ -188,38 +188,38 @@ describe("Edit page: Rights (P3)", () => {
 
   it("after an error redirect the stored basis shows again (the page re-reads it)", async () => {
     rightsState = { kind: "present", declaration: { basis: "public_domain" } };
-    const html = await render({ error: "Something went wrong saving your changes. Please try again" });
+    const html = await render({ error: "Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri" });
     expect(radio(html, "public_domain")).toContain('checked=""');
   });
 
-  it("is the last block of Book details, after Additional book details", async () => {
+  it("is the last block of Book details, after Të dhëna të tjera për librin", async () => {
     const html = await render();
-    const files = html.indexOf(">Files</h2>");
-    expect(html.indexOf("Additional book details")).toBeLessThan(html.indexOf('name="rightsBasis"'));
+    const files = html.indexOf(">Skedarët</h2>");
+    expect(html.indexOf("Të dhëna të tjera për librin")).toBeLessThan(html.indexOf('name="rightsBasis"'));
     expect(html.indexOf('name="rightsBasis"')).toBeLessThan(files);
   });
 });
 
 describe("Edit page: the Publishing box (P4, D3)", () => {
-  it("no declaration -> 'Choose the rights before publishing.' and Publish disabled", async () => {
+  it("no declaration -> 'Zgjidhni të drejtat para publikimit.' and Publish disabled", async () => {
     const html = await render();
-    expect(html).toContain("Choose the rights before publishing.");
+    expect(html).toContain("Zgjidhni të drejtat para publikimit.");
     expect(publishButton(html)).toContain('disabled=""');
   });
 
   it("the description notice comes first when both are missing", async () => {
     book.description = "";
     const html = await render();
-    expect(html).toContain("Add a description before publishing.");
-    expect(html).not.toContain("Choose the rights before publishing.");
+    expect(html).toContain("Shtoni një përshkrim para publikimit.");
+    expect(html).not.toContain("Zgjidhni të drejtat para publikimit.");
   });
 
   it("with a declaration -> Ready to send for review, the control enabled", async () => {
     rightsState = { kind: "present", declaration: { basis: "own_rights" } };
     const html = await render();
     // ADMIN-3-REVIEW (B): no approval yet, so the line names the review.
-    expect(html).toContain("Ready to send for review.");
-    expect(html).not.toContain("Choose the rights before publishing.");
+    expect(html).toContain("Gati për t&#x27;u dërguar për shqyrtim.");
+    expect(html).not.toContain("Zgjidhni të drejtat para publikimit.");
     expect(publishButton(html)).not.toContain('disabled=""');
   });
 });
@@ -235,15 +235,15 @@ describe("Edit page before the migration (D2/D3)", () => {
   it("the Pen name field is still shown, and there is no Rights choice", async () => {
     const html = await render();
     expect(html).toContain('name="penName"');
-    expect(html).toContain("Pen name (optional)");
+    expect(html).toContain("Pseudonimi (opsional)");
     expect(html).not.toContain('name="rightsBasis"');
-    expect(html).not.toContain(">Rights</legend>");
+    expect(html).not.toContain(">Të drejtat</legend>");
   });
 
   it("the Publishing box shows the existing generic sentence and Publish is disabled", async () => {
     const html = await render();
-    expect(html).toContain("We couldn&#x27;t publish your book yet. Please try again from your dashboard");
-    expect(html).not.toContain("Choose the rights before publishing.");
+    expect(html).toContain("Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj");
+    expect(html).not.toContain("Zgjidhni të drejtat para publikimit.");
     expect(publishButton(html)).toContain('disabled=""');
   });
 
@@ -251,13 +251,13 @@ describe("Edit page before the migration (D2/D3)", () => {
     features = { penName: true, rights: true };
     const html = await render();
     expect(html).not.toContain('name="rightsBasis"');
-    expect(html).toContain("We couldn&#x27;t publish your book yet. Please try again from your dashboard");
+    expect(html).toContain("Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj");
   });
 });
 
 describe("Edit page: iPhone step price box (I2)", () => {
   function priceBox(html: string): string {
-    const start = html.indexOf("Price (ALL)");
+    const start = html.indexOf("Çmimi (lekë)");
     return html.slice(start, html.indexOf("</label>", start));
   }
 
@@ -284,13 +284,13 @@ describe("Edit page: iPhone step price box (I2)", () => {
     expect(box).toContain("border-[#8c8472]");
     expect(box).toContain("focus-within:shadow-[var(--focus-ring)]");
     expect(box).not.toContain("border-red-700");
-    expect(box).toMatch(/<span aria-hidden="true"[^>]*>ALL<\/span>/);
+    expect(box).toMatch(/<span aria-hidden="true"[^>]*>lekë<\/span>/);
   });
 
   it("keeps the help sentence word for word, with 0 = free", async () => {
     const box = priceBox(await render());
     expect(box.replace(/<!-- -->/g, "")).toContain(
-      "Whole lek: 0 for a free ebook, or 99 to 100000. Librum takes a 20% platform fee — you keep the rest of every sale.",
+      "Lekë të plota: 0 për e-libër falas, ose nga 99 deri në 100.000. Librum mban një tarifë platforme prej 20%; pjesa tjetër e çdo shitjeje është e juaja.",
     );
   });
 });
@@ -301,13 +301,13 @@ describe("Edit page: iPhone step manuscript line (I3)", () => {
   it("names a stored EPUB as 'EPUB file', never by its storage name", async () => {
     book.file_path = `${USER_ID}/${STORAGE_NAME}`;
     const html = await render();
-    expect(html).toContain("Current manuscript: EPUB file");
+    expect(html).toContain("Dorëshkrimi aktual: skedar EPUB");
     expect(html).not.toContain(STORAGE_NAME);
     expect(html).not.toContain("26525d0c");
-    expect(html.replace(/<!-- -->/g, "")).toContain("EPUB · up to 50 MB.</span>");
+    expect(html.replace(/<!-- -->/g, "")).toContain("EPUB · deri në 50 MB.</span>");
     // LEFTOVERS (L6, his Q1 = a): the paragraph says it once; the file
     // button no longer repeats it.
-    expect(html.split("Leave blank to keep your current manuscript.")).toHaveLength(2);
+    expect(html.split("Lëreni bosh për të mbajtur dorëshkrimin aktual.")).toHaveLength(2);
   });
 
   // LEFTOVERS (L5a): nothing about the stored file reaches ManuscriptField
@@ -323,11 +323,11 @@ describe("Edit page: iPhone step manuscript line (I3)", () => {
     expect([...element.matchAll(/(\w+)=\{/g)].map((m) => m[1])).toEqual(["bookTitle", "authorName", "authorId"]);
   });
 
-  it("no manuscript keeps 'No manuscript on file'", async () => {
+  it("no manuscript keeps 'Nuk ka dorëshkrim'", async () => {
     book.file_path = null;
     const html = await render();
-    expect(html).toContain("No manuscript on file");
-    expect(html).not.toContain("Current manuscript:");
-    expect(html.replace(/<!-- -->/g, "")).toContain("EPUB · up to 50 MB.</span>");
+    expect(html).toContain("Nuk ka dorëshkrim");
+    expect(html).not.toContain("Dorëshkrimi aktual:");
+    expect(html.replace(/<!-- -->/g, "")).toContain("EPUB · deri në 50 MB.</span>");
   });
 });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { setRecoverySession, clearRecoverySession } from "@/lib/recovery-session";
 import { resolveSafeInternalPath } from "@/lib/safe-redirect";
+import { CONFIRMATION_LINK_INVALID_MESSAGE, RECOVERY_LINK_INVALID_MESSAGE } from "@/lib/auth-page-messages";
 
 // LAUNCH-1 P1-11: the installed @supabase/auth-js runtime attaches a
 // `redirectType` field to exchangeCodeForSession()'s resolved data when
@@ -66,11 +67,6 @@ function parseTokenHashType(value: string | null): TokenHashType | null {
 export function isRecoveryAttempt(type: string | null, next: string): boolean {
   return type === "recovery" || next === "/reset-password";
 }
-
-const CONFIRMATION_LINK_INVALID_MESSAGE =
-  "This confirmation link is invalid or has expired. Please request a new one.";
-const RECOVERY_LINK_INVALID_MESSAGE =
-  "This password reset link is invalid or has expired. Please request a new one.";
 
 // AUTH-1E: one safe, non-leaking failure destination -- never the raw
 // Supabase/GoTrue error, only a choice between signup and recovery copy.

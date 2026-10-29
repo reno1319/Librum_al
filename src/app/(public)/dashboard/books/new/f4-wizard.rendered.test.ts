@@ -33,27 +33,27 @@ function render(features: { penNameAvailable: boolean; rightsAvailable: boolean 
 describe("Add a book with the migration applied", () => {
   const html = render({ penNameAvailable: true, rightsAvailable: true });
 
-  it("Pen name (optional) sits directly under Title, maxLength 120, with the help naming the author", () => {
+  it("Pseudonimi (opsional) sits directly under Title, maxLength 120, with the help naming the author", () => {
     const input = html.match(/<input[^>]*name="penName"[^>]*>/)![0];
     expect(input).toContain('maxLength="120"');
-    expect(html).toContain("Pen name (optional)");
-    expect(html).toContain("Leave blank to use your author name, Arben Leka.");
+    expect(html).toContain("Pseudonimi (opsional)");
+    expect(html).toContain("Lëreni bosh për të përdorur emrin tuaj si autor, Arben Leka.");
     expect(html.indexOf('name="penName"')).toBeGreaterThan(html.indexOf('name="title"'));
     expect(html.indexOf('name="penName"')).toBeLessThan(html.indexOf('name="language"'));
   });
 
   it("no help sentence when the author has no name yet (never 'author name, .')", () => {
-    expect(render({ penNameAvailable: true, rightsAvailable: true }, "")).not.toContain("Leave blank to use your author name");
+    expect(render({ penNameAvailable: true, rightsAvailable: true }, "")).not.toContain("Lëreni bosh për të përdorur emrin tuaj si autor");
   });
 
-  it("Translator (optional) is inside Additional book details, maxLength 120", () => {
-    const details = html.slice(html.indexOf("Additional book details"), html.indexOf("</details>"));
-    expect(details).toContain("Translator (optional)");
+  it("Përkthyesi (opsional) is inside Të dhëna të tjera për librin, maxLength 120", () => {
+    const details = html.slice(html.indexOf("Të dhëna të tjera për librin"), html.indexOf("</details>"));
+    expect(details).toContain("Përkthyesi (opsional)");
     expect(details.match(/<input[^>]*name="translator"[^>]*>/)![0]).toContain('maxLength="120"');
   });
 
   it("Rights: a visible legend, two radios named rightsBasis, nothing preselected", () => {
-    expect(html).toContain('<legend class="mb-3 font-bold text-foreground">Rights</legend>');
+    expect(html).toContain('<legend class="mb-3 font-bold text-foreground">Të drejtat</legend>');
     const radios = html.match(/<input[^>]*name="rightsBasis"[^>]*>/g)!;
     expect(radios).toHaveLength(2);
     for (const radio of radios) expect(radio).not.toContain("checked");
@@ -76,22 +76,22 @@ describe("Add a book with the migration applied", () => {
   });
 
   it("Rights sits on step 3 between Readiness and the buttons", () => {
-    const readiness = html.indexOf(">Readiness</p>");
-    const rights = html.indexOf(">Rights</legend>");
+    const readiness = html.indexOf(">Gatishmëria</p>");
+    const rights = html.indexOf(">Të drejtat</legend>");
     expect(readiness).toBeGreaterThan(html.indexOf('name="pricing"'));
     expect(rights).toBeGreaterThan(readiness);
     // The step's buttons are rendered after the step bodies.
-    expect(html.indexOf(">Next</button>")).toBeGreaterThan(rights);
+    expect(html.indexOf(">Vazhdoni</button>")).toBeGreaterThan(rights);
   });
 
   it("Readiness lists the missing choice, and never says ready while it is missing", () => {
-    const readiness = html.slice(html.indexOf(">Readiness</p>"), html.indexOf(">Rights</legend>"));
-    expect(readiness).toContain("Choose the rights before publishing.");
-    expect(readiness).not.toContain("Looks good — ready to send for review.");
+    const readiness = html.slice(html.indexOf(">Gatishmëria</p>"), html.indexOf(">Të drejtat</legend>"));
+    expect(readiness).toContain("Zgjidhni të drejtat para publikimit.");
+    expect(readiness).not.toContain("Gjithçka duket mirë: gati për t&#x27;u dërguar për shqyrtim.");
   });
 
   it("the preview card shows the author name while no pen name is typed", () => {
-    const card = html.slice(html.indexOf("How readers will see it"));
+    const card = html.slice(html.indexOf("Si do ta shohin lexuesit"));
     expect(card).toContain("Arben Leka");
   });
 });
@@ -101,14 +101,14 @@ describe("Add a book before the migration (D2/D3)", () => {
 
   it("no Pen name field, no Rights choice, no new readiness line", () => {
     expect(html).not.toContain('name="penName"');
-    expect(html).not.toContain("Pen name (optional)");
+    expect(html).not.toContain("Pseudonimi (opsional)");
     expect(html).not.toContain('name="rightsBasis"');
-    expect(html).not.toContain(">Rights</legend>");
-    expect(html).not.toContain("Choose the rights before publishing.");
+    expect(html).not.toContain(">Të drejtat</legend>");
+    expect(html).not.toContain("Zgjidhni të drejtat para publikimit.");
   });
 
   it("never says 'ready to send for review' (the server refuses Publish without the rights table)", () => {
-    expect(html).not.toContain("Looks good — ready to send for review.");
+    expect(html).not.toContain("Gjithçka duket mirë: gati për t&#x27;u dërguar për shqyrtim.");
   });
 
   it("the Translator field is still there (book_contributors exists before F3)", () => {
@@ -117,7 +117,7 @@ describe("Add a book before the migration (D2/D3)", () => {
 });
 
 describe("Add a book: the client rule (source)", () => {
-  it("Publish book without a choice is blocked before submit; Save as draft never is", () => {
+  it("Publish book without a choice is blocked before submit; Ruajeni si draft never is", () => {
     const handler = source.slice(source.indexOf("function handleSubmit"), source.indexOf("// ALL-WIRING-2: readiness is previewed"));
     expect(handler).toContain("(event.nativeEvent as SubmitEvent).submitter");
     expect(handler).toContain('submitter.value === "publish"');

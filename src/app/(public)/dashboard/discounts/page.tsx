@@ -15,11 +15,12 @@ import {
   describeDiscountCode,
 } from "@/lib/discount-amount";
 import { discountExpiryDisplayDate } from "@/lib/discount-code-limits";
+import { groupAllDigits } from "@/lib/catalog-price";
 import type { Book, DiscountCode } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Discounts",
+  title: "Zbritjet",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -73,13 +74,13 @@ export default async function DiscountsPage({
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
 
       <div className="mt-2">
         <PageHeader
-          title="Discount codes"
-          description="Create a promo code for one of your books — readers enter it at checkout for a percentage or a fixed amount in lek (ALL) off."
+          title="Kodet e zbritjes"
+          description="Krijoni një kod promocional për një nga librat tuaj. Lexuesit e shkruajnë gjatë pagesës dhe marrin një zbritje në përqindje ose një shumë fikse në lekë."
         />
       </div>
 
@@ -97,7 +98,7 @@ export default async function DiscountsPage({
       {!books || books.length === 0 ? (
         <EmptyState
           className="mt-6"
-          title="You need at least one book before you can create a discount code."
+          title="Ju duhet të paktën një libër para se të krijoni një kod zbritjeje."
         />
       ) : (
         <form
@@ -105,10 +106,10 @@ export default async function DiscountsPage({
           className="mt-6 flex flex-col gap-4 rounded-card border border-border bg-surface p-4 shadow-sm"
         >
           <label className="flex flex-col gap-1 text-sm">
-            Book
+            Libri
             <select name="bookId" required defaultValue="" className={formControlClasses}>
               <option value="" disabled>
-                Choose a book
+                Zgjidhni një libër
               </option>
               {books.map((book) => (
                 <option key={book.id} value={book.id}>
@@ -119,12 +120,12 @@ export default async function DiscountsPage({
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            Code
+            Kodi
             <input
               name="code"
               type="text"
               required
-              placeholder="e.g. LAUNCH20"
+              placeholder="p.sh. NISJA20"
               className={`uppercase ${formControlClasses}`}
             />
           </label>
@@ -134,18 +135,18 @@ export default async function DiscountsPage({
               375px screen. min-w-0 lets each half shrink on wider ones. */}
           <div className="flex flex-col gap-3 sm:flex-row">
             <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-              Discount type
+              Lloji i zbritjes
               <select name="type" required defaultValue="percent" className={formControlClasses}>
-                <option value="percent">Percentage off</option>
+                <option value="percent">Zbritje në përqindje</option>
                 {/* ALL-DISCOUNT-3: a fixed discount is whole lek, written
                     to amount_off_all. The old "amount" (USD) option is
                     gone, and its value is not reused. */}
-                <option value={FIXED_ALL_DISCOUNT_FORM_TYPE}>Fixed amount off (ALL, lek)</option>
+                <option value={FIXED_ALL_DISCOUNT_FORM_TYPE}>Zbritje me shumë fikse (lekë)</option>
               </select>
             </label>
 
             <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-              Value
+              Vlera
               {/* Text, not type="number": the whole-lek convention accepts
                   "250,00", which a number input refuses, and the server
                   parses the string without a float step either way. */}
@@ -154,35 +155,35 @@ export default async function DiscountsPage({
                 type="text"
                 inputMode="decimal"
                 required
-                placeholder="e.g. 20"
+                placeholder="p.sh. 20"
                 className={formControlClasses}
               />
             </label>
           </div>
           <p className="-mt-2 text-sm text-muted">
-            Percentage: a whole number from 1 to 100. Fixed amount: whole lek, from{" "}
-            {MINIMUM_FIXED_DISCOUNT_ALL} to {MAXIMUM_FIXED_DISCOUNT_ALL} ALL. A code that would take a
-            book below its minimum price is refused at checkout.
+            Përqindja: një numër i plotë nga 1 deri në 100. Shuma fikse: lekë të plota, nga{" "}
+            {MINIMUM_FIXED_DISCOUNT_ALL} deri në {groupAllDigits(MAXIMUM_FIXED_DISCOUNT_ALL)} lekë. Një kod që do ta çonte
+            librin nën çmimin minimal refuzohet gjatë pagesës.
           </p>
 
           <label className="flex flex-col gap-1 text-sm">
-            Expires (optional)
+            Vlen deri më (opsionale)
             <input name="expiresAt" type="date" className={formControlClasses} />
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            Max uses (optional)
+            Numri maksimal i përdorimeve (opsional)
             <input
               name="maxUses"
               type="text"
               inputMode="numeric"
-              placeholder="No limit"
+              placeholder="Pa kufi"
               className={formControlClasses}
             />
           </label>
 
           <button type="submit" className={buttonClasses("primary", "md", "w-fit")}>
-            Create code
+            Krijoni kodin
           </button>
         </form>
       )}
@@ -212,10 +213,10 @@ export default async function DiscountsPage({
                 <p className="text-xs text-muted">
                   {code.books?.title}
                   {code.expires_at &&
-                    ` · ${expired ? "Expired" : "Expires"} ${discountExpiryDisplayDate(code.expires_at)}`}
+                    ` · ${expired ? "Vlente deri më" : "Vlen deri më"} ${discountExpiryDisplayDate(code.expires_at)}`}
                   {uses !== null &&
-                    (!code.max_uses ? ` · Used ${uses}` : ` · Used ${uses} of ${code.max_uses}`)}
-                  {!code.active && " · Disabled"}
+                    (!code.max_uses ? ` · Përdorur: ${uses}` : ` · Përdorur: ${uses} nga ${code.max_uses}`)}
+                  {!code.active && " · Çaktivizuar"}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -224,7 +225,7 @@ export default async function DiscountsPage({
                     type="submit"
                     className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium hover:bg-surface-hover"
                   >
-                    {code.active ? "Disable" : "Enable"}
+                    {code.active ? "Çaktivizoni" : "Aktivizoni"}
                   </button>
                 </form>
                 <form action={deleteDiscountCode.bind(null, code.id)}>
@@ -232,7 +233,7 @@ export default async function DiscountsPage({
                     type="submit"
                     className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
                   >
-                    Delete
+                    Fshini
                   </button>
                 </form>
               </div>
@@ -241,7 +242,7 @@ export default async function DiscountsPage({
         })}
         {(codes ?? []).length === 0 && (
           <li>
-            <EmptyState description="No discount codes yet." />
+            <EmptyState description="Ende nuk keni asnjë kod zbritjeje." />
           </li>
         )}
       </ul>

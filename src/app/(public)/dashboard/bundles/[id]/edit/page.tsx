@@ -9,7 +9,7 @@ import { formControlClasses } from "@/lib/form-styles";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { PriceChangeConfirm } from "@/components/price-change-confirm";
-import { MAXIMUM_CATALOG_PRICE_ALL, MINIMUM_PAID_CATALOG_PRICE_ALL } from "@/lib/catalog-price";
+import { MAXIMUM_CATALOG_PRICE_ALL, MINIMUM_PAID_CATALOG_PRICE_ALL, groupAllDigits } from "@/lib/catalog-price";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
 
@@ -17,7 +17,7 @@ import type { Metadata } from "next";
 // -- avoids a metadata-only query and its own auth/ownership check for
 // a private authenticated page.
 export const metadata: Metadata = {
-  title: "Edit bundle",
+  title: "Ndryshoni paketën",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
@@ -99,11 +99,11 @@ export default async function EditBundlePage({
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
       <Link href="/dashboard/bundles" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to bundles
+        &larr; Kthehuni te paketat
       </Link>
 
       <div className="mt-2">
-        <PageHeader title="Edit bundle" />
+        <PageHeader title="Ndryshoni paketën" />
       </div>
 
       {error && (
@@ -117,7 +117,7 @@ export default async function EditBundlePage({
         className="mt-6 flex flex-col gap-4"
       >
         <label className="flex flex-col gap-1 text-sm">
-          Bundle title
+          Titulli i paketës
           <input
             name="title"
             type="text"
@@ -128,7 +128,7 @@ export default async function EditBundlePage({
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          Description (optional)
+          Përshkrimi (opsional)
           <textarea
             name="description"
             rows={3}
@@ -142,7 +142,7 @@ export default async function EditBundlePage({
             USD column -- so saving the form requires the author to
             supply one. */}
         <label className="flex flex-col gap-1 text-sm">
-          Bundle price (ALL)
+          Çmimi i paketës (lekë)
           <input
             name="price"
             type="text"
@@ -152,8 +152,8 @@ export default async function EditBundlePage({
             className={`w-40 ${formControlClasses}`}
           />
           <span className="text-sm text-muted">
-            Whole lek: 0 for a free bundle, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
-            {MAXIMUM_CATALOG_PRICE_ALL}.
+            Lekë të plota: 0 për paketë falas, ose nga {MINIMUM_PAID_CATALOG_PRICE_ALL} deri në{" "}
+            {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}.
           </span>
         </label>
         {/* LIVE-PRICE-CONFIRM-1: a live bundle's new price needs a tick
@@ -162,7 +162,7 @@ export default async function EditBundlePage({
 
         <fieldset>
           <legend className="text-sm">
-            Books in this bundle{bundlePenName ? ` (${bundlePenName.name})` : ""}
+            Librat në këtë paketë{bundlePenName ? ` (${bundlePenName.name})` : ""}
           </legend>
           <div className="mt-2 flex flex-col gap-2 rounded-card border border-border p-3">
             {books.map((book) => (
@@ -179,12 +179,12 @@ export default async function EditBundlePage({
             ))}
           </div>
           <span className="text-sm text-muted">
-            Choose at least 2. A bundle holds books of one pen name only.
+            Zgjidhni të paktën 2. Një paketë mban vetëm libra me të njëjtin pseudonim.
           </span>
         </fieldset>
 
         <button type="submit" className={buttonClasses("primary", "md", "mt-2 w-fit")}>
-          Save changes
+          Ruani ndryshimet
         </button>
       </form>
     </main>

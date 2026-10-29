@@ -244,7 +244,7 @@ async function run(fields: Record<string, string>): Promise<string> {
   throw new Error("updateProfile returned without redirecting");
 }
 
-const SAVE_PROFILE_ERROR = `/dashboard/profile?error=${encodeURIComponent("We couldn't save your profile. Please try again.")}`;
+const SAVE_PROFILE_ERROR = `/dashboard/profile?error=${encodeURIComponent("Profili nuk u ruajt dot. Provoni përsëri.")}`;
 
 function avatarWrites(): DbWrite[] {
   return dbWrites.filter((w) => "avatar_path" in w.payload);

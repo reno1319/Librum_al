@@ -24,7 +24,7 @@ export const ADMIN_LOGIN_PATH = "/admin/login";
 // substring check, is a sound boundary) -- this adds exactly one further
 // restriction on top: the resolved internal path must be exactly
 // "/admin" or start with "/admin/", so a crafted next=/dashboard,
-// next=/books/123, or next=/auth/callback can never be used to send the
+// next=/libra/123, or next=/auth/callback can never be used to send the
 // staff login flow somewhere this boundary was never designed to send
 // it, even though each of those IS a legitimate same-site destination
 // for OTHER parts of this app (see resolveSafeInternalPath's own tests).

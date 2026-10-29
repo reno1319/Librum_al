@@ -48,8 +48,8 @@ describe("AdminRefundsPage: maintenance-mode gate", () => {
     const element = await AdminRefundsPage();
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
 
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockRequireStaff).not.toHaveBeenCalled();
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockFrom).not.toHaveBeenCalled();
@@ -150,13 +150,13 @@ describe("AdminRefundsPage: request amounts carry their own currency (Patch 4)",
       p_refund_request_ids: ["r1", "r2", "r3", "r4"],
     });
     expect(html).toContain("USD 6.99");
-    expect(html).toContain("799,20 ALL");
-    expect(html).toContain("Amount unavailable (conflicting currency records)");
-    expect(html).toContain("Amount unavailable (currency unknown)");
+    expect(html).toContain("799,20 lekë");
+    expect(html).toContain("Shuma nuk është e disponueshme (të dhëna kontradiktore për monedhën)");
+    expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toContain("USD 42.00");
-    expect(html).not.toContain("42 ALL");
+    expect(html).not.toContain("42 lekë");
     expect(html).not.toContain("USD 51.00");
-    expect(html).not.toContain("51 ALL");
+    expect(html).not.toContain("51 lekë");
     expect(html).not.toMatch(/\$/);
   });
 
@@ -166,6 +166,6 @@ describe("AdminRefundsPage: request amounts carry their own currency (Patch 4)",
     expect(html).toContain("4 awaiting review");
     expect(html).not.toContain("USD ");
     expect(html).not.toContain(" ALL");
-    expect(html.match(/Amount unavailable \(currency unknown\)/g)).toHaveLength(4);
+    expect(html.match(/Shuma nuk është e disponueshme \(monedhë e panjohur\)/g)).toHaveLength(4);
   });
 });

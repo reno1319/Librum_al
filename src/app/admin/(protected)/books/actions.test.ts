@@ -134,19 +134,19 @@ describe("unpublishBookAsStaff", () => {
     });
     expect(mockSendEmail).toHaveBeenCalledWith("ana@example.com", {
       title: "Kënga e fundit",
-      reasonLabel: "Copyright complaint",
+      reasonLabel: "Ankesë për të drejtën e autorit",
       message: "Send proof.",
       bundleTitles: ["Set A"],
     });
     for (const path of [
       "/",
-      "/bookstore",
-      `/books/${BOOK_ID}`,
+      "/librari",
+      `/libra/${BOOK_ID}`,
       "/admin/books",
       `/admin/books/${BOOK_ID}`,
       "/dashboard",
-      "/bundles/bundle-1",
-      "/authors/pen-1",
+      "/paketa/bundle-1",
+      "/autore/pen-1",
       `/admin/reports/${REPORT_ID}`,
       "/admin/reports",
       "/admin",
@@ -299,12 +299,14 @@ describe("approveBookReviewAsStaff", () => {
     });
     expect(mockNewBookEmails).toHaveBeenCalledWith(expect.anything(), { bookId: BOOK_ID, authorId: AUTHOR_ID });
     expect(mockApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID });
+    // ALBANIAN-12: the author's own email goes before the follower batches.
+    expect(mockApprovedEmail.mock.invocationCallOrder[0]).toBeLessThan(mockNewBookEmails.mock.invocationCallOrder[0]);
     expect(mockRetention).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
       authorId: AUTHOR_ID,
       bookId: BOOK_ID,
       caller: "approveBookReviewAsStaff",
     });
-    for (const path of ["/", "/bookstore", `/books/${BOOK_ID}`, "/authors/pen-1", "/admin/books", `/admin/books/${BOOK_ID}`, "/dashboard"]) {
+    for (const path of ["/", "/librari", `/libra/${BOOK_ID}`, "/autore/pen-1", "/admin/books", `/admin/books/${BOOK_ID}`, "/dashboard"]) {
       expect(mockRevalidatePath).toHaveBeenCalledWith(path);
     }
     expect(target).toBe(`/admin/books/${BOOK_ID}?success=${encodeURIComponent("Book approved. It's live in the Bookstore now.")}`);
@@ -386,7 +388,7 @@ describe("sendBackBookReviewAsStaff", () => {
     });
     expect(mockSentBackEmail).toHaveBeenCalledWith("ana@example.com", {
       title: "Kënga e fundit",
-      reasonLabel: "Wrong or broken file",
+      reasonLabel: "Skedar i gabuar ose i dëmtuar",
       message: "Fix the file.",
     });
     expect(mockRetention).toHaveBeenCalledWith(expect.anything(), expect.anything(), {

@@ -16,11 +16,11 @@ function labels(pathname: string) {
 describe("dashboard menu groups", () => {
   it("has Renato's four groups and the existing page names", () => {
     expect(DASHBOARD_MENU_GROUPS.map((g) => [g.label, g.items.map((i) => `${i.label} ${i.href}`)])).toEqual([
-      ["Books", ["Books /dashboard", "Series /dashboard/series"]],
-      ["Money", ["Sales /dashboard/sales", "Financial balance /dashboard/balance"]],
-      ["Promotion", ["Bundles /dashboard/bundles", "Discounts /dashboard/discounts"]],
+      ["Librat", ["Librat /dashboard", "Seritë /dashboard/series"]],
+      ["Paratë", ["Shitjet /dashboard/sales", "Bilanci /dashboard/balance"]],
+      ["Promovimi", ["Paketat /dashboard/bundles", "Zbritjet /dashboard/discounts"]],
       // PEN-NAMES-1: Pen names joins the Profile group.
-      ["Profile", ["Profile /dashboard/profile", "Pen names /dashboard/pen-names"]],
+      ["Profili", ["Profili /dashboard/profile", "Pseudonimet /dashboard/pen-names"]],
     ]);
   });
 
@@ -33,19 +33,19 @@ describe("dashboard menu groups", () => {
 
 describe("findDashboardMenuMatch", () => {
   it.each([
-    ["/dashboard", "Books/Books"],
-    ["/dashboard/", "Books/Books"],
-    ["/dashboard/books", "Books/Books"],
-    ["/dashboard/books/new", "Books/Books"],
-    ["/dashboard/books/abc/edit", "Books/Books"],
-    ["/dashboard/series", "Books/Series"],
-    ["/dashboard/sales", "Money/Sales"],
-    ["/dashboard/balance", "Money/Financial balance"],
-    ["/dashboard/bundles", "Promotion/Bundles"],
-    ["/dashboard/bundles/abc/edit", "Promotion/Bundles"],
-    ["/dashboard/discounts", "Promotion/Discounts"],
-    ["/dashboard/profile", "Profile/Profile"],
-    ["/dashboard/pen-names", "Profile/Pen names"],
+    ["/dashboard", "Librat/Librat"],
+    ["/dashboard/", "Librat/Librat"],
+    ["/dashboard/books", "Librat/Librat"],
+    ["/dashboard/books/new", "Librat/Librat"],
+    ["/dashboard/books/abc/edit", "Librat/Librat"],
+    ["/dashboard/series", "Librat/Seritë"],
+    ["/dashboard/sales", "Paratë/Shitjet"],
+    ["/dashboard/balance", "Paratë/Bilanci"],
+    ["/dashboard/bundles", "Promovimi/Paketat"],
+    ["/dashboard/bundles/abc/edit", "Promovimi/Paketat"],
+    ["/dashboard/discounts", "Promovimi/Zbritjet"],
+    ["/dashboard/profile", "Profili/Profili"],
+    ["/dashboard/pen-names", "Profili/Pseudonimet"],
   ])("%s -> %s", (pathname, expected) => {
     expect(labels(pathname)).toBe(expected);
   });
@@ -93,21 +93,21 @@ describe("aria-current", () => {
   });
 
   it.each(["/dashboard/books", "/dashboard/books/new", "/dashboard/books/abc/edit"])(
-    "Books item is 'true' (not 'page') on %s",
+    "Librat item is 'true' (not 'page') on %s",
     (pathname) => {
       expect(current(pathname).items[0]).toBe("true");
       expect(current(pathname).groups[0]).toBe("true");
     },
   );
 
-  it("bundle edit marks Bundles 'true'", () => {
+  it("bundle edit marks Paketat 'true'", () => {
     expect(current("/dashboard/bundles/abc/edit").items[4]).toBe("true");
     expect(current("/dashboard/bundles/abc/edit").groups[2]).toBe("true");
   });
 
   // PEN-NAMES-1: Profile now has two items (Profile, Pen names), so its
   // tab is 'true' like the other groups and each item is 'page' on its own.
-  it("the Profile group is 'true'; Profile and Pen names are each 'page' on their own page", () => {
+  it("the Profili group is 'true'; Profili and Pseudonimet are each 'page' on their own page", () => {
     expect(current("/dashboard/profile").groups[3]).toBe("true");
     expect(current("/dashboard/profile").items[6]).toBe("page");
     expect(current("/dashboard/pen-names").groups[3]).toBe("true");
@@ -121,10 +121,10 @@ describe("aria-current", () => {
 
   it("uses the groups in order", () => {
     expect([books.label, money.label, promotion.label, profile.label]).toEqual([
-      "Books",
-      "Money",
-      "Promotion",
-      "Profile",
+      "Librat",
+      "Paratë",
+      "Promovimi",
+      "Profili",
     ]);
   });
 });

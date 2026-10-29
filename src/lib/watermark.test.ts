@@ -45,7 +45,7 @@ describe("watermarkEpub", () => {
     const resultZip = await JSZip.loadAsync(result.bytes);
     const opfXml = await resultZip.file("OEBPS/content.opf")!.async("string");
     expect(opfXml).toContain(
-      "This copy is licensed to reader@example.com. Please do not distribute.",
+      "Kjo kopje është licencuar për reader@example.com. Ju lutemi, mos e shpërndani.",
     );
     expect(opfXml).toContain("<dc:rights>");
   });

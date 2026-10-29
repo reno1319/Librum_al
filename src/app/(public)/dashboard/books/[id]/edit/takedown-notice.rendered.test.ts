@@ -23,7 +23,7 @@ vi.mock("../../../actions", () => ({
   cancelBookReview: { bind: () => async () => undefined },
 }));
 // ADMIN-3-REVIEW: a draft with no approval and nothing pending -- the
-// Publish control reads "Send for review" (its own states are in
+// Publish control reads "Dërgojeni për shqyrtim" (its own states are in
 // review-state.rendered.test.ts).
 vi.mock("@/lib/book-reviews", () => ({
   getBookReviewState: async () => ({ kind: "ok", pending: false, approvalValid: false, latestSentBack: null }),
@@ -92,7 +92,7 @@ beforeEach(() => {
     keywords: "",
     isbn: null,
     language: "sq",
-    genre: "Fiction",
+    genre: "Letërsi artistike",
     publisher: null,
     edition: null,
     original_publication_date: null,
@@ -125,26 +125,26 @@ describe("Edit page: a book Librum took down", () => {
       },
     };
     const html = await render();
-    expect(html).toContain("Taken down by Librum</span>");
-    expect(html).toContain("Taken down by Librum on Oct 19, 2026. Reason: Copyright complaint.");
+    expect(html).toContain("Hequr nga Libraria</span>");
+    expect(html).toContain("Hequr nga Libraria më 19 tetor 2026. Arsyeja: Ankesë për të drejtën e autorit.");
     expect(html).toContain("Please send proof.");
-    expect(html).toContain("We also unpublished: Set A.");
-    expect(html).toContain("Questions? Write to support@librum.al");
-    expect(html).not.toContain("Send for review</button>");
+    expect(html).toContain("Hoqëm nga publikimi edhe: Set A.");
+    expect(html).toContain("Pyetje? Na shkruani te support@librum.al");
+    expect(html).not.toContain("Dërgojeni për shqyrtim</button>");
   });
 
   it("disables Publish with the generic sentence when the takedown can't be read", async () => {
     takedown = { state: { kind: "unavailable" }, notice: null };
     const html = await render();
-    expect(html).not.toContain("Taken down by Librum");
-    const start = html.lastIndexOf("<button", html.indexOf("Send for review</button>"));
-    expect(html.slice(start, html.indexOf("Send for review</button>"))).toContain('disabled=""');
+    expect(html).not.toContain("Hequr nga Libraria");
+    const start = html.lastIndexOf("<button", html.indexOf("Dërgojeni për shqyrtim</button>"));
+    expect(html.slice(start, html.indexOf("Dërgojeni për shqyrtim</button>"))).toContain('disabled=""');
   });
 
   it("is unchanged without a takedown", async () => {
     const html = await render();
-    expect(html).not.toContain("Taken down by Librum");
-    const start = html.lastIndexOf("<button", html.indexOf("Send for review</button>"));
-    expect(html.slice(start, html.indexOf("Send for review</button>"))).not.toContain('disabled=""');
+    expect(html).not.toContain("Hequr nga Libraria");
+    const start = html.lastIndexOf("<button", html.indexOf("Dërgojeni për shqyrtim</button>"));
+    expect(html.slice(start, html.indexOf("Dërgojeni për shqyrtim</button>"))).not.toContain('disabled=""');
   });
 });

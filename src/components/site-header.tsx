@@ -49,7 +49,7 @@ export function buildSiteHeaderNav(params: {
   const { user, displayName, role, recoveryActive } = params;
 
   const accountHref = user ? "/account" : "/login";
-  const accountLabel = user ? "Account" : "Log in or sign up";
+  const accountLabel = user ? "Llogaria" : "Hyni ose regjistrohuni";
 
   if (recoveryActive) {
     return {
@@ -57,7 +57,7 @@ export function buildSiteHeaderNav(params: {
       headerName: null,
       showAccountLink: false,
       showLogout: true,
-      recoveryLabel: "Password recovery",
+      recoveryLabel: "Rikthimi i fjalëkalimit",
       accountHref,
       accountLabel,
     };
@@ -75,18 +75,18 @@ export function buildSiteHeaderNav(params: {
   // BLOG-1 design report's own preferred ordering -- every other entry
   // and their relative order is unchanged.
   const primaryLinks: NavItem[] = [
-    { href: "/", label: "Home" },
-    { href: "/about", label: "About" },
-    { href: "/how-it-works", label: "How it works" },
-    { href: "/pricing", label: "Earnings" },
-    { href: "/bookstore", label: "Bookstore" },
+    { href: "/", label: "Kryefaqja" },
+    { href: "/rreth-nesh", label: "Rreth nesh" },
+    { href: "/si-funksionon", label: "Si funksionon" },
+    { href: "/fitimet", label: "Fitimet" },
+    { href: "/librari", label: "Libraria" },
     { href: "/blog", label: "Blog" },
   ];
   if (user) {
     primaryLinks.push(
       role === "author"
-        ? { href: "/dashboard", label: "Dashboard" }
-        : { href: "/library", label: "Library" },
+        ? { href: "/dashboard", label: "Paneli i autorit" }
+        : { href: "/library", label: "Biblioteka ime" },
     );
   }
 
@@ -151,8 +151,8 @@ export async function SiteHeader() {
       {/* HEADER NAME: one row at every width now (below lg it only ever
           held the logo and the right-hand icons); on phones the name in
           the right group shrinks first, never the logo. */}
-      <div className="page-container flex flex-nowrap items-center justify-between gap-x-4 py-3 sm:gap-x-8 lg:gap-x-6 xl:gap-x-8">
-        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-8 gap-y-2 lg:shrink lg:flex-nowrap lg:gap-x-6 xl:gap-x-8">
+      <div className="page-container flex flex-nowrap items-center justify-between gap-x-4 py-3 sm:gap-x-8 lg:gap-x-4 xl:gap-x-8">
+        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-8 gap-y-2 lg:flex-nowrap lg:gap-x-4 xl:gap-x-8">
           <Link
             href="/"
             className="focus-ring rounded-sm font-serif text-[1.75rem] font-bold text-primary-foreground"
@@ -161,15 +161,18 @@ export async function SiteHeader() {
           </Link>
 
           {/* Wraps onto a second row rather than scrolling sideways when
-              the labels get longer (the Albanian translation runs about
-              30% longer than this English copy). */}
-          <nav className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex lg:flex-nowrap lg:gap-x-4 lg:whitespace-nowrap xl:gap-x-6">
+              the labels get longer. From lg to xl the Albanian labels of
+              a signed-in author (with "Paneli i autorit", "Dilni" and the
+              greeting) ran into the right-hand group, so that range uses
+              slightly smaller text and gaps, and this group no longer
+              shrinks: the name in the greeting is shortened instead. */}
+          <nav aria-label="Kryesore" className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex lg:flex-nowrap lg:gap-x-3 lg:text-[0.9375rem] lg:whitespace-nowrap xl:gap-x-6 xl:text-base">
             <NavLinks items={nav.primaryLinks} onDark />
           </nav>
         </div>
 
         <div className="flex min-w-0 items-center gap-3">
-          <nav className="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap">
+          <nav aria-label="Llogaria" className="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap">
             {nav.recoveryLabel && (
               <span className="text-primary-foreground/80">{nav.recoveryLabel}</span>
             )}
@@ -188,18 +191,18 @@ export async function SiteHeader() {
             {!user && (
               <>
                 <Link href={nav.accountHref} className={OUTLINE_ON_DARK_CLASSES}>
-                  Log in
+                  Hyni
                 </Link>
                 {/* FIX1 (X2): Author chosen, as on Earnings. */}
                 <Link href="/signup?role=author" className={BRASS_BUTTON_CLASSES}>
-                  Sign up
+                  Regjistrohuni
                 </Link>
               </>
             )}
             {nav.showLogout && (
               <form action={logout}>
                 <button type="submit" className={QUIET_LINK_ON_DARK_CLASSES}>
-                  Log out
+                  Dilni
                 </button>
               </form>
             )}
@@ -216,14 +219,14 @@ export async function SiteHeader() {
             (nav.headerName ? (
               <Link
                 href={nav.accountHref}
-                aria-label={`Hello, ${nav.headerName}, ${nav.accountLabel}`}
-                title={`Hello, ${nav.headerName}`}
+                aria-label={`Përshëndetje, ${nav.headerName}, ${nav.accountLabel}`}
+                title={`Përshëndetje, ${nav.headerName}`}
                 className="focus-ring flex min-h-11 min-w-0 items-center gap-2 rounded-sm px-1.5 text-base font-medium text-primary-foreground"
               >
                 {/* r2 (Renato 11:52Z): "Hello, " stays whole; only the name
                     is shortened. */}
                 <span className="flex min-w-0 items-baseline">
-                  <span className="shrink-0 whitespace-pre">Hello, </span>
+                  <span className="shrink-0 whitespace-pre">Përshëndetje, </span>
                   <span className="min-w-0 max-w-[12ch] truncate">{nav.headerName}</span>
                 </span>
                 <span aria-hidden="true" className="shrink-0">

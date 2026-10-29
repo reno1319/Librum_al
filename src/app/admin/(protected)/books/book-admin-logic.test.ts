@@ -100,7 +100,7 @@ describe("books search escaping (S5)", () => {
 
 describe("the book page eyebrow (C)", () => {
   it("shows the live price, free, draft and taken down", () => {
-    expect(describeBookEyebrow({ status: "published", price_all: 499 }, false)).toBe("Live · Paid · 499 ALL");
+    expect(describeBookEyebrow({ status: "published", price_all: 499 }, false)).toBe("Live · Paid · 499 lekë");
     expect(describeBookEyebrow({ status: "published", price_all: 0 }, false)).toBe("Live · Free");
     expect(describeBookEyebrow({ status: "draft", price_all: 499 }, false)).toBe("Draft");
     expect(describeBookEyebrow({ status: "draft", price_all: 0 }, true)).toBe("Taken down");

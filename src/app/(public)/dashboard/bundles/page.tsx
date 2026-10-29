@@ -18,18 +18,26 @@ import {
   MAXIMUM_CATALOG_PRICE_ALL,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
   formatCatalogPriceLabel,
+  groupAllDigits,
 } from "@/lib/catalog-price";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Bundles",
+  title: "Paketat",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see the exhaustive
 // route audit (bundles.price_all is rendered in the bundle list below).
 export const dynamic = "force-dynamic";
+
+// ALBANIAN-10: the stored status stays English; this is what the author reads.
+function bundleStatusLabel(status: string): string {
+  if (status === "published") return "E publikuar";
+  if (status === "draft") return "Draft";
+  return status;
+}
 
 export default async function BundlesPage({
   searchParams,
@@ -114,13 +122,13 @@ export default async function BundlesPage({
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
       <Link href="/dashboard" className="focus-ring rounded-sm text-sm text-muted underline underline-offset-2 hover:decoration-2">
-        &larr; Back to dashboard
+        &larr; Kthehuni te paneli
       </Link>
 
       <div className="mt-2">
         <PageHeader
-          title="Bundles"
-          description="Combine two or more of your published books into a single discounted purchase — one checkout unlocks every book in it."
+          title="Paketat"
+          description="Bashkoni dy ose më shumë nga librat tuaj të publikuar në një blerje të vetme me zbritje: një pagesë hap çdo libër të paketës."
         />
       </div>
 
@@ -138,7 +146,7 @@ export default async function BundlesPage({
       {penNamesWithBooks.length > 1 && (
         <form method="get" className="mt-6 flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-sm">
-            Pen name
+            Pseudonimi
             <select name="pen" defaultValue={chosenPenName?.id} className={formControlClasses}>
               {penNamesWithBooks.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -148,10 +156,10 @@ export default async function BundlesPage({
             </select>
           </label>
           <button type="submit" className={buttonClasses("outline", "md", "w-fit")}>
-            Show books
+            Shfaqni librat
           </button>
           <span className="basis-full text-sm text-muted">
-            A bundle holds books of one pen name only.
+            Një paketë mban vetëm libra me të njëjtin pseudonim.
           </span>
         </form>
       )}
@@ -161,8 +169,8 @@ export default async function BundlesPage({
           className="mt-6"
           title={
             penNamesWithBooks.length > 1
-              ? "You need at least 2 published books under this pen name to create a bundle."
-              : "You need at least 2 published books before you can create a bundle."
+              ? "Ju duhen të paktën 2 libra të publikuar me këtë pseudonim për të krijuar një paketë."
+              : "Ju duhen të paktën 2 libra të publikuar para se të krijoni një paketë."
           }
         />
       ) : (
@@ -172,18 +180,18 @@ export default async function BundlesPage({
         >
           {chosenPenName && <input type="hidden" name="penNameId" value={chosenPenName.id} />}
           <label className="flex flex-col gap-1 text-sm">
-            Bundle title
+            Titulli i paketës
             <input
               name="title"
               type="text"
               required
-              placeholder="e.g. The Complete Collection"
+              placeholder="p.sh. Koleksioni i plotë"
               className={formControlClasses}
             />
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            Description (optional)
+            Përshkrimi (opsional)
             <textarea name="description" rows={3} className={formControlClasses} />
           </label>
 
@@ -192,7 +200,7 @@ export default async function BundlesPage({
               as on the book forms: `type="number"` cannot submit the
               accepted "99,00" form at all. */}
           <label className="flex flex-col gap-1 text-sm">
-            Bundle price (ALL)
+            Çmimi i paketës (lekë)
             <input
               name="price"
               type="text"
@@ -201,14 +209,14 @@ export default async function BundlesPage({
               className={`w-40 ${formControlClasses}`}
             />
             <span className="text-sm text-muted">
-              Whole lek: 0 for a free bundle, or {MINIMUM_PAID_CATALOG_PRICE_ALL} to{" "}
-              {MAXIMUM_CATALOG_PRICE_ALL}.
+              Lekë të plota: 0 për paketë falas, ose nga {MINIMUM_PAID_CATALOG_PRICE_ALL} deri në{" "}
+              {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}.
             </span>
           </label>
 
           <fieldset>
             <legend className="text-sm">
-              Books in this bundle
+              Librat në këtë paketë
               {penNamesWithBooks.length > 1 && chosenPenName ? ` (${chosenPenName.name})` : ""}
             </legend>
             <div className="mt-2 flex flex-col gap-2 rounded-card border border-border p-3">
@@ -219,11 +227,11 @@ export default async function BundlesPage({
                 </label>
               ))}
             </div>
-            <span className="text-sm text-muted">Choose at least 2.</span>
+            <span className="text-sm text-muted">Zgjidhni të paktën 2.</span>
           </fieldset>
 
           <button type="submit" className={buttonClasses("primary", "md", "w-fit")}>
-            Create bundle
+            Krijoni paketën
           </button>
         </form>
       )}
@@ -241,23 +249,24 @@ export default async function BundlesPage({
                   · {formatCatalogPriceLabel(bundle.price_all)}
                 </span>
               </p>
-              <p className="text-xs text-muted capitalize">
-                {bundle.status} · {bookCountByBundle.get(bundle.id) ?? 0} books
+              <p className="text-xs text-muted">
+                {bundleStatusLabel(bundle.status)} · {bookCountByBundle.get(bundle.id) ?? 0}{" "}
+                {(bookCountByBundle.get(bundle.id) ?? 0) === 1 ? "libër" : "libra"}
               </p>
             </div>
             <Link href={`/dashboard/bundles/${bundle.id}/edit`} className={buttonClasses("outline", "sm")}>
-              Edit
+              Ndryshoni
             </Link>
             {bundle.status === "draft" ? (
               <form action={publishBundle.bind(null, bundle.id)}>
                 <button type="submit" className={buttonClasses("outline", "sm")}>
-                  Publish
+                  Publikoni
                 </button>
               </form>
             ) : (
               <form action={unpublishBundle.bind(null, bundle.id)}>
                 <button type="submit" className={buttonClasses("outline", "sm")}>
-                  Unpublish
+                  Hiqeni nga publikimi
                 </button>
               </form>
             )}
@@ -268,7 +277,7 @@ export default async function BundlesPage({
         ))}
         {(bundles ?? []).length === 0 && (
           <li>
-            <EmptyState description="No bundles yet." />
+            <EmptyState description="Ende nuk keni asnjë paketë." />
           </li>
         )}
       </ul>

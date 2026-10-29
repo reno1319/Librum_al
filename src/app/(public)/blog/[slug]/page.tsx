@@ -27,7 +27,7 @@ type PublicBlogPostDetail = {
 };
 
 // LIBRUM 2.0 BLOG-1D: mirrors Book Detail's own PERF-1 pattern exactly
-// (src/app/(public)/books/[id]/page.tsx's getBookForDetail) --
+// (src/app/(public)/libra/[id]/page.tsx's getBookForDetail) --
 // generateMetadata() and the page component are separate invocations
 // Next.js calls for the same request; cache() (React's per-request
 // memoization, cleared once the request finishes, never a persistent/
@@ -236,12 +236,12 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
       )}
 
       <div className="mt-14 border-t border-border pt-8 text-center">
-        <p className="text-muted">Gati të botosh librin tënd?</p>
+        <p className="text-muted">Gati ta botoni librin tuaj?</p>
         <Link
           href="/signup?role=author"
           className="mt-3 inline-block rounded-control bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
         >
-          Boto librin tënd
+          Publikoni librin tuaj
         </Link>
       </div>
     </main>

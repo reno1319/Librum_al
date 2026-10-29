@@ -70,6 +70,7 @@ import {
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
+  groupAllDigits,
   parseCatalogPriceAll,
 } from "@/lib/catalog-price";
 import {
@@ -85,40 +86,42 @@ import {
 // "9.99" needs to learn the shape of a Librum price, not that character
 // four was unexpected.
 const MISSING_ALL_PRICE_MESSAGE =
-  "Set this book's price in lek before publishing it.";
+  "Vendosni çmimin e librit në lekë para se ta publikoni.";
 
 // FIX1 (X16): Renato's W-B wording. True on the one path that shows it
 // (createBook's intent=publish), because that path inserts the draft
 // before performPublish refuses; publishBook's own refusal names only
 // the first sentence, since there the book already is a draft.
 const MISSING_DESCRIPTION_MESSAGE =
-  "Add a description before publishing. Your book will still be saved as a draft.";
-const MISSING_DESCRIPTION_SHORT_MESSAGE = "Add a description before publishing.";
+  "Shtoni një përshkrim para publikimit. Libri juaj ruhet gjithsesi si draft.";
+const MISSING_DESCRIPTION_SHORT_MESSAGE = "Shtoni një përshkrim para publikimit.";
 
 // F4 (P4): Renato's rule, a rights choice before Publish. The same
 // sentence on both publish paths; createBook adds "Saved as draft" as
 // its success line, as for the missing description.
-const MISSING_RIGHTS_MESSAGE = "Choose the rights before publishing.";
+const MISSING_RIGHTS_MESSAGE = "Zgjidhni të drejtat para publikimit.";
 
 // F4 (D3): the existing generic refusal, also used when the rights
 // choice cannot be read at all (before the migration, or a read error).
 const PUBLISH_NOT_POSSIBLE_YET_QUERY =
-  "We+couldn%27t+publish+your+book+yet.+Please+try+again+from+your+dashboard";
+  encodeURIComponent(
+    "Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj",
+  );
 
 // F4 (P6): a published book cannot have its description cleared.
-const PUBLISHED_NEEDS_DESCRIPTION_MESSAGE = "A published book needs a description.";
+const PUBLISHED_NEEDS_DESCRIPTION_MESSAGE = "Një libër i publikuar duhet të ketë përshkrim.";
 
 // The existing contributor failure sentence, shared by addContributor and
 // Add a book's Translator field (F4, P2).
-const ADD_CONTRIBUTOR_ERROR_MESSAGE = "We couldn't add the contributor. Please try again.";
+const ADD_CONTRIBUTOR_ERROR_MESSAGE = "Bashkëpunëtori nuk u shtua dot. Provoni përsëri.";
 
 // F4 (P2): the Translator field's bound (its input's maxLength). Over it,
 // nothing is inserted and the contributor message applies.
 const TRANSLATOR_MAX_LENGTH = 120;
 
 const CATALOG_PRICE_ERROR_MESSAGE =
-  `Enter your price in lek: 0 for a free ebook, or a whole number from ` +
-  `${MINIMUM_PAID_CATALOG_PRICE_ALL} to ${MAXIMUM_CATALOG_PRICE_ALL}`;
+  `Shkruani çmimin në lekë: 0 për e-libër falas, ose një numër të plotë nga ` +
+  `${MINIMUM_PAID_CATALOG_PRICE_ALL} deri në ${groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}`;
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
@@ -177,12 +180,12 @@ function resolveBoundedOptionalText(
   const value = String(formData.get(fieldName) ?? "").trim();
   if (!value) return { present, value: null };
   if (value.length > maxLength) {
-    // A literal "+"-joined query string, matching every other redirect
-    // in this file (e.g. "Please+fill+in+every+field") -- fieldLabel is
-    // always one of this file's own hardcoded call-site labels
-    // ("Subtitle"/"Publisher"/"Edition"), never user input, so no
-    // encoding is needed here.
-    redirect(`${errorPath}?error=${fieldLabel}+must+be+${maxLength}+characters+or+fewer`);
+    // ALBANIAN-9: encoded like every other redirect message in this
+    // file now; fieldLabel is always one of this file's own hardcoded
+    // call-site labels ("Nëntitulli"/"Botuesi"/"Botimi"), never user input.
+    redirect(
+      `${errorPath}?error=${encodeURIComponent(`${fieldLabel} mund të ketë deri në ${maxLength} karaktere`)}`,
+    );
   }
   return { present, value };
 }
@@ -200,7 +203,7 @@ function resolveLanguage(formData: FormData, errorPath: string): ResolvedOptiona
   const value = String(formData.get("language") ?? "").trim();
   if (!value) return { present, value: null };
   if (!isSupportedLanguage(value)) {
-    redirect(`${errorPath}?error=Please+choose+a+supported+language`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Zgjidhni një gjuhë të pranuar")}`);
   }
   return { present, value };
 }
@@ -251,7 +254,7 @@ function resolveLanguageForUpdate(
 
   if (value === existingLanguage) return { action: "preserve" };
 
-  redirect(`${errorPath}?error=Please+choose+a+supported+language`);
+  redirect(`${errorPath}?error=${encodeURIComponent("Zgjidhni një gjuhë të pranuar")}`);
 }
 
 // The author-supplied "originally published" date -- a genuinely
@@ -270,16 +273,16 @@ function resolveOriginalPublicationDate(formData: FormData, errorPath: string): 
   if (!raw) return { present, value: null };
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    redirect(`${errorPath}?error=Enter+a+valid+original+publication+date`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Shkruani një datë të vlefshme të botimit të parë")}`);
   }
 
   const parsed = new Date(`${raw}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw) {
-    redirect(`${errorPath}?error=Enter+a+valid+original+publication+date`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Shkruani një datë të vlefshme të botimit të parë")}`);
   }
 
   if (parsed.getTime() > Date.now()) {
-    redirect(`${errorPath}?error=Original+publication+date+can%27t+be+in+the+future`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Data e botimit të parë nuk mund të jetë në të ardhmen")}`);
   }
 
   return { present, value: raw };
@@ -330,11 +333,11 @@ function epubValidationErrorQuery(
     case "too_many_entries":
     case "too_large_uncompressed":
     case "entry_too_large":
-      return encodeURIComponent("The EPUB is too large or contains too many files.");
+      return encodeURIComponent("EPUB-i është shumë i madh ose ka shumë skedarë.");
     case "encrypted_or_drm":
-      return encodeURIComponent("This EPUB uses encryption/DRM that Librum does not support.");
+      return encodeURIComponent("Ky EPUB përdor enkriptim/DRM që Librum nuk e mbështet.");
     default:
-      return "This+file+doesn%27t+appear+to+be+a+valid+EPUB";
+      return encodeURIComponent("Ky skedar nuk duket si EPUB i vlefshëm");
   }
 }
 
@@ -362,7 +365,7 @@ async function resolveManuscriptInput(
     // this same value is later handed to remove().
     if (!isOwnTemporaryManuscriptUploadPath(tempPath, userId)) {
       redirect(
-        `${errorPath}?error=That+manuscript+reference+is+no+longer+valid.+Please+choose+your+file+again`,
+        `${errorPath}?error=${encodeURIComponent("Dorëshkrimi i zgjedhur nuk vlen më. Zgjidhni skedarin përsëri")}`,
       );
     }
 
@@ -371,7 +374,7 @@ async function resolveManuscriptInput(
       .download(tempPath);
     if (downloadError || !data) {
       console.error("resolveManuscriptInput: temp manuscript download failed:", downloadError);
-      redirect(`${errorPath}?error=Could+not+read+your+uploaded+manuscript.+Please+try+again`);
+      redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi i ngarkuar nuk u lexua dot. Provoni përsëri")}`);
     }
 
     bytes = Buffer.from(await data!.arrayBuffer());
@@ -382,7 +385,7 @@ async function resolveManuscriptInput(
       return { present: false };
     }
     if (!manuscript.name.toLowerCase().endsWith(".epub")) {
-      redirect(`${errorPath}?error=The+manuscript+must+be+an+EPUB+file`);
+      redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi duhet të jetë skedar EPUB")}`);
     }
     bytes = Buffer.from(await manuscript.arrayBuffer());
   }
@@ -391,7 +394,7 @@ async function resolveManuscriptInput(
   // browser's own pre-upload check) alone for bytes that came back
   // from a temp Storage download.
   if (bytes.length > MAX_MANUSCRIPT_BYTES) {
-    redirect(`${errorPath}?error=Manuscript+must+be+under+50MB`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi duhet të jetë nën 50 MB")}`);
   }
 
   const manuscriptValidation = await validateEpubStructure(bytes);
@@ -459,7 +462,7 @@ async function resolveCoverInput(
     // BOOK-STORAGE-MUTATION-AUTH-1: exact temporary-key shape, as for
     // the manuscript above.
     if (!isOwnTemporaryCoverUploadPath(tempPath, userId)) {
-      redirect(`${errorPath}?error=That+cover+reference+is+no+longer+valid.+Please+choose+your+file+again`);
+      redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri")}`);
     }
 
     const { data, error: downloadError } = await supabase.storage
@@ -467,7 +470,7 @@ async function resolveCoverInput(
       .download(tempPath);
     if (downloadError || !data) {
       console.error("resolveCoverInput: temp cover download failed:", downloadError);
-      redirect(`${errorPath}?error=Could+not+read+your+uploaded+cover.+Please+try+again`);
+      redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e ngarkuar nuk u lexua dot. Provoni përsëri")}`);
     }
 
     bytes = Buffer.from(await data!.arrayBuffer());
@@ -484,7 +487,7 @@ async function resolveCoverInput(
   // browser's own pre-upload check) alone for bytes that came back
   // from a temp Storage download.
   if (bytes.length > MAX_COVER_BYTES) {
-    redirect(`${errorPath}?error=Cover+image+must+be+under+5MB`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Imazhi i kopertinës duhet të jetë nën 5 MB")}`);
   }
 
   // The SAME authoritative byte-signature check every cover has always
@@ -496,13 +499,13 @@ async function resolveCoverInput(
   const coverFile = new File([new Uint8Array(bytes)], "cover", { type: "application/octet-stream" });
   const coverKind = await detectCoverImageKind(coverFile);
   if (!coverKind) {
-    redirect(`${errorPath}?error=That+doesn%27t+look+like+a+valid+JPEG+or+PNG+image`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Ky nuk duket si imazh i vlefshëm JPEG ose PNG")}`);
   }
   // COVERS-1: the signature check above still gates what gets decoded;
   // the stored cover is always the shrunk JPEG, never the raw upload.
   const shrunk = await shrinkImageToJpeg(bytes, BOOK_COVER_SIZE);
   if (!shrunk) {
-    redirect(`${errorPath}?error=Could+not+read+your+uploaded+cover.+Please+try+again`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e ngarkuar nuk u lexua dot. Provoni përsëri")}`);
   }
   const { extension, contentType } = resolveVerifiedCoverStorageDetails("jpeg");
 
@@ -532,13 +535,13 @@ async function resolveSeriesSelection(
     .maybeSingle();
 
   if (!series) {
-    redirect(`${errorPath}?error=Choose+one+of+your+own+series`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Zgjidhni një nga seritë tuaja")}`);
   }
 
   const rawPosition = String(formData.get("seriesPosition") ?? "").trim();
   const seriesPosition = rawPosition ? Number(rawPosition) : null;
   if (seriesPosition != null && (!Number.isInteger(seriesPosition) || seriesPosition < 1)) {
-    redirect(`${errorPath}?error=Series+position+must+be+a+positive+whole+number`);
+    redirect(`${errorPath}?error=${encodeURIComponent("Vendi në seri duhet të jetë numër i plotë pozitiv")}`);
   }
 
   return { seriesId, seriesPosition };
@@ -685,7 +688,7 @@ export async function createBook(formData: FormData) {
   const manuscriptProvided = manuscriptStoragePath !== "" || (!!manuscript && manuscript.size > 0);
 
   if (!title || !coverProvided || !manuscriptProvided) {
-    redirect("/dashboard/books/new?error=Please+fill+in+every+field");
+    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   // A parse failure performs NO insert and NO update. This redirect is
@@ -697,7 +700,7 @@ export async function createBook(formData: FormData) {
   }
 
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
-    redirect("/dashboard/books/new?error=Please+choose+a+genre");
+    redirect(`/dashboard/books/new?error=${encodeURIComponent("Zgjidhni një zhanër")}`);
   }
 
   // FIX1 (X9): empty stays allowed; a filled ISBN must be a real one.
@@ -717,7 +720,7 @@ export async function createBook(formData: FormData) {
     formData,
     "subtitle",
     SUBTITLE_MAX_LENGTH,
-    "Subtitle",
+    "Nëntitulli",
     "/dashboard/books/new",
   ).value;
   const language = resolveLanguage(formData, "/dashboard/books/new").value;
@@ -725,14 +728,14 @@ export async function createBook(formData: FormData) {
     formData,
     "publisher",
     PUBLISHER_MAX_LENGTH,
-    "Publisher",
+    "Botuesi",
     "/dashboard/books/new",
   ).value;
   const edition = resolveBoundedOptionalText(
     formData,
     "edition",
     EDITION_MAX_LENGTH,
-    "Edition",
+    "Botimi",
     "/dashboard/books/new",
   ).value;
   const originalPublicationDate = resolveOriginalPublicationDate(formData, "/dashboard/books/new").value;
@@ -759,7 +762,7 @@ export async function createBook(formData: FormData) {
       `/dashboard/books/new?error=${encodeURIComponent(
         penNameResolution.reason === "invalid"
           ? penNameResolution.message
-          : "Something went wrong saving your book. Please try again",
+          : "Diçka shkoi keq gjatë ruajtjes së librit. Provoni përsëri",
       )}`,
     );
   }
@@ -772,7 +775,7 @@ export async function createBook(formData: FormData) {
   // return type honest.
   const coverResult = await resolveCoverInput(supabase, user.id, formData, "/dashboard/books/new");
   if (!coverResult.present) {
-    redirect("/dashboard/books/new?error=Please+fill+in+every+field");
+    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   const manuscriptResult = await resolveManuscriptInput(
@@ -782,7 +785,7 @@ export async function createBook(formData: FormData) {
     "/dashboard/books/new",
   );
   if (!manuscriptResult.present) {
-    redirect("/dashboard/books/new?error=Please+fill+in+every+field");
+    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   const bookId = randomUUID();
@@ -814,7 +817,7 @@ export async function createBook(formData: FormData) {
   if (coverError) {
     console.error("createBook: cover upload failed:", coverError);
     redirect(
-      "/dashboard/books/new?error=Could+not+upload+your+cover+image.+Please+try+again",
+      `/dashboard/books/new?error=${encodeURIComponent("Imazhi i kopertinës nuk u ngarkua dot. Provoni përsëri")}`,
     );
   }
 
@@ -826,7 +829,7 @@ export async function createBook(formData: FormData) {
     console.error("createBook: manuscript upload failed:", manuscriptError);
     await removeNewCoverUpload(catalogWriter, coverPath, "createBook");
     redirect(
-      "/dashboard/books/new?error=Could+not+upload+your+manuscript.+Please+try+again",
+      `/dashboard/books/new?error=${encodeURIComponent("Dorëshkrimi nuk u ngarkua dot. Provoni përsëri")}`,
     );
   }
 
@@ -905,7 +908,7 @@ export async function createBook(formData: FormData) {
       redirect(`/dashboard/books/new?error=${encodeURIComponent(penNameMessage)}`);
     }
     redirect(
-      "/dashboard/books/new?error=Something+went+wrong+saving+your+book.+Please+try+again",
+      `/dashboard/books/new?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së librit. Provoni përsëri")}`,
     );
   }
   if (!isExactlyOneRowWritten(insertedRows) || insertedRows?.[0]?.id !== bookId) {
@@ -914,7 +917,7 @@ export async function createBook(formData: FormData) {
       rowCount: Array.isArray(insertedRows) ? insertedRows.length : null,
     });
     redirect(
-      "/dashboard/books/new?error=Something+went+wrong+saving+your+book.+Please+try+again",
+      `/dashboard/books/new?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së librit. Provoni përsëri")}`,
     );
   }
 
@@ -1038,8 +1041,8 @@ export async function createBook(formData: FormData) {
 
     redirect(
       translatorErrorQuery
-        ? `/dashboard?success=Your+book+is+now+live&${translatorErrorQuery}`
-        : "/dashboard?success=Your+book+is+now+live",
+        ? `/dashboard?success=${encodeURIComponent("Libri juaj u publikua")}&${translatorErrorQuery}`
+        : `/dashboard?success=${encodeURIComponent("Libri juaj u publikua")}`,
     );
   }
 
@@ -1051,40 +1054,40 @@ export async function createBook(formData: FormData) {
   // treated as exhaustive.
   if (publishResult.reason === "missing_all_price") {
     redirect(
-      `/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
+      `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
     );
   }
   if (publishResult.reason === "missing_description") {
     redirect(
-      `/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_DESCRIPTION_MESSAGE)}`,
+      `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(MISSING_DESCRIPTION_MESSAGE)}`,
     );
   }
   // ADMIN-2-TAKEDOWN: not reachable for a book this request just
   // inserted (no takedown can exist yet); handled for completeness.
   if (publishResult.reason === "taken_down") {
-    redirect(`/dashboard?success=Saved+as+draft&error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
+    redirect(`/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
   }
   // F4 (P4): a publish refusal always takes the one error slot; a
   // translator failure is then only logged (above).
   if (publishResult.reason === "missing_rights") {
-    redirect(`/dashboard?success=Saved+as+draft&error=${encodeURIComponent(MISSING_RIGHTS_MESSAGE)}`);
+    redirect(`/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(MISSING_RIGHTS_MESSAGE)}`);
   }
   if (publishResult.reason === "paid_mode_required") {
     redirect(
-      "/dashboard?success=Saved+as+draft&error=Paid+publishing+isn%27t+available+right+now",
+      `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent("Publikimi me pagesë nuk është i mundur tani")}`,
     );
   }
   // ADMIN-3-REVIEW: not reachable for a book this request just inserted
   // (no review can exist yet); handled for completeness.
   if (publishResult.reason === "already_in_review") {
-    redirect(`/dashboard?success=Saved+as+draft&error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
+    redirect(`/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
   }
   if (publishResult.reason === "book_changed") {
-    redirect(`/dashboard?success=Saved+as+draft&error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
+    redirect(`/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
   }
   // "rights_unavailable" (F4, D3), "takedown_unavailable" (ADMIN-2) and
   // "review_unavailable" (ADMIN-3) land here too: the existing sentence.
-  redirect(`/dashboard?success=Saved+as+draft&error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
+  redirect(`/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
 }
 
 export async function updateBook(bookId: string, formData: FormData) {
@@ -1139,7 +1142,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   const parsedPrice = parseCatalogPriceAll(formData.get("price"));
 
   if (!title) {
-    redirect(`/dashboard/books/${bookId}/edit?error=Please+fill+in+every+field`);
+    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
   }
 
   // A parse failure performs no update. Above every Supabase mutation
@@ -1153,7 +1156,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   }
 
   if (!GENRES.includes(genre as (typeof GENRES)[number])) {
-    redirect(`/dashboard/books/${bookId}/edit?error=Please+choose+a+genre`);
+    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Zgjidhni një zhanër")}`);
   }
 
   // FIX1 (X9): same rule as createBook. An ISBN resubmitted exactly as
@@ -1243,7 +1246,7 @@ export async function updateBook(bookId: string, formData: FormData) {
         `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
           penNameResolution.reason === "invalid"
             ? penNameResolution.message
-            : "Something went wrong saving your changes. Please try again",
+            : "Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri",
         )}`,
       );
     }
@@ -1268,7 +1271,7 @@ export async function updateBook(bookId: string, formData: FormData) {
     formData,
     "subtitle",
     SUBTITLE_MAX_LENGTH,
-    "Subtitle",
+    "Nëntitulli",
     `/dashboard/books/${bookId}/edit`,
   );
   // LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT SERVER-SIDE
@@ -1286,14 +1289,14 @@ export async function updateBook(bookId: string, formData: FormData) {
     formData,
     "publisher",
     PUBLISHER_MAX_LENGTH,
-    "Publisher",
+    "Botuesi",
     `/dashboard/books/${bookId}/edit`,
   );
   const editionResolved = resolveBoundedOptionalText(
     formData,
     "edition",
     EDITION_MAX_LENGTH,
-    "Edition",
+    "Botimi",
     `/dashboard/books/${bookId}/edit`,
   );
   const originalPublicationDateResolved = resolveOriginalPublicationDate(
@@ -1447,7 +1450,7 @@ export async function updateBook(bookId: string, formData: FormData) {
     const membership = await bookBelongsToPublishedBundle(supabase, existing.id);
     if (!membership.ok) {
       redirect(
-        `/dashboard/books/${bookId}/edit?error=Something+went+wrong+saving+your+changes.+Please+try+again`,
+        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`,
       );
     }
     if (membership.inPublishedBundle) {
@@ -1493,8 +1496,8 @@ export async function updateBook(bookId: string, formData: FormData) {
       }
       redirect(
         upload.kind === "cover"
-          ? `/dashboard/books/${bookId}/edit?error=Could+not+upload+your+cover+image.+Please+try+again`
-          : `/dashboard/books/${bookId}/edit?error=Could+not+upload+your+manuscript.+Please+try+again`,
+          ? `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Imazhi i kopertinës nuk u ngarkua dot. Provoni përsëri")}`
+          : `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Dorëshkrimi nuk u ngarkua dot. Provoni përsëri")}`,
       );
     }
   }
@@ -1630,7 +1633,7 @@ export async function updateBook(bookId: string, formData: FormData) {
       redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(penNameMessage)}`);
     }
     redirect(
-      `/dashboard/books/${bookId}/edit?error=Something+went+wrong+saving+your+changes.+Please+try+again`,
+      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`,
     );
   }
   if (!isExactlyOneRowWritten(updatedRows) || updatedRows?.[0]?.id !== existing.id) {
@@ -1717,18 +1720,18 @@ export async function updateBook(bookId: string, formData: FormData) {
   await removeProvenBookStorageObjects(supabase, removals, "updateBook");
 
   revalidatePath("/dashboard");
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
   revalidatePath("/");
   if (filesChanged && (wasLive || wasPending)) {
     if (reviewRequestFailed) {
       redirect(`/dashboard/books/${bookId}/edit?success=${encodeURIComponent(LIVE_FILES_REQUEST_FAILED_MESSAGE)}`);
     }
     if (wasLive) {
-      revalidatePath("/bookstore");
+      revalidatePath("/librari");
       redirect(`/dashboard?success=${encodeURIComponent(LIVE_FILES_SAVED_MESSAGE)}`);
     }
   }
-  redirect("/dashboard?success=Book+updated");
+  redirect(`/dashboard?success=${encodeURIComponent("Libri u përditësua")}`);
 }
 
 // ADMIN-3-REVIEW (E): the author's "Cancel review" -- the pending review
@@ -1752,7 +1755,7 @@ export async function cancelBookReview(bookId: string) {
   if (!result.ok) {
     redirect(
       `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
-        result.reason === "not_pending" ? NOT_IN_REVIEW_MESSAGE : "Something went wrong. Please try again",
+        result.reason === "not_pending" ? NOT_IN_REVIEW_MESSAGE : "Diçka shkoi keq. Provoni përsëri",
       )}`,
     );
   }
@@ -2145,7 +2148,7 @@ export async function publishBook(bookId: string) {
       redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
     }
     if (result.reason === "paid_mode_required") {
-      redirect("/dashboard?error=Paid+publishing+isn%27t+available+right+now");
+      redirect(`/dashboard?error=${encodeURIComponent("Publikimi me pagesë nuk është i mundur tani")}`);
     }
     // "not_found" (no such book, or not owned by this user) and
     // "update_failed" both redirect back to the dashboard -- the
@@ -2198,7 +2201,7 @@ export async function publishBook(bookId: string) {
     });
   }
 
-  redirect("/dashboard?success=Your+book+is+now+live");
+  redirect(`/dashboard?success=${encodeURIComponent("Libri juaj u publikua")}`);
 }
 
 // PHASE-2C bundle-membership-integrity: shared by unpublishBook() and
@@ -2290,7 +2293,7 @@ export async function unpublishBook(bookId: string) {
 
   if (bookReadError) {
     console.error("unpublishBook: book read failed", { bookId, error: bookReadError });
-    redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të hiqet nga publikimi tani")}`);
   }
   if (!book) {
     redirect("/dashboard");
@@ -2304,11 +2307,11 @@ export async function unpublishBook(bookId: string) {
   // bookBelongsToPublishedBundle()'s own comment.
   const membership = await bookBelongsToPublishedBundle(supabase, bookId);
   if (!membership.ok) {
-    redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të hiqet nga publikimi tani")}`);
   }
   if (membership.inPublishedBundle) {
     redirect(
-      "/dashboard?error=This+book+is+part+of+a+published+bundle+-+unpublish+or+edit+the+bundle+first",
+      `/dashboard?error=${encodeURIComponent("Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose ndryshojeni atë fillimisht")}`,
     );
   }
 
@@ -2332,11 +2335,11 @@ export async function unpublishBook(bookId: string) {
 
   if (updateError) {
     console.error("unpublishBook: update failed", { bookId, error: updateError });
-    redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të hiqet nga publikimi tani")}`);
   }
   if (!isExactlyOneRowWritten(updatedRows)) {
     console.error("unpublishBook: update did not change exactly one row", { bookId, userId: user.id });
-    redirect("/dashboard?error=Could+not+unpublish+that+book+right+now");
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të hiqet nga publikimi tani")}`);
   }
 
   // F5 (C5): the unpublish above succeeded, so this book stops being
@@ -2398,7 +2401,7 @@ export async function deleteBook(bookId: string) {
     redirect(`/dashboard?error=${encodeURIComponent(TAKEN_DOWN_DELETE_MESSAGE)}`);
   }
   if (takedown.kind === "unavailable") {
-    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të fshihet tani")}`);
   }
 
   // PHASE-2C: a book that's a member of a currently published bundle
@@ -2416,11 +2419,11 @@ export async function deleteBook(bookId: string) {
   // bookBelongsToPublishedBundle()'s own comment.
   const membership = await bookBelongsToPublishedBundle(supabase, bookId);
   if (!membership.ok) {
-    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të fshihet tani")}`);
   }
   if (membership.inPublishedBundle) {
     redirect(
-      "/dashboard?error=This+book+is+part+of+a+published+bundle+-+unpublish+or+remove+it+from+the+bundle+first",
+      `/dashboard?error=${encodeURIComponent("Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose hiqeni librin nga paketa fillimisht")}`,
     );
   }
 
@@ -2443,7 +2446,7 @@ export async function deleteBook(bookId: string) {
 
   if ((purchaseCount ?? 0) > 0) {
     redirect(
-      "/dashboard?error=This+book+has+been+acquired+by+readers+and+can%27t+be+deleted+-+unpublish+it+instead",
+      `/dashboard?error=${encodeURIComponent("Këtë libër e kanë marrë lexues dhe nuk mund të fshihet. Hiqeni nga publikimi")}`,
     );
   }
 
@@ -2456,7 +2459,7 @@ export async function deleteBook(bookId: string) {
   const catalogWriter = createCatalogWriteClient();
   const snapshots = await readReviewSnapshots(catalogWriter, [book.id]);
   if (!snapshots.ok) {
-    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të fshihet tani")}`);
   }
 
   // The books row is deleted BEFORE any storage cleanup is attempted --
@@ -2492,7 +2495,7 @@ export async function deleteBook(bookId: string) {
     // a raw constraint-violation string.
     if (deleteError.code === "23503") {
       redirect(
-        "/dashboard?error=This+book+has+been+acquired+by+readers+and+can%27t+be+deleted+-+unpublish+it+instead",
+        `/dashboard?error=${encodeURIComponent("Këtë libër e kanë marrë lexues dhe nuk mund të fshihet. Hiqeni nga publikimi")}`,
       );
     }
     // ADMIN-2-TAKEDOWN: the delete-lock trigger (LB461) caught a
@@ -2500,7 +2503,7 @@ export async function deleteBook(bookId: string) {
     if (deleteError.code === "LB461") {
       redirect(`/dashboard?error=${encodeURIComponent(TAKEN_DOWN_DELETE_MESSAGE)}`);
     }
-    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të fshihet tani")}`);
   }
 
   if (!isExactlyOneRowWritten(deletedRows) || deletedRows?.[0]?.id !== book.id) {
@@ -2508,7 +2511,7 @@ export async function deleteBook(bookId: string) {
       bookId: book.id,
       rowCount: Array.isArray(deletedRows) ? deletedRows.length : null,
     });
-    redirect("/dashboard?error=Could+not+delete+that+book+right+now");
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të fshihet tani")}`);
   }
 
   // The book row is gone at this point -- from the author's perspective
@@ -2573,7 +2576,7 @@ export async function addContributor(bookId: string, formData: FormData) {
   const role = String(formData.get("role") ?? "");
 
   if (!name || !CONTRIBUTOR_ROLES.includes(role as (typeof CONTRIBUTOR_ROLES)[number])) {
-    redirect(`/dashboard/books/${bookId}/edit?error=Enter+a+name+and+choose+a+role`);
+    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Shkruani një emër dhe zgjidhni një rol")}`);
   }
 
   const { data: book } = await supabase
@@ -2602,8 +2605,8 @@ export async function addContributor(bookId: string, formData: FormData) {
   }
 
   revalidatePath(`/dashboard/books/${bookId}/edit`);
-  revalidatePath(`/books/${bookId}`);
-  redirect(`/dashboard/books/${bookId}/edit?success=Contributor+added`);
+  revalidatePath(`/libra/${bookId}`);
+  redirect(`/dashboard/books/${bookId}/edit?success=${encodeURIComponent("Bashkëpunëtori u shtua")}`);
 }
 
 export async function removeContributor(bookId: string, contributorId: string) {
@@ -2632,5 +2635,5 @@ export async function removeContributor(bookId: string, contributorId: string) {
   await supabase.from("book_contributors").delete().eq("id", contributorId);
 
   revalidatePath(`/dashboard/books/${bookId}/edit`);
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
 }

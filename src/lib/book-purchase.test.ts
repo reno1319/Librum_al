@@ -8,7 +8,7 @@ import {
 
 describe("resolveBookPurchaseState", () => {
   // Distinct states, not a single collapsed "anonymous" -- a free book
-  // must present "Log in to get this book", never "Log in to buy", so
+  // must present "Hyni për ta marrë këtë libër", never "Hyni për ta blerë", so
   // the presentation layer needs the price distinction here, not just
   // the auth distinction.
   it("anonymous + paid resolves to anonymous-paid, not the free variant", () => {
@@ -89,7 +89,7 @@ describe("resolveBookPurchaseState", () => {
 // showing no Read Sample on Book Detail. Root cause: the report's own
 // screenshots were the book's AUTHOR viewing their OWN page, where Read
 // Sample has ALWAYS been intentionally omitted (PRODUCT-1's own design
-// -- an author already has Download EPUB) -- not a defect in DOCX-
+// -- an author already has Shkarkoni EPUB) -- not a defect in DOCX-
 // generated EPUBs, the sample extractor, or any DB field PRODUCT-5
 // touches. This was previously an untested inline computation directly
 // in Book Detail's Server Component; extracted here (alongside
@@ -116,7 +116,7 @@ describe("resolveShowSample", () => {
   });
 
   it.each(hidden)(
-    "omits Read Sample for %s -- already has full access via Download EPUB",
+    "omits Read Sample for %s -- already has full access via Shkarkoni EPUB",
     (state) => {
       expect(resolveShowSample(state)).toBe(false);
     },
@@ -135,13 +135,13 @@ describe("resolveCheckoutSecurityNote", () => {
 
   it("paid book, POK enabled: names POK", () => {
     expect(resolveCheckoutSecurityNote({ priceAll: 199, usePok: true, paidCheckoutAvailable: true })).toBe(
-      " Secure checkout with POK.",
+      " Pagesë e sigurt me POK.",
     );
   });
 
   it("paid book, POK not enabled (checkout disabled): neutral wording, never names Stripe", () => {
     const note = resolveCheckoutSecurityNote({ priceAll: 199, usePok: false, paidCheckoutAvailable: true });
-    expect(note).toBe(" Secure checkout.");
+    expect(note).toBe(" Pagesë e sigurt.");
     expect(note).not.toContain("Stripe");
   });
 });

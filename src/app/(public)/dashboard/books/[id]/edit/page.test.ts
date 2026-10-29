@@ -107,88 +107,20 @@ describe("Edit page: bibliographic metadata fields", () => {
   });
 });
 
-describe("Edit page: Language field (historical-book safety, critical)", () => {
-  const languageBlock = source.match(/<select\s+name="language"[\s\S]*?<\/select>/)![0];
-
-  it("uses the shared LANGUAGES vocabulary, not a duplicate hardcoded list", () => {
-    expect(source).toContain('import { LANGUAGES, isSupportedLanguage } from "@/lib/languages";');
-    expect(languageBlock).toContain("{LANGUAGES.map(");
+// ALBANIAN-9 (Renato 10-28 "1. a"): the language picker is gone. The
+// Edit form sends no "language" field, so updateBook() leaves the stored
+// books.language untouched (resolveLanguageForUpdate "omit"): a book that
+// already holds "en", "it" or an unknown code keeps it on every save.
+describe("Edit page: no Language field (stored language never touched)", () => {
+  it("renders no language control and imports no language vocabulary", () => {
+    expect(source).not.toMatch(/name="language"/);
+    expect(source).not.toContain("@/lib/languages");
   });
 
-  it("never defaults to \"sq\" -- the default is derived from the book's own stored value only", () => {
-    expect(languageBlock).not.toContain('"sq"');
-    expect(languageBlock).toContain('defaultValue={book.language ?? ""}');
-  });
-
-  it("is not required -- an existing book may legitimately have no language on record", () => {
-    expect(languageBlock).not.toContain("required");
-  });
-
-  it("shows a neutral, non-Albanian, non-disabled placeholder so an author can deliberately revert to no language", () => {
-    expect(languageBlock).toContain('<option value="">Select language</option>');
-    expect(languageBlock).not.toMatch(/<option value="" disabled>/);
-  });
-
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT LANGUAGE
-  // PRESERVATION CORRECTION: books.language carries no DB CHECK, so an
-  // existing book may already hold a code this deployed LANGUAGES
-  // doesn't recognize (e.g. a future/legacy "fr"). Collapsing that case
-  // to the same blank defaultValue as a genuinely-null book made it
-  // indistinguishable from "no language" once rendered -- an untouched
-  // save of any unrelated field would then silently submit language=""
-  // and clear real metadata. These tests cover cases A-G from that
-  // correction's own spec directly against the real source. Case H (a
-  // full submit-and-persist round trip for an unchanged unsupported
-  // value) is EXPLICITLY NOT covered here -- see this correction's own
-  // final report: resolveLanguage() (actions.ts) still rejects any
-  // non-empty value outside LANGUAGES with a redirect before
-  // updateBook()'s .update() call ever runs, so that full round trip
-  // does not currently succeed end-to-end. Writing a test that asserts
-  // it does would misrepresent the real, reported, still-open state of
-  // that gap -- deliberately not done, per this correction's own
-  // "do not weaken the test" instruction.
-  describe("unsupported/future language code preservation (Cases A-G)", () => {
-    it("Case A -- null language: the blank prompt is the only pre-selected representation, no synthetic option", () => {
-      expect(languageBlock).toContain('defaultValue={book.language ?? ""}');
-      // For book.language === null, `book.language && !isSupportedLanguage(...)`
-      // is false, so the synthetic <option> branch never renders --
-      // confirmed structurally below (Case F) rather than re-asserted
-      // per-value here, since this is a static source file covering
-      // every book, not one book's own resolved JSX.
-    });
-
-    it("Case B/C -- supported codes (sq, en, it) render from LANGUAGES, not a duplicate/synthetic option", () => {
-      expect(languageBlock).toContain("{LANGUAGES.map((l) => (");
-      expect(languageBlock).toMatch(/<option key=\{l\.code\} value=\{l\.code\}>/);
-    });
-
-    it("Case D -- a non-null, unsupported code is preserved via a synthetic <option>, not mapped to blank", () => {
-      expect(languageBlock).toContain(
-        "{book.language && !isSupportedLanguage(book.language) && (",
-      );
-      expect(languageBlock).toContain(
-        "<option value={book.language}>Current language · {book.language}</option>",
-      );
-    });
-
-    it("Case E -- the normal sq/en/it options remain available alongside the synthetic one", () => {
-      const synthenticIndex = languageBlock.indexOf("Current language");
-      const languagesMapIndex = languageBlock.indexOf("{LANGUAGES.map(");
-      expect(synthenticIndex).toBeGreaterThan(-1);
-      expect(languagesMapIndex).toBeGreaterThan(-1);
-    });
-
-    it("Case F -- the synthetic option is gated on non-null AND unsupported, so it never duplicates a supported code", () => {
-      const guardMatch = languageBlock.match(
-        /\{book\.language && !isSupportedLanguage\(book\.language\) && \(/,
-      );
-      expect(guardMatch).not.toBeNull();
-    });
-
-    it("Case G -- copy never calls it \"Invalid language\"", () => {
-      expect(languageBlock).not.toContain("Invalid language");
-      expect(languageBlock).toContain("Current language ·");
-    });
+  it("does not keep a language value in the form draft", () => {
+    const draftFields = source.match(/const EDIT_BOOK_DRAFT_FIELDS = \[[\s\S]*?\] as const;/)![0];
+    expect(draftFields).not.toContain('"language"');
+    expect(draftFields).toContain('"genre"');
   });
 });
 
@@ -210,19 +142,20 @@ describe("Edit page: published_at is never author-editable", () => {
 });
 
 describe("Edit page: form organization", () => {
-  it("wraps Keywords/ISBN/Publisher/Edition/Originally-published/Series inside one 'Additional book details' disclosure, mirroring the New Book wizard", () => {
+  it("wraps Keywords/ISBN/Publisher/Edition/Originally-published/Series inside one 'Të dhëna të tjera për librin' disclosure, mirroring the New Book wizard", () => {
     const detailsBlock = source.match(/<details[\s\S]*?<\/details>/)![0];
-    expect(detailsBlock).toContain("Additional book details");
+    expect(detailsBlock).toContain("Të dhëna të tjera për librin");
     for (const fieldName of ["keywords", "isbn", "publisher", "edition", "originalPublicationDate", "seriesId"]) {
       expect(detailsBlock).toContain(`name="${fieldName}"`);
     }
   });
 
-  it("Title, Subtitle, Description, Language, and Genre stay directly visible (not inside the disclosure)", () => {
+  it("Title, Subtitle, Description and Genre stay directly visible (not inside the disclosure)", () => {
     const detailsStart = source.indexOf("<details");
-    const bookDetailsSectionStart = source.indexOf('<h2 className="font-serif text-xl font-normal">Book details</h2>');
+    const bookDetailsSectionStart = source.indexOf('<h2 className="font-serif text-xl font-normal">Të dhënat e librit</h2>');
+    expect(bookDetailsSectionStart).toBeGreaterThan(-1);
     const beforeDisclosure = source.slice(bookDetailsSectionStart, detailsStart);
-    for (const fieldName of ["title", "subtitle", "description", "language", "genre"]) {
+    for (const fieldName of ["title", "subtitle", "description", "genre"]) {
       expect(beforeDisclosure).toContain(`name="${fieldName}"`);
     }
   });
@@ -251,8 +184,8 @@ describe("EditBookPage: maintenance-mode gate", () => {
     });
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
 
-    expect(html).toContain("Scheduled maintenance");
-    expect(html).toContain("temporarily unavailable for scheduled maintenance");
+    expect(html).toContain("Mirëmbajtje e planifikuar");
+    expect(html).toContain("përkohësisht i padisponueshëm për mirëmbajtje të planifikuar");
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 

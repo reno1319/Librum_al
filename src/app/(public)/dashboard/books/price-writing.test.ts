@@ -179,7 +179,7 @@ async function buildFormData(price: string, confirmed = false): Promise<FormData
   formData.set("description", "A description.");
   formData.set("keywords", "");
   formData.set("isbn", "");
-  formData.set("genre", "Fiction");
+  formData.set("genre", "Letërsi artistike");
   formData.set("price", price);
   if (confirmed) formData.set("confirmPriceChange", String(Number(price)));
   formData.set(
@@ -471,7 +471,7 @@ describe("updateBook: ISBN check (FIX1 X9)", () => {
   beforeEach(resetMocks);
 
   const INVALID_ISBN_REDIRECT = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(
-    "Enter a valid ISBN-10 or ISBN-13, or leave it blank.",
+    "Shkruani një ISBN-10 ose ISBN-13 të vlefshëm, ose lëreni bosh.",
   )}`;
 
   function withExistingIsbn(isbn: string | null) {

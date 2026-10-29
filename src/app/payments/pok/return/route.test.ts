@@ -22,7 +22,7 @@ describe("POK browser return", () => {
     expect(mocks.getUser).not.toHaveBeenCalled(); expect(mocks.fulfill).not.toHaveBeenCalled();
   });
   it("invalid return cannot reach privileged code", async () => {
-    await expect(GET(new Request("https://librum.example/payments/pok/return"))).rejects.toMatchObject({ target: "/library?error=Invalid+payment+return" });
+    await expect(GET(new Request("https://librum.example/payments/pok/return"))).rejects.toMatchObject({ target: "/library?error=Kthimi%20nga%20pagesa%20nuk%20%C3%ABsht%C3%AB%20i%20vlefsh%C3%ABm." });
     expect(mocks.repo).not.toHaveBeenCalled(); expect(mocks.fulfill).not.toHaveBeenCalled();
   });
   it("unauthenticated return goes to login without fulfillment", async () => {
@@ -39,12 +39,12 @@ describe("POK browser return", () => {
   });
   it("binds original reader and only reports verified fulfillment", async () => {
     mocks.fulfill.mockResolvedValue({ status: "fulfilled", bookId: "book" });
-    await expect(GET(request())).rejects.toMatchObject({ target: "/books/book?purchase=success" });
+    await expect(GET(request())).rejects.toMatchObject({ target: "/libra/book?purchase=success" });
     expect(mocks.fulfill).toHaveBeenCalledWith({ intentId: id, token, merchantId: "merchant", readerId: "reader" }, {}, {});
   });
   it("browser success query does not make an unpaid verification successful", async () => {
     mocks.fulfill.mockResolvedValue({ status: "pending", bookId: "book" });
-    await expect(GET(request())).rejects.toMatchObject({ target: "/books/book?error=Payment+verification+pending" });
+    await expect(GET(request())).rejects.toMatchObject({ target: "/libra/book?error=Pagesa%20po%20verifikohet%20ende." });
   });
   // POK-FULFILMENT-1: four statuses, four DISTINCT destinations. Before
   // this, 'blocked' and 'closed_unpaid' both read as "verification
@@ -52,10 +52,10 @@ describe("POK browser return", () => {
   // had died unpaid -- was told to keep waiting for something that was
   // never going to arrive.
   it.each([
-    { status: "fulfilled", target: "/books/book?purchase=success" },
-    { status: "pending", target: "/books/book?error=Payment+verification+pending" },
-    { status: "closed_unpaid", target: "/books/book?error=Payment+was+not+completed" },
-    { status: "blocked", target: "/books/book?error=Payment+needs+review" },
+    { status: "fulfilled", target: "/libra/book?purchase=success" },
+    { status: "pending", target: "/libra/book?error=Pagesa%20po%20verifikohet%20ende." },
+    { status: "closed_unpaid", target: "/libra/book?error=Pagesa%20nuk%20u%20krye." },
+    { status: "blocked", target: "/libra/book?error=Pagesa%20duhet%20t%C3%AB%20shqyrtohet%20nga%20ne." },
   ])("sends $status to its own destination", async ({ status, target }) => {
     mocks.fulfill.mockResolvedValue({ status, bookId: "book" });
     await expect(GET(request())).rejects.toMatchObject({ target });
@@ -77,7 +77,7 @@ describe("POK browser return", () => {
   });
   it("verification errors expose no private details", async () => {
     mocks.fulfill.mockRejectedValue(new Error("private secret"));
-    await expect(GET(request())).rejects.toMatchObject({ target: "/library?error=Payment+verification+pending" });
+    await expect(GET(request())).rejects.toMatchObject({ target: "/library?error=Pagesa%20po%20verifikohet%20ende." });
   });
 });
 
@@ -104,6 +104,6 @@ describe("POK browser return: maintenance-mode gate", () => {
   it("maintenance mode off (unset) preserves existing behavior", async () => {
     vi.unstubAllEnvs();
     mocks.fulfill.mockResolvedValue({ status: "fulfilled", bookId: "book" });
-    await expect(GET(request())).rejects.toMatchObject({ target: "/books/book?purchase=success" });
+    await expect(GET(request())).rejects.toMatchObject({ target: "/libra/book?purchase=success" });
   });
 });

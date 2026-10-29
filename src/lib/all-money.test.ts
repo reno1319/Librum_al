@@ -20,20 +20,20 @@ import { ALL_FREE_LABEL, formatAllMinorUnits } from "./all-money";
 
 describe("formatAllMinorUnits: the four contract examples, exactly", () => {
   it("0 is the free label, not 0 ALL", () => {
-    expect(formatAllMinorUnits(0)).toBe("Free");
+    expect(formatAllMinorUnits(0)).toBe("Falas");
     expect(formatAllMinorUnits(0)).toBe(ALL_FREE_LABEL);
   });
 
   it("9900 is 99 ALL", () => {
-    expect(formatAllMinorUnits(9900)).toBe("99 ALL");
+    expect(formatAllMinorUnits(9900)).toBe("99 lekë");
   });
 
   it("17910 is 179,10 ALL -- the qindarka Intl would have dropped", () => {
-    expect(formatAllMinorUnits(17910)).toBe("179,10 ALL");
+    expect(formatAllMinorUnits(17910)).toBe("179,10 lekë");
   });
 
   it("10000000 is 100.000 ALL -- dot groups thousands, comma separates decimals", () => {
-    expect(formatAllMinorUnits(10000000)).toBe("100.000 ALL");
+    expect(formatAllMinorUnits(10000000)).toBe("100.000 lekë");
   });
 });
 
@@ -42,23 +42,23 @@ describe("formatAllMinorUnits: separators are never swapped", () => {
   // is the mirror image of the en-US one, and "looks formatted" is not
   // the property under test.
   const cases: Array<[number, string]> = [
-    [1, "0,01 ALL"],
-    [9, "0,09 ALL"],
-    [10, "0,10 ALL"],
-    [99, "0,99 ALL"],
-    [100, "1 ALL"],
-    [101, "1,01 ALL"],
-    [999, "9,99 ALL"],
-    [1000, "10 ALL"],
-    [99999, "999,99 ALL"],
-    [100000, "1.000 ALL"],
-    [100001, "1.000,01 ALL"],
-    [999999, "9.999,99 ALL"],
-    [1000000, "10.000 ALL"],
-    [99999999, "999.999,99 ALL"],
-    [100000000, "1.000.000 ALL"],
-    [123456789, "1.234.567,89 ALL"],
-    [1000000000, "10.000.000 ALL"],
+    [1, "0,01 lekë"],
+    [9, "0,09 lekë"],
+    [10, "0,10 lekë"],
+    [99, "0,99 lekë"],
+    [100, "1 lek"],
+    [101, "1,01 lekë"],
+    [999, "9,99 lekë"],
+    [1000, "10 lekë"],
+    [99999, "999,99 lekë"],
+    [100000, "1.000 lekë"],
+    [100001, "1.000,01 lekë"],
+    [999999, "9.999,99 lekë"],
+    [1000000, "10.000 lekë"],
+    [99999999, "999.999,99 lekë"],
+    [100000000, "1.000.000 lekë"],
+    [123456789, "1.234.567,89 lekë"],
+    [1000000000, "10.000.000 lekë"],
   ];
 
   it.each(cases)("%i formats as %s", (minor, expected) => {
@@ -70,12 +70,10 @@ describe("formatAllMinorUnits: separators are never swapped", () => {
       const out = formatAllMinorUnits(minor);
       expect(out).not.toContain("$");
       expect(out).not.toContain("\u20ac");
-      // Only the three-letter code, never the bare "L"/"Lek" symbol
-      // forms -- checked as "no letter outside the ALL suffix" rather
-      // than "contains no L", since ALL itself is full of them.
-      expect(out.replace(/ ALL$/, "")).not.toMatch(/[A-Za-z]/);
-      // The suffix form, never Intl's "ALL 179" prefix form.
-      expect(out.endsWith(" ALL")).toBe(true);
+      // ALBANIAN-1: only the "lek"/"lekë" word, as a suffix -- no
+      // letter anywhere else, and never Intl's "ALL 179" prefix form.
+      expect(out.replace(/ lekë?$/, "")).not.toMatch(/[A-Za-zë]/);
+      expect(out).toMatch(/ lekë?$/);
       expect(out.startsWith("ALL")).toBe(false);
     }
   });
@@ -86,13 +84,13 @@ describe("formatAllMinorUnits: separators are never swapped", () => {
     for (let minor = 1; minor <= 2000; minor += 1) {
       const formatted = formatAllMinorUnits(minor);
       if (minor % 100 === 0) {
-        expect(formatted).toMatch(/^\d{1,3}(\.\d{3})* ALL$/);
+        expect(formatted).toMatch(minor === 100 ? /^1 lek$/ : /^\d{1,3}(\.\d{3})* lekë$/);
       } else {
-        expect(formatted).toMatch(/^\d{1,3}(\.\d{3})*,\d{2} ALL$/);
+        expect(formatted).toMatch(/^\d{1,3}(\.\d{3})*,\d{2} lekë$/);
       }
     }
-    expect(formatAllMinorUnits(17910)).toBe("179,10 ALL");
-    expect(formatAllMinorUnits(19900)).toBe("199 ALL");
+    expect(formatAllMinorUnits(17910)).toBe("179,10 lekë");
+    expect(formatAllMinorUnits(19900)).toBe("199 lekë");
   });
 });
 
@@ -100,16 +98,16 @@ describe("formatAllMinorUnits: integer-only, with no rounding to lose", () => {
   // 0.1 + 0.2 !== 0.3 is the canonical float failure; the minor-unit
   // equivalents of those three amounts must come back exact.
   it("is exact for the values a divide-by-100 implementation would round", () => {
-    expect(formatAllMinorUnits(10)).toBe("0,10 ALL");
-    expect(formatAllMinorUnits(20)).toBe("0,20 ALL");
-    expect(formatAllMinorUnits(30)).toBe("0,30 ALL");
-    expect(formatAllMinorUnits(70)).toBe("0,70 ALL");
-    expect(formatAllMinorUnits(8100)).toBe("81 ALL");
+    expect(formatAllMinorUnits(10)).toBe("0,10 lekë");
+    expect(formatAllMinorUnits(20)).toBe("0,20 lekë");
+    expect(formatAllMinorUnits(30)).toBe("0,30 lekë");
+    expect(formatAllMinorUnits(70)).toBe("0,70 lekë");
+    expect(formatAllMinorUnits(8100)).toBe("81 lekë");
   });
 
   it("is exact at the very top of the safe-integer range", () => {
     expect(formatAllMinorUnits(Number.MAX_SAFE_INTEGER)).toBe(
-      "90.071.992.547.409,91 ALL",
+      "90.071.992.547.409,91 lekë",
     );
   });
 
@@ -121,7 +119,7 @@ describe("formatAllMinorUnits: integer-only, with no rounding to lose", () => {
   it("disagrees with a divide-then-toFixed implementation exactly where floating point does", () => {
     const minor = 9007199254000001;
     expect(Number.isSafeInteger(minor)).toBe(true);
-    expect(formatAllMinorUnits(minor)).toBe("90.071.992.540.000,01 ALL");
+    expect(formatAllMinorUnits(minor)).toBe("90.071.992.540.000,01 lekë");
     expect((minor / 100).toFixed(2)).toBe("90071992540000.02");
   });
 
@@ -131,7 +129,7 @@ describe("formatAllMinorUnits: integer-only, with no rounding to lose", () => {
       // A whole-lek amount has no decimal part at all (FIX1 X5).
       expect(formatted).not.toContain(",");
       // ...and the whole part, with grouping removed, is the price back.
-      const whole = formatted.slice(0, -" ALL".length).replace(/\./g, "");
+      const whole = formatted.replace(/ lekë$/, "").replace(/\./g, "");
       expect(whole).toBe(String(priceAll));
     }
   });
@@ -158,7 +156,7 @@ describe("formatAllMinorUnits: rejects everything that is not a minor-unit count
   // and formats as a perfectly innocent "Free" unless Object.is is used.
   it("rejects negative zero specifically, while positive zero is still Free", () => {
     expect(() => formatAllMinorUnits(-0)).toThrow();
-    expect(formatAllMinorUnits(0)).toBe("Free");
+    expect(formatAllMinorUnits(0)).toBe("Falas");
   });
 
   it("never echoes the offending value back in the message", () => {
