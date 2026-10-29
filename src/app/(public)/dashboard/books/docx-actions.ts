@@ -3,7 +3,12 @@
 import { randomUUID } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { convertDocxToDocument, type ConversionWarning } from "@/lib/docx-converter";
-import { generateEpub, patchEpubMetadata } from "@/lib/epub-generator";
+import {
+  generateEpub,
+  patchEpubMetadata,
+  UNKNOWN_AUTHOR_NAME,
+  UNTITLED_MANUSCRIPT_TITLE,
+} from "@/lib/epub-generator";
 import { validateEpubStructure } from "@/lib/epub-validation";
 
 // LIBRUM 2.0 PRODUCT-5 413 CORRECTION: a confirmed production defect --
@@ -174,8 +179,8 @@ export async function parseDocxToDocument(tempDocxPath: string): Promise<ParseDo
     // (real, for Edit Book's already-known title; still blank, for the
     // wizard's Files step, in which case this placeholder is exactly
     // what would be applied anyway).
-    title: "Untitled manuscript",
-    authorName: "Unknown author",
+    title: UNTITLED_MANUSCRIPT_TITLE,
+    authorName: UNKNOWN_AUTHOR_NAME,
     sections: conversion.sections,
     images: conversion.images,
   });
@@ -218,7 +223,7 @@ export type RepackageResult = { success: true } | { success: false; error: strin
 // parameter, passed straight through to patchEpubMetadata()'s own
 // (also optional) fourth parameter -- omitted here means omitted
 // there, which leaves the generated EPUB's dc:language exactly as
-// parseDocxToDocument() first packaged it (always "und" today, since
+// parseDocxToDocument() first packaged it ("sq" since SQ-17, since
 // that function's own generateEpub() call never supplies a language
 // either -- see this function's own top-of-file comment for why that
 // stays unchanged: mirrors the pre-existing title/author bootstrap
@@ -244,8 +249,8 @@ export async function repackageWithTitle(
   }
 
   const epubBytes = Buffer.from(await fileData.arrayBuffer());
-  const title = bookTitle.trim() || "Untitled manuscript";
-  const author = authorName.trim() || "Unknown author";
+  const title = bookTitle.trim() || UNTITLED_MANUSCRIPT_TITLE;
+  const author = authorName.trim() || UNKNOWN_AUTHOR_NAME;
 
   let patched: Buffer;
   try {

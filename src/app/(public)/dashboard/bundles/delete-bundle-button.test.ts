@@ -160,7 +160,7 @@ describe("DeleteBundleButton: explicit confirmation", () => {
   it("renders a plain, enabled button (not a submit) whose accessible name names the exact bundle", () => {
     const html = renderToStaticMarkup(createElement(DeleteBundleButton, DISPOSABLE_TARGET));
     expect(html).toContain('type="button"');
-    expect(html).toContain(`aria-label="Fshini paketën “${DISPOSABLE.title}”"`);
+    expect(html).toContain(`aria-label="Fshini paketën &quot;${DISPOSABLE.title}&quot;"`);
     expect(html).toContain(">Fshini</button>");
     expect(html).not.toMatch(/\sdisabled(=|\s|>)/);
     expect(html).not.toContain("aria-busy");
@@ -263,7 +263,7 @@ describe("DeleteBundleButton: single-flight per mounted button", () => {
     expect(pendingView.props.disabled).toBe(true);
     expect(pendingView.props["aria-busy"]).toBe(true);
     expect(pendingView.props.children).toBe("Po fshihet…");
-    expect(pendingView.props["aria-label"]).toBe(`Paketa “${DISPOSABLE.title}” po fshihet…`);
+    expect(pendingView.props["aria-label"]).toBe(`Paketa "${DISPOSABLE.title}" po fshihet…`);
     const pendingHtml = renderToStaticMarkup(pendingView);
     expect(pendingHtml).toContain('disabled=""');
     expect(pendingHtml).toContain('aria-busy="true"');
@@ -497,8 +497,8 @@ describe("BundlesPage: every row's controls target that row", () => {
 
   it("the rendered page shows one named Delete per row and no delete form", async () => {
     const html = renderToStaticMarkup(await renderPageTree());
-    expect(html).toContain('aria-label="Fshini paketën “Fixture Bundle”"');
-    expect(html).toContain(`aria-label="Fshini paketën “${DISPOSABLE.title}”"`);
+    expect(html).toContain('aria-label="Fshini paketën &quot;Fixture Bundle&quot;"');
+    expect(html).toContain(`aria-label="Fshini paketën &quot;${DISPOSABLE.title}&quot;"`);
     expect(html.match(/aria-label="Fshini paketën /g)).toHaveLength(2);
     expect(html.match(/<form/g)).toHaveLength(3); // create, Unpublish, Publish
   });

@@ -83,7 +83,7 @@ describe("the author's words (G, M5)", () => {
         formatDate,
       ),
     ).toEqual([
-      "Hequr nga Librum më 19 Oct 2026. Arsyeja: Ankesë për të drejtën e autorit.",
+      "Hequr nga Libraria më 19 Oct 2026. Arsyeja: Ankesë për të drejtën e autorit.",
       "Send proof.",
       "Hoqëm nga publikimi edhe: Set A, Set B.",
       "Pyetje? Na shkruani te support@librum.al",
@@ -94,7 +94,7 @@ describe("the author's words (G, M5)", () => {
         formatDate,
       ),
     ).toEqual([
-      "Hequr nga Librum më 19 Oct 2026. Arsyeja: Tjetër.",
+      "Hequr nga Libraria më 19 Oct 2026. Arsyeja: Tjetër.",
       "Done!",
       "Pyetje? Na shkruani te support@librum.al",
     ]);

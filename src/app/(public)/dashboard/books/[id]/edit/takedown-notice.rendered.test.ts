@@ -125,8 +125,8 @@ describe("Edit page: a book Librum took down", () => {
       },
     };
     const html = await render();
-    expect(html).toContain("Hequr nga Librum</span>");
-    expect(html).toContain("Hequr nga Librum më 19 tetor 2026. Arsyeja: Ankesë për të drejtën e autorit.");
+    expect(html).toContain("Hequr nga Libraria</span>");
+    expect(html).toContain("Hequr nga Libraria më 19 tetor 2026. Arsyeja: Ankesë për të drejtën e autorit.");
     expect(html).toContain("Please send proof.");
     expect(html).toContain("Hoqëm nga publikimi edhe: Set A.");
     expect(html).toContain("Pyetje? Na shkruani te support@librum.al");
@@ -136,14 +136,14 @@ describe("Edit page: a book Librum took down", () => {
   it("disables Publish with the generic sentence when the takedown can't be read", async () => {
     takedown = { state: { kind: "unavailable" }, notice: null };
     const html = await render();
-    expect(html).not.toContain("Hequr nga Librum");
+    expect(html).not.toContain("Hequr nga Libraria");
     const start = html.lastIndexOf("<button", html.indexOf("Dërgojeni për shqyrtim</button>"));
     expect(html.slice(start, html.indexOf("Dërgojeni për shqyrtim</button>"))).toContain('disabled=""');
   });
 
   it("is unchanged without a takedown", async () => {
     const html = await render();
-    expect(html).not.toContain("Hequr nga Librum");
+    expect(html).not.toContain("Hequr nga Libraria");
     const start = html.lastIndexOf("<button", html.indexOf("Dërgojeni për shqyrtim</button>"));
     expect(html.slice(start, html.indexOf("Dërgojeni për shqyrtim</button>"))).not.toContain('disabled=""');
   });

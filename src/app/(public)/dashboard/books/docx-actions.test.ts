@@ -90,8 +90,8 @@ describe("parseDocxToDocument", () => {
     const opf = await zip.file("OEBPS/content.opf")!.async("string");
     // No real title/author known yet at parse time -- see the
     // trim-or-placeholder fallback docx-actions.ts documents.
-    expect(opf).toContain("<dc:title>Untitled manuscript</dc:title>");
-    expect(opf).toContain("<dc:creator>Unknown author</dc:creator>");
+    expect(opf).toContain("<dc:title>Dorëshkrim pa titull</dc:title>");
+    expect(opf).toContain("<dc:creator>Autor i panjohur</dc:creator>");
   });
 
   it("rejects a temp path not owned by the calling user, without touching storage", async () => {
@@ -197,8 +197,8 @@ describe("repackageWithTitle", () => {
 
     const zip = await JSZip.loadAsync(fakeStorage.objects.get(conversionId)!);
     const opf = await zip.file("OEBPS/content.opf")!.async("string");
-    expect(opf).toContain("<dc:title>Untitled manuscript</dc:title>");
-    expect(opf).toContain("<dc:creator>Unknown author</dc:creator>");
+    expect(opf).toContain("<dc:title>Dorëshkrim pa titull</dc:title>");
+    expect(opf).toContain("<dc:creator>Autor i panjohur</dc:creator>");
   });
 
   it("rejects a conversionId not owned by the calling user", async () => {
@@ -224,7 +224,7 @@ describe("repackageWithTitle", () => {
   // tests). These cover the pass-through itself: a real code reaches
   // the stored temp EPUB's dc:language, and omitting the argument
   // (the shape every call above already uses) leaves dc:language at
-  // "und" -- parseDocxToDocument()'s own placeholder packaging, which
+  // "sq" (SQ-17; was "und") -- parseDocxToDocument()'s own packaging, which
   // this function's own top-of-file comment says is deliberately never
   // supplied a language either.
   it.each(["sq", "en", "it"])("threads language '%s' into the repackaged temp EPUB's dc:language", async (code) => {
@@ -237,13 +237,13 @@ describe("repackageWithTitle", () => {
     expect(opf).toContain(`<dc:language>${code}</dc:language>`);
   });
 
-  it("leaves dc:language at 'und' when the language argument is omitted", async () => {
+  it("leaves dc:language at 'sq' when the language argument is omitted (SQ-17: Edit Book sends none)", async () => {
     const conversionId = await storedTempEpub();
     const result = await repackageWithTitle(conversionId, "The Maltese Falcon", "Dashiell Hammett");
     expect(result).toEqual({ success: true });
 
     const zip = await JSZip.loadAsync(fakeStorage.objects.get(conversionId)!);
     const opf = await zip.file("OEBPS/content.opf")!.async("string");
-    expect(opf).toContain("<dc:language>und</dc:language>");
+    expect(opf).toContain("<dc:language>sq</dc:language>");
   });
 });

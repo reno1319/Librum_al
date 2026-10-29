@@ -229,7 +229,7 @@ export async function buyBook(bookId: string, formData: FormData) {
   }
 
   if (catalogPriceState === "free") {
-    redirect(`/libra/${bookId}?error=${encodeURIComponent("Ky libër është falas. Përdorni butonin “Merreni e-librin — Falas”.")}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent('Ky libër është falas. Përdorni butonin "Merreni e-librin — Falas".')}`);
   }
 
   // PAID-MODE-1: whether Librum may start a PAID checkout AT ALL is a

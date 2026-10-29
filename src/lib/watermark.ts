@@ -67,7 +67,7 @@ export async function watermarkEpub(bytes: Buffer, email: string): Promise<Water
     }
 
     const opfXml = await opfFile.async("string");
-    const notice = `<dc:rights>This copy is licensed to ${escapeXml(email)}. Please do not distribute.</dc:rights>`;
+    const notice = `<dc:rights>Kjo kopje është licencuar për ${escapeXml(email)}. Ju lutemi, mos e shpërndani.</dc:rights>`;
     const updatedOpf = opfXml.replace(
       /(<[a-zA-Z0-9:]*metadata[^>]*>)/i,
       `$1${notice}`,

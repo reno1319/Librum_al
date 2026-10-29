@@ -174,7 +174,7 @@ describe("Edit page: in review (E, F)", () => {
       notice: { takenDownAt: "2026-10-19T10:00:00Z", reason: "copyright", message: "Proof please", bundleTitles: [] },
     };
     const html = await render();
-    expect(html).toContain("Hequr nga Librum</span>");
+    expect(html).toContain("Hequr nga Libraria</span>");
     expect(html).not.toContain("Anuloni shqyrtimin</button>");
   });
 });

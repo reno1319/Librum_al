@@ -35,7 +35,7 @@ describe("AuthorBookRow: a book Librum took down", () => {
     expect(html).toContain(">HEQUR NGA LIBRARIA<");
     expect(html).not.toContain(">DRAFT<");
     expect(html).toContain('role="status"');
-    expect(html).toMatch(/Hequr nga Librum më [^<]+\. Arsyeja: Shkel rregullat e përmbajtjes\./);
+    expect(html).toMatch(/Hequr nga Libraria më [^<]+\. Arsyeja: Shkel rregullat e përmbajtjes\./);
     expect(html).toContain("This breaks the rules.");
     expect(html).toContain("Hoqëm nga publikimi edhe: Set A.");
     expect(html).toContain("Pyetje? Na shkruani te support@librum.al");
