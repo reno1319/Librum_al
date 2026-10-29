@@ -207,7 +207,7 @@ describe("PEN-NAMES-1 Author Page", () => {
     expect(html.match(/rel="nofollow ugc noopener noreferrer"/g)).toHaveLength(2);
   });
 
-  it("an old /authors/<account id> URL, an unknown id or a malformed id is not found", async () => {
+  it("an old /autore/<account id> URL, an unknown id or a malformed id is not found", async () => {
     install();
     await expect(render(ACCOUNT)).rejects.toBeInstanceOf(NotFoundSignal);
     await expect(render("not-a-uuid")).rejects.toBeInstanceOf(NotFoundSignal);

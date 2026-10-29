@@ -124,51 +124,51 @@ describe("isKnownBookstoreSort", () => {
 });
 
 describe("buildBookstoreHref", () => {
-  it("bare /bookstore when nothing is set", () => {
-    expect(buildBookstoreHref({}, {})).toBe("/bookstore");
+  it("bare /librari when nothing is set", () => {
+    expect(buildBookstoreHref({}, {})).toBe("/librari");
   });
 
   it("carries forward existing params untouched", () => {
     expect(buildBookstoreHref({ q: "dante", sort: "price_asc" }, {})).toBe(
-      "/bookstore?q=dante&sort=price_asc",
+      "/librari?q=dante&sort=price_asc",
     );
   });
 
   it("an override adds a new param without disturbing the others", () => {
     expect(buildBookstoreHref({ q: "dante" }, { genre: "Letërsi artistike" })).toBe(
-      "/bookstore?q=dante&genre=Let%C3%ABrsi+artistike",
+      "/librari?q=dante&genre=Let%C3%ABrsi+artistike",
     );
   });
 
   it("an override of undefined removes that param", () => {
     expect(buildBookstoreHref({ q: "dante", genre: "Letërsi artistike" }, { genre: undefined })).toBe(
-      "/bookstore?q=dante",
+      "/librari?q=dante",
     );
   });
 
   it("an override replaces an existing value for the same key", () => {
     expect(buildBookstoreHref({ genre: "Letërsi artistike" }, { genre: "Poezi" })).toBe(
-      "/bookstore?genre=Poezi",
+      "/librari?genre=Poezi",
     );
   });
 });
 
 describe("toggleGenreHref", () => {
   it("selecting a genre with none active adds it", () => {
-    expect(toggleGenreHref({}, "Letërsi artistike")).toBe("/bookstore?genre=Let%C3%ABrsi+artistike");
+    expect(toggleGenreHref({}, "Letërsi artistike")).toBe("/librari?genre=Let%C3%ABrsi+artistike");
   });
 
   it("clicking the already-active genre clears it (toggle off)", () => {
-    expect(toggleGenreHref({ genre: "Letërsi artistike" }, "Letërsi artistike")).toBe("/bookstore");
+    expect(toggleGenreHref({ genre: "Letërsi artistike" }, "Letërsi artistike")).toBe("/librari");
   });
 
   it("clicking a different genre switches to it", () => {
-    expect(toggleGenreHref({ genre: "Letërsi artistike" }, "Poezi")).toBe("/bookstore?genre=Poezi");
+    expect(toggleGenreHref({ genre: "Letërsi artistike" }, "Poezi")).toBe("/librari?genre=Poezi");
   });
 
   it("preserves an active search term while toggling genre", () => {
     expect(toggleGenreHref({ q: "dante", genre: "Letërsi artistike" }, "Letërsi artistike")).toBe(
-      "/bookstore?q=dante",
+      "/librari?q=dante",
     );
   });
 });

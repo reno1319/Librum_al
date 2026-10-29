@@ -715,7 +715,7 @@ export default async function EditBookPage({
             {book.status !== "published" && (
               <p className="mt-2 text-sm text-muted">
                 <Link
-                  href={`/books/${book.id}`}
+                  href={`/libra/${book.id}`}
                   target="_blank"
                   rel="noopener"
                   className="focus-ring rounded-sm font-medium text-foreground underline"

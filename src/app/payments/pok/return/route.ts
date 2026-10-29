@@ -49,10 +49,10 @@ export async function GET(request: Request) {
     //
     // Each message is a fixed literal. No cause, no last_error_code, no
     // timestamp and no provider text ever reaches the query string.
-    destination = result.status === "fulfilled" ? `/books/${result.bookId}?purchase=success`
-      : result.status === "closed_unpaid" ? `/books/${result.bookId}?error=${encodeURIComponent(NOT_COMPLETED_MESSAGE)}`
-      : result.status === "blocked" ? `/books/${result.bookId}?error=${encodeURIComponent(NEEDS_REVIEW_MESSAGE)}`
-      : `/books/${result.bookId}?error=${encodeURIComponent(PENDING_MESSAGE)}`;
+    destination = result.status === "fulfilled" ? `/libra/${result.bookId}?purchase=success`
+      : result.status === "closed_unpaid" ? `/libra/${result.bookId}?error=${encodeURIComponent(NOT_COMPLETED_MESSAGE)}`
+      : result.status === "blocked" ? `/libra/${result.bookId}?error=${encodeURIComponent(NEEDS_REVIEW_MESSAGE)}`
+      : `/libra/${result.bookId}?error=${encodeURIComponent(PENDING_MESSAGE)}`;
   } catch { /* generic, non-secret diagnostic only */ }
   redirect(destination);
 }

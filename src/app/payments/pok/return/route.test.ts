@@ -39,12 +39,12 @@ describe("POK browser return", () => {
   });
   it("binds original reader and only reports verified fulfillment", async () => {
     mocks.fulfill.mockResolvedValue({ status: "fulfilled", bookId: "book" });
-    await expect(GET(request())).rejects.toMatchObject({ target: "/books/book?purchase=success" });
+    await expect(GET(request())).rejects.toMatchObject({ target: "/libra/book?purchase=success" });
     expect(mocks.fulfill).toHaveBeenCalledWith({ intentId: id, token, merchantId: "merchant", readerId: "reader" }, {}, {});
   });
   it("browser success query does not make an unpaid verification successful", async () => {
     mocks.fulfill.mockResolvedValue({ status: "pending", bookId: "book" });
-    await expect(GET(request())).rejects.toMatchObject({ target: "/books/book?error=Pagesa%20po%20verifikohet%20ende." });
+    await expect(GET(request())).rejects.toMatchObject({ target: "/libra/book?error=Pagesa%20po%20verifikohet%20ende." });
   });
   // POK-FULFILMENT-1: four statuses, four DISTINCT destinations. Before
   // this, 'blocked' and 'closed_unpaid' both read as "verification
@@ -52,10 +52,10 @@ describe("POK browser return", () => {
   // had died unpaid -- was told to keep waiting for something that was
   // never going to arrive.
   it.each([
-    { status: "fulfilled", target: "/books/book?purchase=success" },
-    { status: "pending", target: "/books/book?error=Pagesa%20po%20verifikohet%20ende." },
-    { status: "closed_unpaid", target: "/books/book?error=Pagesa%20nuk%20u%20krye." },
-    { status: "blocked", target: "/books/book?error=Pagesa%20duhet%20t%C3%AB%20shqyrtohet%20nga%20ne." },
+    { status: "fulfilled", target: "/libra/book?purchase=success" },
+    { status: "pending", target: "/libra/book?error=Pagesa%20po%20verifikohet%20ende." },
+    { status: "closed_unpaid", target: "/libra/book?error=Pagesa%20nuk%20u%20krye." },
+    { status: "blocked", target: "/libra/book?error=Pagesa%20duhet%20t%C3%AB%20shqyrtohet%20nga%20ne." },
   ])("sends $status to its own destination", async ({ status, target }) => {
     mocks.fulfill.mockResolvedValue({ status, bookId: "book" });
     await expect(GET(request())).rejects.toMatchObject({ target });
@@ -104,6 +104,6 @@ describe("POK browser return: maintenance-mode gate", () => {
   it("maintenance mode off (unset) preserves existing behavior", async () => {
     vi.unstubAllEnvs();
     mocks.fulfill.mockResolvedValue({ status: "fulfilled", bookId: "book" });
-    await expect(GET(request())).rejects.toMatchObject({ target: "/books/book?purchase=success" });
+    await expect(GET(request())).rejects.toMatchObject({ target: "/libra/book?purchase=success" });
   });
 });

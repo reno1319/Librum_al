@@ -531,7 +531,7 @@ describe("BookDetailPage: redesign step 3", () => {
   it("the breadcrumb links the bookstore and the book's genre", async () => {
     const html = await render({ user: null, book: { ...BOOK_ROW, genre: "Poezi" } });
     expect(html).toContain('aria-label="Rruga e navigimit"');
-    expect(html).toContain('href="/bookstore?genre=Poezi"');
+    expect(html).toContain('href="/librari?genre=Poezi"');
   });
 
   // FIX1 (X4): no star row until the first review.
@@ -557,7 +557,7 @@ describe("BookDetailPage: redesign step 3", () => {
   it("a visitor gets the author page's own Hyni për ta ndjekur link; the author gets no follow control", async () => {
     const anon = await render({ user: null });
     expect(anon).toContain("Hyni për ta ndjekur");
-    expect(anon).toContain('href="/login?next=/authors/pen-an-author"');
+    expect(anon).toContain('href="/login?next=/autore/pen-an-author"');
     const author = await render({ user: { id: "author" } });
     expect(author).not.toContain("Follow");
   });

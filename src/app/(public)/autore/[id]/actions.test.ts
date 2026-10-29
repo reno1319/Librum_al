@@ -82,13 +82,13 @@ describe("followPenName / unfollowPenName", () => {
 
   it("one of the author's own pen names: no follow row", async () => {
     ownRow = { id: PEN };
-    expect(await redirectOf(followPenName(PEN))).toBe(`/authors/${PEN}`);
+    expect(await redirectOf(followPenName(PEN))).toBe(`/autore/${PEN}`);
     expect(calls.some((c) => c.table === "pen_name_follows")).toBe(false);
   });
 
   it("signed out goes to login; a malformed id touches nothing", async () => {
     userId = null;
-    expect(await redirectOf(followPenName(PEN))).toBe(`/login?next=/authors/${PEN}`);
+    expect(await redirectOf(followPenName(PEN))).toBe(`/login?next=/autore/${PEN}`);
     expect(await redirectOf(followPenName("x'; drop"))).toBe("/");
     expect(calls).toEqual([]);
   });
@@ -106,13 +106,13 @@ describe("followPenName / unfollowPenName", () => {
 
 describe("removePenNameLinks (8a)", () => {
   it("without reports.resolve: no RPC", async () => {
-    expect(await redirectOf(removePenNameLinks(PEN))).toBe(`/authors/${PEN}`);
+    expect(await redirectOf(removePenNameLinks(PEN))).toBe(`/autore/${PEN}`);
     expect(rpcCalls).toEqual([]);
   });
 
   it("with reports.resolve: calls staff_remove_pen_name_links for that pen name", async () => {
     staff = true;
-    expect(await redirectOf(removePenNameLinks(PEN))).toBe(`/authors/${PEN}?success=Links removed.`);
+    expect(await redirectOf(removePenNameLinks(PEN))).toBe(`/autore/${PEN}?success=Links removed.`);
     expect(rpcCalls).toEqual([{ fn: "staff_remove_pen_name_links", args: { p_pen_name_id: PEN } }]);
   });
 });

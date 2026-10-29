@@ -38,7 +38,7 @@ export function LibraryBookCard({
   return (
     <li className="flex flex-col gap-1.5">
       <Link
-        href={`/books/${bookId}`}
+        href={`/libra/${bookId}`}
         className="focus-ring group flex flex-col gap-3 rounded-sm"
       >
         {coverUrl ? (

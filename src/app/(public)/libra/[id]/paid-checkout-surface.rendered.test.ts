@@ -146,7 +146,7 @@ const CLOSED: Array<[string, () => void]> = [
 /** Every paid checkout initiation or resume surface, asserted one by one. */
 function expectNoPaidCheckoutSurface(html: string) {
   expect(html).not.toContain("Hyni për ta blerë");
-  expect(html).not.toContain(`/login?next=/books/${BOOK_U_ID}`);
+  expect(html).not.toContain(`/login?next=/libra/${BOOK_U_ID}`);
   expect(html).not.toContain('name="code"');
   expect(html).not.toContain("Kodi promocional");
   expect(html).not.toContain("Blini e-librin");
@@ -199,7 +199,7 @@ describe("paid checkout open: exact controlled-staging mode on protected staging
   it("anonymous: 'Hyni për ta blerë' is restored and no unavailable notice shows", async () => {
     const { html } = await render({ user: null });
     expect(html).toContain("Hyni për ta blerë");
-    expect(html).toContain(`/login?next=/books/${BOOK_U_ID}`);
+    expect(html).toContain(`/login?next=/libra/${BOOK_U_ID}`);
     expect(html).not.toContain(NOTICE);
   });
 
@@ -274,7 +274,7 @@ describe("Fixture Book U on staging with PAID_CHECKOUT_MODE absent", () => {
       createElement(BookCard, { book: BOOK_U, coverUrl: null, authorName: "Fixture Author" }),
     );
     expect(html).toContain("199 lekë");
-    expect(html).toContain(`/books/${BOOK_U_ID}`);
+    expect(html).toContain(`/libra/${BOOK_U_ID}`);
     expect(html).not.toContain("Buy");
   });
 

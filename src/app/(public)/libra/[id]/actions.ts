@@ -179,11 +179,11 @@ export async function buyBook(bookId: string, formData: FormData) {
   // checkout intent, provider order, or purchase row may be created
   // while the cutover's maintenance window is active.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    redirectForMaintenance(`/books/${bookId}`);
+    redirectForMaintenance(`/libra/${bookId}`);
   }
 
   // LAUNCH-1 P1-11: defense-in-depth -- Proxy already blocks the
-  // /books/[id] page itself while a recovery session is active, so this
+  // /libra/[id] page itself while a recovery session is active, so this
   // is the second layer against a crafted direct POST. Runs before any
   // Stripe/Supabase call below.
   await redirectIfRecoverySessionActive();
@@ -194,7 +194,7 @@ export async function buyBook(bookId: string, formData: FormData) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?next=/books/${bookId}`);
+    redirect(`/login?next=/libra/${bookId}`);
   }
 
   const { data: book } = await supabase
@@ -204,7 +204,7 @@ export async function buyBook(bookId: string, formData: FormData) {
     .single<BookForCheckout>();
 
   if (!book || book.status !== "published" || (await isOwnBook(supabase, bookId, user.id))) {
-    redirect(`/books/${bookId}`);
+    redirect(`/libra/${bookId}`);
   }
 
   // ALL-WIRING-2: the catalog price is classified THREE ways, from the
@@ -225,11 +225,11 @@ export async function buyBook(bookId: string, formData: FormData) {
   const catalogPriceState = resolveCatalogPriceState(book.price_all);
 
   if (catalogPriceState === "unavailable") {
-    redirect(`/books/${bookId}?error=${encodeURIComponent("Ky libër nuk mund të blihet tani.")}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent("Ky libër nuk mund të blihet tani.")}`);
   }
 
   if (catalogPriceState === "free") {
-    redirect(`/books/${bookId}?error=${encodeURIComponent("Ky libër është falas. Përdorni butonin “Merreni e-librin — Falas”.")}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent("Ky libër është falas. Përdorni butonin “Merreni e-librin — Falas”.")}`);
   }
 
   // PAID-MODE-1: whether Librum may start a PAID checkout AT ALL is a
@@ -248,7 +248,7 @@ export async function buyBook(bookId: string, formData: FormData) {
   // uses, deliberately: a reader learns that checkout is unavailable and
   // nothing whatsoever about this deployment's configuration.
   if (!canStartPaidCheckout()) {
-    redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
   }
 
   // STRIPE-DISABLE-1: the single point that decides WHICH provider may
@@ -274,14 +274,14 @@ export async function buyBook(bookId: string, formData: FormData) {
   });
 
   if (activeProvider !== "pok") {
-    redirect(`/books/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`);
   }
 
   let pokConfig: PokConfig;
   try {
     pokConfig = getPokConfig();
   } catch {
-    redirect(`/books/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
   }
 
   // Cheap, non-authoritative early check for a friendlier redirect --
@@ -299,7 +299,7 @@ export async function buyBook(bookId: string, formData: FormData) {
   });
 
   if (ownsBook) {
-    redirect(`/books/${bookId}`);
+    redirect(`/libra/${bookId}`);
   }
 
   // Cheap, non-authoritative early check purely for a friendlier "That
@@ -326,7 +326,7 @@ export async function buyBook(bookId: string, formData: FormData) {
       !!discount?.expires_at && new Date(discount.expires_at) < new Date();
 
     if (!discount || isExpired) {
-      redirect(`/books/${bookId}?error=${encodeURIComponent("Ky kod promocional nuk është i vlefshëm.")}`);
+      redirect(`/libra/${bookId}?error=${encodeURIComponent("Ky kod promocional nuk është i vlefshëm.")}`);
     }
   }
 
@@ -385,7 +385,7 @@ export async function buyBook(bookId: string, formData: FormData) {
         readerId: user.id,
         error: intentError,
       });
-      redirect(`/books/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
+      redirect(`/libra/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
     }
 
     // ALL-WIRING-2 CORRECTION: both discount rejections, classified
@@ -421,7 +421,7 @@ export async function buyBook(bookId: string, formData: FormData) {
   // this narrowed nothing, and every `result` assignment after it looked
   // possibly-unassigned.
   function failClosed(message: string): never {
-    redirect(`/books/${bookId}?error=${encodeURIComponent(message)}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent(message)}`);
   }
 
   let quote = await createQuote(acceptExistingQuote, expectedIntentId);
@@ -482,7 +482,7 @@ export async function buyBook(bookId: string, formData: FormData) {
           // the reader just clicked to confirm, which is exactly the
           // harm the conflict notice exists to prevent. Tell them, and
           // let them choose again against the current price.
-          redirect(`/books/${bookId}?checkout_expired=1`);
+          redirect(`/libra/${bookId}?checkout_expired=1`);
         }
         replacementUsed = true;
         quote = await createQuote(false, null);
@@ -491,7 +491,7 @@ export async function buyBook(bookId: string, formData: FormData) {
         }
         break;
       case "fulfilled":
-        redirect(`/books/${bookId}?purchase=success`);
+        redirect(`/libra/${bookId}?purchase=success`);
         break;
       case "fulfilment_pending":
         failClosed(CHECKOUT_PENDING_VERIFICATION_MESSAGE);
@@ -507,7 +507,7 @@ export async function buyBook(bookId: string, formData: FormData) {
           // the frozen amount, says plainly that the new price or code is
           // not applied to it, and offers resuming as a separate,
           // deliberate second action.
-          redirect(`/books/${bookId}?checkout_conflict=${conflictingIntentId}`);
+          redirect(`/libra/${bookId}?checkout_conflict=${conflictingIntentId}`);
         }
         failClosed(CHECKOUT_IN_PROGRESS_MESSAGE);
         break;
@@ -543,7 +543,7 @@ export async function buyBook(bookId: string, formData: FormData) {
       readerId: user.id,
       quoteStatus: quote.quote_status,
     });
-    redirect(`/books/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
   }
 
   const origin = resolveSiteOrigin();
@@ -570,7 +570,7 @@ export async function buyBook(bookId: string, formData: FormData) {
     // already produces, so the reader-visible outcome never depends on
     // which of the two layers actually caught the maintenance window.
     if (err instanceof Error && err.message === POK_CHECKOUT_MAINTENANCE_ACTIVE) {
-      redirectForMaintenance(`/books/${bookId}`);
+      redirectForMaintenance(`/libra/${bookId}`);
     }
     // STALE-CHECKOUT-1: the claim race resolved into a retirement while
     // we were starting -- the attempt was proved dead and superseded
@@ -586,7 +586,7 @@ export async function buyBook(bookId: string, formData: FormData) {
       try {
         result = await runCheckout(replacement.intent_id as string);
       } catch {
-        redirect(`/books/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
+        redirect(`/libra/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
       }
     } else if (err instanceof Error && err.message === POK_CHECKOUT_ATTEMPT_RETIRED) {
       failClosed(CHECKOUT_AMBIGUOUS_MESSAGE);
@@ -603,7 +603,7 @@ export async function buyBook(bookId: string, formData: FormData) {
         "Nuk mund ta rihapim me siguri këtë pagesë. Nëse keni paguar tashmë, shikoni Bibliotekën tuaj; përndryshe na kontaktoni për ta përfunduar blerjen.",
       );
     } else {
-      redirect(`/books/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
+      redirect(`/libra/${bookId}?error=${encodeURIComponent("Pagesa nuk mund të nisej. Provoni përsëri.")}`);
     }
   }
 
@@ -614,13 +614,13 @@ export async function buyBook(bookId: string, formData: FormData) {
   // capture evidence, so a completed order is never retired and its
   // intent is never superseded.
   if (result.kind === "fulfilled") {
-    redirect(`/books/${result.bookId}?purchase=success`);
+    redirect(`/libra/${result.bookId}?purchase=success`);
   }
   if (result.kind === "fulfilment_pending") {
-    redirect(`/books/${result.bookId}?error=${encodeURIComponent(CHECKOUT_PENDING_VERIFICATION_MESSAGE)}`);
+    redirect(`/libra/${result.bookId}?error=${encodeURIComponent(CHECKOUT_PENDING_VERIFICATION_MESSAGE)}`);
   }
   if (result.kind === "blocked") {
-    redirect(`/books/${result.bookId}?error=${encodeURIComponent(CHECKOUT_NEEDS_REVIEW_MESSAGE)}`);
+    redirect(`/libra/${result.bookId}?error=${encodeURIComponent(CHECKOUT_NEEDS_REVIEW_MESSAGE)}`);
   }
   redirect(result.url);
 }
@@ -637,7 +637,7 @@ export async function getFreeBook(bookId: string) {
   // is gated identically to every paid checkout path, before any
   // Supabase client construction.
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    redirectForMaintenance(`/books/${bookId}`);
+    redirectForMaintenance(`/libra/${bookId}`);
   }
 
   const supabase = await createClient();
@@ -646,7 +646,7 @@ export async function getFreeBook(bookId: string) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?next=/books/${bookId}`);
+    redirect(`/login?next=/libra/${bookId}`);
   }
 
   const { data: book } = await supabase
@@ -674,7 +674,7 @@ export async function getFreeBook(bookId: string) {
     book.price_all !== 0 ||
     (await isOwnBook(supabase, bookId, user.id))
   ) {
-    redirect(`/books/${bookId}`);
+    redirect(`/libra/${bookId}`);
   }
 
   // LAUNCH-1 P1-7A: routed through user_owns_book() (also excludes a
@@ -691,7 +691,7 @@ export async function getFreeBook(bookId: string) {
   if (ownsBook) {
     // Already owned (e.g. a real paid purchase from before the book went
     // free) -- idempotent no-op rather than overwriting that record.
-    redirect(`/books/${bookId}?free=success`);
+    redirect(`/libra/${bookId}?free=success`);
   }
 
   // Free acquisitions never touch Stripe, so there's no real checkout
@@ -714,13 +714,13 @@ export async function getFreeBook(bookId: string) {
   );
 
   if (error) {
-    redirect(`/books/${bookId}?error=${encodeURIComponent("Libri nuk mund të shtohej tani. Provoni përsëri.")}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent("Libri nuk mund të shtohej tani. Provoni përsëri.")}`);
   }
 
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
   revalidatePath("/library");
 
-  redirect(`/books/${bookId}?free=success`);
+  redirect(`/libra/${bookId}?free=success`);
 }
 
 export async function submitReview(bookId: string, formData: FormData) {
@@ -730,14 +730,14 @@ export async function submitReview(bookId: string, formData: FormData) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?next=/books/${bookId}`);
+    redirect(`/login?next=/libra/${bookId}`);
   }
 
   const rating = Number(formData.get("rating"));
   const body = String(formData.get("body") ?? "").trim();
 
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-    redirect(`/books/${bookId}?error=${encodeURIComponent("Zgjidhni yjet.")}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent("Zgjidhni yjet.")}`);
   }
 
   // LAUNCH-1 P1-7A: routed through user_owns_book() (also excludes a
@@ -751,7 +751,7 @@ export async function submitReview(bookId: string, formData: FormData) {
   });
 
   if (!ownsBook) {
-    redirect(`/books/${bookId}?error=${encodeURIComponent("Blini këtë libër për ta vlerësuar.")}`);
+    redirect(`/libra/${bookId}?error=${encodeURIComponent("Blini këtë libër për ta vlerësuar.")}`);
   }
 
   // Resubmitting overwrites the reader's existing review for this book,
@@ -772,11 +772,11 @@ export async function submitReview(bookId: string, formData: FormData) {
     // function uses a Librum-authored string; this is the one that
     // didn't.
     redirect(
-      `/books/${bookId}?error=${encodeURIComponent("Nuk e ruajtëm dot vlerësimin tuaj. Provoni përsëri.")}`,
+      `/libra/${bookId}?error=${encodeURIComponent("Nuk e ruajtëm dot vlerësimin tuaj. Provoni përsëri.")}`,
     );
   }
 
-  redirect(`/books/${bookId}?review=success`);
+  redirect(`/libra/${bookId}?review=success`);
 }
 
 export async function addToWishlist(bookId: string) {
@@ -786,7 +786,7 @@ export async function addToWishlist(bookId: string) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?next=/books/${bookId}`);
+    redirect(`/login?next=/libra/${bookId}`);
   }
 
   await supabase.from("wishlist_items").insert({
@@ -794,7 +794,7 @@ export async function addToWishlist(bookId: string) {
     reader_id: user.id,
   });
 
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
   revalidatePath("/wishlist");
 }
 
@@ -814,7 +814,7 @@ export async function removeFromWishlist(bookId: string) {
     .eq("book_id", bookId)
     .eq("reader_id", user.id);
 
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
   revalidatePath("/wishlist");
 }
 
@@ -825,14 +825,14 @@ export async function submitReport(bookId: string, formData: FormData) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?next=/books/${bookId}/report`);
+    redirect(`/login?next=/libra/${bookId}/report`);
   }
 
   const reason = String(formData.get("reason") ?? "");
   const details = String(formData.get("details") ?? "").trim();
 
   if (!REPORT_REASONS.includes(reason as (typeof REPORT_REASONS)[number])) {
-    redirect(`/books/${bookId}/report?error=${encodeURIComponent("Zgjidhni një arsye.")}`);
+    redirect(`/libra/${bookId}/report?error=${encodeURIComponent("Zgjidhni një arsye.")}`);
   }
 
   const { error } = await supabase.from("book_reports").insert({
@@ -846,12 +846,12 @@ export async function submitReport(bookId: string, formData: FormData) {
     // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: same correction as the review
     // upsert above -- was error.message.
     redirect(
-      `/books/${bookId}/report?error=${encodeURIComponent("Nuk e dërguam dot raportimin tuaj. Provoni përsëri.")}`,
+      `/libra/${bookId}/report?error=${encodeURIComponent("Nuk e dërguam dot raportimin tuaj. Provoni përsëri.")}`,
     );
   }
 
   // ADMIN-ALERTS-1: best effort, never throws; redirect() stays outside it.
   await sendBookReportedStaffEmail({ bookId, reporterId: user.id, reason });
 
-  redirect(`/books/${bookId}?report=success`);
+  redirect(`/libra/${bookId}?report=success`);
 }

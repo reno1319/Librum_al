@@ -60,7 +60,7 @@ export default function NotFound() {
             Shkoni te faqja kryesore
           </Link>
           <Link
-            href="/bookstore"
+            href="/librari"
             className="focus-ring rounded-sm text-sm text-muted hover:underline"
           >
             Shfletoni Librarinë

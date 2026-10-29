@@ -241,7 +241,7 @@ export function AuthorBookRow({
                   the author's preview of it. */}
               {book.status !== "published" && (
                 <li>
-                  <Link href={`/books/${book.id}`} className={MENU_ITEM_CLASSES}>
+                  <Link href={`/libra/${book.id}`} className={MENU_ITEM_CLASSES}>
                     Shikoni librin para botimit
                   </Link>
                 </li>
@@ -249,7 +249,7 @@ export function AuthorBookRow({
               {book.status === "published" && (
                 <>
                   <li>
-                    <Link href={`/books/${book.id}`} className={MENU_ITEM_CLASSES}>
+                    <Link href={`/libra/${book.id}`} className={MENU_ITEM_CLASSES}>
                       Shikojeni në Librari
                     </Link>
                   </li>

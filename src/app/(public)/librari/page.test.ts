@@ -132,7 +132,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(feature).toContain("199 lekë");
     expect(feature).toContain("Lexoni një pjesë");
     expect(feature).toContain(`Blini · 199 lekë`);
-    expect(feature).toContain('href="/books/book-10"');
+    expect(feature).toContain('href="/libra/book-10"');
   });
 
   // FIX1 (X6): Renato 17:11Z "5a" -- the second "I ri në Librum" shelf
@@ -202,7 +202,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(shelf).toContain("Book 08");
     expect(shelf).toContain("Book 03");
     expect(shelf).not.toContain("Book 09");
-    expect(shelf).toContain('href="/bookstore?maxPrice=0"');
+    expect(shelf).toContain('href="/librari?maxPrice=0"');
   });
 
   it("keeps the Të gjithë librat grid with its existing count line, and ends with the author band", async () => {
@@ -262,7 +262,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
 
   it("shows the five newest books as linked spines, newest first, with title and byline", async () => {
     const shelf = ornateShelf(await render());
-    const ids = [...shelf.matchAll(/href="\/books\/(book-\d+)"/g)].map((m) => m[1]);
+    const ids = [...shelf.matchAll(/href="\/libra\/(book-\d+)"/g)].map((m) => m[1]);
     expect(ids).toEqual(["book-10", "book-09", "book-08", "book-07", "book-06"]);
     expect(shelf).toContain('aria-label="Shikoni Book 10 në Librum"');
     expect(shelf).toContain(">Book 10</span>");
@@ -295,6 +295,6 @@ describe("BookstorePage: redesign step 3 layout", () => {
     const shelf = ornateShelf(await render());
     expect(shelf).not.toContain("book-10");
     expect(shelf).not.toContain("book-09");
-    expect([...shelf.matchAll(/href="\/books\//g)]).toHaveLength(5);
+    expect([...shelf.matchAll(/href="\/libra\//g)]).toHaveLength(5);
   });
 });

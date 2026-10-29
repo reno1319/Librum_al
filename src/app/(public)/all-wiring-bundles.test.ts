@@ -31,10 +31,10 @@ const ACTIVE_BUNDLE_CATALOG = [
   "dashboard/bundles/actions.ts",
   "dashboard/bundles/page.tsx",
   "dashboard/bundles/[id]/edit/page.tsx",
-  "bundles/[id]/page.tsx",
-  "bundles/[id]/actions.ts",
-  "bookstore/page.tsx",
-  "authors/[id]/page.tsx",
+  "paketa/[id]/page.tsx",
+  "paketa/[id]/actions.ts",
+  "librari/page.tsx",
+  "autore/[id]/page.tsx",
   "../../lib/bundle-catalog.ts",
 ];
 
@@ -125,16 +125,16 @@ describe("bundle prices are parsed, classified and labelled only by the catalog 
   it("every displayed bundle price goes through formatCatalogPriceLabel(bundle.price_all)", () => {
     for (const file of [
       "dashboard/bundles/page.tsx",
-      "bundles/[id]/page.tsx",
-      "bookstore/page.tsx",
-      "authors/[id]/page.tsx",
+      "paketa/[id]/page.tsx",
+      "librari/page.tsx",
+      "autore/[id]/page.tsx",
     ]) {
       expect(code(read(file))).toContain("formatCatalogPriceLabel(bundle.price_all)");
     }
   });
 
   it("both public discovery rails exclude unpriced bundles in the query", () => {
-    for (const file of ["bookstore/page.tsx", "authors/[id]/page.tsx"]) {
+    for (const file of ["librari/page.tsx", "autore/[id]/page.tsx"]) {
       const source = code(read(file));
       // PEN-NAMES-2: public rails read the public_bundles view.
       expect(source).not.toContain('from("bundles")');
@@ -150,7 +150,7 @@ describe("bundle prices are parsed, classified and labelled only by the catalog 
     // pages read the author's own rows from the base table.
     const files: [string, string][] = [
       ["dashboard/bundles/page.tsx", 'from("bundles")'],
-      ["bundles/[id]/page.tsx", 'from("public_bundles")'],
+      ["paketa/[id]/page.tsx", 'from("public_bundles")'],
       ["dashboard/bundles/[id]/edit/page.tsx", 'from("bundles")'],
     ];
     for (const [file, table] of files) {

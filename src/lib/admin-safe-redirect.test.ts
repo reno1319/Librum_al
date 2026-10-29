@@ -42,8 +42,8 @@ describe("resolveSafeAdminPath: rejects everything not under /admin", () => {
     expect(resolveSafeAdminPath("/dashboard")).toBeNull();
   });
 
-  it("a legitimate same-site path that is not under /admin (/books/...)", () => {
-    expect(resolveSafeAdminPath("/books/123")).toBeNull();
+  it("a legitimate same-site path that is not under /admin (/libra/...)", () => {
+    expect(resolveSafeAdminPath("/libra/123")).toBeNull();
   });
 
   it("a legitimate same-site path that is not under /admin (/auth/...)", () => {

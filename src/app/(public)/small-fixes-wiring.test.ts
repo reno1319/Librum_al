@@ -116,9 +116,9 @@ describe("FIX1 X14: the cover placeholder", () => {
       "src/components/book-card.tsx",
       "src/components/library-book-card.tsx",
       "src/components/author-book-row.tsx",
-      "src/app/(public)/books/[id]/page.tsx",
-      "src/app/(public)/bookstore/page.tsx",
-      "src/app/(public)/authors/[id]/page.tsx",
+      "src/app/(public)/libra/[id]/page.tsx",
+      "src/app/(public)/librari/page.tsx",
+      "src/app/(public)/autore/[id]/page.tsx",
       "src/app/(public)/dashboard/books/new/upload-wizard.tsx",
     ]) {
       const source = read(file);

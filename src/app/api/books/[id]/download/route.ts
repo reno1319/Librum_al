@@ -85,11 +85,11 @@ export async function GET(
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.redirect(new URL(`/login?next=/books/${id}`, request.url));
+    return NextResponse.redirect(new URL(`/login?next=/libra/${id}`, request.url));
   }
 
   const fileUnavailable = () =>
-    NextResponse.redirect(new URL(`/books/${id}?error=${encodeURIComponent("Ky skedar nuk është i disponueshëm.")}`, request.url));
+    NextResponse.redirect(new URL(`/libra/${id}?error=${encodeURIComponent("Ky skedar nuk është i disponueshëm.")}`, request.url));
 
   // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: a query error fails closed even
   // when plausible row data rides along with it. The stored path is NOT
@@ -127,7 +127,7 @@ export async function GET(
 
   if (!owned) {
     return NextResponse.redirect(
-      new URL(`/books/${id}?error=${encodeURIComponent("Blini këtë libër për ta shkarkuar.")}`, request.url),
+      new URL(`/libra/${id}?error=${encodeURIComponent("Blini këtë libër për ta shkarkuar.")}`, request.url),
     );
   }
 
@@ -177,7 +177,7 @@ export async function GET(
 
   if (downloadError || !fileBlob) {
     return NextResponse.redirect(
-      new URL(`/books/${id}?error=${encodeURIComponent("Skedari nuk u shkarkua dot.")}`, request.url),
+      new URL(`/libra/${id}?error=${encodeURIComponent("Skedari nuk u shkarkua dot.")}`, request.url),
     );
   }
 
@@ -239,7 +239,7 @@ export async function GET(
         code: recordError.code ?? null,
       });
       return NextResponse.redirect(
-        new URL(`/books/${id}?error=${encodeURIComponent("Skedari nuk u shkarkua dot. Provoni përsëri.")}`, request.url),
+        new URL(`/libra/${id}?error=${encodeURIComponent("Skedari nuk u shkarkua dot. Provoni përsëri.")}`, request.url),
       );
     }
   }

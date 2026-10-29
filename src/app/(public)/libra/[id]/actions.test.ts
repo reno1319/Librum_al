@@ -168,23 +168,23 @@ describe("buyBook: POK provider selection", () => {
   it("the author can't buy their own book: no intent, no provider", async () => {
     mockCreateClient.mockResolvedValue({ auth: { getUser: async () => ({ data: { user: { id: "author" } } }) }, rpc,
       from: bookTables(async () => ({ data: { id: "book", title: "Test", price_all: 499, author_id: "author", status: "published" } }), "author") });
-    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book" });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/libra/book" });
     expect(rpc).not.toHaveBeenCalledWith("create_book_checkout_intent", expect.anything());
     expect(mockStartPok).not.toHaveBeenCalled();
   });
   it("POK failure never falls back to Stripe", async () => {
     mockStartPok.mockRejectedValue(new Error("timeout"));
-    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Pagesa%20nuk%20mund%20t%C3%AB%20nisej.%20Provoni%20p%C3%ABrs%C3%ABri." });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/libra/book?error=Pagesa%20nuk%20mund%20t%C3%AB%20nisej.%20Provoni%20p%C3%ABrs%C3%ABri." });
   });
   it("an unsafe-to-resume checkout gets an honest message, never the generic one", async () => {
     mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_CANNOT_RESUME"));
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: "/books/book?error=Nuk%20mund%20ta%20rihapim%20me%20siguri%20k%C3%ABt%C3%AB%20pages%C3%AB.%20N%C3%ABse%20keni%20paguar%20tashm%C3%AB%2C%20shikoni%20Bibliotek%C3%ABn%20tuaj%3B%20p%C3%ABrndryshe%20na%20kontaktoni%20p%C3%ABr%20ta%20p%C3%ABrfunduar%20blerjen.",
+      target: "/libra/book?error=Nuk%20mund%20ta%20rihapim%20me%20siguri%20k%C3%ABt%C3%AB%20pages%C3%AB.%20N%C3%ABse%20keni%20paguar%20tashm%C3%AB%2C%20shikoni%20Bibliotek%C3%ABn%20tuaj%3B%20p%C3%ABrndryshe%20na%20kontaktoni%20p%C3%ABr%20ta%20p%C3%ABrfunduar%20blerjen.",
     });
   });
   it("invalid sandbox configuration fails before an intent is minted", async () => {
     mockPokConfig.mockImplementation(() => { throw new Error("POK_STAGING_ONLY"); });
-    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/books/book?error=Pagesa%20nuk%20mund%20t%C3%AB%20nisej.%20Provoni%20p%C3%ABrs%C3%ABri." });
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/libra/book?error=Pagesa%20nuk%20mund%20t%C3%AB%20nisej.%20Provoni%20p%C3%ABrs%C3%ABri." });
     expect(rpc).not.toHaveBeenCalled(); expect(mockStartPok).not.toHaveBeenCalled();
   });
   // APP A CORRECTION 2: startPokCheckout()'s own defense-in-depth
@@ -194,7 +194,7 @@ describe("buyBook: POK provider selection", () => {
   it("startPokCheckout's own maintenance sentinel redirects identically to the top-of-function gate", async () => {
     mockStartPok.mockRejectedValue(new Error("POK_CHECKOUT_MAINTENANCE_ACTIVE"));
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: "/books/book?error=Librum%20%C3%ABsht%C3%AB%20p%C3%ABrkoh%C3%ABsisht%20i%20padisponuesh%C3%ABm%20p%C3%ABr%20mir%C3%ABmbajtje%20t%C3%AB%20planifikuar.%20Ju%20lutemi%20provoni%20p%C3%ABrs%C3%ABri%20pas%20pak.",
+      target: "/libra/book?error=Librum%20%C3%ABsht%C3%AB%20p%C3%ABrkoh%C3%ABsisht%20i%20padisponuesh%C3%ABm%20p%C3%ABr%20mir%C3%ABmbajtje%20t%C3%AB%20planifikuar.%20Ju%20lutemi%20provoni%20p%C3%ABrs%C3%ABri%20pas%20pak.",
     });
   });
 });
@@ -234,7 +234,7 @@ describe("buyBook / getFreeBook: maintenance-mode gate", () => {
     await expect(buyBook("book-1", new FormData())).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining("/books/book-1?error="),
+      expect.stringContaining("/libra/book-1?error="),
     );
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockStartPok).not.toHaveBeenCalled();
@@ -244,7 +244,7 @@ describe("buyBook / getFreeBook: maintenance-mode gate", () => {
     await expect(getFreeBook("book-1")).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      expect.stringContaining("/books/book-1?error="),
+      expect.stringContaining("/libra/book-1?error="),
     );
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
@@ -300,7 +300,7 @@ describe("buyBook: fail-closed provider resolution (STRIPE-DISABLE-1)", () => {
   const BOOK_ID = "book-1";
   const READER_ID = "reader-1";
   const AUTHOR_ID = "author-1";
-  const UNAVAILABLE_PREFIX = `/books/${BOOK_ID}?error=`;
+  const UNAVAILABLE_PREFIX = `/libra/${BOOK_ID}?error=`;
   const ORIGINAL_REGIME = process.env.NEW_CHECKOUT_REGIME;
   const ORIGINAL_PROVIDER = process.env.LEDGER_PAYMENT_PROVIDER;
 
@@ -441,7 +441,7 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
   });
 
   it("succeeds for a free, unowned book without touching Stripe, POK, or any checkout-intent RPC", async () => {
-    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/books/${BOOK_ID}?free=success` });
+    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/libra/${BOOK_ID}?free=success` });
 
     expect(mockPurchasesUpsert).toHaveBeenCalledWith(
       expect.objectContaining({ book_id: BOOK_ID, reader_id: READER_ID, amount_cents: 0 }),
@@ -455,7 +455,7 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
   it("already-owned free book: idempotent no-op redirect, never re-upserts", async () => {
     mockRpc.mockResolvedValue({ data: true, error: null });
 
-    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/books/${BOOK_ID}?free=success` });
+    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/libra/${BOOK_ID}?free=success` });
 
     expect(mockPurchasesUpsert).not.toHaveBeenCalled();
   });
@@ -468,7 +468,7 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
       error: null,
     });
 
-    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/books/${BOOK_ID}` });
+    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/libra/${BOOK_ID}` });
 
     expect(mockPurchasesUpsert).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
@@ -480,7 +480,7 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
       error: null,
     });
 
-    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/books/${BOOK_ID}` });
+    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/libra/${BOOK_ID}` });
 
     expect(mockPurchasesUpsert).not.toHaveBeenCalled();
   });
@@ -503,7 +503,7 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
       error: null,
     });
 
-    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/books/${BOOK_ID}` });
+    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/libra/${BOOK_ID}` });
 
     expect(mockPurchasesUpsert).not.toHaveBeenCalled();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
@@ -522,7 +522,7 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
       error: null,
     });
 
-    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/books/${BOOK_ID}` });
+    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/libra/${BOOK_ID}` });
 
     expect(mockPurchasesUpsert).not.toHaveBeenCalled();
   });
@@ -540,14 +540,14 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
     });
 
     await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({
-      target: `/books/${BOOK_ID}?free=success`,
+      target: `/libra/${BOOK_ID}?free=success`,
     });
     expect(mockPurchasesUpsert).toHaveBeenCalled();
   });
 
   it("the successful claim creates a zero-amount entitlement and NOTHING else", async () => {
     await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({
-      target: `/books/${BOOK_ID}?free=success`,
+      target: `/libra/${BOOK_ID}?free=success`,
     });
 
     // Exactly one write, to purchases, at amount 0.
@@ -581,7 +581,7 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
     vi.stubEnv("STRIPE_SECRET_KEY", "");
 
     await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({
-      target: `/books/${BOOK_ID}?free=success`,
+      target: `/libra/${BOOK_ID}?free=success`,
     });
     expect(mockPurchasesUpsert).toHaveBeenCalledTimes(1);
 
@@ -655,7 +655,7 @@ describe("buyBook: paid-checkout mode gate (PAID-MODE-1)", () => {
       if (value !== undefined) vi.stubEnv("PAID_CHECKOUT_MODE", value);
 
       await expect(buyBook(BOOK_ID, new FormData())).rejects.toMatchObject({
-        target: `/books/${BOOK_ID}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`,
+        target: `/libra/${BOOK_ID}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`,
       });
 
       expect(mockPokConfig).not.toHaveBeenCalled();
@@ -669,7 +669,7 @@ describe("buyBook: paid-checkout mode gate (PAID-MODE-1)", () => {
     vi.stubEnv("VERCEL_ENV", "production");
 
     await expect(buyBook(BOOK_ID, new FormData())).rejects.toMatchObject({
-      target: `/books/${BOOK_ID}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`,
+      target: `/libra/${BOOK_ID}?error=${encodeURIComponent(BOOK_CHECKOUT_UNAVAILABLE_MESSAGE)}`,
     });
     expect(mockPokConfig).not.toHaveBeenCalled();
     expect(mockRpc).not.toHaveBeenCalled();
@@ -736,7 +736,7 @@ describe("buyBook: stale-checkout quote statuses", () => {
   let quoteRows: unknown[];
 
   function msg(text: string) {
-    return `/books/book?error=${encodeURIComponent(text)}`;
+    return `/libra/book?error=${encodeURIComponent(text)}`;
   }
 
   beforeEach(() => {
@@ -805,7 +805,7 @@ describe("buyBook: stale-checkout quote statuses", () => {
     quote("conflict_attempt_unresolved");
     mockProbe.mockResolvedValue({ kind: "resumable", url: CHECKOUT_URL });
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: `/books/book?checkout_conflict=${INTENT}`,
+      target: `/libra/book?checkout_conflict=${INTENT}`,
     });
     // The reader is NEVER silently sent to the old amount's checkout.
     expect(mockStartPok).not.toHaveBeenCalled();
@@ -826,7 +826,7 @@ describe("buyBook: stale-checkout quote statuses", () => {
   });
 
   it.each([
-    [{ kind: "fulfilled", bookId: "book" }, "/books/book?purchase=success"],
+    [{ kind: "fulfilled", bookId: "book" }, "/libra/book?purchase=success"],
     [{ kind: "fulfilment_pending", bookId: "book" }, null],
     [{ kind: "blocked", bookId: "book" }, null],
     [{ kind: "needs_reconciliation" }, null],
@@ -897,7 +897,7 @@ describe("buyBook: stale-checkout quote statuses", () => {
     quote("blocked_expired_attempt_unresolved");
     mockProbe.mockResolvedValue({ kind: "retired" });
     await expect(buyBook("book", resumeForm(INTENT))).rejects.toMatchObject({
-      target: "/books/book?checkout_expired=1",
+      target: "/libra/book?checkout_expired=1",
     });
     expect(mockStartPok).not.toHaveBeenCalled();
   });
@@ -939,11 +939,11 @@ describe("buyBook: stale-checkout quote statuses", () => {
   });
 
   it.each([
-    [{ kind: "fulfilled", bookId: "book" }, "/books/book?purchase=success"],
+    [{ kind: "fulfilled", bookId: "book" }, "/libra/book?purchase=success"],
     [{ kind: "fulfilment_pending", bookId: "book" },
-      "/books/book?error=Ende%20nuk%20e%20kemi%20konfirmuar%20pages%C3%ABn%20tuaj.%20Shikoni%20Bibliotek%C3%ABn%20tuaj%20pas%20disa%20minutash%20para%20se%20t%C3%AB%20paguani%20p%C3%ABrs%C3%ABri."],
+      "/libra/book?error=Ende%20nuk%20e%20kemi%20konfirmuar%20pages%C3%ABn%20tuaj.%20Shikoni%20Bibliotek%C3%ABn%20tuaj%20pas%20disa%20minutash%20para%20se%20t%C3%AB%20paguani%20p%C3%ABrs%C3%ABri."],
     [{ kind: "blocked", bookId: "book" },
-      "/books/book?error=Kjo%20blerje%20duhet%20kontrolluar.%20N%C3%ABse%20keni%20paguar%20tashm%C3%AB%2C%20shikoni%20Bibliotek%C3%ABn%20tuaj%3B%20p%C3%ABrndryshe%20na%20kontaktoni."],
+      "/libra/book?error=Kjo%20blerje%20duhet%20kontrolluar.%20N%C3%ABse%20keni%20paguar%20tashm%C3%AB%2C%20shikoni%20Bibliotek%C3%ABn%20tuaj%3B%20p%C3%ABrndryshe%20na%20kontaktoni."],
   ] as const)("routes the %j checkout result away from a second payable link", async (result, target) => {
     quote("minted");
     mockStartPok.mockResolvedValue(result);
@@ -953,7 +953,7 @@ describe("buyBook: stale-checkout quote statuses", () => {
   it("fails closed on a malformed quote row rather than guessing a price", async () => {
     quoteRows = [{ intent_id: INTENT, price_cents_at_checkout: null, expires_at: null, quote_status: "minted" }];
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: "/books/book?error=Pagesa%20nuk%20mund%20t%C3%AB%20nisej.%20Provoni%20p%C3%ABrs%C3%ABri.",
+      target: "/libra/book?error=Pagesa%20nuk%20mund%20t%C3%AB%20nisej.%20Provoni%20p%C3%ABrs%C3%ABri.",
     });
     expect(mockStartPok).not.toHaveBeenCalled();
   });
@@ -1009,7 +1009,7 @@ describe("buyBook: the catalog price decides, and null is neither free nor paid"
     bookRow = { ...bookRow, price_all: priceAll };
 
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
-      target: "/books/book?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20blihet%20tani.",
+      target: "/libra/book?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20blihet%20tani.",
     });
 
     expect(rpc).not.toHaveBeenCalledWith("create_book_checkout_intent", expect.anything());
@@ -1195,7 +1195,7 @@ describe("buyBook: discount rejections on a REPLACEMENT quote", () => {
     "Ende nuk mund ta rihapim me siguri pagesën tuaj të mëparshme. Provoni përsëri pas disa minutash.";
 
   function msg(text: string) {
-    return `/books/book?error=${encodeURIComponent(text)}`;
+    return `/libra/book?error=${encodeURIComponent(text)}`;
   }
 
   function row(status: string) {

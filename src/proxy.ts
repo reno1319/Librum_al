@@ -14,7 +14,7 @@ export async function proxy(request: NextRequest) {
 // UNDER CONSTRUCTION r2 (audit F1): skip Proxy only for real static
 // files -- Next's own build output, the image optimizer, and the files
 // actually in public/, each by exact path. The old "any path ending in
-// .png/.svg/..." rule let /books/x.png reach pages and Server Actions
+// .png/.svg/..." rule let /libra/x.png reach pages and Server Actions
 // without the lock. A new file in public/ must be added here (and to
 // PUBLIC_FILES in proxy.test.ts, which fails until it is); until then it
 // answers like any page, locked while the lock is on.

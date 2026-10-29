@@ -64,7 +64,7 @@ const { buyBundle } = await import("./actions");
 
 const BUNDLE_ID = "bundle-1";
 const EXPECTED_TARGET =
-  `/bundles/${BUNDLE_ID}?error=` + encodeURIComponent("Kjo paketë nuk mund të blihet tani");
+  `/paketa/${BUNDLE_ID}?error=` + encodeURIComponent("Kjo paketë nuk mund të blihet tani");
 
 const STAGING = {
   VERCEL_ENV: "preview",
@@ -151,7 +151,7 @@ describe("buyBundle and the bundle checkout RPC: structurally untouched by the A
     const afterLogin = body.slice(body.indexOf("/login?next="));
     // After the login redirect, the ONLY statement left is the closure.
     expect(afterLogin).toMatch(
-      /^\/login\?next=\/bundles\/\$\{bundleId\}`\);\s*\}\s*redirect\(`\/bundles\/\$\{bundleId\}\?error=\$\{encodeURIComponent\(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE\)\}`\);\s*\}\s*$/,
+      /^\/login\?next=\/paketa\/\$\{bundleId\}`\);\s*\}\s*redirect\(`\/paketa\/\$\{bundleId\}\?error=\$\{encodeURIComponent\(BUNDLE_CHECKOUT_UNAVAILABLE_MESSAGE\)\}`\);\s*\}\s*$/,
     );
   });
 

@@ -19,7 +19,7 @@ import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 // testing footer content means testing the data it renders from.
 export const FOOTER_GROUPS = {
   Zbuloni: [
-    { href: "/bookstore", label: "Libraria" },
+    { href: "/librari", label: "Libraria" },
     { href: "/blog", label: "Blog" },
     { href: "/about", label: "Rreth nesh" },
   ],

@@ -108,7 +108,7 @@ describe("submitReport: ERR-2 error-message mapping", () => {
 
     expect(mockReportedStaffEmail).toHaveBeenCalledTimes(1);
     expect(mockReportedStaffEmail).toHaveBeenCalledWith({ bookId: "book-1", reporterId: "reader-1", reason: "Other" });
-    expect(mockRedirect).toHaveBeenCalledWith("/books/book-1?report=success");
+    expect(mockRedirect).toHaveBeenCalledWith("/libra/book-1?report=success");
   });
 
   it("maps a raw Postgres/PostgREST error to a stable Librum-facing message, never error.message", async () => {

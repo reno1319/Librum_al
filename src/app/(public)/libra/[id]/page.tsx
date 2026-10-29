@@ -12,7 +12,7 @@ import {
   addToWishlist,
   removeFromWishlist,
 } from "./actions";
-import { followPenName, unfollowPenName } from "../../authors/[id]/actions";
+import { followPenName, unfollowPenName } from "../../autore/[id]/actions";
 import { buildBookstoreHref } from "@/lib/bookstore";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
@@ -653,7 +653,7 @@ export default async function BookDetailPage({
       <nav aria-label="Rruga e navigimit" className="text-sm text-muted">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <li>
-            <Link href="/bookstore" className={BREADCRUMB_LINK_CLASSES}>
+            <Link href="/librari" className={BREADCRUMB_LINK_CLASSES}>
               Libraria
             </Link>
           </li>
@@ -743,7 +743,7 @@ export default async function BookDetailPage({
               <>
                 {" · "}
                 {book.series_position ? `Libri ${book.series_position} i serisë ` : "Pjesë e serisë "}
-                <Link href={`/series/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
+                <Link href={`/seri/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
                   {seriesInfo.title}
                 </Link>
               </>
@@ -1024,7 +1024,7 @@ export default async function BookDetailPage({
                   <dt className={DETAIL_LABEL_CLASSES}>Seria</dt>
                   <dd className={DETAIL_VALUE_CLASSES}>
                     {book.series_position ? `Libri ${book.series_position} i serisë ` : ""}
-                    <Link href={`/series/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
+                    <Link href={`/seri/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
                       {seriesInfo.title}
                     </Link>
                   </dd>
@@ -1246,7 +1246,7 @@ export default async function BookDetailPage({
 
       {/* ============================================================
           Series entries -- LIBRUM 2.0 PRODUCT-3: now also the home for
-          "View series ->" (the one clear link to the new /series/[id]
+          "View series ->" (the one clear link to the new /seri/[id]
           page from this section) and a Previous/Next continuity block,
           both derived from the exact same seriesEntries/orderSeriesBooks
           order this list itself already renders in -- never a second,
@@ -1257,7 +1257,7 @@ export default async function BookDetailPage({
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <h2 className={SECTION_HEADING}>{seriesInfo.title}</h2>
             <Link
-              href={`/series/${seriesInfo.id}`}
+              href={`/seri/${seriesInfo.id}`}
               className="focus-ring shrink-0 rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
             >
               Shikoni serinë &rarr;
@@ -1273,7 +1273,7 @@ export default async function BookDetailPage({
             <div className="mt-4 flex flex-col gap-3 rounded-[4px] border border-border bg-surface p-4 sm:flex-row sm:items-start sm:justify-between">
               {previousInSeries ? (
                 <Link
-                  href={`/books/${previousInSeries.id}`}
+                  href={`/libra/${previousInSeries.id}`}
                   className="focus-ring group flex flex-col rounded-sm"
                 >
                   <span className="text-xs text-muted">&larr; I mëparshmi në seri</span>
@@ -1289,7 +1289,7 @@ export default async function BookDetailPage({
               )}
               {nextInSeries ? (
                 <Link
-                  href={`/books/${nextInSeries.id}`}
+                  href={`/libra/${nextInSeries.id}`}
                   className="focus-ring group flex flex-col rounded-sm sm:items-end sm:text-right"
                 >
                   <span className="text-xs text-muted">I radhës në seri &rarr;</span>
@@ -1316,7 +1316,7 @@ export default async function BookDetailPage({
                     <span className="text-xs text-muted">(ky libër)</span>
                   </span>
                 ) : (
-                  <Link href={`/books/${entry.id}`} className={INLINE_LINK_CLASSES}>
+                  <Link href={`/libra/${entry.id}`} className={INLINE_LINK_CLASSES}>
                     {entry.series_position != null && `${entry.series_position}. `}
                     {entry.title}
                   </Link>
@@ -1347,7 +1347,7 @@ export default async function BookDetailPage({
       {user && !isAuthor && (
         <p className="mt-10 text-xs text-muted">
           <Link
-            href={`/books/${book.id}/report`}
+            href={`/libra/${book.id}/report`}
             className="focus-ring rounded-sm underline underline-offset-2 hover:decoration-2"
           >
             Raportoni këtë libër
@@ -1376,13 +1376,13 @@ const DETAIL_VALUE_CLASSES = "mt-1 font-semibold text-foreground";
 async function followAuthorFromBook(penNameId: string, bookId: string) {
   "use server";
   await followPenName(penNameId);
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
 }
 
 async function unfollowAuthorFromBook(penNameId: string, bookId: string) {
   "use server";
   await unfollowPenName(penNameId);
-  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/libra/${bookId}`);
 }
 
 // PAID-CHECKOUT-SURFACE-1: the one reader-facing sentence for a paid book
@@ -1512,7 +1512,7 @@ function PurchasePanel({
   if (state === "anonymous-paid" || state === "anonymous-free") {
     return (
       <div className="flex flex-col gap-3">
-        <Link href={`/login?next=/books/${bookId}`} className={PRIMARY_ACTION_CLASSES}>
+        <Link href={`/login?next=/libra/${bookId}`} className={PRIMARY_ACTION_CLASSES}>
           {state === "anonymous-free" ? "Hyni për ta marrë këtë libër" : "Hyni për ta blerë"}
         </Link>
       </div>

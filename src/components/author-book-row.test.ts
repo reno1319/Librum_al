@@ -119,7 +119,7 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
       ["Ndryshoni të dhënat", `${editBase}#details`],
       ["Ndryshoni dorëshkrimin ose kopertinën", `${editBase}#files`],
       ["Ndryshoni çmimin", `${editBase}#pricing`],
-      ["Shikojeni në Librari", `/books/${BOOK.id}`],
+      ["Shikojeni në Librari", `/libra/${BOOK.id}`],
       ["Hiqeni nga publikimi", `${editBase}#publishing`],
     ]) {
       expect(html).toContain(`href="${href}"`);
@@ -128,10 +128,10 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     expect(html).toContain(">Fshini<");
   });
 
-  it("the separate View button is gone: /books/<id> appears once, inside the menu", () => {
+  it("the separate View button is gone: /libra/<id> appears once, inside the menu", () => {
     const html = render({ book: LIVE, missing: [] });
-    expect(html.split(`href="/books/${BOOK.id}"`).length - 1).toBe(1);
-    expect(html.indexOf(`href="/books/${BOOK.id}"`)).toBeGreaterThan(html.indexOf("<summary"));
+    expect(html.split(`href="/libra/${BOOK.id}"`).length - 1).toBe(1);
+    expect(html.indexOf(`href="/libra/${BOOK.id}"`)).toBeGreaterThan(html.indexOf("<summary"));
   });
 
   it("a draft: Vazhdoni përgatitjen plus ···, no View or Unpublish, Delete kept", () => {
@@ -164,9 +164,9 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     ],
   ])("%s: Preview links to the book's own page, once, inside the menu", (_label, props) => {
     const html = render(props);
-    expect(html).toMatch(new RegExp(`href="/books/${BOOK.id}"[^>]*>Shikoni librin para botimit<`));
-    expect(html.split(`href="/books/${BOOK.id}"`).length - 1).toBe(1);
-    expect(html.indexOf(`href="/books/${BOOK.id}"`)).toBeGreaterThan(html.indexOf("<summary"));
+    expect(html).toMatch(new RegExp(`href="/libra/${BOOK.id}"[^>]*>Shikoni librin para botimit<`));
+    expect(html.split(`href="/libra/${BOOK.id}"`).length - 1).toBe(1);
+    expect(html.indexOf(`href="/libra/${BOOK.id}"`)).toBeGreaterThan(html.indexOf("<summary"));
     expect(html).not.toContain("Shikojeni në Librari");
   });
 

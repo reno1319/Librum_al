@@ -51,8 +51,8 @@ const OTHER_BOOK_ID = "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091";
 const READER_EMAIL = "reader@example.com";
 const CANONICAL_PATH = `${AUTHOR_ID}/${BOOK_ID}.epub`;
 const EXPECTED_COLUMNS = "id, author_id, file_path, title";
-const FILE_UNAVAILABLE = `/books/${BOOK_ID}?error=Ky%20skedar%20nuk%20%C3%ABsht%C3%AB%20i%20disponuesh%C3%ABm.`;
-const BUY_FIRST = `/books/${BOOK_ID}?error=Blini%20k%C3%ABt%C3%AB%20lib%C3%ABr%20p%C3%ABr%20ta%20shkarkuar.`;
+const FILE_UNAVAILABLE = `/libra/${BOOK_ID}?error=Ky%20skedar%20nuk%20%C3%ABsht%C3%AB%20i%20disponuesh%C3%ABm.`;
+const BUY_FIRST = `/libra/${BOOK_ID}?error=Blini%20k%C3%ABt%C3%AB%20lib%C3%ABr%20p%C3%ABr%20ta%20shkarkuar.`;
 
 // Every value here is refused for a row whose id is BOOK_ID and whose
 // author_id is AUTHOR_ID. Strings are also asserted never to appear in a
@@ -291,7 +291,7 @@ describe("GET /api/books/[id]/download", () => {
       const response = await callRoute();
 
       expect(response.status).toBe(307);
-      expect(redirectTarget(response)).toBe(`/login?next=/books/${BOOK_ID}`);
+      expect(redirectTarget(response)).toBe(`/login?next=/libra/${BOOK_ID}`);
       expect(supabase.__from).not.toHaveBeenCalled();
       expect(mockCreateAdminClient).not.toHaveBeenCalled();
     });
@@ -479,7 +479,7 @@ describe("GET /api/books/[id]/download", () => {
   });
 
   describe("download log (DOWNLOADS-1, 1a)", () => {
-    const RECORD_FAILED = `/books/${BOOK_ID}?error=Skedari%20nuk%20u%20shkarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri.`;
+    const RECORD_FAILED = `/libra/${BOOK_ID}?error=Skedari%20nuk%20u%20shkarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri.`;
 
     function setUpReader(adminOverrides: Parameters<typeof makeFakeAdminClient>[0] = {}) {
       const adminClient = makeFakeAdminClient(adminOverrides);
@@ -813,7 +813,7 @@ describe("GET /api/books/[id]/download", () => {
 
       const response = await GET(makeRequest(), { params: Promise.resolve({ id: BOOK_FIXTURE_BOOK_ID }) });
 
-      expect(redirectTarget(response)).toBe(`/books/${BOOK_FIXTURE_BOOK_ID}?error=Ky%20skedar%20nuk%20%C3%ABsht%C3%AB%20i%20disponuesh%C3%ABm.`);
+      expect(redirectTarget(response)).toBe(`/libra/${BOOK_FIXTURE_BOOK_ID}?error=Ky%20skedar%20nuk%20%C3%ABsht%C3%AB%20i%20disponuesh%C3%ABm.`);
       expect(adminClient.__from).not.toHaveBeenCalled();
       expect(adminClient.__download).not.toHaveBeenCalled();
       expect(mockWatermarkEpub).not.toHaveBeenCalled();
@@ -909,7 +909,7 @@ describe("GET /api/books/[id]/download", () => {
 
       const response = await callRoute();
 
-      expect(redirectTarget(response)).toBe(`/books/${BOOK_ID}?error=Skedari%20nuk%20u%20shkarkua%20dot.`);
+      expect(redirectTarget(response)).toBe(`/libra/${BOOK_ID}?error=Skedari%20nuk%20u%20shkarkua%20dot.`);
       expect(mockWatermarkEpub).not.toHaveBeenCalled();
       expect(`${response.headers.get("location")}${allLogOutput()}`).not.toContain("internal storage detail");
     });

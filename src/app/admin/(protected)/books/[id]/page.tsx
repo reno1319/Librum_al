@@ -268,7 +268,7 @@ export default async function AdminBookPage({
               <p className="mt-0.5 text-sm text-muted">Account name: {accountName}</p>
             )}
             {book.status === "published" && (
-              <Link href={`/books/${book.id}`} className="mt-1 inline-flex min-h-11 items-center text-sm text-primary underline">
+              <Link href={`/libra/${book.id}`} className="mt-1 inline-flex min-h-11 items-center text-sm text-primary underline">
                 View public book page
               </Link>
             )}

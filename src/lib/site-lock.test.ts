@@ -69,7 +69,7 @@ describe("locked page", () => {
 
   it.each([
     "/",
-    "/books/abc",
+    "/libra/abc",
     "/admin",
     "/admin/login",
     "/login",

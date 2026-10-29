@@ -24,7 +24,7 @@ const TRANSACTION_SURFACES = [
   "src/app/(public)/dashboard/sales/revenue-logic.ts",
   "src/app/(public)/dashboard/balance/page.tsx",
   "src/app/(public)/dashboard/balance/balance-logic.ts",
-  "src/app/(public)/books/[id]/page.tsx",
+  "src/app/(public)/libra/[id]/page.tsx",
   "src/app/admin/(protected)/finance/page.tsx",
   "src/app/admin/(protected)/refunds/page.tsx",
   "src/app/admin/(protected)/refunds/[id]/page.tsx",

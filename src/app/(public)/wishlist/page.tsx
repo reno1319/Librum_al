@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { removeFromWishlist } from "@/app/(public)/books/[id]/actions";
+import { removeFromWishlist } from "@/app/(public)/libra/[id]/actions";
 import { BookCard } from "@/components/book-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -80,7 +80,7 @@ export default async function WishlistPage() {
           title="Lista juaj e dëshirave është bosh."
           description="Librat që ruani për më vonë do të shfaqen këtu."
           action={
-            <Link href="/bookstore" className={buttonClasses("primary", "md")}>
+            <Link href="/librari" className={buttonClasses("primary", "md")}>
               Shfletoni Librarinë
             </Link>
           }

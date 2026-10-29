@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import { assertSupabaseEnvSafeForExecution } from "@/lib/supabase/env-guard";
 import { SECURITY_HEADER_RULES } from "@/lib/security-headers";
+import { OLD_PUBLIC_PATHS } from "@/lib/old-public-paths";
 
 // AUTH-STAGE-1A: this file is loaded once, in Node, by the `next`
 // CLI itself -- for `next dev`, `next build`, and `next start` alike --
@@ -42,8 +43,15 @@ const nextConfig: NextConfig = {
   },
   // AUTHOR PAGES REDESIGN (Renato's Q13): the Stripe Payouts page is
   // gone; old links land on Financial balance. Permanent (308).
+  // ALBANIAN-15 (Renato 10-29, "1. a"): the public catalog pages moved
+  // to Albanian addresses. Old English links (emails already sent,
+  // shared links, bookmarks, search results) land on the new page with
+  // the rest of the path and the query kept. Permanent (308).
   redirects() {
-    return [{ source: "/dashboard/payouts", destination: "/dashboard/balance", permanent: true }];
+    return [
+      { source: "/dashboard/payouts", destination: "/dashboard/balance", permanent: true },
+      ...OLD_PUBLIC_PATHS,
+    ];
   },
   headers() {
     return SECURITY_HEADER_RULES;

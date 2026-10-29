@@ -21,18 +21,18 @@ export function isVisitorStatsEnabled(env: Record<string, string | undefined>): 
 // neither list, so each new page needs a decision.
 export const COUNTED_PATHS = [
   "/about",
-  "/authors",
+  "/autore",
   "/blog",
-  "/books",
-  "/bookstore",
-  "/bundles",
   "/contact",
   "/help",
   "/how-it-works",
+  "/libra",
+  "/librari",
+  "/paketa",
   "/pricing",
   "/privacy",
   "/refunds",
-  "/series",
+  "/seri",
   "/terms",
 ] as const;
 

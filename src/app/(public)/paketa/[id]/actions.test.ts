@@ -59,7 +59,7 @@ describe("buyBundle: recovery-session defense-in-depth", () => {
 describe("buyBundle: fails closed under every configuration (STRIPE-DISABLE-1)", () => {
   const BUNDLE_ID = "bundle-1";
   const READER_ID = "reader-1";
-  const UNAVAILABLE_PREFIX = `/bundles/${BUNDLE_ID}?error=`;
+  const UNAVAILABLE_PREFIX = `/paketa/${BUNDLE_ID}?error=`;
   const ORIGINAL_REGIME = process.env.NEW_CHECKOUT_REGIME;
   const ORIGINAL_PROVIDER = process.env.LEDGER_PAYMENT_PROVIDER;
 
@@ -138,7 +138,7 @@ describe("buyBundle: fails closed under every configuration (STRIPE-DISABLE-1)",
     });
 
     await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({
-      target: expect.stringContaining(`/login?next=/bundles/${BUNDLE_ID}`),
+      target: expect.stringContaining(`/login?next=/paketa/${BUNDLE_ID}`),
     });
   });
 });
@@ -163,7 +163,7 @@ describe("buyBundle: maintenance-mode gate", () => {
 
   it("redirects with the maintenance message before the recovery-session cookie read or any Supabase/Stripe call", async () => {
     await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({
-      target: expect.stringContaining(`/bundles/${BUNDLE_ID}?error=`),
+      target: expect.stringContaining(`/paketa/${BUNDLE_ID}?error=`),
     });
 
     expect(mockCookieStore.get).not.toHaveBeenCalled();
@@ -231,7 +231,7 @@ describe("buyBundle: unconditional closure is not softened (PAID-MODE-1)", () =>
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
 
     await expect(buyBundle(BUNDLE_ID)).rejects.toMatchObject({
-      target: expect.stringContaining(`/bundles/${BUNDLE_ID}?error=`),
+      target: expect.stringContaining(`/paketa/${BUNDLE_ID}?error=`),
     });
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
   });

@@ -1,7 +1,7 @@
 // PEN-NAMES-1 (migration 20261019184512): a pen name is the public
 // identity readers see -- its own id, name, bio, photo and links. Every
 // reader-facing page reads pen names through the public_pen_names view,
-// which has no author_id, and links to /authors/<pen name id>.
+// which has no author_id, and links to /autore/<pen name id>.
 //
 // Release rule: this alone does NOT hide the account behind a pen name
 // (books.author_id and public_author_profiles stay public until PR B),
@@ -40,7 +40,7 @@ export type OwnPenName = {
 };
 
 export function authorPagePath(penNameId: string): string {
-  return `/authors/${penNameId}`;
+  return `/autore/${penNameId}`;
 }
 
 // links is jsonb: only well-formed https strings are ever rendered, even
