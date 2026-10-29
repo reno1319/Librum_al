@@ -15,6 +15,7 @@ import { reviewBookReport } from "../actions";
 import { ReportReviewButtons } from "./report-review-buttons";
 import { buttonClasses } from "@/components/ui/button";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 LAUNCH-FIX-1B MOD-1: static title, not a dynamic one built
 // from the reported book's title -- same reasoning as the refund detail
@@ -62,7 +63,9 @@ export default async function AdminBookReportDetailPage({
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
   const { id } = await params;
-  const { error, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+  const error = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
 
   // ADMIN-1A pre-finalize correction: src/app/admin/layout.tsx's
   // requireStaff("admin.access") only proves the caller is SOME staff

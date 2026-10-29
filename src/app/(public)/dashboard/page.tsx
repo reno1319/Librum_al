@@ -22,6 +22,7 @@ import {
 } from "./dashboard-sales";
 import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Paneli i autorit",
@@ -97,7 +98,11 @@ export default async function DashboardPage({
     return <MaintenanceNotice />;
   }
 
-  const { error, success, tab: rawTab, q: rawQ } = await searchParams;
+  const { error: rawError, success: rawSuccess, tab: rawTab, q: rawQ } = await searchParams;
+
+  const error = pageErrorMessage(rawError);
+
+  const success = pageSuccessMessage(rawSuccess);
   const supabase = await createClient();
   const {
     data: { user },

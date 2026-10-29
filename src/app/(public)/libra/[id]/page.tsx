@@ -48,6 +48,7 @@ import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import { bookWhatsappShareHref } from "@/lib/contact";
 import { bookPagePath, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
 // -- Bookstore (UI-4) owns discovery/browsing, this page owns "should I
@@ -274,11 +275,12 @@ export default async function BookDetailPage({
     free: freeStatus,
     review: reviewStatus,
     report: reportStatus,
-    error,
+    error: rawError,
     checkout_conflict: checkoutConflict,
     checkout_expired: checkoutExpired,
     canceled,
   } = await searchParams;
+  const error = pageErrorMessage(rawError);
 
   const supabase = await createClient();
 

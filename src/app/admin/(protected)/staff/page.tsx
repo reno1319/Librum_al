@@ -13,6 +13,7 @@ import { RoleChangeRow } from "./role-change-row";
 import { RemoveStaffButton } from "./remove-staff-button";
 import { STAFF_ROLE_LABELS, canManageStaffRow, formatStaffAddedDate } from "./staff-management-logic";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Staff",
@@ -37,7 +38,9 @@ export default async function AdminStaffPage({
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
   const { userId, role } = await requireStaff("staff.view");
-  const { error, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+  const error = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
   const canManage = roleHasPermission(role, "staff.manage");
 
   const result = await listStaffMembers();

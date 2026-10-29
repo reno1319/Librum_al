@@ -10,6 +10,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Librum Administration",
@@ -35,7 +36,8 @@ export default async function AdminLoginPage({
 }: {
   searchParams: Promise<{ error?: string; next?: string }>;
 }) {
-  const { error, next } = await searchParams;
+  const { error: rawError, next } = await searchParams;
+  const error = pageErrorMessage(rawError);
   const safeNext = resolveSafeAdminPath(next);
 
   const supabase = await createClient();

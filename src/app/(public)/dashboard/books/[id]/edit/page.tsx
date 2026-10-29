@@ -51,6 +51,7 @@ import { CheckedBookField } from "@/components/checked-book-field";
 import type { Book, Series, Contributor } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 // LIBRUM 2.0 SEO-1: a static title, not "Edit <book title>" -- getting
 // the real title would mean a second query inside generateMetadata()
@@ -147,7 +148,9 @@ export default async function EditBookPage({
   }
 
   const { id } = await params;
-  const { error, success } = await searchParams;
+  const { error: rawError, success: rawSuccess } = await searchParams;
+  const error = pageErrorMessage(rawError);
+  const success = pageSuccessMessage(rawSuccess);
 
   const supabase = await createClient();
   const {

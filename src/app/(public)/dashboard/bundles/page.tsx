@@ -22,6 +22,7 @@ import {
 } from "@/lib/catalog-price";
 import type { Book, Bundle } from "@/lib/types";
 import type { Metadata } from "next";
+import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Paketat",
@@ -51,7 +52,11 @@ export default async function BundlesPage({
     return <MaintenanceNotice />;
   }
 
-  const { error, success, pen } = await searchParams;
+  const { error: rawError, success: rawSuccess, pen } = await searchParams;
+
+  const error = pageErrorMessage(rawError);
+
+  const success = pageSuccessMessage(rawSuccess);
   const supabase = await createClient();
   const {
     data: { user },

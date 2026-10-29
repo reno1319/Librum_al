@@ -8,6 +8,7 @@ import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { getCatalogSchemaFeatures } from "@/lib/catalog-schema-features";
 import type { Series } from "@/lib/types";
 import type { Metadata } from "next";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Libër i ri",
@@ -18,7 +19,8 @@ export default async function NewBookPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error: rawError } = await searchParams;
+  const error = pageErrorMessage(rawError);
   const supabase = await createClient();
   const {
     data: { user },
