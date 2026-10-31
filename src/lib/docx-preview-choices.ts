@@ -265,6 +265,39 @@ export function describeFixes(report: CleanupReport): string[] {
   return lines;
 }
 
+// W3 Part 2: the health report in the preview's "Çfarë bëri Librum" box
+// (Renato's I4, 31 Oct): green lines for what Librum found and fixed,
+// amber lines for what the author should look at. Warnings from the
+// conversion are amber lines too.
+export type HealthLine = { tone: "ok" | "check"; text: string };
+
+export function healthReport(report: CleanupReport, warnings: { message: string }[] = []): HealthLine[] {
+  const lines: HealthLine[] = [];
+  const fixes = describeFixes(report);
+  const notes = report.notes ?? { footnotes: 0, endnotes: 0, dropped: 0 };
+  if (fixes.length > 0) {
+    lines.push({ tone: report.chapters > 0 ? "ok" : "check", text: fixes[0] });
+  }
+  if (notes.footnotes > 0) lines.push({ tone: "ok", text: `${notes.footnotes} shënime në fund të faqes, të ruajtura në fund të kapitullit të vet` });
+  if (notes.endnotes > 0) lines.push({ tone: "ok", text: `${notes.endnotes} shënime në fund të librit, të ruajtura në kapitullin “Shënime”` });
+  if ((report.gaps ?? 0) > 0) lines.push({ tone: "ok", text: `${report.gaps} rreshta bosh të ruajtur rreth rreshtave në qendër dhe poezive` });
+  const broken = report.fixes.brokenLetters ?? 0;
+  if (broken > 0) lines.push({ tone: "ok", text: `${broken} shkronja të prishura të rregulluara (p.sh. “Ã«” në “ë”)` });
+  for (const f of fixes.slice(1)) lines.push({ tone: "ok", text: f });
+  const unsure = report.guesses.filter((g) => g.confidence !== "high" && g.kind !== "title_page").length;
+  if (unsure > 0) lines.push({ tone: "check", text: `${unsure} vende ku Librum nuk është i sigurt: shihini te “Kontrolloni këto”` });
+  const missing = report.missingLetters;
+  if (missing) {
+    const list = missing.words.map((w) => `“${w.word}” (${w.count}) në vend të “${w.correct}”`).join(", ");
+    lines.push({
+      tone: "check",
+      text: `${missing.total} fjalë duken të shkruara pa ë ose ç: ${list}. Librum nuk i ndryshon vetë; rregullojini në Word dhe ngarkojeni dokumentin sërish.`,
+    });
+  }
+  for (const w of warnings) lines.push({ tone: "check", text: w.message });
+  return lines;
+}
+
 // Sorted for the list: unsure ones first, then in book order.
 export function guessesForList(report: CleanupReport): CleanupGuess[] {
   return report.guesses

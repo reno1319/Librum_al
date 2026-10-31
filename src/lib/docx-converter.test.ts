@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import {
   convertDocxToDocument,
@@ -21,6 +21,17 @@ import {
   internalLinkParagraph,
   bookmarkOnlyParagraph,
 } from "./docx-test-fixtures";
+
+// W3 Part 2 (answer 2a): Word notes are kept only with the clean-up
+// pass on. Production keeps removing them, with the warning, until the
+// switch step; these tests pin that.
+function onProduction() {
+  vi.stubEnv("VERCEL", "1");
+  vi.stubEnv("VERCEL_ENV", "production");
+}
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("convertDocxToDocument", () => {
   it("converts simple paragraphs with no headings into a single section", async () => {
@@ -164,7 +175,8 @@ describe("convertDocxToDocument", () => {
     expect(result.sections[0].html).toContain("After the break.");
   });
 
-  it("gives an unambiguous 'not preserved' warning about footnotes -- never merely 'may need review'", async () => {
+  it("gives an unambiguous 'not preserved' warning about footnotes -- never merely 'may need review' (Production)", async () => {
+    onProduction();
     const zip = new JSZip();
     const base = await buildDocxBytes({ bodyXml: paragraph("Body text.") });
     const loaded = await JSZip.loadAsync(base);
@@ -196,7 +208,8 @@ describe("convertDocxToDocument", () => {
     expect(warning?.message).not.toMatch(/may (require|need)/i);
   });
 
-  it("cleanly removes Mammoth's own footnote reference and note-list markup rather than leaving a dead cross-chapter link", async () => {
+  it("cleanly removes Mammoth's own footnote reference and note-list markup rather than leaving a dead cross-chapter link (Production)", async () => {
+    onProduction();
     // Built directly (not via the fixture helper) because this needs a
     // real w:footnoteReference + footnotes.xml pair, empirically
     // verified against the installed Mammoth build to actually produce
@@ -574,7 +587,8 @@ describe("W2 converter fixes", () => {
     expect(result.sections[0].html).toBe("");
   });
 
-  it("removes the empty <sup> and <ol> a removed footnote leaves behind", async () => {
+  it("removes the empty <sup> and <ol> a removed footnote leaves behind (Production)", async () => {
+    onProduction();
     const zip = new JSZip();
     zip.file(
       "[Content_Types].xml",

@@ -241,7 +241,12 @@ export async function parseDocxToDocument(tempDocxPath: string, choices?: unknow
       bookId: conversionId,
       title: UNTITLED_MANUSCRIPT_TITLE,
       authorName: UNKNOWN_AUTHOR_NAME,
-      sections: preview.map(({ heading, headingLines, html }) => ({ heading, ...(headingLines ? { headingLines } : {}), html })),
+      sections: preview.map(({ heading, headingLines, headingNotes, html }) => ({
+        heading,
+        ...(headingLines ? { headingLines } : {}),
+        ...(headingNotes ? { headingNotes } : {}),
+        html,
+      })),
       images: conversion.images,
     });
     const { error: previewError } = await supabase.storage

@@ -33,6 +33,9 @@ type BuildOptions = {
   numberingXml?: string;
   // W3: a footnotes part with one note, w:id="2".
   includeFootnotes?: boolean;
+  // W3 Part 2: footnotes/endnotes parts with these notes (see note()).
+  footnotesXml?: string;
+  endnotesXml?: string;
 };
 
 export async function buildDocxBytes(options: BuildOptions): Promise<Buffer> {
@@ -43,8 +46,11 @@ export async function buildDocxBytes(options: BuildOptions): Promise<Buffer> {
     options.includeStyles
       ? `<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>`
       : "",
-    options.includeFootnotes
+    options.includeFootnotes || options.footnotesXml !== undefined
       ? `<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>`
+      : "",
+    options.endnotesXml !== undefined
+      ? `<Override PartName="/word/endnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"/>`
       : "",
     options.includeNumbering
       ? `<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>`
@@ -107,6 +113,15 @@ ${options.numberingXml ?? `<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0">
     );
   }
 
+  for (const [kind, xml] of [["footnote", options.footnotesXml], ["endnote", options.endnotesXml]] as const) {
+    if (xml === undefined) continue;
+    zip.file(
+      `word/${kind}s.xml`,
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:${kind}s xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:${kind} w:type="separator" w:id="-1"/><w:${kind} w:type="continuationSeparator" w:id="0"/>${xml}</w:${kind}s>`,
+    );
+  }
+
   if (options.includeImageRel) {
     zip.file("word/media/image1.png", tinyPngBytes());
   }
@@ -122,8 +137,11 @@ ${options.numberingXml ?? `<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0">
     options.includeNumbering
       ? `<Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>`
       : "",
-    options.includeFootnotes
+    options.includeFootnotes || options.footnotesXml !== undefined
       ? `<Relationship Id="rIdFootnotes" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/>`
+      : "",
+    options.endnotesXml !== undefined
+      ? `<Relationship Id="rIdEndnotes" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes" Target="endnotes.xml"/>`
       : "",
     options.includeImageRel
       ? `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>`
@@ -238,4 +256,20 @@ export function emptyPara(count = 1): string {
 // A body paragraph long enough to read as ordinary prose.
 export function prose(seed: string): string {
   return fmt(`${seed} ishte një ditë e zakonshme në qytet, me njerëz që shkonin në punë dhe fëmijë që vraponin drejt shkollës.`, { tabs: 1 });
+}
+
+// W3 Part 2: a note reference run (Word's superscript number) and a
+// note's text for footnotesXml / endnotesXml. `paras` are paragraph
+// XML (paragraph(), fmt(), ...).
+export function noteRef(kind: "footnote" | "endnote", id: number, superscript = false): string {
+  const tag = kind === "footnote" ? "w:footnoteReference" : "w:endnoteReference";
+  return `<w:r>${superscript ? '<w:rPr><w:vertAlign w:val="superscript"/></w:rPr>' : ""}<${tag} w:id="${id}"/></w:r>`;
+}
+export function note(kind: "footnote" | "endnote", id: number, ...paras: string[]): string {
+  return `<w:${kind} w:id="${id}">${paras.join("")}</w:${kind}>`;
+}
+// A paragraph of text runs with note references in between:
+// textWithNotes("Fjala", noteRef("footnote", 7), " vazhdon.").
+export function textWithNotes(...parts: string[]): string {
+  return `<w:p>${parts.map((p) => (p.startsWith("<w:r>") ? p : `<w:r><w:t xml:space="preserve">${p}</w:t></w:r>`)).join("")}</w:p>`;
 }

@@ -592,6 +592,37 @@ describe("Word-made book look (W3)", () => {
     expect(css).not.toContain("p { margin: 0 0 1em; }");
   });
 
+  it("styles kept blank lines and notes (W3 Part 2), and Production's stylesheet stays as it was", async () => {
+    const zip = await JSZip.loadAsync(await generateEpub(BASE_INPUT));
+    const css = await zip.file("OEBPS/styles.css")!.async("string");
+    expect(css).toContain("p.gap, p.gap + p { text-indent: 0; }");
+    expect(css).toContain("aside.footnote { font-size: 0.9em;");
+    expect(css).toContain("aside.footnote p, div.endnote p { text-indent: 0; }");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    try {
+      const prodCss = await (await JSZip.loadAsync(await generateEpub(BASE_INPUT))).file("OEBPS/styles.css")!.async("string");
+      expect(prodCss).not.toMatch(/gap|footnote|endnote|sup a/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("puts a title's note links after a two-line title, and keeps them when the title was only a note number", async () => {
+    const link = '<sup><a epub:type="noteref" href="#fn-1" id="fnref-1">1</a></sup>';
+    const zip = await JSZip.loadAsync(
+      await generateEpub({
+        ...BASE_INPUT,
+        sections: [
+          { heading: "Kapitulli 1: Ana", headingLines: ["Kapitulli 1", "Ana"], headingNotes: link, html: "<p>Teksti.</p>" },
+          { heading: null, headingNotes: link.replace(/1/g, "2"), html: "<p>Më tej.</p>" },
+        ],
+      }),
+    );
+    expect(await zip.file("OEBPS/chapter-1.xhtml")!.async("string")).toContain(`<h1>Kapitulli 1<br/>Ana${link}</h1>`);
+    expect(await zip.file("OEBPS/chapter-2.xhtml")!.async("string")).toContain(`<p>${link.replace(/1/g, "2")}</p>\n<p>Më tej.</p>`);
+  });
+
   it("shows a two-line chapter title on two lines and its one-line form in the contents", async () => {
     const zip = await JSZip.loadAsync(
       await generateEpub({

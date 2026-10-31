@@ -153,4 +153,41 @@ describe("W4 r2 (audit F1, N1)", () => {
     expect(preview![0].html.match(/data-p="1"/g)).toHaveLength(1);
     expect(preview![0].html).toContain('<span data-p="2"></span>Një rresht');
   });
+
+  // W3 Part 2: the W4 r2 audit's notes A1-A3 (Renato's 1a, 31 Oct).
+  it("A1: 'make a chapter' on a title wins over 'not a chapter' on its label", async () => {
+    const r = await convert(book, { notChapter: [5], makeChapter: [6] }, true);
+    expect(r.sections.map((s) => s.heading)).toEqual(["Kapitulli 1: Fillimi", "Kthimi", "Kapitulli 3: Mbarimi"]);
+    expect(r.sections[0].html).toContain("Kapitulli 2");
+  });
+
+  it("A2: ignores the author's mark-named bookmarks inside a link or a table cell, and the ebook stays the same", async () => {
+    const bm = (name: string, id: number) => `<w:bookmarkStart w:id="${id}" w:name="${name}"/><w:bookmarkEnd w:id="${id}"/>`;
+    const body =
+      heading(1, "Liqeni") + prose("Dita") +
+      `<w:p><w:hyperlink w:anchor="x">${bm("lbs_2", 7)}<w:r><w:t>Lidhje</w:t></w:r></w:hyperlink></w:p>` +
+      `<w:tbl><w:tr><w:tc><w:p>${bm("lbp_1", 9)}<w:r><w:t>Qeliza</w:t></w:r></w:p></w:tc></w:tr></w:tbl>` + prose("Nata");
+    const plain = await convert(body);
+    const marked = await convert(body, {}, true);
+    const { preview, ...rest } = marked;
+    expect(rest).toEqual(plain);
+    expect(preview![0].html).not.toContain('data-s="2"');
+    expect(preview![0].html.match(/data-p="1"/g)).toHaveLength(1);
+    expect(preview![0].html).toContain('<span data-p="2"></span>Lidhje');
+    expect(preview![0].html).toContain("<td><p>Qeliza</p></td>");
+  });
+
+  it("A3: 'keep apart' on a title typed on two lines keeps both title lines together as the next chapter", async () => {
+    // Kapitulli 1 0, Fillimi 1, empty 2, Dita 3, Nata 4 | KAPITULLI 2 5, line 6, line 7, empty 8, Era 9, Shiu 10
+    const two = chapter("Kapitulli 1", "Fillimi", true) + fmt("KAPITULLI 2", { ...look, pageBreakBefore: true }) +
+      fmt("Udhëtimi i gjatë", look) + fmt("drejt shtëpisë", look) + emptyPara() + prose("Era") + prose("Shiu");
+    const merged = await convert(two);
+    expect(merged.sections.map((s) => s.heading)).toEqual(["Kapitulli 1: Fillimi", "KAPITULLI 2: Udhëtimi i gjatë drejt shtëpisë"]);
+    const apart = await convert(two, { keepTitleApart: [5] }, true);
+    expect(apart.sections.map((s) => s.heading)).toEqual(["Kapitulli 1: Fillimi", "KAPITULLI 2", "Udhëtimi i gjatë drejt shtëpisë"]);
+    expect(apart.sections[2].headingLines).toEqual(["Udhëtimi i gjatë", "drejt shtëpisë"]);
+    expect(apart.sections[1].html).toBe("");
+    expect(apart.sections[2].html).toMatch(/^<p>Era/);
+    expect(apart.cleanup.guesses.find((g) => g.kind === "merged_title" && g.paragraph === 5)).toMatchObject({ applied: false });
+  });
 });

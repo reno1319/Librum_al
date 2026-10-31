@@ -81,7 +81,13 @@ h2 { font-size: 1.3em; }
 h3 { font-size: 1.1em; }
 h4 { font-size: 1em; }
 ${bookStyle ? `p { margin: 0; text-indent: 1.5em; }
-h1 + p, h2 + p, h3 + p, h4 + p, blockquote + p, ul + p, ol + p, table + p, p.scene-break + p, p.center + p, p.right + p, p.verse + p, p.verse-stanza + p, p.verse-indent + p, body > p:first-child { text-indent: 0; }` : "p { margin: 0 0 1em; }"}
+h1 + p, h2 + p, h3 + p, h4 + p, blockquote + p, ul + p, ol + p, table + p, p.scene-break + p, p.center + p, p.right + p, p.verse + p, p.verse-stanza + p, p.verse-indent + p, body > p:first-child { text-indent: 0; }
+p.gap, p.gap + p { text-indent: 0; }
+p.gap { margin: 0; }
+sup a { text-decoration: none; }
+aside.footnote { font-size: 0.9em; margin: 1em 0 0; }
+aside.footnote p, div.endnote p { text-indent: 0; }
+div.endnote { margin: 0 0 0.8em; }` : "p { margin: 0 0 1em; }"}
 p.scene-break { text-align: center; text-indent: 0; margin: 1em 0; }
 p.center { text-align: center; text-indent: 0; }
 p.right { text-align: right; text-indent: 0; }
@@ -96,17 +102,21 @@ td, th { border: 1px solid #999; padding: 0.4em; text-align: left; }
 `;
 }
 
-function chapterFilename(index: number): string {
+export function chapterFilename(index: number): string {
   return `chapter-${index + 1}.xhtml`;
 }
 
-function renderChapterXhtml(section: DocSection, index: number, language: string): string {
+function renderChapterXhtml(section: DocSection, language: string): string {
+  // W3 Part 2 (answer 3a): note links on the title come after it.
+  const notes = section.headingNotes ?? "";
   const headingHtml = section.headingLines && section.headingLines.length > 1
-    ? `<h1>${section.headingLines.map(escapeXml).join("<br/>")}</h1>\n`
+    ? `<h1>${section.headingLines.map(escapeXml).join("<br/>")}${notes}</h1>\n`
     : section.heading
-    ? `<h1>${escapeXml(section.heading)}</h1>\n`
-    : index === 0
-      ? ""
+    ? `<h1>${escapeXml(section.heading)}${notes}</h1>\n`
+    : notes
+      // A title that was only a note number: the link is kept, so its
+      // note still has a place to point back to.
+      ? `<p>${notes}</p>\n`
       : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -335,7 +345,7 @@ export async function generateEpub(input: EpubGeneratorInput): Promise<Buffer> {
   zip.file("OEBPS/styles.css", stylesheet(cleanupPassEnabled()));
 
   input.sections.forEach((section, i) => {
-    zip.file(`OEBPS/${chapterFilename(i)}`, renderChapterXhtml(section, i, language));
+    zip.file(`OEBPS/${chapterFilename(i)}`, renderChapterXhtml(section, language));
   });
 
   for (const image of input.images) {

@@ -10,6 +10,9 @@ import {
   type CleanupOptions,
   type CleanupReport,
 } from "@/lib/docx-cleanup";
+import { ENDNOTES_HEADING, extractNotes, renderNotes, takeHeadingNotes } from "@/lib/docx-notes";
+import { findMissingLetters, fixBrokenLetters } from "@/lib/docx-letters";
+import { chapterFilename } from "@/lib/epub-generator";
 
 // LIBRUM 2.0 PRODUCT-5: DOCX -> a small, safe, deterministic internal
 // document model, entirely separate from EPUB packaging itself (see
@@ -46,6 +49,10 @@ export type DocSection = {
   // ("Kapitulli 1" / "Mëngjesi"), the lines; `heading` is then the
   // one-line contents-list text ("Kapitulli 1: Mëngjesi").
   headingLines?: string[];
+  // W3 Part 2 (answer 3a): the note links on the chapter title
+  // ("PARATHËNIE¹"), Librum's own markup built from numbers only;
+  // shown after the title in the book, never in the contents list.
+  headingNotes?: string;
   // Sanitized, well-formed XHTML body content for this chapter --
   // ready to embed directly inside a <body> element.
   html: string;
@@ -82,6 +89,7 @@ export type ConversionWarning = {
 export type PreviewSection = {
   heading: string | null;
   headingLines?: string[];
+  headingNotes?: string;
   headingPara: number | null;
   html: string;
 };
@@ -212,6 +220,27 @@ async function hasFootnotesOrEndnotes(zip: JSZip): Promise<boolean> {
     }
   }
   return false;
+}
+
+// W3 Part 2 (audit F3): the notes the text points at, as "f5" / "e3",
+// read straight from Word's own XML. When one of these did not come
+// through as a note (a shape the note code does not know), the author
+// still gets the "notes left out" warning instead of losing it silently.
+// References deleted with Track Changes (w:del, or the old place of a
+// move, w:moveFrom) are not in the book, so they never count (audit r2
+// F5); a self-closing w:del only marks a deleted paragraph end.
+const DELETED_XML_RE = /<w:(del|moveFrom)\b[^>]*\/>|<w:(del|moveFrom)\b(?:[^>]*[^>/])?>[\s\S]*?<\/w:\2>/g;
+async function referencedNoteKeys(zip: JSZip): Promise<Set<string>> {
+  const keys = new Set<string>();
+  try {
+    const xml = ((await zip.file("word/document.xml")?.async("string")) ?? "").replace(DELETED_XML_RE, "");
+    for (const m of xml.matchAll(/<w:(footnote|endnote)Reference\b[^>]*?\bw:id="(-?\d+)"/g)) {
+      keys.add(`${m[1] === "footnote" ? "f" : "e"}${m[2]}`);
+    }
+  } catch {
+    // Unreadable: nothing to compare against.
+  }
+  return keys;
 }
 
 const SAFE_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
@@ -349,7 +378,7 @@ const ALLOWED_TAGS = new Set([
 const VOID_TAGS = new Set(["br", "hr", "img"]);
 // W3: the only class names kept -- the ones docx-converter's own style
 // map writes for the clean-up pass's marks. Anything else is dropped.
-const ALLOWED_P_CLASSES = new Set(["scene-break", "center", "right", "verse", "verse-stanza", "verse-indent"]);
+const ALLOWED_P_CLASSES = new Set(["scene-break", "center", "right", "verse", "verse-stanza", "verse-indent", "gap"]);
 const DROP_ENTIRELY_TAGS = new Set([
   "script", "style", "iframe", "object", "embed", "form", "input", "button",
   "select", "textarea", "option", "video", "audio", "canvas", "svg",
@@ -541,6 +570,7 @@ const HEADING_STYLE_MAP = [
   "p[style-name='Librum Verse Stanza'] => p.verse-stanza:fresh",
   "p[style-name='Librum Verse Indent'] => p.verse-indent:fresh",
   "p[style-name='Librum Plain'] => p:fresh",
+  "p[style-name='Librum Gap'] => p.gap:fresh",
 ];
 
 // W4: Mammoth writes the clean-up pass's paragraph marks as empty
@@ -665,6 +695,7 @@ export async function convertDocxToDocument(
 
   let rawHtml: string;
   let markedHtml: string | null = null;
+  let noteBodies = new Map<string, string>();
   try {
     const result = await mammoth.convertToHtml(
       { buffer: mammothInput },
@@ -719,8 +750,20 @@ export async function convertDocxToDocument(
     // W4: the ebook never carries the preview's marks (removed here,
     // before anything else reads the HTML); the marked copy is kept
     // only for the preview.
-    markedHtml = extras.preview ? result.value : null;
-    rawHtml = stripParagraphMarks(result.value);
+    let mammothHtml = result.value;
+    // W3 Part 2 (answer 6a): broken letters ("Ã«" -> "ë"), and notes
+    // taken out before the chapter split (docx-notes.ts). Both only with
+    // the clean-up pass on (answer 2a: one switch for all of W3).
+    if (w3Enabled) {
+      const fixed = fixBrokenLetters(mammothHtml);
+      mammothHtml = fixed.text;
+      cleanup.fixes.brokenLetters = fixed.count;
+      const extracted = extractNotes(mammothHtml);
+      mammothHtml = extracted.html;
+      noteBodies = extracted.bodies;
+    }
+    markedHtml = extras.preview ? mammothHtml : null;
+    rawHtml = stripParagraphMarks(mammothHtml);
 
     if (result.messages.some((m) => m.type === "warning" && !isHarmlessMammothWarning(m.message))) {
       warnings.push({
@@ -750,7 +793,7 @@ export async function convertDocxToDocument(
     });
   }
 
-  if (await hasFootnotesOrEndnotes(zip)) {
+  if (!w3Enabled && (await hasFootnotesOrEndnotes(zip))) {
     warnings.push({
       code: "footnotes_or_endnotes_skipped",
       // LIBRUM 2.0 PRODUCT-5 PRE-COMMIT CORRECTION: unambiguous, not
@@ -782,12 +825,14 @@ export async function convertDocxToDocument(
   const rawSections: {
     heading: string | null;
     headingLines?: string[];
+    headingKeys: string[];
     rawHtml: string;
     headingPara: number | null;
     markedHtml: string;
   }[] = [];
   let currentHeading: string | null = null;
   let currentLines: string[] | undefined;
+  let currentKeys: string[] = [];
   let currentHtml = "";
   let currentHeadingPara: number | null = null;
   let currentMarked = "";
@@ -797,6 +842,7 @@ export async function convertDocxToDocument(
       rawSections.push({
         heading: currentHeading,
         headingLines: currentLines,
+        headingKeys: currentKeys,
         rawHtml: currentHtml,
         headingPara: currentHeadingPara,
         markedHtml: currentMarked,
@@ -812,13 +858,16 @@ export async function convertDocxToDocument(
       currentHeadingPara = firstParagraphMark(markedPart);
       currentMarked = "";
       if (w3Enabled) {
-        const parsed = headingFromHtml(headingMatch[1]);
+        const taken = takeHeadingNotes(headingMatch[1]);
+        currentKeys = taken.keys;
+        const parsed = headingFromHtml(taken.html);
         currentHeading = parsed.heading;
         currentLines = parsed.lines;
       } else {
         // Answer 10b: Production keeps the title exactly as before W3.
         currentHeading = headingHtmlToText(headingMatch[1]) || null;
         currentLines = undefined;
+        currentKeys = [];
       }
       currentHtml = "";
     } else {
@@ -867,11 +916,51 @@ export async function convertDocxToDocument(
   if (sections.length === 0) {
     return { success: false, error: "empty_document" };
   }
+  const keptKeys = rawSections.filter((_s, i) => keep[i]).map((s) => s.headingKeys);
+
+  // W3 Part 2: notes. Footnotes go at the end of their own chapter, and
+  // endnotes into one "Shënime" chapter after the last one (answer 1b).
+  const sanitizeNote = (html: string) =>
+    removeEmptyElements(sanitizeFragment(html, checkImageSrc, () => {
+      unsafeLinkFound = true;
+    }));
+  const withNotes = <T extends { html: string; headingNotes?: string }>(list: T[], extra: (html: string) => T) => {
+    const rendered = renderNotes(
+      list.map((s, i) => ({ html: s.html, headingKeys: keptKeys[i] })),
+      noteBodies,
+      sanitizeNote,
+      chapterFilename,
+    );
+    const out: T[] = list.map((s, i) => ({
+      ...s,
+      html: rendered.sections[i].html,
+      ...(rendered.sections[i].headingNotes ? { headingNotes: rendered.sections[i].headingNotes } : {}),
+    }));
+    if (rendered.endnotesHtml) out.push(extra(rendered.endnotesHtml));
+    return { out, rendered };
+  };
+  let finalSections = sections;
+  if (w3Enabled) {
+    const { out, rendered } = withNotes(sections, (html) => ({ heading: ENDNOTES_HEADING, html }));
+    finalSections = out;
+    cleanup.notes = { footnotes: rendered.footnotes, endnotes: rendered.endnotes, dropped: rendered.unplaced };
+    const unreadable = [...(await referencedNoteKeys(zip))].some((k) => !noteBodies.has(k));
+    if (rendered.unplaced > 0 || unreadable) {
+      warnings.push({
+        code: "footnotes_or_endnotes_skipped",
+        message: "Disa shënime nuk u kthyen dot dhe u lanë jashtë. Kontrolloni librin para publikimit.",
+      });
+    }
+    // Answer 5a: words typed without ë/ç, reported only.
+    cleanup.missingLetters = findMissingLetters(
+      finalSections.flatMap((s) => [s.heading ?? "", headingHtmlToText(s.html.replace(/<\/(?:p|li|h[2-4]|td|th|aside|div)>/g, " "))]),
+    );
+  }
 
   // W4: the preview's chapters, one for one with `sections`.
   let preview: PreviewSection[] | undefined;
   if (extras.preview) {
-    preview = rawSections.flatMap((section, i) => {
+    const previewSections: PreviewSection[] = rawSections.flatMap((section, i) => {
       if (!keep[i]) return [];
       const html = markedParts
         ? marksToSpans(removeEmptyElements(sanitizeFragment(marksToText(section.markedHtml), checkImageSrc, () => {})).trim())
@@ -883,6 +972,9 @@ export async function convertDocxToDocument(
         html,
       }];
     });
+    preview = w3Enabled
+      ? withNotes(previewSections, (html) => ({ heading: ENDNOTES_HEADING, headingPara: null, html })).out
+      : previewSections;
   }
 
   if (unsafeLinkFound) {
@@ -892,5 +984,5 @@ export async function convertDocxToDocument(
     });
   }
 
-  return { success: true, sections, images, warnings, cleanup, ...(preview ? { preview } : {}) };
+  return { success: true, sections: finalSections, images, warnings, cleanup, ...(preview ? { preview } : {}) };
 }

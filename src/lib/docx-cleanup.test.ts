@@ -640,6 +640,84 @@ describe("W3 tidying", () => {
   });
 });
 
+describe("W3 Part 2: a blank line around centered lines (Renato's staging try-out, answer 4a)", () => {
+  const center = (text: string, italic = false) => fmt(text, { align: "center", italic });
+  const chapter = (body: string) => heading(1, "Kreu") + prose("Dita") + body;
+  const gaps = (html: string) => (html.match(/<p class="gap">\u00a0<\/p>/g) ?? []).length;
+
+  it("keeps one blank line above and below a centered heading line typed between empty lines", async () => {
+    const r = await convert(chapter(emptyPara(2) + center("RENDI I NGJARJEVE") + emptyPara() + prose("Nata") + prose("Era")), { includeStyles: true });
+    expect(r.sections[0].html).toMatch(
+      /Dita[^<]*<\/p><p class="gap">\u00a0<\/p><p class="center">RENDI I NGJARJEVE<\/p><p class="gap">\u00a0<\/p><p>Nata/,
+    );
+    expect(r.cleanup.gaps).toBe(2);
+  });
+
+  it("keeps the gap around a centered italic couplet, with its two lines tight", async () => {
+    const r = await convert(chapter(emptyPara() + center("Hëna fle mbi ujë,", true) + center("era s’e zgjon dot.", true) + emptyPara() + prose("Nata")), { includeStyles: true });
+    expect(r.sections[0].html).toContain(
+      '<p class="gap">\u00a0</p><p class="center"><em>Hëna fle mbi ujë,</em></p><p class="center"><em>era s’e zgjon dot.</em></p><p class="gap">\u00a0</p><p>Nata',
+    );
+  });
+
+  it("keeps a centered poem tight inside, with one gap around it", async () => {
+    const poem = ["Mali i lartë", "guri i ftohtë", "lumi që ikën", "dhe zogu që rri"].map((l) => center(l)).join("");
+    const r = await convert(chapter(emptyPara() + poem + emptyPara() + prose("Nata")), { includeStyles: true });
+    expect(gaps(r.sections[0].html)).toBe(2);
+    // (A 4-line centered poem is a verse block today; centering poems is W6.)
+    expect(r.sections[0].html).toMatch(/<p class="gap">\u00a0<\/p><p class="(?:verse|center)">Mali i lartë<\/p><p class="(?:verse|center)">guri i ftohtë<\/p><p class="(?:verse|center)">lumi që ikën<\/p><p class="(?:verse|center)">dhe zogu që rri<\/p><p class="gap">\u00a0<\/p><p>Nata/);
+  });
+
+  it("is one blank line however many empty lines were typed, and right-aligned lines get it too", async () => {
+    const r = await convert(chapter(emptyPara(5) + fmt("— Një letër e vjetër", { align: "right" }) + emptyPara(4) + prose("Nata")), { includeStyles: true });
+    expect(r.sections[0].html).toContain('<p class="gap">\u00a0</p><p class="right">— Një letër e vjetër</p><p class="gap">\u00a0</p><p>Nata');
+    expect(gaps(r.sections[0].html)).toBe(2);
+  });
+
+  it("adds no gap where Word had none, at a chapter start, or between ordinary paragraphs", async () => {
+    const r = await convert(
+      heading(1, "Kreu") + emptyPara(2) + center("Motoja e kreut") + prose("Dita") + center("Pa rresht bosh") + prose("Nata") + emptyPara() + prose("Era"),
+      { includeStyles: true },
+    );
+    expect(gaps(r.sections[0].html)).toBe(0);
+    expect(r.cleanup.gaps).toBe(0);
+  });
+
+  it("adds no gap next to a chapter title, and never on Production", async () => {
+    const body = chapter(emptyPara() + center("Fundi i pjesës") + emptyPara(2) + heading(1, "Kreu tjetër") + prose("Nata"));
+    const r = await convert(body, { includeStyles: true });
+    expect(r.sections[0].html).toMatch(/<p class="gap">\u00a0<\/p><p class="center">Fundi i pjesës<\/p>$/);
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    const prod = await convert(body, { includeStyles: true });
+    expect(prod.sections[0].html).not.toContain("gap");
+    vi.unstubAllEnvs();
+  });
+
+  // Renato's audit answer Q1a (31 Oct): a page break inside a chapter
+  // counts like empty lines, so the line is never stuck to the text above.
+  it.each([
+    ["before the centered line", fmt("KRONOLOGJI", { align: "center", pageBreakBefore: true }), prose("Dita")],
+    ["after the paragraph above it", center("KRONOLOGJI"), fmt("Dita", { pageBreakAfter: true })],
+  ])("keeps one blank line above a centered line after a page break %s, and one below", async (_name, line, above) => {
+    const r = await convert(heading(1, "Kreu") + prose("Mëngjesi") + above + line + emptyPara(2) + prose("Nata") + prose("Era") + prose("Shiu"), {
+      includeStyles: true,
+    });
+    expect(r.sections).toHaveLength(1);
+    expect(r.sections[0].html).toMatch(/Dita[^<]*<\/p><p class="gap">\u00a0<\/p><p class="center">KRONOLOGJI<\/p><p class="gap">\u00a0<\/p><p>Nata/);
+    expect(gaps(r.sections[0].html)).toBe(2);
+  });
+
+  it("adds no gap for a page break between ordinary paragraphs, or before a chapter title", async () => {
+    const r = await convert(
+      heading(1, "Kreu") + prose("Mëngjesi") + fmt("Dita", { pageBreakBefore: true }) + center("Fundi", false) + fmt("Kreu tjetër", { pageBreakBefore: true, align: "center" }).replace("<w:pPr>", '<w:pPr><w:pStyle w:val="Heading1"/>') + prose("Nata"),
+      { includeStyles: true },
+    );
+    expect(r.sections.map((s) => s.heading)).toEqual(["Kreu", "Kreu tjetër"]);
+    expect(r.sections.map((s) => gaps(s.html))).toEqual([0, 0]);
+  });
+});
+
 describe("W3 tracked changes and links", () => {
   it("uses the final text of tracked changes and warns the author (answer 7a)", async () => {
     const r = await convert(

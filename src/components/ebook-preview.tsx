@@ -8,7 +8,7 @@ import {
   MAX_CHAPTER_TITLE_CHARS,
   applyTap,
   canToggleGuess,
-  describeFixes,
+  healthReport,
   describeGuess,
   guessWillApply,
   guessesForList,
@@ -184,7 +184,7 @@ export function EbookPreview({
 
   const guesses = useMemo(() => guessesForList(build.cleanup).filter((g) => g.kind !== "title_page"), [build.cleanup]);
   const titlePage = build.cleanup.guesses.find((g) => g.kind === "title_page");
-  const fixes = describeFixes(build.cleanup);
+  const health = healthReport(build.cleanup, build.warnings);
   const pending = pendingCount(choices, appliedChoices);
   const ownChanges = pendingChanges(choices, appliedChoices).filter(
     (c) => c.kind !== "other" && !build.cleanup.guesses.some((g) => g.paragraph === c.paragraph && (g.kind === "chapter" || g.kind === "scene_break" || g.kind === "subheading")),
@@ -353,23 +353,27 @@ export function EbookPreview({
         >
           <section>
             <h3 className="mb-1 font-semibold">Çfarë bëri Librum</h3>
-            {fixes.length > 0 ? (
-              <ul className="flex list-disc flex-col gap-0.5 pl-4 text-muted">
-                {fixes.map((f) => (
-                  <li key={f}>{f}</li>
-                ))}
-              </ul>
-            ) : (
+            {!health.some((h) => h.tone === "ok") && (
               <p className="text-muted">Librum e ktheu dokumentin ashtu siç është, me kapitujt nga stilet Heading 1 të Word-it.</p>
             )}
-            {titlePage && <p className="mt-1 text-muted">{describeGuess(titlePage, true, false).state}</p>}
-            {build.warnings.length > 0 && (
-              <ul className="mt-2 flex list-disc flex-col gap-0.5 pl-4 text-xs text-muted">
-                {build.warnings.map((w, i) => (
-                  <li key={i}>{w.message}</li>
+            {health.length > 0 && (
+              // W3 Part 2: the health report; green = done, amber = look at it.
+              <ul className="flex flex-col gap-1">
+                {health.map((h, i) => (
+                  <li
+                    key={i}
+                    className={`flex items-start gap-2 rounded-[4px] px-2 py-1 ${h.tone === "ok" ? "bg-[#eef5ef] text-[#1f4d33]" : "bg-[#fbf1dc] text-[#6b4a0f]"}`}
+                  >
+                    <span aria-hidden="true">{h.tone === "ok" ? "✓" : "!"}</span>
+                    <span>
+                      <span className="sr-only">{h.tone === "ok" ? "Në rregull: " : "Kontrollojeni: "}</span>
+                      {h.text}
+                    </span>
+                  </li>
                 ))}
               </ul>
             )}
+            {titlePage && <p className="mt-1 text-muted">{describeGuess(titlePage, true, false).state}</p>}
             {showQuotes && (
               <label className="mt-2 flex items-start gap-2">
                 <input

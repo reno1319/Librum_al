@@ -33,6 +33,7 @@ import {
   transformText,
 } from "@/lib/docx-paragraphs";
 import { planStructure, type Block, type CleanupGuess } from "@/lib/docx-structure";
+import type { MissingLetters } from "@/lib/docx-letters";
 import {
   detectDialogueDash,
   detectQuoteStyle,
@@ -117,7 +118,19 @@ export type CleanupReport = {
     dropCapsJoined: number;
     headingNumbersAdded: number;
     paragraphsSplit: number;
+    // W3 Part 2 (answer 6a): "Ã«" -> "ë" and the like.
+    brokenLetters: number;
   };
+  // W3 Part 2 (answer 4a): blank lines kept around centered/right lines
+  // and poems that had empty lines around them in Word.
+  gaps: number;
+  // W3 Part 2: Word notes kept in the ebook (footnotes at the end of
+  // their chapter, endnotes in the "Shënime" chapter); `dropped` = note
+  // texts whose reference was not found in the book.
+  notes: { footnotes: number; endnotes: number; dropped: number };
+  // W3 Part 2 (answer 5a): words typed without ë/ç, when it looks like a
+  // habit; reported only, never corrected.
+  missingLetters: MissingLetters | null;
   trackedChanges: boolean;
   comments: boolean;
   guesses: CleanupGuess[];
@@ -142,7 +155,11 @@ export function emptyCleanupReport(): CleanupReport {
       dropCapsJoined: 0,
       headingNumbersAdded: 0,
       paragraphsSplit: 0,
+      brokenLetters: 0,
     },
+    gaps: 0,
+    notes: { footnotes: 0, endnotes: 0, dropped: 0 },
+    missingLetters: null,
     trackedChanges: false,
     comments: false,
     guesses: [],
@@ -188,6 +205,15 @@ function isTocBlock(sdt: XElem): boolean {
     if (/table of contents/i.test(getAttr(g, "w:val") ?? "")) return true;
   }
   return false;
+}
+
+// W3 Part 2 (answer 4a): one blank line, however many empty lines the
+// author typed. A non-breaking space keeps it through Mammoth (which
+// drops empty paragraphs) and through the ebook's empty-element clean-up.
+function gapParagraph(): XElem {
+  const p = el("w:p", "", [textRun("\u00a0")]);
+  setParagraphStyle(p, LIBRUM_STYLES.gap.id);
+  return p;
 }
 
 function sceneBreakParagraph(): XElem {
@@ -371,6 +397,7 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
       mark(sb, `${SCENE_BREAK_MARK_PREFIX}${index}`);
       out.push(sb);
     }
+    if (p?.gapBefore) out.push(gapParagraph());
     if (p?.splitAtBreaks) {
       let first = true;
       for (const part of splitAtLineBreaks(c)) {
@@ -397,6 +424,7 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
   report.chapters = structure.chapters;
   report.subheadings = structure.subheadings;
   report.sceneBreaks = structure.sceneBreaks;
+  report.gaps = structure.gaps;
   report.quoteStyle = fixQuotes ? quoteStyle : "off";
   report.fixes.emptyLinesRemoved = structure.emptyRemoved;
   report.fixes.paragraphsSplit = structure.paragraphsSplit;
