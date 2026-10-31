@@ -9,6 +9,9 @@ import {
   UNSAFE_MANUSCRIPT_PATHS,
 } from "@/lib/book-storage-path-test-fixtures";
 import { canonicalBookCoverPath, canonicalBookManuscriptPath, isNewBookCoverPath } from "@/lib/book-storage-path";
+import sharp from "sharp";
+import { generateEpub } from "@/lib/epub-generator";
+import { embedCoverInLibrumEpub, readLibrumEbookCover } from "@/lib/epub-cover";
 
 // BOOK-STORAGE-MUTATION-AUTH-1 (F5): the real createBook/updateBook/
 // deleteBook actions against one recording Supabase double. Every
@@ -63,6 +66,16 @@ let deleteResult: Result | null;
 let removeError: unknown = null;
 let failUploadsTo: Set<string> = new Set();
 let storedObjects: Record<string, Buffer> = {};
+// W7: what each upload carried, by "<bucket>:<path>".
+let uploadedBytes: Record<string, Buffer> = {};
+// W7 r2: Storage metadata per stored object, what each upload carried, and
+// an info() failure switch.
+let storedMetadata: Record<string, Record<string, string>> = {};
+let uploadedMetadata: Record<string, Record<string, string> | undefined> = {};
+let infoError: unknown = null;
+let failDownloadsOf: Set<string> = new Set();
+// W7: the author's own pen_names read for the ebook's dc:creator.
+let penNameReadResult: Result = { data: { name: "Emri i Penës" }, error: null };
 // PEN-2 (L10): every Storage call made through the catalog writer
 // (service role), as "<op>:<bucket>".
 let writerStorageOps: string[] = [];
@@ -76,6 +89,7 @@ function query(table: string) {
     if (op === "select") {
       if (table === "books") return bookReadResult;
       if (table === "bundle_books") return bundleBooksResult;
+      if (table === "pen_names") return penNameReadResult;
       if (table === "purchases" || table === "author_book_purchases") return { data: null, error: null, count: 0 } as Result;
       throw new Error(`unexpected read of ${table}`);
     }
@@ -138,14 +152,25 @@ function storageBucket(bucket: string) {
     events.push(`storage:${op}:${bucket}`);
   };
   return {
-    upload: async (path: unknown) => {
+    upload: async (path: unknown, bytes?: unknown, options?: unknown) => {
       record("upload", [path]);
+      uploadedBytes[`${bucket}:${String(path)}`] = bytes as Buffer;
+      uploadedMetadata[`${bucket}:${String(path)}`] = (options as { metadata?: Record<string, string> } | undefined)?.metadata;
       return failUploadsTo.has(`${bucket}:${String(path)}`) || failUploadsTo.has(`${bucket}:*`)
         ? { error: { message: "upload failed" } }
         : { error: null };
     },
+    // W7 r2: object info -- the custom metadata the object was stored with.
+    info: async (path: unknown) => {
+      record("info", [path]);
+      const key = `${bucket}:${String(path)}`;
+      if (infoError) return { data: null, error: infoError };
+      if (!storedObjects[key]) return { data: null, error: { message: "not found" } };
+      return { data: { name: String(path), metadata: storedMetadata[key] ?? {} }, error: null };
+    },
     download: async (path: unknown) => {
       record("download", [path]);
+      if (failDownloadsOf.has(`${bucket}:${String(path)}`)) return { data: null, error: { message: "download failed" } };
       const bytes = storedObjects[`${bucket}:${String(path)}`];
       return bytes
         ? { data: { arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) }, error: null }
@@ -218,6 +243,11 @@ const NEW_EPUB = expect.stringMatching(
 const RANDOM_STORED = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
 const uploadedCoverKey = () => String(storageCalls.find((c) => c.op === "upload" && c.bucket === "covers")?.paths[0]);
 
+// W7 r2: the one Storage question a cover change asks about a stored key
+// (info() on the book's own stored ebook: did Librum make it?). No download.
+const OWN_EPUB_INFO = { op: "info", bucket: "manuscripts", paths: [OWN_EPUB] };
+const OWN_EPUB_READ = { op: "download", bucket: "manuscripts", paths: [OWN_EPUB] };
+
 async function validEpub(): Promise<Buffer> {
   const zip = new JSZip();
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
@@ -231,6 +261,9 @@ async function validEpub(): Promise<Buffer> {
   );
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
+
+// W7: the default stored ebook -- a directly uploaded one, never rewritten.
+const DIRECT_EPUB = await validEpub();
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
@@ -293,8 +326,16 @@ beforeEach(() => {
   deleteResult = null;
   removeError = null;
   failUploadsTo = new Set();
-  storedObjects = {};
+  // W7: a cover change reads the book's own stored ebook to see whether
+  // Librum made it; by default it is a directly uploaded one (untouched).
+  storedObjects = { [`manuscripts:${OWN_EPUB}`]: DIRECT_EPUB };
   writerStorageOps = [];
+  uploadedBytes = {};
+  storedMetadata = {};
+  uploadedMetadata = {};
+  infoError = null;
+  failDownloadsOf = new Set();
+  penNameReadResult = { data: { name: "Emri i Penës" }, error: null };
   consoleOutput = [];
   bundleBooksResult = { data: [], error: null };
   resetBookReviewsDouble();
@@ -374,6 +415,7 @@ describe("updateBook with a replacement", () => {
     expect(payload.cover_path).toEqual(NEW_JPG);
     expect(payload).not.toHaveProperty("file_path");
     expect(storageCalls).toEqual([
+      OWN_EPUB_INFO,
       { op: "upload", bucket: "covers", paths: [NEW_JPG] },
       { op: "remove", bucket: "covers", paths: [OWN_PNG] },
     ]);
@@ -384,7 +426,8 @@ describe("updateBook with a replacement", () => {
   // shrunk JPEG, so the extension is always .jpg.
   it("the key is a fresh random folder and always .jpg -- not the file name, account or book", async () => {
     await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
-    expect(storageCalls[0]).toEqual({ op: "upload", bucket: "covers", paths: [NEW_JPG] });
+    expect(storageCalls[0]).toEqual(OWN_EPUB_INFO);
+    expect(storageCalls[1]).toEqual({ op: "upload", bucket: "covers", paths: [NEW_JPG] });
     expect(uploadedCoverKey()).not.toContain(USER_ID);
     expect(uploadedCoverKey()).not.toContain(BOOK_ID);
     expect(uploadedCoverKey()).not.toContain("anything");
@@ -392,7 +435,7 @@ describe("updateBook with a replacement", () => {
 
   it("covers are uploaded and removed with the catalog writer (service role, C9), never the session", async () => {
     await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
-    expect(writerStorageOps).toEqual(["upload:covers", "remove:covers"]);
+    expect(writerStorageOps).toEqual(["info:manuscripts", "upload:covers", "remove:covers"]);
   });
 
   // PEN-2 (L10): every replace gets a new key, so even a same-extension
@@ -401,7 +444,12 @@ describe("updateBook with a replacement", () => {
   it("a same-extension replace gets a new key and removes the previous object after the write", async () => {
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), PNG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
     expect(uploadedCoverKey()).not.toBe(OWN_PNG);
-    expect(events).toEqual(["storage:upload:covers", "db:update:books", "storage:remove:covers"]);
+    expect(events).toEqual([
+      "storage:info:manuscripts",
+      "storage:upload:covers",
+      "db:update:books",
+      "storage:remove:covers",
+    ]);
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [OWN_PNG] }]);
   });
 
@@ -424,7 +472,12 @@ describe("updateBook with a replacement", () => {
   it("the exact own-book legacy .jpeg cover is removed only after the write, and never re-created", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
-    expect(events).toEqual(["storage:upload:covers", "db:update:books", "storage:remove:covers"]);
+    expect(events).toEqual([
+      "storage:info:manuscripts",
+      "storage:upload:covers",
+      "db:update:books",
+      "storage:remove:covers",
+    ]);
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [LEGACY_JPEG] }]);
     expect(everyStorageKey().filter((k) => String(k).endsWith(".jpeg"))).toEqual([LEGACY_JPEG]);
     expect((bookUpdates()[0].payload as Record<string, unknown>).cover_path).toEqual(NEW_JPG);
@@ -484,7 +537,7 @@ describe("updateBook never hands an unsafe stored path to Storage", () => {
   it.each(coverCases)("stored cover %s: replacement succeeds, the old value is left untouched", async (_label, value) => {
     bookReadResult = { data: row({ cover_path: value }), error: null };
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
-    expect(storageCalls).toEqual([{ op: "upload", bucket: "covers", paths: [NEW_JPG] }]);
+    expect(storageCalls).toEqual([OWN_EPUB_INFO, { op: "upload", bucket: "covers", paths: [NEW_JPG] }]);
     expect((bookUpdates()[0].payload as Record<string, unknown>).cover_path).toEqual(NEW_JPG);
     if (value.trim().length > 8) expect(loggedText()).not.toContain(value);
   });
@@ -564,7 +617,7 @@ describe("updateBook fails closed on identity, read and write failures", () => {
     await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [uploadedCoverKey()] }]);
     expect(isNewBookCoverPath(uploadedCoverKey())).toBe(true);
-    expect(writerStorageOps).toEqual(["upload:covers", "remove:covers"]);
+    expect(writerStorageOps).toEqual(["info:manuscripts", "upload:covers", "remove:covers"]);
   });
 });
 
@@ -802,7 +855,12 @@ describe("legacy cover: every ASCII spelling of jpeg, bound to the exact author 
     const stored = `${USER_ID}/${BOOK_ID}-cover.${ext}`;
     bookReadResult = { data: row({ cover_path: stored }), error: null };
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
-    expect(events).toEqual(["storage:upload:covers", "db:update:books", "storage:remove:covers"]);
+    expect(events).toEqual([
+      "storage:info:manuscripts",
+      "storage:upload:covers",
+      "db:update:books",
+      "storage:remove:covers",
+    ]);
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [stored] }]);
     expect(bookUpdates()[0].filters).toContainEqual({ kind: "eq", column: "cover_path", value: stored });
   });
@@ -914,14 +972,28 @@ describe("a failed removal is logged without any key and never reverses the comp
 });
 
 // ============================================================
-describe("no book action ever moves, copies, signs or downloads a stored key", () => {
-  it("across update and delete flows, Storage sees only uploads of new keys, temp downloads and proven removals", async () => {
+describe("no book action ever moves, copies, signs or downloads a stored key it does not need", () => {
+  it("across update and delete flows, Storage sees only uploads of new keys, temp downloads, proven removals and (W7) one info() on the own stored ebook", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
     await run(updateBook(BOOK_ID, editForm()));
     await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
     await run(updateBook(BOOK_ID, await withManuscript(editForm())));
     await run(deleteBook(BOOK_ID));
-    expect(storageCalls.map((c) => c.op).filter((op) => !["upload", "remove"].includes(op))).toEqual([]);
+    const others = storageCalls.filter((c) => !["upload", "remove"].includes(c.op));
+    // W7 r2: exactly one info() -- the cover change asking whether Librum
+    // made its own stored ebook. A directly uploaded ebook is never
+    // downloaded; neither the plain edit, the direct-EPUB replacement nor
+    // the delete asks anything.
+    expect(others).toEqual([OWN_EPUB_INFO]);
+  });
+
+  it("W7: an unsafe stored manuscript key is never read on a cover change", async () => {
+    for (const [, value] of UNSAFE_MANUSCRIPT_PATHS) {
+      storageCalls = [];
+      bookReadResult = { data: row({ file_path: value }), error: null };
+      await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
+      expect(storageCalls.filter((c) => c.op === "download" || c.op === "info")).toEqual([]);
+    }
   });
 });
 
@@ -1152,5 +1224,262 @@ describe("deleteBook and review snapshots (ADMIN-3)", () => {
     expect(await run(deleteBook(BOOK_ID))).toBe("/dashboard?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20fshihet%20tani");
     expect(bookDeletes()).toEqual([]);
     expect(storageCalls).toEqual([]);
+  });
+});
+
+// ============================================================
+// W7 (Renato 10-31: 1a 2a 3a 4b 5a; r2: Q1 b-lite, Q2 a, Q3 a): the cover
+// inside a Librum-made (Word) ebook. Directly uploaded ebooks are never
+// touched, and a failed swap never fails the save (one more line in the
+// success message instead).
+describe("W7: the cover inside a Librum-made ebook", () => {
+  const SAVED = "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua";
+  // Q1 b-lite: a fixed flag; the page shows the one sentence for it.
+  const WARNING = "&ebook_cover=0";
+  const SAVED_WITH_WARNING = `${SAVED}${WARNING}`;
+  const MARKER = { librum: "made" };
+
+  async function librumEpub(): Promise<Buffer> {
+    return generateEpub({
+      bookId: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+      title: "Titulli i vjetër",
+      authorName: "Emri i vjetër",
+      sections: [{ heading: "Kapitulli 1", html: "<p>Tekst.</p>" }],
+      images: [],
+    });
+  }
+
+  async function storeOwnLibrumEbook(bytes?: Buffer, marked = true): Promise<void> {
+    storedObjects[`manuscripts:${OWN_EPUB}`] = bytes ?? (await librumEpub());
+    if (marked) storedMetadata[`manuscripts:${OWN_EPUB}`] = MARKER;
+  }
+
+  async function bigPng(): Promise<Buffer> {
+    return sharp({ create: { width: 2000, height: 3000, channels: 3, background: "#336699" } }).png().toBuffer();
+  }
+
+  async function opfOf(bytes: Buffer): Promise<string> {
+    return (await JSZip.loadAsync(bytes)).file("OEBPS/content.opf")!.async("string");
+  }
+
+  const uploadedEbookKey = () =>
+    String(storageCalls.find((c) => c.op === "upload" && c.bucket === "manuscripts")?.paths[0]);
+  const uploadedEbook = () => uploadedBytes[`manuscripts:${uploadedEbookKey()}`];
+  const uploadedEbookMetadata = () => uploadedMetadata[`manuscripts:${uploadedEbookKey()}`];
+  const uploadedCover = () => uploadedBytes[`covers:${uploadedCoverKey()}`];
+
+  it("createBook: a Word-made ebook is saved with the cover (1600px) as first page, the saved title, the pen name and the marker", async () => {
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
+    const f = withCover(editForm(), await bigPng());
+    f.set("title", "Titulli i ri");
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(createBook(f))).toBe("/dashboard");
+
+    const ebook = uploadedEbook()!;
+    const opf = await opfOf(ebook);
+    expect(opf).toContain('properties="cover-image"');
+    expect(opf).toMatch(/<spine>\n<itemref idref="librum-cover-page"\/>/);
+    expect(opf).toContain("<dc:title>Titulli i ri</dc:title>");
+    expect(opf).toContain("<dc:creator>Emri i Penës</dc:creator>");
+    const inside = (await readLibrumEbookCover(ebook))!;
+    expect((await sharp(inside).metadata()).width).toBe(1600);
+    expect((await sharp(inside).metadata()).format).toBe("jpeg");
+    // The site keeps its 800px cover.
+    expect((await sharp(uploadedCover()).metadata()).width).toBe(800);
+    expect(uploadedEbookMetadata()).toEqual(MARKER);
+  });
+
+  it("createBook: 2a -- a directly uploaded ebook is stored byte-for-byte as uploaded, with no marker", async () => {
+    const direct = await validEpub();
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = direct;
+    const f = withCover(editForm(), PNG);
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(createBook(f))).toBe("/dashboard");
+    expect(uploadedEbook()).toEqual(direct);
+    expect(uploadedEbookMetadata()).toBeUndefined();
+  });
+
+  it("createBook: an unreadable pen name keeps the name already inside the ebook", async () => {
+    penNameReadResult = { data: null, error: { message: "boom" } };
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
+    const f = withCover(editForm(), PNG);
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(createBook(f))).toBe("/dashboard");
+    expect(await opfOf(uploadedEbook()!)).toContain("<dc:creator>Emri i vjetër</dc:creator>");
+  });
+
+  it("updateBook, cover only: a marked Word-made ebook is rewritten to a fresh versioned key, compare-and-set on file_path", async () => {
+    await storeOwnLibrumEbook();
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), await bigPng())))).toBe(SAVED);
+
+    expect(storageCalls.slice(0, 4)).toEqual([
+      OWN_EPUB_INFO,
+      OWN_EPUB_READ,
+      { op: "upload", bucket: "covers", paths: [NEW_JPG] },
+      { op: "upload", bucket: "manuscripts", paths: [NEW_EPUB] },
+    ]);
+    const [update] = bookUpdates();
+    expect(update.payload).toMatchObject({ cover_path: NEW_JPG, file_path: NEW_EPUB, status: "draft" });
+    expect(update.filters).toContainEqual({ kind: "eq", column: "file_path", value: OWN_EPUB });
+    expect(update.filters).toContainEqual({ kind: "eq", column: "cover_path", value: OWN_PNG });
+    const inside = (await readLibrumEbookCover(uploadedEbook()!))!;
+    expect((await sharp(inside).metadata()).width).toBe(1600);
+    expect(await opfOf(uploadedEbook()!)).toContain("<dc:title>Title</dc:title>");
+    // The rewritten ebook keeps the marker, so the next cover change works.
+    expect(uploadedEbookMetadata()).toEqual(MARKER);
+    // The superseded ebook goes through the retention rule, after the write.
+    expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toContain("removeUnretainedManuscripts");
+    expect(events.indexOf("db:update:books")).toBeLessThan(events.indexOf("storage:remove:manuscripts"));
+  });
+
+  it("updateBook, cover only on a live Word-made book: one draft write with both new keys, then a review request", async () => {
+    bookReadResult = { data: row({ status: "published" }), error: null };
+    await storeOwnLibrumEbook();
+    await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
+    expect(bookUpdates()).toHaveLength(1);
+    expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG, file_path: NEW_EPUB, status: "draft", librum_choice_at: null });
+    expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["requestBookReview", "removeUnretainedManuscripts"]);
+  });
+
+  it("updateBook, cover only: R2 -- a direct-upload stored ebook is only asked about (info), never downloaded or rewritten", async () => {
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
+    expect(storageCalls.filter((c) => c.bucket === "manuscripts")).toEqual([OWN_EPUB_INFO]);
+    expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
+  });
+
+  it("updateBook, cover only: R2 -- a Word-made ebook stored before W7 (no marker) is not downloaded and not rewritten (5a)", async () => {
+    await storeOwnLibrumEbook(undefined, false);
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
+    expect(storageCalls.filter((c) => c.bucket === "manuscripts")).toEqual([OWN_EPUB_INFO]);
+    expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
+  });
+
+  it("updateBook, cover only: a failed info() keeps the cover change, skips the swap and logs it", async () => {
+    await storeOwnLibrumEbook();
+    infoError = { message: "info failed" };
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
+    expect(storageCalls.filter((c) => c.bucket === "manuscripts")).toEqual([OWN_EPUB_INFO]);
+    expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG });
+    expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
+    expect(loggedText()).toContain("updateBook: could not check whether Librum made the current ebook");
+  });
+
+  it("updateBook, cover only: a marked ebook whose download fails keeps the cover change, logs, and tells the author (Q1)", async () => {
+    await storeOwnLibrumEbook();
+    failDownloadsOf = new Set([`manuscripts:${OWN_EPUB}`]);
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED_WITH_WARNING);
+    expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG });
+    expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
+    expect(loggedText()).toContain("updateBook: current ebook not read; cover not put inside it");
+  });
+
+  it("updateBook, cover only: a marked ebook that is not Librum's shape after download is left untouched (second gate)", async () => {
+    await storeOwnLibrumEbook(await validEpub());
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
+    expect(loggedText()).toContain("updateBook: marked ebook is not a Librum-made package");
+    expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
+  });
+
+  it("updateBook, cover only on a live book whose swap fails: the Q1 line follows the live-book message", async () => {
+    bookReadResult = { data: row({ status: "published" }), error: null };
+    await storeOwnLibrumEbook();
+    failDownloadsOf = new Set([`manuscripts:${OWN_EPUB}`]);
+    const liveSaved = `/dashboard?success=${encodeURIComponent(
+      "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
+    )}`;
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(`${liveSaved}${WARNING}`);
+    expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG, status: "draft" });
+  });
+
+  it("updateBook, new Word file only: the sharp cover inside the marked current ebook is carried over (4b)", async () => {
+    const carried = Buffer.from(await sharp(await bigPng()).resize({ width: 1600 }).jpeg().toBuffer());
+    const current = await embedCoverInLibrumEpub(await librumEpub(), { coverJpeg: carried });
+    if (!current.ok) throw new Error("fixture embed failed");
+    await storeOwnLibrumEbook(current.bytes);
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
+    const f = editForm();
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(await readLibrumEbookCover(uploadedEbook()!)).toEqual(carried);
+    expect(uploadedEbookMetadata()).toEqual(MARKER);
+    expect(storageCalls.some((c) => c.bucket === "covers" && c.op !== "remove")).toBe(false);
+    expect(bookUpdates()[0].payload).not.toHaveProperty("cover_path");
+  });
+
+  it("updateBook, new Word file only: an unmarked current ebook is never downloaded; the stored site cover is used", async () => {
+    const carried = Buffer.from(await sharp(await bigPng()).resize({ width: 1600 }).jpeg().toBuffer());
+    const current = await embedCoverInLibrumEpub(await librumEpub(), { coverJpeg: carried });
+    if (!current.ok) throw new Error("fixture embed failed");
+    await storeOwnLibrumEbook(current.bytes, false);
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
+    storedObjects[`covers:${OWN_PNG}`] = JPG;
+    const f = editForm();
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(storageCalls).not.toContainEqual(OWN_EPUB_READ);
+    expect(storageCalls).toContainEqual({ op: "download", bucket: "covers", paths: [OWN_PNG] });
+    expect(await readLibrumEbookCover(uploadedEbook()!)).not.toEqual(carried);
+  });
+
+  it("updateBook, new Word file and new cover together: the new cover goes in at 1600px, nothing old is read", async () => {
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
+    const f = withCover(editForm(), await bigPng());
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    const inside = (await readLibrumEbookCover(uploadedEbook()!))!;
+    expect((await sharp(inside).metadata()).width).toBe(1600);
+    expect(storageCalls.filter((c) => (c.op === "download" || c.op === "info") && c.paths[0] !== TEMP_EPUB)).toEqual([]);
+  });
+
+  it("updateBook, new Word file only, current ebook has no cover: the stored site cover is used, as a JPEG", async () => {
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
+    storedObjects[`covers:${OWN_PNG}`] = JPG;
+    const f = editForm();
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(storageCalls).toContainEqual({ op: "download", bucket: "covers", paths: [OWN_PNG] });
+    expect((await sharp((await readLibrumEbookCover(uploadedEbook()!))!).metadata()).format).toBe("jpeg");
+  });
+
+  it("updateBook, new Word file only: R1 -- a stored PNG site cover is re-encoded as a JPEG inside the ebook", async () => {
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
+    storedObjects[`covers:${OWN_PNG}`] = await bigPng();
+    const f = editForm();
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    const inside = (await readLibrumEbookCover(uploadedEbook()!))!;
+    expect([...inside.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+    expect(await sharp(inside).metadata()).toMatchObject({ format: "jpeg", width: 1600 });
+  });
+
+  it("updateBook, new Word file only, no cover anywhere: saved without one, logged, and the author is told (Q1)", async () => {
+    const fresh = await librumEpub();
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = fresh;
+    const f = editForm();
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED_WITH_WARNING);
+    expect(uploadedEbook()).toEqual(fresh);
+    // Still Librum-made, so still marked.
+    expect(uploadedEbookMetadata()).toEqual(MARKER);
+    expect(loggedText()).toContain("updateBook: cover not put inside the Librum-made ebook; ebook kept as it was");
+    expect(loggedText()).toContain("cover_unavailable");
+  });
+
+  it("updateBook, new Word file only: an unsafe stored cover key is never read", async () => {
+    bookReadResult = { data: row({ cover_path: `${OTHER_AUTHOR}/${OTHER_BOOK}-cover.png`, file_path: null }), error: null };
+    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
+    const f = editForm();
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED_WITH_WARNING);
+    expect(storageCalls.filter((c) => c.op === "download" && c.bucket === "covers")).toEqual([]);
+  });
+
+  it("updateBook, new direct EPUB and new cover: the ebook is stored byte-for-byte, with no marker (2a)", async () => {
+    const direct = await validEpub();
+    const f = withCover(editForm(), JPG);
+    f.set("manuscript", new File([new Uint8Array(direct)], "book.epub"));
+    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(uploadedEbook()).toEqual(direct);
+    expect(uploadedEbookMetadata()).toBeUndefined();
   });
 });
