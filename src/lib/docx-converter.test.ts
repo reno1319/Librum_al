@@ -23,11 +23,13 @@ import {
 } from "./docx-test-fixtures";
 
 // W3 Part 2 (answer 2a): Word notes are kept only with the clean-up
-// pass on. Production keeps removing them, with the warning, until the
-// switch step; these tests pin that.
-function onProduction() {
+// pass on. With the emergency switch DOCX_CLEANUP_OFF set (here on a
+// Production deployment), notes are removed with the warning, exactly
+// as before W3; these tests pin that.
+function cleanupSwitchedOff() {
   vi.stubEnv("VERCEL", "1");
   vi.stubEnv("VERCEL_ENV", "production");
+  vi.stubEnv("DOCX_CLEANUP_OFF", "1");
 }
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -175,8 +177,8 @@ describe("convertDocxToDocument", () => {
     expect(result.sections[0].html).toContain("After the break.");
   });
 
-  it("gives an unambiguous 'not preserved' warning about footnotes -- never merely 'may need review' (Production)", async () => {
-    onProduction();
+  it("gives an unambiguous 'not preserved' warning about footnotes -- never merely 'may need review' (clean-up switched off)", async () => {
+    cleanupSwitchedOff();
     const zip = new JSZip();
     const base = await buildDocxBytes({ bodyXml: paragraph("Body text.") });
     const loaded = await JSZip.loadAsync(base);
@@ -208,8 +210,8 @@ describe("convertDocxToDocument", () => {
     expect(warning?.message).not.toMatch(/may (require|need)/i);
   });
 
-  it("cleanly removes Mammoth's own footnote reference and note-list markup rather than leaving a dead cross-chapter link (Production)", async () => {
-    onProduction();
+  it("cleanly removes Mammoth's own footnote reference and note-list markup rather than leaving a dead cross-chapter link (clean-up switched off)", async () => {
+    cleanupSwitchedOff();
     // Built directly (not via the fixture helper) because this needs a
     // real w:footnoteReference + footnotes.xml pair, empirically
     // verified against the installed Mammoth build to actually produce
@@ -587,8 +589,8 @@ describe("W2 converter fixes", () => {
     expect(result.sections[0].html).toBe("");
   });
 
-  it("removes the empty <sup> and <ol> a removed footnote leaves behind (Production)", async () => {
-    onProduction();
+  it("removes the empty <sup> and <ol> a removed footnote leaves behind (clean-up switched off)", async () => {
+    cleanupSwitchedOff();
     const zip = new JSZip();
     zip.file(
       "[Content_Types].xml",

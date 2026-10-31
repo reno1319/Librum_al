@@ -60,18 +60,19 @@ import {
 // author preview (W4) can show and undo it. If anything goes wrong the
 // caller converts the original file exactly as before.
 
-// Renato's answer 10b (31 Oct): W3 must not reach Production before the
-// author preview (W4) exists. The pass (and the book-style paragraph
-// CSS in epub-generator.ts) runs only on staging/preview deployments
-// and local machines; on Production, or on any Vercel deployment
-// whose environment is unclear, conversion stays exactly as before.
-// W4 (the author preview) keeps it (Renato 31 Oct, 8b): it is turned
-// on for Production in a separate small change, after the preview has
-// been tried on staging.
+// Renato's answer 10b (31 Oct) kept W3 off Production until the author
+// preview (W4) existed and had been tried on staging. That try-out
+// passed (31 Oct, footnote test file), and his answers 1a/2a turn the
+// pass (and the book-style paragraph CSS in epub-generator.ts) on
+// everywhere, with one emergency off switch: DOCX_CLEANUP_OFF. Any
+// non-empty value (after trimming spaces) turns the pass off, so a
+// typo can only ever switch it off, never leave it on by mistake.
+// Unset or empty means on. Server-only (no NEXT_PUBLIC_ prefix). With
+// it off, conversion is exactly as it was before W3. On Vercel the
+// switch takes effect after a redeploy.
 export function cleanupPassEnabled(env: Record<string, string | undefined> = process.env): boolean {
-  const vercelEnv = env.VERCEL_ENV;
-  if (vercelEnv === "preview" || vercelEnv === "development") return true;
-  return !vercelEnv && !env.VERCEL;
+  const off = env.DOCX_CLEANUP_OFF;
+  return off === undefined || off.trim() === "";
 }
 
 export const CLEANUP_SAMPLE_TEXT_MAX = 80;
