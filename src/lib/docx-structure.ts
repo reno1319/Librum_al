@@ -67,6 +67,14 @@ export type StructureOptions = {
   // Chapter labels the author wants kept apart from the line after them
   // (undo of a "merged_title" guess; the label's paragraph number).
   keepTitleApart?: number[];
+  // W4 preview: single-empty-line suggestions the author accepts, and
+  // scene breaks the author takes out (the paragraph after the gap).
+  sceneBreak?: number[];
+  noSceneBreak?: number[];
+  // W4 preview: sub-headings and poems the author turns back into
+  // normal text (the guess's paragraph number).
+  notSubheading?: number[];
+  notVerse?: number[];
 };
 
 export type StructureResult = {
@@ -489,10 +497,22 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   }
 
   // Author overrides from the preview (W4).
+  const notSubSet = new Set(options.notSubheading ?? []);
+  // Chapters the author says are not chapters (for their title lines,
+  // below the title-line rules).
+  const authorRemoved = new Set<number>();
   for (let j = 0; j < n; j++) {
     const f = para(j);
     if (!f || f.empty) continue;
     const idx = indexOf(j);
+    if (notSubSet.has(idx) && subSet.has(j) && !makeSet.has(idx)) {
+      subSet.delete(j);
+      const g = chapterGuessAt(idx);
+      if (g) {
+        g.applied = false;
+        g.signs.push("kept as normal text by the author");
+      }
+    }
     if (!makeSet.has(idx) && !notSet.has(idx)) continue;
     if (makeSet.has(idx) && !chapterSet.has(j)) {
       chapterSet.add(j);
@@ -502,7 +522,11 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     }
     if (notSet.has(idx) && chapterSet.has(j)) {
       chapterSet.delete(j);
+      authorRemoved.add(j);
       if (plans.get(j)?.style === "chapter") delete plan(j).style;
+      // A line the author styled Heading 1 by mistake: Word's style
+      // would still make it a chapter, so it is set as plain text.
+      if (f.headingLevel === 1) plan(j).style = "plain";
     }
     const g = chapterGuessAt(idx);
     if (g) {
@@ -585,6 +609,32 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
       if (guess) {
         guess.applied = false;
         guess.signs.push("title line of the chapter label above");
+      }
+    }
+  }
+  // W4 (audit F1): "not a chapter" on "Kapitulli 2" whose title line
+  // ("Kthimi") was joined to it removes the whole chapter: the title
+  // line must not become the chapter instead. Same for a bare label
+  // whose next line is a chapter on the same page with nothing between
+  // (the safety net's case below).
+  for (const j of [...authorRemoved].sort((a, b) => a - b)) {
+    if (keepApartSet.has(indexOf(j))) continue;
+    let lines = titleLinesOf(j);
+    if (lines.length === 0 && LABEL_ONLY_RE.test(para(j)!.trimmed)) {
+      const k = nextContent(j);
+      const g = k >= 0 ? para(k) : null;
+      if (g && chapterSet.has(k) && !newPage[k] && !LABEL_ONLY_RE.test(g.trimmed) && !CHAPTER_WORD_RE.test(g.trimmed) && !NUMBER_LABEL_RE.test(g.trimmed)) {
+        lines = [k];
+      }
+    }
+    for (const k of lines) {
+      if (!chapterSet.has(k) || makeSet.has(indexOf(k))) continue;
+      chapterSet.delete(k);
+      if (para(k)!.headingLevel === 1) plan(k).style = "plain";
+      const guess = chapterGuessAt(indexOf(k));
+      if (guess) {
+        guess.applied = false;
+        guess.signs.push("title of a chapter the author says is not a chapter");
       }
     }
   }
@@ -775,7 +825,8 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   }
 
   // ---- 6. alignment, poems ----
-  const isHeading = (j: number) => chapterSet.has(j) || subSet.has(j) || !!para(j)?.headingLevel;
+  const isHeading = (j: number) =>
+    chapterSet.has(j) || subSet.has(j) || (!!para(j)?.headingLevel && plans.get(j)?.style !== "plain");
   const plain = textParas.filter((j) => !isHeading(j) && !isRemoved(j) && !plans.get(j)?.replaceWithSceneBreak);
   const plainSet = new Set(plain);
   const centeredCount = plain.filter((j) => centered(para(j)!)).length;
@@ -803,21 +854,25 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   // Poems typed one line per paragraph: 4+ short lines in a row (empty
   // lines between = stanza gaps), mostly not ending like sentences.
   {
+    const notVerseSet = new Set(options.notVerse ?? []);
     let run: number[] = [];
     const flush = () => {
       if (run.length >= 4) {
         const open = run.filter((j) => !/[.!?…"”»]$/.test(para(j)!.trimmed)).length;
         if (open / run.length >= 0.6) {
-          run.forEach((j, idx) => {
-            plan(j).style = idx > 0 && emptiesBefore[j] > 0 ? "verseStanza" : "verse";
-          });
+          const off = notVerseSet.has(indexOf(run[0]));
+          if (!off) {
+            run.forEach((j, idx) => {
+              plan(j).style = idx > 0 && emptiesBefore[j] > 0 ? "verseStanza" : "verse";
+            });
+          }
           guesses.push({
             paragraph: indexOf(run[0]),
             kind: "verse",
             text: truncate(para(run[0])!.trimmed),
             confidence: "medium",
-            applied: true,
-            signs: [`${run.length} short lines`],
+            applied: !off,
+            signs: [`${run.length} short lines`, ...(off ? ["kept as normal text by the author"] : [])],
           });
         }
       }
@@ -971,21 +1026,27 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     } else if (!prevC && pos - segStartPos[c.seg] < 3) nearStart.add(c.b);
   }
   let sceneBreaks = 0;
+  const sceneBreakSet = new Set(options.sceneBreak ?? []);
+  const noSceneBreakSet = new Set(options.noSceneBreak ?? []);
   for (const c of candidates) {
     if (dense.has(c.b)) continue;
     const e = emptiesBefore[c.b];
-    const apply = e >= 2 && !nearStart.has(c.b) && !c.spaced;
+    const auto = e >= 2 && !nearStart.has(c.b) && !c.spaced;
+    // The author's choice in the preview wins (W4).
+    const byAuthor = noSceneBreakSet.has(indexOf(c.b)) ? false : sceneBreakSet.has(indexOf(c.b)) ? true : null;
+    const apply = byAuthor ?? auto;
     if (apply) plan(c.b).sceneBreakBefore = true;
     guesses.push({
       paragraph: indexOf(c.b),
       kind: "scene_break",
       text: truncate(para(c.b)!.trimmed),
-      confidence: apply ? "high" : "medium",
+      confidence: auto ? "high" : "medium",
       applied: apply,
       signs: [
         `${e} empty line${e > 1 ? "s" : ""} between paragraphs`,
         ...(nearStart.has(c.b) ? ["close to the chapter start"] : []),
         ...(c.spaced ? ["the chapter uses empty lines as spacing"] : []),
+        ...(byAuthor !== null && byAuthor !== auto ? [byAuthor ? "added by the author" : "taken out by the author"] : []),
       ],
     });
   }

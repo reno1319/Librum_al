@@ -5,6 +5,7 @@ import {
   findAll,
   firstChild,
   getAttr,
+  walk,
   parseXml,
   serializeXml,
   type XElem,
@@ -63,7 +64,9 @@ import {
 // CSS in epub-generator.ts) runs only on staging/preview deployments
 // and local machines; on Production, or on any Vercel deployment
 // whose environment is unclear, conversion stays exactly as before.
-// W4 removes this switch.
+// W4 (the author preview) keeps it (Renato 31 Oct, 8b): it is turned
+// on for Production in a separate small change, after the preview has
+// been tried on staging.
 export function cleanupPassEnabled(env: Record<string, string | undefined> = process.env): boolean {
   const vercelEnv = env.VERCEL_ENV;
   if (vercelEnv === "preview" || vercelEnv === "development") return true;
@@ -81,8 +84,20 @@ export type CleanupOptions = {
   keepLines?: number[];
   keepContents?: number[];
   keepTitleApart?: number[];
+  sceneBreak?: number[];
+  noSceneBreak?: number[];
+  notSubheading?: number[];
+  notVerse?: number[];
   fixQuotes?: boolean;
+  // W4: mark each paragraph with its Word paragraph number (a bookmark
+  // Mammoth turns into <a id="lbp_N">), so the author preview can say
+  // which line the author tapped. docx-converter.ts strips the marks
+  // before the ebook is built, so the ebook is the same with or without.
+  markParagraphs?: boolean;
 };
+
+export const PARAGRAPH_MARK_PREFIX = "lbp_";
+export const SCENE_BREAK_MARK_PREFIX = "lbs_";
 
 export type CleanupReport = {
   applied: boolean;
@@ -239,6 +254,10 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
     keepLines: options.keepLines,
     keepContents: options.keepContents,
     keepTitleApart: options.keepTitleApart,
+    sceneBreak: options.sceneBreak,
+    noSceneBreak: options.noSceneBreak,
+    notSubheading: options.notSubheading,
+    notVerse: options.notVerse,
   });
   const { plans } = structure;
 
@@ -292,6 +311,43 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
     }
   });
 
+  // Audit N1: the author's own bookmarks with Librum's mark names would
+  // fake a mark in the preview; they are dropped from the marked copy
+  // (the ebook never keeps any of these names either way).
+  const ownMarkIds = new Set<string>();
+  const markNameRe = new RegExp(`^(?:${PARAGRAPH_MARK_PREFIX}|${SCENE_BREAK_MARK_PREFIX})`);
+  const isOwnMark = (c: XNode) =>
+    c.kind === "el" &&
+    ((c.name === "w:bookmarkStart" && markNameRe.test(getAttr(c, "w:name") ?? "")) ||
+      (c.name === "w:bookmarkEnd" && ownMarkIds.has(getAttr(c, "w:id") ?? "")));
+  if (options.markParagraphs) {
+    for (const c of flat) {
+      if (c.kind !== "el") continue;
+      if (c.name === "w:bookmarkStart" && markNameRe.test(getAttr(c, "w:name") ?? "")) ownMarkIds.add(getAttr(c, "w:id") ?? "");
+      walk(c, (e) => {
+        if (e.name === "w:bookmarkStart" && markNameRe.test(getAttr(e, "w:name") ?? "")) ownMarkIds.add(getAttr(e, "w:id") ?? "");
+      });
+    }
+    if (ownMarkIds.size > 0) {
+      for (const c of flat) {
+        if (c.kind !== "el") continue;
+        walk(c, (e) => {
+          e.children = e.children.filter((x) => !isOwnMark(x));
+        });
+        c.children = c.children.filter((x) => !isOwnMark(x));
+      }
+    }
+  }
+  let markId = 0;
+  const mark = (node: XElem, name: string) => {
+    if (!options.markParagraphs) return;
+    // Ids far above Word's own bookmark ids; Mammoth uses only the name.
+    const id = 900_000_000 + markId++;
+    insertAtStart(node, [
+      el("w:bookmarkStart", ` w:id="${id}" w:name="${name}"`),
+      el("w:bookmarkEnd", ` w:id="${id}"`),
+    ]);
+  };
   const out: XNode[] = [];
   let bi = 0;
   for (const c of flat) {
@@ -300,21 +356,34 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
       continue;
     }
     const j = bi++;
+    // A top-level bookmark of the author's with a mark name (N1).
+    if (ownMarkIds.size > 0 && isOwnMark(c)) continue;
     const p = plans.get(j);
     if (p?.remove || p?.mergedAway) continue;
+    const b = blocks[j];
+    const index = b.kind === "p" ? b.index : -1;
     if (p?.replaceWithSceneBreak) {
       out.push(sceneBreakParagraph());
       continue;
     }
-    if (p?.sceneBreakBefore) out.push(sceneBreakParagraph());
+    if (p?.sceneBreakBefore) {
+      const sb = sceneBreakParagraph();
+      mark(sb, `${SCENE_BREAK_MARK_PREFIX}${index}`);
+      out.push(sb);
+    }
     if (p?.splitAtBreaks) {
+      let first = true;
       for (const part of splitAtLineBreaks(c)) {
         stripLeadingWhitespace(part);
         stripTrailingWhitespace(part);
-        if (!readParagraph(part, sheet).empty) out.push(part);
+        if (readParagraph(part, sheet).empty) continue;
+        if (first) mark(part, `${PARAGRAPH_MARK_PREFIX}${index}`);
+        first = false;
+        out.push(part);
       }
       continue;
     }
+    if (c.name === "w:p" && index >= 0) mark(c, `${PARAGRAPH_MARK_PREFIX}${index}`);
     out.push(c);
   }
   body.children = out;

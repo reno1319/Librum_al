@@ -5,6 +5,15 @@ import { parseDocxToDocument, repackageWithTitle } from "@/app/(public)/dashboar
 import { createClient } from "@/lib/supabase/client";
 import type { ConversionWarning } from "@/lib/docx-converter";
 import { fileInputClasses } from "@/lib/form-styles";
+import { EbookPreview, type PreviewBuild } from "@/components/ebook-preview";
+import { emptyChoices, pendingCount, type PreviewChoices } from "@/lib/docx-preview-choices";
+import {
+  approvalStillValid,
+  approvalTickState,
+  createPreviewCache,
+  shouldBlockSubmit,
+  submittablePath,
+} from "@/lib/manuscript-approval";
 
 // REDESIGN STEP 5 (A2): restyling only -- the picker sits in a dashed
 // drop-area box and the browser's own file button is drawn as an
@@ -62,6 +71,16 @@ const GENERIC_ERROR = "Ky dorëshkrim nuk u përpunua dot. Provoni përsëri.";
 const TOO_LARGE_ERROR = "Ky dorëshkrim e kalon kufirin prej 50 MB.";
 const UPLOAD_FAILED_ERROR =
   "Dorëshkrimi juaj nuk u ngarkua. Kontrolloni lidhjen dhe provoni përsëri.";
+const APPROVE_FIRST_ERROR =
+  "Hapni pamjen paraprake të e-librit dhe konfirmoni se libri duket mirë para se të vazhdoni.";
+
+// W4 (Renato 31 Oct, 6a): a Word manuscript is ready to submit only
+// after the author has opened the preview of THIS build and confirmed
+// it. Until then the hidden "manuscriptStoragePath" stays empty, the
+// wizard's Files step counts the manuscript as not ready, and a submit
+// of the surrounding form (Edit Book) is stopped with a message -- so
+// an unconfirmed Word book can never be saved. A directly-uploaded
+// EPUB is unchanged (7b: no preview for author-made EPUBs).
 
 export function ManuscriptField({
   bookTitle,
@@ -120,6 +139,16 @@ export function ManuscriptField({
   // it there keeps this in lockstep for both EPUB and DOCX modes alike,
   // not just DOCX's pre-existing "converted successfully" message.
   const [readyName, setReadyName] = useState<string | null>(null);
+  // W4: the latest Word build and the author's preview choices.
+  const [build, setBuild] = useState<PreviewBuild | null>(null);
+  const [choices, setChoices] = useState<PreviewChoices>(emptyChoices);
+  const [appliedChoices, setAppliedChoices] = useState<PreviewChoices>(emptyChoices);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState("");
+  const [previewSeen, setPreviewSeen] = useState(false);
+  const [approved, setApproved] = useState(false);
+  const [approveError, setApproveError] = useState("");
 
   const hiddenPathInputRef = useRef<HTMLInputElement>(null);
   const liveTitleRef = useRef(bookTitle);
@@ -135,6 +164,21 @@ export function ManuscriptField({
   const pendingCountRef = useRef(0);
   const inFlightRef = useRef<Promise<void>>(Promise.resolve());
   const supabaseClientRef = useRef<ReturnType<typeof createClient> | null>(null);
+  // W4: the Word file the author picked, sent again for every rebuild
+  // (answer 5a: Librum never keeps the Word file); the preview copy's
+  // path; whether the current build is confirmed.
+  const docxFileRef = useRef<File | null>(null);
+  const previewPathRef = useRef<string | null>(null);
+  const approvedRef = useRef(false);
+  const readyNameRef = useRef<string | null>(null);
+  const approvalBoxRef = useRef<HTMLDivElement>(null);
+  // Audit F4: one download of the preview copy per build.
+  const previewCacheRef = useRef<ReturnType<typeof createPreviewCache> | null>(null);
+  // Bumped by every new Word conversion and by clearing the build; a
+  // conversion whose token is no longer current is thrown away. (Not
+  // requestIdRef: a title-change repackage of the previous build may
+  // run while a rebuild is in flight and must not cancel it.)
+  const buildTokenRef = useRef(0);
 
   function supabase() {
     if (!supabaseClientRef.current) {
@@ -144,13 +188,43 @@ export function ManuscriptField({
   }
 
   function setHiddenPath(path: string | null, displayName: string | null) {
-    if (hiddenPathInputRef.current) {
-      hiddenPathInputRef.current.value = path ?? "";
-    }
     tempPathRef.current = path;
     displayNameRef.current = path ? displayName : null;
+    readyNameRef.current = path ? displayName : null;
     setReadyName(path ? displayName : null);
-    onManuscriptChange?.(path && displayName ? { name: displayName } : null);
+    publishReady();
+  }
+
+  // What the surrounding form sees: the ready path, except for a Word
+  // build the author hasn't confirmed yet (W4).
+  function publishReady() {
+    const submittable = submittablePath(modeRef.current, tempPathRef.current, approvedRef.current);
+    if (hiddenPathInputRef.current) {
+      hiddenPathInputRef.current.value = submittable ?? "";
+    }
+    const name = readyNameRef.current;
+    onManuscriptChange?.(submittable && name ? { name } : null);
+  }
+
+  function setApproval(value: boolean) {
+    approvedRef.current = value;
+    setApproved(value);
+    if (value) setApproveError("");
+    publishReady();
+  }
+
+  // A new Word build (first conversion, a rebuild, or a new file) must
+  // be looked at and confirmed again.
+  function resetApproval() {
+    setPreviewSeen(false);
+    setApproval(false);
+  }
+
+  function replacePreview(path: string | null) {
+    const old = previewPathRef.current;
+    previewPathRef.current = path;
+    if (old !== path) previewCacheRef.current?.clear();
+    if (old && old !== path) void removeTempObject(old);
   }
 
   // Best-effort only -- see the correction's own report for what this
@@ -298,6 +372,16 @@ export function ManuscriptField({
     if (!form) return;
 
     function handleSubmit(e: Event) {
+      // W4: a converted Word manuscript not yet confirmed in the preview
+      // is never submitted (the hidden path is empty then, and saving
+      // would silently keep the old manuscript or none).
+      if (shouldBlockSubmit(modeRef.current, tempPathRef.current, approvedRef.current, pendingCountRef.current)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setApproveError(APPROVE_FIRST_ERROR);
+        approvalBoxRef.current?.scrollIntoView({ block: "center" });
+        return;
+      }
       if (pendingCountRef.current === 0) return;
       // stopImmediatePropagation, not just preventDefault: this must
       // win the race against React's own submit handling for the
@@ -331,9 +415,25 @@ export function ManuscriptField({
   useEffect(() => {
     return () => {
       if (tempPathRef.current) void removeTempObject(tempPathRef.current);
+      if (previewPathRef.current) void removeTempObject(previewPathRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // W4: forget the Word build and its preview.
+  function clearDocxBuild() {
+    buildTokenRef.current += 1;
+    docxFileRef.current = null;
+    replacePreview(null);
+    setBuild(null);
+    setChoices(emptyChoices());
+    setAppliedChoices(emptyChoices());
+    setPreviewOpen(false);
+    setApplying(false);
+    setApplyError("");
+    setApproveError("");
+    resetApproval();
+  }
 
   function handleEpubChange(file: File | null) {
     if (tempPathRef.current) {
@@ -399,6 +499,7 @@ export function ManuscriptField({
       void removeTempObject(tempPathRef.current);
     }
     setHiddenPath(null, null);
+    clearDocxBuild();
 
     if (!file) {
       setStatus("idle");
@@ -417,10 +518,28 @@ export function ManuscriptField({
     setStatus("converting");
     setErrorMessage("");
     setWarnings([]);
+    docxFileRef.current = file;
+    void convertDocx(file, emptyChoices(), false);
+  }
 
-    const myRequestId = beginRequest();
+  // Uploads the Word file to a new temporary path and converts it with
+  // the author's choices. The first conversion fills the field; a
+  // rebuild (W4 "Apply") replaces the previous build only once the new
+  // one is ready, so a failed rebuild leaves the last good one in place.
+  async function convertDocx(file: File, withChoices: PreviewChoices, rebuild: boolean) {
+    beginRequest();
+    const myToken = ++buildTokenRef.current;
+    const stale = () => myToken !== buildTokenRef.current || docxFileRef.current !== file;
     const tempDocxPath = `${authorId}/tmp/docx/${crypto.randomUUID()}.docx`;
     const displayName = file.name.replace(/\.docx$/i, "");
+    const fail = (message: string) => {
+      if (rebuild) {
+        setApplyError(message);
+      } else {
+        setStatus("error");
+        setErrorMessage(message);
+      }
+    };
 
     const run = (async () => {
       try {
@@ -430,24 +549,45 @@ export function ManuscriptField({
             contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           });
 
-        if (isStale(myRequestId)) return;
+        if (stale()) {
+          if (!uploadError) void removeTempObject(tempDocxPath);
+          return;
+        }
         if (uploadError) {
           console.error("ManuscriptField: DOCX upload failed:", uploadError);
-          setStatus("error");
-          setErrorMessage(UPLOAD_FAILED_ERROR);
+          fail(UPLOAD_FAILED_ERROR);
           return;
         }
 
-        const parsed = await parseDocxToDocument(tempDocxPath);
-        if (isStale(myRequestId)) return;
+        const parsed = await parseDocxToDocument(tempDocxPath, withChoices);
+        if (stale()) {
+          if (parsed.success) {
+            void removeTempObject(parsed.conversionId);
+            void removeTempObject(parsed.previewPath);
+          }
+          return;
+        }
 
         if (!parsed.success) {
-          setStatus("error");
-          setErrorMessage(parsed.error);
+          fail(parsed.error);
           return;
         }
 
+        if (rebuild && tempPathRef.current && tempPathRef.current !== parsed.conversionId) {
+          void removeTempObject(tempPathRef.current);
+        }
+        replacePreview(parsed.previewPath);
+        resetApproval();
         setWarnings(parsed.warnings);
+        setAppliedChoices(withChoices);
+        setChoices(withChoices);
+        setApplyError("");
+        setBuild({
+          previewPath: parsed.previewPath,
+          cleanup: parsed.cleanup,
+          chapters: parsed.chapters,
+          warnings: parsed.warnings,
+        });
         // repackageAndFinalize runs its own request/pending-count
         // cycle; this outer one has nothing left to guard past this
         // point.
@@ -458,16 +598,45 @@ export function ManuscriptField({
         // -- section 19 of the CB-1 correction brief.
         console.error("ManuscriptField: DOCX conversion failed:", err);
         void removeTempObject(tempDocxPath);
-        if (isStale(myRequestId)) return;
-        setStatus("error");
-        setErrorMessage(GENERIC_ERROR);
+        if (stale()) return;
+        fail(GENERIC_ERROR);
       } finally {
         pendingCountRef.current -= 1;
+        if (rebuild) setApplying(false);
       }
     })();
 
     inFlightRef.current = run;
+    await run;
   }
+
+  function applyChoices() {
+    const file = docxFileRef.current;
+    if (!file || applying) return;
+    setApplying(true);
+    setApproval(false);
+    setApplyError("");
+    void convertDocx(file, choices, true);
+  }
+
+  function downloadPreview(path: string): Promise<Blob> {
+    previewCacheRef.current ??= createPreviewCache(async (p) => {
+      const { data, error } = await supabase().storage.from(MANUSCRIPTS_BUCKET).download(p);
+      if (error || !data) throw error ?? new Error("preview missing");
+      return data;
+    });
+    return previewCacheRef.current.get(path);
+  }
+
+  // Audit F3: a change not yet applied takes back the author's
+  // confirmation -- the book they confirmed is no longer the one they
+  // expect to submit.
+  function changeChoices(next: PreviewChoices) {
+    setChoices(next);
+    if (!approvalStillValid(approvedRef.current, pendingCount(next, appliedChoices), applying)) setApproval(false);
+  }
+
+  const tick = approvalTickState({ previewSeen, pendingChanges: pendingCount(choices, appliedChoices), applying });
 
   function switchMode(next: "epub" | "docx") {
     if (next === mode) return;
@@ -478,6 +647,7 @@ export function ManuscriptField({
     setWarnings([]);
     if (tempPathRef.current) void removeTempObject(tempPathRef.current);
     setHiddenPath(null, null);
+    clearDocxBuild();
   }
 
   return (
@@ -607,7 +777,55 @@ export function ManuscriptField({
                   ))}
                 </ul>
               )}
+              {build && (
+                <div ref={approvalBoxRef} className="mt-3 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    className="focus-ring min-h-11 self-start rounded-[3px] bg-primary px-4 font-semibold text-white"
+                    onClick={() => setPreviewOpen(true)}
+                  >
+                    Hap pamjen paraprake
+                  </button>
+                  <label className={`flex items-start gap-2 ${tick.disabled ? "opacity-60" : ""}`}>
+                    <input
+                      type="checkbox"
+                      className="focus-ring mt-0.5 h-5 w-5 shrink-0 accent-primary"
+                      checked={approved}
+                      disabled={tick.disabled}
+                      onChange={(e) => setApproval(e.target.checked)}
+                    />
+                    <span>
+                      E kontrollova pamjen paraprake dhe libri duket si duhet.
+                      {tick.reason && <span className="block text-xs text-muted">{tick.reason}</span>}
+                    </span>
+                  </label>
+                  {approveError && (
+                    <p role="alert" className="text-sm text-red-800">
+                      {approveError}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
+          )}
+
+          {previewOpen && build && (
+            <EbookPreview
+              build={build}
+              choices={choices}
+              appliedChoices={appliedChoices}
+              onChoicesChange={changeChoices}
+              onApply={applyChoices}
+              applying={applying}
+              applyError={applyError}
+              onApprove={() => {
+                setApproval(true);
+                setPreviewOpen(false);
+              }}
+              onClose={() => setPreviewOpen(false)}
+              onLoaded={() => setPreviewSeen(true)}
+              download={downloadPreview}
+            />
           )}
         </div>
       )}

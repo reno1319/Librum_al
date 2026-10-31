@@ -212,6 +212,8 @@ export const LIBRUM_STYLES = {
   verse: { id: "LibrumVerse", name: "Librum Verse" },
   verseStanza: { id: "LibrumVerseStanza", name: "Librum Verse Stanza" },
   verseIndent: { id: "LibrumVerseIndent", name: "Librum Verse Indent" },
+  // W4: a Heading 1 the author says is not a chapter.
+  plain: { id: "LibrumPlain", name: "Librum Plain" },
 } as const;
 export type LibrumStyleKey = keyof typeof LIBRUM_STYLES;
 
