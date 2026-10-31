@@ -4,7 +4,8 @@
 //   book already uses „, «…» if it uses «, otherwise curly “…”;
 // - a straight apostrophe in or at the edge of a word (s'e, t', 'i)
 //   becomes ’ -- never an opening quote, unless it clearly opens a
-//   'quoted phrase' that closes later in the same paragraph;
+//   'quoted phrase' that closes later in the same paragraph; that
+//   phrase's closing quote may follow its own punctuation ('Po,' tha);
 // - "..." becomes "…", a spaced "--" becomes "—";
 // - a hyphen that opens dialogue ("- Po, tha.") becomes the dash the
 //   author uses most for dialogue ("—" if none).
@@ -54,7 +55,11 @@ const QUOTE_PAIRS: Record<QuoteStyle, [string, string]> = {
 
 const LETTER_RE = /[\p{L}\p{N}]/u;
 const SPACE_RE = /[\s ]/;
+const DIGIT_RE = /^[0-9]$/;
 const OPENING_CONTEXT = new Set(["(", "[", "{", "—", "–", "-", "/", "„", "“", "«", "‘", "‚"]);
+// Punctuation that can end a quoted phrase just before its closing
+// quote: 'Po,' / 'Po.' / 'Po?!' / 'Po...'.
+const PHRASE_END_PUNCT = new Set([",", ".", "!", "?", ";", ":", "…"]);
 
 function isLetter(ch: string | undefined): boolean {
   return ch !== undefined && LETTER_RE.test(ch);
@@ -125,6 +130,7 @@ export function tidyText(
   }
 
   // Straight apostrophes / single quotes.
+  let phraseOpen = false;
   for (let i = 0; i < n; i++) {
     if (chars[i] !== "'") continue;
     const prev = chars[i - 1];
@@ -132,22 +138,51 @@ export function tidyText(
     if (isLetter(prev)) {
       out[i] = "’";
       counts.apostrophes++;
+      // A word's closing quote ends the phrase; a single-letter elision
+      // (s', t') inside it does not.
+      if (!isLetter(next) && isLetter(chars[i - 2])) phraseOpen = false;
+      continue;
+    }
+    if (phraseOpen && closesAfterPunctuation(chars, i)) {
+      out[i] = "’";
+      counts.apostrophes++;
+      phraseOpen = false;
       continue;
     }
     if ((isSpaceOrStart(prev) || OPENING_CONTEXT.has(prev!)) && isLetter(next)) {
-      out[i] = opensQuotedPhrase(chars, i) ? "‘" : "’";
+      // Audit W3SW r1 N1: inside an open phrase ('Rock 'n' roll,') and
+      // before a two-digit year ('90) it is an apostrophe, never an opener.
+      const opens = !phraseOpen && !isShortYear(chars, i) && opensQuotedPhrase(chars, i);
+      out[i] = opens ? "‘" : "’";
+      if (opens) phraseOpen = true;
       counts.apostrophes++;
     }
   }
   return out;
 }
 
+// '90, '44: an elided year, exactly two digits.
+function isShortYear(chars: string[], i: number): boolean {
+  return DIGIT_RE.test(chars[i + 1] ?? "") && DIGIT_RE.test(chars[i + 2] ?? "") && !isLetter(chars[i + 3]);
+}
+
+// A straight quote right after a word's closing punctuation ("Po,'",
+// "Po?!'", "Po...'") and before a non-letter.
+function closesAfterPunctuation(chars: string[], j: number): boolean {
+  if (isLetter(chars[j + 1])) return false;
+  let k = j - 1;
+  while (k >= 0 && PHRASE_END_PUNCT.has(chars[k])) k--;
+  return k < j - 1 && isLetter(chars[k]);
+}
+
 // 'like this' -- a later straight quote closes a word of 2+ letters and
-// is followed by a non-letter. Single-letter elisions (s', t', m') never
+// is followed by a non-letter, or follows that phrase's own closing
+// punctuation ('Po,' tha). Single-letter elisions (s', t', m') never
 // close a phrase.
 function opensQuotedPhrase(chars: string[], start: number): boolean {
   for (let j = start + 1; j < chars.length; j++) {
     if (chars[j] !== "'") continue;
+    if (closesAfterPunctuation(chars, j)) return true;
     if (!isLetter(chars[j - 1]) || isLetter(chars[j + 1])) continue;
     if (!isLetter(chars[j - 2])) continue; // single-letter elision
     return j - start > 2;

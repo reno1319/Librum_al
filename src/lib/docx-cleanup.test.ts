@@ -683,14 +683,18 @@ describe("W3 Part 2: a blank line around centered lines (Renato's staging try-ou
     expect(r.cleanup.gaps).toBe(0);
   });
 
-  it("adds no gap next to a chapter title, and never on Production", async () => {
+  it("adds no gap next to a chapter title, the same on Production, and none with the clean-up switched off", async () => {
     const body = chapter(emptyPara() + center("Fundi i pjesës") + emptyPara(2) + heading(1, "Kreu tjetër") + prose("Nata"));
     const r = await convert(body, { includeStyles: true });
     expect(r.sections[0].html).toMatch(/<p class="gap">\u00a0<\/p><p class="center">Fundi i pjesës<\/p>$/);
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("DOCX_CLEANUP_OFF", "");
     const prod = await convert(body, { includeStyles: true });
-    expect(prod.sections[0].html).not.toContain("gap");
+    expect(prod.sections[0].html).toBe(r.sections[0].html);
+    vi.stubEnv("DOCX_CLEANUP_OFF", "1");
+    const off = await convert(body, { includeStyles: true });
+    expect(off.sections[0].html).not.toContain("gap");
     vi.unstubAllEnvs();
   });
 
@@ -762,23 +766,67 @@ describe("W3 tracked changes and links", () => {
   });
 });
 
-describe("W3 stays off Production until the author preview exists (answer 10b)", () => {
+describe("W3 runs everywhere unless DOCX_CLEANUP_OFF is set (answers 1a/2a, 31 Oct)", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("runs only on preview/development deployments and local machines", () => {
+  it("is on in every environment, Production included, when the switch is unset or empty", () => {
     expect(cleanupPassEnabled({})).toBe(true);
     expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "preview" })).toBe(true);
     expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "development" })).toBe(true);
-    expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "production" })).toBe(false);
-    expect(cleanupPassEnabled({ VERCEL_ENV: "production" })).toBe(false);
-    // On Vercel with no clear environment: off.
-    expect(cleanupPassEnabled({ VERCEL: "1" })).toBe(false);
-    expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "staging" })).toBe(false);
+    expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "production" })).toBe(true);
+    expect(cleanupPassEnabled({ VERCEL_ENV: "production" })).toBe(true);
+    expect(cleanupPassEnabled({ VERCEL: "1" })).toBe(true);
+    expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "production", DOCX_CLEANUP_OFF: "" })).toBe(true);
+    expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "production", DOCX_CLEANUP_OFF: "  " })).toBe(true);
   });
 
-  it("converts exactly as before on Production", async () => {
+  it.each(["1", "true", "off", "OFF", "0", "false", "no", " 1 ", "yes please"])(
+    "any non-empty switch value (%j) turns it off, in every environment",
+    (value) => {
+      expect(cleanupPassEnabled({ DOCX_CLEANUP_OFF: value })).toBe(false);
+      expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "production", DOCX_CLEANUP_OFF: value })).toBe(false);
+      expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "preview", DOCX_CLEANUP_OFF: value })).toBe(false);
+    },
+  );
+
+  // Audit W3SW r1.
+  it("treats whitespace-only values (tab, newline, no-break space) as unset, so on", () => {
+    for (const v of ["\t", "\n", " \r\n ", "\u00a0"]) {
+      expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "production", DOCX_CLEANUP_OFF: v })).toBe(true);
+    }
+  });
+
+  it("ignores the old Vercel markers: unknown environment names are on, and the switch wins everywhere", () => {
+    expect(cleanupPassEnabled({ VERCEL: "1", VERCEL_ENV: "staging" })).toBe(true);
+    expect(cleanupPassEnabled({ VERCEL_ENV: "something-else" })).toBe(true);
+    expect(cleanupPassEnabled({ VERCEL: "1", DOCX_CLEANUP_OFF: "x" })).toBe(false);
+    expect(cleanupPassEnabled({ VERCEL_ENV: "development", DOCX_CLEANUP_OFF: "x" })).toBe(false);
+  });
+
+  it("reads process.env by default", () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("DOCX_CLEANUP_OFF", "");
+    expect(cleanupPassEnabled()).toBe(true);
+    vi.stubEnv("DOCX_CLEANUP_OFF", "1");
+    expect(cleanupPassEnabled()).toBe(false);
+  });
+
+  it("cleans up on Production when the switch is unset", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("DOCX_CLEANUP_OFF", "");
+    const r = await convert(
+      title("Liqeni") + fmt("Kapitulli 1", { align: "center", bold: true }) + prose("Dita") + emptyPara(2) + prose("Nata") + fmt('Ai tha: "Po".'),
+    );
+    expect(r.cleanup.applied).toBe(true);
+    expect(r.sections[0].html).not.toContain('"Po"');
+  });
+
+  it("converts exactly as before W3 when the clean-up is switched off", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("DOCX_CLEANUP_OFF", "1");
     const r = await convert(
       title("Liqeni") + fmt("Kapitulli 1", { align: "center", bold: true }) + prose("Dita") + emptyPara(2) + prose("Nata") + fmt('Ai tha: "Po".'),
     );

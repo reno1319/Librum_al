@@ -577,14 +577,19 @@ describe("Word-made book look (W3)", () => {
     const css = await zip.file("OEBPS/styles.css")!.async("string");
     expect(css).toContain("p { margin: 0; text-indent: 1.5em; }");
     expect(css).toMatch(/h1 \+ p[^{]*p\.scene-break \+ p[^{]*\{ text-indent: 0; \}/);
-    // Answer 10b: Production keeps the old paragraph gap until W4.
+    // Production gets the same book look (answers 1a/2a, 31 Oct); only
+    // the emergency switch DOCX_CLEANUP_OFF brings back the old gap.
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("DOCX_CLEANUP_OFF", "");
     try {
       const prodZip = await JSZip.loadAsync(await generateEpub(BASE_INPUT));
-      const prodCss = await prodZip.file("OEBPS/styles.css")!.async("string");
-      expect(prodCss).toContain("p { margin: 0 0 1em; }");
-      expect(prodCss).not.toContain("text-indent: 1.5em");
+      expect(await prodZip.file("OEBPS/styles.css")!.async("string")).toBe(css);
+      vi.stubEnv("DOCX_CLEANUP_OFF", "1");
+      const offZip = await JSZip.loadAsync(await generateEpub(BASE_INPUT));
+      const offCss = await offZip.file("OEBPS/styles.css")!.async("string");
+      expect(offCss).toContain("p { margin: 0 0 1em; }");
+      expect(offCss).not.toContain("text-indent: 1.5em");
     } finally {
       vi.unstubAllEnvs();
     }
@@ -592,7 +597,7 @@ describe("Word-made book look (W3)", () => {
     expect(css).not.toContain("p { margin: 0 0 1em; }");
   });
 
-  it("styles kept blank lines and notes (W3 Part 2), and Production's stylesheet stays as it was", async () => {
+  it("styles kept blank lines and notes (W3 Part 2), and the switched-off stylesheet stays as it was", async () => {
     const zip = await JSZip.loadAsync(await generateEpub(BASE_INPUT));
     const css = await zip.file("OEBPS/styles.css")!.async("string");
     expect(css).toContain("p.gap, p.gap + p { text-indent: 0; }");
@@ -600,6 +605,7 @@ describe("Word-made book look (W3)", () => {
     expect(css).toContain("aside.footnote p, div.endnote p { text-indent: 0; }");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("DOCX_CLEANUP_OFF", "1");
     try {
       const prodCss = await (await JSZip.loadAsync(await generateEpub(BASE_INPUT))).file("OEBPS/styles.css")!.async("string");
       expect(prodCss).not.toMatch(/gap|footnote|endnote|sup a/);

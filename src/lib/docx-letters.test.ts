@@ -30,7 +30,7 @@ describe("broken letters (answer 6a)", () => {
     expect(fixBrokenLetters(text)).toEqual({ text, count: 0 });
   });
 
-  it("fixes them in the book, the chapter title included, and not on Production", async () => {
+  it("fixes them in the book, the chapter title included, on Production too, and not with the clean-up switched off", async () => {
     const body = heading(1, "Kreu i parÃ«") + paragraph("Ajo Ã«shtÃ« kÃ«tu.");
     const r = await convert(body);
     expect(r.sections[0].heading).toBe("Kreu i parë");
@@ -38,9 +38,14 @@ describe("broken letters (answer 6a)", () => {
     expect(r.cleanup.fixes.brokenLetters).toBe(4);
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("DOCX_CLEANUP_OFF", "");
     const prod = await convert(body);
-    expect(prod.sections[0].html).toBe("<p>Ajo Ã«shtÃ« kÃ«tu.</p>");
-    expect(prod.cleanup.fixes.brokenLetters).toBe(0);
+    expect(prod.sections[0].html).toBe("<p>Ajo është këtu.</p>");
+    expect(prod.cleanup.fixes.brokenLetters).toBe(4);
+    vi.stubEnv("DOCX_CLEANUP_OFF", "1");
+    const off = await convert(body);
+    expect(off.sections[0].html).toBe("<p>Ajo Ã«shtÃ« kÃ«tu.</p>");
+    expect(off.cleanup.fixes.brokenLetters).toBe(0);
   });
 });
 
