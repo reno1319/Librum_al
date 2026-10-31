@@ -14,6 +14,8 @@ const TAGS = [
   "p", "h1", "h2", "h3", "h4", "blockquote", "em", "strong", "i", "b", "u", "br", "hr",
   "ul", "ol", "li", "sup", "sub", "a", "img", "span",
   "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption",
+  // W3 Part 2: footnotes (end of chapter) and endnotes ("Shënime").
+  "aside", "div",
 ] as const;
 export type PreviewTag = (typeof TAGS)[number];
 const TAG_SET = new Set<string>(TAGS);
@@ -21,8 +23,9 @@ const VOID_TAGS = new Set(["br", "hr", "img"]);
 // Content that is never text for the reader.
 const DROP_WITH_CONTENT = new Set(["script", "style", "head", "title", "svg", "math", "iframe", "object", "template"]);
 
-export const PREVIEW_PARAGRAPH_CLASSES = ["scene-break", "center", "right", "verse", "verse-stanza", "verse-indent"] as const;
+export const PREVIEW_PARAGRAPH_CLASSES = ["scene-break", "center", "right", "verse", "verse-stanza", "verse-indent", "gap"] as const;
 const P_CLASSES = new Set<string>(PREVIEW_PARAGRAPH_CLASSES);
+const NOTE_CLASSES: Record<string, string> = { aside: "footnote", div: "endnote" };
 export const PREVIEW_IMAGE_SRC_RE = /^images\/img-\d{1,4}\.(?:png|jpg|gif)$/;
 const NUMBER_RE = /^\d{1,7}$/;
 
@@ -55,6 +58,10 @@ function safeAttrs(tag: PreviewTag, attrs: Record<string, string>): Record<strin
   switch (tag) {
     case "p":
       if (attrs.class && P_CLASSES.has(attrs.class)) out.class = attrs.class;
+      break;
+    case "aside":
+    case "div":
+      if (attrs.class === NOTE_CLASSES[tag]) out.class = attrs.class;
       break;
     case "span":
       if (attrs["data-p"] && NUMBER_RE.test(attrs["data-p"])) out["data-p"] = attrs["data-p"];

@@ -53,6 +53,8 @@ export type ParaPlan = {
   dropCapInto?: number; // block position this drop cap is glued to
   numberLabel?: boolean;
   splitAtBreaks?: boolean;
+  // W3 Part 2: one blank line before this paragraph (answer 4a).
+  gapBefore?: boolean;
 };
 
 export type StructureOptions = {
@@ -87,6 +89,7 @@ export type StructureResult = {
   contentsLinesRemoved: number;
   emptyRemoved: number;
   paragraphsSplit: number;
+  gaps: number;
 };
 
 const CHAPTER_WORD_RE =
@@ -783,6 +786,22 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     const kept = keepApartSet.has(indexOf(j));
     if (!kept && lines.some((k) => chapterSet.has(k))) continue;
     mergeTitle(j, lines, kept, lines.length > 1 ? "chapter label with its title on the next two lines" : "chapter label with its title on the next line");
+    // W4 audit A3: "keep apart" on a title typed on two lines keeps the
+    // label as its own chapter and the two title lines together as the
+    // next chapter (before, the first line became text of the label's
+    // chapter and the second line a chapter of its own).
+    if (kept && lines.length === 2 && chapterSet.has(j)) {
+      const [a, b] = lines;
+      chapterSet.add(a);
+      chapterSet.delete(b);
+      if (para(a)!.headingLevel !== 1) plan(a).style = "chapter";
+      plan(a).mergeNextInto = [b];
+      plan(b).mergedAway = true;
+      const ga = chapterGuessAt(indexOf(a));
+      if (ga) ga.applied = true;
+      const gb = chapterGuessAt(indexOf(b));
+      if (gb) gb.applied = false;
+    }
   }
   // Safety net (audit H1a): a chapter that is only a label ("Kapitulli
   // 1") with nothing in it before the next chapter, on the same page,
@@ -1071,6 +1090,41 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   }
   sceneBreaks += [...plans.values()].filter((p) => p.sceneBreakBefore).length;
 
+  // ---- 7b. blank lines around lines set apart (W3 Part 2, answer 4a) ----
+  // Renato's staging try-out (31 Oct): a centered heading or couplet
+  // with empty lines around it in Word was stuck to the text in the
+  // ebook. Where Word had empty lines between a centered or right-aligned
+  // line, block or poem and the text next to it, the ebook keeps one
+  // blank line, however many there were. A page break inside a chapter
+  // counts like empty lines (Renato's audit answer Q1a, 31 Oct): ebooks
+  // drop page breaks there, so the line would be stuck to the text
+  // above. Lines inside a block stay tight (no empty lines between them
+  // in Word, no gap). Never at a chapter start or next to a heading
+  // (headings have their own space), where a scene break already is,
+  // or before a poem's stanza (it has its own).
+  const setApart = (j: number) => {
+    const s = plans.get(j)?.style;
+    return s === "center" || s === "right" || s === "verse" || s === "verseStanza" || s === "verseIndent";
+  };
+  let gaps = 0;
+  {
+    let prev = -1;
+    for (let j = 0; j < n; j++) {
+      const f = para(j);
+      if (f && (f.empty || isRemoved(j))) continue;
+      const p = plans.get(j);
+      if (
+        prev >= 0 && (emptiesBefore[j] > 0 || newPage[j]) && (setApart(prev) || setApart(j)) &&
+        !isHeading(prev) && !isHeading(j) && !p?.sceneBreakBefore && !p?.replaceWithSceneBreak &&
+        !plans.get(prev)?.replaceWithSceneBreak && p?.style !== "verseStanza"
+      ) {
+        plan(j).gapBefore = true;
+        gaps++;
+      }
+      prev = j;
+    }
+  }
+
   // ---- 8. empty paragraphs go (their meaning is decided above) ----
   let emptyRemoved = 0;
   for (let j = 0; j < n; j++) {
@@ -1091,5 +1145,6 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     contentsLinesRemoved,
     emptyRemoved,
     paragraphsSplit,
+    gaps,
   };
 }

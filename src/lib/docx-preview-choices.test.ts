@@ -7,6 +7,7 @@ import {
   describeGuess,
   emptyChoices,
   guessWillApply,
+  healthReport,
   isGuessPending,
   normalizeChoices,
   pendingChanges,
@@ -130,5 +131,45 @@ describe("words for the author", () => {
     r.chapterSource = "detected";
     r.fixes.quotes = 4;
     expect(describeFixes(r)).toEqual(["3 kapituj të gjetur nga Librum", "4 thonjëza të rregulluara"]);
+  });
+});
+
+describe("W3 Part 2 health report", () => {
+  it("shows what Librum did in green and what to look at in amber", () => {
+    const r = emptyCleanupReport();
+    r.applied = true;
+    r.chapters = 7;
+    r.chapterSource = "detected";
+    r.notes = { footnotes: 53, endnotes: 2, dropped: 0 };
+    r.gaps = 4;
+    r.fixes.brokenLetters = 3;
+    r.fixes.quotes = 2;
+    r.guesses = [guess({ confidence: "medium", paragraph: 1 }), guess({ confidence: "high", paragraph: 2 }), guess({ kind: "title_page", confidence: "medium", paragraph: 0 })];
+    r.missingLetters = { total: 31, words: [{ word: "eshte", correct: "është", count: 20 }, { word: "nje", correct: "një", count: 11 }] };
+    const lines = healthReport(r, [{ message: "Tabelat u kthyen." }]);
+    expect(lines).toEqual([
+      { tone: "ok", text: "7 kapituj të gjetur nga Librum" },
+      { tone: "ok", text: "53 shënime në fund të faqes, të ruajtura në fund të kapitullit të vet" },
+      { tone: "ok", text: "2 shënime në fund të librit, të ruajtura në kapitullin “Shënime”" },
+      { tone: "ok", text: "4 rreshta bosh të ruajtur rreth rreshtave në qendër dhe poezive" },
+      { tone: "ok", text: "3 shkronja të prishura të rregulluara (p.sh. “Ã«” në “ë”)" },
+      { tone: "ok", text: "2 thonjëza të rregulluara" },
+      { tone: "check", text: "1 vende ku Librum nuk është i sigurt: shihini te “Kontrolloni këto”" },
+      {
+        tone: "check",
+        text: "31 fjalë duken të shkruara pa ë ose ç: “eshte” (20) në vend të “është”, “nje” (11) në vend të “një”. Librum nuk i ndryshon vetë; rregullojini në Word dhe ngarkojeni dokumentin sërish.",
+      },
+      { tone: "check", text: "Tabelat u kthyen." },
+    ]);
+  });
+
+  it("marks a book with no chapters amber, and shows notes even without the clean-up changes", () => {
+    const r = emptyCleanupReport();
+    r.applied = true;
+    expect(healthReport(r)[0]).toEqual({ tone: "check", text: "Asnjë kapitull i gjetur: libri është një pjesë e vetme" });
+    const off = emptyCleanupReport();
+    off.notes = { footnotes: 2, endnotes: 0, dropped: 0 };
+    expect(healthReport(off)).toEqual([{ tone: "ok", text: "2 shënime në fund të faqes, të ruajtura në fund të kapitullit të vet" }]);
+    expect(healthReport(emptyCleanupReport())).toEqual([]);
   });
 });

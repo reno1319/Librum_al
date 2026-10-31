@@ -212,6 +212,8 @@ export const LIBRUM_STYLES = {
   verse: { id: "LibrumVerse", name: "Librum Verse" },
   verseStanza: { id: "LibrumVerseStanza", name: "Librum Verse Stanza" },
   verseIndent: { id: "LibrumVerseIndent", name: "Librum Verse Indent" },
+  // W3 Part 2: a blank line kept around a line set apart (answer 4a).
+  gap: { id: "LibrumGap", name: "Librum Gap" },
   // W4: a Heading 1 the author says is not a chapter.
   plain: { id: "LibrumPlain", name: "Librum Plain" },
 } as const;
