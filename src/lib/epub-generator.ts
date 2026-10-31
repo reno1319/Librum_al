@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { cleanupPassEnabled } from "@/lib/docx-cleanup";
 import type { DocImage, DocSection } from "@/lib/docx-converter";
 
 // LIBRUM 2.0 PRODUCT-5: builds a real, minimal, valid EPUB 3 package
@@ -63,32 +64,46 @@ function escapeXml(text: string): string {
   return text.replace(/[&<>"]/g, (c) => XML_ESCAPE[c]);
 }
 
+// W3: book-style paragraphs (Renato 31 Oct): first-line indent, no gap
+// between paragraphs, no indent after a heading, a scene break or a
+// centered/poem line; classes from docx-converter's clean-up marks.
 // A small, generic reflowable-ebook stylesheet -- paragraph spacing,
 // heading rhythm, blockquote/list/image treatment. Deliberately NOT
 // Word's own generated stylesheet (fixed page widths, absolute
 // positioning, print-layout assumptions all excluded on purpose, per
 // the brief's "no print-layout hacks" rule) -- an ebook is reflowable,
 // this preserves structure/emphasis, not DOCX page geometry.
-const STYLESHEET = `body { font-family: serif; line-height: 1.5; margin: 1em; }
+function stylesheet(bookStyle: boolean): string {
+  return `body { font-family: serif; line-height: 1.5; margin: 1em; }
 h1, h2, h3, h4 { font-family: sans-serif; line-height: 1.25; margin: 1.4em 0 0.6em; }
 h1 { font-size: 1.6em; }
 h2 { font-size: 1.3em; }
 h3 { font-size: 1.1em; }
 h4 { font-size: 1em; }
-p { margin: 0 0 1em; }
+${bookStyle ? `p { margin: 0; text-indent: 1.5em; }
+h1 + p, h2 + p, h3 + p, h4 + p, blockquote + p, ul + p, ol + p, table + p, p.scene-break + p, p.center + p, p.right + p, p.verse + p, p.verse-stanza + p, p.verse-indent + p, body > p:first-child { text-indent: 0; }` : "p { margin: 0 0 1em; }"}
+p.scene-break { text-align: center; text-indent: 0; margin: 1em 0; }
+p.center { text-align: center; text-indent: 0; }
+p.right { text-align: right; text-indent: 0; }
+p.verse, p.verse-stanza { text-indent: 0; margin-left: 1em; }
+p.verse-stanza { margin-top: 1em; }
+p.verse-indent { text-indent: 0; margin-left: 3em; }
 blockquote { margin: 1em 2em; font-style: italic; }
 ul, ol { margin: 0 0 1em; padding-left: 1.5em; }
 img { max-width: 100%; }
 table { border-collapse: collapse; width: 100%; margin: 0 0 1em; }
 td, th { border: 1px solid #999; padding: 0.4em; text-align: left; }
 `;
+}
 
 function chapterFilename(index: number): string {
   return `chapter-${index + 1}.xhtml`;
 }
 
 function renderChapterXhtml(section: DocSection, index: number, language: string): string {
-  const headingHtml = section.heading
+  const headingHtml = section.headingLines && section.headingLines.length > 1
+    ? `<h1>${section.headingLines.map(escapeXml).join("<br/>")}</h1>\n`
+    : section.heading
     ? `<h1>${escapeXml(section.heading)}</h1>\n`
     : index === 0
       ? ""
@@ -316,7 +331,8 @@ export async function generateEpub(input: EpubGeneratorInput): Promise<Buffer> {
   // but not these pages; every book is Albanian, so they agree.
   const language = resolveEpubLanguageCode(input.language);
   zip.file("OEBPS/nav.xhtml", renderNavXhtml(input.sections, language));
-  zip.file("OEBPS/styles.css", STYLESHEET);
+  // Answer 10b: Production keeps the old paragraph spacing until W4.
+  zip.file("OEBPS/styles.css", stylesheet(cleanupPassEnabled()));
 
   input.sections.forEach((section, i) => {
     zip.file(`OEBPS/${chapterFilename(i)}`, renderChapterXhtml(section, i, language));

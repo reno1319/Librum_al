@@ -515,14 +515,18 @@ describe("W2 converter fixes", () => {
     expect(removeEmptyElements("<p>Nr.<em>&nbsp;</em>5</p>")).toBe("<p>Nr.<em>&nbsp;</em>5</p>");
   });
 
-  it("keeps a Word paragraph holding only a non-breaking space through the whole conversion", async () => {
+  it("keeps the meaning of a Word paragraph holding only a non-breaking space through the whole conversion", async () => {
+    // W3: the clean-up pass decides what blank lines mean (answer 4a,
+    // D1 = a): a single blank line is only a scene-break suggestion for
+    // the author preview, so it leaves no empty paragraph behind.
     const bytes = await buildDocxBytes({
-      bodyXml: paragraph("Para.") + paragraph("\u00a0") + paragraph("Pas."),
+      bodyXml: paragraph("Para.") + paragraph("\u00a0") + paragraph("Pas.") + paragraph("Fund."),
     });
     const result = await convertDocxToDocument(bytes);
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.sections[0].html).toBe("<p>Para.</p><p>\u00a0</p><p>Pas.</p>");
+    expect(result.sections[0].html).toBe("<p>Para.</p><p>Pas.</p><p>Fund.</p>");
+    expect(result.cleanup.guesses).toContainEqual(expect.objectContaining({ kind: "scene_break", paragraph: 2, applied: false }));
   });
 
   it("leaves no empty paragraph where an unsupported picture was skipped", async () => {
