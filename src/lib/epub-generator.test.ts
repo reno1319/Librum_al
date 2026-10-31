@@ -12,6 +12,7 @@ import {
   boldItalicParagraph,
   imageParagraph,
   tinyPngBytes,
+  hyperlinkParagraph,
 } from "./docx-test-fixtures";
 
 const BASE_INPUT = {
@@ -158,7 +159,7 @@ describe("generateEpub", () => {
   it("includes embedded images in the manifest and writes their bytes", async () => {
     const bytes = await generateEpub({
       ...BASE_INPUT,
-      sections: [{ heading: "Chapter One", html: '<p>Text.</p><img src="../images/img-1.png" alt=""/>' }],
+      sections: [{ heading: "Chapter One", html: '<p>Text.</p><img src="images/img-1.png" alt=""/>' }],
       images: [{ filename: "img-1.png", mediaType: "image/png", bytes: tinyPngBytes() }],
     });
     const zip = await JSZip.loadAsync(bytes);
@@ -191,7 +192,7 @@ describe("patchEpubMetadata", () => {
     const original = await generateEpub({
       ...BASE_INPUT,
       images: [{ filename: "img-1.png", mediaType: "image/png", bytes: tinyPngBytes() }],
-      sections: [{ heading: "Chapter One", html: '<p>Text.</p><img src="../images/img-1.png" alt=""/>' }],
+      sections: [{ heading: "Chapter One", html: '<p>Text.</p><img src="images/img-1.png" alt=""/>' }],
     });
 
     const patched = await patchEpubMetadata(original, "New Title", "New Author");
@@ -476,5 +477,96 @@ describe("generated EPUB text (SQ-17)", () => {
   it("generated pages are still a valid EPUB", async () => {
     const result = await validateEpubStructure(await generateEpub(BASE_INPUT));
     expect(result).toEqual({ valid: true });
+  });
+});
+
+// W2: the old tests only compared strings, so an image path that pointed
+// outside the book ("../images/x") passed while every picture was
+// broken in real readers. This opens the generated EPUB and resolves
+// every src/href in every page and in the package file, the way a
+// reading app does.
+async function unresolvedReferences(epubBytes: Buffer): Promise<string[]> {
+  const zip = await JSZip.loadAsync(epubBytes);
+  const missing: string[] = [];
+  // Resolves `ref` against the folder of `fromFile`; null when the
+  // path climbs out of the EPUB, which can never resolve.
+  const resolve = (fromFile: string, ref: string): string | null => {
+    const parts = fromFile.split("/").slice(0, -1);
+    for (const seg of ref.split("#")[0].split("/")) {
+      if (seg === "..") {
+        if (parts.length === 0) return null;
+        parts.pop();
+      } else if (seg !== "." && seg !== "") parts.push(decodeURIComponent(seg));
+    }
+    return parts.join("/");
+  };
+  for (const path of Object.keys(zip.files)) {
+    if (!/\.(xhtml|opf)$/.test(path)) continue;
+    const text = await zip.file(path)!.async("string");
+    for (const m of text.matchAll(/\b(?:src|href)="([^"]*)"/g)) {
+      const ref = m[1];
+      if (/^(?:https?:|mailto:)/.test(ref) || ref.startsWith("#")) continue;
+      const target = resolve(path, ref);
+      if (target === null || !zip.file(target)) missing.push(`${path} -> ${ref}`);
+    }
+  }
+  return missing;
+}
+
+describe("generated EPUB references (W2)", () => {
+  it("every picture, link, stylesheet and manifest entry in a converted book points at a file inside the EPUB", async () => {
+    const docxBytes = await buildDocxBytes({
+      includeStyles: true,
+      includeImageRel: true,
+      includeHyperlinkRel: [{ id: "rIdLink1", target: "https://example.com" }],
+      bodyXml:
+        heading(1, "Kapitulli 1") +
+        paragraph("Fillimi.") +
+        imageParagraph() +
+        hyperlinkParagraph("rIdLink1", "faqja") +
+        heading(1, "Ana &amp; Beni") +
+        imageParagraph(),
+    });
+    const conversion = await convertDocxToDocument(docxBytes);
+    expect(conversion.success).toBe(true);
+    if (!conversion.success) return;
+    const epubBytes = await generateEpub({
+      ...BASE_INPUT,
+      sections: conversion.sections,
+      images: conversion.images,
+    });
+
+    const zip = await JSZip.loadAsync(epubBytes);
+    const chapterOne = await zip.file("OEBPS/chapter-1.xhtml")!.async("string");
+    expect(chapterOne).toMatch(/<img src="[^"]+"/);
+    expect(await unresolvedReferences(epubBytes)).toEqual([]);
+  });
+
+  it("the reference check itself catches the old broken '../images/' path", async () => {
+    const epubBytes = await generateEpub({
+      ...BASE_INPUT,
+      sections: [{ heading: "Kapitulli 1", html: '<p>x</p><img src="../images/img-1.png" alt=""/>' }],
+      images: [{ filename: "img-1.png", mediaType: "image/png", bytes: tinyPngBytes() }],
+    });
+    expect(await unresolvedReferences(epubBytes)).toEqual(["OEBPS/chapter-1.xhtml -> ../images/img-1.png"]);
+  });
+
+  it("writes '&' in a chapter title escaped exactly once in the page, its title and the contents", async () => {
+    const docxBytes = await buildDocxBytes({
+      includeStyles: true,
+      bodyXml: heading(1, "Ana &amp; Beni") + paragraph("Tekst."),
+    });
+    const conversion = await convertDocxToDocument(docxBytes);
+    expect(conversion.success).toBe(true);
+    if (!conversion.success) return;
+    const epubBytes = await generateEpub({ ...BASE_INPUT, sections: conversion.sections, images: [] });
+    const zip = await JSZip.loadAsync(epubBytes);
+    const chapter = await zip.file("OEBPS/chapter-1.xhtml")!.async("string");
+    const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+    for (const page of [chapter, nav]) {
+      expect(page).toContain("Ana &amp; Beni");
+      expect(page).not.toContain("&amp;amp;");
+    }
+    expect(chapter).toContain("<title>Ana &amp; Beni</title>");
   });
 });

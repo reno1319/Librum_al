@@ -25,6 +25,9 @@ type BuildOptions = {
   includeHyperlinkRel?: { id: string; target: string; external?: boolean }[];
   includeVbaProject?: boolean;
   contentTypesOverride?: string;
+  // W2: extra paragraph styles written into styles.xml (needs
+  // includeStyles), e.g. Word's own "Title" or "toc 1".
+  extraParagraphStyles?: { id: string; name: string }[];
 };
 
 export async function buildDocxBytes(options: BuildOptions): Promise<Buffer> {
@@ -70,6 +73,9 @@ ${overrides}
 <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/></w:style>
 <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/></w:style>
 <w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/></w:style>
+${(options.extraParagraphStyles ?? [])
+  .map((st) => `<w:style w:type="paragraph" w:styleId="${st.id}"><w:name w:val="${st.name}"/><w:basedOn w:val="Normal"/></w:style>`)
+  .join("\n")}
 </w:styles>`,
     );
   }
@@ -163,4 +169,20 @@ export function tableXml(): string {
 
 export function pageBreakParagraph(text: string): string {
   return `<w:p><w:r><w:br w:type="page"/><w:t>${text}</w:t></w:r></w:p>`;
+}
+
+// W2: a paragraph in the given Word style id.
+export function styledParagraph(styleId: string, text: string): string {
+  return `<w:p><w:pPr><w:pStyle w:val="${styleId}"/></w:pPr><w:r><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`;
+}
+
+// W2: a link to a bookmark inside the document, the way Word's own
+// table of contents writes it.
+export function internalLinkParagraph(anchor: string, text: string): string {
+  return `<w:p><w:hyperlink w:anchor="${anchor}"><w:r><w:t>${text}</w:t></w:r></w:hyperlink></w:p>`;
+}
+
+// W2: a paragraph holding only a bookmark -- no visible text.
+export function bookmarkOnlyParagraph(name: string): string {
+  return `<w:p><w:bookmarkStart w:id="0" w:name="${name}"/><w:bookmarkEnd w:id="0"/></w:p>`;
 }

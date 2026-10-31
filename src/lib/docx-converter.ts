@@ -126,6 +126,11 @@ const MAX_DOCX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024;
 const MAX_DOCUMENT_XML_BYTES = 50 * 1024 * 1024;
 const MAX_XML_PART_BYTES = 50 * 1024 * 1024;
 
+// W2: the image path written into chapter pages, relative to the
+// chapter file. epub-generator.ts writes chapters to OEBPS/ and images
+// to OEBPS/images/, so this must stay "images/".
+export const IMAGE_SRC_PREFIX = "images/";
+
 const SUPPORTED_IMAGE_TYPES: Record<string, DocImage["mediaType"]> = {
   "image/png": "image/png",
   "image/jpeg": "image/jpeg",
@@ -192,6 +197,81 @@ function isSafeHref(href: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isWordTocBookmark(href: string): boolean {
+  return /^#_Toc[\w-]*$/.test(href);
+}
+
+// W2: Mammoth reports every Word style it has no mapping for. These
+// styles carry no content Librum loses (the text still comes through
+// as ordinary paragraphs, and Librum builds its own contents page), so
+// they must not trigger the "some formatting couldn't be converted"
+// warning. Anything else Mammoth warns about still does.
+const HARMLESS_PARAGRAPH_STYLES = [/^title$/i, /^toc\b/i, /^body text$/i, /^first paragraph$/i];
+const HARMLESS_RUN_STYLES = [/^hyperlink$/i];
+
+export function isHarmlessMammothWarning(message: string): boolean {
+  // Greedy up to Mammoth's own " (Style ID: " suffix, so a style name
+  // containing an apostrophe is read whole.
+  const style = message.match(/^Unrecognised (paragraph|run) style: '(.*)' \(Style ID: /);
+  if (style) {
+    const list = style[1] === "paragraph" ? HARMLESS_PARAGRAPH_STYLES : HARMLESS_RUN_STYLES;
+    return list.some((re) => re.test(style[2].trim()));
+  }
+  // An image in a format Librum doesn't keep already gets its own,
+  // clearer warning ("image_skipped_unsupported_type").
+  return /^Image of type .* is unlikely to display in web browsers$/.test(message);
+}
+
+// W2: Mammoth's heading HTML is already escaped ("Ana &amp; Beni").
+// The heading is stored as plain text and epub-generator.ts escapes it
+// once when writing it, so it is decoded here exactly once.
+const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, body: string) => {
+    if (body[0] === "#") {
+      const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    }
+    return NAMED_ENTITIES[body.toLowerCase()] ?? whole;
+  });
+}
+
+export function headingHtmlToText(html: string): string {
+  return decodeEntities(html.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// W2: removes elements left with nothing inside them -- the empty <p>
+// a skipped image or a bookmark leaves behind, the empty <sup> where a
+// removed footnote number was, the empty <ol> the removed note list
+// leaves. The sanitizer emits these tags without attributes, so a
+// plain match is exact. Repeated until nothing changes, so nested
+// empties (<p><em></em></p>) go too. Table cells are never removed
+// (that would break the table's shape). An empty inline element keeps
+// any space it held ("word<em> </em>word" stays two words). Only plain
+// spaces, tabs and line breaks count as empty -- never a non-breaking
+// space (U+00A0 or &nbsp;): a paragraph holding just that is a blank
+// line the author put there on purpose (a scene break, a stanza gap),
+// and an inline one must stay non-breaking. JavaScript's \s would match
+// U+00A0, so it is not used here.
+const EMPTY_ELEMENT_RE = /<(p|sup|sub|ol|ul|li|em|strong|i|b|u|blockquote|h2|h3|h4)>([ \t\r\n]*)<\/\1>/g;
+const INLINE_TAGS = new Set(["sup", "sub", "em", "strong", "i", "b", "u"]);
+export function removeEmptyElements(html: string): string {
+  let current = html;
+  for (;;) {
+    const next = current.replace(EMPTY_ELEMENT_RE, (_whole, tag: string, space: string) =>
+      INLINE_TAGS.has(tag) && space.length > 0 ? " " : "",
+    );
+    if (next === current) return current;
+    current = next;
+  }
+}
+
+function hasVisibleContent(html: string): boolean {
+  return /<img\b|<hr\b|<table\b/.test(html) || html.replace(/<[^>]+>/g, "").trim().length > 0;
 }
 
 // ============================================================
@@ -322,7 +402,11 @@ function sanitizeFragment(
       if (name === "a") {
         const href = getAttr(attrs, "href");
         const safe = href && isSafeHref(href);
-        if (!safe && href) onUnsafeLink();
+        // W2: Word's own table-of-contents links ("#_Toc...") point at
+        // bookmarks inside the document. They are unwrapped (text kept)
+        // like any other non-web link, but they are not unsafe, so they
+        // no longer raise the "unsafe link" warning.
+        if (!safe && href && !isWordTocBookmark(href)) onUnsafeLink();
         const openTag = safe ? `<a href="${escapeAttr(href!)}">` : "";
         if (selfClosing) continue;
         stack.push({ tag: name, allowed: safe === true, isDropped: false, openTag, html: [] });
@@ -482,13 +566,16 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
           const extension = mediaType === "image/png" ? "png" : mediaType === "image/gif" ? "gif" : "jpg";
           const filename = `img-${images.length + 1}.${extension}`;
           images.push({ filename, mediaType, bytes: imageBuffer });
-          return { src: `../images/${filename}` };
+          // W2: chapters sit in OEBPS/ next to OEBPS/images/, so the
+          // path is "images/x" -- the old "../images/x" pointed outside
+          // OEBPS and every converted picture was broken.
+          return { src: `${IMAGE_SRC_PREFIX}${filename}` };
         }),
       },
     );
     rawHtml = result.value;
 
-    if (result.messages.some((m) => m.type === "warning")) {
+    if (result.messages.some((m) => m.type === "warning" && !isHarmlessMammothWarning(m.message))) {
       warnings.push({
         code: "unsupported_element_skipped",
         message: "Disa formatime të veçanta të Word-it nuk u kthyen dot dhe u thjeshtuan.",
@@ -554,7 +641,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
     const headingMatch = part.match(/^<h1>([\s\S]*?)<\/h1>$/);
     if (headingMatch) {
       flushRaw();
-      currentHeading = headingMatch[1].replace(/<[^>]+>/g, "").trim();
+      currentHeading = headingHtmlToText(headingMatch[1]) || null;
       currentHtml = "";
     } else {
       currentHtml += part;
@@ -571,24 +658,33 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
   // conflict with h1 being outside ALLOWED_TAGS.
   let unsafeLinkFound = false;
   const imageFilenames = new Set(images.map((i) => i.filename));
-  const sections: DocSection[] = rawSections.map((section) => ({
+  const sanitizedSections: DocSection[] = rawSections.map((section) => ({
     heading: section.heading,
-    html: sanitizeFragment(
+    html: removeEmptyElements(sanitizeFragment(
       section.rawHtml,
       (src) => {
         // src is already exactly what our own convertImage callback
-        // returned ("../images/img-N.ext") or "" for a skipped image --
+        // returned ("images/img-N.ext") or "" for a skipped image --
         // never anything else, since Mammoth never invents an <img> tag
         // on its own. Re-validated against the images this run actually
         // produced anyway, rather than trusted blindly.
-        const filename = src.replace(/^\.\.\/images\//, "");
+        if (!src.startsWith(IMAGE_SRC_PREFIX)) return null;
+        const filename = src.slice(IMAGE_SRC_PREFIX.length);
         return imageFilenames.has(filename) ? src : null;
       },
       () => {
         unsafeLinkFound = true;
       },
-    ),
+    )).trim(),
   }));
+
+  // W2: a section with no heading and nothing visible in it (e.g. only
+  // a bookmark before the first Heading 1) used to become an empty
+  // first page. A titled chapter is always kept, even with no body.
+  const sections = sanitizedSections.filter((s) => s.heading || hasVisibleContent(s.html));
+  if (sections.length === 0) {
+    return { success: false, error: "empty_document" };
+  }
 
   if (unsafeLinkFound) {
     warnings.push({
