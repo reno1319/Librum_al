@@ -28,6 +28,11 @@ type BuildOptions = {
   // W2: extra paragraph styles written into styles.xml (needs
   // includeStyles), e.g. Word's own "Title" or "toc 1".
   extraParagraphStyles?: { id: string; name: string }[];
+  // W3: numbering definitions (inside <w:numbering>) replacing the
+  // default bullet list (needs includeNumbering).
+  numberingXml?: string;
+  // W3: a footnotes part with one note, w:id="2".
+  includeFootnotes?: boolean;
 };
 
 export async function buildDocxBytes(options: BuildOptions): Promise<Buffer> {
@@ -37,6 +42,9 @@ export async function buildDocxBytes(options: BuildOptions): Promise<Buffer> {
     `<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>`,
     options.includeStyles
       ? `<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>`
+      : "",
+    options.includeFootnotes
+      ? `<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>`
       : "",
     options.includeNumbering
       ? `<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>`
@@ -85,9 +93,17 @@ ${(options.extraParagraphStyles ?? [])
       "word/numbering.xml",
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum>
-<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+${options.numberingXml ?? `<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum>
+<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>`}
 </w:numbering>`,
+    );
+  }
+
+  if (options.includeFootnotes) {
+    zip.file(
+      "word/footnotes.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote w:id="2"><w:p><w:r><w:t>Shënim.</w:t></w:r></w:p></w:footnote></w:footnotes>`,
     );
   }
 
@@ -105,6 +121,9 @@ ${(options.extraParagraphStyles ?? [])
       : "",
     options.includeNumbering
       ? `<Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>`
+      : "",
+    options.includeFootnotes
+      ? `<Relationship Id="rIdFootnotes" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/>`
       : "",
     options.includeImageRel
       ? `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>`
@@ -185,4 +204,38 @@ export function internalLinkParagraph(anchor: string, text: string): string {
 // W2: a paragraph holding only a bookmark -- no visible text.
 export function bookmarkOnlyParagraph(name: string): string {
   return `<w:p><w:bookmarkStart w:id="0" w:name="${name}"/><w:bookmarkEnd w:id="0"/></w:p>`;
+}
+
+// W3: a paragraph with direct formatting, the way authors type
+// chapter titles by hand (centered, bigger, bold, on a new page).
+export type Look = {
+  align?: "center" | "right" | "both" | "left";
+  size?: number; // half-points, e.g. 36 = 18pt
+  bold?: boolean;
+  italic?: boolean;
+  pageBreakBefore?: boolean;
+  pageBreakAfter?: boolean; // a page break typed at the end of this paragraph
+  tabs?: number; // leading tabs
+  style?: string;
+  numId?: number;
+};
+export function fmt(text: string, look: Look = {}): string {
+  const pPr = [
+    look.style ? `<w:pStyle w:val="${look.style}"/>` : "",
+    look.pageBreakBefore ? `<w:pageBreakBefore/>` : "",
+    look.numId !== undefined ? `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${look.numId}"/></w:numPr>` : "",
+    look.align ? `<w:jc w:val="${look.align}"/>` : "",
+  ].join("");
+  const rPr = [look.bold ? "<w:b/>" : "", look.italic ? "<w:i/>" : "", look.size ? `<w:sz w:val="${look.size}"/>` : ""].join("");
+  const tabs = "<w:tab/>".repeat(look.tabs ?? 0);
+  return `<w:p>${pPr ? `<w:pPr>${pPr}</w:pPr>` : ""}<w:r>${rPr ? `<w:rPr>${rPr}</w:rPr>` : ""}${tabs}<w:t xml:space="preserve">${text}</w:t>${look.pageBreakAfter ? '<w:br w:type="page"/>' : ""}</w:r></w:p>`;
+}
+
+export function emptyPara(count = 1): string {
+  return "<w:p/>".repeat(count);
+}
+
+// A body paragraph long enough to read as ordinary prose.
+export function prose(seed: string): string {
+  return fmt(`${seed} ishte një ditë e zakonshme në qytet, me njerëz që shkonin në punë dhe fëmijë që vraponin drejt shkollës.`, { tabs: 1 });
 }

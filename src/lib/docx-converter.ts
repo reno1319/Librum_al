@@ -1,6 +1,13 @@
 import JSZip from "jszip";
 import mammoth from "mammoth";
 import { preflightZipEntries, findEntry } from "@/lib/zip-preflight";
+import {
+  cleanUpDocx,
+  cleanupPassEnabled,
+  emptyCleanupReport,
+  type CleanupOptions,
+  type CleanupReport,
+} from "@/lib/docx-cleanup";
 
 // LIBRUM 2.0 PRODUCT-5: DOCX -> a small, safe, deterministic internal
 // document model, entirely separate from EPUB packaging itself (see
@@ -33,6 +40,10 @@ export type DocSection = {
   // with no heading yet (content before the manuscript's first Heading
   // 1, if any) -- never fabricated from anything else.
   heading: string | null;
+  // W3: when the chapter title is shown on two lines in the book
+  // ("Kapitulli 1" / "Mëngjesi"), the lines; `heading` is then the
+  // one-line contents-list text ("Kapitulli 1: Mëngjesi").
+  headingLines?: string[];
   // Sanitized, well-formed XHTML body content for this chapter --
   // ready to embed directly inside a <body> element.
   html: string;
@@ -56,7 +67,8 @@ export type ConversionWarning = {
     | "image_skipped_too_large"
     | "too_many_images"
     | "unsupported_element_skipped"
-    | "unsafe_link_removed";
+    | "unsafe_link_removed"
+    | "tracked_changes_accepted";
   message: string;
 };
 
@@ -66,6 +78,9 @@ export type DocxConversionResult =
       sections: DocSection[];
       images: DocImage[];
       warnings: ConversionWarning[];
+      // W3: what the clean-up pass changed and guessed (for the author
+      // preview, W4).
+      cleanup: CleanupReport;
     }
   | {
       success: false;
@@ -238,8 +253,12 @@ function decodeEntities(text: string): string {
   });
 }
 
+// W3: a footnote number on a chapter title ("PARATHËNIE¹") stays out
+// of the title text used for the contents list.
+const NOTE_REF_RE = /<a\b[^>]*\bid="(?:footnote|endnote)-ref-\d+"[^>]*>[\s\S]*?<\/a>/g;
+
 export function headingHtmlToText(html: string): string {
-  return decodeEntities(html.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, ""))
+  return decodeEntities(html.replace(NOTE_REF_RE, "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, ""))
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -270,6 +289,25 @@ export function removeEmptyElements(html: string): string {
   }
 }
 
+// W3: "Kapitulli 1" + "Mëngjesi" -> "Kapitulli 1: Mëngjesi" for the
+// contents list; other two-line titles are joined with a space.
+const HEADING_LABEL_RE =
+  /^(?:(?:kapitull(?:i)?|kreu|pjesa|libri|tregimi|chapter|part|book)\s+(?:[ie]\s+)?\S{1,12}|[IVXLCDM]{1,7}\.?|\d{1,3}\.?)$/i;
+export function headingFromHtml(html: string): { heading: string | null; lines?: string[] } {
+  const lines = html
+    .replace(NOTE_REF_RE, "")
+    .split(/<br\s*\/?>/i)
+    .map((l) => headingHtmlToText(l))
+    .filter(Boolean);
+  if (lines.length === 0) return { heading: null };
+  if (lines.length === 1) return { heading: lines[0] };
+  const [first, ...rest] = lines;
+  const heading = HEADING_LABEL_RE.test(first)
+    ? `${first.replace(/[.:]$/, "")}: ${rest.join(" ")}`
+    : lines.join(" ");
+  return { heading, lines };
+}
+
 function hasVisibleContent(html: string): boolean {
   return /<img\b|<hr\b|<table\b/.test(html) || html.replace(/<[^>]+>/g, "").trim().length > 0;
 }
@@ -293,6 +331,9 @@ const ALLOWED_TAGS = new Set([
   "table", "thead", "tbody", "tr", "td", "th",
 ]);
 const VOID_TAGS = new Set(["br", "hr", "img"]);
+// W3: the only class names kept -- the ones docx-converter's own style
+// map writes for the clean-up pass's marks. Anything else is dropped.
+const ALLOWED_P_CLASSES = new Set(["scene-break", "center", "right", "verse", "verse-stanza", "verse-indent"]);
 const DROP_ENTIRELY_TAGS = new Set([
   "script", "style", "iframe", "object", "embed", "form", "input", "button",
   "select", "textarea", "option", "video", "audio", "canvas", "svg",
@@ -400,7 +441,10 @@ function sanitizeFragment(
       }
 
       if (name === "a") {
-        const href = getAttr(attrs, "href");
+        // W3: Mammoth's HTML is already escaped ("a=1&amp;b=2"); decoded
+        // once here so escapeAttr() below doesn't make it "&amp;amp;".
+        const rawHref = getAttr(attrs, "href");
+        const href = rawHref === null ? null : decodeEntities(rawHref);
         const safe = href && isSafeHref(href);
         // W2: Word's own table-of-contents links ("#_Toc...") point at
         // bookmarks inside the document. They are unwrapped (text kept)
@@ -421,7 +465,7 @@ function sanitizeFragment(
 
       if (name === "img") {
         const src = getAttr(attrs, "src");
-        const alt = getAttr(attrs, "alt") ?? "";
+        const alt = decodeEntities(getAttr(attrs, "alt") ?? "");
         const rewritten = src ? imageSrcRewrite(src) : null;
         if (rewritten) {
           stack[stack.length - 1].html.push(
@@ -439,11 +483,13 @@ function sanitizeFragment(
       if (selfClosing) continue;
 
       const allowed = ALLOWED_TAGS.has(name);
+      const pClass = name === "p" ? getAttr(attrs, "class") : null;
+      const keptClass = pClass && ALLOWED_P_CLASSES.has(pClass) ? pClass : null;
       stack.push({
         tag: name,
         allowed,
         isDropped: false,
-        openTag: allowed ? `<${name}>` : "",
+        openTag: allowed ? (keptClass ? `<p class="${keptClass}">` : `<${name}>`) : "",
         html: [],
       });
       continue;
@@ -469,9 +515,21 @@ const HEADING_STYLE_MAP = [
   "p[style-name='Heading 4'] => h4:fresh",
   "p[style-name='Quote'] => blockquote:fresh",
   "p[style-name='Intense Quote'] => blockquote:fresh",
+  // W3: marks written by the clean-up pass (docx-cleanup.ts).
+  "p[style-name='Librum Chapter'] => h1:fresh",
+  "p[style-name='Librum Subheading'] => h2:fresh",
+  "p[style-name='Librum Scene Break'] => p.scene-break:fresh",
+  "p[style-name='Librum Center'] => p.center:fresh",
+  "p[style-name='Librum Right'] => p.right:fresh",
+  "p[style-name='Librum Verse'] => p.verse:fresh",
+  "p[style-name='Librum Verse Stanza'] => p.verse-stanza:fresh",
+  "p[style-name='Librum Verse Indent'] => p.verse-indent:fresh",
 ];
 
-export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversionResult> {
+export async function convertDocxToDocument(
+  bytes: Buffer,
+  options: CleanupOptions = {},
+): Promise<DocxConversionResult> {
   // LIBRUM 2.0 PRODUCT-5 PRE-COMMIT CORRECTION: the ZIP-bomb preflight
   // runs FIRST, against the raw buffer, before JSZip (or Mammoth,
   // which is layered on top of it) ever touches this file. See
@@ -516,7 +574,33 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
     return { success: false, error: "macro_enabled_document_not_supported" };
   }
 
+  // W3: the clean-up pass writes a cleaned copy for Mammoth. Any failure
+  // there (an unusual or malformed file) falls back to converting the
+  // original exactly as before.
+  let mammothInput = bytes;
+  let cleanup = emptyCleanupReport();
+  const w3Enabled = cleanupPassEnabled();
+  if (w3Enabled) {
+    try {
+      const copy = await JSZip.loadAsync(bytes);
+      cleanup = await cleanUpDocx(copy, options);
+      if (cleanup.applied) {
+        mammothInput = await copy.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+      }
+    } catch {
+      cleanup = emptyCleanupReport();
+      mammothInput = bytes;
+    }
+  }
+
   const warnings: ConversionWarning[] = [];
+  if (cleanup.trackedChanges || cleanup.comments) {
+    warnings.push({
+      code: "tracked_changes_accepted",
+      message:
+        "Dokumenti kishte ndryshime të pashqyrtuara (Track Changes) ose komente. U përdor versioni përfundimtar, me të gjitha ndryshimet të pranuara dhe pa komente. Kontrollojeni tekstin.",
+    });
+  }
   const images: DocImage[] = [];
   let totalImageBytes = 0;
   let skippedForCount = false;
@@ -524,7 +608,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
   let rawHtml: string;
   try {
     const result = await mammoth.convertToHtml(
-      { buffer: bytes },
+      { buffer: mammothInput },
       {
         styleMap: HEADING_STYLE_MAP,
         // LIBRUM 2.0 PRODUCT-5: the ONLY place image bytes ever come
@@ -627,13 +711,14 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
   // `html`, so there's exactly one place a chapter title is ever
   // rendered from), so splitting on it has to happen first.
   const rawParts = rawHtml.split(/(<h1>[\s\S]*?<\/h1>)/);
-  const rawSections: { heading: string | null; rawHtml: string }[] = [];
+  const rawSections: { heading: string | null; headingLines?: string[]; rawHtml: string }[] = [];
   let currentHeading: string | null = null;
+  let currentLines: string[] | undefined;
   let currentHtml = "";
 
   function flushRaw() {
     if (currentHtml.trim().length > 0 || currentHeading) {
-      rawSections.push({ heading: currentHeading, rawHtml: currentHtml });
+      rawSections.push({ heading: currentHeading, headingLines: currentLines, rawHtml: currentHtml });
     }
   }
 
@@ -641,7 +726,15 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
     const headingMatch = part.match(/^<h1>([\s\S]*?)<\/h1>$/);
     if (headingMatch) {
       flushRaw();
-      currentHeading = headingHtmlToText(headingMatch[1]) || null;
+      if (w3Enabled) {
+        const parsed = headingFromHtml(headingMatch[1]);
+        currentHeading = parsed.heading;
+        currentLines = parsed.lines;
+      } else {
+        // Answer 10b: Production keeps the title exactly as before W3.
+        currentHeading = headingHtmlToText(headingMatch[1]) || null;
+        currentLines = undefined;
+      }
       currentHtml = "";
     } else {
       currentHtml += part;
@@ -660,6 +753,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
   const imageFilenames = new Set(images.map((i) => i.filename));
   const sanitizedSections: DocSection[] = rawSections.map((section) => ({
     heading: section.heading,
+    ...(section.headingLines ? { headingLines: section.headingLines } : {}),
     html: removeEmptyElements(sanitizeFragment(
       section.rawHtml,
       (src) => {
@@ -693,5 +787,5 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
     });
   }
 
-  return { success: true, sections, images, warnings };
+  return { success: true, sections, images, warnings, cleanup };
 }

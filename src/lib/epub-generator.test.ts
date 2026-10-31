@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { randomBytes } from "crypto";
 import JSZip from "jszip";
 import { generateEpub, patchEpubMetadata } from "./epub-generator";
@@ -568,5 +568,41 @@ describe("generated EPUB references (W2)", () => {
       expect(page).not.toContain("&amp;amp;");
     }
     expect(chapter).toContain("<title>Ana &amp; Beni</title>");
+  });
+});
+
+describe("Word-made book look (W3)", () => {
+  it("indents paragraphs like a printed book: first-line indent, no gap, none after a heading or scene break", async () => {
+    const zip = await JSZip.loadAsync(await generateEpub(BASE_INPUT));
+    const css = await zip.file("OEBPS/styles.css")!.async("string");
+    expect(css).toContain("p { margin: 0; text-indent: 1.5em; }");
+    expect(css).toMatch(/h1 \+ p[^{]*p\.scene-break \+ p[^{]*\{ text-indent: 0; \}/);
+    // Answer 10b: Production keeps the old paragraph gap until W4.
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    try {
+      const prodZip = await JSZip.loadAsync(await generateEpub(BASE_INPUT));
+      const prodCss = await prodZip.file("OEBPS/styles.css")!.async("string");
+      expect(prodCss).toContain("p { margin: 0 0 1em; }");
+      expect(prodCss).not.toContain("text-indent: 1.5em");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(css).toContain("p.scene-break { text-align: center;");
+    expect(css).not.toContain("p { margin: 0 0 1em; }");
+  });
+
+  it("shows a two-line chapter title on two lines and its one-line form in the contents", async () => {
+    const zip = await JSZip.loadAsync(
+      await generateEpub({
+        ...BASE_INPUT,
+        sections: [{ heading: "Kapitulli 1: Ana & Beni", headingLines: ["Kapitulli 1", "Ana & Beni"], html: "<p>Teksti.</p>" }],
+      }),
+    );
+    const chapter = await zip.file("OEBPS/chapter-1.xhtml")!.async("string");
+    expect(chapter).toContain("<h1>Kapitulli 1<br/>Ana &amp; Beni</h1>");
+    expect(chapter).toContain("<title>Kapitulli 1: Ana &amp; Beni</title>");
+    const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+    expect(nav).toContain(">Kapitulli 1: Ana &amp; Beni</a>");
   });
 });
