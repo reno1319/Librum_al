@@ -23,6 +23,7 @@ import {
 import type { Book } from "@/lib/types";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { ebookCoverNotice } from "@/lib/ebook-cover-notice";
 
 export const metadata: Metadata = {
   title: "Paneli i autorit",
@@ -89,7 +90,7 @@ function dashboardHref(tab: BookTab, q: string): string {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string; tab?: string; q?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; tab?: string; q?: string; ebook_cover?: string }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_all
   // via AuthorBookRow (exhaustive route audit) -- checked as the first
@@ -98,11 +99,14 @@ export default async function DashboardPage({
     return <MaintenanceNotice />;
   }
 
-  const { error: rawError, success: rawSuccess, tab: rawTab, q: rawQ } = await searchParams;
+  const { error: rawError, success: rawSuccess, tab: rawTab, q: rawQ, ebook_cover: rawEbookCover } = await searchParams;
 
   const error = pageErrorMessage(rawError);
 
   const success = pageSuccessMessage(rawSuccess);
+  // W7 r2 (Q1): one fixed sentence when the cover could not be put inside
+  // a Librum-made ebook (src/lib/ebook-cover-notice.ts).
+  const ebookCoverWarning = ebookCoverNotice(rawEbookCover);
   const supabase = await createClient();
   const {
     data: { user },
@@ -154,6 +158,11 @@ export default async function DashboardPage({
       {success && (
         <Alert variant="success" className="mt-6">
           {success}
+        </Alert>
+      )}
+      {ebookCoverWarning && (
+        <Alert variant="warning" className="mt-6">
+          {ebookCoverWarning}
         </Alert>
       )}
     </>

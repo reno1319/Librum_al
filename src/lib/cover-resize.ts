@@ -10,6 +10,10 @@ import sharp from "sharp";
 // - blog cover: blog post page, max-w-2xl (672 CSS px)
 // - pen name photo: author page, sm:size-28 (112 CSS px), always round
 export const BOOK_COVER_SIZE = { width: 800 } as const;
+// W7 (Renato 4b): the copy put INSIDE a Librum-made ebook only, made from
+// the original upload during the save and never stored on its own. A
+// tablet shows the cover full-screen, where 800px looks soft.
+export const EBOOK_COVER_SIZE = { width: 1600 } as const;
 export const BLOG_COVER_SIZE = { width: 1400 } as const;
 export const PEN_NAME_PHOTO_SIZE = { width: 400, height: 400 } as const;
 export const IMAGE_JPEG_QUALITY = 80;
