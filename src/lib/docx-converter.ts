@@ -1,6 +1,18 @@
 import JSZip from "jszip";
 import mammoth from "mammoth";
 import { preflightZipEntries, findEntry } from "@/lib/zip-preflight";
+import {
+  cleanUpDocx,
+  cleanupPassEnabled,
+  emptyCleanupReport,
+  PARAGRAPH_MARK_PREFIX,
+  SCENE_BREAK_MARK_PREFIX,
+  type CleanupOptions,
+  type CleanupReport,
+} from "@/lib/docx-cleanup";
+import { ENDNOTES_HEADING, extractNotes, renderNotes, takeHeadingNotes } from "@/lib/docx-notes";
+import { findMissingLetters, fixBrokenLetters } from "@/lib/docx-letters";
+import { chapterFilename } from "@/lib/epub-generator";
 
 // LIBRUM 2.0 PRODUCT-5: DOCX -> a small, safe, deterministic internal
 // document model, entirely separate from EPUB packaging itself (see
@@ -33,6 +45,14 @@ export type DocSection = {
   // with no heading yet (content before the manuscript's first Heading
   // 1, if any) -- never fabricated from anything else.
   heading: string | null;
+  // W3: when the chapter title is shown on two lines in the book
+  // ("Kapitulli 1" / "Mëngjesi"), the lines; `heading` is then the
+  // one-line contents-list text ("Kapitulli 1: Mëngjesi").
+  headingLines?: string[];
+  // W3 Part 2 (answer 3a): the note links on the chapter title
+  // ("PARATHËNIE¹"), Librum's own markup built from numbers only;
+  // shown after the title in the book, never in the contents list.
+  headingNotes?: string;
   // Sanitized, well-formed XHTML body content for this chapter --
   // ready to embed directly inside a <body> element.
   html: string;
@@ -56,8 +76,22 @@ export type ConversionWarning = {
     | "image_skipped_too_large"
     | "too_many_images"
     | "unsupported_element_skipped"
-    | "unsafe_link_removed";
+    | "unsafe_link_removed"
+    | "tracked_changes_accepted";
   message: string;
+};
+
+// W4: the same chapters as `sections`, one for one, for the author's
+// preview. `html` is the same sanitized content plus empty
+// <span data-p="N"> (start of Word paragraph N) and <span data-s="N">
+// (scene break before Word paragraph N) marks; `headingPara` is the
+// Word paragraph of the chapter title. Never put in the ebook.
+export type PreviewSection = {
+  heading: string | null;
+  headingLines?: string[];
+  headingNotes?: string;
+  headingPara: number | null;
+  html: string;
 };
 
 export type DocxConversionResult =
@@ -66,6 +100,11 @@ export type DocxConversionResult =
       sections: DocSection[];
       images: DocImage[];
       warnings: ConversionWarning[];
+      // W3: what the clean-up pass changed and guessed (for the author
+      // preview, W4).
+      cleanup: CleanupReport;
+      // W4: only when asked for ({ preview: true }).
+      preview?: PreviewSection[];
     }
   | {
       success: false;
@@ -126,6 +165,11 @@ const MAX_DOCX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024;
 const MAX_DOCUMENT_XML_BYTES = 50 * 1024 * 1024;
 const MAX_XML_PART_BYTES = 50 * 1024 * 1024;
 
+// W2: the image path written into chapter pages, relative to the
+// chapter file. epub-generator.ts writes chapters to OEBPS/ and images
+// to OEBPS/images/, so this must stay "images/".
+export const IMAGE_SRC_PREFIX = "images/";
+
 const SUPPORTED_IMAGE_TYPES: Record<string, DocImage["mediaType"]> = {
   "image/png": "image/png",
   "image/jpeg": "image/jpeg",
@@ -178,6 +222,27 @@ async function hasFootnotesOrEndnotes(zip: JSZip): Promise<boolean> {
   return false;
 }
 
+// W3 Part 2 (audit F3): the notes the text points at, as "f5" / "e3",
+// read straight from Word's own XML. When one of these did not come
+// through as a note (a shape the note code does not know), the author
+// still gets the "notes left out" warning instead of losing it silently.
+// References deleted with Track Changes (w:del, or the old place of a
+// move, w:moveFrom) are not in the book, so they never count (audit r2
+// F5); a self-closing w:del only marks a deleted paragraph end.
+const DELETED_XML_RE = /<w:(del|moveFrom)\b[^>]*\/>|<w:(del|moveFrom)\b(?:[^>]*[^>/])?>[\s\S]*?<\/w:\2>/g;
+async function referencedNoteKeys(zip: JSZip): Promise<Set<string>> {
+  const keys = new Set<string>();
+  try {
+    const xml = ((await zip.file("word/document.xml")?.async("string")) ?? "").replace(DELETED_XML_RE, "");
+    for (const m of xml.matchAll(/<w:(footnote|endnote)Reference\b[^>]*?\bw:id="(-?\d+)"/g)) {
+      keys.add(`${m[1] === "footnote" ? "f" : "e"}${m[2]}`);
+    }
+  } catch {
+    // Unreadable: nothing to compare against.
+  }
+  return keys;
+}
+
 const SAFE_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
 
 function isSafeHref(href: string): boolean {
@@ -192,6 +257,104 @@ function isSafeHref(href: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isWordTocBookmark(href: string): boolean {
+  return /^#_Toc[\w-]*$/.test(href);
+}
+
+// W2: Mammoth reports every Word style it has no mapping for. These
+// styles carry no content Librum loses (the text still comes through
+// as ordinary paragraphs, and Librum builds its own contents page), so
+// they must not trigger the "some formatting couldn't be converted"
+// warning. Anything else Mammoth warns about still does.
+const HARMLESS_PARAGRAPH_STYLES = [/^title$/i, /^toc\b/i, /^body text$/i, /^first paragraph$/i];
+const HARMLESS_RUN_STYLES = [/^hyperlink$/i];
+
+export function isHarmlessMammothWarning(message: string): boolean {
+  // Greedy up to Mammoth's own " (Style ID: " suffix, so a style name
+  // containing an apostrophe is read whole.
+  const style = message.match(/^Unrecognised (paragraph|run) style: '(.*)' \(Style ID: /);
+  if (style) {
+    const list = style[1] === "paragraph" ? HARMLESS_PARAGRAPH_STYLES : HARMLESS_RUN_STYLES;
+    return list.some((re) => re.test(style[2].trim()));
+  }
+  // An image in a format Librum doesn't keep already gets its own,
+  // clearer warning ("image_skipped_unsupported_type").
+  return /^Image of type .* is unlikely to display in web browsers$/.test(message);
+}
+
+// W2: Mammoth's heading HTML is already escaped ("Ana &amp; Beni").
+// The heading is stored as plain text and epub-generator.ts escapes it
+// once when writing it, so it is decoded here exactly once.
+const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, body: string) => {
+    if (body[0] === "#") {
+      const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    }
+    return NAMED_ENTITIES[body.toLowerCase()] ?? whole;
+  });
+}
+
+// W3: a footnote number on a chapter title ("PARATHËNIE¹") stays out
+// of the title text used for the contents list.
+const NOTE_REF_RE = /<a\b[^>]*\bid="(?:footnote|endnote)-ref-\d+"[^>]*>[\s\S]*?<\/a>/g;
+
+export function headingHtmlToText(html: string): string {
+  return decodeEntities(html.replace(NOTE_REF_RE, "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// W2: removes elements left with nothing inside them -- the empty <p>
+// a skipped image or a bookmark leaves behind, the empty <sup> where a
+// removed footnote number was, the empty <ol> the removed note list
+// leaves. The sanitizer emits these tags without attributes, so a
+// plain match is exact. Repeated until nothing changes, so nested
+// empties (<p><em></em></p>) go too. Table cells are never removed
+// (that would break the table's shape). An empty inline element keeps
+// any space it held ("word<em> </em>word" stays two words). Only plain
+// spaces, tabs and line breaks count as empty -- never a non-breaking
+// space (U+00A0 or &nbsp;): a paragraph holding just that is a blank
+// line the author put there on purpose (a scene break, a stanza gap),
+// and an inline one must stay non-breaking. JavaScript's \s would match
+// U+00A0, so it is not used here.
+const EMPTY_ELEMENT_RE = /<(p|sup|sub|ol|ul|li|em|strong|i|b|u|blockquote|h2|h3|h4)>([ \t\r\n]*)<\/\1>/g;
+const INLINE_TAGS = new Set(["sup", "sub", "em", "strong", "i", "b", "u"]);
+export function removeEmptyElements(html: string): string {
+  let current = html;
+  for (;;) {
+    const next = current.replace(EMPTY_ELEMENT_RE, (_whole, tag: string, space: string) =>
+      INLINE_TAGS.has(tag) && space.length > 0 ? " " : "",
+    );
+    if (next === current) return current;
+    current = next;
+  }
+}
+
+// W3: "Kapitulli 1" + "Mëngjesi" -> "Kapitulli 1: Mëngjesi" for the
+// contents list; other two-line titles are joined with a space.
+const HEADING_LABEL_RE =
+  /^(?:(?:kapitull(?:i)?|kreu|pjesa|libri|tregimi|chapter|part|book)\s+(?:[ie]\s+)?\S{1,12}|[IVXLCDM]{1,7}\.?|\d{1,3}\.?)$/i;
+export function headingFromHtml(html: string): { heading: string | null; lines?: string[] } {
+  const lines = html
+    .replace(NOTE_REF_RE, "")
+    .split(/<br\s*\/?>/i)
+    .map((l) => headingHtmlToText(l))
+    .filter(Boolean);
+  if (lines.length === 0) return { heading: null };
+  if (lines.length === 1) return { heading: lines[0] };
+  const [first, ...rest] = lines;
+  const heading = HEADING_LABEL_RE.test(first)
+    ? `${first.replace(/[.:]$/, "")}: ${rest.join(" ")}`
+    : lines.join(" ");
+  return { heading, lines };
+}
+
+function hasVisibleContent(html: string): boolean {
+  return /<img\b|<hr\b|<table\b/.test(html) || html.replace(/<[^>]+>/g, "").trim().length > 0;
 }
 
 // ============================================================
@@ -213,6 +376,9 @@ const ALLOWED_TAGS = new Set([
   "table", "thead", "tbody", "tr", "td", "th",
 ]);
 const VOID_TAGS = new Set(["br", "hr", "img"]);
+// W3: the only class names kept -- the ones docx-converter's own style
+// map writes for the clean-up pass's marks. Anything else is dropped.
+const ALLOWED_P_CLASSES = new Set(["scene-break", "center", "right", "verse", "verse-stanza", "verse-indent", "gap"]);
 const DROP_ENTIRELY_TAGS = new Set([
   "script", "style", "iframe", "object", "embed", "form", "input", "button",
   "select", "textarea", "option", "video", "audio", "canvas", "svg",
@@ -320,9 +486,16 @@ function sanitizeFragment(
       }
 
       if (name === "a") {
-        const href = getAttr(attrs, "href");
+        // W3: Mammoth's HTML is already escaped ("a=1&amp;b=2"); decoded
+        // once here so escapeAttr() below doesn't make it "&amp;amp;".
+        const rawHref = getAttr(attrs, "href");
+        const href = rawHref === null ? null : decodeEntities(rawHref);
         const safe = href && isSafeHref(href);
-        if (!safe && href) onUnsafeLink();
+        // W2: Word's own table-of-contents links ("#_Toc...") point at
+        // bookmarks inside the document. They are unwrapped (text kept)
+        // like any other non-web link, but they are not unsafe, so they
+        // no longer raise the "unsafe link" warning.
+        if (!safe && href && !isWordTocBookmark(href)) onUnsafeLink();
         const openTag = safe ? `<a href="${escapeAttr(href!)}">` : "";
         if (selfClosing) continue;
         stack.push({ tag: name, allowed: safe === true, isDropped: false, openTag, html: [] });
@@ -337,7 +510,7 @@ function sanitizeFragment(
 
       if (name === "img") {
         const src = getAttr(attrs, "src");
-        const alt = getAttr(attrs, "alt") ?? "";
+        const alt = decodeEntities(getAttr(attrs, "alt") ?? "");
         const rewritten = src ? imageSrcRewrite(src) : null;
         if (rewritten) {
           stack[stack.length - 1].html.push(
@@ -355,11 +528,13 @@ function sanitizeFragment(
       if (selfClosing) continue;
 
       const allowed = ALLOWED_TAGS.has(name);
+      const pClass = name === "p" ? getAttr(attrs, "class") : null;
+      const keptClass = pClass && ALLOWED_P_CLASSES.has(pClass) ? pClass : null;
       stack.push({
         tag: name,
         allowed,
         isDropped: false,
-        openTag: allowed ? `<${name}>` : "",
+        openTag: allowed ? (keptClass ? `<p class="${keptClass}">` : `<${name}>`) : "",
         html: [],
       });
       continue;
@@ -385,9 +560,64 @@ const HEADING_STYLE_MAP = [
   "p[style-name='Heading 4'] => h4:fresh",
   "p[style-name='Quote'] => blockquote:fresh",
   "p[style-name='Intense Quote'] => blockquote:fresh",
+  // W3: marks written by the clean-up pass (docx-cleanup.ts).
+  "p[style-name='Librum Chapter'] => h1:fresh",
+  "p[style-name='Librum Subheading'] => h2:fresh",
+  "p[style-name='Librum Scene Break'] => p.scene-break:fresh",
+  "p[style-name='Librum Center'] => p.center:fresh",
+  "p[style-name='Librum Right'] => p.right:fresh",
+  "p[style-name='Librum Verse'] => p.verse:fresh",
+  "p[style-name='Librum Verse Stanza'] => p.verse-stanza:fresh",
+  "p[style-name='Librum Verse Indent'] => p.verse-indent:fresh",
+  "p[style-name='Librum Plain'] => p:fresh",
+  "p[style-name='Librum Gap'] => p.gap:fresh",
 ];
 
-export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversionResult> {
+// W4: Mammoth writes the clean-up pass's paragraph marks as empty
+// anchors. They are taken out of the ebook's HTML before anything else
+// sees it; the preview keeps them as private-use characters (which pass
+// the sanitizer as text) and turns them into data spans afterwards.
+const MARK_ANCHOR_RE = new RegExp(`<a id="(${PARAGRAPH_MARK_PREFIX}|${SCENE_BREAK_MARK_PREFIX})(\\d{1,7})"></a>`, "g");
+const MARK_OPEN = "\uE000";
+const MARK_CLOSE = "\uE001";
+const MARK_TEXT_RE = /\uE000([ps])(\d{1,7})\uE001/g;
+const PRIVATE_MARK_CHARS_RE = /[\uE000\uE001]/g;
+
+export function stripParagraphMarks(html: string): string {
+  return html.replace(MARK_ANCHOR_RE, "");
+}
+
+function marksToText(html: string): string {
+  return html
+    .replace(PRIVATE_MARK_CHARS_RE, "")
+    .replace(MARK_ANCHOR_RE, (_m, prefix: string, n: string) =>
+      `${MARK_OPEN}${prefix === PARAGRAPH_MARK_PREFIX ? "p" : "s"}${n}${MARK_CLOSE}`,
+    );
+}
+
+function marksToSpans(html: string): string {
+  return html.replace(MARK_TEXT_RE, (_m, kind: string, n: string) =>
+    kind === "p" ? `<span data-p="${Number(n)}"></span>` : `<span data-s="${Number(n)}"></span>`,
+  );
+}
+
+function firstParagraphMark(html: string): number | null {
+  for (const m of html.matchAll(MARK_ANCHOR_RE)) {
+    if (m[1] === PARAGRAPH_MARK_PREFIX) return Number(m[2]);
+  }
+  return null;
+}
+
+export type ConvertExtras = {
+  // W4: also return the chapters with paragraph marks for the preview.
+  preview?: boolean;
+};
+
+export async function convertDocxToDocument(
+  bytes: Buffer,
+  options: CleanupOptions = {},
+  extras: ConvertExtras = {},
+): Promise<DocxConversionResult> {
   // LIBRUM 2.0 PRODUCT-5 PRE-COMMIT CORRECTION: the ZIP-bomb preflight
   // runs FIRST, against the raw buffer, before JSZip (or Mammoth,
   // which is layered on top of it) ever touches this file. See
@@ -432,15 +662,43 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
     return { success: false, error: "macro_enabled_document_not_supported" };
   }
 
+  // W3: the clean-up pass writes a cleaned copy for Mammoth. Any failure
+  // there (an unusual or malformed file) falls back to converting the
+  // original exactly as before.
+  let mammothInput = bytes;
+  let cleanup = emptyCleanupReport();
+  const w3Enabled = cleanupPassEnabled();
+  if (w3Enabled) {
+    try {
+      const copy = await JSZip.loadAsync(bytes);
+      cleanup = await cleanUpDocx(copy, { ...options, markParagraphs: extras.preview === true });
+      if (cleanup.applied) {
+        mammothInput = await copy.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+      }
+    } catch {
+      cleanup = emptyCleanupReport();
+      mammothInput = bytes;
+    }
+  }
+
   const warnings: ConversionWarning[] = [];
+  if (cleanup.trackedChanges || cleanup.comments) {
+    warnings.push({
+      code: "tracked_changes_accepted",
+      message:
+        "Dokumenti kishte ndryshime të pashqyrtuara (Track Changes) ose komente. U përdor versioni përfundimtar, me të gjitha ndryshimet të pranuara dhe pa komente. Kontrollojeni tekstin.",
+    });
+  }
   const images: DocImage[] = [];
   let totalImageBytes = 0;
   let skippedForCount = false;
 
   let rawHtml: string;
+  let markedHtml: string | null = null;
+  let noteBodies = new Map<string, string>();
   try {
     const result = await mammoth.convertToHtml(
-      { buffer: bytes },
+      { buffer: mammothInput },
       {
         styleMap: HEADING_STYLE_MAP,
         // LIBRUM 2.0 PRODUCT-5: the ONLY place image bytes ever come
@@ -482,13 +740,32 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
           const extension = mediaType === "image/png" ? "png" : mediaType === "image/gif" ? "gif" : "jpg";
           const filename = `img-${images.length + 1}.${extension}`;
           images.push({ filename, mediaType, bytes: imageBuffer });
-          return { src: `../images/${filename}` };
+          // W2: chapters sit in OEBPS/ next to OEBPS/images/, so the
+          // path is "images/x" -- the old "../images/x" pointed outside
+          // OEBPS and every converted picture was broken.
+          return { src: `${IMAGE_SRC_PREFIX}${filename}` };
         }),
       },
     );
-    rawHtml = result.value;
+    // W4: the ebook never carries the preview's marks (removed here,
+    // before anything else reads the HTML); the marked copy is kept
+    // only for the preview.
+    let mammothHtml = result.value;
+    // W3 Part 2 (answer 6a): broken letters ("Ã«" -> "ë"), and notes
+    // taken out before the chapter split (docx-notes.ts). Both only with
+    // the clean-up pass on (answer 2a: one switch for all of W3).
+    if (w3Enabled) {
+      const fixed = fixBrokenLetters(mammothHtml);
+      mammothHtml = fixed.text;
+      cleanup.fixes.brokenLetters = fixed.count;
+      const extracted = extractNotes(mammothHtml);
+      mammothHtml = extracted.html;
+      noteBodies = extracted.bodies;
+    }
+    markedHtml = extras.preview ? mammothHtml : null;
+    rawHtml = stripParagraphMarks(mammothHtml);
 
-    if (result.messages.some((m) => m.type === "warning")) {
+    if (result.messages.some((m) => m.type === "warning" && !isHarmlessMammothWarning(m.message))) {
       warnings.push({
         code: "unsupported_element_skipped",
         message: "Disa formatime të veçanta të Word-it nuk u kthyen dot dhe u thjeshtuan.",
@@ -516,7 +793,7 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
     });
   }
 
-  if (await hasFootnotesOrEndnotes(zip)) {
+  if (!w3Enabled && (await hasFootnotesOrEndnotes(zip))) {
     warnings.push({
       code: "footnotes_or_endnotes_skipped",
       // LIBRUM 2.0 PRODUCT-5 PRE-COMMIT CORRECTION: unambiguous, not
@@ -540,24 +817,62 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
   // `html`, so there's exactly one place a chapter title is ever
   // rendered from), so splitting on it has to happen first.
   const rawParts = rawHtml.split(/(<h1>[\s\S]*?<\/h1>)/);
-  const rawSections: { heading: string | null; rawHtml: string }[] = [];
+  // W4: the marked copy splits into exactly the same parts (the marks
+  // are only empty anchors); if it ever doesn't, there is no preview
+  // marking rather than a wrong one.
+  let markedParts = markedHtml !== null ? markedHtml.split(/(<h1>[\s\S]*?<\/h1>)/) : null;
+  if (markedParts && markedParts.length !== rawParts.length) markedParts = null;
+  const rawSections: {
+    heading: string | null;
+    headingLines?: string[];
+    headingKeys: string[];
+    rawHtml: string;
+    headingPara: number | null;
+    markedHtml: string;
+  }[] = [];
   let currentHeading: string | null = null;
+  let currentLines: string[] | undefined;
+  let currentKeys: string[] = [];
   let currentHtml = "";
+  let currentHeadingPara: number | null = null;
+  let currentMarked = "";
 
   function flushRaw() {
     if (currentHtml.trim().length > 0 || currentHeading) {
-      rawSections.push({ heading: currentHeading, rawHtml: currentHtml });
+      rawSections.push({
+        heading: currentHeading,
+        headingLines: currentLines,
+        headingKeys: currentKeys,
+        rawHtml: currentHtml,
+        headingPara: currentHeadingPara,
+        markedHtml: currentMarked,
+      });
     }
   }
 
-  for (const part of rawParts) {
+  for (const [partIndex, part] of rawParts.entries()) {
     const headingMatch = part.match(/^<h1>([\s\S]*?)<\/h1>$/);
+    const markedPart = markedParts ? markedParts[partIndex] : "";
     if (headingMatch) {
       flushRaw();
-      currentHeading = headingMatch[1].replace(/<[^>]+>/g, "").trim();
+      currentHeadingPara = firstParagraphMark(markedPart);
+      currentMarked = "";
+      if (w3Enabled) {
+        const taken = takeHeadingNotes(headingMatch[1]);
+        currentKeys = taken.keys;
+        const parsed = headingFromHtml(taken.html);
+        currentHeading = parsed.heading;
+        currentLines = parsed.lines;
+      } else {
+        // Answer 10b: Production keeps the title exactly as before W3.
+        currentHeading = headingHtmlToText(headingMatch[1]) || null;
+        currentLines = undefined;
+        currentKeys = [];
+      }
       currentHtml = "";
     } else {
       currentHtml += part;
+      currentMarked += markedPart;
     }
   }
   flushRaw();
@@ -571,24 +886,96 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
   // conflict with h1 being outside ALLOWED_TAGS.
   let unsafeLinkFound = false;
   const imageFilenames = new Set(images.map((i) => i.filename));
-  const sections: DocSection[] = rawSections.map((section) => ({
+  const checkImageSrc = (src: string) => {
+    // src is already exactly what our own convertImage callback
+    // returned ("images/img-N.ext") or "" for a skipped image --
+    // never anything else, since Mammoth never invents an <img> tag
+    // on its own. Re-validated against the images this run actually
+    // produced anyway, rather than trusted blindly.
+    if (!src.startsWith(IMAGE_SRC_PREFIX)) return null;
+    const filename = src.slice(IMAGE_SRC_PREFIX.length);
+    return imageFilenames.has(filename) ? src : null;
+  };
+  const sanitizedSections: DocSection[] = rawSections.map((section) => ({
     heading: section.heading,
-    html: sanitizeFragment(
+    ...(section.headingLines ? { headingLines: section.headingLines } : {}),
+    html: removeEmptyElements(sanitizeFragment(
       section.rawHtml,
-      (src) => {
-        // src is already exactly what our own convertImage callback
-        // returned ("../images/img-N.ext") or "" for a skipped image --
-        // never anything else, since Mammoth never invents an <img> tag
-        // on its own. Re-validated against the images this run actually
-        // produced anyway, rather than trusted blindly.
-        const filename = src.replace(/^\.\.\/images\//, "");
-        return imageFilenames.has(filename) ? src : null;
-      },
+      checkImageSrc,
       () => {
         unsafeLinkFound = true;
       },
-    ),
+    )).trim(),
   }));
+
+  // W2: a section with no heading and nothing visible in it (e.g. only
+  // a bookmark before the first Heading 1) used to become an empty
+  // first page. A titled chapter is always kept, even with no body.
+  const keep = sanitizedSections.map((s) => !!s.heading || hasVisibleContent(s.html));
+  const sections = sanitizedSections.filter((_s, i) => keep[i]);
+  if (sections.length === 0) {
+    return { success: false, error: "empty_document" };
+  }
+  const keptKeys = rawSections.filter((_s, i) => keep[i]).map((s) => s.headingKeys);
+
+  // W3 Part 2: notes. Footnotes go at the end of their own chapter, and
+  // endnotes into one "Shënime" chapter after the last one (answer 1b).
+  const sanitizeNote = (html: string) =>
+    removeEmptyElements(sanitizeFragment(html, checkImageSrc, () => {
+      unsafeLinkFound = true;
+    }));
+  const withNotes = <T extends { html: string; headingNotes?: string }>(list: T[], extra: (html: string) => T) => {
+    const rendered = renderNotes(
+      list.map((s, i) => ({ html: s.html, headingKeys: keptKeys[i] })),
+      noteBodies,
+      sanitizeNote,
+      chapterFilename,
+    );
+    const out: T[] = list.map((s, i) => ({
+      ...s,
+      html: rendered.sections[i].html,
+      ...(rendered.sections[i].headingNotes ? { headingNotes: rendered.sections[i].headingNotes } : {}),
+    }));
+    if (rendered.endnotesHtml) out.push(extra(rendered.endnotesHtml));
+    return { out, rendered };
+  };
+  let finalSections = sections;
+  if (w3Enabled) {
+    const { out, rendered } = withNotes(sections, (html) => ({ heading: ENDNOTES_HEADING, html }));
+    finalSections = out;
+    cleanup.notes = { footnotes: rendered.footnotes, endnotes: rendered.endnotes, dropped: rendered.unplaced };
+    const unreadable = [...(await referencedNoteKeys(zip))].some((k) => !noteBodies.has(k));
+    if (rendered.unplaced > 0 || unreadable) {
+      warnings.push({
+        code: "footnotes_or_endnotes_skipped",
+        message: "Disa shënime nuk u kthyen dot dhe u lanë jashtë. Kontrolloni librin para publikimit.",
+      });
+    }
+    // Answer 5a: words typed without ë/ç, reported only.
+    cleanup.missingLetters = findMissingLetters(
+      finalSections.flatMap((s) => [s.heading ?? "", headingHtmlToText(s.html.replace(/<\/(?:p|li|h[2-4]|td|th|aside|div)>/g, " "))]),
+    );
+  }
+
+  // W4: the preview's chapters, one for one with `sections`.
+  let preview: PreviewSection[] | undefined;
+  if (extras.preview) {
+    const previewSections: PreviewSection[] = rawSections.flatMap((section, i) => {
+      if (!keep[i]) return [];
+      const html = markedParts
+        ? marksToSpans(removeEmptyElements(sanitizeFragment(marksToText(section.markedHtml), checkImageSrc, () => {})).trim())
+        : sanitizedSections[i].html;
+      return [{
+        heading: section.heading,
+        ...(section.headingLines ? { headingLines: section.headingLines } : {}),
+        headingPara: markedParts ? section.headingPara : null,
+        html,
+      }];
+    });
+    preview = w3Enabled
+      ? withNotes(previewSections, (html) => ({ heading: ENDNOTES_HEADING, headingPara: null, html })).out
+      : previewSections;
+  }
 
   if (unsafeLinkFound) {
     warnings.push({
@@ -597,5 +984,5 @@ export async function convertDocxToDocument(bytes: Buffer): Promise<DocxConversi
     });
   }
 
-  return { success: true, sections, images, warnings };
+  return { success: true, sections: finalSections, images, warnings, cleanup, ...(preview ? { preview } : {}) };
 }

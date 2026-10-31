@@ -3,6 +3,8 @@
 import { randomUUID } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { convertDocxToDocument, type ConversionWarning } from "@/lib/docx-converter";
+import type { CleanupReport } from "@/lib/docx-cleanup";
+import { normalizeChoices } from "@/lib/docx-preview-choices";
 import {
   generateEpub,
   patchEpubMetadata,
@@ -99,6 +101,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   too_complex: "Dokumenti është shumë i ndërlikuar për t'u kthyer.",
   generated_epub_invalid:
     "Diçka shkoi keq gjatë krijimit të e-librit tuaj. Provoni përsëri ose ngarkoni drejtpërdrejt një EPUB.",
+  invalid_choices: "Ndryshimet tuaja nuk u lexuan dot. Rifreskoni faqen dhe provoni përsëri.",
 };
 
 async function requireOwnedTempPath(tempPath: string) {
@@ -116,8 +119,21 @@ async function requireOwnedTempPath(tempPath: string) {
   return { ok: true as const, supabase, userId: user.id };
 }
 
+// W4: the preview copy of the ebook -- the same chapters with each
+// Word paragraph's number marked (data-p / data-s), never submitted --
+// lives next to the ebook as "<uid>/tmp/preview/<uuid>.epub". It is a
+// real EPUB, so the bucket's own file-type rule needs no change.
+export type PreviewChapter = { heading: string | null; headingPara: number | null };
+
 export type ParseDocxResult =
-  | { success: true; conversionId: string; warnings: ConversionWarning[] }
+  | {
+      success: true;
+      conversionId: string;
+      warnings: ConversionWarning[];
+      previewPath: string;
+      cleanup: CleanupReport;
+      chapters: PreviewChapter[];
+    }
   | { success: false; error: string };
 
 // Receives only the small temporary-storage path the browser already
@@ -126,7 +142,11 @@ export type ParseDocxResult =
 // immediately packages + stores a first EPUB (title/author not
 // necessarily final yet -- see repackageWithTitle()) so the client
 // never needs the normalized sections/images at all.
-export async function parseDocxToDocument(tempDocxPath: string): Promise<ParseDocxResult> {
+// W4: `choices` are the author's preview choices (docx-preview-
+// choices.ts), re-validated here; the browser sends the same Word file
+// again for every rebuild (answer 5a), so the Word file is still
+// deleted right after each conversion.
+export async function parseDocxToDocument(tempDocxPath: string, choices?: unknown): Promise<ParseDocxResult> {
   const auth = await requireOwnedTempPath(tempDocxPath);
   if (!auth.ok) return { success: false, error: auth.error };
   const { supabase, userId } = auth;
@@ -158,7 +178,13 @@ export async function parseDocxToDocument(tempDocxPath: string): Promise<ParseDo
     return { success: false, error: ERROR_MESSAGES.too_large };
   }
 
-  const conversion = await convertDocxToDocument(bytes);
+  const options = normalizeChoices(choices);
+  if (!options) {
+    await cleanupTempDocx();
+    return { success: false, error: ERROR_MESSAGES.invalid_choices };
+  }
+
+  const conversion = await convertDocxToDocument(bytes, options, { preview: true });
   // The temporary DOCX is never needed again past this point, success
   // or failure -- see the correction brief's "temporary DOCX only"
   // lifecycle rule (upload -> convert -> delete).
@@ -205,7 +231,43 @@ export async function parseDocxToDocument(tempDocxPath: string): Promise<ParseDo
     return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };
   }
 
-  return { success: true, conversionId: tempEpubPath, warnings: conversion.warnings };
+  // W4: the preview copy. Same pictures and chapters; only the marks
+  // differ. Without it the author can't approve, so a failure here
+  // fails the conversion (and removes the ebook just stored).
+  const preview = conversion.preview ?? conversion.sections.map((s) => ({ ...s, headingPara: null }));
+  const previewPath = `${userId}/tmp/preview/${conversionId}.epub`;
+  try {
+    const previewBytes = await generateEpub({
+      bookId: conversionId,
+      title: UNTITLED_MANUSCRIPT_TITLE,
+      authorName: UNKNOWN_AUTHOR_NAME,
+      sections: preview.map(({ heading, headingLines, headingNotes, html }) => ({
+        heading,
+        ...(headingLines ? { headingLines } : {}),
+        ...(headingNotes ? { headingNotes } : {}),
+        html,
+      })),
+      images: conversion.images,
+    });
+    const { error: previewError } = await supabase.storage
+      .from(MANUSCRIPTS_BUCKET)
+      .upload(previewPath, previewBytes, { contentType: "application/epub+zip", upsert: true });
+    if (previewError) throw previewError;
+  } catch (err) {
+    console.error("parseDocxToDocument: preview upload failed:", err);
+    const { error } = await supabase.storage.from(MANUSCRIPTS_BUCKET).remove([tempEpubPath]);
+    if (error) console.error("parseDocxToDocument: failed to remove temporary EPUB:", error);
+    return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };
+  }
+
+  return {
+    success: true,
+    conversionId: tempEpubPath,
+    warnings: conversion.warnings,
+    previewPath,
+    cleanup: conversion.cleanup,
+    chapters: preview.map((s) => ({ heading: s.heading, headingPara: s.headingPara })),
+  };
 }
 
 export type RepackageResult = { success: true } | { success: false; error: string };

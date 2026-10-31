@@ -52,6 +52,7 @@ import type { Book, Series, Contributor } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { ebookCoverNotice } from "@/lib/ebook-cover-notice";
 
 // LIBRUM 2.0 SEO-1: a static title, not "Edit <book title>" -- getting
 // the real title would mean a second query inside generateMetadata()
@@ -138,7 +139,7 @@ export default async function EditBookPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; success?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; ebook_cover?: string }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_all
   // for editing (exhaustive route audit) -- checked as the first
@@ -148,9 +149,12 @@ export default async function EditBookPage({
   }
 
   const { id } = await params;
-  const { error: rawError, success: rawSuccess } = await searchParams;
+  const { error: rawError, success: rawSuccess, ebook_cover: rawEbookCover } = await searchParams;
   const error = pageErrorMessage(rawError);
   const success = pageSuccessMessage(rawSuccess);
+  // W7 r2 (Q1): one fixed sentence when the cover could not be put inside
+  // a Librum-made ebook (src/lib/ebook-cover-notice.ts).
+  const ebookCoverWarning = ebookCoverNotice(rawEbookCover);
 
   const supabase = await createClient();
   const {
@@ -280,6 +284,11 @@ export default async function EditBookPage({
       {success && (
         <Alert variant="success" className="mt-4">
           {success}
+        </Alert>
+      )}
+      {ebookCoverWarning && (
+        <Alert variant="warning" className="mt-4">
+          {ebookCoverWarning}
         </Alert>
       )}
 

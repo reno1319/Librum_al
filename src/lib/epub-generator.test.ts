@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { randomBytes } from "crypto";
 import JSZip from "jszip";
 import { generateEpub, patchEpubMetadata } from "./epub-generator";
@@ -12,6 +12,7 @@ import {
   boldItalicParagraph,
   imageParagraph,
   tinyPngBytes,
+  hyperlinkParagraph,
 } from "./docx-test-fixtures";
 
 const BASE_INPUT = {
@@ -158,7 +159,7 @@ describe("generateEpub", () => {
   it("includes embedded images in the manifest and writes their bytes", async () => {
     const bytes = await generateEpub({
       ...BASE_INPUT,
-      sections: [{ heading: "Chapter One", html: '<p>Text.</p><img src="../images/img-1.png" alt=""/>' }],
+      sections: [{ heading: "Chapter One", html: '<p>Text.</p><img src="images/img-1.png" alt=""/>' }],
       images: [{ filename: "img-1.png", mediaType: "image/png", bytes: tinyPngBytes() }],
     });
     const zip = await JSZip.loadAsync(bytes);
@@ -191,7 +192,7 @@ describe("patchEpubMetadata", () => {
     const original = await generateEpub({
       ...BASE_INPUT,
       images: [{ filename: "img-1.png", mediaType: "image/png", bytes: tinyPngBytes() }],
-      sections: [{ heading: "Chapter One", html: '<p>Text.</p><img src="../images/img-1.png" alt=""/>' }],
+      sections: [{ heading: "Chapter One", html: '<p>Text.</p><img src="images/img-1.png" alt=""/>' }],
     });
 
     const patched = await patchEpubMetadata(original, "New Title", "New Author");
@@ -476,5 +477,163 @@ describe("generated EPUB text (SQ-17)", () => {
   it("generated pages are still a valid EPUB", async () => {
     const result = await validateEpubStructure(await generateEpub(BASE_INPUT));
     expect(result).toEqual({ valid: true });
+  });
+});
+
+// W2: the old tests only compared strings, so an image path that pointed
+// outside the book ("../images/x") passed while every picture was
+// broken in real readers. This opens the generated EPUB and resolves
+// every src/href in every page and in the package file, the way a
+// reading app does.
+async function unresolvedReferences(epubBytes: Buffer): Promise<string[]> {
+  const zip = await JSZip.loadAsync(epubBytes);
+  const missing: string[] = [];
+  // Resolves `ref` against the folder of `fromFile`; null when the
+  // path climbs out of the EPUB, which can never resolve.
+  const resolve = (fromFile: string, ref: string): string | null => {
+    const parts = fromFile.split("/").slice(0, -1);
+    for (const seg of ref.split("#")[0].split("/")) {
+      if (seg === "..") {
+        if (parts.length === 0) return null;
+        parts.pop();
+      } else if (seg !== "." && seg !== "") parts.push(decodeURIComponent(seg));
+    }
+    return parts.join("/");
+  };
+  for (const path of Object.keys(zip.files)) {
+    if (!/\.(xhtml|opf)$/.test(path)) continue;
+    const text = await zip.file(path)!.async("string");
+    for (const m of text.matchAll(/\b(?:src|href)="([^"]*)"/g)) {
+      const ref = m[1];
+      if (/^(?:https?:|mailto:)/.test(ref) || ref.startsWith("#")) continue;
+      const target = resolve(path, ref);
+      if (target === null || !zip.file(target)) missing.push(`${path} -> ${ref}`);
+    }
+  }
+  return missing;
+}
+
+describe("generated EPUB references (W2)", () => {
+  it("every picture, link, stylesheet and manifest entry in a converted book points at a file inside the EPUB", async () => {
+    const docxBytes = await buildDocxBytes({
+      includeStyles: true,
+      includeImageRel: true,
+      includeHyperlinkRel: [{ id: "rIdLink1", target: "https://example.com" }],
+      bodyXml:
+        heading(1, "Kapitulli 1") +
+        paragraph("Fillimi.") +
+        imageParagraph() +
+        hyperlinkParagraph("rIdLink1", "faqja") +
+        heading(1, "Ana &amp; Beni") +
+        imageParagraph(),
+    });
+    const conversion = await convertDocxToDocument(docxBytes);
+    expect(conversion.success).toBe(true);
+    if (!conversion.success) return;
+    const epubBytes = await generateEpub({
+      ...BASE_INPUT,
+      sections: conversion.sections,
+      images: conversion.images,
+    });
+
+    const zip = await JSZip.loadAsync(epubBytes);
+    const chapterOne = await zip.file("OEBPS/chapter-1.xhtml")!.async("string");
+    expect(chapterOne).toMatch(/<img src="[^"]+"/);
+    expect(await unresolvedReferences(epubBytes)).toEqual([]);
+  });
+
+  it("the reference check itself catches the old broken '../images/' path", async () => {
+    const epubBytes = await generateEpub({
+      ...BASE_INPUT,
+      sections: [{ heading: "Kapitulli 1", html: '<p>x</p><img src="../images/img-1.png" alt=""/>' }],
+      images: [{ filename: "img-1.png", mediaType: "image/png", bytes: tinyPngBytes() }],
+    });
+    expect(await unresolvedReferences(epubBytes)).toEqual(["OEBPS/chapter-1.xhtml -> ../images/img-1.png"]);
+  });
+
+  it("writes '&' in a chapter title escaped exactly once in the page, its title and the contents", async () => {
+    const docxBytes = await buildDocxBytes({
+      includeStyles: true,
+      bodyXml: heading(1, "Ana &amp; Beni") + paragraph("Tekst."),
+    });
+    const conversion = await convertDocxToDocument(docxBytes);
+    expect(conversion.success).toBe(true);
+    if (!conversion.success) return;
+    const epubBytes = await generateEpub({ ...BASE_INPUT, sections: conversion.sections, images: [] });
+    const zip = await JSZip.loadAsync(epubBytes);
+    const chapter = await zip.file("OEBPS/chapter-1.xhtml")!.async("string");
+    const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+    for (const page of [chapter, nav]) {
+      expect(page).toContain("Ana &amp; Beni");
+      expect(page).not.toContain("&amp;amp;");
+    }
+    expect(chapter).toContain("<title>Ana &amp; Beni</title>");
+  });
+});
+
+describe("Word-made book look (W3)", () => {
+  it("indents paragraphs like a printed book: first-line indent, no gap, none after a heading or scene break", async () => {
+    const zip = await JSZip.loadAsync(await generateEpub(BASE_INPUT));
+    const css = await zip.file("OEBPS/styles.css")!.async("string");
+    expect(css).toContain("p { margin: 0; text-indent: 1.5em; }");
+    expect(css).toMatch(/h1 \+ p[^{]*p\.scene-break \+ p[^{]*\{ text-indent: 0; \}/);
+    // Answer 10b: Production keeps the old paragraph gap until W4.
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    try {
+      const prodZip = await JSZip.loadAsync(await generateEpub(BASE_INPUT));
+      const prodCss = await prodZip.file("OEBPS/styles.css")!.async("string");
+      expect(prodCss).toContain("p { margin: 0 0 1em; }");
+      expect(prodCss).not.toContain("text-indent: 1.5em");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(css).toContain("p.scene-break { text-align: center;");
+    expect(css).not.toContain("p { margin: 0 0 1em; }");
+  });
+
+  it("styles kept blank lines and notes (W3 Part 2), and Production's stylesheet stays as it was", async () => {
+    const zip = await JSZip.loadAsync(await generateEpub(BASE_INPUT));
+    const css = await zip.file("OEBPS/styles.css")!.async("string");
+    expect(css).toContain("p.gap, p.gap + p { text-indent: 0; }");
+    expect(css).toContain("aside.footnote { font-size: 0.9em;");
+    expect(css).toContain("aside.footnote p, div.endnote p { text-indent: 0; }");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    try {
+      const prodCss = await (await JSZip.loadAsync(await generateEpub(BASE_INPUT))).file("OEBPS/styles.css")!.async("string");
+      expect(prodCss).not.toMatch(/gap|footnote|endnote|sup a/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("puts a title's note links after a two-line title, and keeps them when the title was only a note number", async () => {
+    const link = '<sup><a epub:type="noteref" href="#fn-1" id="fnref-1">1</a></sup>';
+    const zip = await JSZip.loadAsync(
+      await generateEpub({
+        ...BASE_INPUT,
+        sections: [
+          { heading: "Kapitulli 1: Ana", headingLines: ["Kapitulli 1", "Ana"], headingNotes: link, html: "<p>Teksti.</p>" },
+          { heading: null, headingNotes: link.replace(/1/g, "2"), html: "<p>Më tej.</p>" },
+        ],
+      }),
+    );
+    expect(await zip.file("OEBPS/chapter-1.xhtml")!.async("string")).toContain(`<h1>Kapitulli 1<br/>Ana${link}</h1>`);
+    expect(await zip.file("OEBPS/chapter-2.xhtml")!.async("string")).toContain(`<p>${link.replace(/1/g, "2")}</p>\n<p>Më tej.</p>`);
+  });
+
+  it("shows a two-line chapter title on two lines and its one-line form in the contents", async () => {
+    const zip = await JSZip.loadAsync(
+      await generateEpub({
+        ...BASE_INPUT,
+        sections: [{ heading: "Kapitulli 1: Ana & Beni", headingLines: ["Kapitulli 1", "Ana & Beni"], html: "<p>Teksti.</p>" }],
+      }),
+    );
+    const chapter = await zip.file("OEBPS/chapter-1.xhtml")!.async("string");
+    expect(chapter).toContain("<h1>Kapitulli 1<br/>Ana &amp; Beni</h1>");
+    expect(chapter).toContain("<title>Kapitulli 1: Ana &amp; Beni</title>");
+    const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+    expect(nav).toContain(">Kapitulli 1: Ana &amp; Beni</a>");
   });
 });

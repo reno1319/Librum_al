@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
-import { convertDocxToDocument } from "./docx-converter";
+import {
+  convertDocxToDocument,
+  headingHtmlToText,
+  isHarmlessMammothWarning,
+  removeEmptyElements,
+} from "./docx-converter";
 import {
   buildDocxBytes,
   paragraph,
@@ -12,7 +17,21 @@ import {
   imageParagraph,
   tableXml,
   pageBreakParagraph,
+  styledParagraph,
+  internalLinkParagraph,
+  bookmarkOnlyParagraph,
 } from "./docx-test-fixtures";
+
+// W3 Part 2 (answer 2a): Word notes are kept only with the clean-up
+// pass on. Production keeps removing them, with the warning, until the
+// switch step; these tests pin that.
+function onProduction() {
+  vi.stubEnv("VERCEL", "1");
+  vi.stubEnv("VERCEL_ENV", "production");
+}
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("convertDocxToDocument", () => {
   it("converts simple paragraphs with no headings into a single section", async () => {
@@ -132,7 +151,10 @@ describe("convertDocxToDocument", () => {
     expect(result.images).toHaveLength(1);
     expect(result.images[0].mediaType).toBe("image/png");
     expect(result.images[0].bytes.length).toBeGreaterThan(0);
-    expect(result.sections[0].html).toContain(`<img src="../images/${result.images[0].filename}"`);
+    // W2: relative to the chapter file in OEBPS/, where OEBPS/images/
+    // sits -- never "../images/", which pointed outside the book.
+    expect(result.sections[0].html).toContain(`<img src="images/${result.images[0].filename}"`);
+    expect(result.sections[0].html).not.toContain("../");
   });
 
   it("converts a simple table and warns that it may need review", async () => {
@@ -153,7 +175,8 @@ describe("convertDocxToDocument", () => {
     expect(result.sections[0].html).toContain("After the break.");
   });
 
-  it("gives an unambiguous 'not preserved' warning about footnotes -- never merely 'may need review'", async () => {
+  it("gives an unambiguous 'not preserved' warning about footnotes -- never merely 'may need review' (Production)", async () => {
+    onProduction();
     const zip = new JSZip();
     const base = await buildDocxBytes({ bodyXml: paragraph("Body text.") });
     const loaded = await JSZip.loadAsync(base);
@@ -185,7 +208,8 @@ describe("convertDocxToDocument", () => {
     expect(warning?.message).not.toMatch(/may (require|need)/i);
   });
 
-  it("cleanly removes Mammoth's own footnote reference and note-list markup rather than leaving a dead cross-chapter link", async () => {
+  it("cleanly removes Mammoth's own footnote reference and note-list markup rather than leaving a dead cross-chapter link (Production)", async () => {
+    onProduction();
     // Built directly (not via the fixture helper) because this needs a
     // real w:footnoteReference + footnotes.xml pair, empirically
     // verified against the installed Mammoth build to actually produce
@@ -376,5 +400,241 @@ describe("convertDocxToDocument", () => {
       const result = await convertDocxToDocument(bytes);
       expect(result.success).toBe(true);
     });
+  });
+});
+
+describe("W2 converter fixes", () => {
+  it("writes '&' in a chapter title as plain text, so it is escaped only once later", async () => {
+    const bytes = await buildDocxBytes({
+      includeStyles: true,
+      bodyXml: heading(1, "Ana &amp; Beni &lt;1&gt;") + paragraph("Tekst."),
+    });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.sections[0].heading).toBe("Ana & Beni <1>");
+  });
+
+  it("decodes heading entities exactly once and turns line breaks into spaces", () => {
+    expect(headingHtmlToText("Ana &amp; Beni")).toBe("Ana & Beni");
+    expect(headingHtmlToText("&amp;lt;")).toBe("&lt;");
+    expect(headingHtmlToText("Kapitulli 1<br />Fillimi")).toBe("Kapitulli 1 Fillimi");
+    expect(headingHtmlToText("<strong>Ç&#235;sht&#xEB;</strong>")).toBe("Çështë");
+    expect(headingHtmlToText("&unknown; &#0;")).toBe("&unknown; &#0;");
+  });
+
+  it("gives no formatting warning for Word's Title, contents, Body Text and First Paragraph styles", async () => {
+    const bytes = await buildDocxBytes({
+      includeStyles: true,
+      extraParagraphStyles: [
+        { id: "Title", name: "Title" },
+        { id: "TOCHeading", name: "TOC Heading" },
+        { id: "TOC1", name: "toc 1" },
+        { id: "BodyText", name: "Body Text" },
+        { id: "FirstParagraph", name: "First Paragraph" },
+      ],
+      bodyXml:
+        styledParagraph("Title", "Libri") +
+        styledParagraph("TOCHeading", "Përmbajtja") +
+        styledParagraph("TOC1", "Kapitulli 1") +
+        heading(1, "Kapitulli 1") +
+        styledParagraph("FirstParagraph", "Fillimi.") +
+        styledParagraph("BodyText", "Vazhdimi."),
+    });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.warnings.map((w) => w.code)).not.toContain("unsupported_element_skipped");
+    expect(result.sections.map((s) => s.html).join("")).toContain("Vazhdimi.");
+  });
+
+  it("still warns for a Word style that is not on the harmless list", async () => {
+    const bytes = await buildDocxBytes({
+      includeStyles: true,
+      extraParagraphStyles: [{ id: "MyStyle", name: "My Fancy Style" }],
+      bodyXml: styledParagraph("MyStyle", "Tekst."),
+    });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.warnings.map((w) => w.code)).toContain("unsupported_element_skipped");
+  });
+
+  it("classifies Mammoth messages by exact style name", () => {
+    expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'Title' (Style ID: Title)")).toBe(true);
+    expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'toc 2' (Style ID: TOC2)")).toBe(true);
+    expect(isHarmlessMammothWarning("Unrecognised run style: 'Hyperlink' (Style ID: Hyperlink)")).toBe(true);
+    expect(isHarmlessMammothWarning("Image of type image/bmp is unlikely to display in web browsers")).toBe(true);
+    expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'Subtitle Fancy' (Style ID: X)")).toBe(false);
+    expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'Titles' (Style ID: X)")).toBe(false);
+    expect(isHarmlessMammothWarning("Unrecognised run style: 'Title' (Style ID: Title)")).toBe(false);
+    expect(isHarmlessMammothWarning("Something else entirely")).toBe(false);
+    // W2 r2: a style name with an apostrophe is read whole, not cut at it.
+    expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'Title's Fancy' (Style ID: X)")).toBe(false);
+  });
+
+  it("unwraps Word's own contents links (#_Toc) without an unsafe-link warning", async () => {
+    const bytes = await buildDocxBytes({
+      includeStyles: true,
+      bodyXml: internalLinkParagraph("_Toc123456", "Kapitulli 1") + heading(1, "Kapitulli 1") + paragraph("Tekst."),
+    });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const html = result.sections.map((s) => s.html).join("");
+    expect(html).not.toContain("<a ");
+    expect(html).not.toContain("_Toc");
+    expect(result.warnings.map((w) => w.code)).not.toContain("unsafe_link_removed");
+  });
+
+  it("still warns for a non-web link that only contains _Toc somewhere inside it", async () => {
+    for (const anchor of ["x_Toc123", "_Toc1 extra"]) {
+      const bytes = await buildDocxBytes({ bodyXml: internalLinkParagraph(anchor, "lidhja") });
+      const result = await convertDocxToDocument(bytes);
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.warnings.map((w) => w.code)).toContain("unsafe_link_removed");
+    }
+  });
+
+  it("still warns for an internal link that is not a Word contents link", async () => {
+    const bytes = await buildDocxBytes({
+      bodyXml: internalLinkParagraph("myBookmark", "shiko këtu"),
+    });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.warnings.map((w) => w.code)).toContain("unsafe_link_removed");
+  });
+
+  it("removes empty elements, including nested ones, but never table cells", () => {
+    expect(removeEmptyElements("<p>a<sup></sup></p><ol>\n</ol><p> </p>")).toBe("<p>a</p>");
+    expect(removeEmptyElements("<p><em><strong></strong></em></p><p>b</p>")).toBe("<p>b</p>");
+    expect(removeEmptyElements("<table><tr><td></td><td>x</td></tr></table>")).toBe(
+      "<table><tr><td></td><td>x</td></tr></table>",
+    );
+    expect(removeEmptyElements("<p><br/></p>")).toBe("<p><br/></p>");
+    expect(removeEmptyElements("<p>fjala<em> </em>tjetër</p>")).toBe("<p>fjala tjetër</p>");
+    expect(removeEmptyElements("<p>fjala<em></em>tjetër</p>")).toBe("<p>fjalatjetër</p>");
+    // W2 r2: Apple Pages leaves a removed footnote number as nested <sup>.
+    expect(removeEmptyElements("<p>a<sup><sup></sup></sup></p>")).toBe("<p>a</p>");
+    expect(removeEmptyElements("<h2> </h2><h3></h3><h4>\n</h4><p>x</p>")).toBe("<p>x</p>");
+  });
+
+  it("keeps a blank line made of a non-breaking space, and keeps an inline one non-breaking", () => {
+    expect(removeEmptyElements("<p>Para.</p><p>\u00a0</p><p>Pas.</p>")).toBe("<p>Para.</p><p>\u00a0</p><p>Pas.</p>");
+    expect(removeEmptyElements("<p>Para.</p><p>&nbsp;</p><p>Pas.</p>")).toBe("<p>Para.</p><p>&nbsp;</p><p>Pas.</p>");
+    expect(removeEmptyElements("<p>Nr.<em>\u00a0</em>5</p>")).toBe("<p>Nr.<em>\u00a0</em>5</p>");
+    expect(removeEmptyElements("<p>Nr.<em>&nbsp;</em>5</p>")).toBe("<p>Nr.<em>&nbsp;</em>5</p>");
+  });
+
+  it("keeps the meaning of a Word paragraph holding only a non-breaking space through the whole conversion", async () => {
+    // W3: the clean-up pass decides what blank lines mean (answer 4a,
+    // D1 = a): a single blank line is only a scene-break suggestion for
+    // the author preview, so it leaves no empty paragraph behind.
+    const bytes = await buildDocxBytes({
+      bodyXml: paragraph("Para.") + paragraph("\u00a0") + paragraph("Pas.") + paragraph("Fund."),
+    });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.sections[0].html).toBe("<p>Para.</p><p>Pas.</p><p>Fund.</p>");
+    expect(result.cleanup.guesses).toContainEqual(expect.objectContaining({ kind: "scene_break", paragraph: 2, applied: false }));
+  });
+
+  it("leaves no empty paragraph where an unsupported picture was skipped", async () => {
+    const bytes = await buildDocxBytes({
+      includeImageRel: true,
+      contentTypesOverride: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Default Extension="png" ContentType="image/bmp"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`,
+      bodyXml: paragraph("Para.") + imageParagraph() + paragraph("Pas."),
+    });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.images).toHaveLength(0);
+    expect(result.warnings.map((w) => w.code)).toContain("image_skipped_unsupported_type");
+    expect(result.warnings.map((w) => w.code)).not.toContain("unsupported_element_skipped");
+    expect(result.sections[0].html).toBe("<p>Para.</p><p>Pas.</p>");
+  });
+
+  it("drops an untitled empty first page (e.g. only a bookmark before the first chapter)", async () => {
+    const bytes = await buildDocxBytes({
+      includeStyles: true,
+      bodyXml: bookmarkOnlyParagraph("hyrja") + heading(1, "Kapitulli 1") + paragraph("Tekst."),
+    });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.sections).toHaveLength(1);
+    expect(result.sections[0].heading).toBe("Kapitulli 1");
+  });
+
+  it("keeps a titled chapter even when it has no text (e.g. a part title page)", async () => {
+    const bytes = await buildDocxBytes({
+      includeStyles: true,
+      bodyXml: heading(1, "Pjesa e Parë") + heading(1, "Kapitulli 1") + paragraph("Tekst."),
+    });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.sections.map((s) => s.heading)).toEqual(["Pjesa e Parë", "Kapitulli 1"]);
+    expect(result.sections[0].html).toBe("");
+  });
+
+  it("removes the empty <sup> and <ol> a removed footnote leaves behind (Production)", async () => {
+    onProduction();
+    const zip = new JSZip();
+    zip.file(
+      "[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>
+</Types>`,
+    );
+    zip.file(
+      "_rels/.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`,
+    );
+    zip.file(
+      "word/footnotes.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:footnote w:type="separator" w:id="-1"/>
+<w:footnote w:type="continuationSeparator" w:id="0"/>
+<w:footnote w:id="2"><w:p><w:r><w:t>Shënim.</w:t></w:r></w:p></w:footnote>
+</w:footnotes>`,
+    );
+    zip.file(
+      "word/_rels/document.xml.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rIdFootnotes" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/>
+</Relationships>`,
+    );
+    zip.file(
+      "word/document.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+<w:p><w:r><w:t xml:space="preserve">Tekst me shënim</w:t></w:r><w:r><w:footnoteReference w:id="2"/></w:r><w:r><w:t>.</w:t></w:r></w:p>
+</w:body></w:document>`,
+    );
+    const result = await convertDocxToDocument(await zip.generateAsync({ type: "nodebuffer" }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.sections[0].html).not.toContain("<sup>");
+    expect(result.sections[0].html).not.toContain("<ol>");
+    expect(result.sections[0].html).toContain("Tekst me shënim");
   });
 });
