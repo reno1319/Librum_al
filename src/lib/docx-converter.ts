@@ -5,6 +5,8 @@ import {
   cleanUpDocx,
   cleanupPassEnabled,
   emptyCleanupReport,
+  PARAGRAPH_MARK_PREFIX,
+  SCENE_BREAK_MARK_PREFIX,
   type CleanupOptions,
   type CleanupReport,
 } from "@/lib/docx-cleanup";
@@ -72,6 +74,18 @@ export type ConversionWarning = {
   message: string;
 };
 
+// W4: the same chapters as `sections`, one for one, for the author's
+// preview. `html` is the same sanitized content plus empty
+// <span data-p="N"> (start of Word paragraph N) and <span data-s="N">
+// (scene break before Word paragraph N) marks; `headingPara` is the
+// Word paragraph of the chapter title. Never put in the ebook.
+export type PreviewSection = {
+  heading: string | null;
+  headingLines?: string[];
+  headingPara: number | null;
+  html: string;
+};
+
 export type DocxConversionResult =
   | {
       success: true;
@@ -81,6 +95,8 @@ export type DocxConversionResult =
       // W3: what the clean-up pass changed and guessed (for the author
       // preview, W4).
       cleanup: CleanupReport;
+      // W4: only when asked for ({ preview: true }).
+      preview?: PreviewSection[];
     }
   | {
       success: false;
@@ -524,11 +540,53 @@ const HEADING_STYLE_MAP = [
   "p[style-name='Librum Verse'] => p.verse:fresh",
   "p[style-name='Librum Verse Stanza'] => p.verse-stanza:fresh",
   "p[style-name='Librum Verse Indent'] => p.verse-indent:fresh",
+  "p[style-name='Librum Plain'] => p:fresh",
 ];
+
+// W4: Mammoth writes the clean-up pass's paragraph marks as empty
+// anchors. They are taken out of the ebook's HTML before anything else
+// sees it; the preview keeps them as private-use characters (which pass
+// the sanitizer as text) and turns them into data spans afterwards.
+const MARK_ANCHOR_RE = new RegExp(`<a id="(${PARAGRAPH_MARK_PREFIX}|${SCENE_BREAK_MARK_PREFIX})(\\d{1,7})"></a>`, "g");
+const MARK_OPEN = "\uE000";
+const MARK_CLOSE = "\uE001";
+const MARK_TEXT_RE = /\uE000([ps])(\d{1,7})\uE001/g;
+const PRIVATE_MARK_CHARS_RE = /[\uE000\uE001]/g;
+
+export function stripParagraphMarks(html: string): string {
+  return html.replace(MARK_ANCHOR_RE, "");
+}
+
+function marksToText(html: string): string {
+  return html
+    .replace(PRIVATE_MARK_CHARS_RE, "")
+    .replace(MARK_ANCHOR_RE, (_m, prefix: string, n: string) =>
+      `${MARK_OPEN}${prefix === PARAGRAPH_MARK_PREFIX ? "p" : "s"}${n}${MARK_CLOSE}`,
+    );
+}
+
+function marksToSpans(html: string): string {
+  return html.replace(MARK_TEXT_RE, (_m, kind: string, n: string) =>
+    kind === "p" ? `<span data-p="${Number(n)}"></span>` : `<span data-s="${Number(n)}"></span>`,
+  );
+}
+
+function firstParagraphMark(html: string): number | null {
+  for (const m of html.matchAll(MARK_ANCHOR_RE)) {
+    if (m[1] === PARAGRAPH_MARK_PREFIX) return Number(m[2]);
+  }
+  return null;
+}
+
+export type ConvertExtras = {
+  // W4: also return the chapters with paragraph marks for the preview.
+  preview?: boolean;
+};
 
 export async function convertDocxToDocument(
   bytes: Buffer,
   options: CleanupOptions = {},
+  extras: ConvertExtras = {},
 ): Promise<DocxConversionResult> {
   // LIBRUM 2.0 PRODUCT-5 PRE-COMMIT CORRECTION: the ZIP-bomb preflight
   // runs FIRST, against the raw buffer, before JSZip (or Mammoth,
@@ -583,7 +641,7 @@ export async function convertDocxToDocument(
   if (w3Enabled) {
     try {
       const copy = await JSZip.loadAsync(bytes);
-      cleanup = await cleanUpDocx(copy, options);
+      cleanup = await cleanUpDocx(copy, { ...options, markParagraphs: extras.preview === true });
       if (cleanup.applied) {
         mammothInput = await copy.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
       }
@@ -606,6 +664,7 @@ export async function convertDocxToDocument(
   let skippedForCount = false;
 
   let rawHtml: string;
+  let markedHtml: string | null = null;
   try {
     const result = await mammoth.convertToHtml(
       { buffer: mammothInput },
@@ -657,7 +716,11 @@ export async function convertDocxToDocument(
         }),
       },
     );
-    rawHtml = result.value;
+    // W4: the ebook never carries the preview's marks (removed here,
+    // before anything else reads the HTML); the marked copy is kept
+    // only for the preview.
+    markedHtml = extras.preview ? result.value : null;
+    rawHtml = stripParagraphMarks(result.value);
 
     if (result.messages.some((m) => m.type === "warning" && !isHarmlessMammothWarning(m.message))) {
       warnings.push({
@@ -711,21 +774,43 @@ export async function convertDocxToDocument(
   // `html`, so there's exactly one place a chapter title is ever
   // rendered from), so splitting on it has to happen first.
   const rawParts = rawHtml.split(/(<h1>[\s\S]*?<\/h1>)/);
-  const rawSections: { heading: string | null; headingLines?: string[]; rawHtml: string }[] = [];
+  // W4: the marked copy splits into exactly the same parts (the marks
+  // are only empty anchors); if it ever doesn't, there is no preview
+  // marking rather than a wrong one.
+  let markedParts = markedHtml !== null ? markedHtml.split(/(<h1>[\s\S]*?<\/h1>)/) : null;
+  if (markedParts && markedParts.length !== rawParts.length) markedParts = null;
+  const rawSections: {
+    heading: string | null;
+    headingLines?: string[];
+    rawHtml: string;
+    headingPara: number | null;
+    markedHtml: string;
+  }[] = [];
   let currentHeading: string | null = null;
   let currentLines: string[] | undefined;
   let currentHtml = "";
+  let currentHeadingPara: number | null = null;
+  let currentMarked = "";
 
   function flushRaw() {
     if (currentHtml.trim().length > 0 || currentHeading) {
-      rawSections.push({ heading: currentHeading, headingLines: currentLines, rawHtml: currentHtml });
+      rawSections.push({
+        heading: currentHeading,
+        headingLines: currentLines,
+        rawHtml: currentHtml,
+        headingPara: currentHeadingPara,
+        markedHtml: currentMarked,
+      });
     }
   }
 
-  for (const part of rawParts) {
+  for (const [partIndex, part] of rawParts.entries()) {
     const headingMatch = part.match(/^<h1>([\s\S]*?)<\/h1>$/);
+    const markedPart = markedParts ? markedParts[partIndex] : "";
     if (headingMatch) {
       flushRaw();
+      currentHeadingPara = firstParagraphMark(markedPart);
+      currentMarked = "";
       if (w3Enabled) {
         const parsed = headingFromHtml(headingMatch[1]);
         currentHeading = parsed.heading;
@@ -738,6 +823,7 @@ export async function convertDocxToDocument(
       currentHtml = "";
     } else {
       currentHtml += part;
+      currentMarked += markedPart;
     }
   }
   flushRaw();
@@ -751,21 +837,22 @@ export async function convertDocxToDocument(
   // conflict with h1 being outside ALLOWED_TAGS.
   let unsafeLinkFound = false;
   const imageFilenames = new Set(images.map((i) => i.filename));
+  const checkImageSrc = (src: string) => {
+    // src is already exactly what our own convertImage callback
+    // returned ("images/img-N.ext") or "" for a skipped image --
+    // never anything else, since Mammoth never invents an <img> tag
+    // on its own. Re-validated against the images this run actually
+    // produced anyway, rather than trusted blindly.
+    if (!src.startsWith(IMAGE_SRC_PREFIX)) return null;
+    const filename = src.slice(IMAGE_SRC_PREFIX.length);
+    return imageFilenames.has(filename) ? src : null;
+  };
   const sanitizedSections: DocSection[] = rawSections.map((section) => ({
     heading: section.heading,
     ...(section.headingLines ? { headingLines: section.headingLines } : {}),
     html: removeEmptyElements(sanitizeFragment(
       section.rawHtml,
-      (src) => {
-        // src is already exactly what our own convertImage callback
-        // returned ("images/img-N.ext") or "" for a skipped image --
-        // never anything else, since Mammoth never invents an <img> tag
-        // on its own. Re-validated against the images this run actually
-        // produced anyway, rather than trusted blindly.
-        if (!src.startsWith(IMAGE_SRC_PREFIX)) return null;
-        const filename = src.slice(IMAGE_SRC_PREFIX.length);
-        return imageFilenames.has(filename) ? src : null;
-      },
+      checkImageSrc,
       () => {
         unsafeLinkFound = true;
       },
@@ -775,9 +862,27 @@ export async function convertDocxToDocument(
   // W2: a section with no heading and nothing visible in it (e.g. only
   // a bookmark before the first Heading 1) used to become an empty
   // first page. A titled chapter is always kept, even with no body.
-  const sections = sanitizedSections.filter((s) => s.heading || hasVisibleContent(s.html));
+  const keep = sanitizedSections.map((s) => !!s.heading || hasVisibleContent(s.html));
+  const sections = sanitizedSections.filter((_s, i) => keep[i]);
   if (sections.length === 0) {
     return { success: false, error: "empty_document" };
+  }
+
+  // W4: the preview's chapters, one for one with `sections`.
+  let preview: PreviewSection[] | undefined;
+  if (extras.preview) {
+    preview = rawSections.flatMap((section, i) => {
+      if (!keep[i]) return [];
+      const html = markedParts
+        ? marksToSpans(removeEmptyElements(sanitizeFragment(marksToText(section.markedHtml), checkImageSrc, () => {})).trim())
+        : sanitizedSections[i].html;
+      return [{
+        heading: section.heading,
+        ...(section.headingLines ? { headingLines: section.headingLines } : {}),
+        headingPara: markedParts ? section.headingPara : null,
+        html,
+      }];
+    });
   }
 
   if (unsafeLinkFound) {
@@ -787,5 +892,5 @@ export async function convertDocxToDocument(
     });
   }
 
-  return { success: true, sections, images, warnings, cleanup };
+  return { success: true, sections, images, warnings, cleanup, ...(preview ? { preview } : {}) };
 }
