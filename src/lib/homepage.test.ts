@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveHomepageCta, resolveAuthorPageCta, computeAuthorSharePercent } from "./homepage";
+import { STANDARD_ROYALTY_PERCENT } from "./royalty";
 
 describe("resolveHomepageCta", () => {
   it("logged out: hero and final both point at signup with author role intent", () => {
@@ -45,8 +46,10 @@ describe("resolveHomepageCta", () => {
 });
 
 describe("computeAuthorSharePercent", () => {
-  it("derives from PLATFORM_FEE_PERCENT, not a hardcoded literal", () => {
-    expect(computeAuthorSharePercent()).toBe(80);
+  // BD2: the standard royalty (70%, from 199 lek), from src/lib/royalty.ts.
+  it("is the standard royalty from src/lib/royalty.ts", () => {
+    expect(computeAuthorSharePercent()).toBe(STANDARD_ROYALTY_PERCENT);
+    expect(computeAuthorSharePercent()).toBe(70);
   });
 });
 

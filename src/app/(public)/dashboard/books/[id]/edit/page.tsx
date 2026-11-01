@@ -11,7 +11,7 @@ import {
   cancelBookReview,
 } from "../../actions";
 import { GENRES } from "@/lib/genres";
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { ROYALTY_TIERS_LINE } from "@/lib/royalty";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
   MINIMUM_PAID_CATALOG_PRICE_ALL,
@@ -652,9 +652,7 @@ export default async function EditBookPage({
                   </span>
                   <span className="text-sm text-muted">
                     Lekë të plota: 0 për e-libër falas, ose nga {MINIMUM_PAID_CATALOG_PRICE_ALL} deri në{" "}
-                    {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}. Librum mban një tarifë platforme prej{" "}
-                    {PLATFORM_FEE_PERCENT}%; pjesa tjetër e çdo shitjeje
-                    është e juaja.
+                    {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}. {ROYALTY_TIERS_LINE}
                   </span>
                 </label>
                 {/* LIVE-PRICE-CONFIRM-1: a live book's new price needs a

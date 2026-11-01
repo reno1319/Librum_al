@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { platformFeeCents } from "@/lib/pricing";
+import { librumShareMinor } from "@/lib/royalty";
 import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
 import {
   canAdvanceFromBookDetails,
@@ -91,8 +91,9 @@ describe("resolveWizardPriceSummary", () => {
       isFreeBook: true,
       priceAll: 0,
       grossMinor: 0,
-      feeMinor: 0,
+      librumShareMinor: 0,
       earningsMinor: 0,
+      royaltyPercent: 0,
     });
   });
 
@@ -109,16 +110,17 @@ describe("resolveWizardPriceSummary", () => {
       const result = resolveWizardPriceSummary(price);
       expect(result.priceAll).toBe(priceAll);
       expect(result.grossMinor).toBe(priceAll * 100);
-      expect(result.feeMinor).toBe(expected.platformFeeMinor);
+      expect(result.librumShareMinor).toBe(expected.librumShareMinor);
       expect(result.earningsMinor).toBe(expected.authorEarningsMinor);
-      // And, transitively, with platformFeeCents itself.
-      expect(result.feeMinor).toBe(platformFeeCents(priceAll * 100));
+      expect(result.royaltyPercent).toBe(expected.royaltyPercent);
+      // And, transitively, with the BD2 royalty tiers themselves.
+      expect(result.librumShareMinor).toBe(librumShareMinor(priceAll * 100));
     }
   });
 
   it("fee + earnings always sum back to the exact gross, never dropping or inventing a minor unit", () => {
     const result = resolveWizardPriceSummary("999");
-    expect(result.feeMinor + result.earningsMinor).toBe(result.grossMinor);
+    expect(result.librumShareMinor + result.earningsMinor).toBe(result.grossMinor);
   });
 
   it("reports priceValid: false with a zeroed summary for every rejected form", () => {
@@ -127,8 +129,9 @@ describe("resolveWizardPriceSummary", () => {
       isFreeBook: false,
       priceAll: 0,
       grossMinor: 0,
-      feeMinor: 0,
+      librumShareMinor: 0,
       earningsMinor: 0,
+      royaltyPercent: 0,
     };
     for (const bad of ["-5", "abc", "9.99", "50", "100001", ""]) {
       expect(resolveWizardPriceSummary(bad)).toEqual(zeroed);

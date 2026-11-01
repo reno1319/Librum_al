@@ -101,7 +101,7 @@ describe("TRUST PACK 1: links to the reader help page", () => {
   // ALBANIAN-15 (SQ-14 audit): the lost-dispute answer says "recover", as the Terms do.
   it("Help says Librum recovers only what the author kept from a lost dispute", async () => {
     const text = toText(renderToStaticMarkup(await HelpPage()));
-    expect(text).toContain("Librum mund të rikuperojë nga ju vetëm të ardhurat që mbajtët realisht nga ajo shitje, asnjëherë më shumë.");
+    expect(text).toContain("Librum mund të rikuperojë nga ju vetëm honorarin që mbajtët realisht nga ajo shitje, asnjëherë më shumë.");
   });
 
   it("the Library and the book page's owned panel link to it", () => {

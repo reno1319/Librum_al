@@ -290,7 +290,7 @@ describe("Edit page: iPhone step price box (I2)", () => {
   it("keeps the help sentence word for word, with 0 = free", async () => {
     const box = priceBox(await render());
     expect(box.replace(/<!-- -->/g, "")).toContain(
-      "Lekë të plota: 0 për e-libër falas, ose nga 99 deri në 100.000. Librum mban një tarifë platforme prej 20%; pjesa tjetër e çdo shitjeje është e juaja.",
+      "Lekë të plota: 0 për e-libër falas, ose nga 99 deri në 100.000. Honorari i autorit: 70% e çmimit që paguan lexuesi, nga 199 lekë e lart; 50% nën 199 lekë.",
     );
   });
 });

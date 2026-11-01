@@ -44,8 +44,10 @@ export type WizardPriceSummary = {
   isFreeBook: boolean;
   priceAll: number;
   grossMinor: number;
-  feeMinor: number;
+  librumShareMinor: number;
   earningsMinor: number;
+  /** The author's royalty percent for this price (0 when free or invalid). */
+  royaltyPercent: number;
 };
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART C: the Price & Earnings step's and
@@ -61,6 +63,12 @@ export type WizardPriceSummary = {
 // rather than calling platformFeeCents() beside it, so the wizard, the
 // public /fitimet calculator and the ledger cannot disagree even by a
 // rounding step.
+//
+// BD2 (Renato 11-01, 1a): calculateAuthorEarnings() now follows the
+// decided royalty tiers (src/lib/royalty.ts: 70% from 199 lek, 50%
+// below), like every public page. The wizard and /fitimet still agree
+// exactly; the LEDGER keeps 80% until the live POK build (N6) moves it
+// to the same tiers, so until then a staging test sale shows 80%.
 export function resolveWizardPriceSummary(price: string): WizardPriceSummary {
   const parsed = parseCatalogPriceAll(price);
 
@@ -70,8 +78,9 @@ export function resolveWizardPriceSummary(price: string): WizardPriceSummary {
       isFreeBook: false,
       priceAll: 0,
       grossMinor: 0,
-      feeMinor: 0,
+      librumShareMinor: 0,
       earningsMinor: 0,
+      royaltyPercent: 0,
     };
   }
 
@@ -86,8 +95,9 @@ export function resolveWizardPriceSummary(price: string): WizardPriceSummary {
     isFreeBook,
     priceAll,
     grossMinor: estimate.grossMinor,
-    feeMinor: estimate.platformFeeMinor,
+    librumShareMinor: estimate.librumShareMinor,
     earningsMinor: estimate.authorEarningsMinor,
+    royaltyPercent: estimate.royaltyPercent,
   };
 }
 

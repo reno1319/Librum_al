@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ClosingCtaBand, PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { ROYALTY_RULE_SENTENCE } from "@/lib/royalty";
 import { getAuthorPageCta } from "@/lib/author-page-cta";
 import { visibleTeam } from "@/lib/team";
 import type { Metadata } from "next";
@@ -61,11 +61,9 @@ export default async function AboutPage() {
           <section className="mt-12">
             <h2 className="font-serif text-2xl font-normal text-primary">Si funksionojnë paratë</h2>
             <p className="mt-3 text-foreground/90">
-              Kur të nisë botimi me pagesë, Librum do të marrë një tarifë
-              platforme prej {PLATFORM_FEE_PERCENT}% për çdo shitje. Botimi me
-              pagesë dhe pagesat për autorët nuk janë aktivizuar ende: autorët
-              mund të vazhdojnë të publikojnë libra falas, ndërsa Librum
-              përfundon sistemet e pagesave. Shihni{" "}
+              {/* BD2 (Renato 11-01: 2a, 7b): seller + royalty, from
+                  src/lib/royalty.ts; no "not activated yet" sentence. */}
+              {ROYALTY_RULE_SENTENCE} Shihni{" "}
               <Link href="/si-funksionon" className="text-primary underline">
                 si funksionon vetëbotimi
               </Link>{" "}

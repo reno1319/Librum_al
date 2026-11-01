@@ -17,8 +17,10 @@ import { AUTHOR_AGE_STATEMENT_VERSION } from "@/lib/author-age-statement";
 // which Terms the person agreed to. "terms-2026-10" was the English
 // text; "terms-sq-1" is the Albanian one (ALBANIAN-14, Renato 10-28
 // "2. a": it applies to new sign-ups and new authors, and nobody is
-// asked to accept again). Its date is POLICY_LAST_UPDATED.
-export const TERMS_VERSION = "terms-sq-1";
+// asked to accept again). "terms-sq-2" is BD2's royalty wording (Renato
+// 11-01 "3. a": Librum sells and pays a 70%/50% royalty; again nobody is
+// asked to accept again). Its date is TERMS_LAST_UPDATED.
+export const TERMS_VERSION = "terms-sq-2";
 
 // The sign-up form's and the Become-an-author form's Terms checkbox.
 export const TERMS_FIELD = "accept_terms";
