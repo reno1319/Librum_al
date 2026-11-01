@@ -12742,7 +12742,13 @@ create table public.book_rights_declarations (
   book_title text not null,
   author_id uuid references public.profiles(id) on delete set null,
   author_public_name text not null,
-  basis text not null check (basis in ('own_rights', 'public_domain')),
+  -- BD3-P3 (migration 20261101150000): a third basis,
+  -- 'public_domain_original' (original in the public domain, the
+  -- translation the author's own). Named, with the name Postgres gave
+  -- the original inline CHECK, so both build paths agree.
+  basis text not null
+    constraint book_rights_declarations_basis_check
+    check (basis in ('own_rights', 'public_domain', 'public_domain_original')),
   statement_version text not null,
   statement_text text not null check (btrim(statement_text) <> ''),
   declared_at timestamptz not null default now(),

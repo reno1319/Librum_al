@@ -23,9 +23,16 @@ export const RIGHTS_STATEMENTS: Readonly<Record<RightsBasis, { readonly text: st
   public_domain: {
     text: "Ky libër është në domenin publik, përfshirë çdo përkthim që ngarkoj",
   },
+  // BD3 patch 3 (Renato 1 Nov, 2a): a new translation of an old book.
+  // Added beside the two rights-v2 sentences, which are unchanged, so
+  // the version stays rights-v2: every row stores the exact sentence
+  // the author chose (statement_text). Lawyer list, like the others.
+  public_domain_original: {
+    text: "Vepra origjinale është në domenin publik; përkthimi është imi ose kam lejen e përkthyesit për ta botuar dhe shitur",
+  },
 };
 
-export const RIGHTS_BASES: readonly RightsBasis[] = ["own_rights", "public_domain"];
+export const RIGHTS_BASES: readonly RightsBasis[] = ["own_rights", "public_domain", "public_domain_original"];
 
 export function isRightsBasis(value: unknown): value is RightsBasis {
   return typeof value === "string" && (RIGHTS_BASES as readonly string[]).includes(value);
