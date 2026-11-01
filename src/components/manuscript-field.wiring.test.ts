@@ -79,3 +79,22 @@ describe("ManuscriptField: one preview download per build (audit F4)", () => {
     expect(source).toContain("download={downloadPreview}");
   });
 });
+
+describe("ManuscriptField: the EPUB store/contact warning (BD3 patch 3)", () => {
+  it("is started after the upload succeeds, never awaited inside the in-flight run", () => {
+    const body = fnBody("handleEpubChange");
+    const ready = body.indexOf("setHiddenPath(tempEpubPath, displayName);");
+    const warn = body.indexOf("void warnAboutOutsideMentions(file, myRequestId);");
+    expect(ready).toBeGreaterThan(0);
+    expect(warn).toBeGreaterThan(ready);
+    expect(body).not.toContain("await warnAboutOutsideMentions");
+    expect(body).not.toContain("scanEpubForOutsideMentions");
+  });
+
+  it("shows nothing for a stale upload or after switching to Word, and never throws", () => {
+    const body = fnBody("warnAboutOutsideMentions");
+    expect(body).toContain('if (isStale(requestId) || modeRef.current !== "epub" || !scan || !hasMentions(scan)) return;');
+    expect(body).toContain('outsideMentionMessages(listedMentions(scan), "epub")');
+    expect(body).toMatch(/\} catch \{/);
+  });
+});

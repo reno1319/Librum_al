@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { parseDocxToDocument, repackageWithTitle } from "@/app/(public)/dashboard/books/docx-actions";
 import { createClient } from "@/lib/supabase/client";
 import type { ConversionWarning } from "@/lib/docx-converter";
+import { hasMentions, listedMentions, scanEpubForOutsideMentions } from "@/lib/epub-outside-mentions";
+import { outsideMentionMessages } from "@/lib/outside-mentions";
 import { fileInputClasses } from "@/lib/form-styles";
 import { EbookPreview, type PreviewBuild } from "@/components/ebook-preview";
 import { emptyChoices, pendingCount, type PreviewChoices } from "@/lib/docx-preview-choices";
@@ -435,6 +437,20 @@ export function ManuscriptField({
     resetApproval();
   }
 
+  async function warnAboutOutsideMentions(file: File, requestId: number) {
+    try {
+      const scan = await scanEpubForOutsideMentions(await file.arrayBuffer());
+      if (isStale(requestId) || modeRef.current !== "epub" || !scan || !hasMentions(scan)) return;
+      const outside = outsideMentionMessages(listedMentions(scan), "epub");
+      const found: ConversionWarning[] = [];
+      if (outside.store) found.push({ code: "other_store_mentioned", message: outside.store });
+      if (outside.contact) found.push({ code: "contact_details_in_book", message: outside.contact });
+      setWarnings(found);
+    } catch {
+      // Advice only: nothing to show.
+    }
+  }
+
   function handleEpubChange(file: File | null) {
     if (tempPathRef.current) {
       void removeTempObject(tempPathRef.current);
@@ -480,6 +496,13 @@ export function ManuscriptField({
 
         setStatus("success");
         setHiddenPath(tempEpubPath, displayName);
+
+        // BD3 patch 3 (3a): other stores, emails and phone numbers in an
+        // uploaded EPUB are only warned about, here in the browser (no
+        // download). Not awaited: it never holds up the form's submit,
+        // and a file it cannot read shows nothing (the server's own
+        // checks still decide).
+        void warnAboutOutsideMentions(file, myRequestId);
       } catch (err) {
         console.error("ManuscriptField: EPUB upload failed:", err);
         void removeTempObject(tempEpubPath);
@@ -714,6 +737,14 @@ export function ManuscriptField({
             <p role="status" className="text-sm font-semibold text-primary">
               Dorëshkrimi gati: {readyName}
             </p>
+          )}
+
+          {status === "success" && warnings.length > 0 && (
+            <ul role="status" className="flex list-disc flex-col gap-1 rounded-card border-l-4 border-primary bg-surface py-2 pl-7 pr-3 text-sm text-muted">
+              {warnings.map((w) => (
+                <li key={w.code}>{w.message}</li>
+              ))}
+            </ul>
           )}
 
           {status === "error" && (

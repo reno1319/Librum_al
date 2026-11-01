@@ -83,6 +83,7 @@ describe("readLibrumPages", () => {
       penName: "Arben Prova",
       copyrightYear: 2015,
       translators: [],
+      rights: "own_rights",
       librumYear: 2026,
       isbn: null,
       publisher: null,
@@ -149,6 +150,15 @@ describe("readLibrumPages", () => {
     const { client } = fakeAdmin({ book: { data: { ...BOOK_ROW, published_at: "2026-12-31T23:30:00Z" }, error: null } });
     const pages = await readLibrumPages(client, { bookId: BOOK_ID, buyer: null, siteOrigin: ORIGIN });
     expect(pages!.front.librumYear).toBe(2027);
+  });
+
+  it("BD3 patch 3: the rights basis the route read is passed through; none means the ordinary page", async () => {
+    for (const rights of ["public_domain", "public_domain_original", "own_rights"] as const) {
+      const pages = await readLibrumPages(fakeAdmin().client, { bookId: BOOK_ID, buyer: null, siteOrigin: ORIGIN, rights });
+      expect(pages!.front.rights).toBe(rights);
+    }
+    const none = await readLibrumPages(fakeAdmin().client, { bookId: BOOK_ID, buyer: null, siteOrigin: ORIGIN, rights: null });
+    expect(none!.front.rights).toBe("own_rights");
   });
 
   it("translators, ISBN, publisher and edition are passed through; blank values become null", async () => {

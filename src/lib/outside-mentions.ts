@@ -1,12 +1,13 @@
 // BD3 patch 2 (Renato 1 Nov, 3a): text in a book that points readers
 // away from Librum (other stores) or carries contact details (email,
 // phone). Librum never changes such text inside the story; the author
-// is warned in the preview, and (patch 3) the reviewer clears it before
-// approving. Authors may still sell elsewhere (no exclusivity): only the
+// is warned (advice only: Renato dropped the reviewer check on 1 Nov,
+// 3c). Authors may still sell elsewhere (no exclusivity): only the
 // mention inside the Librum copy is the problem.
 //
 // Shared by the Word converter (warnings, and the copyright-page
-// detection in docx-structure.ts) and, later, the reviewer's check.
+// detection in docx-structure.ts) and the EPUB upload warning
+// (epub-outside-mentions.ts).
 
 // Store names as they are written in ebooks. Words that are also common
 // words or names on their own ("Apple", "Nook", "Lulu", "Play") are only
@@ -47,11 +48,21 @@ function digits(s: string): number {
   return (s.match(/\d/g) ?? []).length;
 }
 
-export function findOutsideMentions(text: string): OutsideMentions {
+// Every distinct mention, uncapped (BD3 patch 3: the EPUB scan merges
+// these across the book's files before listing at most MAX_LISTED).
+export function collectOutsideMentions(text: string): OutsideMentions {
   const stores = STORES.filter((s) => s.re.test(text)).map((s) => s.name);
   const emails = [...new Set((text.match(EMAIL_RE) ?? []).map((e) => e.toLowerCase()))].filter((e) => !OWN_EMAIL_RE.test(e));
   const phones = [...new Set((text.match(PHONE_RE) ?? []).map((p) => p.trim()))].filter((p) => digits(p) >= 9 && digits(p) <= 15);
-  return { stores: stores.slice(0, MAX_LISTED), emails: emails.slice(0, MAX_LISTED), phones: phones.slice(0, MAX_LISTED) };
+  return { stores, emails, phones };
+}
+
+export function capOutsideMentions(m: OutsideMentions): OutsideMentions {
+  return { stores: m.stores.slice(0, MAX_LISTED), emails: m.emails.slice(0, MAX_LISTED), phones: m.phones.slice(0, MAX_LISTED) };
+}
+
+export function findOutsideMentions(text: string): OutsideMentions {
+  return capOutsideMentions(collectOutsideMentions(text));
 }
 
 export function hasOutsideMention(text: string): boolean {
@@ -59,16 +70,24 @@ export function hasOutsideMention(text: string): boolean {
   return m.stores.length > 0 || m.emails.length > 0 || m.phones.length > 0;
 }
 
-// The author-facing warnings (Albanian), one per kind found.
-export function outsideMentionMessages(m: OutsideMentions): { store: string | null; contact: string | null } {
+// The author-facing warnings (Albanian), one per kind found. "word":
+// the Word converter's wording (patch 2, unchanged); "epub" (patch 3):
+// the same warning for an EPUB the author uploaded.
+export function outsideMentionMessages(
+  m: OutsideMentions,
+  source: "word" | "epub" = "word",
+): { store: string | null; contact: string | null } {
+  const fix =
+    source === "word" ? "hiqeni këtë tekst në Word dhe ngarkojeni dokumentin sërish" : "hiqeni këtë tekst nga skedari EPUB dhe ngarkojeni sërish";
+  const fixContact = source === "word" ? "hiqeni në Word dhe ngarkojeni dokumentin sërish" : "hiqeni nga skedari EPUB dhe ngarkojeni sërish";
   const store =
     m.stores.length > 0
-      ? `Libri përmend një dyqan tjetër (${m.stores.join(", ")}). Në Librum libri shitet vetëm nga Librum: hiqeni këtë tekst në Word dhe ngarkojeni dokumentin sërish. Përndryshe, recensuesi i Librum do t'jua kërkojë para miratimit.`
+      ? `Libri përmend një dyqan tjetër (${m.stores.join(", ")}). Në Librum libri shitet vetëm nga Librum: ${fix}.`
       : null;
   const found = [...m.emails, ...m.phones];
   const contact =
     found.length > 0
-      ? `Libri ka një adresë email ose numër telefoni (${found.join(", ")}). Çdo lexues që e blen librin do ta shohë. Nëse nuk e doni këtë, hiqeni në Word dhe ngarkojeni dokumentin sërish.`
+      ? `Libri ka një adresë email ose numër telefoni (${found.join(", ")}). Çdo lexues që e blen librin do ta shohë. Nëse nuk e doni këtë, ${fixContact}.`
       : null;
   return { store, contact };
 }

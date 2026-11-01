@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import type { RightsBasis } from "@/lib/types";
 
 // BD3 + BD4 + BD4b (Renato 1 Nov 2026: 1a 2a 3a 4a 5a, wording "ok"):
 // every downloaded book gets one Librum page at the front (the
@@ -20,6 +21,10 @@ export type LibrumFrontPage = {
   copyrightYear: number;
   // 4a: the translator holds © for the translation (year on Librum).
   translators: string[];
+  // BD3 patch 3 (Renato 1 Nov, 1a 2a): the rights basis the author
+  // declared last. "public_domain": no © and no "may not copy" line;
+  // "public_domain_original": © for the translation only.
+  rights: RightsBasis;
   librumYear: number;
   isbn: string | null;
   publisher: string | null;
@@ -52,6 +57,10 @@ export const MORE_BOOKS_HEADING = "Libra të tjerë nga";
 export const REVIEW_LINE = "Ju pëlqeu libri? Lini një vlerësim në Librum.";
 // BD3 patch 2 (Renato 1 Nov, a): the last page opens with a thank-you.
 export const THANKS_LINE = "Faleminderit që lexuat!";
+// BD3 patch 3 (Renato 1 Nov, 1a and 2a).
+export const PUBLIC_DOMAIN_LINE = "Vepër në domenin publik.";
+export const PUBLIC_DOMAIN_ORIGINAL_LINE = "Vepra origjinale në domenin publik.";
+export const TRANSLATED_BY = "Përktheu:";
 
 const XML_ESCAPE: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 function esc(text: string): string {
@@ -117,16 +126,29 @@ export function frontPageBody(p: LibrumFrontPage): string {
   out.push(`<h1>${esc(clean(p.title))}</h1>`);
   if (p.subtitle && clean(p.subtitle)) out.push(line(p.subtitle, "sub"));
   out.push(line(p.penName, "author"));
-  out.push(line(`© ${p.copyrightYear} ${clean(p.penName)}. ${RIGHTS_LINE}`));
   const translators = p.translators.map(clean).filter(Boolean);
-  if (translators.length > 0) {
-    out.push(line(`Përkthimi © ${p.librumYear} ${translators.join(", ")}.`));
+  if (p.rights === "public_domain") {
+    // 1a: the author declared the whole book, any translation included,
+    // public domain: no ©, no "all rights reserved", no copy ban.
+    out.push(line(PUBLIC_DOMAIN_LINE));
+    if (translators.length > 0) out.push(line(`${TRANSLATED_BY} ${translators.join(", ")}.`));
+  } else if (p.rights === "public_domain_original") {
+    // 2a: © for the translation only. With no translator listed, the
+    // author declared the translation is theirs: their pen name.
+    out.push(line(PUBLIC_DOMAIN_ORIGINAL_LINE));
+    const holders = translators.length > 0 ? translators.join(", ") : clean(p.penName);
+    out.push(line(`Përkthimi © ${p.librumYear} ${holders}.`));
+  } else {
+    out.push(line(`© ${p.copyrightYear} ${clean(p.penName)}. ${RIGHTS_LINE}`));
+    if (translators.length > 0) {
+      out.push(line(`Përkthimi © ${p.librumYear} ${translators.join(", ")}.`));
+    }
   }
   if (p.isbn && clean(p.isbn)) out.push(line(`ISBN ${clean(p.isbn)}`));
   if (p.publisher && clean(p.publisher)) out.push(line(p.publisher));
   if (p.edition && clean(p.edition)) out.push(line(p.edition));
   out.push(line(`Botuar në Librum, ${p.librumYear} · librum.al`, "gap"));
-  out.push(line(PERSONAL_USE_LINE, "gap small"));
+  if (p.rights !== "public_domain") out.push(line(PERSONAL_USE_LINE, "gap small"));
   if (p.buyer) {
     const verb = p.buyer.free ? "Shkarkuar falas nga" : "Blerë nga";
     out.push(line(`${verb} ${p.buyer.email} më ${p.buyer.date} · Kodi i blerjes: ${p.buyer.code}`, "gap small"));

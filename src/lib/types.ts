@@ -130,7 +130,10 @@ export type Book = {
 // book. book_id/author_id become null when the book/account is deleted;
 // the title, name and sentence are copies taken at the moment of
 // choosing. The current choice is the newest row for the book.
-export type RightsBasis = "own_rights" | "public_domain";
+// BD3 patch 3 (Renato 1 Nov, 2a): "public_domain_original" -- the
+// original work is in the public domain, the translation is the
+// author's own (or they have the translator's permission).
+export type RightsBasis = "own_rights" | "public_domain" | "public_domain_original";
 
 export type BookRightsDeclaration = {
   id: string;

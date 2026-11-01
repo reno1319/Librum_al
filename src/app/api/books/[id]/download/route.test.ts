@@ -50,6 +50,12 @@ const mockAddLibrumPages = vi.fn();
 vi.mock("@/lib/librum-download-pages", () => ({
   readLibrumPages: (...args: unknown[]) => mockReadLibrumPages(...args),
 }));
+// BD3 patch 3: the rights basis read (service role, one book, one
+// column) is its own module, tested in librum-download-rights.test.ts.
+const mockReadRightsBasis = vi.fn();
+vi.mock("@/lib/librum-download-rights", () => ({
+  readRightsBasisForPages: (...args: unknown[]) => mockReadRightsBasis(...args),
+}));
 vi.mock("@/lib/epub-librum-pages", () => ({
   addLibrumPages: (...args: unknown[]) => mockAddLibrumPages(...args),
 }));
@@ -269,6 +275,8 @@ describe("GET /api/books/[id]/download", () => {
     mockReadLibrumPages.mockReset();
     mockAddLibrumPages.mockReset();
     mockReadLibrumPages.mockResolvedValue(PAGES_STUB);
+    mockReadRightsBasis.mockReset();
+    mockReadRightsBasis.mockResolvedValue({ ok: true, basis: "public_domain" });
     mockAddLibrumPages.mockImplementation(async (bytes: Buffer) => ({ added: true, bytes }));
     logSpies.length = 0;
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -607,6 +615,8 @@ describe("GET /api/books/[id]/download", () => {
       mockCreateAdminClient.mockReturnValue(adminClient);
       expect(redirectTarget(await callRoute())).toBe(BUY_FIRST);
       expect(adminClient.__rpc).not.toHaveBeenCalled();
+      // BD3 patch 3: nor is the rights basis read for them.
+      expect(mockReadRightsBasis).not.toHaveBeenCalled();
     });
   });
 
@@ -651,6 +661,13 @@ describe("GET /api/books/[id]/download", () => {
       expect(client).toBe(session);
       expect(input).toMatchObject({ bookId: BOOK_ID, buyer: { readerId: READER_ID, email: READER_EMAIL } });
       expect(typeof (input as { siteOrigin: unknown }).siteOrigin).toBe("string");
+      // BD3 patch 3: the rights basis is read with the service-role
+      // client, only after the entitlement check, for this book only,
+      // and handed to the page reader.
+      expect(mockReadRightsBasis).toHaveBeenCalledTimes(1);
+      expect(mockReadRightsBasis.mock.calls[0][1]).toBe(BOOK_ID);
+      expect(mockReadRightsBasis.mock.calls[0][0]).not.toBe(session);
+      expect((input as { rights: unknown }).rights).toBe("public_domain");
       const [addBytes, addPages] = mockAddLibrumPages.mock.calls[0];
       expect(Buffer.from(addBytes as Buffer).equals(fileBytes)).toBe(true);
       expect(addPages).toBe(PAGES_STUB);
@@ -687,6 +704,25 @@ describe("GET /api/books/[id]/download", () => {
         { bookId: BOOK_ID, readerId: READER_ID, stage: "missing_purchase_row" },
       ]);
       expect(allLogOutput()).not.toContain(READER_EMAIL);
+    });
+
+    it("BD3 patch 3 (audit r1, N3): a failed rights read serves the stored book with NO pages, one console.warn", async () => {
+      const fileBytes = Buffer.from("stored epub");
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: true }));
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes }));
+      mockReadRightsBasis.mockResolvedValue({ ok: false });
+      mockWatermarkEpub.mockImplementation(async (bytes: Buffer) => ({ watermarked: true, bytes }));
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      expect(Buffer.from(await response.arrayBuffer()).equals(fileBytes)).toBe(true);
+      expect(mockReadLibrumPages).not.toHaveBeenCalled();
+      expect(mockAddLibrumPages).not.toHaveBeenCalled();
+      expect(Buffer.from(mockWatermarkEpub.mock.calls[0][0] as Buffer).equals(fileBytes)).toBe(true);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][1]).toEqual({ bookId: BOOK_ID, readerId: READER_ID, stage: "rights_read_failed" });
+      expect(errorSpy).not.toHaveBeenCalled();
     });
 
     it("missing details: serves the stored book, one console.warn with stage 'missing_details'", async () => {

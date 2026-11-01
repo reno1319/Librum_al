@@ -12,6 +12,7 @@ import { readDownloadFilePath } from "@/lib/book-reviews";
 import { downloadFileName } from "@/lib/download-file-name";
 import { addLibrumPages } from "@/lib/epub-librum-pages";
 import { readLibrumPages } from "@/lib/librum-download-pages";
+import { readRightsBasisForPages } from "@/lib/librum-download-rights";
 import { resolveSiteOrigin } from "@/lib/site-url";
 
 // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the exact row this route may act
@@ -195,16 +196,23 @@ export async function GET(
   let originalBytes: Buffer = storedBytes;
   try {
     const isAuthor = book.author_id === user.id;
-    const pages = await readLibrumPages(supabase, {
-      bookId: book.id,
-      buyer: !isAuthor && user.email ? { readerId: user.id, email: user.email } : null,
-      siteOrigin: resolveSiteOrigin(),
-    });
+    // BD3 patch 3: the rights basis decides the © line. If it can't be
+    // read, no pages at all (audit r1, N3): a public-domain book must
+    // never get a false ©.
+    const rights = await readRightsBasisForPages(admin, book.id);
+    const pages = rights.ok
+      ? await readLibrumPages(supabase, {
+          bookId: book.id,
+          buyer: !isAuthor && user.email ? { readerId: user.id, email: user.email } : null,
+          siteOrigin: resolveSiteOrigin(),
+          rights: rights.basis,
+        })
+      : null;
     if (!pages) {
       console.warn("Download: served the book without the Librum pages (fallback)", {
         bookId: id,
         readerId: user.id,
-        stage: "missing_details",
+        stage: rights.ok ? "missing_details" : "rights_read_failed",
       });
     } else {
       if (pages.buyerLineMissing) {

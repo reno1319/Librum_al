@@ -3,6 +3,7 @@ import { MAX_MORE_BOOKS, purchaseCode, type LibrumFrontPage, type LibrumLastPage
 import { formatTimestampAsDate, TIRANA_TIME_ZONE } from "@/lib/book-detail-dates";
 import { BOOK_PEN_NAME_EMBED, resolveBookByline } from "@/lib/book-byline";
 import type { PenNameRef } from "@/lib/pen-names";
+import type { RightsBasis } from "@/lib/types";
 
 // BD3 + BD4 + BD4b: the details for the two Librum pages of one
 // download, read with the caller's own session client AFTER the route
@@ -58,7 +59,10 @@ function textOrNull(value: unknown): string | null {
 
 export async function readLibrumPages(
   supabase: SupabaseClient,
-  input: { bookId: string; buyer: LibrumPagesBuyer; siteOrigin: string; now?: Date },
+  // BD3 patch 3: rights is the book's latest declared basis, which the
+  // route reads itself (buyers cannot read the declarations table);
+  // null (none, or the read failed) keeps the ordinary © page.
+  input: { bookId: string; buyer: LibrumPagesBuyer; siteOrigin: string; rights?: RightsBasis | null; now?: Date },
 ): Promise<{ front: LibrumFrontPage; last: LibrumLastPage; buyerLineMissing: boolean } | null> {
   const now = input.now ?? new Date();
 
@@ -147,6 +151,7 @@ export async function readLibrumPages(
       penName,
       copyrightYear,
       translators,
+      rights: input.rights ?? "own_rights",
       librumYear,
       isbn: textOrNull(book.isbn),
       publisher: textOrNull(book.publisher),

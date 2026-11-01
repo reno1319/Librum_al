@@ -8,6 +8,9 @@ import {
   lastPageBody,
   MAX_MORE_BOOKS,
   PERSONAL_USE_LINE,
+  PUBLIC_DOMAIN_LINE,
+  PUBLIC_DOMAIN_ORIGINAL_LINE,
+  RIGHTS_LINE,
   purchaseCode,
   REVIEW_LINE,
   THANKS_LINE,
@@ -25,6 +28,7 @@ const FRONT: LibrumFrontPage = {
   penName: "Arben Prova",
   copyrightYear: 2015,
   translators: [],
+  rights: "own_rights",
   librumYear: 2026,
   isbn: null,
   publisher: null,
@@ -125,6 +129,55 @@ describe("front page wording (approved 1 Nov)", () => {
   it("a translation adds the translator's © line with the Librum year (4a)", () => {
     const html = frontPageBody({ ...FRONT, translators: ["Drita Shembull", "Gëzim Prova"] });
     expect(html).toContain("Përkthimi © 2026 Drita Shembull, Gëzim Prova.");
+  });
+
+  describe("BD3 patch 3: the rights basis (Renato 1 Nov, 1a 2a)", () => {
+    it("public domain: 'Vepër në domenin publik.', the translator without ©, no rights or copy-ban line", () => {
+      const html = frontPageBody({ ...FRONT, rights: "public_domain", translators: ["Drita Shembull"] });
+      expect(html).toContain(`<p>${PUBLIC_DOMAIN_LINE}</p>`);
+      expect(html).toContain("<p>Përktheu: Drita Shembull.</p>");
+      expect(html).not.toContain("©");
+      expect(html).not.toContain(RIGHTS_LINE);
+      expect(html).not.toContain(PERSONAL_USE_LINE);
+      // Title, pen name, Librum line and buyer line stay.
+      expect(html).toContain("<h1>Lulja e marsit</h1>");
+      expect(html).toContain("Botuar në Librum, 2026 · librum.al");
+      expect(html).toContain("Blerë nga ana@example.com");
+    });
+
+    it("public domain with no translator: no 'Përktheu' line", () => {
+      expect(frontPageBody({ ...FRONT, rights: "public_domain" })).not.toContain("Përktheu");
+    });
+
+    it("original in the public domain: © for the translation only, with the Librum year; the copy-ban line stays", () => {
+      const html = frontPageBody({ ...FRONT, rights: "public_domain_original", translators: ["Drita Shembull", "Gëzim Prova"] });
+      expect(html).toContain(`<p>${PUBLIC_DOMAIN_ORIGINAL_LINE}</p>`);
+      expect(html).toContain("<p>Përkthimi © 2026 Drita Shembull, Gëzim Prova.</p>");
+      expect(html).not.toContain("© 2015");
+      expect(html.match(/©/g)).toHaveLength(1);
+      expect(html).toContain(PERSONAL_USE_LINE);
+    });
+
+    it("original in the public domain with no translator listed: the translation's © goes to the pen name", () => {
+      const html = frontPageBody({ ...FRONT, rights: "public_domain_original" });
+      expect(html).toContain("<p>Përkthimi © 2026 Arben Prova.</p>");
+      expect(html.match(/©/g)).toHaveLength(1);
+    });
+
+    it("own rights: unchanged (© with the original year, rights line, copy-ban line)", () => {
+      const html = frontPageBody(FRONT);
+      expect(html).toContain(`© 2015 Arben Prova. ${RIGHTS_LINE}`);
+      expect(html).toContain(PERSONAL_USE_LINE);
+      expect(html).not.toContain("domenin publik");
+    });
+
+    it("every variant is valid XHTML inside a real download", async () => {
+      for (const rights of ["own_rights", "public_domain", "public_domain_original"] as const) {
+        const out = await addLibrumPages(await wordMadeEpub(), { front: { ...FRONT, rights, translators: ["D & Sh"] }, last: LAST });
+        expect(out.added).toBe(true);
+        expect((await validateEpubStructure(out.bytes)).valid).toBe(true);
+      }
+    });
   });
 
   it("ISBN, publisher and edition appear only when filled in", () => {

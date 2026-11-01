@@ -52,15 +52,15 @@ describe("Add a book with the migration applied", () => {
     expect(details.match(/<input[^>]*name="translator"[^>]*>/)![0]).toContain('maxLength="120"');
   });
 
-  it("Rights: a visible legend, two radios named rightsBasis, nothing preselected", () => {
+  it("Rights: a visible legend, three radios named rightsBasis, nothing preselected", () => {
     expect(html).toContain('<legend class="mb-3 font-bold text-foreground">Të drejtat</legend>');
     const radios = html.match(/<input[^>]*name="rightsBasis"[^>]*>/g)!;
-    expect(radios).toHaveLength(2);
+    expect(radios).toHaveLength(3);
     for (const radio of radios) expect(radio).not.toContain("checked");
   });
 
-  it("the two labels equal RIGHTS_STATEMENTS code point for code point", () => {
-    for (const basis of ["own_rights", "public_domain"] as const) {
+  it("the three labels equal RIGHTS_STATEMENTS code point for code point", () => {
+    for (const basis of ["own_rights", "public_domain", "public_domain_original"] as const) {
       const label = html.match(new RegExp(`value="${basis}"[^>]*/><span[^>]*>([^<]*)</span>`))![1].replace(/&#x27;/g, "'");
       expect([...label].map((c) => c.codePointAt(0))).toEqual(
         [...RIGHTS_STATEMENTS[basis].text].map((c) => c.codePointAt(0)),
