@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { LibraryBookCard } from "@/components/library-book-card";
-import { resolveBookByline } from "@/lib/book-byline";
+import { resolveBookByline, resolveOriginalAuthor } from "@/lib/book-byline";
 import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
@@ -143,7 +143,8 @@ export default async function LibraryPage({
                 bookId={book.id}
                 title={book.title}
                 coverUrl={coverUrl}
-                penNameId={book.pen?.id ?? null}
+                // BD3 patch 4: an original author has no page, so no link.
+                penNameId={resolveOriginalAuthor(book) ? null : (book.pen?.id ?? null)}
                 authorName={resolveBookByline(book)}
                 isPublished={book.status === "published"}
                 downloadable={ownedByBookId.get(book.id) ?? false}

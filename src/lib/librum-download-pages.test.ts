@@ -22,6 +22,7 @@ const BOOK_ROW = {
   publisher: null,
   edition: null,
   original_publication_date: "2015-03-08",
+  original_author: null,
   published_at: "2026-11-01T09:00:00Z",
   pen_name_id: PEN_ID,
   price_all: 299,
@@ -81,7 +82,9 @@ describe("readLibrumPages", () => {
       title: "Lulja e marsit",
       subtitle: "Tregim",
       penName: "Arben Prova",
+      originalAuthor: null,
       copyrightYear: 2015,
+      originalYear: 2015,
       translators: [],
       rights: "own_rights",
       librumYear: 2026,
@@ -136,6 +139,25 @@ describe("readLibrumPages", () => {
     const { client } = fakeAdmin({ book: { data: { ...BOOK_ROW, original_publication_date: null }, error: null } });
     const pages = await readLibrumPages(client, { bookId: BOOK_ID, buyer: null, siteOrigin: ORIGIN });
     expect(pages!.front.copyrightYear).toBe(2026);
+  });
+
+  it("BD3 patch 4: reads original_author; the original year is null without a date (no Librum-year fallback)", async () => {
+    const { client, calls } = fakeAdmin({
+      book: { data: { ...BOOK_ROW, original_publication_date: null, original_author: "  Lev Tolstoi " }, error: null },
+    });
+    const pages = await readLibrumPages(client, { bookId: BOOK_ID, buyer: null, siteOrigin: ORIGIN });
+    expect(pages!.front.originalAuthor).toBe("Lev Tolstoi");
+    expect(pages!.front.originalYear).toBeNull();
+    expect(pages!.front.penName).toBe("Arben Prova");
+    expect(pages!.last.penName).toBe("Arben Prova");
+    expect(calls.find((c) => c.table === "public_books")!.columns).toContain("original_author");
+  });
+
+  it("BD3 patch 4: a blank original_author is none", async () => {
+    const { client } = fakeAdmin({ book: { data: { ...BOOK_ROW, original_author: "   " }, error: null } });
+    const pages = await readLibrumPages(client, { bookId: BOOK_ID, buyer: null, siteOrigin: ORIGIN });
+    expect(pages!.front.originalAuthor).toBeNull();
+    expect(pages!.front.originalYear).toBe(2015);
   });
 
   it("never published yet (author's preview download): both years are this year, in Tirana", async () => {

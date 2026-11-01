@@ -39,7 +39,7 @@ const OTHER_BOOK_ID = "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091";
 const CANONICAL_PATH = `${AUTHOR_ID}/${BOOK_ID}.epub`;
 // PEN-NAMES-2 (D2): the public read has no account columns; the
 // service role reads author_id/file_path for a published book only.
-const EXPECTED_COLUMNS = "id, title, status, pen:public_pen_names(id, name)";
+const EXPECTED_COLUMNS = "id, title, status, original_author, pen:public_pen_names(id, name)";
 const EXPECTED_STORAGE_COLUMNS = "author_id, file_path";
 
 // Every value here is refused for a row whose id is BOOK_ID and whose

@@ -106,7 +106,7 @@ describe("/admin/librum-choice", () => {
   it("lists only published, priced books, newest first, first 21 asked", async () => {
     const html = await render();
     expect(listQuery()).toEqual([
-      { method: "select", args: ["id, title, cover_path, pen:public_pen_names(id, name)"] },
+      { method: "select", args: ["id, title, cover_path, original_author, pen:public_pen_names(id, name)"] },
       { method: "eq", args: ["status", "published"] },
       { method: "not", args: ["price_all", "is", null] },
       { method: "order", args: ["created_at", { ascending: false }] },

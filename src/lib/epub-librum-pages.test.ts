@@ -26,7 +26,9 @@ const FRONT: LibrumFrontPage = {
   title: "Lulja e marsit",
   subtitle: "Tregim",
   penName: "Arben Prova",
+  originalAuthor: null,
   copyrightYear: 2015,
+  originalYear: 2015,
   translators: [],
   rights: "own_rights",
   librumYear: 2026,
@@ -176,6 +178,84 @@ describe("front page wording (approved 1 Nov)", () => {
         const out = await addLibrumPages(await wordMadeEpub(), { front: { ...FRONT, rights, translators: ["D & Sh"] }, last: LAST });
         expect(out.added).toBe(true);
         expect((await validateEpubStructure(out.bytes)).valid).toBe(true);
+      }
+    });
+  });
+
+  describe("BD3 patch 4: the original author (Renato 1 Nov, 1a 5a 6a; 16:05Z 1a)", () => {
+    const ORIGINAL = { ...FRONT, originalAuthor: "Lev Tolstoi" };
+
+    it("the original author is the byline, with 'Përktheu:' and the translators under it", () => {
+      const html = frontPageBody({ ...ORIGINAL, translators: ["Drita Shembull", "Gëzim Prova"] });
+      expect(html).toContain('<p class="author">Lev Tolstoi<br/>Përktheu: Drita Shembull, Gëzim Prova</p>');
+      expect(html).not.toContain('<p class="author">Arben Prova</p>');
+    });
+
+    it("with no translator typed, 'Përktheu:' names the pen name (16:05Z, 1a)", () => {
+      expect(frontPageBody(ORIGINAL)).toContain('<p class="author">Lev Tolstoi<br/>Përktheu: Arben Prova</p>');
+    });
+
+    it("licensed translation (own rights): © original year + original author, then the translation's © on the Librum year (6a)", () => {
+      const html = frontPageBody({ ...ORIGINAL, originalYear: 1877, copyrightYear: 1877, translators: ["Drita Shembull"] });
+      expect(html).toContain("<p>© 1877 Lev Tolstoi.</p>");
+      expect(html).toContain("<p>Përkthimi © 2026 Drita Shembull.</p>");
+      expect(html).toContain(`<p>${RIGHTS_LINE}</p>`);
+      expect(html).toContain(PERSONAL_USE_LINE);
+      expect(html).not.toContain("© 1877 Arben Prova");
+      expect(html.indexOf("© 1877 Lev Tolstoi")).toBeLessThan(html.indexOf("Përkthimi ©"));
+    });
+
+    it("licensed translation with no original date: the original author's © has no year, never the Librum year", () => {
+      const html = frontPageBody({ ...ORIGINAL, originalYear: null, copyrightYear: 2026 });
+      expect(html).toContain("<p>© Lev Tolstoi.</p>");
+      expect(html).not.toContain("© 2026 Lev Tolstoi");
+      expect(html).toContain("<p>Përkthimi © 2026 Arben Prova.</p>");
+    });
+
+    it("public domain: the byline names both; no ©; no second 'Përktheu' line", () => {
+      const html = frontPageBody({ ...ORIGINAL, rights: "public_domain", translators: ["Drita Shembull"] });
+      expect(html).toContain('<p class="author">Lev Tolstoi<br/>Përktheu: Drita Shembull</p>');
+      expect(html).toContain(`<p>${PUBLIC_DOMAIN_LINE}</p>`);
+      expect(html.match(/Përktheu/g)).toHaveLength(1);
+      expect(html).not.toContain("©");
+      expect(html).not.toContain(PERSONAL_USE_LINE);
+    });
+
+    it("public domain, untranslated (no translator typed): no 'Përktheu' at all, never the uploader (audit r1 H1; 16:37Z 1a)", () => {
+      const html = frontPageBody({ ...FRONT, originalAuthor: "Gjergj Fishta", rights: "public_domain" });
+      expect(html).toContain('<p class="author">Gjergj Fishta</p>');
+      expect(html).not.toContain("Përktheu");
+      expect(html).not.toContain("Arben Prova");
+      expect(html).not.toContain("©");
+    });
+
+    it("original in the public domain: the translation's © only, to the translators or the pen name", () => {
+      const html = frontPageBody({ ...ORIGINAL, rights: "public_domain_original" });
+      expect(html).toContain('<p class="author">Lev Tolstoi<br/>Përktheu: Arben Prova</p>');
+      expect(html).toContain("<p>Përkthimi © 2026 Arben Prova.</p>");
+      expect(html.match(/©/g)).toHaveLength(1);
+      expect(html).toContain(PERSONAL_USE_LINE);
+    });
+
+    it("a blank original author is no original author", () => {
+      expect(frontPageBody({ ...FRONT, originalAuthor: "   " })).toBe(frontPageBody(FRONT));
+    });
+
+    it("the original author is escaped", () => {
+      const html = frontPageBody({ ...FRONT, originalAuthor: "A <b> & \"C\"" });
+      expect(html).toContain("A &lt;b&gt; &amp; &quot;C&quot;<br/>");
+    });
+
+    it("every basis with an original author is valid XHTML inside a real download", async () => {
+      for (const rights of ["own_rights", "public_domain", "public_domain_original"] as const) {
+        for (const originalYear of [1877, null]) {
+          const out = await addLibrumPages(await wordMadeEpub(), {
+            front: { ...ORIGINAL, rights, originalYear, translators: ["D & Sh"] },
+            last: LAST,
+          });
+          expect(out.added).toBe(true);
+          expect((await validateEpubStructure(out.bytes)).valid).toBe(true);
+        }
       }
     });
   });

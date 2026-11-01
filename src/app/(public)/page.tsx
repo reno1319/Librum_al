@@ -89,8 +89,8 @@ const MAX_HOMEPAGE_COVERS = 8;
 
 // HOME-PICKS-1: one select and one mapping for the newest list and the
 // staff-picked fan books, so both carry the same fields and byline.
-const COVER_SELECT = "id, title, cover_path, genre, description, pen:public_pen_names(id, name)";
-type CoverRow = Pick<PublicBook, "id" | "title" | "cover_path" | "genre" | "description"> & {
+const COVER_SELECT = "id, title, cover_path, genre, description, original_author, pen:public_pen_names(id, name)";
+type CoverRow = Pick<PublicBook, "id" | "title" | "cover_path" | "genre" | "description" | "original_author"> & {
   pen: PenNameRef | null;
 };
 

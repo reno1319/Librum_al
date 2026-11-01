@@ -325,7 +325,12 @@ export function ManuscriptField({
     // field is not rendered, and then the byline is simply authorName.
     const rawPenNameInput = form?.elements.namedItem("penName");
     const penNameInput = rawPenNameInput instanceof HTMLInputElement ? rawPenNameInput : null;
-    const bylineFor = (input: HTMLInputElement | null) => input?.value.trim() || authorName;
+    // BD3 patch 4 (1a): an "Autori origjinal" is the byline, so it is
+    // the Word-made ebook's dc:creator too.
+    const rawOriginalAuthorInput = form?.elements.namedItem("originalAuthor");
+    const originalAuthorInput = rawOriginalAuthorInput instanceof HTMLInputElement ? rawOriginalAuthorInput : null;
+    const bylineFor = (input: HTMLInputElement | null) =>
+      originalAuthorInput?.value.trim() || input?.value.trim() || authorName;
 
     liveTitleRef.current = titleInput.value;
     if (languageInput) liveLanguageRef.current = languageInput.value;
@@ -355,10 +360,12 @@ export function ManuscriptField({
     titleInput.addEventListener("input", handleTitleInput);
     languageInput?.addEventListener("change", handleLanguageChange);
     penNameInput?.addEventListener("input", handlePenNameInput);
+    originalAuthorInput?.addEventListener("input", handlePenNameInput);
     return () => {
       titleInput.removeEventListener("input", handleTitleInput);
       languageInput?.removeEventListener("change", handleLanguageChange);
       penNameInput?.removeEventListener("input", handlePenNameInput);
+      originalAuthorInput?.removeEventListener("input", handlePenNameInput);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

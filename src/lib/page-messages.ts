@@ -9,6 +9,7 @@ import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Arsyeja duhet të ketë më pak se 2000 karaktere.",
+  "Autori origjinal mund të ketë deri në 200 karaktere",
   "Autorët duhet të jenë 18 vjeç ose më shumë. Shënoni kutinë për ta konfirmuar.",
   "Bashkëpunëtori nuk u shtua dot. Provoni përsëri.",
   "Biografia mund të ketë deri në 5.000 karaktere.",
@@ -96,6 +97,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Ky libër është në një seri ose paketë. Hiqeni prej saj më parë, pastaj ndryshoni pseudonimin.",
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose hiqeni librin nga paketa fillimisht",
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose ndryshojeni atë fillimisht",
+  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni autorin origjinal.",
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose kopertinën.",
   "Ky nuk duket si IBAN i vlefshëm shqiptar (duhet të fillojë me AL dhe të vazhdojë me 26 shifra ose shkronja).",
   "Ky nuk duket si imazh i vlefshëm JPEG ose PNG",
@@ -166,6 +168,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Seria nuk u krijua dot. Provoni përsëri.",
   "Shkruani FSHI për ta konfirmuar.",
   "Shkruani IBAN-in tuaj.",
+  "Shkruani autorin origjinal. Kërkohet kur vepra është në domenin publik.",
   "Shkruani emrin e mbajtësit të llogarisë.",
   "Shkruani një ISBN-10 ose ISBN-13 të vlefshëm, ose lëreni bosh.",
   "Shkruani një datë të vlefshme të botimit të parë",
@@ -311,8 +314,10 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Të dhënat bankare u ruajtën.",
   "U dërgua për shqyrtim. Do ta kontrollojmë librin dhe do t'ju njoftojmë kur të publikohet. Nuk është ende në Librari.",
   "U ruajt si draft",
+  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë autorin origjinal të ri.",
   "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
   "U ruajt. Shtypni \"Dërgojeni për shqyrtim\" kur të jeni gati.",
+  "U ruajt. Librum e ka miratuar tashmë këtë autor origjinal. Shtypni \"Publikoni\" kur të jeni gati.",
 ]);
 
 type QueryValue = string | string[] | undefined;

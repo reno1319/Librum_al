@@ -12,6 +12,7 @@ const BOOK = {
   genre: "Letërsi artistike",
   price_all: 0,
   pen_name_id: undefined,
+  original_author: null,
 };
 
 describe("cover images in lists (COVERS-1)", () => {
@@ -30,5 +31,34 @@ describe("cover images in lists (COVERS-1)", () => {
       }),
     );
     expect(html).toContain('loading="lazy"');
+  });
+});
+
+// BD3 patch 4 (4a): a card shows only the original author, as plain
+// text (it has no page); the pen name keeps its link.
+describe("BookCard byline (BD3 patch 4)", () => {
+  const PEN_ID = "f0000000-0000-4000-8000-000000000001";
+
+  it("an original author is plain text, never a link to the uploader's page", () => {
+    const html = renderToStaticMarkup(
+      createElement(BookCard, {
+        book: { ...BOOK, pen_name_id: PEN_ID, original_author: "Lev Tolstoi" },
+        coverUrl: null,
+        authorName: "Lev Tolstoi",
+      }),
+    );
+    expect(html).toContain("Lev Tolstoi");
+    expect(html).not.toContain(`/autore/${PEN_ID}`);
+  });
+
+  it("a pen name byline still links to its page", () => {
+    const html = renderToStaticMarkup(
+      createElement(BookCard, {
+        book: { ...BOOK, pen_name_id: PEN_ID, original_author: null },
+        coverUrl: null,
+        authorName: "Botime Prova",
+      }),
+    );
+    expect(html).toContain(`href="/autore/${PEN_ID}"`);
   });
 });

@@ -233,7 +233,9 @@ begin
       format('part1: %s is SECURITY DEFINER, search_path empty, EXECUTE for authenticated only', c));
   end loop;
   foreach c in array array[
-    'public.book_review_approval_valid(uuid,text,text)', 'public.books_require_review_approval()',
+    -- BD3 patch 4 (migration 20261101170000): the approval also binds
+    -- the original author, so the internal function takes four arguments.
+    'public.book_review_approval_valid(uuid,text,text,text)', 'public.books_require_review_approval()',
     'public.books_refuse_live_file_change()', 'public.books_cancel_pending_review_on_delete()'] loop
     perform pg_temp.assert(not has_function_privilege('anon', c, 'EXECUTE')
       and not has_function_privilege('authenticated', c, 'EXECUTE')
@@ -247,8 +249,9 @@ begin
       like '%BEFORE UPDATE OF status ON public.books FOR EACH ROW%',
     'part1: the gate is BEFORE UPDATE OF status only (no INSERT trigger)');
   perform pg_temp.assert((select pg_get_triggerdef(oid) from pg_trigger where tgname = 'books_refuse_live_file_change')
-      like '%BEFORE UPDATE OF file_path, cover_path ON public.books FOR EACH ROW%',
-    'part1: the live-files guard is BEFORE UPDATE OF file_path, cover_path');
+      -- BD3 patch 4 (migration 20261101170000): and original_author.
+      like '%BEFORE UPDATE OF file_path, cover_path, original_author ON public.books FOR EACH ROW%',
+    'part1: the live-files guard is BEFORE UPDATE OF file_path, cover_path, original_author');
   perform pg_temp.assert((select pg_get_triggerdef(oid) from pg_trigger where tgname = 'books_cancel_pending_review_on_delete')
       like '%BEFORE DELETE ON public.books FOR EACH ROW%',
     'part1: the cancel-on-delete trigger is BEFORE DELETE');
@@ -920,7 +923,8 @@ begin
       format('part17: buyer_file_only needs grandfathered -- got %s', sqlerrm));
   end;
   perform pg_temp.assert(not public.book_review_approval_valid(h,
-      (select file_path from public.books where id = h), (select cover_path from public.books where id = h)),
+      (select file_path from public.books where id = h), (select cover_path from public.books where id = h),
+      (select original_author from public.books where id = h)),
     'part17: the validity function ignores a buyer_file_only row with matching paths');
   v := pg_temp.run_as('service_role', null,
     $q$update public.books set status = 'published' where id = 'e0770001-0000-4000-8000-0000000000a7'$q$);

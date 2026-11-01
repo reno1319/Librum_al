@@ -95,7 +95,7 @@ export async function GET(
   const supabase = await createClient();
   const { data: bookData, error: bookError } = await supabase
     .from("public_books")
-    .select("id, title, status, pen:public_pen_names(id, name)")
+    .select("id, title, status, original_author, pen:public_pen_names(id, name)")
     .eq("id", id)
     .maybeSingle<SampleBookRow>();
 
