@@ -274,7 +274,12 @@ function isWordTocBookmark(href: string): boolean {
 // they must not trigger the "some formatting couldn't be converted"
 // warning. Anything else Mammoth warns about still does.
 const HARMLESS_PARAGRAPH_STYLES = [/^title$/i, /^toc\b/i, /^body text$/i, /^first paragraph$/i];
-const HARMLESS_RUN_STYLES = [/^hyperlink$/i];
+// BD6: LibreOffice names the note number's run style "Footnote
+// Characters" / "Endnote Characters" (Word: "footnote reference", which
+// Mammoth already knows), so a file saved from LibreOffice warned
+// falsely. The notes themselves are read from footnotes.xml and
+// endnotes.xml either way.
+const HARMLESS_RUN_STYLES = [/^hyperlink$/i, /^footnote characters$/i, /^endnote characters$/i];
 
 export function isHarmlessMammothWarning(message: string): boolean {
   // Greedy up to Mammoth's own " (Style ID: " suffix, so a style name

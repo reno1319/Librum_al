@@ -467,6 +467,12 @@ describe("W2 converter fixes", () => {
     expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'toc 2' (Style ID: TOC2)")).toBe(true);
     expect(isHarmlessMammothWarning("Unrecognised run style: 'Hyperlink' (Style ID: Hyperlink)")).toBe(true);
     expect(isHarmlessMammothWarning("Image of type image/bmp is unlikely to display in web browsers")).toBe(true);
+    // BD6: LibreOffice's note-number run styles (run styles only).
+    expect(isHarmlessMammothWarning("Unrecognised run style: 'Footnote Characters' (Style ID: FootnoteCharacters)")).toBe(true);
+    expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'Footnote Characters' (Style ID: X)")).toBe(false);
+    expect(isHarmlessMammothWarning("Unrecognised run style: 'Footnote Characters Big' (Style ID: X)")).toBe(false);
+    expect(isHarmlessMammothWarning("Unrecognised run style: 'Endnote Characters' (Style ID: EndnoteCharacters)")).toBe(true);
+    expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'Endnote Characters' (Style ID: X)")).toBe(false);
     expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'Subtitle Fancy' (Style ID: X)")).toBe(false);
     expect(isHarmlessMammothWarning("Unrecognised paragraph style: 'Titles' (Style ID: X)")).toBe(false);
     expect(isHarmlessMammothWarning("Unrecognised run style: 'Title' (Style ID: Title)")).toBe(false);

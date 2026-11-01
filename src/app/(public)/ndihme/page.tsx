@@ -36,6 +36,8 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
       {
         q: "Çfarë skedarësh mund të ngarkoj?",
         a: "EPUB, ose DOCX (Librum e kthen në EPUB për ju), deri në 50 MB, si dhe një kopertinë JPG ose PNG deri në 5 MB.",
+        // BD6 (answer 1a): the Word guide and template.
+        link: { href: "/ndihme/word", label: "Si ta përgatitni dorëshkrimin në Word, me shabllonin e Librum" },
       },
       {
         q: "A mund ta ndryshoj një libër pasi e kam publikuar?",

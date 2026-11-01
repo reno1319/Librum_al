@@ -16,6 +16,7 @@ import {
   shouldBlockSubmit,
   submittablePath,
 } from "@/lib/manuscript-approval";
+import { WORD_GUIDE_PATH, WORD_TEMPLATE_PATH } from "@/lib/word-guide-paths";
 
 // REDESIGN STEP 5 (A2): restyling only -- the picker sits in a dashed
 // drop-area box and the browser's own file button is drawn as an
@@ -765,6 +766,20 @@ export function ManuscriptField({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
+          {/* BD6 (answer 3a): the guide and the template, before the
+              picker; no tick box. A new tab, so the half-filled form stays. */}
+          <p className="rounded-card border border-border bg-surface px-3 py-2 text-sm text-foreground">
+            Para se të ngarkoni, lexoni{" "}
+            <a href={WORD_GUIDE_PATH} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+              udhëzuesin për Word
+              <span className="sr-only"> (hapet në një skedë të re)</span>
+            </a>
+            . Mund të shkarkoni edhe{" "}
+            <a href={WORD_TEMPLATE_PATH} download className="text-primary underline">
+              shabllonin e Librum
+            </a>
+            .
+          </p>
           <label className={PICKER_BOX_CLASSES}>
             <span className="font-semibold text-foreground">
               {status === "success" ? "Zëvendësoni dorëshkrimin" : "Skedari i dorëshkrimit"}
