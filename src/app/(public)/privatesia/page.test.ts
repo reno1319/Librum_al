@@ -101,6 +101,8 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(source).toContain("{PRIVACY_LAST_UPDATED_LINE}");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
     expect(POLICY_LAST_UPDATED_LINE).toBe("Përditësuar më: 30 tetor 2026");
+    // BD7: the release day (Renato 1 Nov, card "b").
+    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 2 nëntor 2026");
   });
 
   it("is a lawyer-review draft in the code only, with no blank slots", () => {

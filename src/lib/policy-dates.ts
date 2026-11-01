@@ -13,7 +13,9 @@ export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATE
 // now on, so a Privacy change no longer moves the Terms and Refunds
 // dates. Like the line above, it must be the day this Privacy text goes
 // live on Production: the release that ships it sets the final value.
-export const PRIVACY_LAST_UPDATED = "1 nëntor 2026";
+// BD7 (Renato 1 Nov, card "b"): the release goes to Production on
+// Monday 2 November 2026; if it moves, this line moves with it.
+export const PRIVACY_LAST_UPDATED = "2 nëntor 2026";
 
 export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDATED}`;
 
@@ -22,6 +24,7 @@ export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDA
 // keeps POLICY_LAST_UPDATED. Like the lines above, it must be the day
 // this Terms text goes live on Production: the release that ships it
 // (BD7) sets the final value.
-export const TERMS_LAST_UPDATED = "1 nëntor 2026";
+// BD7 (Renato 1 Nov, card "b"): release day Monday 2 November 2026.
+export const TERMS_LAST_UPDATED = "2 nëntor 2026";
 
 export const TERMS_LAST_UPDATED_LINE = `Përditësuar më: ${TERMS_LAST_UPDATED}`;

@@ -79,7 +79,7 @@ describe("POLICY PAGES: /kushtet", () => {
   it("takes its date from its own line (BD2, 3. a)", () => {
     expect(text).toContain(TERMS_LAST_UPDATED_LINE);
     // BD7 sets the Production release day; until then the build day.
-    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 1 nëntor 2026");
+    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 2 nëntor 2026");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
   });
 
