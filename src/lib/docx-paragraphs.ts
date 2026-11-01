@@ -17,6 +17,7 @@ import {
   type RunLook,
   type StyleSheet,
 } from "@/lib/docx-styles";
+import { trimSpace, trimSpaceEnd } from "@/lib/docx-trim";
 
 // W3: reads one Word paragraph (<w:p>) the way the clean-up pass needs
 // it -- its visible text and how it looks (alignment, font size, bold,
@@ -199,7 +200,7 @@ export function readParagraph(p: XElem, sheet: StyleSheet): ParaFacts {
   let size: number | null = null;
   let best = -1;
   for (const [s, w] of sizeWeight) if (w > best) { best = w; size = s; }
-  const trimmed = text.replace(/^[\s ​﻿]+|[\s ​﻿]+$/g, "");
+  const trimmed = trimSpace(text);
   const letters = trimmed.replace(/[^\p{L}]/gu, "");
   const upperCase = letters.length >= 3 && letters === letters.toLocaleUpperCase("sq") && letters !== letters.toLocaleLowerCase("sq");
   return {
@@ -307,7 +308,6 @@ function removePiece(piece: Piece) {
 }
 
 const LEAD_WS_RE = /^[\s ​﻿]+/;
-const TRAIL_WS_RE = /[\s ​﻿]+$/;
 
 // Removes tabs and spaces typed at the start of the paragraph. Returns
 // true when anything was removed.
@@ -351,7 +351,7 @@ export function stripTrailingWhitespace(p: XElem): boolean {
       continue;
     }
     const t = textOf(n);
-    const stripped = t.replace(TRAIL_WS_RE, "");
+    const stripped = trimSpaceEnd(t);
     if (stripped !== t) {
       setText(n, stripped);
       changed = true;
