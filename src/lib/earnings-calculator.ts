@@ -1,5 +1,5 @@
 import { resolveCatalogPriceState } from "@/lib/catalog-price";
-import { platformFeeCents } from "@/lib/pricing";
+import { librumShareMinor, royaltyPercentForPaidMinor } from "@/lib/royalty";
 
 // LIBRUM 2.0 PRODUCT-4: this is a public, purely informational estimate
 // -- "if I price my book at X, approximately how much does Librum
@@ -9,22 +9,24 @@ import { platformFeeCents } from "@/lib/pricing";
 // fee is deducted from the author's share, so neither belongs in this
 // arithmetic).
 //
-// The formula and its rounding are NOT independently invented --
-// platformFeeCents() (src/lib/pricing.ts) is the exact function behind
-// PLATFORM_FEE_PERCENT / AUTHOR_ROYALTY_RATE_BPS, the same 8000 bps
-// split create_book_checkout_intent freezes onto every new checkout
-// intent and the same one Dashboard Sales shows per purchase.
-// Reusing it here, with the same
-// PER-SALE rounding those two callers use, is what guarantees this
-// calculator can never quietly disagree with real revenue for the same
-// hypothetical price: platformFeeCents() is rounded ONCE on a single
+// BD2 (Renato 11-01, 1a): the estimate now follows the DECIDED royalty
+// tiers in src/lib/royalty.ts (70% from 199 lek, 50% below), which is
+// what the public pages say. It deliberately no longer calls
+// platformFeeCents() (src/lib/pricing.ts): that function still drives
+// the real 80/20 checkout and ledger until the live POK build (N6)
+// switches them to the same tiers. Until then this estimate and a test
+// sale on staging disagree on purpose; after N6 they must agree again.
+//
+// Rounding stays PER SALE: Librum's share is rounded once on a single
 // sale's price, then multiplied by the sales count -- never rounded
-// once on an already-multiplied gross total, which is a different (and
-// wrong) number for most price/sales combinations.
+// once on an already-multiplied gross total. Catalog prices are whole
+// lek, so at 70% and 50% there is nothing to round anyway.
 export type EarningsEstimate = {
   grossMinor: number;
-  platformFeeMinor: number;
+  librumShareMinor: number;
   authorEarningsMinor: number;
+  /** The author's royalty percent for this price; 0 when the estimate is all zero (free, invalid price or no sales). */
+  royaltyPercent: number;
 };
 
 // ALL-WIRING-2: the inputs and outputs are ALL, not USD. The price is a
@@ -62,12 +64,14 @@ export function calculateAuthorEarnings(
 
   // THE conversion boundary: whole lek -> integer ALL minor units.
   const perSaleGrossMinor = safePriceAll * 100;
-  const perSaleFeeMinor = platformFeeCents(perSaleGrossMinor);
-  const perSaleEarningsMinor = perSaleGrossMinor - perSaleFeeMinor;
+  const perSaleLibrumMinor = librumShareMinor(perSaleGrossMinor);
+  const perSaleEarningsMinor = perSaleGrossMinor - perSaleLibrumMinor;
 
   return {
     grossMinor: perSaleGrossMinor * safeSales,
-    platformFeeMinor: perSaleFeeMinor * safeSales,
+    librumShareMinor: perSaleLibrumMinor * safeSales,
     authorEarningsMinor: perSaleEarningsMinor * safeSales,
+    royaltyPercent:
+      perSaleGrossMinor > 0 && safeSales > 0 ? royaltyPercentForPaidMinor(perSaleGrossMinor) : 0,
   };
 }

@@ -1,6 +1,10 @@
 import Link from "next/link";
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
-import { POLICY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
+import {
+  REDUCED_ROYALTY_PERCENT,
+  STANDARD_ROYALTY_FROM_ALL,
+  STANDARD_ROYALTY_PERCENT,
+} from "@/lib/royalty";
+import { TERMS_LAST_UPDATED_LINE } from "@/lib/policy-dates";
 import { PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import { SellerDetailsBlock } from "@/components/seller-details";
 import type { Metadata } from "next";
@@ -9,8 +13,6 @@ export const metadata: Metadata = {
   title: "Kushtet e përdorimit",
   description: "Kushtet e përdorimit të Librum.",
 };
-
-const AUTHOR_SHARE_PERCENT = 100 - PLATFORM_FEE_PERCENT;
 
 // AUTHOR PAGES REDESIGN: the green header band, a "Contents" box (Renato,
 // 1. a) linking each section by its anchor, and gold section numbers.
@@ -39,6 +41,15 @@ const AUTHOR_SHARE_PERCENT = 100 - PLATFORM_FEE_PERCENT;
 // sentence for sentence. One fact is brought up to date: section 15 no
 // longer says Librum doesn't check books, because every book is
 // reviewed before it reaches the Bookstore.
+//
+// BD2 (Renato 11-01: 2a, 3a, 5a, 7b): Librum is the seller and pays the
+// author a royalty ("honorar"): sections 4, 8, 9, 10 and 11 say so, with
+// the decided tiers from src/lib/royalty.ts (70% from 199 lek, 50% below,
+// on the amount actually paid; for a bundle, the bundle's price). The
+// "testing before launch" and "payout setup not available yet" sentences
+// are gone. New TERMS_VERSION "terms-sq-2" (src/lib/agreement-records.ts);
+// nobody is asked to accept again. Its own date is TERMS_LAST_UPDATED,
+// set to the Production release day (BD7). Lawyer check: R4.
 const SECTION_TITLES = [
   "Pranimi i Kushteve",
   "Kush jemi",
@@ -47,7 +58,7 @@ const SECTION_TITLES = [
   "Përmbajtja e autorit dhe licenca",
   "Rregullat e përmbajtjes dhe shkeljet",
   "Licenca juaj e leximit",
-  "Pagesat dhe tarifa e platformës",
+  "Pagesat dhe honorari i autorit",
   "Anulimi dhe rimbursimet",
   "Kundërshtimet e pagesave",
   "Pagesat për autorët",
@@ -67,7 +78,7 @@ export default function TermsPage() {
 
       <div className={SECTION_CONTAINER}>
         <div className="max-w-2xl">
-          <p className="text-sm text-muted">{POLICY_LAST_UPDATED_LINE}</p>
+          <p className="text-sm text-muted">{TERMS_LAST_UPDATED_LINE}</p>
 
           <nav aria-labelledby="terms-contents" className="mt-6 rounded-[4px] border border-border bg-surface p-5 sm:p-6">
             <h2 id="terms-contents" className="text-sm font-semibold uppercase tracking-[0.08em] text-primary">
@@ -141,13 +152,12 @@ export default function TermsPage() {
                 <span className="text-[#8a6d12]">4.</span> Roli i Librum
               </h2>
               <p className="mt-2">
-                Librum është një platformë dixhitale botimi dhe shitjeje,
-                përmes së cilës autorët e pavarur ua bëjnë veprat e tyre të
-                disponueshme lexuesve. Librum mundëson vetë platformën
-                (faqet e librave, procesin e pagesës dhe dorëzimin dixhital)
-                dhe merr një tarifë platforme për çdo shitje, siç përshkruhet
-                në Seksionin 8. Botimi me pagesë dhe konfigurimi i pagesave
-                për autorët nuk kanë nisur ende.
+                Librum është një platformë dixhitale botimi dhe shitjeje.
+                Librum ua shet lexuesve, në emrin e vet, librat elektronikë
+                që autorët e pavarur publikojnë në Librum, dhe për çdo shitje
+                i paguan autorit një honorar, siç përshkruhet në Seksionin 8.
+                Librum mundëson vetë platformën (faqet e librave, procesin e
+                pagesës dhe dorëzimin dixhital).
               </p>
             </section>
 
@@ -259,18 +269,21 @@ export default function TermsPage() {
 
             <section id="section-8" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">8.</span> Pagesat dhe tarifa e platformës
+                <span className="text-[#8a6d12]">8.</span> Pagesat dhe honorari i autorit
               </h2>
               <p className="mt-2">
-                Librum është aktualisht në testim para nisjes, dhe blerjet
-                me pagesë nuk kanë nisur ende publikisht. Kur të nisin
-                blerjet me pagesë, pagesat e reja të lexuesve do të
-                përpunohen në lekë (ALL) në faqen e pagesës së POK. Librum
-                nuk i mbledh dhe nuk i ruan të dhënat e kartave të lexuesve.
-                Për çdo shitje të përfunduar, autori merr{" "}
-                {AUTHOR_SHARE_PERCENT}% të shumës së paguar realisht, pasi
-                zbatohet çdo kod zbritjeje ose çmim pakete, dhe Librum mban{" "}
-                {PLATFORM_FEE_PERCENT}% si tarifë të platformës.
+                Pagesat e lexuesve përpunohen në lekë (ALL) në faqen e
+                pagesës së POK. Librum nuk i mbledh dhe nuk i ruan të dhënat
+                e kartave të lexuesve.
+              </p>
+              <p className="mt-2">
+                Për çdo shitje të përfunduar, Librum i paguan autorit një
+                honorar prej {STANDARD_ROYALTY_PERCENT}% të shumës së paguar
+                realisht, kur kjo shumë është {STANDARD_ROYALTY_FROM_ALL}{" "}
+                lekë ose më shumë, dhe {REDUCED_ROYALTY_PERCENT}% kur është nën{" "}
+                {STANDARD_ROYALTY_FROM_ALL} lekë. Shuma e paguar realisht është
+                ajo pasi zbatohet çdo kod zbritjeje; për një paketë vlen çmimi
+                i paketës. Pjesa tjetër i mbetet Librum.
               </p>
             </section>
 
@@ -298,8 +311,8 @@ export default function TermsPage() {
               <p className="mt-2">
                 Kur Librum miraton rimbursimin e një blerjeje, aksesi i
                 lexuesit te titulli ose paketa e rimbursuar mund të hiqet,
-                të ardhurat përkatëse të autorit anulohen, dhe rimbursohet
-                edhe tarifa përkatëse e platformës së Librum. Nëse anuloni
+                honorari përkatës i autorit anulohet, dhe rimbursohet edhe
+                pjesa përkatëse e Librum. Nëse anuloni
                 brenda 14 ditëve, Librum jua kthen paratë brenda 14 ditëve
                 nga kërkesa juaj; sa kohë i duhet më pas bankës suaj për
                 t&apos;i shfaqur varet nga banka.
@@ -320,10 +333,10 @@ export default function TermsPage() {
               <p className="mt-2">
                 Nëse një kundërshtim zgjidhet përfundimisht kundër pagesës,
                 aksesi i lexuesit te blerja përkatëse mund të hiqet, dhe
-                Librum mund të rikuperojë nga autori jo më shumë se të
-                ardhurat që autori mbajti realisht nga ai transaksion.
-                Librum nuk ia ngarkon autorit pjesën e vet të tarifës së
-                platformës për një kundërshtim të humbur, dhe sipas
+                Librum mund të rikuperojë nga autori jo më shumë se
+                honorarin që autori mbajti realisht nga ai transaksion.
+                Librum nuk ia ngarkon autorit pjesën e vet nga ai
+                transaksion për një kundërshtim të humbur, dhe sipas
                 politikës aktuale të Librum, tarifën e kundërshtimit që merr
                 ofruesi i pagesave e paguan Librum.
               </p>
@@ -334,11 +347,10 @@ export default function TermsPage() {
                 <span className="text-[#8a6d12]">11.</span> Pagesat për autorët
               </h2>
               <p className="mt-2">
-                Konfigurimi i pagesave për autorët nuk është ende i
-                disponueshëm. Librum do të publikojë mënyrën dhe kohën e
-                pagesave për autorët para se të nisë botimi me pagesë. POK
-                përpunon pagesat e reja të lexuesve dhe nuk paraqitet këtu
-                si ofruesi që përdor Librum për pagesat e autorëve.
+                Librum do ta publikojë mënyrën dhe kohën e pagesave për autorët
+                para pagesës së parë të honorarit. POK përpunon pagesat e
+                lexuesve dhe nuk paraqitet këtu si ofruesi që përdor Librum
+                për pagesat e autorëve.
               </p>
             </section>
 

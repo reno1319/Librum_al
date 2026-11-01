@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { ROYALTY_PAID_PRICE_SENTENCE, ROYALTY_RULE_SENTENCE } from "@/lib/royalty";
 import { MINIMUM_PAID_CATALOG_PRICE_ALL } from "@/lib/catalog-price";
 import { getAuthorPageCta } from "@/lib/author-page-cta";
 import { REPLY_PROMISE } from "@/lib/contact";
@@ -66,15 +66,16 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
     faqs: [
       {
         q: "Si paguhem?",
-        a: `Botimi me pagesë dhe pagesat për autorët nuk janë aktivizuar ende. Autorët mund të vazhdojnë të publikojnë libra falas, ndërsa Librum përfundon sistemet e pagesave. Kur të nisë botimi me pagesë, sipas kushteve aktuale të komisionit autori merr ${100 - PLATFORM_FEE_PERCENT}% dhe Librum ${PLATFORM_FEE_PERCENT}%. Mënyra dhe koha e pagesave për autorët do të publikohen para se të nisë botimi me pagesë.`,
+        // BD2 (Renato 11-01: 2a, 7b): seller + royalty; no "not activated yet".
+        a: `${ROYALTY_RULE_SENTENCE} ${ROYALTY_PAID_PRICE_SENTENCE} Honorari juaj shfaqet te Paneli i autorit, te Shitjet dhe te Bilanci. Mënyrën dhe kohën e pagesave për autorët Librum do t'i publikojë para pagesës së parë.`,
       },
       {
         q: "Çfarë ndodh me fitimet e mia nëse një shitje rimbursohet?",
-        a: "Të ardhurat që morët nga ajo shitje anulohen, dhe rimbursohet edhe tarifa e platformës së Librum për atë shitje: Librum nuk e mban tarifën e vet për një shitje të rimbursuar.",
+        a: "Honorari që morët nga ajo shitje anulohet, dhe Librum rimburson edhe pjesën e vet të asaj shitjeje: Librum nuk e mban pjesën e vet për një shitje të rimbursuar.",
       },
       {
         q: "Çfarë ndodh nëse një blerës fiton një kundërshtim të pagesës?",
-        a: `Nëse kundërshtimi zgjidhet përfundimisht kundër pagesës, Librum mund të rikuperojë nga ju vetëm të ardhurat që mbajtët realisht nga ajo shitje, asnjëherë më shumë. Nuk paguani kurrë pjesën prej ${PLATFORM_FEE_PERCENT}% të tarifës së platformës së Librum për një kundërshtim të humbur, dhe sipas rregullave aktuale Librum paguan vetë tarifën që merr për kundërshtimin ofruesi i pagesave.`,
+        a: `Nëse kundërshtimi zgjidhet përfundimisht kundër pagesës, Librum mund të rikuperojë nga ju vetëm honorarin që mbajtët realisht nga ajo shitje, asnjëherë më shumë. Nuk paguani kurrë pjesën e Librum nga ajo shitje për një kundërshtim të humbur, dhe sipas rregullave aktuale Librum paguan vetë tarifën që merr për kundërshtimin ofruesi i pagesave.`,
       },
     ],
   },
@@ -97,7 +98,7 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
       },
       {
         q: "A janë të sigurta të dhënat e pagesës sime?",
-        a: "Librum është tani në testim, para nisjes. Kur të nisin blerjet me pagesë, pagesa do të bëhet në faqen e pagesës së POK dhe do të tarifohet në lekë. Librum nuk i sheh dhe nuk i ruan kurrë të dhënat e kartës suaj.",
+        a: "Pagesa bëhet në faqen e pagesës së POK dhe tarifohet në lekë. Librum nuk i sheh dhe nuk i ruan kurrë të dhënat e kartës suaj.",
       },
       {
         q: "A mund ta shohin lexuesit një pjesë të librit para se ta blejnë?",

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { createBook } from "../actions";
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { ROYALTY_TIERS_LINE } from "@/lib/royalty";
 import { formatAllMinorUnits } from "@/lib/all-money";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
@@ -315,7 +315,7 @@ export function UploadWizard({
   const byline = originalAuthor.trim() || (penNameAvailable ? penName.trim() : "") || authorName;
 
   const pricing = resolveWizardPricing({ mode: priceMode, paidPrice });
-  const { priceValid, isFreeBook, priceAll, grossMinor, feeMinor, earningsMinor } = pricing;
+  const { priceValid, isFreeBook, priceAll, grossMinor, librumShareMinor, earningsMinor, royaltyPercent } = pricing;
 
   // W6: an invalid paid price blocks BOTH final buttons before anything
   // is sent. This is a submit handler, not a disabled= on the buttons:
@@ -841,8 +841,7 @@ export function UploadWizard({
                 <FieldError id="wizard-price-error" message={priceError} />
                 <span className="text-sm text-muted">
                   Lekë të plota: nga {MINIMUM_PAID_CATALOG_PRICE_ALL} deri në{" "}
-                  {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}. Librum mban një tarifë platforme prej{" "}
-                  {PLATFORM_FEE_PERCENT}%; pjesa tjetër e çdo shitjeje është e juaja.
+                  {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}. {ROYALTY_TIERS_LINE}
                 </span>
               </label>
             ) : (
@@ -981,11 +980,11 @@ export function UploadWizard({
                   <span>{formatAllMinorUnits(grossMinor)}</span>
                 </div>
                 <div className="flex items-baseline justify-between gap-4">
-                  <span className="text-muted">Tarifa e platformës Librum ({PLATFORM_FEE_PERCENT}%)</span>
-                  <span>-{formatAllMinorUnits(feeMinor)}</span>
+                  <span className="text-muted">Pjesa e Librum ({100 - royaltyPercent}%)</span>
+                  <span>-{formatAllMinorUnits(librumShareMinor)}</span>
                 </div>
                 <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
-                  <span className="font-medium text-foreground">Ju fitoni për çdo shitje</span>
+                  <span className="font-medium text-foreground">Honorari juaj për çdo shitje ({royaltyPercent}%)</span>
                   <span className="font-serif text-2xl text-primary">
                     {formatAllMinorUnits(earningsMinor)}
                   </span>

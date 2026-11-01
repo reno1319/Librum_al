@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { ROYALTY_HEADLINE_CAPTION, ROYALTY_RULE_SENTENCE, STANDARD_ROYALTY_FROM_ALL } from "@/lib/royalty";
 import { resolveHomepageCta, computeAuthorSharePercent, type HomepageCta } from "@/lib/homepage";
 import { Alert } from "@/components/ui/alert";
 import { IconCheck } from "@/components/icons";
@@ -251,7 +251,8 @@ export default async function Home({
 function HeroSection({ cta, fan }: { cta: HomepageCta | null; fan: FanCover<Cover>[] }) {
   const authorShare = computeAuthorSharePercent();
   const proofPoints = [
-    `${authorShare}% për autorin`,
+    // BD2 (4a): never a bare "70%" -- it holds from 199 lek.
+    `${authorShare}% për autorin, nga ${STANDARD_ROYALTY_FROM_ALL} lekë`,
     "Çmimin e vendosni ju",
     "Pa tarifë fillestare",
     "Pa abonim mujor",
@@ -434,7 +435,8 @@ const PUBLISHING_STEPS: { title: string; body: string }[] = [
   },
   {
     title: "Shisni dhe fitoni",
-    body: "Botimi me pagesë dhe pagesat për autorët nuk kanë nisur ende. Autorët mund të vazhdojnë të botojnë libra falas ndërsa Librum përfundon sistemet e pagesave.",
+    // BD2 (Renato 11-01, 7b): the "not started yet" sentence is gone.
+    body: "Librum e shet librin tuaj dhe ju paguan honorar për çdo shitje. Shitjet i ndiqni te Paneli i autorit.",
   },
 ];
 
@@ -482,6 +484,7 @@ function EarningsSection() {
           <p className="mt-1 text-sm font-medium uppercase tracking-wide text-muted">
             Pjesa e autorit
           </p>
+          <p className="mt-1 text-sm text-muted">{ROYALTY_HEADLINE_CAPTION}</p>
         </div>
         <div className="sm:border-l sm:border-accent sm:pl-14">
           <p className="text-sm font-semibold uppercase tracking-wide text-primary">Fitimet</p>
@@ -489,8 +492,7 @@ function EarningsSection() {
             Mbani më shumë nga çdo shitje që kualifikohet.
           </h2>
           <p className="mt-3 leading-relaxed text-foreground/90">
-            Librum mban një tarifë platforme prej {PLATFORM_FEE_PERCENT}%. Pa
-            tarifë fillestare. Pa abonim mujor.
+            {ROYALTY_RULE_SENTENCE} Pa tarifë fillestare. Pa abonim mujor.
           </p>
           {/* r9: moved here from the deleted tools section ("Track your
               sales"), word for word. */}

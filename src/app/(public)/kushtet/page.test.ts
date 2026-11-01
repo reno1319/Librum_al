@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import TermsPage, { metadata } from "./page";
 import { SELLER_PENDING_TEXT } from "@/lib/seller";
-import { POLICY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
+import { TERMS_LAST_UPDATED_LINE } from "@/lib/policy-dates";
 
-// POLICY PAGES (pipeline item 2): new terms, money wording untouched.
+// POLICY PAGES (pipeline item 2): new terms. BD2: the money wording.
 const html = renderToStaticMarkup(TermsPage());
 const text = html
   .replace(/<[^>]+>/g, " ")
@@ -46,15 +46,24 @@ describe("POLICY PAGES: /kushtet", () => {
     }
   });
 
-  it("translates the money sections sentence for sentence (they change only with the live POK build)", () => {
-    expect(section(8)).toContain("Pagesat dhe tarifa e platformës");
-    expect(section(8)).toContain("{AUTHOR_SHARE_PERCENT}% të shumës së paguar realisht");
-    expect(section(8)).toContain("{PLATFORM_FEE_PERCENT}% si tarifë të platformës.");
+  // BD2 (Renato 11-01: 2a, 5a, 7b): seller + royalty, 70% from 199 lek,
+  // 50% below, on the amount actually paid; no "not launched yet".
+  it("says Librum sells and pays a 70%/50% royalty on the amount actually paid", () => {
+    expect(text).toContain("Librum ua shet lexuesve, në emrin e vet, librat elektronikë që autorët e pavarur publikojnë në Librum, dhe për çdo shitje i paguan autorit një honorar, siç përshkruhet në Seksionin 8.");
+    expect(text).toContain("Për çdo shitje të përfunduar, Librum i paguan autorit një honorar prej 70% të shumës së paguar realisht, kur kjo shumë është 199 lekë ose më shumë, dhe 50% kur është nën 199 lekë.");
+    expect(text).toContain("Shuma e paguar realisht është ajo pasi zbatohet çdo kod zbritjeje; për një paketë vlen çmimi i paketës. Pjesa tjetër i mbetet Librum.");
+    expect(section(8)).toContain("Pagesat dhe honorari i autorit");
+    expect(text).toContain("honorari përkatës i autorit anulohet, dhe rimbursohet edhe pjesa përkatëse e Librum.");
+    expect(text).toContain("Librum mund të rikuperojë nga autori jo më shumë se honorarin që autori mbajti realisht nga ai transaksion.");
     expect(section(10)).toContain("ofruesi i pagesave e paguan Librum.");
-    expect(section(10)).toContain("ardhurat që autori mbajti realisht nga ai transaksion.");
-    expect(section(10)).toContain("Librum mund të rikuperojë nga autori jo më shumë se të");
     expect(text).toContain("Librum ju njofton pa vonesë për pretendimin");
-    expect(section(11)).toContain("Konfigurimi i pagesave për autorët nuk është ende i");
+    expect(text).toContain("Librum do ta publikojë mënyrën dhe kohën e pagesave për autorët para pagesës së parë të honorarit.");
+  });
+
+  it("no longer says platform fee, 80/20, or not launched yet", () => {
+    expect(text).not.toMatch(/tarif[ëa] (e )?platform|tarifës së platform|80%|20%/);
+    expect(text).not.toMatch(/nuk kanë nisur|nuk është ende i disponueshëm|testim para nisjes/);
+    expect(source).not.toContain("PLATFORM_FEE_PERCENT");
   });
 
   // ALBANIAN-14: the one fact brought up to date (every book is reviewed).
@@ -66,8 +75,12 @@ describe("POLICY PAGES: /kushtet", () => {
     expect(text).not.toContain("30 ditë para");
   });
 
-  it("takes its date from the one shared line (ALBANIAN-14, 3. b)", () => {
-    expect(text).toContain(POLICY_LAST_UPDATED_LINE);
+  // BD2 (3a): the Terms have their own date; Refunds keep the shared one.
+  it("takes its date from its own line (BD2, 3. a)", () => {
+    expect(text).toContain(TERMS_LAST_UPDATED_LINE);
+    // BD7 sets the Production release day; until then the build day.
+    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 1 nëntor 2026");
+    expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
   });
 
   it("is a lawyer-review draft in the code only, with no blank slots", () => {

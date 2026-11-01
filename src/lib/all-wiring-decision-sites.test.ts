@@ -264,7 +264,7 @@ describe("decision sites 8-9 of 13: the earnings calculator, logic and its compo
   it("the paid row earns; the conversion boundary is x100 and happens exactly once", () => {
     const estimate = calculateAuthorEarnings(LEGACY_PAID.price_all as number, 1);
     expect(estimate.grossMinor).toBe(19900);
-    expect(estimate.platformFeeMinor + estimate.authorEarningsMinor).toBe(estimate.grossMinor);
+    expect(estimate.librumShareMinor + estimate.authorEarningsMinor).toBe(estimate.grossMinor);
   });
 
   it("an unpriced book earns nothing rather than throwing or inventing a price", () => {
@@ -272,7 +272,7 @@ describe("decision sites 8-9 of 13: the earnings calculator, logic and its compo
       UNPRICED.price_all as unknown as number,
       10,
     );
-    expect(estimate).toEqual({ grossMinor: 0, platformFeeMinor: 0, authorEarningsMinor: 0 });
+    expect(estimate).toEqual({ grossMinor: 0, librumShareMinor: 0, authorEarningsMinor: 0, royaltyPercent: 0 });
   });
 
   it("the legacy price_cents is never what it earns on", () => {
@@ -286,8 +286,8 @@ describe("decision sites 8-9 of 13: the earnings calculator, logic and its compo
     for (const priceAll of [99, 100, 199, 333, 1000, 12345, 100000]) {
       const e = calculateAuthorEarnings(priceAll, 7);
       expect(e.grossMinor).toBe(priceAll * 100 * 7);
-      expect(e.platformFeeMinor + e.authorEarningsMinor).toBe(e.grossMinor);
-      expect(Number.isSafeInteger(e.platformFeeMinor)).toBe(true);
+      expect(e.librumShareMinor + e.authorEarningsMinor).toBe(e.grossMinor);
+      expect(Number.isSafeInteger(e.librumShareMinor)).toBe(true);
       expect(Number.isSafeInteger(e.authorEarningsMinor)).toBe(true);
     }
   });
@@ -333,7 +333,7 @@ describe("decision site 10 of 13: the upload wizard's price summary", () => {
       const summary = resolveWizardPriceSummary(String(priceAll));
       const estimate = calculateAuthorEarnings(priceAll, 1);
       expect(summary.grossMinor).toBe(estimate.grossMinor);
-      expect(summary.feeMinor).toBe(estimate.platformFeeMinor);
+      expect(summary.librumShareMinor).toBe(estimate.librumShareMinor);
       expect(summary.earningsMinor).toBe(estimate.authorEarningsMinor);
     }
   });

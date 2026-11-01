@@ -75,7 +75,7 @@ describe("REFUND POLICY: Terms section 9 links the policy", () => {
   it("keeps the money paragraph and links the policy", () => {
     const source = read("src/app/(public)/kushtet/page.tsx");
     const section9 = source.match(/<section id="section-9"[\s\S]*?<\/section>/)![0];
-    expect(section9).toContain("të ardhurat përkatëse të autorit anulohen");
+    expect(section9).toContain("honorari përkatës i autorit anulohet");
     expect(section9).toContain('<Link href="/rimbursimet" className="text-primary underline">');
     expect(section9).toContain("Politikën e rimbursimit");
   });

@@ -1,5 +1,6 @@
 // ALBANIAN-14 (Renato 10-28, "3. b"): the "Last updated" date of the
-// Terms, the Privacy Policy and the Refund Policy, typed in one place.
+// Terms, the Privacy Policy and the Refund Policy, typed in one place
+// (since BD4 and BD2, Privacy and Terms have their own dates below).
 // It must be the exact day the Albanian text goes live on Production.
 // POL-1 (Renato 10-29, "1. a"): release 9 goes to Production on Friday
 // 30 October 2026, Tirana time. If the release moves to another day,
@@ -15,3 +16,12 @@ export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATE
 export const PRIVACY_LAST_UPDATED = "1 nëntor 2026";
 
 export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDATED}`;
+
+// BD2 (Renato 1 Nov, "3. a"): the Terms have their own date from now on
+// (royalty wording, TERMS_VERSION "terms-sq-2"), so the Refund Policy
+// keeps POLICY_LAST_UPDATED. Like the lines above, it must be the day
+// this Terms text goes live on Production: the release that ships it
+// (BD7) sets the final value.
+export const TERMS_LAST_UPDATED = "1 nëntor 2026";
+
+export const TERMS_LAST_UPDATED_LINE = `Përditësuar më: ${TERMS_LAST_UPDATED}`;
