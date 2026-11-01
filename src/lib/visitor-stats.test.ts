@@ -72,6 +72,7 @@ describe("VISITOR STATS: which pages count", () => {
       "/blog/a-post",
       "/ndihme",
       "/ndihme/leximi",
+      "/ndihme/word",
       "/rreth-nesh",
       "/kontakt",
       "/si-funksionon",

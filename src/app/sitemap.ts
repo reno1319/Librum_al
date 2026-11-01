@@ -29,6 +29,7 @@ const STATIC_PUBLIC_ROUTES = [
   "/librari",
   "/ndihme",
   "/ndihme/leximi",
+  "/ndihme/word",
   "/kontakt",
   "/kushtet",
   "/privatesia",
