@@ -1217,7 +1217,7 @@ describe("resolveManuscriptInput: temp-path authorization (CB-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Dor%C3%ABshkrimi%20i%20ngarkuar%20nuk%20u%20lexua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
+      "/dashboard/books/new?error=Dor%C3%ABshkrimi%20i%20ngarkuar%20ka%20skaduar%20ose%20nuk%20u%20lexua%20dot.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -1465,7 +1465,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Kopertina%20e%20ngarkuar%20nuk%20u%20lexua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
+      "/dashboard/books/new?error=Kopertina%20e%20ngarkuar%20ka%20skaduar%20ose%20nuk%20u%20lexua%20dot.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });

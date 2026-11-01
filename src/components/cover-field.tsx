@@ -3,6 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { fileInputClasses } from "@/lib/form-styles";
+import {
+  TEMP_UPLOAD_CHECK_INTERVAL_MS,
+  TEMP_UPLOAD_EXPIRED_MESSAGE,
+  tempUploadExpired,
+} from "@/lib/temp-upload-expiry";
 
 // REDESIGN STEP 5 (A2): restyling only -- the picker sits in a dashed
 // drop-area box and the browser's own file button is drawn as an
@@ -66,6 +71,7 @@ export function CoverField({
   authorId,
   existingCoverUrl,
   onCoverChange,
+  onUploadExpired,
 }: {
   // The signed-in author's own id -- used only to namespace this
   // upload's temporary Storage path, same convention as
@@ -83,6 +89,9 @@ export function CoverField({
   // (the new wizard's Review step) can show an actual thumbnail
   // without introducing a second upload/preview implementation.
   onCoverChange?: (info: { name: string; previewUrl: string } | null) => void;
+  // BD5 (3a): called when a Save is stopped because the uploaded cover
+  // is more than 3 days old (the wizard goes back to its Files step).
+  onUploadExpired?: () => void;
 }) {
   const isReplaceMode = existingCoverUrl !== undefined;
   const [status, setStatus] = useState<Status>("idle");
@@ -90,10 +99,22 @@ export function CoverField({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [readyFileName, setReadyFileName] = useState<string | null>(null);
   const [smallCover, setSmallCover] = useState(false);
+  // BD5: bumped to give the file picker a fresh, empty input after an
+  // expired upload, so picking the same file again fires onChange.
+  const [pickerKey, setPickerKey] = useState(0);
 
   const hiddenPathInputRef = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
   const tempPathRef = useRef<string | null>(null);
+  // BD5: when the current temporary upload finished (browser clock), and
+  // whether an expiry still has to stop one Save so the author sees it.
+  const uploadedAtRef = useRef<number | null>(null);
+  const expiredNoticeRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const onUploadExpiredRef = useRef(onUploadExpired);
+  useEffect(() => {
+    onUploadExpiredRef.current = onUploadExpired;
+  }, [onUploadExpired]);
   const requestIdRef = useRef(0);
   const pendingCountRef = useRef(0);
   const inFlightRef = useRef<Promise<void>>(Promise.resolve());
@@ -118,7 +139,33 @@ export function CoverField({
     if (hiddenPathInputRef.current) {
       hiddenPathInputRef.current.value = path ?? "";
     }
+    if (path === null) uploadedAtRef.current = null;
+    else if (path !== tempPathRef.current) uploadedAtRef.current = Date.now();
     tempPathRef.current = path;
+  }
+
+  // BD5 (3a): the upload is past the form's 3-day limit. Clear the field,
+  // say why, and stop the next Save once so the author sees the message.
+  // The stored file itself is left to the nightly clean-up (84 h): a Save
+  // sent just before the limit may still be reading it (audit r1 F4).
+  function expireUpload() {
+    setHiddenPath(null);
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setPreviewUrl(null);
+    setReadyFileName(null);
+    setSmallCover(false);
+    setStatus("error");
+    setErrorMessage(TEMP_UPLOAD_EXPIRED_MESSAGE);
+    setPickerKey((key) => key + 1);
+    expiredNoticeRef.current = true;
+    onCoverChange?.(null);
+  }
+
+  function checkUploadAge() {
+    if (tempPathRef.current && tempUploadExpired(uploadedAtRef.current, Date.now())) expireUpload();
   }
 
   async function removeTempObject(path: string) {
@@ -151,6 +198,7 @@ export function CoverField({
       void removeTempObject(tempPathRef.current);
     }
     setHiddenPath(null);
+    expiredNoticeRef.current = false;
     setErrorMessage("");
     setReadyFileName(null);
     setSmallCover(false);
@@ -242,6 +290,18 @@ export function CoverField({
     if (!form) return;
 
     function handleSubmit(e: Event) {
+      // BD5 (3a): an upload past the 3-day limit never reaches the
+      // server; this Save is stopped before anything is sent, so the
+      // rest of the form stays as typed.
+      checkUploadAge();
+      if (expiredNoticeRef.current) {
+        expiredNoticeRef.current = false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onUploadExpiredRef.current?.();
+        requestAnimationFrame(() => rootRef.current?.scrollIntoView({ block: "center" }));
+        return;
+      }
       if (pendingCountRef.current === 0) return;
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -255,12 +315,32 @@ export function CoverField({
 
     form.addEventListener("submit", handleSubmit, true);
     return () => form.removeEventListener("submit", handleSubmit, true);
+    // BD5: checkUploadAge works through refs and state setters; the
+    // only prop it reaches (the page's change callback) is a stable
+    // state setter in the wizard and absent on Edit Book.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // BD5: an open form re-checks its upload's age every minute and when
+  // the tab comes back into view, so the message is already there when
+  // the author returns.
+  useEffect(() => {
+    const timer = window.setInterval(checkUploadAge, TEMP_UPLOAD_CHECK_INTERVAL_MS);
+    function onVisible() {
+      if (document.visibilityState === "visible") checkUploadAge();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const displayedPreview = previewUrl ?? (isReplaceMode ? existingCoverUrl : undefined);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div ref={rootRef} className="flex flex-col gap-2">
       <input ref={hiddenPathInputRef} type="hidden" name="coverStoragePath" />
 
       {isReplaceMode && (
@@ -286,6 +366,7 @@ export function CoverField({
         <input
           type="file"
           accept="image/png,image/jpeg"
+          key={pickerKey}
           className={PICKER_INPUT_CLASSES}
           onChange={(e) => handleCoverChange(e.target.files?.[0] ?? null)}
         />

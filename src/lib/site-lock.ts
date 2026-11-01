@@ -29,8 +29,9 @@ export const SITE_UNLOCK_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 export const SITE_LOCK_RETRY_AFTER_SECONDS = 86400;
 
 // Machine routes that must keep working for everyone (2a): POK's
-// server-to-server webhook, the monthly payout job (vercel.json, guarded
-// by its own CRON_SECRET), the liveness check and the uptime monitor's
+// server-to-server webhook, the monthly payout job and the daily
+// temporary-upload clean-up (BD5) (vercel.json, both guarded by their
+// own CRON_SECRET check), the liveness check and the uptime monitor's
 // database check (ALERTS-1, 2a: returns only ok or not ok), and the email
 // confirm/login callback (it only exchanges a code, then redirects to a
 // page, which is locked again without the cookie). Exact paths only --
@@ -38,6 +39,7 @@ export const SITE_LOCK_RETRY_AFTER_SECONDS = 86400;
 export const SITE_LOCK_OPEN_PATHS: ReadonlySet<string> = new Set([
   "/api/payments/pok/webhook",
   "/api/internal/payouts/run",
+  "/api/internal/tmp-uploads/cleanup",
   "/api/health",
   "/api/health/db",
   "/auth/callback",

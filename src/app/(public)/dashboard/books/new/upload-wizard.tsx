@@ -300,6 +300,12 @@ export function UploadWizard({
     setStep((s) => Math.min(s + 1, STEPS.length));
   }
 
+  // BD5 (3a): a Save stopped because an upload is more than 3 days old
+  // brings the author back to the Files step, where the message is.
+  function goToFilesStep() {
+    setStep(2);
+  }
+
   function goBack() {
     setStep((s) => Math.max(s - 1, 1));
   }
@@ -710,7 +716,7 @@ export function UploadWizard({
           <div className={step === 2 ? "flex flex-col gap-6" : "hidden"}>
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <CoverField authorId={authorId} onCoverChange={setCover} />
+                <CoverField authorId={authorId} onCoverChange={setCover} onUploadExpired={goToFilesStep} />
                 {/* FIX1 (X10): the tip moved here from the Tips box. */}
                 <p className="text-sm text-muted">
                   Kopertina duket më mirë si imazh vertikal, të paktën 1000px i lartë.
@@ -723,6 +729,7 @@ export function UploadWizard({
                 authorName={authorName}
                 authorId={authorId}
                 onManuscriptChange={setManuscript}
+                onUploadExpired={goToFilesStep}
               />
 
               <p role="status" className="text-sm text-muted">

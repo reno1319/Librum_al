@@ -38,9 +38,16 @@ describe("vercel.json cron configuration", () => {
     expect(payout?.schedule).toBe(PAYOUT_CYCLE_CRON_EXPRESSION);
   });
 
-  it("contains exactly one cron entry -- no duplicate payout cron, nothing accidentally removed", () => {
+  it("contains exactly two cron entries -- payouts and the BD5 clean-up, nothing accidentally removed", () => {
     const config = readVercelConfig();
-    expect(config.crons).toHaveLength(1);
+    expect(config.crons).toHaveLength(2);
+  });
+
+  // BD5 (W9): daily at 03:00 UTC. Vercel Hobby allows one run a day.
+  it("registers the daily temporary-upload clean-up cron", () => {
+    const config = readVercelConfig();
+    const cleanup = config.crons.find((cron) => cron.path === "/api/internal/tmp-uploads/cleanup");
+    expect(cleanup?.schedule).toBe("0 3 * * *");
   });
 
   it("no cron path appears more than once", () => {
