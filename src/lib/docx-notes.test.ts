@@ -188,14 +188,21 @@ describe("footnotes (W3 Part 2)", () => {
     expect(r.sections[0].html).toContain("Teksti f2 këtu.");
   });
 
-  it("keeps removing notes, with the warning, on Production (answer 2a: one switch)", async () => {
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_ENV", "production");
-    const r = await convert({
+  it("keeps notes on Production, and removes them with the warning when the clean-up is switched off (answer 2a: one switch)", async () => {
+    const input = {
       bodyXml: heading(1, "Kreu") + textWithNotes("Teksti", noteRef("footnote", 2), " dhe", noteRef("endnote", 3), "."),
       footnotesXml: note("footnote", 2, paragraph("Poshtë.")),
       endnotesXml: note("endnote", 3, paragraph("Në fund.")),
-    });
+    };
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("DOCX_CLEANUP_OFF", "");
+    const prod = await convert(input);
+    expect(prod.cleanup.notes).toEqual({ footnotes: 1, endnotes: 1, dropped: 0 });
+    expect(prod.sections.map((s) => s.heading)).toEqual(["Kreu", "Shënime"]);
+    expect(prod.warnings.some((w) => w.code === "footnotes_or_endnotes_skipped")).toBe(false);
+    vi.stubEnv("DOCX_CLEANUP_OFF", "1");
+    const r = await convert(input);
     expect(r.sections.map((s) => s.heading)).toEqual(["Kreu"]);
     expect(r.sections[0].html).not.toMatch(/aside|noteref|Poshtë|Në fund/);
     expect(r.cleanup.notes).toEqual({ footnotes: 0, endnotes: 0, dropped: 0 });

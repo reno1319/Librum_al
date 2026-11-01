@@ -864,7 +864,7 @@ export async function convertDocxToDocument(
         currentHeading = parsed.heading;
         currentLines = parsed.lines;
       } else {
-        // Answer 10b: Production keeps the title exactly as before W3.
+        // Clean-up switched off (DOCX_CLEANUP_OFF): the title exactly as before W3.
         currentHeading = headingHtmlToText(headingMatch[1]) || null;
         currentLines = undefined;
         currentKeys = [];

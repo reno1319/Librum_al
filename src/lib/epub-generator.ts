@@ -341,7 +341,7 @@ export async function generateEpub(input: EpubGeneratorInput): Promise<Buffer> {
   // but not these pages; every book is Albanian, so they agree.
   const language = resolveEpubLanguageCode(input.language);
   zip.file("OEBPS/nav.xhtml", renderNavXhtml(input.sections, language));
-  // Answer 10b: Production keeps the old paragraph spacing until W4.
+  // Clean-up switched off (DOCX_CLEANUP_OFF): the old paragraph spacing.
   zip.file("OEBPS/styles.css", stylesheet(cleanupPassEnabled()));
 
   input.sections.forEach((section, i) => {
