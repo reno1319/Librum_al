@@ -18,6 +18,8 @@ export const CHOICE_LISTS = [
   "noSceneBreak",
   "notSubheading",
   "notVerse",
+  "keepCopyright",
+  "removeTitlePage",
 ] as const;
 export type ChoiceList = (typeof CHOICE_LISTS)[number];
 
@@ -40,6 +42,8 @@ export function emptyChoices(): PreviewChoices {
     noSceneBreak: [],
     notSubheading: [],
     notVerse: [],
+    keepCopyright: [],
+    removeTitlePage: [],
     fixQuotes: true,
   };
 }
@@ -90,7 +94,8 @@ const GUESS_LISTS: Record<GuessKind, { off?: ChoiceList; on?: ChoiceList }> = {
   merged_title: { off: "keepTitleApart" },
   split_lines: { off: "keepLines" },
   verse: { off: "notVerse" },
-  title_page: {},
+  title_page: { on: "removeTitlePage" },
+  copyright_page: { off: "keepCopyright" },
 };
 
 function has(choices: PreviewChoices, list: ChoiceList | undefined, p: number): boolean {
@@ -127,7 +132,9 @@ export function guessWillApply(guess: CleanupGuess, choices: PreviewChoices, app
 
 export function canToggleGuess(guess: CleanupGuess, applied: PreviewChoices): boolean {
   const { off, on } = GUESS_LISTS[guess.kind];
-  if (guess.applied) return !!off;
+  // An opt-in kind (a typed title page) the author applied can be undone
+  // too (audit r5 M1).
+  if (guess.applied) return !!off || has(applied, on, guess.paragraph);
   return !!on || has(applied, off, guess.paragraph);
 }
 
@@ -232,8 +239,16 @@ export function describeGuess(guess: CleanupGuess, on: boolean, canToggle: boole
       return on
         ? { state: `U formatua si poezi (rreshta të shkurtër): ${t}`, action: act("Ktheje në prozë"), unsure }
         : { state: `Mbetet prozë: ${t}`, action: act("Formatoje si poezi"), unsure };
+    // BD3 patch 2 (Renato 1 Nov, 1a 2a): Librum's own first page carries
+    // the title, the author and the copyright line in every download.
     case "title_page":
-      return { state: `Faqja e titullit e shkruar në dokument mbetet në fillim të librit: ${t}`, action: null, unsure: false };
+      return on
+        ? { state: `Faqja e titullit e shkruar në dokument u hoq: ${t}. Librum shton vetë faqen e parë me titullin dhe autorin.`, action: act("Ktheje në libër"), unsure }
+        : { state: `Titulli i shkruar në dokument mbetet në libër: ${t}. Librum shton vetë faqen e parë me titullin dhe autorin, ndaj mund ta hiqni.`, action: act("Hiqe"), unsure };
+    case "copyright_page":
+      return on
+        ? { state: `Faqja e të drejtave u hoq: ${t}. Librum shton vetë faqen e të drejtave në çdo shkarkim.`, action: act("Kjo nuk është faqe të drejtash"), unsure }
+        : { state: `Mbetet në libër (Librum mendoi se ishte faqe të drejtash): ${t}`, action: act("Hiqe"), unsure };
   }
 }
 
@@ -265,6 +280,11 @@ export function describeFixes(report: CleanupReport): string[] {
     f.contentsLinesRemoved,
     "rresht i tabelës së përmbajtjes i hequr (Librum e krijon vetë përmbajtjen)",
     "rreshta të tabelës së përmbajtjes të hequr (Librum e krijon vetë përmbajtjen)",
+  );
+  add(
+    f.frontLinesRemoved ?? 0,
+    "rresht i faqes së të drejtave ose të titullit i hequr (Librum shton faqen e vet)",
+    "rreshta të faqes së të drejtave ose të titullit të hequr (Librum shton faqen e vet)",
   );
   add(f.emptyLinesRemoved, "rresht bosh i hequr", "rreshta bosh të hequr");
   add(f.indentsRemoved, "kryeradhë me hapësira ose Tab e hequr", "kryeradhë me hapësira ose Tab të hequra");

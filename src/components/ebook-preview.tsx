@@ -182,8 +182,7 @@ export function EbookPreview({
     setFocusPara(null);
   }, [focusPara, nodes]);
 
-  const guesses = useMemo(() => guessesForList(build.cleanup).filter((g) => g.kind !== "title_page"), [build.cleanup]);
-  const titlePage = build.cleanup.guesses.find((g) => g.kind === "title_page");
+  const guesses = useMemo(() => guessesForList(build.cleanup), [build.cleanup]);
   const health = healthReport(build.cleanup, build.warnings);
   const pending = pendingCount(choices, appliedChoices);
   const ownChanges = pendingChanges(choices, appliedChoices).filter(
@@ -373,7 +372,6 @@ export function EbookPreview({
                 ))}
               </ul>
             )}
-            {titlePage && <p className="mt-1 text-muted">{describeGuess(titlePage, true, false).state}</p>}
             {showQuotes && (
               <label className="mt-2 flex items-start gap-2">
                 <input

@@ -90,9 +90,25 @@ describe("W3 chapters typed by hand", () => {
       fmt("Tiranë 2026", { align: "center", pageBreakAfter: true }) +
       title("Valët") + prose("Dita") + lastBeforeBreak("Nata") + title("Guri") + prose("Era"),
     );
+    // BD3 patch 2: the typed title line is offered for removal, never
+    // removed by default (Renato 1 Nov, after audit r4); the author's
+    // "remove" takes only that line.
     expect(r.sections.map((s) => s.heading)).toEqual([null, "Valët", "Guri"]);
     expect(r.sections[0].html).toContain('<p class="center">LIBRI I DETIT</p>');
-    expect(r.cleanup.guesses.find((g) => g.kind === "title_page")).toMatchObject({ applied: false });
+    const guess = r.cleanup.guesses.find((g) => g.kind === "title_page");
+    expect(guess).toMatchObject({ applied: false, text: "LIBRI I DETIT" });
+    expect(r.cleanup.fixes.frontLinesRemoved).toBe(0);
+    const removed = await convert(
+      fmt("LIBRI I DETIT", { align: "center", size: 44 }) + emptyPara(4) + fmt("Autor Prove", { align: "center", size: 30 }) + emptyPara(3) +
+      fmt("Tiranë 2026", { align: "center", pageBreakAfter: true }) +
+      title("Valët") + prose("Dita") + lastBeforeBreak("Nata") + title("Guri") + prose("Era"),
+      {},
+      { removeTitlePage: [guess!.paragraph] },
+    );
+    expect(removed.sections.map((s) => s.heading)).toEqual([null, "Valët", "Guri"]);
+    expect(removed.sections[0].html).not.toContain("LIBRI I DETIT");
+    expect(removed.sections[0].html).toContain("Autor Prove");
+    expect(removed.cleanup.guesses.find((g) => g.kind === "title_page")).toMatchObject({ applied: true, paragraph: guess!.paragraph });
   });
 
   it("trusts Heading 1 styles when the author used them", async () => {

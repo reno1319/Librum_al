@@ -81,13 +81,31 @@ describe("toggling a guess", () => {
   });
 
   it("offers no toggle where the clean-up pass has no switch", () => {
-    expect(canToggleGuess(guess({ kind: "title_page", applied: false }), applied)).toBe(false);
     // An unsure typed contents list the pass kept: there is no "remove it" option.
     expect(canToggleGuess(guess({ kind: "typed_contents", applied: false }), applied)).toBe(false);
     // But one the author kept can be removed again.
     expect(canToggleGuess(guess({ kind: "typed_contents", applied: false }), { ...applied, keepContents: [7] })).toBe(true);
-    const g = guess({ kind: "title_page", applied: false });
-    expect(toggleGuess(g, applied, applied)).toBe(applied);
+    // BD3 patch 2: a typed title page is offered for removal.
+    expect(canToggleGuess(guess({ kind: "title_page", applied: false }), applied)).toBe(true);
+  });
+});
+
+describe("undo of a removed copyright page or title page (BD3 patch 2)", () => {
+  it("toggles keepCopyright and removeTitlePage, and accepts them from the browser", () => {
+    const applied = emptyChoices();
+    expect(toggleGuess(guess({ kind: "copyright_page" }), applied, applied).keepCopyright).toEqual([7]);
+    expect(toggleGuess(guess({ kind: "title_page", applied: false }), applied, applied).removeTitlePage).toEqual([7]);
+    expect(canToggleGuess(guess({ kind: "copyright_page", applied: false }), applied)).toBe(false);
+    expect(canToggleGuess(guess({ kind: "copyright_page", applied: false }), { ...applied, keepCopyright: [7] })).toBe(true);
+    expect(normalizeChoices({ keepCopyright: [3, 3, 1], removeTitlePage: [0] })).toMatchObject({ keepCopyright: [1, 3], removeTitlePage: [0] });
+    expect(normalizeChoices({ keepCopyright: [-1] })).toBeNull();
+  });
+
+  it("counts the removed lines in the summary", () => {
+    const r = emptyCleanupReport();
+    r.applied = true;
+    r.fixes.frontLinesRemoved = 1;
+    expect(describeFixes(r)).toContain("1 rresht i faqes së të drejtave ose të titullit i hequr (Librum shton faqen e vet)");
   });
 });
 
@@ -128,6 +146,23 @@ describe("words for the author", () => {
     expect(describeGuess(contents, true, true).state).toBe("Përmbajtja e shkruar nga ju, që fillon me “Përmbajtja”, u hoq. Librum e krijon vetë përmbajtjen e e-librit.");
     expect(describeGuess(contents, false, true).state).toBe("Përmbajtja e shkruar nga ju mbetet në libër: “Përmbajtja”");
     expect(describeGuess(guess({ kind: "scene_break" }), false, true).action).toBe("Shto një ndarje skene");
+  });
+
+  it("describes the removed copyright page and title page, with an undo (BD3 patch 2, 1a)", () => {
+    const cp = guess({ kind: "copyright_page", text: "© 2020 Autor Prove / ISBN 978" });
+    expect(describeGuess(cp, true, true)).toEqual({
+      state: "Faqja e të drejtave u hoq: “© 2020 Autor Prove / ISBN 978”. Librum shton vetë faqen e të drejtave në çdo shkarkim.",
+      action: "Kjo nuk është faqe të drejtash",
+      unsure: false,
+    });
+    expect(describeGuess(cp, false, true).action).toBe("Hiqe");
+    const tp = guess({ kind: "title_page", text: "LIBRI / Autor" });
+    expect(describeGuess(tp, true, true).action).toBe("Ktheje në libër");
+    expect(describeGuess(tp, false, true)).toEqual({
+      state: "Titulli i shkruar në dokument mbetet në libër: “LIBRI / Autor”. Librum shton vetë faqen e parë me titullin dhe autorin, ndaj mund ta hiqni.",
+      action: "Hiqe",
+      unsure: false,
+    });
   });
 
   it("lists only the fixes that happened", () => {

@@ -1,5 +1,6 @@
 import type { ParaFacts } from "@/lib/docx-paragraphs";
 import type { LibrumStyleKey } from "@/lib/docx-styles";
+import { hasOutsideMention } from "@/lib/outside-mentions";
 
 // W3: decides the book's structure from how each paragraph LOOKS, for
 // Word files where the author didn't use Heading styles (Renato's
@@ -24,6 +25,7 @@ export type GuessKind =
   | "subheading"
   | "scene_break"
   | "title_page"
+  | "copyright_page"
   | "typed_contents"
   | "verse"
   | "split_lines"
@@ -77,6 +79,11 @@ export type StructureOptions = {
   // normal text (the guess's paragraph number).
   notSubheading?: number[];
   notVerse?: number[];
+  // BD3 patch 2 (answer 1a): a removed copyright page the author brings
+  // back, and a typed title page the author chooses to remove (the
+  // guess's paragraph number).
+  keepCopyright?: number[];
+  removeTitlePage?: number[];
 };
 
 export type StructureResult = {
@@ -87,6 +94,8 @@ export type StructureResult = {
   subheadings: number;
   sceneBreaks: number;
   contentsLinesRemoved: number;
+  // BD3 patch 2: lines of the author's copyright page and typed title page.
+  frontLinesRemoved: number;
   emptyRemoved: number;
   paragraphsSplit: number;
   gaps: number;
@@ -110,6 +119,73 @@ const MARKER_RE = /^[\s*#⁂~•·✦❖◆◇§]{1,20}$/;
 const MARKER_SYMBOL_RE = /[*#⁂~•·✦❖◆◇§]/;
 const DIALOGUE_RE = /^[—–-][  ]/;
 const NOT_A_TITLE_RE = /©|\bISBN\b|\bcopyright\b|t[ëe] gjitha t[ëe] drejtat/i;
+// BD3 patch 2: lines of an author's own copyright page. Only lines a
+// copyright page has are matched, never a phrase that a story can use
+// ("të gjitha të drejtat e njeriut", "copyright-i i këngës"): audit r1
+// H1-H3. JavaScript's \b treats "ë" as a non-letter, so the end of a
+// word is (?![\p{L}\d]) with the u flag (audit r1 M2).
+const END = String.raw`(?![\p{L}\d])`;
+const COPYRIGHT_RE = new RegExp(
+  [
+    String.raw`©`,
+    String.raw`\(c\)\s*(?:1[89]|20)\d{2}`,
+    String.raw`\bcopyright[\s,:]*(?:©|\(c\)|(?:1[89]|20)\d{2}|by${END}|nga${END})`,
+    String.raw`\bcopyrighted (?:property|material|work)`,
+    String.raw`t[ëe] gjitha t[ëe] drejtat (?:(?:jan[ëe] )?t[ëe] |(?:jan[ëe] )?e )?rezervuara`,
+    String.raw`t[ëe] drejtat e (?:botimit|autorit) (?:jan[ëe]|i p[ëe]rkasin|t[ëe] rezervuara|e rezervuara|mbrohen)`,
+    String.raw`all rights reserved`,
+    String.raw`\bISBN(?:-1[03])?[:\s]*(?:97[89][\s-]?)?\d[\d\s-]{7,}[\dXx]`,
+    String.raw`\blicen[cs]e notes?${END}`,
+    String.raw`\blicensed for your personal`,
+    String.raw`may not be (?:reproduced|copied|re-?sold)`,
+    String.raw`ndalohet (?:çdo |rreptësisht )?(?:riprodhim|kopjim|shumëfishim)`,
+    String.raw`(?:riprodhimi|kopjimi|shumëfishimi)\b[^.]{0,60}\bndalohet`,
+  ].join("|"),
+  "iu",
+);
+const FRONT_META_RE = new RegExp(
+  [
+    String.raw`\bbotuar (?:nga|n[ëe])${END}`,
+    String.raw`\bbotimi i${END}`,
+    String.raw`\bbotim(?:i)? (?:i )?(?:par[ëe]|dyt[ëe]|tret[ëe]|elektronik|digjital)${END}`,
+    String.raw`\bsht[ëe]pia botuese${END}`,
+    String.raw`\bbotues(?:i)?${END}`,
+    String.raw`\bpublished by${END}`,
+    String.raw`\bfirst published${END}`,
+    String.raw`\bindependently published${END}`,
+    String.raw`\b(?:smashwords |kindle |first |second |\d+(?:st|nd|rd|th) )?edition${END}`,
+    String.raw`\bredakt(?:or|ore|imi|uar)${END}`,
+    String.raw`\bkorrektur|\bkorrektor`,
+    String.raw`\bkopertin`,
+    String.raw`\bcover (?:design|art|image|by)${END}`,
+    String.raw`\bprinted in${END}`,
+    String.raw`\bshtypur n[ëe]${END}`,
+    String.raw`^\s*(?:1[89]|20)\d{2}\s*$`,
+    String.raw`www\.`,
+    String.raw`https?:\/\/`,
+  ].join("|"),
+  "iu",
+);
+// A line that ends like a sentence or a question (audit r1 H1). A
+// label ending in ":" ("Na gjeni në:") or a list line ending in "," is
+// not a sentence.
+const SENTENCE_LIKE_END_RE = /[.;…?!]["”»’)]*$/u;
+const DIALOGUE_START_RE = /^[—–-]/u;
+// A part or chapter heading ("PART ONE", "Pjesa e parë: Deti",
+// "Kapitulli 1") is never a book title; "Libri i detit" can be (audit
+// r3 M1): the number or ordinal must end the line or come before ":".
+const PART_HEADING_RE = new RegExp(
+  String.raw`^(?:kapitull(?:i)?|chapter|pjesa|pjes[ëe]|part|book|libri|kreu)\s+` +
+    String.raw`(?:[IVXLCDM]{1,7}|\d{1,3}|one|two|three|four|five|first|second|third|[ie]\s+(?:par[ëe]|dyt[ëe]|tret[ëe]|kat[ëe]rt[ëe]|pest[ëe]))` +
+    String.raw`\s*(?:$|[:.\-–—])`,
+  "iu",
+);
+// A dedication never counts as a book title (audit r3 H1, M1).
+const DEDICATION_START_RE = /^(?:p[ëe]r|for|to|kushtuar|dedikuar|in memoriam|n[ëe] kujtim)(?![\p{L}\d])/iu;
+const MAX_FRONT_PARAS = 60;
+const MAX_COPYRIGHT_PARA_WORDS = 90;
+const MAX_META_LINE_WORDS = 8;
+const MAX_TITLE_LINE_WORDS = 12;
 
 const ROMAN: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
 function trailingPageNumber(t: string): { value: number; roman: boolean } | null {
@@ -826,20 +902,198 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     mergeTitle(j, [k], kept, "empty chapter label joined to the next title");
   }
 
-  // ---- 5. title page (kept until Librum's own page exists, answer 3a) ----
+  // ---- 5. front matter: the author's own copyright page and typed
+  // title page (BD3 patch 2, Renato 1 Nov: 2a, and 1a 2a 3a) ----
+  // Librum adds its own page with the title, the pen name and the
+  // copyright line to every download, so the author's own copyright
+  // lines go, and the big title lines of a typed title page go too.
+  // Losing an author's real text is the worst outcome (audit r1), so
+  // only lines of a known kind are removed and everything else on the
+  // page stays (a dedication, an epigraph, an author's note, a list):
+  // - copyright lines (COPYRIGHT_RE, at most 90 words);
+  // - next to them, short publisher/edition/year/web/store/email lines
+  //   that are not sentences (anywhere on a page that has a copyright
+  //   line and ends with a page break; else only touching one);
+  // - on the first page, closed by a page break, before a real first
+  //   chapter: the lines bigger than every chapter title (or in Word's
+  //   Title style), and a byline ("nga ...", "përktheu ...").
+  // Only before the first chapter, plus the short lines right under the
+  // title of a one-story book (its only chapter). The author can undo
+  // copyright group in the preview (keepCopyright); a title page is only
+  // offered for removal (removeTitlePage, Renato 1 Nov after audit r4).
   const firstChapter = textParas.find((j) => chapterSet.has(j));
-  if (firstChapter !== undefined) {
-    const before = textParas.filter((j) => j < firstChapter);
-    const titleLike = before.filter((j) => centered(para(j)!) || bigger(para(j)!) || /^title$/i.test(para(j)!.styleName));
-    if (before.length > 0 && before.length <= 15 && titleLike.length / before.length >= 0.6 && newPage[firstChapter]) {
+  const keepCopyrightSet = new Set(options.keepCopyright ?? []);
+  const removeTitlePageSet = new Set(options.removeTitlePage ?? []);
+  let frontLinesRemoved = 0;
+  {
+    const text = (j: number) => para(j)!.trimmed;
+    const sentenceLike = (j: number) => SENTENCE_LIKE_END_RE.test(text(j)) && words(text(j)) > 3;
+    const copyrightLine = (j: number) => COPYRIGHT_RE.test(text(j)) && words(text(j)) <= MAX_COPYRIGHT_PARA_WORDS;
+    // A sentence of more than 12 words: the story (or a preface) has begun.
+    const storyLine = (j: number) => words(text(j)) > MAX_TITLE_LINE_WORDS && SENTENCE_LIKE_END_RE.test(text(j)) && !COPYRIGHT_RE.test(text(j));
+    // A line of dialogue ("— Botuesi?") is never a publisher line.
+    // A publisher/store/web line is plain: never bigger than the body,
+    // in a Title style or italic (a subtitle, a dedication's line, an
+    // epigraph: audit r5 L1).
+    const plainLook = (j: number) => {
+      const f = para(j)!;
+      return !bigger(f) && !f.italic && !/^(?:title|subtitle)$/i.test(f.styleName.trim());
+    };
+    const metaLine = (j: number) =>
+      words(text(j)) <= MAX_META_LINE_WORDS &&
+      !sentenceLike(j) &&
+      !DIALOGUE_START_RE.test(text(j)) &&
+      plainLook(j) &&
+      (FRONT_META_RE.test(text(j)) || hasOutsideMention(text(j)));
+    const separator = (j: number) => /^[\s_\-–—=*~.·•]{3,}$/u.test(text(j));
+    // A line that can sit in the front part: a copyright, publisher or
+    // separator line, or a short line that is not a sentence (a title,
+    // a byline, a dedication). The story starts at anything else.
+    const frontish = (j: number) =>
+      copyrightLine(j) || metaLine(j) || separator(j) || (words(text(j)) <= MAX_TITLE_LINE_WORDS && !SENTENCE_LIKE_END_RE.test(text(j)));
+
+    const front: number[] = [];
+    let storyStarted = false;
+    for (const j of textParas) {
+      if ((firstChapter !== undefined && j >= firstChapter) || front.length >= MAX_FRONT_PARAS) break;
+      // Without chapters the story starts at the first line that is not
+      // front-page material; with chapters (the first one found may come
+      // late, audit r2 M3), at the first prose paragraph.
+      if (firstChapter === undefined ? !frontish(j) : storyLine(j)) {
+        storyStarted = true;
+        break;
+      }
+      if (isRemoved(j) || plans.get(j)?.replaceWithSceneBreak) continue;
+      front.push(j);
+    }
+    const pages: number[][] = [];
+    for (const j of front) {
+      if (pages.length === 0 || newPage[j]) pages.push([]);
+      pages[pages.length - 1].push(j);
+    }
+    // When the story started on the last page looked at, that page is
+    // not a page of its own (audit r2 M2).
+    const closed = (i: number) =>
+      i + 1 < pages.length || (!storyStarted && firstChapter !== undefined && newPage[firstChapter]);
+
+    const removedNow = new Set<number>();
+    // `choiceSet`: for copyright lines, the author's undo (removed unless
+    // listed); for a title page, the author's own "remove" (kept unless
+    // listed: audit r4 showed the title cannot be told apart from a
+    // dedication or a heading alone on page 1 without the book's title).
+    const removeGroup = (lines: number[], kind: "copyright_page" | "title_page", sign: string, choiceSet: Set<number>) => {
+      const own = lines.filter((j) => !removedNow.has(j));
+      if (own.length === 0 || own.every(separator)) return;
+      const listed = choiceSet.has(indexOf(own[0]));
+      const kept = kind === "title_page" ? !listed : listed;
+      for (const j of own) removedNow.add(j);
+      if (!kept) {
+        for (const j of own) {
+          plan(j).remove = true;
+          frontLinesRemoved++;
+        }
+      }
       guesses.push({
-        paragraph: indexOf(before[0]),
-        kind: "title_page",
-        text: truncate(before.map((j) => para(j)!.trimmed).join(" / ")),
+        paragraph: indexOf(own[0]),
+        kind,
+        // A title page offer shows every line it would remove, in full
+        // (audit r5 L3); a copyright group is shortened as before.
+        text: kind === "title_page" ? own.map(text).join(" / ") : truncate(own.map(text).join(" / ")),
         confidence: "high",
-        applied: false,
-        signs: ["typed title page before the first chapter; kept until Librum's own title page exists"],
+        applied: !kept,
+        signs: [sign, ...(kind === "title_page" ? (kept ? [] : ["removed by the author"]) : kept ? ["kept by the author"] : [])],
       });
+    };
+    // Runs of touching copyright/meta/separator lines with a copyright
+    // line in them.
+    const runsOf = (list: number[]): number[][] => {
+      const out: number[][] = [];
+      let run: number[] = [];
+      const flush = () => {
+        if (run.some(copyrightLine)) out.push(run);
+        run = [];
+      };
+      for (const j of list) {
+        const fits = copyrightLine(j) || metaLine(j) || separator(j);
+        if (fits && (run.length === 0 || emptiesBefore[j] < 2)) run.push(j);
+        else {
+          flush();
+          if (fits) run.push(j);
+        }
+      }
+      flush();
+      return out;
+    };
+
+    pages.forEach((page, i) => {
+      if (!page.some(copyrightLine)) return;
+      if (closed(i)) {
+        // A copyright page: its copyright, publisher and separator lines
+        // go, wherever they are on it; nothing else.
+        removeGroup(
+          page.filter((j) => copyrightLine(j) || metaLine(j) || separator(j)),
+          "copyright_page",
+          "copyright page before the first chapter",
+          keepCopyrightSet,
+        );
+        return;
+      }
+      for (const run of runsOf(page)) removeGroup(run, "copyright_page", "copyright lines before the story", keepCopyrightSet);
+    });
+
+    // A one-story book whose title became its only chapter: copyright
+    // lines right under that title, before the story starts.
+    if (firstChapter !== undefined && chapterSet.size === 1 && front.length === 0) {
+      const leadIn: number[] = [];
+      for (const j of textParas) {
+        if (j <= firstChapter) continue;
+        if (leadIn.length >= MAX_FRONT_PARAS || !frontish(j)) break;
+        if (isRemoved(j) || plans.get(j)?.replaceWithSceneBreak) continue;
+        leadIn.push(j);
+      }
+      for (const run of runsOf(leadIn)) removeGroup(run, "copyright_page", "copyright lines under the book's title", keepCopyrightSet);
+    }
+
+    // The typed title page: only its title line(s). A line is the
+    // book's title when it is in Word's Title style, or bigger than the
+    // body AND than every chapter title (a poem book's first poem looks
+    // like the later ones: audit r1 H6). Nothing else on the page goes:
+    // not a smaller author line, a byline, a year or a dedication
+    // (audit r2 H1, H2, M1); a stray author name is harmless, a lost
+    // dedication is not. A page with a prose paragraph on it is not a
+    // title page (audit r2 M2).
+    if (firstChapter !== undefined && pages.length > 0 && closed(0)) {
+      const page = pages[0];
+      const isTitleStyle = (j: number) => /^title$/i.test(para(j)!.styleName.trim());
+      const chapterSizes = [...chapterSet].map((j) => para(j)?.size ?? null).filter((x): x is number => x !== null);
+      const biggest = chapterSizes.length > 0 ? Math.max(...chapterSizes) : median;
+      const titleLine = (j: number) =>
+        words(text(j)) <= MAX_TITLE_LINE_WORDS &&
+        !SENTENCE_LIKE_END_RE.test(text(j)) &&
+        !PART_HEADING_RE.test(text(j)) &&
+        !LABEL_ONLY_RE.test(text(j)) &&
+        !DEDICATION_START_RE.test(text(j)) &&
+        !para(j)!.italic;
+      // Audit r3 H1: with a Title-style line, only that line is the
+      // title; otherwise only the line(s) at the page's largest size,
+      // when that size is above the body and every chapter title.
+      const titleStyled = page.filter(isTitleStyle);
+      const sizes = page.map((j) => para(j)!.size ?? 0);
+      const pageMax = Math.max(0, ...sizes);
+      const anchor = (j: number) =>
+        titleLine(j) &&
+        (titleStyled.length > 0
+          ? isTitleStyle(j)
+          : bigger(para(j)!) && (para(j)!.size ?? 0) === pageMax && pageMax > biggest);
+      const prosePara = page.some((j) => words(text(j)) > MAX_TITLE_LINE_WORDS);
+      if (!prosePara && page.length <= 12) {
+        removeGroup(
+          page.filter(anchor),
+          "title_page",
+          "typed title page; Librum's own page shows the title and the author",
+          removeTitlePageSet,
+        );
+      }
     }
   }
 
@@ -1143,6 +1397,7 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     subheadings: subSet.size,
     sceneBreaks,
     contentsLinesRemoved,
+    frontLinesRemoved,
     emptyRemoved,
     paragraphsSplit,
     gaps,
