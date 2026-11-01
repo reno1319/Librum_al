@@ -7,3 +7,11 @@
 export const POLICY_LAST_UPDATED = "30 tetor 2026";
 
 export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATED}`;
+
+// BD4 (Renato 1 Nov, "3. a"): the Privacy Policy has its own date from
+// now on, so a Privacy change no longer moves the Terms and Refunds
+// dates. Like the line above, it must be the day this Privacy text goes
+// live on Production: the release that ships it sets the final value.
+export const PRIVACY_LAST_UPDATED = "1 nëntor 2026";
+
+export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDATED}`;

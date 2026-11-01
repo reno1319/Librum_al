@@ -41,6 +41,20 @@ vi.mock("@/lib/watermark", () => ({
   watermarkEpub: (...args: unknown[]) => mockWatermarkEpub(...args),
 }));
 
+// BD3 + BD4 + BD4b: the Librum pages are their own modules, tested in
+// epub-librum-pages.test.ts and librum-download-pages.test.ts. Here the
+// default is a pass-through (pages "added", bytes unchanged), so every
+// older test below sees exactly the stored bytes, as before.
+const mockReadLibrumPages = vi.fn();
+const mockAddLibrumPages = vi.fn();
+vi.mock("@/lib/librum-download-pages", () => ({
+  readLibrumPages: (...args: unknown[]) => mockReadLibrumPages(...args),
+}));
+vi.mock("@/lib/epub-librum-pages", () => ({
+  addLibrumPages: (...args: unknown[]) => mockAddLibrumPages(...args),
+}));
+const PAGES_STUB = { front: { title: "T" }, last: { penName: "P" }, buyerLineMissing: false };
+
 const { GET, HEAD } = await import("./route");
 
 const AUTHOR_ID = "3f2a8c1e-5b7d-4e9a-8c6f-1a2b3c4d5e6f";
@@ -252,6 +266,10 @@ describe("GET /api/books/[id]/download", () => {
     mockCreateClient.mockReset();
     mockCreateAdminClient.mockReset();
     mockWatermarkEpub.mockReset();
+    mockReadLibrumPages.mockReset();
+    mockAddLibrumPages.mockReset();
+    mockReadLibrumPages.mockResolvedValue(PAGES_STUB);
+    mockAddLibrumPages.mockImplementation(async (bytes: Buffer) => ({ added: true, bytes }));
     logSpies.length = 0;
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -611,6 +629,135 @@ describe("GET /api/books/[id]/download", () => {
       expect(emailArg).toBe(READER_EMAIL);
       expect(warnSpy).not.toHaveBeenCalled();
       expect(errorSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Librum pages (BD3, BD4, BD4b)", () => {
+    it("a buyer: the pages get the buyer's id and email, and the email mark is applied to the book WITH the pages", async () => {
+      const fileBytes = Buffer.from("stored epub");
+      const withPages = Buffer.from("stored epub + librum pages");
+      const session = makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: true });
+      mockCreateClient.mockResolvedValue(session);
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes }));
+      mockAddLibrumPages.mockResolvedValue({ added: true, bytes: withPages });
+      mockWatermarkEpub.mockImplementation(async (bytes: Buffer) => ({ watermarked: true, bytes }));
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      expect(mockReadLibrumPages).toHaveBeenCalledTimes(1);
+      const [client, input] = mockReadLibrumPages.mock.calls[0];
+      // The caller's own session client, never the service role.
+      expect(client).toBe(session);
+      expect(input).toMatchObject({ bookId: BOOK_ID, buyer: { readerId: READER_ID, email: READER_EMAIL } });
+      expect(typeof (input as { siteOrigin: unknown }).siteOrigin).toBe("string");
+      const [addBytes, addPages] = mockAddLibrumPages.mock.calls[0];
+      expect(Buffer.from(addBytes as Buffer).equals(fileBytes)).toBe(true);
+      expect(addPages).toBe(PAGES_STUB);
+      expect(Buffer.from(mockWatermarkEpub.mock.calls[0][0] as Buffer).equals(withPages)).toBe(true);
+      expect(Buffer.from(await response.arrayBuffer()).equals(withPages)).toBe(true);
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("the author's own download has no buyer line", async () => {
+      mockCreateClient.mockResolvedValue(makeFakeSupabase());
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient());
+      mockWatermarkEpub.mockResolvedValue({ watermarked: true, bytes: Buffer.from("w") });
+
+      await callRoute();
+
+      expect(mockReadLibrumPages.mock.calls[0][1]).toMatchObject({ bookId: BOOK_ID, buyer: null });
+    });
+
+    it("a buyer whose purchase row can't be read: pages added without the buyer line, one console.warn", async () => {
+      const withPages = Buffer.from("stored epub + librum pages");
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: true }));
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient());
+      mockReadLibrumPages.mockResolvedValue({ ...PAGES_STUB, buyerLineMissing: true });
+      mockAddLibrumPages.mockResolvedValue({ added: true, bytes: withPages });
+      mockWatermarkEpub.mockImplementation(async (bytes: Buffer) => ({ watermarked: true, bytes }));
+
+      const response = await callRoute();
+
+      expect(Buffer.from(await response.arrayBuffer()).equals(withPages)).toBe(true);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]).toEqual([
+        "Download: added the Librum pages without the buyer line",
+        { bookId: BOOK_ID, readerId: READER_ID, stage: "missing_purchase_row" },
+      ]);
+      expect(allLogOutput()).not.toContain(READER_EMAIL);
+    });
+
+    it("missing details: serves the stored book, one console.warn with stage 'missing_details'", async () => {
+      const fileBytes = Buffer.from("stored epub");
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: true }));
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes }));
+      mockReadLibrumPages.mockResolvedValue(null);
+      mockWatermarkEpub.mockImplementation(async (bytes: Buffer) => ({ watermarked: true, bytes }));
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      expect(mockAddLibrumPages).not.toHaveBeenCalled();
+      expect(Buffer.from(await response.arrayBuffer()).equals(fileBytes)).toBe(true);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][1]).toEqual({ bookId: BOOK_ID, readerId: READER_ID, stage: "missing_details" });
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("an EPUB shape the pages can't handle: stored book, one console.warn, no email or path in the log", async () => {
+      const fileBytes = Buffer.from("stored epub");
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: true }));
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes }));
+      mockAddLibrumPages.mockResolvedValue({ added: false, bytes: fileBytes, failureStage: "unsupported_structure" });
+      mockWatermarkEpub.mockImplementation(async (bytes: Buffer) => ({ watermarked: true, bytes }));
+
+      const response = await callRoute();
+
+      expect(Buffer.from(await response.arrayBuffer()).equals(fileBytes)).toBe(true);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][1]).toEqual({
+        bookId: BOOK_ID,
+        readerId: READER_ID,
+        byteSize: fileBytes.length,
+        stage: "unsupported_structure",
+      });
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(allLogOutput()).not.toContain(READER_EMAIL);
+      expect(allLogOutput()).not.toContain(CANONICAL_PATH);
+    });
+
+    it("an unexpected error while adding pages: stored book, one console.error", async () => {
+      const fileBytes = Buffer.from("stored epub");
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: true }));
+      mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes }));
+      mockAddLibrumPages.mockResolvedValue({ added: false, bytes: fileBytes, failureStage: "unexpected_exception" });
+      mockWatermarkEpub.mockImplementation(async (bytes: Buffer) => ({ watermarked: true, bytes }));
+
+      const response = await callRoute();
+
+      expect(Buffer.from(await response.arrayBuffer()).equals(fileBytes)).toBe(true);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("a thrown error while reading the details: stored book, one console.error, the download is still recorded", async () => {
+      const fileBytes = Buffer.from("stored epub");
+      mockCreateClient.mockResolvedValue(makeFakeSupabase({ userId: READER_ID, ownsBookRpcResult: true }));
+      const admin = makeFakeAdminClient({ fileBytes });
+      mockCreateAdminClient.mockReturnValue(admin);
+      mockReadLibrumPages.mockRejectedValue(new Error("boom"));
+      mockWatermarkEpub.mockImplementation(async (bytes: Buffer) => ({ watermarked: true, bytes }));
+
+      const response = await callRoute();
+
+      expect(response.status).toBe(200);
+      expect(Buffer.from(await response.arrayBuffer()).equals(fileBytes)).toBe(true);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0][1]).toEqual({ bookId: BOOK_ID, readerId: READER_ID, stage: "unexpected_exception" });
+      expect(allLogOutput()).not.toContain("boom");
+      expect(admin.__rpc).toHaveBeenCalledWith("record_book_download", expect.objectContaining({ p_book_id: BOOK_ID }));
     });
   });
 

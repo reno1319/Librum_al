@@ -45,7 +45,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
-import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
+import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER } from "@/lib/book-downloads";
 import { bookWhatsappShareHref } from "@/lib/contact";
 import { bookPagePath, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
 import { pageErrorMessage } from "@/lib/page-messages";
@@ -1477,6 +1477,8 @@ function PurchasePanel({
           Shkarkoni EPUB
         </a>
         {downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
+        {/* D13 2a / BD4: the sharing reminder next to Download. */}
+        <p className="text-xs text-muted">{SHARING_REMINDER}</p>
         {/* TRUST PACK (item 5, 1. a): the reader help page, next to Download. */}
         <Link href="/ndihme/leximi" className="w-fit text-xs text-muted underline underline-offset-2 hover:text-foreground">
           Si ta lexoni librin

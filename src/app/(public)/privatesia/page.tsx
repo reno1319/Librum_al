@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import { SellerDetailsBlock } from "@/components/seller-details";
 import { isWhatsappContactLive } from "@/lib/contact";
-import { POLICY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
+import { PRIVACY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -34,6 +34,10 @@ export const metadata: Metadata = {
 // - bank details are described without promising a payout that isn't
 //   live (bank setup is off: BANK_PAYOUT_SETUP_ENABLED);
 // - emails about new books from authors you follow (ALBANIAN-12).
+// BD4 (D13 1b, Renato 31 Oct): the email, purchase date and code now
+// show on the first page of every downloaded book, not only in its
+// metadata. Privacy now has its own date (Renato 1 Nov, "3. a"),
+// PRIVACY_LAST_UPDATED in src/lib/policy-dates.ts.
 export default function PrivacyPage() {
   return (
     <main className="flex-1">
@@ -41,7 +45,7 @@ export default function PrivacyPage() {
 
       <div className={SECTION_CONTAINER}>
         <div className="max-w-2xl">
-          <p className="text-sm text-muted">{POLICY_LAST_UPDATED_LINE}</p>
+          <p className="text-sm text-muted">{PRIVACY_LAST_UPDATED_LINE}</p>
 
           <div className="mt-8 flex flex-col gap-8 text-foreground/90">
             <section>
@@ -161,15 +165,17 @@ export default function PrivacyPage() {
                 Shenja personale në skedarët EPUB
               </h2>
               <p className="mt-2">
-                Kur një lexues shkarkon një skedar EPUB, Librum mund ta
-                vendosë adresën e emailit të llogarisë së tij në të dhënat e
-                brendshme të skedarit (metadata), si shenjë personale. Kjo
-                shërben për të gjetur kush e shkarkoi një kopje që
-                shpërndahet pa leje, dhe për të dekurajuar ndarjen e
-                paautorizuar. Nuk është mbrojtje kundër kopjimit, dhe skedari hapet
-                normalisht kudo. Pasi shkarkohet, adresa e emailit është
-                pjesë e vetë skedarit, jo vetëm diçka e ruajtur në bazën
-                tonë të të dhënave.
+                Kur një lexues shkarkon një skedar EPUB, Librum shton në
+                faqen e parë të librit adresën e emailit të llogarisë së tij,
+                datën e blerjes dhe kodin e blerjes, dhe mund ta vendosë
+                emailin edhe në të dhënat e brendshme të skedarit (metadata),
+                si shenjë personale. Kjo shërben për të gjetur kush e shkarkoi
+                një kopje që shpërndahet pa leje, dhe për të dekurajuar ndarjen
+                e paautorizuar. Nuk është mbrojtje kundër kopjimit, dhe skedari
+                hapet normalisht kudo. Pasi shkarkohet, adresa e emailit është
+                pjesë e vetë skedarit, jo vetëm diçka e ruajtur në bazën tonë
+                të të dhënave: nëse e jepni kopjen tuaj dikujt tjetër, ai e sheh
+                emailin tuaj.
               </p>
             </section>
 
