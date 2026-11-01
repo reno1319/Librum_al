@@ -1,3 +1,4 @@
+import { isLeaderLine, stripLeaderTail } from "@/lib/docx-leader";
 import type { ParaFacts } from "@/lib/docx-paragraphs";
 import type { LibrumStyleKey } from "@/lib/docx-styles";
 import { hasOutsideMention } from "@/lib/outside-mentions";
@@ -113,8 +114,6 @@ const LABEL_ONLY_RE = new RegExp(
 const SENTENCE_END_RE = /[.,;:…]["”»’)]*$/;
 const CONTENTS_TITLE_RE =
   /^(?:p[ëe]rmbajtja|p[ëe]rmbajtje|pasqyra(?: e l[ëe]nd[ëe]s)?|tabela e p[ëe]rmbajtjes|l[ëe]nda|treguesi|contents|table of contents)\s*:?$/i;
-const LEADER_LINE_RE = /^\S.{0,150}?(?:[ \t]*(?:\.{2,}|…+|·{2,}|_{2,})[ \t.…·_]*|\t+[ \t]*|[  ]{3,})(?:\d{1,4}|[ivxlcdm]{1,6})$/i;
-const LEADER_TAIL_RE = /(?:[ \t]*(?:\.{2,}|…+|·{2,}|_{2,})[ \t.…·_]*|\t+[ \t]*|[  ]{3,})(?:\d{1,4}|[ivxlcdm]{1,6})$/i;
 const MARKER_RE = /^[\s*#⁂~•·✦❖◆◇§]{1,20}$/;
 const MARKER_SYMBOL_RE = /[*#⁂~•·✦❖◆◇§]/;
 const DIALOGUE_RE = /^[—–-][  ]/;
@@ -244,7 +243,7 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   const isTocStyle = (f: ParaFacts) => /^toc ?\d|^table of figures$/i.test(f.styleName.trim());
   // A line of a contents list: dots/tab + page number, or (Word's own
   // list with page numbers off) a link to a "_Toc" bookmark.
-  const isContentsLine = (f: ParaFacts) => LEADER_LINE_RE.test(f.trimmed) || f.tocLink || isTocStyle(f);
+  const isContentsLine = (f: ParaFacts) => isLeaderLine(f.trimmed) || f.tocLink || isTocStyle(f);
   const isContentsTitle = (f: ParaFacts) => CONTENTS_TITLE_RE.test(f.trimmed) || /^toc heading$/i.test(f.styleName.trim());
   for (let j = 0; j < blocks.length; j++) {
     const f = para(j);
@@ -751,7 +750,7 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     }
     for (const list of typedLists) {
       const kept = keepContentsSet.has(indexOf(list.run[0]));
-      const named = list.run.filter((r) => isChapterTitle(para(r)!.trimmed.replace(LEADER_TAIL_RE, ""))).length;
+      const named = list.run.filter((r) => isChapterTitle(stripLeaderTail(para(r)!.trimmed))).length;
       const matches = named * 2 > list.run.length;
       const remove = !kept && matches && list.ascending;
       if (remove) {
