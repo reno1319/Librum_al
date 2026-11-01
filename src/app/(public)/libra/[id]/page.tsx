@@ -32,7 +32,14 @@ import {
 } from "@/lib/book-purchase";
 import { orderSeriesBooks, resolveSeriesNeighbors } from "@/lib/series-order";
 import { getAuthorInitials } from "@/lib/author-initials";
-import { resolveBookByline } from "@/lib/book-byline";
+import {
+  resolveBookByline,
+  resolveBookPenName,
+  resolveOriginalAuthor,
+  resolveTranslatorLine,
+  TRANSLATED_BY,
+} from "@/lib/book-byline";
+import { readRightsBasisForPages } from "@/lib/librum-download-rights";
 import {
   authorPagePath,
   penNameLinkLabel,
@@ -380,6 +387,15 @@ export default async function BookDetailPage({
   // Conditional members use `Promise.resolve({ data: null })` (a
   // resolved value, not a query) to keep positions/shapes uniform --
   // never a real query run just to fill a slot.
+  // BD3 patch 4 (audit r1, H1; Renato 16:37Z 1a): with an original
+  // author, whether the pen name may be named as translator depends on
+  // the rights basis, which only the author may read through RLS -- the
+  // same service-role read of one column the download route makes.
+  // Started here, awaited after the batch below; only for such a book.
+  const rightsForBylinePromise = resolveOriginalAuthor(book)
+    ? readRightsBasisForPages(createAdminClient(), book.id)
+    : null;
+
   const [
     { data: reviews },
     { data: myReviewRow },
@@ -635,7 +651,32 @@ export default async function BookDetailPage({
   // PEN-NAMES-1 (3a): the byline, "About the author" and "More by ..."
   // all name the book's pen name and link to its page.
   const bookByline = resolveBookByline(book);
-  const authorName = bookByline;
+  // BD3 patch 4 (1a, 4a): a translated or public-domain book's byline is
+  // its "Autori origjinal"; "About the author" and "More by" stay on the
+  // pen name the book is published under.
+  const authorName = resolveBookPenName(book);
+  const originalAuthor = resolveOriginalAuthor(book);
+  // 1a (16:05Z): "Përktheu:" names the Translator contributors, else the
+  // pen name (linked to its page). Those contributors then leave the
+  // contributor line below, so nobody is named twice.
+  const translatorNames = originalAuthor
+    ? (contributors ?? []).filter((c) => c.role === "Translator").map((c) => c.name.trim()).filter(Boolean)
+    : [];
+  const otherContributors = originalAuthor
+    ? (contributors ?? []).filter((c) => c.role !== "Translator")
+    : (contributors ?? []);
+  // A "public_domain" book names only typed translators (it can be an
+  // untranslated original); an unreadable basis never names the pen name.
+  const rightsForByline = rightsForBylinePromise ? await rightsForBylinePromise : null;
+  const translatorLine = originalAuthor
+    ? resolveTranslatorLine(
+        translatorNames,
+        authorName,
+        rightsForByline?.ok ? rightsForByline.basis : null,
+        rightsForByline?.ok === true,
+      )
+    : null;
+  const penIsTranslator = translatorLine !== null && translatorNames.length === 0;
   // TRUST PACK (item 5, 6. a): a plain wa.me link, nothing loaded from WhatsApp.
   const whatsappShareHref = bookWhatsappShareHref(book, bookByline);
   // P2: schema.org Book data for Google, only on a published book (the
@@ -649,6 +690,9 @@ export default async function BookDetailPage({
           coverUrl,
           pen: book.pen,
           paidCheckoutOn: paidCheckoutAvailable,
+          originalAuthor,
+          translators: translatorNames,
+          penIsTranslator,
         }),
       )
     : null;
@@ -752,7 +796,9 @@ export default async function BookDetailPage({
               mockup ("by <author> · Book 1 of <series>"). */}
           <p className="mt-4 text-foreground">
             nga{" "}
-            {penNamePath ? (
+            {originalAuthor ? (
+              <span className="font-semibold">{originalAuthor}</span>
+            ) : penNamePath ? (
               <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
                 {bookByline}
               </Link>
@@ -770,9 +816,24 @@ export default async function BookDetailPage({
             )}
           </p>
 
-          {contributors && contributors.length > 0 && (
+          {originalAuthor && translatorLine && (
+            <p className="mt-1 text-foreground">
+              {TRANSLATED_BY}{" "}
+              {!penIsTranslator ? (
+                translatorLine
+              ) : penNamePath ? (
+                <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
+                  {authorName}
+                </Link>
+              ) : (
+                <span className="font-semibold">{authorName}</span>
+              )}
+            </p>
+          )}
+
+          {otherContributors.length > 0 && (
             <p className="mt-1 text-sm text-muted">
-              {contributors
+              {otherContributors
                 .map(
                   (c) =>
                     `${CONTRIBUTOR_ROLE_VERB[c.role as keyof typeof CONTRIBUTOR_ROLE_VERB] ?? c.role} ${c.name}`,

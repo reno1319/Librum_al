@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import type { RightsBasis } from "@/lib/types";
+import { resolveTranslatorLine, resolveTranslatorNames, TRANSLATED_BY } from "@/lib/book-byline";
 
 // BD3 + BD4 + BD4b (Renato 1 Nov 2026: 1a 2a 3a 4a 5a, wording "ok"):
 // every downloaded book gets one Librum page at the front (the
@@ -16,9 +17,17 @@ export type LibrumFrontPage = {
   title: string;
   subtitle: string | null;
   penName: string;
+  // BD3 patch 4 (1a, 6a): the "Autori origjinal", or null. When set it
+  // is the byline, and "Përktheu:" names the translators (else the pen
+  // name) right under it.
+  originalAuthor: string | null;
   // 4a: the original publication year when the author gave one,
   // otherwise the year the book first went up on Librum.
   copyrightYear: number;
+  // BD3 patch 4 (6a): the original publication year only, null when the
+  // author gave no date. The original author's © line omits a missing
+  // year; it never falls back to the Librum year (coordinator rule).
+  originalYear: number | null;
   // 4a: the translator holds © for the translation (year on Librum).
   translators: string[];
   // BD3 patch 3 (Renato 1 Nov, 1a 2a): the rights basis the author
@@ -60,7 +69,7 @@ export const THANKS_LINE = "Faleminderit që lexuat!";
 // BD3 patch 3 (Renato 1 Nov, 1a and 2a).
 export const PUBLIC_DOMAIN_LINE = "Vepër në domenin publik.";
 export const PUBLIC_DOMAIN_ORIGINAL_LINE = "Vepra origjinale në domenin publik.";
-export const TRANSLATED_BY = "Përktheu:";
+export { TRANSLATED_BY };
 
 const XML_ESCAPE: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 function esc(text: string): string {
@@ -125,19 +134,41 @@ export function frontPageBody(p: LibrumFrontPage): string {
   const out: string[] = [];
   out.push(`<h1>${esc(clean(p.title))}</h1>`);
   if (p.subtitle && clean(p.subtitle)) out.push(line(p.subtitle, "sub"));
-  out.push(line(p.penName, "author"));
   const translators = p.translators.map(clean).filter(Boolean);
+  const originalAuthor = p.originalAuthor ? clean(p.originalAuthor) || null : null;
+  // 1a (16:05Z): the translators the author typed, else the pen name.
+  const translatedBy = resolveTranslatorNames(translators, clean(p.penName));
+  if (originalAuthor) {
+    // Patch 4 (1a): the original author is the byline; the translator
+    // line sits under it, in the same block. A "public_domain" book
+    // names only typed translators (audit r1, H1: it can be an
+    // untranslated original), so it may have no translator line.
+    const translatorLine = resolveTranslatorLine(translators, clean(p.penName), p.rights);
+    out.push(
+      translatorLine
+        ? `<p class="author">${esc(originalAuthor)}<br/>${esc(`${TRANSLATED_BY} ${translatorLine}`)}</p>`
+        : line(originalAuthor, "author"),
+    );
+  } else {
+    out.push(line(p.penName, "author"));
+  }
   if (p.rights === "public_domain") {
     // 1a: the author declared the whole book, any translation included,
     // public domain: no ©, no "all rights reserved", no copy ban.
     out.push(line(PUBLIC_DOMAIN_LINE));
-    if (translators.length > 0) out.push(line(`${TRANSLATED_BY} ${translators.join(", ")}.`));
+    // With an original author the byline already says who translated it.
+    if (!originalAuthor && translators.length > 0) out.push(line(`${TRANSLATED_BY} ${translators.join(", ")}.`));
   } else if (p.rights === "public_domain_original") {
     // 2a: © for the translation only. With no translator listed, the
     // author declared the translation is theirs: their pen name.
     out.push(line(PUBLIC_DOMAIN_ORIGINAL_LINE));
-    const holders = translators.length > 0 ? translators.join(", ") : clean(p.penName);
-    out.push(line(`Përkthimi © ${p.librumYear} ${holders}.`));
+    out.push(line(`Përkthimi © ${p.librumYear} ${translatedBy}.`));
+  } else if (originalAuthor) {
+    // Patch 4 (6a): a licensed translation. The original author's ©
+    // (year only when given), then the translation's, on the Librum year.
+    out.push(line(`© ${p.originalYear !== null ? `${p.originalYear} ` : ""}${originalAuthor}.`));
+    out.push(line(`Përkthimi © ${p.librumYear} ${translatedBy}.`));
+    out.push(line(RIGHTS_LINE));
   } else {
     out.push(line(`© ${p.copyrightYear} ${clean(p.penName)}. ${RIGHTS_LINE}`));
     if (translators.length > 0) {

@@ -271,7 +271,7 @@ describe("Fixture Book U on staging with PAID_CHECKOUT_MODE absent", () => {
 
   it("stays visible in discovery at 199 ALL", () => {
     const html = renderToStaticMarkup(
-      createElement(BookCard, { book: BOOK_U, coverUrl: null, authorName: "Fixture Author" }),
+      createElement(BookCard, { book: { ...BOOK_U, original_author: null }, coverUrl: null, authorName: "Fixture Author" }),
     );
     expect(html).toContain("199 lekë");
     expect(html).toContain(`/libra/${BOOK_U_ID}`);

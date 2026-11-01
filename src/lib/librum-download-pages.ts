@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MAX_MORE_BOOKS, purchaseCode, type LibrumFrontPage, type LibrumLastPage } from "@/lib/epub-librum-pages";
 import { formatTimestampAsDate, TIRANA_TIME_ZONE } from "@/lib/book-detail-dates";
-import { BOOK_PEN_NAME_EMBED, resolveBookByline } from "@/lib/book-byline";
+import { BOOK_PEN_NAME_EMBED, resolveBookPenName, resolveOriginalAuthor } from "@/lib/book-byline";
 import type { PenNameRef } from "@/lib/pen-names";
 import type { RightsBasis } from "@/lib/types";
 
@@ -25,6 +25,7 @@ type BookRow = {
   publisher: string | null;
   edition: string | null;
   original_publication_date: string | null;
+  original_author: string | null;
   published_at: string | null;
   pen_name_id: string;
 };
@@ -70,7 +71,7 @@ export async function readLibrumPages(
   // any state, and a book they own (the route already checked one).
   const { data: bookData, error: bookError } = await supabase
     .from("public_books")
-    .select(`id, title, subtitle, isbn, publisher, edition, original_publication_date, published_at, pen_name_id, ${BOOK_PEN_NAME_EMBED}`)
+    .select(`id, title, subtitle, isbn, publisher, edition, original_publication_date, original_author, published_at, pen_name_id, ${BOOK_PEN_NAME_EMBED}`)
     .eq("id", input.bookId)
     .maybeSingle();
   if (bookError || !isPlainRow(bookData) || bookData.id !== input.bookId || typeof bookData.title !== "string" || typeof bookData.pen_name_id !== "string") {
@@ -103,7 +104,7 @@ export async function readLibrumPages(
   ]);
 
   // A hidden pen name (a suspended account) means no pages at all.
-  const penName = resolveBookByline(isPlainRow(book.pen) ? (book as { pen: PenNameRef }) : null);
+  const penName = resolveBookPenName(isPlainRow(book.pen) ? (book as { pen: PenNameRef }) : null);
   if (!penName || !penName.trim()) return null;
 
   // A failed side read only drops its own line, never the whole page.
@@ -141,7 +142,8 @@ export async function readLibrumPages(
   // never published yet (the author's own download) uses this year.
   const librumYear = book.published_at ? yearInTirana(new Date(book.published_at)) : yearInTirana(now);
   const originalYear = book.original_publication_date ? Number(book.original_publication_date.slice(0, 4)) : NaN;
-  const copyrightYear = Number.isInteger(originalYear) && originalYear > 0 ? originalYear : librumYear;
+  const hasOriginalYear = Number.isInteger(originalYear) && originalYear > 0;
+  const copyrightYear = hasOriginalYear ? originalYear : librumYear;
 
   return {
     buyerLineMissing,
@@ -149,7 +151,14 @@ export async function readLibrumPages(
       title: book.title,
       subtitle: textOrNull(book.subtitle),
       penName,
+      // BD3 patch 4: the "Autori origjinal", when the author gave one.
+      // (Equal to the pen name = none, audit r1 N1.)
+      originalAuthor: resolveOriginalAuthor({
+        original_author: textOrNull(book.original_author),
+        pen: { id: book.pen_name_id, name: penName },
+      }),
       copyrightYear,
+      originalYear: hasOriginalYear ? originalYear : null,
       translators,
       rights: input.rights ?? "own_rights",
       librumYear,

@@ -252,6 +252,7 @@ describe("AdminBookPage", () => {
       reason: null,
       file_path: FILE,
       cover_path: COVER,
+      original_author: null,
     };
 
     beforeEach(() => {
@@ -315,8 +316,24 @@ describe("AdminBookPage", () => {
     it("files changed since it was sent: no Approve, says why", async () => {
       rows.books.data = { ...(rows.books.data as object), cover_path: "1a2b3c4d-5e6f-4a0b-9c1d-2e3f4a5b6c7d/cover.png" };
       const html = await render("admin");
-      expect(html).toContain("The author changed the file or cover after sending it.");
+      expect(html).toContain("The author changed the file, cover or original author after sending it.");
       expect(html).not.toContain("Approve and publish");
+    });
+
+    // BD3 patch 4 (2b, 16:45Z a): the approval binds to the original author.
+    it("original author changed since it was sent: no Approve, says why", async () => {
+      rows.books.data = { ...(rows.books.data as object), original_author: "Homeri" };
+      const html = await render("admin");
+      expect(html).toContain("The author changed the file, cover or original author after sending it.");
+      expect(html).not.toContain("Approve and publish");
+    });
+
+    it("the same original author as sent: Approve is offered", async () => {
+      rows.books.data = { ...(rows.books.data as object), original_author: "Homeri" };
+      rows.book_reviews = { data: [{ ...pending, original_author: "Homeri" }], error: null };
+      const html = await render("admin");
+      expect(html).toContain("Approve and publish");
+      expect(selects.some((s) => s.table === "book_reviews" && s.columns.includes("original_author"))).toBe(true);
     });
 
     it("a live book shows no review panel, whatever its history", async () => {

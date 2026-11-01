@@ -39,7 +39,7 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
       },
       {
         q: "A mund ta ndryshoj një libër pasi e kam publikuar?",
-        a: "Po. Te Paneli i autorit, shtypni \"Ndryshoni\" te libri për të ndryshuar titullin, përshkrimin, zhanrin, çmimin, kopertinën ose dorëshkrimin. Kopertina dhe dorëshkrimi i ri janë opsionalë: lërini bosh ato fusha për të mbajtur skedarët e tanishëm. Nëse ndryshoni kopertinën ose skedarin e librit, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.",
+        a: "Po. Te Paneli i autorit, shtypni \"Ndryshoni\" te libri për të ndryshuar titullin, përshkrimin, zhanrin, çmimin, kopertinën ose dorëshkrimin. Kopertina dhe dorëshkrimi i ri janë opsionalë: lërini bosh ato fusha për të mbajtur skedarët e tanishëm. Nëse ndryshoni kopertinën, skedarin e librit ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.",
       },
       {
         q: "A mund të botoj me pseudonim?",

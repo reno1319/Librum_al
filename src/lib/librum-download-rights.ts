@@ -30,6 +30,9 @@ export async function readRightsBasisForPages(admin: SupabaseClient, bookId: str
       .select("basis")
       .eq("book_id", bookId)
       .order("declared_at", { ascending: false })
+      // BD3 patch 4 (coordinator): two declarations with the same
+      // declared_at always resolve the same way.
+      .order("id", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (error) return { ok: false };

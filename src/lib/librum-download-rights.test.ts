@@ -26,6 +26,8 @@ describe("readRightsBasisForPages (BD3 patch 3)", () => {
       ["select", "basis"],
       ["eq", "book_id", BOOK_ID],
       ["order", "declared_at", { ascending: false }],
+      // BD3 patch 4 (coordinator): a stable tie-break.
+      ["order", "id", { ascending: false }],
       ["limit", 1],
     ]);
   });

@@ -32,6 +32,7 @@ import { getRightsDeclarationState, recordRightsDeclaration } from "@/lib/book-r
 import { resolveOwnPenNameId } from "@/lib/pen-name-write-client";
 import { penNameErrorMessage } from "@/lib/pen-names";
 import { isRightsBasis } from "@/lib/rights-statements";
+import { MISSING_ORIGINAL_AUTHOR_MESSAGE, normalizeOriginalAuthor, ORIGINAL_AUTHOR_MAX_LENGTH } from "@/lib/book-byline";
 import { getActiveTakedownState } from "@/lib/book-takedowns";
 import { TAKEN_DOWN_DELETE_MESSAGE, TAKEN_DOWN_PUBLISH_MESSAGE } from "@/lib/takedown-reasons";
 import {
@@ -72,6 +73,9 @@ import {
   LIVE_FILES_IN_BUNDLE_MESSAGE,
   LIVE_FILES_REQUEST_FAILED_MESSAGE,
   LIVE_FILES_SAVED_MESSAGE,
+  LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE,
+  LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE,
+  ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE,
   NOT_IN_REVIEW_MESSAGE,
   REVIEW_CANCELLED_MESSAGE,
   SENT_FOR_REVIEW_MESSAGE,
@@ -317,6 +321,30 @@ function resolveOriginalPublicationDate(formData: FormData, errorPath: string): 
   }
 
   return { present, value: raw };
+}
+
+// BD3 patch 4 (Renato 1 Nov, 1a 2a 5a): the "Autori origjinal" box.
+// Optional for every book; required when the rights choice submitted
+// with it is one of the two public-domain bases. Control characters are
+// dropped and the value trimmed (the database CHECK wants exactly that);
+// empty means none. Absent from the form (an older page) changes
+// nothing on an edit.
+const ORIGINAL_AUTHOR_TOO_LONG_MESSAGE = `Autori origjinal mund të ketë deri në ${ORIGINAL_AUTHOR_MAX_LENGTH} karaktere`;
+
+function rightsBasisNeedsOriginalAuthor(basis: unknown): boolean {
+  return basis === "public_domain" || basis === "public_domain_original";
+}
+
+function resolveOriginalAuthorInput(formData: FormData, errorPath: string, required: boolean): ResolvedOptionalText {
+  const present = formData.has("originalAuthor");
+  const raw = normalizeOriginalAuthor(String(formData.get("originalAuthor") ?? ""));
+  if (raw.length > ORIGINAL_AUTHOR_MAX_LENGTH) {
+    redirect(`${errorPath}?error=${encodeURIComponent(ORIGINAL_AUTHOR_TOO_LONG_MESSAGE)}`);
+  }
+  if (!raw && required) {
+    redirect(`${errorPath}?error=${encodeURIComponent(MISSING_ORIGINAL_AUTHOR_MESSAGE)}`);
+  }
+  return { present, value: raw || null };
 }
 
 // LIBRUM 2.0 PRODUCT-5 CB-1: a manuscript can arrive two ways --
@@ -823,6 +851,11 @@ export async function createBook(formData: FormData) {
     "/dashboard/books/new",
   ).value;
   const originalPublicationDate = resolveOriginalPublicationDate(formData, "/dashboard/books/new").value;
+  const originalAuthor = resolveOriginalAuthorInput(
+    formData,
+    "/dashboard/books/new",
+    rightsBasisNeedsOriginalAuthor(formData.get("rightsBasis")),
+  ).value;
   // F4 (P1) / PEN-NAMES-1 (10a): the pen name box, trimmed; empty means
   // the author's default pen name.
   const penName = String(formData.get("penName") ?? "").trim() || null;
@@ -968,6 +1001,7 @@ export async function createBook(formData: FormData) {
     publisher,
     edition,
     original_publication_date: originalPublicationDate,
+    original_author: originalAuthor,
     genre,
     series_id: seriesId,
     series_position: seriesPosition,
@@ -1218,7 +1252,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   // author's row or any id mismatch stops here, before any upload.
   const { data: existing, error: existingError } = await supabase
     .from("books")
-    .select("id, cover_path, file_path, author_id, language, status, price_all, isbn, pen_name_id")
+    .select("id, cover_path, file_path, author_id, language, status, price_all, isbn, pen_name_id, original_author")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .single();
@@ -1321,6 +1355,41 @@ export async function updateBook(bookId: string, formData: FormData) {
       `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(PUBLISHED_NEEDS_DESCRIPTION_MESSAGE)}`,
     );
   }
+
+  // BD3 patch 4 (3a, 5a): an older public-domain book without one must
+  // get it on its next save. Checked against the basis the book will
+  // have after this save -- the one submitted, else the stored one
+  // (audit r1, L2: leaving rightsBasis out must not skip it) -- and
+  // before the pen name below can be created (audit r1, L3). Read only
+  // when the box was submitted without a basis; an unreadable basis
+  // fails closed when a stored value is being cleared.
+  let originalAuthorRequired = false;
+  if (formData.has("originalAuthor")) {
+    const submittedBasis = formData.get("rightsBasis");
+    if (isRightsBasis(submittedBasis)) {
+      originalAuthorRequired = rightsBasisNeedsOriginalAuthor(submittedBasis);
+    } else {
+      const stored = await getRightsDeclarationState(existing.id);
+      // Audit r2 (L1): an unreadable basis fails closed only for a box
+      // that held a value and is being cleared; a book that never had
+      // one (most own-rights books) can still be edited.
+      originalAuthorRequired =
+        stored.kind === "present"
+          ? rightsBasisNeedsOriginalAuthor(stored.declaration.basis)
+          : stored.kind === "unavailable" && Boolean(existing.original_author);
+    }
+  }
+  const originalAuthorResolved = resolveOriginalAuthorInput(
+    formData,
+    `/dashboard/books/${bookId}/edit`,
+    originalAuthorRequired,
+  );
+  // Renato 16:37Z (2b): a new or changed original author on a LIVE book
+  // takes it out of the Bookstore until Librum approves it, exactly like
+  // a new file or cover -- a false author credit must not reach buyers
+  // before staff see it.
+  const originalAuthorChanged =
+    originalAuthorResolved.present && (originalAuthorResolved.value ?? null) !== (existing.original_author ?? null);
 
   // F4 (P1): the same present/absent rule as the metadata below: a form
   // without the Pen name field leaves the book's pen name untouched; a
@@ -1542,7 +1611,13 @@ export async function updateBook(bookId: string, formData: FormData) {
   // longer available). Refused here, before any upload. Fails closed.
   const filesChanged = newCoverPath !== null || newManuscriptPath !== null;
   const wasLive = existing.status === "published";
-  if (filesChanged && wasLive) {
+  // BD3 patch 4 (2b, 16:45Z a): a changed original author goes through
+  // the same review as a new file or cover -- Librum's approval binds to
+  // it (migration 20261101170000) -- so it is handled the same way: a
+  // live book goes back to draft in the same write and is sent again,
+  // and a draft already waiting gets its pending snapshot replaced.
+  const reviewChange = filesChanged || originalAuthorChanged;
+  if (reviewChange && wasLive) {
     const membership = await bookBelongsToPublishedBundle(supabase, existing.id);
     if (!membership.ok) {
       redirect(
@@ -1550,7 +1625,11 @@ export async function updateBook(bookId: string, formData: FormData) {
       );
     }
     if (membership.inPublishedBundle) {
-      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(LIVE_FILES_IN_BUNDLE_MESSAGE)}`);
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
+          filesChanged ? LIVE_FILES_IN_BUNDLE_MESSAGE : LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE,
+        )}`,
+      );
     }
   }
   // D: a draft already waiting for review gets its pending snapshot
@@ -1560,7 +1639,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   // refuse (it binds to the current files) and the author can send it
   // again.
   let wasPending = false;
-  if (filesChanged && !wasLive) {
+  if (reviewChange && !wasLive) {
     const reviewState = await getBookReviewState(supabase, existing.id);
     wasPending = reviewState.kind === "ok" && reviewState.pending;
   }
@@ -1758,7 +1837,9 @@ export async function updateBook(bookId: string, formData: FormData) {
       // in this same row write and whatever status was read -- so a
       // publish that lands in between can never leave unapproved files
       // live (the live-files trigger refuses that, LB463).
-      ...(filesChanged ? { status: "draft" as const, librum_choice_at: null } : {}),
+      // BD3 patch 4 (2b): so does a changed original author (the
+      // live-files trigger refuses it on a live book otherwise).
+      ...(reviewChange ? { status: "draft" as const, librum_choice_at: null } : {}),
       ...(subtitleResolved.present ? { subtitle: subtitleResolved.value } : {}),
       // "omit" (absent) and "preserve" (unchanged unsupported value)
       // both spread in nothing -- see resolveLanguageForUpdate()'s own
@@ -1774,6 +1855,7 @@ export async function updateBook(bookId: string, formData: FormData) {
       ...(originalPublicationDateResolved.present
         ? { original_publication_date: originalPublicationDateResolved.value }
         : {}),
+      ...(originalAuthorResolved.present ? { original_author: originalAuthorResolved.value } : {}),
       // PEN-NAMES-1: only pen_name_id is written (the database keeps the
       // legacy text in step), and only when the box was submitted.
       ...(penNameId !== null ? { pen_name_id: penNameId } : {}),
@@ -1878,9 +1960,19 @@ export async function updateBook(bookId: string, formData: FormData) {
   // request fails, the book stays a draft and the author can press Send
   // for review (S5).
   let reviewRequestFailed = false;
-  if (filesChanged && (wasLive || wasPending)) {
+  let reviewAlreadyApproved = false;
+  if (reviewChange && (wasLive || wasPending)) {
     const request = await requestBookReview(supabase, existing.id);
-    reviewRequestFailed = !request.ok && request.reason !== "already_pending";
+    reviewRequestFailed = !request.ok && request.reason !== "already_pending" && request.reason !== "already_approved";
+    // BD3 patch 4, audit r2 (M1): the author put back the original author
+    // Librum already approved (a file or cover never returns to an
+    // approved key, a name can). The waiting review of the other name is
+    // stale: withdraw it, and tell the author the book can be published.
+    if (!request.ok && request.reason === "already_approved") {
+      const withdrawn = await withdrawBookReview(supabase, existing.id);
+      if (withdrawn.ok || withdrawn.reason === "not_pending") reviewAlreadyApproved = true;
+      else reviewRequestFailed = true;
+    }
     // ADMIN-ALERTS-1 (2a): a new review request starts a new 48h clock.
     if (request.ok) await sendReviewRequestedStaffEmail({ bookId: existing.id, authorId: user.id });
   }
@@ -1916,13 +2008,22 @@ export async function updateBook(bookId: string, formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath(`/libra/${bookId}`);
   revalidatePath("/");
-  if (filesChanged && (wasLive || wasPending)) {
+  if (reviewChange && (wasLive || wasPending)) {
+    if (reviewAlreadyApproved) {
+      redirectAfterSave(
+        ebookCoverWarning,
+        `/dashboard/books/${bookId}/edit?success=${encodeURIComponent(ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE)}`,
+      );
+    }
     if (reviewRequestFailed) {
       redirectAfterSave(ebookCoverWarning, `/dashboard/books/${bookId}/edit?success=${encodeURIComponent(LIVE_FILES_REQUEST_FAILED_MESSAGE)}`);
     }
     if (wasLive) {
       revalidatePath("/librari");
-      redirectAfterSave(ebookCoverWarning, `/dashboard?success=${encodeURIComponent(LIVE_FILES_SAVED_MESSAGE)}`);
+      redirectAfterSave(
+        ebookCoverWarning,
+        `/dashboard?success=${encodeURIComponent(filesChanged ? LIVE_FILES_SAVED_MESSAGE : LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE)}`,
+      );
     }
   }
   redirectAfterSave(ebookCoverWarning, `/dashboard?success=${encodeURIComponent("Libri u përditësua")}`);

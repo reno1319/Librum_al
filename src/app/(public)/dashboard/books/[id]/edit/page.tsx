@@ -43,6 +43,7 @@ import {
 } from "@/lib/book-review-copy";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
+import { ORIGINAL_AUTHOR_EDIT_NOTE, ORIGINAL_AUTHOR_HINT, ORIGINAL_AUTHOR_MAX_LENGTH } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { FormDraftKeeper } from "@/components/form-draft-keeper";
@@ -107,6 +108,7 @@ const EDIT_BOOK_DRAFT_FIELDS = [
   "publisher",
   "edition",
   "originalPublicationDate",
+  "originalAuthor",
   "seriesId",
   "seriesPosition",
   "price",
@@ -397,7 +399,17 @@ export default async function EditBookPage({
                   </select>
                 </label>
 
-                <details className="rounded-card border border-border px-4 py-3">
+                {/* BD3 patch 4 (3a): open when a public-domain book still
+                    has no original author, so the box is in view. */}
+                <details
+                  open={
+                    (currentRightsBasis === "public_domain" || currentRightsBasis === "public_domain_original") &&
+                    !book.original_author
+                      ? true
+                      : undefined
+                  }
+                  className="rounded-card border border-border px-4 py-3"
+                >
                   <summary className="cursor-pointer text-sm font-medium text-foreground">
                     Të dhëna të tjera për librin
                   </summary>
@@ -456,6 +468,25 @@ export default async function EditBookPage({
                         maxLength={EDITION_MAX_LENGTH}
                         className={formControlClasses}
                       />
+                    </label>
+
+                    {/* BD3 patch 4 (1a 2a 3a 5a): required on save when
+                        a public-domain choice is submitted below. */}
+                    <label className="flex flex-col gap-1 text-sm">
+                      {/* Audit r1 (L5): not "optional" on a public-domain book. */}
+                      {currentRightsBasis === "public_domain" || currentRightsBasis === "public_domain_original"
+                        ? "Autori origjinal"
+                        : "Autori origjinal (opsional)"}
+                      <input
+                        name="originalAuthor"
+                        type="text"
+                        defaultValue={book.original_author ?? ""}
+                        maxLength={ORIGINAL_AUTHOR_MAX_LENGTH}
+                        className={formControlClasses}
+                      />
+                      <span className="text-sm text-muted">
+                        {ORIGINAL_AUTHOR_HINT} {ORIGINAL_AUTHOR_EDIT_NOTE}
+                      </span>
                     </label>
 
                     <label className="flex flex-col gap-1 text-sm">

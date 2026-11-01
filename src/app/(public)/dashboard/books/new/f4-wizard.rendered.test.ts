@@ -131,7 +131,8 @@ describe("Add a book: the client rule (source)", () => {
   });
 
   it("the byline (typed pen name, else the author name) feeds the preview card and the placeholder", () => {
-    expect(source).toContain('const byline = (penNameAvailable ? penName.trim() : "") || authorName;');
+    // BD3 patch 4 (1a): a typed original author comes first.
+    expect(source).toContain('const byline = originalAuthor.trim() || (penNameAvailable ? penName.trim() : "") || authorName;');
     expect(source).toContain("authorName={byline}");
     expect(source).toContain("{byline && <p");
   });

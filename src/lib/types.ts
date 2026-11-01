@@ -84,6 +84,9 @@ export type Book = {
   // A `date` column -- serializes as a plain "YYYY-MM-DD" string via
   // supabase-js, same as every other date/timestamp field on this type.
   original_publication_date: string | null;
+  // BD3 patch 4 (migration 20261101170000): the "Autori origjinal" of a
+  // translated or public-domain book, shown as its byline. null = none.
+  original_author: string | null;
   genre: string | null;
   series_id: string | null;
   series_position: number | null;

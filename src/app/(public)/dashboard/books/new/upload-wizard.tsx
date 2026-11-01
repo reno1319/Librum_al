@@ -33,6 +33,11 @@ import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CoverField } from "@/components/cover-field";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
+import {
+  MISSING_ORIGINAL_AUTHOR_MESSAGE,
+  ORIGINAL_AUTHOR_HINT,
+  ORIGINAL_AUTHOR_MAX_LENGTH,
+} from "@/lib/book-byline";
 import type { RightsBasis, Series } from "@/lib/types";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART C: redesigned step order and content --
@@ -233,6 +238,11 @@ export function UploadWizard({
   // F4 (P3): nothing is chosen when the page opens (no preselect).
   const [rightsBasis, setRightsBasis] = useState<RightsBasis | "">("");
   const [rightsError, setRightsError] = useState("");
+  // BD3 patch 4 (2a, 5a): optional, required with a public-domain choice.
+  const [originalAuthor, setOriginalAuthor] = useState("");
+  const [originalAuthorError, setOriginalAuthorError] = useState("");
+  const originalAuthorRef = useRef<HTMLInputElement>(null);
+  const originalAuthorRequired = rightsBasis === "public_domain" || rightsBasis === "public_domain_original";
 
   // Moves keyboard and screen-reader focus to the new step's (visually
   // hidden) heading on every step change, but not on first render.
@@ -301,7 +311,8 @@ export function UploadWizard({
     setStep(target);
   }
 
-  const byline = (penNameAvailable ? penName.trim() : "") || authorName;
+  // BD3 patch 4 (1a): an original author is the byline readers see.
+  const byline = originalAuthor.trim() || (penNameAvailable ? penName.trim() : "") || authorName;
 
   const pricing = resolveWizardPricing({ mode: priceMode, paidPrice });
   const { priceValid, isFreeBook, priceAll, grossMinor, feeMinor, earningsMinor } = pricing;
@@ -320,6 +331,17 @@ export function UploadWizard({
       event.preventDefault();
       setStep(1);
       setShowDetailErrors(true);
+      return;
+    }
+    // BD3 patch 4 (5a): a public-domain choice needs the original
+    // author, on either button (the choice is saved with a draft too).
+    // Back to step 1, where the box is; the server says the same.
+    if (originalAuthorRequired && !originalAuthor.trim()) {
+      event.preventDefault();
+      setOriginalAuthorError(MISSING_ORIGINAL_AUTHOR_MESSAGE);
+      setStep(1);
+      if (moreDetailsRef.current) moreDetailsRef.current.open = true;
+      requestAnimationFrame(() => originalAuthorRef.current?.focus());
       return;
     }
     // F4 (P3): Publish book needs a rights choice; Save as draft never
@@ -577,6 +599,28 @@ export function UploadWizard({
                     maxLength={TRANSLATOR_MAX_LENGTH}
                     className={formControlClassesFor(false)}
                   />
+                </label>
+
+                {/* BD3 patch 4 (1a 2a 5a): shown as the byline, with
+                    "Përktheu:" under it on the book page. */}
+                <label className="flex flex-col gap-1 text-sm">
+                  {originalAuthorRequired ? "Autori origjinal" : "Autori origjinal (opsional)"}
+                  <input
+                    ref={originalAuthorRef}
+                    name="originalAuthor"
+                    type="text"
+                    value={originalAuthor}
+                    onChange={(e) => {
+                      setOriginalAuthor(e.target.value);
+                      setOriginalAuthorError("");
+                    }}
+                    maxLength={ORIGINAL_AUTHOR_MAX_LENGTH}
+                    aria-invalid={originalAuthorError ? true : undefined}
+                    aria-describedby={originalAuthorError ? "wizard-original-author-error" : undefined}
+                    className={formControlClassesFor(!!originalAuthorError)}
+                  />
+                  <FieldError id="wizard-original-author-error" message={originalAuthorError} />
+                  <span className="text-sm text-muted">{ORIGINAL_AUTHOR_HINT}</span>
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
@@ -876,6 +920,9 @@ export function UploadWizard({
                       onChange={() => {
                         setRightsBasis(basis);
                         setRightsError("");
+                        // Audit r1 (L4): a stale "required" error goes
+                        // when the choice no longer needs the box.
+                        setOriginalAuthorError("");
                       }}
                       onKeyDown={(e) => {
                         // Enter on a radio must not submit the form as

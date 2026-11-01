@@ -778,7 +778,19 @@ create table public.books (
   librum_choice_at timestamptz,
   -- PEN-NAMES-1 (migration 20261019184512): the book's pen name, declared
   -- last as the migration adds it.
-  pen_name_id uuid not null references public.pen_names(id)
+  pen_name_id uuid not null references public.pen_names(id),
+  -- BD3-P4 (migration 20261101170000): the "Autori origjinal" of a
+  -- translated or public-domain book, shown as its byline; null = none.
+  -- Declared last, as the migration adds it. Trimmed, 1..200
+  -- characters, no control characters (the app's own rules); whether
+  -- it is required (both public-domain bases) is checked by the app,
+  -- because the rights choice lives in book_rights_declarations.
+  original_author text
+    constraint books_original_author_check
+    check (original_author is null
+           or (char_length(original_author) between 1 and 200
+               and original_author = btrim(original_author)
+               and original_author !~ '[[:cntrl:]]'))
 );
 
 comment on column public.books.price_all is
@@ -2784,7 +2796,9 @@ as
          b.isbn, b.language, b.publisher, b.edition, b.original_publication_date,
          b.genre, b.series_id, b.series_position, b.price_cents, b.cover_path,
          b.status, b.published_at, b.created_at, b.updated_at, b.price_all,
-         b.librum_choice_at, b.pen_name_id
+         b.librum_choice_at, b.pen_name_id,
+         -- BD3-P4 (migration 20261101170000): appended last.
+         b.original_author
   from public.books b
   where b.status = 'published'
      or b.author_id = auth.uid()
@@ -2936,6 +2950,8 @@ as $$
       or extensions.unaccent(books.title) ilike extensions.unaccent('%' || search_term || '%')
       or extensions.unaccent(books.description) ilike extensions.unaccent('%' || search_term || '%')
       or extensions.unaccent(books.keywords) ilike extensions.unaccent('%' || search_term || '%')
+      -- BD3-P4 (migration 20261101170000, 3a): the original author too.
+      or extensions.unaccent(books.original_author) ilike extensions.unaccent('%' || search_term || '%')
       or exists (
         -- PEN-NAMES-1 (5a): the book's OWN pen name, through the public
         -- view (no author_id). The account's public name finds only the
@@ -13322,6 +13338,10 @@ create table public.book_reviews (
   -- never makes the book publishable: book_review_approval_valid() skips
   -- it. Only the migration backfill ever writes true; no function does.
   buyer_file_only boolean not null default false,
+  -- BD3-P4 (Renato 1 Nov, 16:37Z 2b / 16:45Z a): the original author
+  -- the book showed when it was sent; an approval binds to it as to the
+  -- file and cover. Declared last (migration 20261101170000 adds it).
+  original_author text,
   constraint book_reviews_sent_back_check
     check ((status = 'sent_back') = (reason is not null)
            and (status = 'sent_back') = (message_to_author is not null)),
@@ -13367,7 +13387,8 @@ grant select on public.book_reviews to service_role;
 create function public.book_review_approval_valid(
   p_book_id uuid,
   p_file_path text,
-  p_cover_path text
+  p_cover_path text,
+  p_original_author text
 )
 returns boolean
 language sql
@@ -13383,13 +13404,14 @@ as $$
        and not r.buyer_file_only
        and r.file_path is not distinct from p_file_path
        and r.cover_path is not distinct from p_cover_path
+       and r.original_author is not distinct from p_original_author
        and r.decided_at > coalesce(
              (select max(t.taken_down_at) from public.book_takedowns t where t.book_id = p_book_id),
              '-infinity'::timestamptz)
   );
 $$;
 
-revoke all on function public.book_review_approval_valid(uuid, text, text)
+revoke all on function public.book_review_approval_valid(uuid, text, text, text)
   from public, anon, authenticated, service_role;
 
 -- ------------------------------------------------------------
@@ -13404,7 +13426,7 @@ as $$
 begin
   if new.status = 'published'
      and old.status is distinct from 'published'
-     and not public.book_review_approval_valid(new.id, new.file_path, new.cover_path)
+     and not public.book_review_approval_valid(new.id, new.file_path, new.cover_path, new.original_author)
   then
     raise exception 'This book needs Librum''s approval before it can be published.'
       using errcode = 'LB462';
@@ -13434,9 +13456,10 @@ begin
   if old.status = 'published'
      and new.status = 'published'
      and (new.file_path is distinct from old.file_path
-          or new.cover_path is distinct from old.cover_path)
+          or new.cover_path is distinct from old.cover_path
+          or new.original_author is distinct from old.original_author)
   then
-    raise exception 'A live book''s file or cover can only change when the book goes back to draft in the same write.'
+    raise exception 'A live book''s file, cover or original author can only change when the book goes back to draft in the same write.'
       using errcode = 'LB463';
   end if;
   return new;
@@ -13444,7 +13467,7 @@ end;
 $$;
 
 create trigger books_refuse_live_file_change
-  before update of file_path, cover_path on public.books
+  before update of file_path, cover_path, original_author on public.books
   for each row
   execute function public.books_refuse_live_file_change();
 
@@ -13515,7 +13538,7 @@ begin
     raise exception 'not authenticated';
   end if;
 
-  select bo.id, bo.title, bo.author_id, bo.status, bo.file_path, bo.cover_path
+  select bo.id, bo.title, bo.author_id, bo.status, bo.file_path, bo.cover_path, bo.original_author
     into v_book
     from public.books bo
    where bo.id = p_book_id
@@ -13537,11 +13560,11 @@ begin
       using errcode = 'LB460';
   end if;
 
-  if public.book_review_approval_valid(p_book_id, v_book.file_path, v_book.cover_path) then
+  if public.book_review_approval_valid(p_book_id, v_book.file_path, v_book.cover_path, v_book.original_author) then
     raise exception 'this book is already approved';
   end if;
 
-  select r.id, r.file_path, r.cover_path
+  select r.id, r.file_path, r.cover_path, r.original_author
     into v_pending
     from public.book_reviews r
    where r.book_id = p_book_id
@@ -13550,7 +13573,8 @@ begin
 
   if found then
     if v_pending.file_path is not distinct from v_book.file_path
-       and v_pending.cover_path is not distinct from v_book.cover_path then
+       and v_pending.cover_path is not distinct from v_book.cover_path
+       and v_pending.original_author is not distinct from v_book.original_author then
       raise exception 'this book is already waiting for review';
     end if;
     update public.book_reviews
@@ -13559,8 +13583,8 @@ begin
      where id = v_pending.id;
   end if;
 
-  insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, status)
-  values (p_book_id, v_book.title, v_book.author_id, v_book.file_path, v_book.cover_path, 'pending')
+  insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, original_author, status)
+  values (p_book_id, v_book.title, v_book.author_id, v_book.file_path, v_book.cover_path, v_book.original_author, 'pending')
   returning id into v_review_id;
 
   return v_review_id;
@@ -13634,7 +13658,7 @@ begin
     raise exception 'not authenticated';
   end if;
 
-  select bo.id, bo.author_id, bo.file_path, bo.cover_path
+  select bo.id, bo.author_id, bo.file_path, bo.cover_path, bo.original_author
     into v_book
     from public.books bo
    where bo.id = p_book_id;
@@ -13655,7 +13679,7 @@ begin
       select 1 from public.book_reviews r
        where r.book_id = p_book_id and r.status = 'pending'
     ),
-    'approval_valid', public.book_review_approval_valid(p_book_id, v_book.file_path, v_book.cover_path),
+    'approval_valid', public.book_review_approval_valid(p_book_id, v_book.file_path, v_book.cover_path, v_book.original_author),
     'latest_sent_back', case
       when v_latest.status = 'sent_back' then pg_catalog.jsonb_build_object(
         'reason', v_latest.reason,
@@ -13718,7 +13742,8 @@ begin
   end if;
 
   -- The book first, then the review (request_book_review's order).
-  select bo.id, bo.status, bo.file_path, bo.cover_path, bo.price_all, bo.description, bo.published_at
+  select bo.id, bo.status, bo.file_path, bo.cover_path, bo.price_all, bo.description, bo.published_at,
+         bo.original_author
     into v_book
     from public.books bo
    where bo.id = v_book_id
@@ -13727,7 +13752,7 @@ begin
     raise exception 'no review found for this id';
   end if;
 
-  select r.id, r.status, r.file_path, r.cover_path
+  select r.id, r.status, r.file_path, r.cover_path, r.original_author
     into v_review
     from public.book_reviews r
    where r.id = p_review_id
@@ -13757,7 +13782,8 @@ begin
 
   if v_book.price_all is null
      or v_book.price_all is distinct from p_price_all
-     or pg_catalog.btrim(coalesce(v_book.description, '')) = '' then
+     or pg_catalog.btrim(coalesce(v_book.description, '')) = ''
+     or v_book.original_author is distinct from v_review.original_author then
     raise exception 'the author changed the book';
   end if;
 
