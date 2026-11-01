@@ -10,6 +10,9 @@ import {
 } from "@/lib/book-storage-path";
 import { readDownloadFilePath } from "@/lib/book-reviews";
 import { downloadFileName } from "@/lib/download-file-name";
+import { addLibrumPages } from "@/lib/epub-librum-pages";
+import { readLibrumPages } from "@/lib/librum-download-pages";
+import { resolveSiteOrigin } from "@/lib/site-url";
 
 // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: the exact row this route may act
 // on. `id` and `author_id` come back from the database with the path so
@@ -181,7 +184,56 @@ export async function GET(
     );
   }
 
-  const originalBytes = Buffer.from(await fileBlob.arrayBuffer());
+  const storedBytes = Buffer.from(await fileBlob.arrayBuffer());
+
+  // BD3 + BD4 + BD4b (Renato 1 Nov): the Librum copyright page (with
+  // the buyer line) at the front and the "more by this author" page at
+  // the end, added on the way out so they always show the current book
+  // details; the stored file is never changed. Fail-open like the email
+  // mark below: the reader always gets the book, and this route logs
+  // the fallback once, with opaque ids and a stage tag only.
+  let originalBytes: Buffer = storedBytes;
+  try {
+    const isAuthor = book.author_id === user.id;
+    const pages = await readLibrumPages(supabase, {
+      bookId: book.id,
+      buyer: !isAuthor && user.email ? { readerId: user.id, email: user.email } : null,
+      siteOrigin: resolveSiteOrigin(),
+    });
+    if (!pages) {
+      console.warn("Download: served the book without the Librum pages (fallback)", {
+        bookId: id,
+        readerId: user.id,
+        stage: "missing_details",
+      });
+    } else {
+      if (pages.buyerLineMissing) {
+        console.warn("Download: added the Librum pages without the buyer line", {
+          bookId: id,
+          readerId: user.id,
+          stage: "missing_purchase_row",
+        });
+      }
+      const added = await addLibrumPages(storedBytes, pages);
+      if (added.added) {
+        originalBytes = added.bytes;
+      } else {
+        const log = added.failureStage === "unexpected_exception" ? console.error : console.warn;
+        log("Download: served the book without the Librum pages (fallback)", {
+          bookId: id,
+          readerId: user.id,
+          byteSize: storedBytes.length,
+          stage: added.failureStage,
+        });
+      }
+    }
+  } catch {
+    console.error("Download: served the book without the Librum pages (fallback)", {
+      bookId: id,
+      readerId: user.id,
+      stage: "unexpected_exception",
+    });
+  }
 
   // LAUNCH-1 P3-2: watermarking is fail-open by design -- the reader
   // must always get their purchased EPUB, watermarked or not. This

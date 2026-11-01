@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import PrivacyPage, { metadata } from "./page";
 import { SELLER_PENDING_TEXT } from "@/lib/seller";
-import { POLICY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
+import { POLICY_LAST_UPDATED_LINE, PRIVACY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
 
 // POLICY PAGES (pipeline item 2): Law 124/2024 notice.
 const html = renderToStaticMarkup(PrivacyPage());
@@ -86,9 +86,21 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(text).toContain("Nuk përdorim cookies për reklama ose për gjurmim.");
   });
 
-  it("takes its date from the one shared line (ALBANIAN-14, 3. b)", () => {
-    expect(text).toContain(POLICY_LAST_UPDATED_LINE);
-    expect(source).toContain("{POLICY_LAST_UPDATED_LINE}");
+  // BD4 (D13 1b): the visible first page with the buyer's email.
+  it("says the email, purchase date and code show on the book's first page, and that a shared copy shows it", () => {
+    expect(text).toContain(
+      "Librum shton në faqen e parë të librit adresën e emailit të llogarisë së tij, datën e blerjes dhe kodin e blerjes",
+    );
+    expect(text).toContain("nëse e jepni kopjen tuaj dikujt tjetër, ai e sheh emailin tuaj.");
+  });
+
+  // BD4 (Renato 1 Nov, 3. a): Privacy has its own date; Terms and
+  // Refunds keep the shared one.
+  it("takes its date from its own Privacy line, not the shared Terms/Refunds line", () => {
+    expect(text).toContain(PRIVACY_LAST_UPDATED_LINE);
+    expect(source).toContain("{PRIVACY_LAST_UPDATED_LINE}");
+    expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
+    expect(POLICY_LAST_UPDATED_LINE).toBe("Përditësuar më: 30 tetor 2026");
   });
 
   it("is a lawyer-review draft in the code only, with no blank slots", () => {

@@ -27,6 +27,12 @@ type ServiceClient = ReturnType<typeof createAdminClient>;
 
 export const DOWNLOAD_CANCEL_WARNING = "Shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.";
 
+// D13 2a / BD4: the one-line reminder next to the buyer's Download
+// button. The first page of every downloaded book shows the buyer's
+// email (D13 1b), so the reminder says so.
+export const SHARING_REMINDER =
+  "Faqja e parë e librit tregon emailin tuaj. Kjo kopje është vetëm për ju: ju lutemi, mos e shpërndani.";
+
 // --------------------------------------------------------------
 // The buyer's own states (my_purchase_download_states)
 // --------------------------------------------------------------
