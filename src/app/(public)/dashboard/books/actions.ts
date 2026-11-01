@@ -433,7 +433,7 @@ async function resolveManuscriptInput(
       .download(tempPath);
     if (downloadError || !data) {
       console.error("resolveManuscriptInput: temp manuscript download failed:", downloadError);
-      redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi i ngarkuar nuk u lexua dot. Provoni përsëri")}`);
+      redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi i ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri")}`);
     }
 
     bytes = Buffer.from(await data!.arrayBuffer());
@@ -533,7 +533,7 @@ async function resolveCoverInput(
       .download(tempPath);
     if (downloadError || !data) {
       console.error("resolveCoverInput: temp cover download failed:", downloadError);
-      redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e ngarkuar nuk u lexua dot. Provoni përsëri")}`);
+      redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri")}`);
     }
 
     bytes = Buffer.from(await data!.arrayBuffer());

@@ -17,6 +17,11 @@ import {
   submittablePath,
 } from "@/lib/manuscript-approval";
 import { WORD_GUIDE_PATH, WORD_TEMPLATE_PATH } from "@/lib/word-guide-paths";
+import {
+  TEMP_UPLOAD_CHECK_INTERVAL_MS,
+  TEMP_UPLOAD_EXPIRED_MESSAGE,
+  tempUploadExpired,
+} from "@/lib/temp-upload-expiry";
 
 // REDESIGN STEP 5 (A2): restyling only -- the picker sits in a dashed
 // drop-area box and the browser's own file button is drawn as an
@@ -91,6 +96,7 @@ export function ManuscriptField({
   authorName,
   authorId,
   onManuscriptChange,
+  onUploadExpired,
 }: {
   // Initial seed only -- see the title-input listener effect below for
   // why this isn't the ongoing source of truth once mounted.
@@ -130,6 +136,10 @@ export function ManuscriptField({
   // Client Component props"). Omitting the prop entirely is the fix,
   // not passing a no-op closure.
   onManuscriptChange?: (info: { name: string } | null) => void;
+  // BD5 (3a): called when a Save is stopped because the uploaded
+  // manuscript is more than 3 days old (the wizard goes back to its
+  // Files step). Optional, for the same reason as onManuscriptChange.
+  onUploadExpired?: () => void;
 }) {
   const [mode, setMode] = useState<"epub" | "docx">("epub");
   const [status, setStatus] = useState<Status>("idle");
@@ -152,6 +162,9 @@ export function ManuscriptField({
   const [previewSeen, setPreviewSeen] = useState(false);
   const [approved, setApproved] = useState(false);
   const [approveError, setApproveError] = useState("");
+  // BD5: bumped to give the file pickers a fresh, empty input after an
+  // expired upload, so picking the same file again fires onChange.
+  const [pickerKey, setPickerKey] = useState(0);
 
   const hiddenPathInputRef = useRef<HTMLInputElement>(null);
   const liveTitleRef = useRef(bookTitle);
@@ -162,6 +175,17 @@ export function ManuscriptField({
   // temp EPUB Storage path (direct upload OR DOCX-generated, kept
   // repackaged in place) is currently ready to submit.
   const tempPathRef = useRef<string | null>(null);
+  // BD5: when the current temporary ebook was made (browser clock), and
+  // whether an expiry still has to stop one Save so the author sees it.
+  // A title change rewrites the same file in place and keeps this time,
+  // so the form gives up no later than the clean-up's own clock.
+  const uploadedAtRef = useRef<number | null>(null);
+  const expiredNoticeRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const onUploadExpiredRef = useRef(onUploadExpired);
+  useEffect(() => {
+    onUploadExpiredRef.current = onUploadExpired;
+  }, [onUploadExpired]);
   const displayNameRef = useRef<string | null>(null);
   const requestIdRef = useRef(0);
   const pendingCountRef = useRef(0);
@@ -191,6 +215,8 @@ export function ManuscriptField({
   }
 
   function setHiddenPath(path: string | null, displayName: string | null) {
+    if (path === null) uploadedAtRef.current = null;
+    else if (path !== tempPathRef.current) uploadedAtRef.current = Date.now();
     tempPathRef.current = path;
     displayNameRef.current = path ? displayName : null;
     readyNameRef.current = path ? displayName : null;
@@ -382,6 +408,18 @@ export function ManuscriptField({
     if (!form) return;
 
     function handleSubmit(e: Event) {
+      // BD5 (3a): an upload past the 3-day limit never reaches the
+      // server; this Save is stopped before anything is sent, so the
+      // rest of the form stays as typed.
+      checkUploadAge();
+      if (expiredNoticeRef.current) {
+        expiredNoticeRef.current = false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onUploadExpiredRef.current?.();
+        requestAnimationFrame(() => rootRef.current?.scrollIntoView({ block: "center" }));
+        return;
+      }
       // W4: a converted Word manuscript not yet confirmed in the preview
       // is never submitted (the hidden path is empty then, and saving
       // would silently keep the old manuscript or none).
@@ -417,6 +455,10 @@ export function ManuscriptField({
     // it.
     form.addEventListener("submit", handleSubmit, true);
     return () => form.removeEventListener("submit", handleSubmit, true);
+    // BD5: checkUploadAge works through refs and state setters; the
+    // only prop it reaches (the page's change callback) is a stable
+    // state setter in the wizard and absent on Edit Book.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Best-effort cleanup of an abandoned temporary object if the author
@@ -445,6 +487,26 @@ export function ManuscriptField({
     resetApproval();
   }
 
+  // BD5 (3a): the upload is past the form's 3-day limit. Clear the field
+  // and the Word build, say why, and stop the next Save once so the
+  // author sees the message. The stored ebook itself is left to the
+  // nightly clean-up (84 h): a Save sent just before the limit may still
+  // be reading it (audit r1 F4). The preview copy is never read by a
+  // Save, so clearDocxBuild() may remove it as it always has.
+  function expireUpload() {
+    setHiddenPath(null, null);
+    clearDocxBuild();
+    setWarnings([]);
+    setStatus("error");
+    setErrorMessage(TEMP_UPLOAD_EXPIRED_MESSAGE);
+    setPickerKey((key) => key + 1);
+    expiredNoticeRef.current = true;
+  }
+
+  function checkUploadAge() {
+    if (tempPathRef.current && tempUploadExpired(uploadedAtRef.current, Date.now())) expireUpload();
+  }
+
   async function warnAboutOutsideMentions(file: File, requestId: number) {
     try {
       const scan = await scanEpubForOutsideMentions(await file.arrayBuffer());
@@ -460,6 +522,7 @@ export function ManuscriptField({
   }
 
   function handleEpubChange(file: File | null) {
+    expiredNoticeRef.current = false;
     if (tempPathRef.current) {
       void removeTempObject(tempPathRef.current);
     }
@@ -526,6 +589,7 @@ export function ManuscriptField({
   }
 
   function handleDocxChange(file: File | null) {
+    expiredNoticeRef.current = false;
     if (tempPathRef.current) {
       void removeTempObject(tempPathRef.current);
     }
@@ -671,6 +735,7 @@ export function ManuscriptField({
 
   function switchMode(next: "epub" | "docx") {
     if (next === mode) return;
+    expiredNoticeRef.current = false;
     modeRef.current = next;
     setMode(next);
     setStatus("idle");
@@ -681,8 +746,24 @@ export function ManuscriptField({
     clearDocxBuild();
   }
 
+  // BD5: an open form re-checks its upload's age every minute and when
+  // the tab comes back into view, so the message is already there when
+  // the author returns.
+  useEffect(() => {
+    const timer = window.setInterval(checkUploadAge, TEMP_UPLOAD_CHECK_INTERVAL_MS);
+    function onVisible() {
+      if (document.visibilityState === "visible") checkUploadAge();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className="flex flex-col gap-3">
+    <div ref={rootRef} className="flex flex-col gap-3">
       <input ref={hiddenPathInputRef} type="hidden" name="manuscriptStoragePath" />
 
       <fieldset className="flex flex-col gap-2 text-sm">
@@ -726,6 +807,7 @@ export function ManuscriptField({
             <input
               type="file"
               accept=".epub,application/epub+zip"
+              key={pickerKey}
               className={PICKER_INPUT_CLASSES}
               disabled={status === "converting"}
               onChange={(e) => handleEpubChange(e.target.files?.[0] ?? null)}
@@ -787,6 +869,7 @@ export function ManuscriptField({
             <input
               type="file"
               accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              key={pickerKey}
               className={PICKER_INPUT_CLASSES}
               disabled={status === "converting"}
               onChange={(e) => handleDocxChange(e.target.files?.[0] ?? null)}

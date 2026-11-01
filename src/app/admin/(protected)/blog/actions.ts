@@ -65,7 +65,7 @@ async function resolveStagedCoverInput(
     .download(tempPath);
   if (downloadError || !data) {
     console.error("resolveStagedCoverInput: temp cover download failed:", downloadError);
-    redirect(`${errorRedirectPath}?error=${encodeURIComponent("Could not read your uploaded cover. Please try again.")}`);
+    redirect(`${errorRedirectPath}?error=${encodeURIComponent("Could not read your uploaded cover. It may have expired; please choose it again.")}`);
   }
 
   const bytes = Buffer.from(await data!.arrayBuffer());
