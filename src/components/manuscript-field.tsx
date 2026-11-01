@@ -72,7 +72,7 @@ const TOO_LARGE_ERROR = "Ky dorëshkrim e kalon kufirin prej 50 MB.";
 const UPLOAD_FAILED_ERROR =
   "Dorëshkrimi juaj nuk u ngarkua. Kontrolloni lidhjen dhe provoni përsëri.";
 const APPROVE_FIRST_ERROR =
-  "Hapni pamjen paraprake të e-librit dhe konfirmoni se libri duket mirë para se të vazhdoni.";
+  "Hap pamjen paraprake dhe konfirmo nëse e-libri duket mirë para se të vazhdosh.";
 
 // W4 (Renato 31 Oct, 6a): a Word manuscript is ready to submit only
 // after the author has opened the preview of THIS build and confirmed
@@ -784,7 +784,7 @@ export function ManuscriptField({
                     className="focus-ring min-h-11 self-start rounded-[3px] bg-primary px-4 font-semibold text-white"
                     onClick={() => setPreviewOpen(true)}
                   >
-                    Hap pamjen paraprake
+                    Shiko pamjen paraprake
                   </button>
                   <label className={`flex items-start gap-2 ${tick.disabled ? "opacity-60" : ""}`}>
                     <input
@@ -795,7 +795,7 @@ export function ManuscriptField({
                       onChange={(e) => setApproval(e.target.checked)}
                     />
                     <span>
-                      E kontrollova pamjen paraprake dhe libri duket si duhet.
+                      E kontrollova pamjen paraprake dhe duket mirë.
                       {tick.reason && <span className="block text-xs text-muted">{tick.reason}</span>}
                     </span>
                   </label>

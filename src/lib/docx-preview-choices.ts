@@ -206,7 +206,7 @@ export function describeGuess(guess: CleanupGuess, on: boolean, canToggle: boole
   switch (guess.kind) {
     case "chapter":
       return on
-        ? { state: `Fillim kapitulli: ${t}`, action: act("Nuk është kapitull"), unsure }
+        ? { state: `Fillim kapitulli: ${t}`, action: act("Hiqe si kapitull"), unsure }
         : { state: `Mund të jetë fillim kapitulli: ${t}`, action: act("Bëje kapitull"), unsure };
     case "subheading":
       return on
@@ -215,11 +215,11 @@ export function describeGuess(guess: CleanupGuess, on: boolean, canToggle: boole
     case "scene_break":
       return on
         ? { state: `Ndarje skene (* * *) para rreshtit: ${t}`, action: act("Hiqe ndarjen"), unsure }
-        : { state: `Një rresht bosh para: ${t}. Mund të jetë ndarje skene.`, action: act("Shto ndarje skene"), unsure };
+        : { state: `Një rresht bosh para: ${t}. Mund të jetë ndarje skene.`, action: act("Shto një ndarje skene"), unsure };
     case "typed_contents":
       return on
-        ? { state: `U hoq përmbajtja e shkruar me dorë që fillon me ${t}. Librum e krijon vetë përmbajtjen e e-librit.`, action: act("Ktheje në libër"), unsure }
-        : { state: `Përmbajtja e shkruar me dorë mbetet në libër: ${t}`, action: act("Hiqe"), unsure };
+        ? { state: `Përmbajtja e shkruar nga ju, që fillon me ${t}, u hoq. Librum e krijon vetë përmbajtjen e e-librit.`, action: act("Ktheje në libër"), unsure }
+        : { state: `Përmbajtja e shkruar nga ju mbetet në libër: ${t}`, action: act("Hiqe"), unsure };
     case "merged_title":
       return on
         ? { state: `U bashkuan në një titull: ${t}`, action: act("Mbaji veçmas"), unsure }
@@ -237,35 +237,48 @@ export function describeGuess(guess: CleanupGuess, on: boolean, canToggle: boole
   }
 }
 
+// "[N] <words>" with the singular words when N is 1 ("1 kapitull",
+// not "1 kapituj"; Renato's native check, 1 Nov).
+const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
 // The summary of what Librum changed, only the fixes that happened.
 export function describeFixes(report: CleanupReport): string[] {
   if (!report.applied) return [];
   const f = report.fixes;
   const lines: string[] = [];
-  const add = (n: number, text: string) => {
-    if (n > 0) lines.push(`${n} ${text}`);
+  const add = (n: number, one: string, many: string) => {
+    if (n > 0) lines.push(counted(n, one, many));
   };
+  const detected = report.chapterSource === "detected";
   lines.push(
     report.chapters > 0
-      ? `${report.chapters} kapituj${report.chapterSource === "detected" ? " të gjetur nga Librum" : " nga stilet Heading të Word-it"}`
+      ? counted(
+          report.chapters,
+          detected ? "kapitull i gjetur nga Librum" : "kapitull nga llojet e Heading të Word-it",
+          detected ? "kapituj të gjetur nga Librum" : "kapituj nga llojet e Heading të Word-it",
+        )
       : "Asnjë kapitull i gjetur: libri është një pjesë e vetme",
   );
-  add(report.subheadings, "nëntituj");
-  add(report.sceneBreaks, "ndarje skenash (* * *)");
-  add(f.contentsLinesRemoved, "rreshta përmbajtjeje të hequr (Librum e krijon vetë përmbajtjen)");
-  add(f.emptyLinesRemoved, "rreshta bosh të hequr");
-  add(f.indentsRemoved, "kryeradhë me hapësira ose Tab të hequra");
-  add(f.paragraphsSplit, "paragrafë të ndarë (rreshta me Shift+Enter)");
-  add(f.quotes, "thonjëza të rregulluara");
-  add(f.apostrophes, "apostrofa të rregulluar");
-  add(f.ellipses, "tre pika të kthyera në …");
-  add(f.dashes, "viza të rregulluara");
-  add(f.dropCapsJoined, "shkronja fillestare të mëdha të bashkuara me fjalën");
-  add(f.headingNumbersAdded, "numra titujsh nga Word-i të ruajtur");
+  add(report.subheadings, "nëntitull", "nëntituj");
+  add(report.sceneBreaks, "ndarje skene (* * *)", "ndarje skenash (* * *)");
+  add(
+    f.contentsLinesRemoved,
+    "rresht i tabelës së përmbajtjes i hequr (Librum e krijon vetë përmbajtjen)",
+    "rreshta të tabelës së përmbajtjes të hequr (Librum e krijon vetë përmbajtjen)",
+  );
+  add(f.emptyLinesRemoved, "rresht bosh i hequr", "rreshta bosh të hequr");
+  add(f.indentsRemoved, "kryeradhë me hapësira ose Tab e hequr", "kryeradhë me hapësira ose Tab të hequra");
+  add(f.paragraphsSplit, "paragraf i ndarë (rreshta të krijuar me Shift+Enter)", "paragrafë të ndarë (rreshta të krijuar me Shift+Enter)");
+  add(f.quotes, "thonjëz e rregulluar", "thonjëza të rregulluara");
+  add(f.apostrophes, "apostrof i rregulluar", "apostrofa të rregulluara");
+  add(f.ellipses, "tre pika të rregulluara në …", "tre pika të rregulluara në …");
+  add(f.dashes, "vizë e rregulluar", "viza të rregulluara");
+  add(f.dropCapsJoined, "shkronjë fillestare e madhe e bashkuar me fjalën", "shkronja fillestare të mëdha të bashkuara me fjalën");
+  add(f.headingNumbersAdded, "numër titulli i ruajtur nga Word-i", "numra titujsh të ruajtur nga Word-i");
   return lines;
 }
 
-// W3 Part 2: the health report in the preview's "Çfarë bëri Librum" box
+// W3 Part 2: the health report in the preview's "Çfarë rregulloi Librum" box
 // (Renato's I4, 31 Oct): green lines for what Librum found and fixed,
 // amber lines for what the author should look at. Warnings from the
 // conversion are amber lines too.
@@ -278,20 +291,42 @@ export function healthReport(report: CleanupReport, warnings: { message: string 
   if (fixes.length > 0) {
     lines.push({ tone: report.chapters > 0 ? "ok" : "check", text: fixes[0] });
   }
-  if (notes.footnotes > 0) lines.push({ tone: "ok", text: `${notes.footnotes} shënime në fund të faqes, të ruajtura në fund të kapitullit të vet` });
-  if (notes.endnotes > 0) lines.push({ tone: "ok", text: `${notes.endnotes} shënime në fund të librit, të ruajtura në kapitullin “Shënime”` });
-  if ((report.gaps ?? 0) > 0) lines.push({ tone: "ok", text: `${report.gaps} rreshta bosh të ruajtur rreth rreshtave në qendër dhe poezive` });
-  const broken = report.fixes.brokenLetters ?? 0;
-  if (broken > 0) lines.push({ tone: "ok", text: `${broken} shkronja të prishura të rregulluara (p.sh. “Ã«” në “ë”)` });
+  const ok = (n: number, one: string, many: string) => {
+    if (n > 0) lines.push({ tone: "ok", text: counted(n, one, many) });
+  };
+  ok(
+    notes.footnotes,
+    "shënim në fund të faqes, i ruajtur në fund të kapitullit përkatës",
+    "shënime në fund të faqes, të ruajtura në fund të kapitullit përkatës",
+  );
+  ok(notes.endnotes, "shënim në fund të librit, i ruajtur në kapitullin “Shënime”", "shënime në fund të librit, të ruajtura në kapitullin “Shënime”");
+  ok(
+    report.gaps ?? 0,
+    "hapësirë boshe e ruajtur në rreshtat e vendosur në qendër dhe në poezi",
+    "hapësira boshe të ruajtura në rreshtat e vendosur në qendër dhe në poezi",
+  );
+  ok(report.fixes.brokenLetters ?? 0, "shkronjë e rregulluar (p.sh. “Ã«” në “ë”)", "shkronja të rregulluara (p.sh. “Ã«” në “ë”)");
   for (const f of fixes.slice(1)) lines.push({ tone: "ok", text: f });
   const unsure = report.guesses.filter((g) => g.confidence !== "high" && g.kind !== "title_page").length;
-  if (unsure > 0) lines.push({ tone: "check", text: `${unsure} vende ku Librum nuk është i sigurt: shihini te “Kontrolloni këto”` });
+  if (unsure > 0) {
+    lines.push({
+      tone: "check",
+      text: counted(
+        unsure,
+        "rast ku Librum kërkon vëmendjen tuaj: shikoje te “Kontrolloni këto”",
+        "raste ku Librum kërkon vëmendjen tuaj: shikoji te “Kontrolloni këto”",
+      ),
+    });
+  }
   const missing = report.missingLetters;
   if (missing) {
     const list = missing.words.map((w) => `“${w.word}” (${w.count}) në vend të “${w.correct}”`).join(", ");
     lines.push({
       tone: "check",
-      text: `${missing.total} fjalë duken të shkruara pa ë ose ç: ${list}. Librum nuk i ndryshon vetë; rregullojini në Word dhe ngarkojeni dokumentin sërish.`,
+      text:
+        missing.total === 1
+          ? `1 fjalë duket e shkruar pa ë ose ç: ${list}. Librum nuk e ndryshon vetë; rregullojeni në Word dhe ngarkojeni dokumentin sërish.`
+          : `${missing.total} fjalë duken të shkruara pa ë ose ç: ${list}. Librum nuk i ndryshon vetë; rregullojini në Word dhe ngarkojeni dokumentin sërish.`,
     });
   }
   for (const w of warnings) lines.push({ tone: "check", text: w.message });

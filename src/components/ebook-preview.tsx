@@ -352,9 +352,9 @@ export function EbookPreview({
           className={`${pane === "check" ? "flex" : "hidden"} w-full min-h-0 flex-col gap-4 overflow-y-auto border-r border-[#c9c0ae] p-4 text-sm lg:flex lg:w-[24rem] lg:shrink-0`}
         >
           <section>
-            <h3 className="mb-1 font-semibold">Çfarë bëri Librum</h3>
+            <h3 className="mb-1 font-semibold">Çfarë rregulloi Librum</h3>
             {!health.some((h) => h.tone === "ok") && (
-              <p className="text-muted">Librum e ktheu dokumentin ashtu siç është, me kapitujt nga stilet Heading 1 të Word-it.</p>
+              <p className="text-muted">Librum e ktheu dokumentin siç është, me kapitujt e ruajtur nga Heading 1 të Word-it.</p>
             )}
             {health.length > 0 && (
               // W3 Part 2: the health report; green = done, amber = look at it.
@@ -366,7 +366,7 @@ export function EbookPreview({
                   >
                     <span aria-hidden="true">{h.tone === "ok" ? "✓" : "!"}</span>
                     <span>
-                      <span className="sr-only">{h.tone === "ok" ? "Në rregull: " : "Kontrollojeni: "}</span>
+                      <span className="sr-only">{h.tone === "ok" ? "Në rregull: " : "Kontrolloje: "}</span>
                       {h.text}
                     </span>
                   </li>
@@ -403,7 +403,7 @@ export function EbookPreview({
                       ? "Bëhet fillim kapitulli"
                       : action === "notChapter"
                         ? "Nuk është më kapitull"
-                        : "Hiqet ndarja e skenës";
+                        : "Ndarja e skenës hiqet";
                   return (
                     <li key={`${c.kind}:${c.paragraph}`} className="rounded-[4px] border border-[#c9c0ae] bg-surface p-2">
                       <p>
@@ -428,7 +428,7 @@ export function EbookPreview({
             <section>
               <h3 className="mb-1 font-semibold">Kontrolloni këto</h3>
               <p className="mb-2 text-xs text-muted">
-                Këto i vendosi Librum vetë. Ato me shenjën “I pasigurt” kontrollojini me kujdes.
+                Librum i vendosi vetë këto. Kontrolloji me kujdes ato me shenjën “I pasigurt”.
               </p>
               <ul className="flex flex-col gap-2">
                 {guesses.slice(0, listLimit).map((g) => (
@@ -478,17 +478,17 @@ export function EbookPreview({
           </div>
           {marked && (
             <p className="border-b border-[#c9c0ae] bg-surface px-4 py-2 text-xs text-muted">
-              Prekni një rresht për ta bërë fillim kapitulli, ose një titull kapitulli a një ndarje skene për ta hequr.
+              Zgjidhni një rresht për ta bërë fillim kapitulli, ose një titull kapitulli a një ndarje skene për ta hequr.
             </p>
           )}
           <div ref={readerRef} className="min-h-0 flex-1 overflow-y-auto bg-white" onClick={onReaderClick}>
             {loadError ? (
               <p role="alert" className="p-4 text-sm text-red-800">
-                Pamja paraprake nuk u hap dot. Mbyllni dhe provoni përsëri.
+                Pamja paraprake nuk u hap dot. Mbylleni dhe provoni sërish.
               </p>
             ) : !book ? (
               <p role="status" className="p-4 text-sm text-muted">
-                Po hapet e-libri…
+                E-libri po hapet…
               </p>
             ) : (
               <div className={SCOPE_CLASS} lang="sq">
@@ -503,7 +503,7 @@ export function EbookPreview({
               disabled={chapter === 0}
               onClick={() => setChapter((c) => Math.max(0, c - 1))}
             >
-              ‹ I mëparshmi
+              ‹ Kapitulli i mëparshëm
             </button>
             <button
               type="button"
@@ -511,7 +511,7 @@ export function EbookPreview({
               disabled={chapter >= build.chapters.length - 1}
               onClick={() => setChapter((c) => Math.min(build.chapters.length - 1, c + 1))}
             >
-              I radhës ›
+              Kapitulli tjetër ›
             </button>
           </div>
         </main>
@@ -531,7 +531,7 @@ export function EbookPreview({
                 onClick={() => doTap(selected)}
               >
                 {selected.action === "makeChapter"
-                  ? "Bëje fillim kapitulli"
+                  ? "Bëje kapitull"
                   : selected.action === "notChapter"
                     ? "Ky nuk është kapitull"
                     : "Hiqe këtë ndarje skene"}
@@ -551,10 +551,10 @@ export function EbookPreview({
       <footer className="flex flex-col gap-2 border-t border-[#c9c0ae] bg-surface px-4 py-3 text-sm sm:flex-row sm:items-center">
         <div className="flex-1" role="status">
           {applying
-            ? "Po rindërtohet e-libri me ndryshimet tuaja…"
+            ? "E-libri po rindërtohet me ndryshimet tuaja…"
             : pending > 0
               ? `${pending} ndryshim${pending === 1 ? "" : "e"} ende pa u aplikuar.`
-              : "E-libri që shihni është ai që do të dërgohet."}
+              : "E-libri që shihni është varianti që do të dërgohet për shqyrtim."}
           {applyError && (
             <p role="alert" className="mt-1 text-red-800">
               {applyError}
@@ -631,7 +631,7 @@ function GuessRow({
         )}
         {canShow && (
           <button type="button" className="min-h-11 text-primary underline" onClick={onShow}>
-            Shiko në libër
+            Shfaq në libër
           </button>
         )}
       </div>
