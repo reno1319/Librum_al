@@ -13,6 +13,7 @@ import {
 import { ENDNOTES_HEADING, extractNotes, renderNotes, takeHeadingNotes } from "@/lib/docx-notes";
 import { findMissingLetters, fixBrokenLetters } from "@/lib/docx-letters";
 import { chapterFilename } from "@/lib/epub-generator";
+import { findOutsideMentions, outsideMentionMessages } from "@/lib/outside-mentions";
 
 // LIBRUM 2.0 PRODUCT-5: DOCX -> a small, safe, deterministic internal
 // document model, entirely separate from EPUB packaging itself (see
@@ -77,7 +78,11 @@ export type ConversionWarning = {
     | "too_many_images"
     | "unsupported_element_skipped"
     | "unsafe_link_removed"
-    | "tracked_changes_accepted";
+    | "tracked_changes_accepted"
+    // BD3 patch 2 (answer 3a): another store, or an email/phone, left in
+    // the book. Warned only; the reviewer clears it (patch 3).
+    | "other_store_mentioned"
+    | "contact_details_in_book";
   message: string;
 };
 
@@ -983,6 +988,19 @@ export async function convertDocxToDocument(
       message: "Një ose më shumë lidhje kishin adresë të papranuar dhe u hoqën.",
     });
   }
+
+  // BD3 patch 2 (answer 3a): what is left in the book after the
+  // copyright page went. Text only (tags turned into spaces), the
+  // chapter titles and link addresses included.
+  const bookText = finalSections
+    .map((s) => {
+      const hrefs = [...s.html.matchAll(/\bhref="([^"]*)"/g)].map((m) => decodeEntities(m[1]).replace(/^mailto:/i, ""));
+      return `${s.heading ?? ""} ${headingHtmlToText(s.html.replace(/<[^>]*>/g, " "))} ${hrefs.join(" ")}`;
+    })
+    .join("\n");
+  const outside = outsideMentionMessages(findOutsideMentions(bookText));
+  if (outside.store) warnings.push({ code: "other_store_mentioned", message: outside.store });
+  if (outside.contact) warnings.push({ code: "contact_details_in_book", message: outside.contact });
 
   return { success: true, sections: finalSections, images, warnings, cleanup, ...(preview ? { preview } : {}) };
 }

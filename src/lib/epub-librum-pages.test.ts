@@ -10,6 +10,9 @@ import {
   PERSONAL_USE_LINE,
   purchaseCode,
   REVIEW_LINE,
+  THANKS_LINE,
+  frontPageXhtml,
+  lastPageXhtml,
   type LibrumFrontPage,
   type LibrumLastPage,
 } from "./epub-librum-pages";
@@ -165,6 +168,20 @@ describe("last page (5a)", () => {
     expect(html).not.toContain("Libra të tjerë");
     expect(html).not.toContain("<ul>");
     expect(html).toContain(REVIEW_LINE);
+  });
+
+  it("opens with the thank-you line, also when there is no other book (patch 2)", () => {
+    expect(lastPageBody(LAST).startsWith(`<h1 class="thanks">${THANKS_LINE}</h1>`)).toBe(true);
+    expect(lastPageBody({ ...LAST, books: [] }).startsWith(`<h1 class="thanks">${THANKS_LINE}</h1>`)).toBe(true);
+    expect(THANKS_LINE).toBe("Faleminderit që lexuat!");
+  });
+
+  it("every element says centered and no word-splitting itself (Apple Books test, patch 2)", () => {
+    for (const page of [frontPageXhtml(FRONT, false), frontPageXhtml(FRONT, true), lastPageXhtml(LAST, false), lastPageXhtml(LAST, true)]) {
+      expect(page).toContain("body,h1,h2,p,ul,li{text-align:center !important;");
+      expect(page).toContain("hyphens:none !important");
+      expect(page).toContain("adobe-hyphenate:none");
+    }
   });
 
   it("never more than 5 books", () => {

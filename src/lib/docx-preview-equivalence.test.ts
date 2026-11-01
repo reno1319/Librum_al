@@ -43,3 +43,4 @@ vi.mock("./docx-converter", async (importOriginal) => {
 
 await import("./docx-cleanup.test");
 await import("./docx-converter.test");
+await import("./docx-front-matter.test");

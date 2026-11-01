@@ -50,6 +50,8 @@ export const PERSONAL_USE_LINE =
   "Ky libër elektronik është vetëm për përdorimin tuaj personal. Nuk lejohet kopjimi, shpërndarja ose shitja e tij, plotësisht ose pjesërisht, pa lejen me shkrim të autorit.";
 export const MORE_BOOKS_HEADING = "Libra të tjerë nga";
 export const REVIEW_LINE = "Ju pëlqeu libri? Lini një vlerësim në Librum.";
+// BD3 patch 2 (Renato 1 Nov, a): the last page opens with a thank-you.
+export const THANKS_LINE = "Faleminderit që lexuat!";
 
 const XML_ESCAPE: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 function esc(text: string): string {
@@ -65,8 +67,14 @@ function line(text: string, cls?: string): string {
   return `<p${cls ? ` class="${cls}"` : ""}>${esc(clean(text))}</p>`;
 }
 
+// BD3 patch 2 (Renato's Apple Books test, 1 Nov): readers apply their
+// own styles to headings (Apple Books left-aligns h1/h2) and split words
+// with English rules ("rez-ervuara"), so every element says centered
+// and no word-splitting itself instead of inheriting it from body.
 const STYLE = `body{margin:0;padding:0 1em;text-align:center;font-family:serif;line-height:1.5}
+body,h1,h2,p,ul,li{text-align:center !important;-webkit-hyphens:none !important;-epub-hyphens:none;-moz-hyphens:none;hyphens:none !important;adobe-hyphenate:none}
 h1{font-size:1.6em;margin:2.5em 0 .3em;font-weight:bold}
+h1.thanks{font-size:1.4em;margin:2em 0 1.5em}
 h2{font-size:1.25em;margin:2em 0 .8em}
 p{margin:.35em 0;text-indent:0}
 .sub{font-style:italic}
@@ -127,7 +135,7 @@ export function frontPageBody(p: LibrumFrontPage): string {
 }
 
 export function lastPageBody(p: LibrumLastPage): string {
-  const out: string[] = [];
+  const out: string[] = [`<h1 class="thanks">${esc(THANKS_LINE)}</h1>`];
   const books = p.books.slice(0, MAX_MORE_BOOKS);
   if (books.length > 0) {
     out.push(`<h2>${esc(`${MORE_BOOKS_HEADING} ${clean(p.penName)}`)}</h2>`);
