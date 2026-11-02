@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 226 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 222 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -19,7 +19,9 @@
 --   and wishlist_items (migration 20261024200000), plus HOME-PICKS-1's
 --   three home_featured_slots and three public_home_featured_slots rows
 --   (migration 20261025100000), plus DISCOUNT-LIMIT-1's INSERT on
---   discount_codes.max_uses (migration 20261027120000). A relation with no
+--   discount_codes.max_uses (migration 20261027120000), and with BD13's
+--   reviews narrowed to SELECT for authenticated (its INSERT and four
+--   column UPDATE rows removed; migration 20261102120000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -109,10 +111,6 @@ insert into grant_contract_expected (kind, line) values
 ('col','pen_names.name | authenticated | UPDATE'),
 ('col','profiles.display_name | authenticated | UPDATE'),
 ('col','profiles.public_author_name | authenticated | UPDATE'),
-('col','reviews.body | authenticated | UPDATE'),
-('col','reviews.book_id | authenticated | UPDATE'),
-('col','reviews.rating | authenticated | UPDATE'),
-('col','reviews.reader_id | authenticated | UPDATE'),
 ('col','series.author_id | authenticated | INSERT'),
 ('col','series.pen_name_id | authenticated | INSERT'),
 ('col','series.title | authenticated | INSERT'),
@@ -234,7 +232,7 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r refund_requests | authenticated | SELECT'),
 ('rel','r refund_requests | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
 ('rel','r reviews | anon | -'),
-('rel','r reviews | authenticated | INSERT,SELECT'),
+('rel','r reviews | authenticated | SELECT'),
 ('rel','r reviews | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
 ('rel','r series | anon | -'),
 ('rel','r series | authenticated | DELETE,SELECT'),
@@ -306,8 +304,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 226 then
-    raise exception 'FAIL: part1: the snapshot must hold 226 rows, holds %', v_expected;
+  if v_expected <> 222 then
+    raise exception 'FAIL: part1: the snapshot must hold 222 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

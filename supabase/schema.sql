@@ -52,7 +52,17 @@ create table public.profiles (
     check (role <> 'author' or public_author_name is not null),
   stripe_account_id text,
   stripe_payouts_enabled boolean not null default false,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- BD13 (migration 20261102120000): the public name on this account's
+  -- reviews, chosen on the first review (submit_reader_review()); only
+  -- staff change or clear it afterwards (staff_set_review_name(), a
+  -- 'bad_name' rejection). Declared last, as the migration adds it.
+  review_name text
+    constraint profiles_review_name_check
+    check (review_name is null
+           or (char_length(review_name) between 2 and 40
+               and review_name = btrim(review_name)
+               and review_name !~ '[[:cntrl:]]'))
 );
 
 alter table public.profiles enable row level security;
@@ -175,8 +185,9 @@ grant update (display_name, public_author_name)
 
 -- PEN-NAMES-2 (migration 20261019222600, C5): the public_author_profiles
 -- view (migrations 045, 20261019154308) is gone. Readers see an author
--- only as a pen name, through public.public_pen_names; a reviewer who is
--- an author shows their default pen name through public.public_reviews.
+-- only as a pen name, through public.public_pen_names. (Until BD13 a
+-- reviewer who is an author showed their default pen name through
+-- public.public_reviews; BD13 replaced that with the chosen review name.)
 
 -- ============================================================
 -- staff_members: ADMIN-1A's staff/RBAC foundation, replacing binary
@@ -2991,7 +3002,34 @@ create table public.reviews (
   rating integer not null check (rating between 1 and 5),
   body text not null default '',
   created_at timestamptz not null default now(),
-  unique (book_id, reader_id)
+  unique (book_id, reader_id),
+  -- BD13 (migration 20261102120000): staff approve every review before
+  -- it appears; a rejection carries a reason from a fixed list and an
+  -- optional note ('other' requires it). Declared last, as the
+  -- migration adds them; rows from before BD13 were kept 'approved'.
+  status text not null default 'pending'
+    constraint reviews_status_check
+    check (status in ('pending', 'approved', 'rejected')),
+  rejection_reason text
+    constraint reviews_rejection_reason_check
+    check (rejection_reason is null
+           or rejection_reason in ('abusive', 'personal_data', 'off_topic',
+                                   'advertising', 'bad_name', 'other')),
+  rejection_note text
+    constraint reviews_rejection_note_check
+    check (rejection_note is null
+           or (char_length(rejection_note) between 1 and 500
+               and rejection_note = btrim(rejection_note))),
+  updated_at timestamptz not null default now(),
+  -- BD13: the "Autor në Librum" tag, frozen by
+  -- staff_approve_reader_review() from profiles.role (audit r3 F1).
+  reviewer_is_author boolean not null default false,
+  -- A reason exactly when rejected; a note only with a reason, and
+  -- always with 'other'.
+  constraint reviews_rejection_consistent_check
+    check ((status = 'rejected') = (rejection_reason is not null)
+           and (rejection_note is null or rejection_reason is not null)
+           and (rejection_reason is distinct from 'other' or rejection_note is not null))
 );
 
 alter table public.reviews enable row level security;
@@ -3042,19 +3080,24 @@ create policy "Readers can update their own review"
 
 create index reviews_book_id_idx on public.reviews(book_id);
 
+-- BD13 (migration 20261102120000): the staff queue.
+create index reviews_pending_idx
+  on public.reviews (updated_at)
+  where status = 'pending';
+
 -- PEN-NAMES-2 (C3, O7): reset-and-regrant to what submitReview's upsert
 -- needs (SELECT for ON CONFLICT). The app has no review delete, so the
 -- delete policy is gone and no DELETE is granted; account deletion still
 -- cascades through the foreign key.
 revoke all on public.reviews from public, anon, authenticated;
-grant select, insert on public.reviews to authenticated;
-grant update (book_id, reader_id, rating, body)
-  on public.reviews
-  to authenticated;
+-- BD13 (migration 20261102120000): readers write only through
+-- submit_reader_review(), so INSERT and UPDATE are no longer granted;
+-- the two write policies above guard nothing since then.
+grant select on public.reviews to authenticated;
 
--- No reader_id. reviewer_name is the reviewer's default pen name when
--- the reviewer is an author with at least one book (today's
--- public_author_profiles rule, 20261019154308; 22a), else null.
+-- No reader_id. Until BD13, reviewer_name was the reviewer's default pen
+-- name when the reviewer was an author with at least one book (22a).
+-- BD13 (end of this file) replaces it with the chosen review name only.
 -- PEOPLE-1 restates this view near the end of this file (a suspended
 -- account is hidden); account_suspensions is defined there.
 create view public.public_reviews
@@ -14502,14 +14545,23 @@ create or replace view public.public_reviews
   with (security_barrier)
 as
   select r.id, r.book_id, r.rating, r.body, r.created_at,
-         (select pn.name
-            from public.profiles p
-            join public.pen_names pn on pn.author_id = p.id and pn.is_default
-           where p.id = r.reader_id
-             and p.role = 'author'
-             and exists (select 1 from public.books b where b.author_id = p.id)) as reviewer_name
+         (select p.review_name from public.profiles p where p.id = r.reader_id) as reviewer_name,
+         exists (
+           select 1 from public.purchases pu
+            where pu.book_id = r.book_id
+              and pu.reader_id = r.reader_id
+              and pu.refunded_at is null
+              and pu.amount_cents > 0
+              and not exists (
+                select 1 from public.payment_disputes d
+                 where d.stripe_payment_intent_id = pu.stripe_payment_intent_id
+                   and d.status = 'lost'
+              )
+         ) as verified,
+         r.reviewer_is_author
   from public.reviews r
-  where exists (select 1 from public.public_books pb where pb.id = r.book_id)
+  where r.status = 'approved'
+    and exists (select 1 from public.public_books pb where pb.id = r.book_id)
     and not exists (
       select 1 from public.account_suspensions sus
        where sus.user_id = r.reader_id and sus.lifted_at is null
@@ -15025,3 +15077,350 @@ revoke all on function public.set_home_featured_slot(smallint, uuid, boolean, uu
 revoke all on function public.clear_home_featured_slot(smallint) from public, anon, authenticated, service_role;
 grant execute on function public.set_home_featured_slot(smallint, uuid, boolean, uuid) to service_role;
 grant execute on function public.clear_home_featured_slot(smallint) to service_role;
+
+-- ============================================================
+-- BD13 (migration 20261102120000_bd13_reader_reviews.sql): reader
+-- reviews get a public display name, staff approval before they appear
+-- and a verified-purchase badge. See the migration for the full
+-- reasoning and Renato's answers; supabase/tests/088_bd13_reader_reviews
+-- pins the behaviour and 088_bd13_reader_reviews_catalog_equivalence.sh
+-- that this section and the migration build the same database. The
+-- columns, index, grants and public_reviews are restated in place above.
+-- ============================================================
+
+-- Returns one word the app turns into a message:
+--   'pending'      saved, waiting for staff
+--   'unchanged'    identical to the approved review; nothing changed
+--   'not_owner'    the caller does not own the book
+--   'own_book'     the caller is the book's author
+--   'bad_rating'   not 1..5
+--   'too_long'     text over 4,000 characters
+--   'name_required' no name on the account and none given
+--   'bad_name'     the given name breaks the rules (2..40, no control
+--                  characters) after trimming
+create function public.submit_reader_review(
+  p_book_id uuid,
+  p_rating integer,
+  p_body text,
+  p_review_name text
+)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_body text := pg_catalog.btrim(coalesce(p_body, ''));
+  v_name text;
+  v_given text := pg_catalog.btrim(coalesce(p_review_name, ''));
+  v_existing public.reviews%rowtype;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if p_rating is null or p_rating < 1 or p_rating > 5 then
+    return 'bad_rating';
+  end if;
+
+  if pg_catalog.char_length(v_body) > 4000 then
+    return 'too_long';
+  end if;
+
+  if exists (select 1 from public.books b where b.id = p_book_id and b.author_id = v_uid) then
+    return 'own_book';
+  end if;
+
+  if not public.user_owns_book(p_book_id) then
+    return 'not_owner';
+  end if;
+
+  select * into v_existing
+    from public.reviews
+   where book_id = p_book_id and reader_id = v_uid
+     for update;
+
+  -- An identical resubmission of an approved review is a no-op, even
+  -- for a review kept from before BD13 whose account has no name yet.
+  if found
+     and v_existing.status = 'approved'
+     and v_existing.rating = p_rating
+     and v_existing.body = v_body then
+    return 'unchanged';
+  end if;
+
+  select review_name into v_name from public.profiles where id = v_uid for update;
+  if not found then
+    raise exception 'no profile for this account';
+  end if;
+
+  if v_name is null then
+    if v_given = '' then
+      return 'name_required';
+    end if;
+    if pg_catalog.char_length(v_given) < 2
+       or pg_catalog.char_length(v_given) > 40
+       or v_given ~ '[[:cntrl:]]' then
+      return 'bad_name';
+    end if;
+    update public.profiles set review_name = v_given where id = v_uid;
+  end if;
+
+  if v_existing.id is not null then
+    update public.reviews
+       set rating = p_rating,
+           body = v_body,
+           status = 'pending',
+           rejection_reason = null,
+           rejection_note = null,
+           updated_at = now()
+     where id = v_existing.id;
+  else
+    insert into public.reviews (book_id, reader_id, rating, body, status, updated_at)
+    values (p_book_id, v_uid, p_rating, v_body, 'pending', now());
+  end if;
+
+  return 'pending';
+end;
+$$;
+
+revoke all on function public.submit_reader_review(uuid, integer, text, text) from public, anon, authenticated, service_role;
+grant execute on function public.submit_reader_review(uuid, integer, text, text) to authenticated;
+
+-- ------------------------------------------------------------
+-- 5. Staff: the queue, approve, reject, set or clear a name
+-- ------------------------------------------------------------
+-- Each checks staff_has_permission('reports.resolve') (owner, admin,
+-- moderator) and writes admin_audit_log, like
+-- staff_remove_pen_name_links(). Approve and reject take the
+-- updated_at the staff member saw, so a review the reader changed in
+-- the meantime is never decided unseen ('changed').
+
+create function public.staff_list_pending_reader_reviews()
+returns table (
+  review_id uuid,
+  book_id uuid,
+  book_title text,
+  reader_id uuid,
+  rating integer,
+  body text,
+  review_name text,
+  updated_at timestamptz,
+  account_created_at timestamptz,
+  email_confirmed boolean,
+  reviews_total bigint,
+  reviews_approved bigint,
+  verified boolean,
+  reviewer_is_author boolean
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('reports.resolve') then
+    raise exception 'not authorized';
+  end if;
+
+  return query
+    select r.id, r.book_id, b.title, r.reader_id, r.rating, r.body,
+           p.review_name, r.updated_at, p.created_at,
+           u.email_confirmed_at is not null,
+           (select count(*) from public.reviews r2 where r2.reader_id = r.reader_id),
+           (select count(*) from public.reviews r2
+             where r2.reader_id = r.reader_id and r2.status = 'approved'),
+           exists (
+             select 1 from public.purchases pu
+              where pu.book_id = r.book_id
+                and pu.reader_id = r.reader_id
+                and pu.refunded_at is null
+                and pu.amount_cents > 0
+                and not public.payment_intent_has_lost_dispute(pu.stripe_payment_intent_id)
+           ),
+           exists (select 1 from public.books b2 where b2.author_id = r.reader_id)
+      from public.reviews r
+      join public.books b on b.id = r.book_id
+      join public.profiles p on p.id = r.reader_id
+      left join auth.users u on u.id = r.reader_id
+     where r.status = 'pending'
+     order by r.updated_at asc, r.id asc;
+end;
+$$;
+
+create function public.staff_approve_reader_review(
+  p_review_id uuid,
+  p_seen_updated_at timestamptz
+)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := auth.uid();
+  v_row public.reviews%rowtype;
+begin
+  if v_actor is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('reports.resolve') then
+    raise exception 'not authorized';
+  end if;
+
+  select * into v_row from public.reviews where id = p_review_id for update;
+  if not found then
+    return 'not_found';
+  end if;
+  -- Staff never decide their own review (audit r1 S3).
+  if v_row.reader_id = v_actor then
+    return 'own_review';
+  end if;
+  if v_row.status <> 'pending' or v_row.updated_at is distinct from p_seen_updated_at then
+    return 'changed';
+  end if;
+
+  update public.reviews
+     set status = 'approved', rejection_reason = null, rejection_note = null,
+         -- Frozen now, never recomputed (audit r3 F1).
+         reviewer_is_author = coalesce(
+           (select p.role = 'author' from public.profiles p where p.id = v_row.reader_id),
+           false)
+   where id = p_review_id;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor, 'review.approved', 'reviews', p_review_id,
+          pg_catalog.jsonb_build_object('book_id', v_row.book_id, 'rating', v_row.rating));
+
+  return 'approved';
+end;
+$$;
+
+create function public.staff_reject_reader_review(
+  p_review_id uuid,
+  p_seen_updated_at timestamptz,
+  p_reason text,
+  p_note text
+)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := auth.uid();
+  v_row public.reviews%rowtype;
+  v_note text := nullif(pg_catalog.btrim(coalesce(p_note, '')), '');
+begin
+  if v_actor is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('reports.resolve') then
+    raise exception 'not authorized';
+  end if;
+
+  if p_reason is null
+     or p_reason not in ('abusive', 'personal_data', 'off_topic',
+                         'advertising', 'bad_name', 'other') then
+    return 'bad_reason';
+  end if;
+  if p_reason = 'other' and v_note is null then
+    return 'note_required';
+  end if;
+  if v_note is not null and pg_catalog.char_length(v_note) > 500 then
+    return 'note_too_long';
+  end if;
+
+  select * into v_row from public.reviews where id = p_review_id for update;
+  if not found then
+    return 'not_found';
+  end if;
+  -- Staff never decide their own review (audit r1 S3).
+  if v_row.reader_id = v_actor then
+    return 'own_review';
+  end if;
+  if v_row.status <> 'pending' or v_row.updated_at is distinct from p_seen_updated_at then
+    return 'changed';
+  end if;
+
+  update public.reviews
+     set status = 'rejected', rejection_reason = p_reason, rejection_note = v_note
+   where id = p_review_id;
+
+  -- An unsuitable name is cleared, so the reader chooses a new one when
+  -- they send the review again (Q2a: readers cannot change it otherwise).
+  if p_reason = 'bad_name' then
+    update public.profiles set review_name = null where id = v_row.reader_id;
+  end if;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor, 'review.rejected', 'reviews', p_review_id,
+          pg_catalog.jsonb_build_object('book_id', v_row.book_id, 'reason', p_reason));
+
+  return 'rejected';
+end;
+$$;
+
+-- Staff change or clear a reader's public name (Q2a: the reader asks
+-- support). Owner and admin only: it needs people.view (the People page
+-- it lives on) as well as reports.resolve (audit r1 S4). A null or
+-- empty p_name clears it. The person's approved
+-- reviews show the new name at once; a cleared name makes them show
+-- "Një lexues i Librum" until the reader reviews again.
+create function public.staff_set_review_name(
+  p_user_id uuid,
+  p_name text
+)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := auth.uid();
+  v_name text := nullif(pg_catalog.btrim(coalesce(p_name, '')), '');
+  v_old text;
+begin
+  if v_actor is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('reports.resolve')
+     or not public.staff_has_permission('people.view') then
+    raise exception 'not authorized';
+  end if;
+
+  if v_name is not null
+     and (pg_catalog.char_length(v_name) < 2
+          or pg_catalog.char_length(v_name) > 40
+          or v_name ~ '[[:cntrl:]]') then
+    return 'bad_name';
+  end if;
+
+  select review_name into v_old from public.profiles where id = p_user_id for update;
+  if not found then
+    return 'not_found';
+  end if;
+
+  update public.profiles set review_name = v_name where id = p_user_id;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor, case when v_name is null then 'review_name.cleared' else 'review_name.changed' end,
+          'profiles', p_user_id,
+          pg_catalog.jsonb_build_object('old_name', v_old, 'new_name', v_name));
+
+  return 'saved';
+end;
+$$;
+
+revoke all on function public.staff_list_pending_reader_reviews() from public, anon, authenticated, service_role;
+revoke all on function public.staff_approve_reader_review(uuid, timestamptz) from public, anon, authenticated, service_role;
+revoke all on function public.staff_reject_reader_review(uuid, timestamptz, text, text) from public, anon, authenticated, service_role;
+revoke all on function public.staff_set_review_name(uuid, text) from public, anon, authenticated, service_role;
+grant execute on function public.staff_list_pending_reader_reviews() to authenticated;
+grant execute on function public.staff_approve_reader_review(uuid, timestamptz) to authenticated;
+grant execute on function public.staff_reject_reader_review(uuid, timestamptz, text, text) to authenticated;
+grant execute on function public.staff_set_review_name(uuid, text) to authenticated;

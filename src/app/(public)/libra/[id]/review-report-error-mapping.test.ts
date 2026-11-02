@@ -17,16 +17,17 @@ const mockRedirect = vi.fn((url: string) => {
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 
 const mockGetUser = vi.fn();
-const mockOwnsBookRpc = vi.fn();
+// BD13: the review is saved through submit_reader_review().
+const mockSubmitReviewRpc = vi.fn();
 const mockUpsertReview = vi.fn();
 const mockInsertReport = vi.fn();
 
 const mockCreateClient = vi.fn(() =>
   Promise.resolve({
     auth: { getUser: mockGetUser },
-    rpc: (fn: string) => {
-      if (fn !== "user_owns_book") throw new Error(`unexpected rpc in this focused test: ${fn}`);
-      return mockOwnsBookRpc();
+    rpc: (fn: string, args: unknown) => {
+      if (fn !== "submit_reader_review") throw new Error(`unexpected rpc in this focused test: ${fn}`);
+      return mockSubmitReviewRpc(args);
     },
     from: (table: string) => {
       if (table === "reviews") {
@@ -40,6 +41,7 @@ const mockCreateClient = vi.fn(() =>
   }),
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 // ADMIN-ALERTS-1: the staff email after a saved report.
 const mockReportedStaffEmail = vi.fn(async (_args: unknown) => {
@@ -55,7 +57,7 @@ describe("submitReview: ERR-2 error-message mapping", () => {
   beforeEach(() => {
     mockRedirect.mockClear();
     mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: "reader-1" } } });
-    mockOwnsBookRpc.mockReset().mockResolvedValue({ data: true });
+    mockSubmitReviewRpc.mockReset();
     mockUpsertReview.mockReset();
   });
 
@@ -63,7 +65,8 @@ describe("submitReview: ERR-2 error-message mapping", () => {
     const formData = new FormData();
     formData.set("rating", "5");
     formData.set("body", "Loved it");
-    mockUpsertReview.mockResolvedValue({
+    mockSubmitReviewRpc.mockResolvedValue({
+      data: null,
       error: { message: 'new row violates row-level security policy for table "reviews"' },
     });
 
@@ -86,7 +89,51 @@ describe("submitReview: ERR-2 error-message mapping", () => {
     expect(mockRedirect).toHaveBeenCalledWith(
       expect.stringContaining("error=Zgjidhni%20yjet."),
     );
+    expect(mockSubmitReviewRpc).not.toHaveBeenCalled();
+  });
+
+  // BD13: the function's one-word answers.
+  it("sends the trimmed name, text and rating to submit_reader_review, never a direct write", async () => {
+    const formData = new FormData();
+    formData.set("rating", "4");
+    formData.set("body", "  E bukur  ");
+    formData.set("review_name", "  Lexuesi  ");
+    mockSubmitReviewRpc.mockResolvedValue({ data: "pending", error: null });
+
+    await expect(submitReview("book-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockSubmitReviewRpc).toHaveBeenCalledWith({
+      p_book_id: "book-1",
+      p_rating: 4,
+      p_body: "E bukur",
+      p_review_name: "Lexuesi",
+    });
     expect(mockUpsertReview).not.toHaveBeenCalled();
+    expect(mockRedirect).toHaveBeenCalledWith("/libra/book-1?review=pending#vleresimet");
+  });
+
+  it("an identical resubmission says unchanged", async () => {
+    const formData = new FormData();
+    formData.set("rating", "4");
+    mockSubmitReviewRpc.mockResolvedValue({ data: "unchanged", error: null });
+    await expect(submitReview("book-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith("/libra/book-1?review=unchanged#vleresimet");
+  });
+
+  it.each([
+    ["not_owner", "Blini këtë libër për ta vlerësuar."],
+    ["own_book", "Nuk mund ta vlerësoni librin tuaj."],
+    ["bad_rating", "Zgjidhni yjet."],
+    ["too_long", "Komenti mund të ketë deri në 4.000 karaktere."],
+    ["name_required", "Shkruani emrin që do të shfaqet te vlerësimi."],
+    ["bad_name", "Emri duhet të ketë nga 2 deri në 40 karaktere."],
+    ["something_new", "Nuk e ruajtëm dot vlerësimin tuaj. Provoni përsëri."],
+  ])("maps %s to its Albanian message", async (result, message) => {
+    const formData = new FormData();
+    formData.set("rating", "4");
+    mockSubmitReviewRpc.mockResolvedValue({ data: result, error: null });
+    await expect(submitReview("book-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(`/libra/book-1?error=${encodeURIComponent(message)}`);
   });
 });
 

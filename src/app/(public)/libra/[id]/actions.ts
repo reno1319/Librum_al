@@ -2,6 +2,7 @@
 
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
+import { submitReviewOutcome } from "@/lib/reader-reviews";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -735,48 +736,43 @@ export async function submitReview(bookId: string, formData: FormData) {
 
   const rating = Number(formData.get("rating"));
   const body = String(formData.get("body") ?? "").trim();
+  const reviewName = String(formData.get("review_name") ?? "").trim();
 
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     redirect(`/libra/${bookId}?error=${encodeURIComponent("Zgjidhni yjet.")}`);
   }
 
-  // LAUNCH-1 P1-7A: routed through user_owns_book() (also excludes a
-  // purchase whose payment intent has a dispute at status 'lost', see
-  // migration 035) rather than a raw purchases select -- public.
-  // payment_disputes is fully closed to this request-scoped client, and
-  // this SECURITY DEFINER RPC already encapsulates the complete,
-  // correct ownership predicate.
-  const { data: ownsBook } = await supabase.rpc("user_owns_book", {
-    target_book_id: bookId,
+  // BD13: one call does it all. submit_reader_review() checks ownership
+  // with user_owns_book() (also excluding a lost dispute and a refund,
+  // as before), refuses the book's own author, sets the account's public
+  // name on the first review (Q2a: only staff change it afterwards) and
+  // saves the review as 'pending' for staff (3a, Q1a: an edit too). An
+  // identical resubmission of an approved review changes nothing.
+  // Readers hold no INSERT or UPDATE on reviews any more.
+  const { data, error } = await supabase.rpc("submit_reader_review", {
+    p_book_id: bookId,
+    p_rating: rating,
+    p_body: body,
+    p_review_name: reviewName,
   });
 
-  if (!ownsBook) {
-    redirect(`/libra/${bookId}?error=${encodeURIComponent("Blini këtë libër për ta vlerësuar.")}`);
-  }
-
-  // Resubmitting overwrites the reader's existing review for this book,
-  // thanks to the unique(book_id, reader_id) constraint — no separate
-  // "edit" flow needed.
-  const { error } = await supabase
-    .from("reviews")
-    .upsert(
-      { book_id: bookId, reader_id: user.id, rating, body },
-      { onConflict: "book_id,reader_id" },
-    );
-
   if (error) {
-    // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: was error.message -- the raw
-    // Postgres/PostgREST error passed straight through to the URL and
-    // rendered verbatim (e.g. an RLS rejection or constraint violation
-    // in developer-facing English). Every OTHER redirect in this
-    // function uses a Librum-authored string; this is the one that
-    // didn't.
+    // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: never the raw database message.
+    console.error("submitReview: submit_reader_review failed:", error.code);
     redirect(
       `/libra/${bookId}?error=${encodeURIComponent("Nuk e ruajtëm dot vlerësimin tuaj. Provoni përsëri.")}`,
     );
   }
 
-  redirect(`/libra/${bookId}?review=success`);
+  const outcome = submitReviewOutcome(data);
+  if (outcome.kind === "error") {
+    // Errors show in the page's error box at the top, as before.
+    redirect(`/libra/${bookId}?error=${encodeURIComponent(outcome.message)}`);
+  }
+
+  // The thank-you box sits in the reviews section, so jump there.
+  revalidatePath(`/libra/${bookId}`);
+  redirect(`/libra/${bookId}?review=${outcome.status}#vleresimet`);
 }
 
 export async function addToWishlist(bookId: string) {

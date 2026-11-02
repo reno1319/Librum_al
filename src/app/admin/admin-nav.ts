@@ -62,6 +62,11 @@ export type AdminNavItem = {
 // PEOPLE-1: People (every account, searchable, and each person's page)
 // added first in Team, gated by people.view -- the same permission
 // /admin/people and /admin/people/[id] require (owner and admin only).
+//
+// BD13: Reader reviews (the queue of reviews waiting for approval) added
+// in Daily, gated by reports.resolve -- the same permission
+// /admin/reader-reviews and its actions require (owner, admin,
+// moderator: Q3a).
 export type AdminNavGroup = {
   label: string;
   items: readonly AdminNavItem[];
@@ -72,6 +77,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
     label: "Daily",
     items: [
       { href: "/admin", label: "Today", permission: "admin.access" },
+      { href: "/admin/reader-reviews", label: "Reader reviews", permission: "reports.resolve" },
       { href: "/admin/reports", label: "Book reports", permission: "reports.view" },
       { href: "/admin/refunds", label: "Refund requests", permission: "refunds.view" },
     ],

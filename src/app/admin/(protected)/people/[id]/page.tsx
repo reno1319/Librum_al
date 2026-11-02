@@ -26,6 +26,8 @@ import {
 } from "../people-logic";
 import { accessFixNeeded, type AccessFix } from "../suspension-logic";
 import { liftSuspensionAsStaff, retryAccountAccessAsStaff, suspendAccountAsStaff } from "./actions";
+import { setReviewNameAsStaff } from "../../reader-reviews/actions";
+import { REVIEW_NAME_MAX } from "@/lib/reader-reviews";
 import { SuspensionPanel } from "./suspension-panel";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
@@ -57,6 +59,9 @@ export const dynamic = "force-dynamic";
 // states() is service-role only and runs after the people.view gate; the
 // titles come from the same service-role client. There is no cancel
 // button: cancelling ships with the live POK build.
+// BD13 (Q2a): a Review name box -- the public name on this account's
+// reviews, which only staff change or clear once chosen. Read with the
+// service-role client after the people.view gate.
 
 type PenNameRow = { id: string; name: string; is_default: boolean };
 type BookRow = { id: string; title: string; status: string; pen: { name: string } | null };
@@ -139,7 +144,7 @@ export default async function AdminPersonPage({
   if (!person) notFound();
 
   const admin = createAdminClient();
-  const [pensResult, booksResult, suspensionsResult] = await Promise.all([
+  const [pensResult, booksResult, suspensionsResult, reviewNameResult] = await Promise.all([
     admin
       .from("pen_names")
       .select("id, name, is_default")
@@ -160,6 +165,7 @@ export default async function AdminPersonPage({
       .eq("user_id", id)
       .order("suspended_at", { ascending: false })
       .returns<SuspensionRow[]>(),
+    admin.from("profiles").select("review_name").eq("id", id).returns<{ review_name: string | null }[]>(),
   ]);
 
   const books = booksResult.data ?? [];
@@ -196,6 +202,7 @@ export default async function AdminPersonPage({
     pensResult.error ||
       booksResult.error ||
       suspensionsResult.error ||
+      reviewNameResult.error ||
       reviewsResult.error ||
       takedownsResult.error ||
       purchaseStates === null ||
@@ -206,6 +213,7 @@ export default async function AdminPersonPage({
       pens: pensResult.error,
       books: booksResult.error,
       suspensions: suspensionsResult.error,
+      reviewName: reviewNameResult.error,
       reviews: reviewsResult.error,
       takedowns: takedownsResult.error,
       purchases: purchaseStates === null,
@@ -218,6 +226,7 @@ export default async function AdminPersonPage({
   const staffName = (staffId: string | null) => (staffId ? (staffNames.get(staffId) ?? "A former staff member") : "A former staff member");
   const status = personStatusLabel(person);
   const pens = pensResult.data ?? [];
+  const reviewName = reviewNameResult.data?.[0]?.review_name ?? null;
 
   const facts: [string, string][] = [
     ["Email", person.email ?? "No email"],
@@ -293,6 +302,45 @@ export default async function AdminPersonPage({
           </ul>
         )}
       </section>
+
+      {!reviewNameResult.error && (
+        <section aria-labelledby="person-review-name" className={SECTION_CLASSES}>
+          <h2 id="person-review-name" className={SECTION_HEADING_CLASSES}>
+            Review name
+          </h2>
+          <p className="text-sm">
+            {reviewName ? (
+              <>
+                Shown on their reviews as <strong className="break-words">{reviewName}</strong>.
+              </>
+            ) : (
+              "Not chosen yet. They choose it on their first review."
+            )}
+          </p>
+          <p className="mt-1 text-sm text-muted">
+            The reader can&apos;t change it themselves; they write to support. Leave the box empty to clear it, and they
+            choose a new one on their next review.
+          </p>
+          <form action={setReviewNameAsStaff} className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+            <input type="hidden" name="user_id" value={id} />
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-semibold">
+              New review name
+              <input
+                name="review_name"
+                defaultValue={reviewName ?? ""}
+                maxLength={REVIEW_NAME_MAX}
+                className="min-h-11 rounded-control border border-control px-3 font-normal"
+              />
+            </label>
+            <button
+              type="submit"
+              className="focus-ring min-h-11 rounded-control bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
+            >
+              Save review name
+            </button>
+          </form>
+        </section>
+      )}
 
       <section aria-labelledby="person-books" className={SECTION_CLASSES}>
         <h2 id="person-books" className={SECTION_HEADING_CLASSES}>

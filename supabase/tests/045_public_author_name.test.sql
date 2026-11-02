@@ -316,9 +316,11 @@ end $$;
 
 -- Reviews used by the reviews-shaped checks below: the pseudonymous
 -- author reviews another author's book, and a plain reader does too.
-insert into public.reviews (book_id, reader_id, rating, body) values
-  ('b0000000-0000-0000-0000-000000000005', '11111111-1111-1111-1111-111111111111', 5, 'author as reader'),
-  ('b0000000-0000-0000-0000-000000000005', '66666666-6666-6666-6666-666666666666', 4, 'plain reader');
+-- BD13: inserted directly as approved (public_reviews shows approved
+-- reviews only; neither account has a review_name, so the old rule).
+insert into public.reviews (book_id, reader_id, rating, body, status) values
+  ('b0000000-0000-0000-0000-000000000005', '11111111-1111-1111-1111-111111111111', 5, 'author as reader', 'approved'),
+  ('b0000000-0000-0000-0000-000000000005', '66666666-6666-6666-6666-666666666666', 4, 'plain reader', 'approved');
 
 -- ANON: can read the pen name via the view, cannot read display_name at
 -- all (not merely "the row looks empty" -- the base table is
@@ -373,15 +375,16 @@ select pg_temp.assert(
 reset role;
 
 -- REVIEWS-SHAPED READ (PEN-NAMES-2): src/app/(public)/books/[id]/page.tsx
--- reads public_reviews.reviewer_name. A pseudonymous author reviewing
--- elsewhere as a reader must resolve to their PEN NAME, never their
--- private display_name; a plain reader-reviewer (no public surface)
--- must resolve to NULL, never their real name.
+-- reads public_reviews.reviewer_name. BD13 (1b, 2b; audit r1 R1): the
+-- name is only the review name the reviewer chose, so a pseudonymous
+-- author reviewing elsewhere as a reader with no chosen name resolves
+-- to NULL -- never their private display_name and never their pen
+-- name; a plain reader-reviewer must resolve to NULL too.
 set role anon;
 select pg_temp.assert(
-  (select reviewer_name from public.public_reviews
-    where book_id = 'b0000000-0000-0000-0000-000000000005' and body = 'author as reader') = 'Arben Leka',
-  'part5 (public_reviews): a pseudonymous author reviewing as a reader must resolve to their pen name, never their real name'
+  (select count(*) from public.public_reviews
+    where book_id = 'b0000000-0000-0000-0000-000000000005' and body = 'author as reader' and reviewer_name is null) = 1,
+  'part5 (public_reviews): an author reviewing as a reader with no chosen name resolves to NULL, never their real name or pen name (BD13)'
 );
 select pg_temp.assert(
   (select count(*) from public.public_reviews

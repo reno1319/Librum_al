@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import PrivacyPage, { metadata } from "./page";
 import { SELLER_PENDING_TEXT } from "@/lib/seller";
 import { POLICY_LAST_UPDATED_LINE, PRIVACY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
+import { AUTHOR_REVIEWER_LABEL } from "@/lib/reader-reviews";
 
 // POLICY PAGES (pipeline item 2): Law 124/2024 notice.
 const html = renderToStaticMarkup(PrivacyPage());
@@ -94,6 +95,16 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(text).toContain("nëse e jepni kopjen tuaj dikujt tjetër, ai e sheh emailin tuaj.");
   });
 
+  // BD13 (Renato 2 Nov, "c"): staff approval, the review name, and the
+  // public author tag, in the same words as the book page.
+  it("says reviews show after staff approval, with the review name, and names the author tag", () => {
+    expect(text).toContain(
+      "Vlerësimet tuaja shfaqen, pasi i miraton stafi, me emrin që zgjidhni për vlerësimet.",
+    );
+    expect(text).toContain(`Nëse keni llogari autori, pranë vlerësimit shfaqet \u201c${AUTHOR_REVIEWER_LABEL}\u201d.`);
+    expect(text).not.toContain("me emrin që shfaqni");
+  });
+
   // BD4 (Renato 1 Nov, 3. a): Privacy has its own date; Terms and
   // Refunds keep the shared one.
   it("takes its date from its own Privacy line, not the shared Terms/Refunds line", () => {
@@ -101,8 +112,8 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(source).toContain("{PRIVACY_LAST_UPDATED_LINE}");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
     expect(POLICY_LAST_UPDATED_LINE).toBe("Përditësuar më: 30 tetor 2026");
-    // BD7: the release day (Renato 1 Nov, card "b").
-    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 2 nëntor 2026");
+    // BD13: the release day of the review wording (3 November 2026).
+    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 3 nëntor 2026");
   });
 
   it("is a lawyer-review draft in the code only, with no blank slots", () => {

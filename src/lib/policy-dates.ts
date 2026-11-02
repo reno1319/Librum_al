@@ -15,7 +15,10 @@ export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATE
 // live on Production: the release that ships it sets the final value.
 // BD7 (Renato 1 Nov, card "b"): the release goes to Production on
 // Monday 2 November 2026; if it moves, this line moves with it.
-export const PRIVACY_LAST_UPDATED = "2 nëntor 2026";
+// BD13 (review wording, Renato 2 Nov): the BD13 release goes to
+// Production on Tuesday 3 November 2026; if it moves, this line moves
+// with it. Terms and Refunds keep their dates.
+export const PRIVACY_LAST_UPDATED = "3 nëntor 2026";
 
 export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDATED}`;
 

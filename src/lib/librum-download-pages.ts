@@ -170,7 +170,8 @@ export async function readLibrumPages(
     last: {
       penName,
       books: more.map((b) => ({ title: b.title, url: `${input.siteOrigin}/libra/${b.id}` })),
-      reviewUrl: `${input.siteOrigin}/libra/${book.id}`,
+      // BD13 (the BD4b follow-up): straight to the book page's reviews.
+      reviewUrl: `${input.siteOrigin}/libra/${book.id}#vleresimet`,
     },
   };
 }
