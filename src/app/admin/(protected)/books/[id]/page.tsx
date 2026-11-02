@@ -61,6 +61,9 @@ type AdminBook = {
   author_id: string;
   pen_name_id: string | null;
   pen: { name: string } | null;
+  // BD3 patch 4 (audit r1, M1): the "Autori origjinal", which readers
+  // see as the book's byline. null = none.
+  original_author: string | null;
 };
 
 type OpenReport = { id: string; reason: string; details: string; created_at: string };
@@ -83,6 +86,7 @@ type ReviewRow = {
   reason: string | null;
   file_path: string | null;
   cover_path: string | null;
+  original_author: string | null;
 };
 
 type ActiveTakedown = {
@@ -116,7 +120,7 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names(name)")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names(name), original_author")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();
@@ -154,7 +158,7 @@ export default async function AdminBookPage({
       .returns<{ bundle_id: string; bundles: { title: string; status: string } }[]>(),
     admin
       .from("book_reviews")
-      .select("id, status, grandfathered, buyer_file_only, submitted_at, decided_at, decided_by, reason, file_path, cover_path")
+      .select("id, status, grandfathered, buyer_file_only, submitted_at, decided_at, decided_by, reason, file_path, cover_path, original_author")
       .eq("book_id", book.id)
       .order("submitted_at", { ascending: false })
       .returns<ReviewRow[]>(),
@@ -181,11 +185,14 @@ export default async function AdminBookPage({
   const publishedBundleTitles = (bundlesResult.data ?? []).map((row) => row.bundles.title);
   const reviews = reviewsResult.data ?? [];
   const pendingReview = book.status === "draft" ? (reviews.find((r) => r.status === "pending") ?? null) : null;
-  // S6 / 6: the pending snapshot must still be the book's current files.
+  // S6 / 6: the pending snapshot must still be the book's current files
+  // -- and (BD3 patch 4, 2b) its current original author, which the
+  // approval binds to as well.
   const pendingIsCurrent =
     pendingReview !== null &&
     pendingReview.file_path === book.file_path &&
-    pendingReview.cover_path === book.cover_path;
+    pendingReview.cover_path === book.cover_path &&
+    (pendingReview.original_author ?? null) === (book.original_author ?? null);
   const deciderIds = Array.from(new Set(reviews.map((r) => r.decided_by).filter((v): v is string => !!v)));
   const decidersResult =
     deciderIds.length > 0
@@ -269,6 +276,14 @@ export default async function AdminBookPage({
             </p>
             {accountName && accountName !== publicName && (
               <p className="mt-0.5 text-sm text-muted">Account name: {accountName}</p>
+            )}
+            {/* BD3 patch 4 (audit r1, M1): readers see this name as the
+                book's author, on every card and in every download. */}
+            {book.original_author && (
+              <p className="mt-0.5 text-sm">
+                <span className="font-semibold">Original author (readers see this as the byline):</span>{" "}
+                {book.original_author}
+              </p>
             )}
             {book.status === "published" && (
               <Link href={`/libra/${book.id}`} className="mt-1 inline-flex min-h-11 items-center text-sm text-primary underline">
@@ -379,7 +394,8 @@ export default async function AdminBookPage({
               <p className="text-sm text-muted">Only owners and admins can approve or send back a book.</p>
             ) : !pendingIsCurrent ? (
               <p className="text-sm text-red-700">
-                The author changed the file or cover after sending it. They need to send it for review again.
+                The author changed the file, cover or original author after sending it. They need to send it for review
+                again.
               </p>
             ) : (
               <>

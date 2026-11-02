@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { parseDocxToDocument, repackageWithTitle } from "@/app/(public)/dashboard/books/docx-actions";
 import { createClient } from "@/lib/supabase/client";
 import type { ConversionWarning } from "@/lib/docx-converter";
+import { hasMentions, listedMentions, scanEpubForOutsideMentions } from "@/lib/epub-outside-mentions";
+import { outsideMentionMessages } from "@/lib/outside-mentions";
 import { fileInputClasses } from "@/lib/form-styles";
 import { EbookPreview, type PreviewBuild } from "@/components/ebook-preview";
 import { emptyChoices, pendingCount, type PreviewChoices } from "@/lib/docx-preview-choices";
@@ -14,6 +16,12 @@ import {
   shouldBlockSubmit,
   submittablePath,
 } from "@/lib/manuscript-approval";
+import { WORD_GUIDE_PATH, WORD_TEMPLATE_PATH } from "@/lib/word-guide-paths";
+import {
+  TEMP_UPLOAD_CHECK_INTERVAL_MS,
+  TEMP_UPLOAD_EXPIRED_MESSAGE,
+  tempUploadExpired,
+} from "@/lib/temp-upload-expiry";
 
 // REDESIGN STEP 5 (A2): restyling only -- the picker sits in a dashed
 // drop-area box and the browser's own file button is drawn as an
@@ -72,7 +80,7 @@ const TOO_LARGE_ERROR = "Ky dorëshkrim e kalon kufirin prej 50 MB.";
 const UPLOAD_FAILED_ERROR =
   "Dorëshkrimi juaj nuk u ngarkua. Kontrolloni lidhjen dhe provoni përsëri.";
 const APPROVE_FIRST_ERROR =
-  "Hapni pamjen paraprake të e-librit dhe konfirmoni se libri duket mirë para se të vazhdoni.";
+  "Hap pamjen paraprake dhe konfirmo nëse e-libri duket mirë para se të vazhdosh.";
 
 // W4 (Renato 31 Oct, 6a): a Word manuscript is ready to submit only
 // after the author has opened the preview of THIS build and confirmed
@@ -88,6 +96,7 @@ export function ManuscriptField({
   authorName,
   authorId,
   onManuscriptChange,
+  onUploadExpired,
 }: {
   // Initial seed only -- see the title-input listener effect below for
   // why this isn't the ongoing source of truth once mounted.
@@ -127,6 +136,10 @@ export function ManuscriptField({
   // Client Component props"). Omitting the prop entirely is the fix,
   // not passing a no-op closure.
   onManuscriptChange?: (info: { name: string } | null) => void;
+  // BD5 (3a): called when a Save is stopped because the uploaded
+  // manuscript is more than 3 days old (the wizard goes back to its
+  // Files step). Optional, for the same reason as onManuscriptChange.
+  onUploadExpired?: () => void;
 }) {
   const [mode, setMode] = useState<"epub" | "docx">("epub");
   const [status, setStatus] = useState<Status>("idle");
@@ -149,6 +162,9 @@ export function ManuscriptField({
   const [previewSeen, setPreviewSeen] = useState(false);
   const [approved, setApproved] = useState(false);
   const [approveError, setApproveError] = useState("");
+  // BD5: bumped to give the file pickers a fresh, empty input after an
+  // expired upload, so picking the same file again fires onChange.
+  const [pickerKey, setPickerKey] = useState(0);
 
   const hiddenPathInputRef = useRef<HTMLInputElement>(null);
   const liveTitleRef = useRef(bookTitle);
@@ -159,6 +175,17 @@ export function ManuscriptField({
   // temp EPUB Storage path (direct upload OR DOCX-generated, kept
   // repackaged in place) is currently ready to submit.
   const tempPathRef = useRef<string | null>(null);
+  // BD5: when the current temporary ebook was made (browser clock), and
+  // whether an expiry still has to stop one Save so the author sees it.
+  // A title change rewrites the same file in place and keeps this time,
+  // so the form gives up no later than the clean-up's own clock.
+  const uploadedAtRef = useRef<number | null>(null);
+  const expiredNoticeRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const onUploadExpiredRef = useRef(onUploadExpired);
+  useEffect(() => {
+    onUploadExpiredRef.current = onUploadExpired;
+  }, [onUploadExpired]);
   const displayNameRef = useRef<string | null>(null);
   const requestIdRef = useRef(0);
   const pendingCountRef = useRef(0);
@@ -188,6 +215,8 @@ export function ManuscriptField({
   }
 
   function setHiddenPath(path: string | null, displayName: string | null) {
+    if (path === null) uploadedAtRef.current = null;
+    else if (path !== tempPathRef.current) uploadedAtRef.current = Date.now();
     tempPathRef.current = path;
     displayNameRef.current = path ? displayName : null;
     readyNameRef.current = path ? displayName : null;
@@ -323,7 +352,12 @@ export function ManuscriptField({
     // field is not rendered, and then the byline is simply authorName.
     const rawPenNameInput = form?.elements.namedItem("penName");
     const penNameInput = rawPenNameInput instanceof HTMLInputElement ? rawPenNameInput : null;
-    const bylineFor = (input: HTMLInputElement | null) => input?.value.trim() || authorName;
+    // BD3 patch 4 (1a): an "Autori origjinal" is the byline, so it is
+    // the Word-made ebook's dc:creator too.
+    const rawOriginalAuthorInput = form?.elements.namedItem("originalAuthor");
+    const originalAuthorInput = rawOriginalAuthorInput instanceof HTMLInputElement ? rawOriginalAuthorInput : null;
+    const bylineFor = (input: HTMLInputElement | null) =>
+      originalAuthorInput?.value.trim() || input?.value.trim() || authorName;
 
     liveTitleRef.current = titleInput.value;
     if (languageInput) liveLanguageRef.current = languageInput.value;
@@ -353,10 +387,12 @@ export function ManuscriptField({
     titleInput.addEventListener("input", handleTitleInput);
     languageInput?.addEventListener("change", handleLanguageChange);
     penNameInput?.addEventListener("input", handlePenNameInput);
+    originalAuthorInput?.addEventListener("input", handlePenNameInput);
     return () => {
       titleInput.removeEventListener("input", handleTitleInput);
       languageInput?.removeEventListener("change", handleLanguageChange);
       penNameInput?.removeEventListener("input", handlePenNameInput);
+      originalAuthorInput?.removeEventListener("input", handlePenNameInput);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -372,6 +408,18 @@ export function ManuscriptField({
     if (!form) return;
 
     function handleSubmit(e: Event) {
+      // BD5 (3a): an upload past the 3-day limit never reaches the
+      // server; this Save is stopped before anything is sent, so the
+      // rest of the form stays as typed.
+      checkUploadAge();
+      if (expiredNoticeRef.current) {
+        expiredNoticeRef.current = false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onUploadExpiredRef.current?.();
+        requestAnimationFrame(() => rootRef.current?.scrollIntoView({ block: "center" }));
+        return;
+      }
       // W4: a converted Word manuscript not yet confirmed in the preview
       // is never submitted (the hidden path is empty then, and saving
       // would silently keep the old manuscript or none).
@@ -407,6 +455,10 @@ export function ManuscriptField({
     // it.
     form.addEventListener("submit", handleSubmit, true);
     return () => form.removeEventListener("submit", handleSubmit, true);
+    // BD5: checkUploadAge works through refs and state setters; the
+    // only prop it reaches (the page's change callback) is a stable
+    // state setter in the wizard and absent on Edit Book.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Best-effort cleanup of an abandoned temporary object if the author
@@ -435,7 +487,42 @@ export function ManuscriptField({
     resetApproval();
   }
 
+  // BD5 (3a): the upload is past the form's 3-day limit. Clear the field
+  // and the Word build, say why, and stop the next Save once so the
+  // author sees the message. The stored ebook itself is left to the
+  // nightly clean-up (84 h): a Save sent just before the limit may still
+  // be reading it (audit r1 F4). The preview copy is never read by a
+  // Save, so clearDocxBuild() may remove it as it always has.
+  function expireUpload() {
+    setHiddenPath(null, null);
+    clearDocxBuild();
+    setWarnings([]);
+    setStatus("error");
+    setErrorMessage(TEMP_UPLOAD_EXPIRED_MESSAGE);
+    setPickerKey((key) => key + 1);
+    expiredNoticeRef.current = true;
+  }
+
+  function checkUploadAge() {
+    if (tempPathRef.current && tempUploadExpired(uploadedAtRef.current, Date.now())) expireUpload();
+  }
+
+  async function warnAboutOutsideMentions(file: File, requestId: number) {
+    try {
+      const scan = await scanEpubForOutsideMentions(await file.arrayBuffer());
+      if (isStale(requestId) || modeRef.current !== "epub" || !scan || !hasMentions(scan)) return;
+      const outside = outsideMentionMessages(listedMentions(scan), "epub");
+      const found: ConversionWarning[] = [];
+      if (outside.store) found.push({ code: "other_store_mentioned", message: outside.store });
+      if (outside.contact) found.push({ code: "contact_details_in_book", message: outside.contact });
+      setWarnings(found);
+    } catch {
+      // Advice only: nothing to show.
+    }
+  }
+
   function handleEpubChange(file: File | null) {
+    expiredNoticeRef.current = false;
     if (tempPathRef.current) {
       void removeTempObject(tempPathRef.current);
     }
@@ -480,6 +567,13 @@ export function ManuscriptField({
 
         setStatus("success");
         setHiddenPath(tempEpubPath, displayName);
+
+        // BD3 patch 3 (3a): other stores, emails and phone numbers in an
+        // uploaded EPUB are only warned about, here in the browser (no
+        // download). Not awaited: it never holds up the form's submit,
+        // and a file it cannot read shows nothing (the server's own
+        // checks still decide).
+        void warnAboutOutsideMentions(file, myRequestId);
       } catch (err) {
         console.error("ManuscriptField: EPUB upload failed:", err);
         void removeTempObject(tempEpubPath);
@@ -495,6 +589,7 @@ export function ManuscriptField({
   }
 
   function handleDocxChange(file: File | null) {
+    expiredNoticeRef.current = false;
     if (tempPathRef.current) {
       void removeTempObject(tempPathRef.current);
     }
@@ -640,6 +735,7 @@ export function ManuscriptField({
 
   function switchMode(next: "epub" | "docx") {
     if (next === mode) return;
+    expiredNoticeRef.current = false;
     modeRef.current = next;
     setMode(next);
     setStatus("idle");
@@ -650,8 +746,24 @@ export function ManuscriptField({
     clearDocxBuild();
   }
 
+  // BD5: an open form re-checks its upload's age every minute and when
+  // the tab comes back into view, so the message is already there when
+  // the author returns.
+  useEffect(() => {
+    const timer = window.setInterval(checkUploadAge, TEMP_UPLOAD_CHECK_INTERVAL_MS);
+    function onVisible() {
+      if (document.visibilityState === "visible") checkUploadAge();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className="flex flex-col gap-3">
+    <div ref={rootRef} className="flex flex-col gap-3">
       <input ref={hiddenPathInputRef} type="hidden" name="manuscriptStoragePath" />
 
       <fieldset className="flex flex-col gap-2 text-sm">
@@ -695,6 +807,7 @@ export function ManuscriptField({
             <input
               type="file"
               accept=".epub,application/epub+zip"
+              key={pickerKey}
               className={PICKER_INPUT_CLASSES}
               disabled={status === "converting"}
               onChange={(e) => handleEpubChange(e.target.files?.[0] ?? null)}
@@ -716,6 +829,14 @@ export function ManuscriptField({
             </p>
           )}
 
+          {status === "success" && warnings.length > 0 && (
+            <ul role="status" className="flex list-disc flex-col gap-1 rounded-card border-l-4 border-primary bg-surface py-2 pl-7 pr-3 text-sm text-muted">
+              {warnings.map((w) => (
+                <li key={w.code}>{w.message}</li>
+              ))}
+            </ul>
+          )}
+
           {status === "error" && (
             <p
               role="alert"
@@ -727,6 +848,20 @@ export function ManuscriptField({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
+          {/* BD6 (answer 3a): the guide and the template, before the
+              picker; no tick box. A new tab, so the half-filled form stays. */}
+          <p className="rounded-card border border-border bg-surface px-3 py-2 text-sm text-foreground">
+            Para se të ngarkoni, lexoni{" "}
+            <a href={WORD_GUIDE_PATH} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+              udhëzuesin për Word
+              <span className="sr-only"> (hapet në një skedë të re)</span>
+            </a>
+            . Mund të shkarkoni edhe{" "}
+            <a href={WORD_TEMPLATE_PATH} download className="text-primary underline">
+              shabllonin e Librum
+            </a>
+            .
+          </p>
           <label className={PICKER_BOX_CLASSES}>
             <span className="font-semibold text-foreground">
               {status === "success" ? "Zëvendësoni dorëshkrimin" : "Skedari i dorëshkrimit"}
@@ -734,6 +869,7 @@ export function ManuscriptField({
             <input
               type="file"
               accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              key={pickerKey}
               className={PICKER_INPUT_CLASSES}
               disabled={status === "converting"}
               onChange={(e) => handleDocxChange(e.target.files?.[0] ?? null)}
@@ -784,7 +920,7 @@ export function ManuscriptField({
                     className="focus-ring min-h-11 self-start rounded-[3px] bg-primary px-4 font-semibold text-white"
                     onClick={() => setPreviewOpen(true)}
                   >
-                    Hap pamjen paraprake
+                    Shiko pamjen paraprake
                   </button>
                   <label className={`flex items-start gap-2 ${tick.disabled ? "opacity-60" : ""}`}>
                     <input
@@ -795,7 +931,7 @@ export function ManuscriptField({
                       onChange={(e) => setApproval(e.target.checked)}
                     />
                     <span>
-                      E kontrollova pamjen paraprake dhe libri duket si duhet.
+                      E kontrollova pamjen paraprake dhe duket mirë.
                       {tick.reason && <span className="block text-xs text-muted">{tick.reason}</span>}
                     </span>
                   </label>

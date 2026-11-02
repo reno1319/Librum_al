@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
 import { getLibrumChoiceBook } from "@/lib/librum-choice";
 import { escapeIlikePattern, parseLibrumChoiceSearch } from "@/lib/librum-choice-logic";
-import { resolveBookByline } from "@/lib/book-byline";
+import { resolveStaffByline } from "@/lib/book-byline";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
@@ -58,7 +58,7 @@ async function fetchPickableBooks(
   // the base table, and the base table's staff policy is reports.resolve.
   let query = supabase
     .from("public_books")
-    .select("id, title, cover_path, pen:public_pen_names(id, name)")
+    .select("id, title, cover_path, original_author, pen:public_pen_names(id, name)")
     .eq("status", "published")
     .not("price_all", "is", null);
   // `%`, `_` and `\` in the search match themselves (never `.or()` with
@@ -87,7 +87,7 @@ async function fetchSlotBooks(supabase: SupabaseClient, ids: string[]): Promise<
   if (ids.length === 0) return new Map();
   const { data, error } = await supabase
     .from("public_books")
-    .select("id, title, cover_path, price_all, pen:public_pen_names(id, name)")
+    .select("id, title, cover_path, price_all, original_author, pen:public_pen_names(id, name)")
     .in("id", ids)
     .eq("status", "published")
     .returns<SlotBook[]>();
@@ -133,7 +133,7 @@ export default async function AdminLibrumChoicePage({
     fetchPickableBooks(supabase, q),
     getHomeSlotsForStaff(),
   ]);
-  const pickAuthor = pick ? resolveBookByline(pick) : null;
+  const pickAuthor = pick ? resolveStaffByline(pick) : null;
   const homeSlots = home.ok ? home.slots : [];
   const slotOfBook = new Map(homeSlots.map((s) => [s.book_id, s.slot]));
   const slotBooks = await fetchSlotBooks(
@@ -245,7 +245,7 @@ export default async function AdminLibrumChoicePage({
         <>
           <ul className="mt-6 flex flex-col gap-3">
             {list.books.map((book) => {
-              const author = resolveBookByline(book);
+              const author = resolveStaffByline(book);
               const isPicked = pick?.id === book.id;
               const homeSlot = slotOfBook.get(book.id) ?? null;
               return (
@@ -314,7 +314,7 @@ function HomeSlotCard({
   const label = HOME_SLOT_LABELS[slot];
   const book = row ? (books.get(row.book_id) ?? null) : null;
   const live = book ? qualifiesForHomeFan({ status: "published", price_all: book.price_all, cover_path: book.cover_path }) : false;
-  const author = book ? resolveBookByline(book) : null;
+  const author = book ? resolveStaffByline(book) : null;
   return (
     <li className="rounded-card border border-border bg-surface p-4 shadow-sm">
       <p className="text-sm font-medium">{label}</p>

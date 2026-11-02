@@ -2,6 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import { STAGING_SUPABASE_URL } from "@/lib/protected-staging";
 import { CATALOG_ROW_CHANGED_MESSAGE } from "@/lib/paid-repricing";
+import { MISSING_ORIGINAL_AUTHOR_MESSAGE } from "@/lib/book-byline";
+import { bookReviewsDoubleState, resetBookReviewsDouble } from "@/lib/book-reviews-test-double";
+import {
+  LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE,
+  LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE,
+  ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE,
+} from "@/lib/book-review-copy";
 
 // F4: the Add a book / Edit server side of the pen name, the Translator
 // field, the rights choice and the publish gate (actions.ts), against a
@@ -33,7 +40,7 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ __admin: tr
 vi.mock("@/lib/email", () => ({ sendNewBookEmails: vi.fn(async () => undefined) }));
 
 type RightsState =
-  | { kind: "present"; declaration: { basis: "own_rights" | "public_domain" } }
+  | { kind: "present"; declaration: { basis: "own_rights" | "public_domain" | "public_domain_original" } }
   | { kind: "none" }
   | { kind: "unavailable" };
 const mockRightsState = vi.fn<(bookId: string) => Promise<RightsState>>();
@@ -331,7 +338,7 @@ describe("createBook: the rights choice (P3/P4)", () => {
   it.each(["own_rights", "public_domain"])(
     "records exactly one declaration, for the new book's server id and the submitted basis (%s)",
     async (basis) => {
-      const form = createForm({ intent: "publish", rightsBasis: basis, bookId: "client-chosen-id" });
+      const form = createForm({ intent: "publish", rightsBasis: basis, originalAuthor: "Lev Tolstoi", bookId: "client-chosen-id" });
       expect(await redirectOf(createBook(form))).toBe("/dashboard?success=Libri juaj u publikua");
       const insertedId = (method(writerInserts()[0], "insert")!.args[0] as { id: string }).id;
       expect(mockRecordRights).toHaveBeenCalledTimes(1);
@@ -358,7 +365,7 @@ describe("createBook: the rights choice (P3/P4)", () => {
 describe("updateBook: the rights choice is recorded only when it changes (P3)", () => {
   it("no declaration yet -> recorded, after the proven save", async () => {
     mockRightsState.mockResolvedValue({ kind: "none" });
-    expect(await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain" })))).toBe(
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain", originalAuthor: "Lev Tolstoi" })))).toBe(
       "/dashboard?success=Libri u përditësua",
     );
     expect(mockRecordRights).toHaveBeenCalledWith(BOOK_ID, "public_domain");
@@ -366,7 +373,7 @@ describe("updateBook: the rights choice is recorded only when it changes (P3)", 
   });
 
   it("a different basis -> recorded", async () => {
-    await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain" })));
+    await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain", originalAuthor: "Lev Tolstoi" })));
     expect(mockRecordRights).toHaveBeenCalledTimes(1);
   });
 
@@ -377,7 +384,7 @@ describe("updateBook: the rights choice is recorded only when it changes (P3)", 
 
   it("unavailable -> nothing recorded, the save stands", async () => {
     mockRightsState.mockResolvedValue({ kind: "unavailable" });
-    expect(await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain" })))).toBe(
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain", originalAuthor: "Lev Tolstoi" })))).toBe(
       "/dashboard?success=Libri u përditësua",
     );
     expect(mockRecordRights).not.toHaveBeenCalled();
@@ -583,5 +590,203 @@ describe("updateBook: a published book keeps its description (P6, FIX1 A5)", () 
       "/dashboard?success=Libri u përditësua",
     );
     expect(writerUpdates()[0].ops).not.toContainEqual({ method: "eq", args: ["status", "draft"] });
+  });
+});
+
+// BD3 patch 4 (Renato 1 Nov, 2a 3a 5a): the "Autori origjinal" box.
+describe("createBook / updateBook: the original author", () => {
+  function writerUpdatePayload(): Record<string, unknown> | undefined {
+    const update = writerUpdates().map((c) => method(c, "update")).find(Boolean);
+    return update?.args[0] as Record<string, unknown> | undefined;
+  }
+
+  it.each(["public_domain", "public_domain_original"])(
+    "create: %s without an original author is refused before anything is written",
+    async (basis) => {
+      for (const originalAuthor of [undefined, "", "   ", "\u0007"]) {
+        const fields: Record<string, string> = { intent: "draft", rightsBasis: basis };
+        if (originalAuthor !== undefined) fields.originalAuthor = originalAuthor;
+        expect(await redirectOf(createBook(createForm(fields)))).toBe(
+          `/dashboard/books/new?error=${MISSING_ORIGINAL_AUTHOR_MESSAGE}`,
+        );
+      }
+      expect(writerInserts()).toHaveLength(0);
+      expect(mockRecordRights).not.toHaveBeenCalled();
+    },
+  );
+
+  it("create: optional with own rights; saved trimmed, control characters dropped", async () => {
+    await redirectOf(createBook(createForm({ intent: "draft", rightsBasis: "own_rights" })));
+    expect((method(writerInserts()[0], "insert")!.args[0] as Record<string, unknown>).original_author).toBeNull();
+    await redirectOf(
+      createBook(createForm({ intent: "draft", rightsBasis: "own_rights", originalAuthor: "  Lev\u0000 Tolstoi\u0085 " })),
+    );
+    expect((method(writerInserts()[1], "insert")!.args[0] as Record<string, unknown>).original_author).toBe("Lev Tolstoi");
+  });
+
+  it("create: over 200 characters is refused, nothing written", async () => {
+    expect(
+      await redirectOf(createBook(createForm({ intent: "draft", rightsBasis: "own_rights", originalAuthor: "a".repeat(201) }))),
+    ).toBe("/dashboard/books/new?error=Autori origjinal mund të ketë deri në 200 karaktere");
+    expect(writerInserts()).toHaveLength(0);
+  });
+
+  it("update: a public-domain choice without one is refused before the save (3a)", async () => {
+    mockRightsState.mockResolvedValue({ kind: "present", declaration: { basis: "public_domain" } });
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain", originalAuthor: " " })))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${MISSING_ORIGINAL_AUTHOR_MESSAGE}`,
+    );
+    expect(writerUpdatePayload()).toBeUndefined();
+    expect(mockRecordRights).not.toHaveBeenCalled();
+  });
+
+  it("update: the typed value is saved, trimmed", async () => {
+    mockRightsState.mockResolvedValue({ kind: "present", declaration: { basis: "own_rights" } });
+    await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "own_rights", originalAuthor: " Lev Tolstoi " })));
+    expect(writerUpdatePayload()!.original_author).toBe("Lev Tolstoi");
+  });
+
+  it("update: cleared with own rights it becomes null", async () => {
+    mockRightsState.mockResolvedValue({ kind: "present", declaration: { basis: "own_rights" } });
+    await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "own_rights", originalAuthor: "" })));
+    expect(writerUpdatePayload()!.original_author).toBeNull();
+  });
+
+  it("update: no basis submitted, the stored public-domain basis still requires it (audit r1, L2)", async () => {
+    mockRightsState.mockResolvedValue({ kind: "present", declaration: { basis: "public_domain_original" } });
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "" })))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${MISSING_ORIGINAL_AUTHOR_MESSAGE}`,
+    );
+    expect(writerUpdatePayload()).toBeUndefined();
+  });
+
+  it("update: no basis submitted and the stored one unreadable: a cleared box fails closed (L2)", async () => {
+    mockRightsState.mockResolvedValue({ kind: "unavailable" });
+    existingRow = { ...existingRow, original_author: "Homeri" };
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "" })))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${MISSING_ORIGINAL_AUTHOR_MESSAGE}`,
+    );
+  });
+
+  it("update: unreadable basis, a book that never had one: an empty box still saves (audit r2, L1)", async () => {
+    mockRightsState.mockResolvedValue({ kind: "unavailable" });
+    existingRow = { ...existingRow, original_author: null };
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "" })))).toBe("/dashboard?success=Libri u përditësua");
+  });
+
+  it("update: no basis submitted, stored own rights or none: optional", async () => {
+    const states: RightsState[] = [{ kind: "none" }, { kind: "present", declaration: { basis: "own_rights" } }];
+    for (const state of states) {
+      mockRightsState.mockResolvedValue(state);
+      await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "" })));
+    }
+    expect(writerUpdates()).toHaveLength(2);
+  });
+
+  it("update: the refusal comes before any pen name is created (audit r1, L3)", async () => {
+    await redirectOf(updateBook(BOOK_ID, editForm({ rightsBasis: "public_domain", originalAuthor: "", penName: "Emri i Ri" })));
+    expect(mockResolvePenName).not.toHaveBeenCalled();
+    expect(writerUpdatePayload()).toBeUndefined();
+  });
+
+  it("update: absent from the form, original_author is not in the update", async () => {
+    await redirectOf(updateBook(BOOK_ID, editForm()));
+    expect(writerUpdatePayload()).toBeDefined();
+    expect(writerUpdatePayload()).not.toHaveProperty("original_author");
+  });
+});
+
+// BD3 patch 4 (Renato 16:37Z 2b, 16:45Z a): Librum's approval binds to
+// the original author (migration 20261101170000), so a changed one is
+// handled like a new file or cover.
+describe("updateBook: a changed original author goes back to review (2b)", () => {
+  let bundleRows: unknown[];
+  beforeEach(() => {
+    resetBookReviewsDouble();
+    bundleRows = [];
+    respond = (q) =>
+      q.client === "session" && q.table === "bundle_books" ? { data: bundleRows, error: null } : defaultRespond(q);
+  });
+
+  function payload(): Record<string, unknown> {
+    return method(writerUpdates()[0], "update")!.args[0] as Record<string, unknown>;
+  }
+  const requests = () => bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview");
+
+  it("a live book: off the store in the same write, sent for review, told why", async () => {
+    existingRow = { ...existingRow, status: "published", original_author: "Homeri" };
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homer" })))).toBe(
+      `/dashboard?success=${LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE}`,
+    );
+    expect(payload()).toMatchObject({ original_author: "Homer", status: "draft", librum_choice_at: null });
+    expect(requests()).toEqual([{ fn: "requestBookReview", bookId: BOOK_ID }]);
+  });
+
+  it("a live book: adding one where there was none, or clearing it, counts too", async () => {
+    existingRow = { ...existingRow, status: "published", original_author: null };
+    await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homeri" })));
+    existingRow = { ...existingRow, status: "published", original_author: "Homeri" };
+    await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "" })));
+    expect(writerUpdates().map((q) => (method(q, "update")!.args[0] as { status?: string }).status)).toEqual(["draft", "draft"]);
+    expect(requests()).toHaveLength(2);
+  });
+
+  it("a live book: the same name (after trimming) changes nothing", async () => {
+    existingRow = { ...existingRow, status: "published", original_author: "Homeri" };
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "  Homeri " })))).toBe(
+      "/dashboard?success=Libri u përditësua",
+    );
+    expect(payload()).not.toHaveProperty("status");
+    expect(requests()).toHaveLength(0);
+  });
+
+  it("a live book in a published bundle: refused before any write", async () => {
+    existingRow = { ...existingRow, status: "published", original_author: "Homeri" };
+    bundleRows = [{ bundle_id: "b1", bundles: { status: "published" } }];
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homer" })))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE}`,
+    );
+    expect(writerUpdates()).toHaveLength(0);
+  });
+
+  it("a draft waiting for review: its pending snapshot is replaced", async () => {
+    existingRow = { ...existingRow, status: "draft", original_author: "Homeri" };
+    bookReviewsDoubleState.pending = true;
+    await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homer" })));
+    expect(payload()).toMatchObject({ original_author: "Homer", status: "draft" });
+    expect(requests()).toEqual([{ fn: "requestBookReview", bookId: BOOK_ID }]);
+  });
+
+  it("the approved name put back while another is waiting: the stale review is withdrawn (audit r2, M1)", async () => {
+    existingRow = { ...existingRow, status: "draft", original_author: "X" };
+    bookReviewsDoubleState.pending = true;
+    bookReviewsDoubleState.requestResult = { ok: false, reason: "already_approved" };
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homeri" })))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?success=${ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE}`,
+    );
+    expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual([
+      "getBookReviewState",
+      "requestBookReview",
+      "withdrawBookReview",
+    ]);
+  });
+
+  it("M1: when the withdraw fails, the author is told to send it again", async () => {
+    existingRow = { ...existingRow, status: "draft", original_author: "X" };
+    bookReviewsDoubleState.pending = true;
+    bookReviewsDoubleState.requestResult = { ok: false, reason: "already_approved" };
+    bookReviewsDoubleState.withdrawResult = { ok: false, reason: "failed" };
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homeri" })))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?success=U ruajt. Shtypni "Dërgojeni për shqyrtim" kur të jeni gati.`,
+    );
+  });
+
+  it("a draft not waiting: saved, nothing sent", async () => {
+    existingRow = { ...existingRow, status: "draft", original_author: "Homeri" };
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homer" })))).toBe(
+      "/dashboard?success=Libri u përditësua",
+    );
+    expect(bookReviewsDoubleState.calls.some((c) => c.fn === "getBookReviewState")).toBe(true);
+    expect(requests()).toHaveLength(0);
   });
 });

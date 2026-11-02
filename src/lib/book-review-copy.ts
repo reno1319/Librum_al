@@ -120,13 +120,25 @@ export const REVIEW_CANCELLED_MESSAGE = "Shqyrtimi u anulua. Libri juaj është 
 export const NOT_IN_REVIEW_MESSAGE = "Ky libër nuk po pret shqyrtim.";
 
 // C / S5: a new file or cover on a live book.
+// BD3 patch 4 (Renato 16:37Z, 2b): the original author joins the file
+// and the cover.
 export const LIVE_FILES_WARNING =
-  "Nëse ndryshoni skedarin e librit ose kopertinën, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
+  "Nëse ndryshoni skedarin e librit, kopertinën ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
 export const LIVE_FILES_SAVED_MESSAGE =
   "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.";
 export const LIVE_FILES_REQUEST_FAILED_MESSAGE = "U ruajt. Shtypni \"Dërgojeni për shqyrtim\" kur të jeni gati.";
 export const LIVE_FILES_IN_BUNDLE_MESSAGE =
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose kopertinën.";
+// BD3 patch 4 (2b): the same two, for a changed original author.
+export const LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE =
+  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë autorin origjinal të ri.";
+// Audit r2 (M1): the author put back the original author Librum had
+// already approved while a review of another one was waiting. That
+// review is withdrawn; the book can be published again as it is.
+export const ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE =
+  "U ruajt. Librum e ka miratuar tashmë këtë autor origjinal. Shtypni \"Publikoni\" kur të jeni gati.";
+export const LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE =
+  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni autorin origjinal.";
 
 // S3: LB462 / LB463 caught at the write (the book changed after it was
 // read).

@@ -14,7 +14,7 @@ import { BookCard } from "@/components/book-card";
 import { BookSampleReader } from "@/components/book-sample-reader";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
-import { resolveBookByline } from "@/lib/book-byline";
+import { resolveBookByline, resolveOriginalAuthor } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { getLibrumChoiceBook } from "@/lib/librum-choice";
@@ -733,7 +733,9 @@ function FeaturedBook({
           </Link>
         </h2>
         <p className="text-muted">
-          {authorName && book.pen && (
+          {/* BD3 patch 4: an original author has no Librum page, so it
+              is plain text; the pen name keeps its link. */}
+          {authorName && book.pen && !resolveOriginalAuthor(book) && (
             <>
               nga{" "}
               <Link
@@ -744,6 +746,7 @@ function FeaturedBook({
               </Link>
             </>
           )}
+          {authorName && resolveOriginalAuthor(book) && <>nga {authorName}</>}
           {authorName && book.genre && " · "}
           {book.genre}
         </p>

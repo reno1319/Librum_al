@@ -49,6 +49,8 @@ type BookListRow = {
   published_at: string | null;
   created_at: string;
   pen: { name: string } | null;
+  // BD3 patch 4 (audit r1, M1): the byline readers see, when set.
+  original_author: string | null;
 };
 
 const CHIP_CLASSES: Record<BookStateLabel, string> = {
@@ -111,7 +113,9 @@ async function loadBooks(filter: ReturnType<typeof parseBooksFilter>, q: string,
 
   let query = admin
     .from("books")
-    .select("id, title, status, author_id, published_at, created_at, pen:pen_names(name)", { count: "exact" });
+    .select("id, title, status, author_id, published_at, created_at, pen:pen_names(name), original_author", {
+      count: "exact",
+    });
   if (filter === "live") query = query.eq("status", "published");
   if (filter === "draft") {
     query = query.eq("status", "draft");
@@ -223,7 +227,10 @@ export default async function AdminBooksPage({
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block font-semibold break-words text-primary">{book.title}</span>
-                      <span className="block text-sm text-muted">{book.pen?.name ?? "Unknown author"}</span>
+                      <span className="block text-sm text-muted">
+                        {book.pen?.name ?? "Unknown author"}
+                        {book.original_author && ` · original author: ${book.original_author}`}
+                      </span>
                     </span>
                     <span className="flex flex-wrap items-center gap-3 text-sm">
                       <span className={`rounded-[3px] px-2 py-1 text-xs font-bold tracking-wide uppercase ${CHIP_CLASSES[state]}`}>

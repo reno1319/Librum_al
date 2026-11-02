@@ -73,6 +73,7 @@ describe("sitemap", () => {
       "/librari",
       "/ndihme",
       "/ndihme/leximi",
+      "/ndihme/word",
       "/kontakt",
       "/kushtet",
       "/privatesia",

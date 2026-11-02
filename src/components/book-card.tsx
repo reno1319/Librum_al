@@ -3,6 +3,7 @@ import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import type { Book } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { authorPagePath } from "@/lib/pen-names";
+import { resolveOriginalAuthor } from "@/lib/book-byline";
 
 // LIBRUM 2.0 UI-4: the shared reader-commerce card, used by the
 // Bookstore grid, the author profile page, the wishlist page, and
@@ -30,7 +31,12 @@ export function BookCard({
 }: {
   // PEN-NAMES-1: the byline links to the book's pen name page, never to
   // the account (no author_id here).
-  book: Pick<Book, "id" | "title" | "genre" | "price_all" | "pen_name_id">;
+  // BD3 patch 4: with an "Autori origjinal" the byline is that name,
+  // which has no page on Librum, so it is plain text, not a link to the
+  // uploader's pen name page.
+  // Required (audit r1, L7): a caller whose select drops the column
+  // fails to type-check instead of linking an original author's name.
+  book: Pick<Book, "id" | "title" | "genre" | "price_all" | "pen_name_id" | "original_author">;
   coverUrl: string | null;
   authorName?: string | null;
 }) {
@@ -69,7 +75,7 @@ export function BookCard({
       </Link>
 
       {authorName &&
-        (book.pen_name_id ? (
+        (book.pen_name_id && !resolveOriginalAuthor(book) ? (
           <Link
             href={authorPagePath(book.pen_name_id)}
             className="focus-ring w-fit rounded-sm text-[0.8125rem] text-muted hover:underline"

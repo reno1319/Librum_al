@@ -31,10 +31,10 @@ export function approvalTickState(state: { previewSeen: boolean; pendingChanges:
     const n = state.pendingChanges;
     return {
       disabled: true,
-      reason: `Keni ${n} ndryshim${n === 1 ? "" : "e"} pa aplikuar. Hapni pamjen paraprake dhe shtypni “Apliko ndryshimet” ose “Anulo ndryshimet”.`,
+      reason: `Keni ${n} ndryshim${n === 1 ? "" : "e"} pa aplikuar. Hap pamjen paraprake dhe shtyp “Apliko ndryshimet” ose “Anulo ndryshimet”.`,
     };
   }
-  if (!state.previewSeen) return { disabled: true, reason: "Hapni pamjen paraprake më parë." };
+  if (!state.previewSeen) return { disabled: true, reason: "Hap pamjen paraprake më parë." };
   return { disabled: false, reason: null };
 }
 

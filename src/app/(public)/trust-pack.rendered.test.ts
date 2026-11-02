@@ -87,7 +87,7 @@ describe("TRUST PACK 1: links to the reader help page", () => {
   it("Help says a book needs Librum's approval, and that a new cover or file waits for it", async () => {
     const text = toText(renderToStaticMarkup(await HelpPage()));
     expect(text).toContain("Një libër shfaqet në Librari pasi e dërgoni për shqyrtim, Librum e miraton dhe libri ka një çmim.");
-    expect(text).toContain("Nëse ndryshoni kopertinën ose skedarin e librit, libri del nga Libraria derisa Librum ta miratojë.");
+    expect(text).toContain("Nëse ndryshoni kopertinën, skedarin e librit ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë.");
   });
 
   // A4 (Renato 5b): where an Albanian author gets an ISBN, Albania only.
@@ -101,7 +101,7 @@ describe("TRUST PACK 1: links to the reader help page", () => {
   // ALBANIAN-15 (SQ-14 audit): the lost-dispute answer says "recover", as the Terms do.
   it("Help says Librum recovers only what the author kept from a lost dispute", async () => {
     const text = toText(renderToStaticMarkup(await HelpPage()));
-    expect(text).toContain("Librum mund të rikuperojë nga ju vetëm të ardhurat që mbajtët realisht nga ajo shitje, asnjëherë më shumë.");
+    expect(text).toContain("Librum mund të rikuperojë nga ju vetëm honorarin që mbajtët realisht nga ajo shitje, asnjëherë më shumë.");
   });
 
   it("the Library and the book page's owned panel link to it", () => {

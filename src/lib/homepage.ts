@@ -1,4 +1,4 @@
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { STANDARD_ROYALTY_PERCENT } from "@/lib/royalty";
 
 // LIBRUM 2.0 UI-3: a homepage-local decision boundary, deliberately
 // separate from src/components/site-header.tsx's HeaderCta -- same
@@ -60,9 +60,11 @@ export function resolveAuthorPageCta(params: {
 }
 
 // LIBRUM 2.0 UI-3: the single source authors' displayed share derives
-// from -- PLATFORM_FEE_PERCENT (src/lib/pricing.ts), never a literal
-// "80" written on the homepage itself. Both numbers stay derived, not
-// duplicated, matching how /fitimet already computes this.
+// from, never a literal written on a page. BD2 (Renato 11-01, 4a): it is
+// the standard royalty from src/lib/royalty.ts (70%, from 199 lek), shown
+// with ROYALTY_HEADLINE_CAPTION ("50% below 199") wherever it is big. It
+// no longer reads PLATFORM_FEE_PERCENT, which still drives the real
+// checkout until the live POK build (N6).
 export function computeAuthorSharePercent(): number {
-  return 100 - PLATFORM_FEE_PERCENT;
+  return STANDARD_ROYALTY_PERCENT;
 }

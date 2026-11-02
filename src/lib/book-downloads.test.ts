@@ -3,6 +3,7 @@ import {
   buyerDownloadNote,
   DOWNLOAD_CANCEL_WARNING,
   formatDownloadTime,
+  SHARING_REMINDER,
   parseMyDownloadStates,
   parsePurchaseDownloadStates,
   readMyDownloadStates,
@@ -13,6 +14,8 @@ import {
   type PurchaseDownloadState,
 } from "./book-downloads";
 import { formatTransactionAmount } from "./transaction-money";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 const NOW = new Date("2026-10-24T10:00:00Z");
 const BOOK = "9d8c7b6a-5f4e-4d3c-9b2a-1f0e9d8c7b6a";
@@ -180,5 +183,19 @@ describe("staff labels", () => {
     expect(staffAmountLabel(purchase({ paymentId: null, amountMinor: 999, currency: null }))).toBe(
       "Shuma nuk është e disponueshme (monedhë e panjohur)",
     );
+  });
+});
+
+// D13 2a / BD4: the sharing reminder sits in the owned panel, next to
+// Download, and only there (not in the author's or buyer-to-be panels).
+describe("SHARING_REMINDER", () => {
+  it("is the agreed line and shows only next to the buyer's Download button", () => {
+    expect(SHARING_REMINDER).toBe(
+      "Faqja e parë e librit tregon emailin tuaj. Kjo kopje është vetëm për ju: ju lutemi, mos e shpërndani.",
+    );
+    const page = readFileSync(path.join(__dirname, "..", "app", "(public)", "libra", "[id]", "page.tsx"), "utf8");
+    const owned = page.slice(page.indexOf('if (state === "owned")'), page.indexOf("ALL-WIRING-2: a book with no authored"));
+    expect(owned).toContain("{SHARING_REMINDER}");
+    expect(page.split("{SHARING_REMINDER}")).toHaveLength(2);
   });
 });

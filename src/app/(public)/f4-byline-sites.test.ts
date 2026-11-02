@@ -24,7 +24,7 @@ const BYLINE_SITES: [file: string, expected: string[]][] = [
       "authorName={resolveBookByline(book)}",
     ],
   ],
-  ["app/(public)/library/page.tsx", ["authorName={resolveBookByline(book)}", "penNameId={book.pen?.id ?? null}"]],
+  ["app/(public)/library/page.tsx", ["authorName={resolveBookByline(book)}", "penNameId={resolveOriginalAuthor(book) ? null : (book.pen?.id ?? null)}"]],
   ["app/(public)/wishlist/page.tsx", ["authorName={resolveBookByline(book)}"]],
   // HOME-PICKS-1: the newest list and the fan's picks share toCover.
   ["app/(public)/page.tsx", ["author: resolveBookByline(b),"]],
@@ -33,12 +33,13 @@ const BYLINE_SITES: [file: string, expected: string[]][] = [
     ["const bookByline = resolveBookByline(book);", "authorName={bookByline}", "{bookByline}"],
   ],
   ["app/api/books/[id]/sample/route.ts", ["author: resolveBookByline(book),"]],
-  ["app/admin/(protected)/librum-choice/page.tsx", ["resolveBookByline(pick)", "resolveBookByline(book)"]],
+  // BD3 patch 4 r2 (audit r1, M1/L6): staff see both names.
+  ["app/admin/(protected)/librum-choice/page.tsx", ["resolveStaffByline(pick)", "resolveStaffByline(book)"]],
   ["app/(public)/dashboard/books/new/upload-wizard.tsx", ["authorName={byline}"]],
 ];
 
 describe("F4 / PEN-NAMES-1: book bylines", () => {
-  it.each(BYLINE_SITES)("%s uses the book byline", (file, expected) => {
+  it.each(BYLINE_SITES)("%s uses the book byline (staff: both names)", (file, expected) => {
     const source = readSrc(file);
     for (const snippet of expected) expect(source).toContain(snippet);
   });
@@ -72,7 +73,9 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
 describe("PEN-NAMES-1: places that named the author now name the pen name", () => {
   it("book page: Rreth autorit and More by ... use the pen name and link to its page (3a)", () => {
     const source = readSrc("app/(public)/libra/[id]/page.tsx");
-    expect(source).toContain("const authorName = bookByline;");
+    // BD3 patch 4: the byline can be an original author; these two
+    // stay on the pen name.
+    expect(source).toContain("const authorName = resolveBookPenName(book);");
     expect(source).toContain('<p className="font-serif text-[1.375rem] text-primary">{authorName}</p>');
     expect(source).toContain("title={authorName ? `Më shumë nga ${authorName}` : \"Më shumë nga ky autor\"}");
     expect(source).toContain('.eq("pen_name_id", book.pen_name_id)');
@@ -108,5 +111,78 @@ describe("PEN-NAMES-1: places that named the author now name the pen name", () =
 
   it("dashboard lists are unchanged", () => {
     expect(readSrc("components/author-book-row.tsx")).not.toContain("resolveBookByline");
+  });
+});
+
+// BD3 patch 4 (Renato 1 Nov, 1a 2a 4a 5a; 16:05Z 1a 2a 3a).
+describe("BD3 patch 4: the original author", () => {
+  it("book page: the original author is the byline (plain), 'Përktheu:' under it; About/More by stay on the pen name", () => {
+    const source = readSrc("app/(public)/libra/[id]/page.tsx");
+    expect(source).toContain("const originalAuthor = resolveOriginalAuthor(book);");
+    expect(source).toMatch(/\{originalAuthor \? \(\s*<span className="font-semibold">\{originalAuthor\}<\/span>/);
+    expect(source).toContain("{TRANSLATED_BY}");
+    expect(source).toContain('(contributors ?? []).filter((c) => c.role === "Translator")');
+    expect(source).toContain("otherContributors.length > 0");
+    expect(source).toContain("originalAuthor,\n          translators: translatorNames,");
+  });
+
+  it("featured book and library cards do not link an original author to the uploader's page", () => {
+    expect(readSrc("app/(public)/librari/page.tsx")).toContain("{authorName && book.pen && !resolveOriginalAuthor(book) && (");
+    expect(readSrc("components/book-card.tsx")).toContain("book.pen_name_id && !resolveOriginalAuthor(book)");
+  });
+
+  it("every explicit book select that feeds a byline reads original_author", () => {
+    expect(readSrc("app/(public)/page.tsx")).toContain("description, original_author, pen:public_pen_names(id, name)");
+    expect(readSrc("app/api/books/[id]/sample/route.ts")).toContain("status, original_author, pen:public_pen_names");
+    const choice = readSrc("app/admin/(protected)/librum-choice/page.tsx");
+    expect(choice).toContain('"id, title, cover_path, original_author, pen:public_pen_names(id, name)"');
+    expect(choice).toContain('"id, title, cover_path, price_all, original_author, pen:public_pen_names(id, name)"');
+    expect(readSrc("lib/librum-download-pages.ts")).toContain("original_author, published_at");
+  });
+
+  it("the wizard: the box, required with a public-domain choice on either button, back to step 1", () => {
+    const source = readSrc("app/(public)/dashboard/books/new/upload-wizard.tsx");
+    expect(source).toContain('name="originalAuthor"');
+    expect(source).toContain('const originalAuthorRequired = rightsBasis === "public_domain" || rightsBasis === "public_domain_original";');
+    expect(source).toMatch(/if \(originalAuthorRequired && !originalAuthor\.trim\(\)\) \{\s*event\.preventDefault\(\);\s*setOriginalAuthorError\(MISSING_ORIGINAL_AUTHOR_MESSAGE\);\s*setStep\(1\);/);
+    expect(source).toContain("{ORIGINAL_AUTHOR_HINT}");
+    // Before the rights check, so a public-domain draft is caught too.
+    expect(source.indexOf("if (originalAuthorRequired && !originalAuthor.trim())")).toBeLessThan(
+      source.indexOf("const rightsMissing = publishing"),
+    );
+  });
+
+  it("the Edit page: the box, prefilled, kept in the draft fields, and opened when a public-domain book lacks one", () => {
+    const source = readSrc("app/(public)/dashboard/books/[id]/edit/page.tsx");
+    expect(source).toContain('name="originalAuthor"');
+    expect(source).toContain('defaultValue={book.original_author ?? ""}');
+    expect(source).toContain('"originalAuthor",');
+    expect(source).toContain("!book.original_author");
+  });
+
+  it("the Word ebook's dc:creator follows a typed original author", () => {
+    const source = readSrc("components/manuscript-field.tsx");
+    expect(source).toContain('form?.elements.namedItem("originalAuthor")');
+    expect(source).toContain("originalAuthorInput?.value.trim() || input?.value.trim() || authorName");
+    expect(source).toContain('originalAuthorInput?.addEventListener("input", handlePenNameInput);');
+  });
+});
+
+describe("BD3 patch 4 r2: staff see the original author (audit r1, M1)", () => {
+  it("the admin book page and the books list read and show original_author", () => {
+    const page = readSrc("app/admin/(protected)/books/[id]/page.tsx");
+    expect(page).toContain("pen:pen_names(name), original_author");
+    expect(page).toContain("Original author (readers see this as the byline):");
+    const list = readSrc("app/admin/(protected)/books/page.tsx");
+    expect(list).toContain("pen:pen_names(name), original_author");
+    expect(list).toContain("original author: ${book.original_author}");
+  });
+
+  it("the book page reads the rights basis only for a book with an original author, and names the pen name only when allowed (H1)", () => {
+    const source = readSrc("app/(public)/libra/[id]/page.tsx");
+    expect(source).toContain("const rightsForBylinePromise = resolveOriginalAuthor(book)\n    ? readRightsBasisForPages(createAdminClient(), book.id)\n    : null;");
+    expect(source).toContain("rightsForByline?.ok === true,");
+    expect(source).toContain("{originalAuthor && translatorLine && (");
+    expect(source).toContain("penIsTranslator,");
   });
 });

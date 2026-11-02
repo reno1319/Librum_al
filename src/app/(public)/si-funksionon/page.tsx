@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { ROYALTY_PAID_PRICE_SENTENCE, ROYALTY_RULE_SENTENCE } from "@/lib/royalty";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
 import { getAuthorPageCta } from "@/lib/author-page-cta";
 import {
@@ -17,19 +17,15 @@ export const metadata: Metadata = {
   description: "Si ta përgatitni, ta publikoni, t'i vini çmimin dhe ta shisni librin tuaj elektronik me Librum.",
 };
 
-// FIX1 (X3): each step is numbered once -- by its numeral (01-06), never
+// FIX1 (X3): each step is numbered once -- by its numeral (01-05), never
 // also typed into its title, so readers don't hear "1. 1.".
 // AUTHOR PAGES REDESIGN: the steps are a numeral grid, as on the home
-// page; step 4 (rights) is new and renders RIGHTS_STATEMENTS, never a
+// page; the rights step is new and renders RIGHTS_STATEMENTS, never a
 // retyped copy. Every other step's words are unchanged.
 const steps: { title: string; body: string; rights?: boolean }[] = [
   {
     title: "Regjistrohuni si autor",
     body: "Krijoni një llogari dhe zgjidhni \"Autor\" kur regjistroheni.",
-  },
-  {
-    title: "Pagesat për autorët",
-    body: "Botimi me pagesë dhe pagesat për autorët nuk janë aktivizuar ende. Autorët mund të vazhdojnë të publikojnë libra falas, ndërsa Librum përfundon sistemet e pagesave.",
   },
   {
     title: "Ngarkoni librin tuaj",
@@ -46,7 +42,9 @@ const steps: { title: string; body: string; rights?: boolean }[] = [
   },
   {
     title: "Merrni pagesën",
-    body: `Kur të nisë botimi me pagesë, sipas kushteve aktuale të komisionit autori merr ${100 - PLATFORM_FEE_PERCENT}% dhe Librum ${PLATFORM_FEE_PERCENT}%. Mënyra dhe koha e pagesave për autorët do të publikohen para se të nisë botimi me pagesë.`,
+    // BD2 (Renato 11-01: 2a, 7b): seller + royalty; the old "Author
+    // payouts: not activated yet" step is gone.
+    body: `${ROYALTY_RULE_SENTENCE} ${ROYALTY_PAID_PRICE_SENTENCE} Mënyrën dhe kohën e pagesave për autorët Librum do t'i publikojë para pagesës së parë.`,
   },
 ];
 

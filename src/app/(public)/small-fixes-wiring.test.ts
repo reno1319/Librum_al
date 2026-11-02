@@ -45,7 +45,8 @@ describe("FIX1 X3: How it works numbers each step once", () => {
   it("the titles carry no typed number and the numerals number them once", async () => {
     const html = await renderHowItWorks();
     const numerals = [...html.matchAll(/<span class="[^"]*italic[^"]*">(\d\d)<\/span>/g)].map((m) => m[1]);
-    expect(numerals).toEqual(["01", "02", "03", "04", "05", "06"]);
+    // BD2 (7b): the "Author payouts: not activated yet" step is gone.
+    expect(numerals).toEqual(["01", "02", "03", "04", "05"]);
     expect(html).toContain(">Regjistrohuni si autor</h3>");
     expect(html).not.toMatch(/>\d\. /);
     expect(html).not.toContain("list-decimal");

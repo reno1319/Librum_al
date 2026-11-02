@@ -84,6 +84,9 @@ export type Book = {
   // A `date` column -- serializes as a plain "YYYY-MM-DD" string via
   // supabase-js, same as every other date/timestamp field on this type.
   original_publication_date: string | null;
+  // BD3 patch 4 (migration 20261101170000): the "Autori origjinal" of a
+  // translated or public-domain book, shown as its byline. null = none.
+  original_author: string | null;
   genre: string | null;
   series_id: string | null;
   series_position: number | null;
@@ -130,7 +133,10 @@ export type Book = {
 // book. book_id/author_id become null when the book/account is deleted;
 // the title, name and sentence are copies taken at the moment of
 // choosing. The current choice is the newest row for the book.
-export type RightsBasis = "own_rights" | "public_domain";
+// BD3 patch 3 (Renato 1 Nov, 2a): "public_domain_original" -- the
+// original work is in the public domain, the translation is the
+// author's own (or they have the translator's permission).
+export type RightsBasis = "own_rights" | "public_domain" | "public_domain_original";
 
 export type BookRightsDeclaration = {
   id: string;

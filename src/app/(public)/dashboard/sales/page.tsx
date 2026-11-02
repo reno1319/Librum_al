@@ -266,7 +266,7 @@ export default async function SalesPage() {
       </Link>
 
       <div className="mt-2">
-        <PageHeader title="Shitjet" description="Të ardhurat tuaja neto, pas tarifës së platformës së Librum." />
+        <PageHeader title="Shitjet" description="Honorari juaj neto, pas pjesës së Librum." />
       </div>
 
       <p className="mt-3 text-sm text-muted">

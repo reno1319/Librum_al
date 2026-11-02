@@ -90,6 +90,8 @@ export type CleanupOptions = {
   noSceneBreak?: number[];
   notSubheading?: number[];
   notVerse?: number[];
+  keepCopyright?: number[];
+  removeTitlePage?: number[];
   fixQuotes?: boolean;
   // W4: mark each paragraph with its Word paragraph number (a bookmark
   // Mammoth turns into <a id="lbp_N">), so the author preview can say
@@ -112,6 +114,9 @@ export type CleanupReport = {
     emptyLinesRemoved: number;
     indentsRemoved: number;
     contentsLinesRemoved: number;
+    // BD3 patch 2: lines of the author's own copyright page and typed
+    // title page (Librum's own page replaces them at download).
+    frontLinesRemoved: number;
     quotes: number;
     apostrophes: number;
     ellipses: number;
@@ -149,6 +154,7 @@ export function emptyCleanupReport(): CleanupReport {
       emptyLinesRemoved: 0,
       indentsRemoved: 0,
       contentsLinesRemoved: 0,
+      frontLinesRemoved: 0,
       quotes: 0,
       apostrophes: 0,
       ellipses: 0,
@@ -285,6 +291,8 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
     noSceneBreak: options.noSceneBreak,
     notSubheading: options.notSubheading,
     notVerse: options.notVerse,
+    keepCopyright: options.keepCopyright,
+    removeTitlePage: options.removeTitlePage,
   });
   const { plans } = structure;
 
@@ -430,6 +438,7 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
   report.fixes.emptyLinesRemoved = structure.emptyRemoved;
   report.fixes.paragraphsSplit = structure.paragraphsSplit;
   report.fixes.contentsLinesRemoved = structure.contentsLinesRemoved + tocLines;
+  report.fixes.frontLinesRemoved = structure.frontLinesRemoved;
   report.fixes.quotes = counts.quotes;
   report.fixes.apostrophes = counts.apostrophes;
   report.fixes.ellipses = counts.ellipses;

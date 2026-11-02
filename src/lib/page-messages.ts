@@ -9,6 +9,7 @@ import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Arsyeja duhet të ketë më pak se 2000 karaktere.",
+  "Autori origjinal mund të ketë deri në 200 karaktere",
   "Autorët duhet të jenë 18 vjeç ose më shumë. Shënoni kutinë për ta konfirmuar.",
   "Bashkëpunëtori nuk u shtua dot. Provoni përsëri.",
   "Biografia mund të ketë deri në 5.000 karaktere.",
@@ -23,6 +24,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Choose a reason.",
   "Content is required.",
   "Content must be 50,000 characters or fewer.",
+  "Could not read your uploaded cover. It may have expired; please choose it again.",
   "Could not read your uploaded cover. Please try again.",
   "Couldn't check the book's rights. Please try again.",
   "Couldn't check this account. Nothing was changed. Please try again.",
@@ -39,7 +41,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Diçka shkoi keq. Provoni përsëri.",
   "Dorëshkrimi duhet të jetë nën 50 MB",
   "Dorëshkrimi duhet të jetë skedar EPUB",
-  "Dorëshkrimi i ngarkuar nuk u lexua dot. Provoni përsëri",
+  "Dorëshkrimi i ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri",
   "Dorëshkrimi i zgjedhur nuk vlen më. Zgjidhni skedarin përsëri",
   "Dorëshkrimi nuk u ngarkua dot. Provoni përsëri",
   "Duhet të pranoni Kushtet e përdorimit para se të bëheni autor.",
@@ -54,6 +56,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Enter an email address.",
   "Excerpt is required.",
   "Excerpt must be 500 characters or fewer.",
+  "Fotoja e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidheni përsëri.",
   "Fotoja e ngarkuar nuk u lexua dot. Provoni përsëri.",
   "Fotoja nuk u ruajt dot. Provoni përsëri.",
   "Hiqeni këtë llogari nga stafi i Librum para se ta fshini.",
@@ -74,6 +77,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Kjo paketë nuk mund të blihet tani",
   "Kodi nuk u krijua dot. Provoni përsëri.",
   "Konfigurimi i pagesave bankare nuk është i disponueshëm ende.",
+  "Kopertina e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri",
   "Kopertina e ngarkuar nuk u lexua dot. Provoni përsëri",
   "Kopertina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri",
   "Kthimi nga pagesa nuk është i vlefshëm.",
@@ -96,6 +100,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Ky libër është në një seri ose paketë. Hiqeni prej saj më parë, pastaj ndryshoni pseudonimin.",
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose hiqeni librin nga paketa fillimisht",
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose ndryshojeni atë fillimisht",
+  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni autorin origjinal.",
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose kopertinën.",
   "Ky nuk duket si IBAN i vlefshëm shqiptar (duhet të fillojë me AL dhe të vazhdojë me 26 shifra ose shkronja).",
   "Ky nuk duket si imazh i vlefshëm JPEG ose PNG",
@@ -166,6 +171,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Seria nuk u krijua dot. Provoni përsëri.",
   "Shkruani FSHI për ta konfirmuar.",
   "Shkruani IBAN-in tuaj.",
+  "Shkruani autorin origjinal. Kërkohet kur vepra është në domenin publik.",
   "Shkruani emrin e mbajtësit të llogarisë.",
   "Shkruani një ISBN-10 ose ISBN-13 të vlefshëm, ose lëreni bosh.",
   "Shkruani një datë të vlefshme të botimit të parë",
@@ -311,8 +317,10 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Të dhënat bankare u ruajtën.",
   "U dërgua për shqyrtim. Do ta kontrollojmë librin dhe do t'ju njoftojmë kur të publikohet. Nuk është ende në Librari.",
   "U ruajt si draft",
+  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë autorin origjinal të ri.",
   "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
   "U ruajt. Shtypni \"Dërgojeni për shqyrtim\" kur të jeni gati.",
+  "U ruajt. Librum e ka miratuar tashmë këtë autor origjinal. Shtypni \"Publikoni\" kur të jeni gati.",
 ]);
 
 type QueryValue = string | string[] | undefined;

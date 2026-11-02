@@ -121,3 +121,46 @@ describe("siteOriginOrNull", () => {
     expect(siteOriginOrNull()).toBeNull();
   });
 });
+
+// BD3 patch 4 (Renato 1 Nov, 1a; 16:05Z 1a).
+describe("buildBookJsonLd: the original author", () => {
+  function withOriginal(originalAuthor: string | null, translators: string[] = [], penIsTranslator = true) {
+    return buildBookJsonLd(BOOK, {
+      origin: ORIGIN,
+      coverUrl: null,
+      pen: PEN,
+      paidCheckoutOn: false,
+      originalAuthor,
+      translators,
+      penIsTranslator,
+    });
+  }
+
+  it("the pen name is the translator only when the page says so (audit r1 H1: an untranslated public-domain book)", () => {
+    const data = withOriginal("Gjergj Fishta", [], false);
+    expect(data.author).toEqual({ "@type": "Person", name: "Gjergj Fishta" });
+    expect(data).not.toHaveProperty("translator");
+  });
+
+  it("the original author is the author, with no page link; typed translators are the translator", () => {
+    const data = withOriginal("Lev Tolstoi", ["Drita Shembull", " "]);
+    expect(data.author).toEqual({ "@type": "Person", name: "Lev Tolstoi" });
+    expect(data.translator).toEqual([{ "@type": "Person", name: "Drita Shembull" }]);
+  });
+
+  it("with no translator typed, the pen name (with its page) is the translator", () => {
+    expect(withOriginal("Lev Tolstoi").translator).toEqual({
+      "@type": "Person",
+      name: "Ana Shkrimtarja",
+      url: `${ORIGIN}/autore/${PEN.id}`,
+    });
+  });
+
+  it("no original author: unchanged (the pen name is the author, no translator)", () => {
+    for (const original of [null, "  "]) {
+      const data = withOriginal(original, ["Drita Shembull"]);
+      expect(data.author).toEqual({ "@type": "Person", name: "Ana Shkrimtarja", url: `${ORIGIN}/autore/${PEN.id}` });
+      expect(data).not.toHaveProperty("translator");
+    }
+  });
+});

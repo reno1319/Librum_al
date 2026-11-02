@@ -379,7 +379,8 @@ describe("UploadWizard: Price step (REDESIGN STEP 5)", () => {
     expect(priceBlock).toContain("cover.previewUrl");
     // F4 (P5): the byline -- the typed pen name, else the author name.
     expect(priceBlock).toContain("{byline}");
-    expect(source).toContain('const byline = (penNameAvailable ? penName.trim() : "") || authorName;');
+    // BD3 patch 4 (1a): a typed original author comes first.
+    expect(source).toContain('const byline = originalAuthor.trim() || (penNameAvailable ? penName.trim() : "") || authorName;');
     expect(priceBlock).toContain("{title.trim() && (");
     // No price line at all while the price is not valid.
     expect(priceBlock).toContain("{priceValid && (");

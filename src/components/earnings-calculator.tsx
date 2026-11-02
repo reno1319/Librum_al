@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { ROYALTY_TIERS_LINE } from "@/lib/royalty";
 import { formatAllMinorUnits } from "@/lib/all-money";
 import { classifyCatalogPrice, parseCatalogPriceAll } from "@/lib/catalog-price";
 import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
@@ -23,7 +23,11 @@ import { formControlClasses } from "@/lib/form-styles";
 // renders goes through formatAllMinorUnits, so no `$` can appear here.
 //
 // AUTHOR PAGES REDESIGN: a white two-column box (inputs left, estimate
-// right; stacked on phones). Same rows, labels, messages and maths.
+// right; stacked on phones).
+//
+// BD2 (Renato 11-01, 2a): Librum sells the book and pays the author a
+// royalty ("honorar"), so the middle row is Librum's share, not a
+// "platform fee", and both percents follow the price (src/lib/royalty.ts).
 export function EarningsCalculator() {
   const [priceInput, setPriceInput] = useState("990");
   const [salesInput, setSalesInput] = useState("1");
@@ -45,7 +49,7 @@ export function EarningsCalculator() {
 
   const estimate = showBreakdown
     ? calculateAuthorEarnings(priceAll, salesNum)
-    : { grossMinor: 0, platformFeeMinor: 0, authorEarningsMinor: 0 };
+    : { grossMinor: 0, librumShareMinor: 0, authorEarningsMinor: 0, royaltyPercent: 0 };
 
   return (
     <div className="grid gap-8 rounded-[4px] border border-border bg-surface p-5 sm:p-7 md:grid-cols-2">
@@ -101,19 +105,22 @@ export function EarningsCalculator() {
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-4">
-                <span className="text-muted">Tarifa e platformës së Librum ({PLATFORM_FEE_PERCENT}%)</span>
+                <span className="text-muted">Pjesa e Librum ({100 - estimate.royaltyPercent}%)</span>
                 <span className="whitespace-nowrap font-serif text-lg font-semibold text-muted">
-                  -{formatAllMinorUnits(estimate.platformFeeMinor)}
+                  -{formatAllMinorUnits(estimate.librumShareMinor)}
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-4 border-t border-border pt-3">
-                <span className="font-medium text-foreground">Fitimi i vlerësuar i autorit</span>
+                <span className="font-medium text-foreground">
+                  Honorari i vlerësuar i autorit ({estimate.royaltyPercent}%)
+                </span>
                 <span className="whitespace-nowrap font-serif text-[2rem] leading-none font-normal text-primary">
                   {formatAllMinorUnits(estimate.authorEarningsMinor)}
                 </span>
               </div>
             </div>
-            <p className="mt-4 text-xs text-muted">
+            <p className="mt-4 text-xs text-muted">{ROYALTY_TIERS_LINE}</p>
+            <p className="mt-1 text-xs text-muted">
               Para taksave dhe tarifave të mundshme bankare ose të këmbimit valutor.
             </p>
           </>

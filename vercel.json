@@ -4,6 +4,10 @@
     {
       "path": "/api/internal/payouts/run",
       "schedule": "0 6 5 * *"
+    },
+    {
+      "path": "/api/internal/tmp-uploads/cleanup",
+      "schedule": "0 3 * * *"
     }
   ]
 }

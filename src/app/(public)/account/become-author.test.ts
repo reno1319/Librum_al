@@ -476,7 +476,7 @@ describe("becomeAuthor: AUTHOR-AGE-1 18+ tick", () => {
     expect(meta.author_age_statement_version).toBe("author-age-v2");
     expect(Number.isNaN(Date.parse(String(meta.author_age_confirmed_at)))).toBe(false);
     // SECURITY-9A: the same write records the Terms.
-    expect(meta.terms_version).toBe("terms-sq-1");
+    expect(meta.terms_version).toBe("terms-sq-2");
     expect(meta.terms_accepted_at).toBe(meta.author_age_confirmed_at);
     expect(order).toEqual(["age", "role"]);
   });

@@ -19,6 +19,7 @@ import { groupAllDigits } from "@/lib/catalog-price";
 import type { Book, DiscountCode } from "@/lib/types";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { ROYALTY_DISCOUNT_NOTE } from "@/lib/royalty";
 
 export const metadata: Metadata = {
   title: "Zbritjet",
@@ -85,7 +86,8 @@ export default async function DiscountsPage({
       <div className="mt-2">
         <PageHeader
           title="Kodet e zbritjes"
-          description="Krijoni një kod promocional për një nga librat tuaj. Lexuesit e shkruajnë gjatë pagesës dhe marrin një zbritje në përqindje ose një shumë fikse në lekë."
+          // BD2 (Renato 11-01, 6a): the royalty follows the price paid.
+          description={`Krijoni një kod promocional për një nga librat tuaj. Lexuesit e shkruajnë gjatë pagesës dhe marrin një zbritje në përqindje ose një shumë fikse në lekë. ${ROYALTY_DISCOUNT_NOTE}`}
         />
       </div>
 

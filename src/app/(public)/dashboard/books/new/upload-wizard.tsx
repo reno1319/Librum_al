@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { createBook } from "../actions";
-import { PLATFORM_FEE_PERCENT } from "@/lib/pricing";
+import { ROYALTY_TIERS_LINE } from "@/lib/royalty";
 import { formatAllMinorUnits } from "@/lib/all-money";
 import {
   MAXIMUM_CATALOG_PRICE_ALL,
@@ -33,6 +33,11 @@ import { buttonClasses } from "@/components/ui/button";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CoverField } from "@/components/cover-field";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
+import {
+  MISSING_ORIGINAL_AUTHOR_MESSAGE,
+  ORIGINAL_AUTHOR_HINT,
+  ORIGINAL_AUTHOR_MAX_LENGTH,
+} from "@/lib/book-byline";
 import type { RightsBasis, Series } from "@/lib/types";
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART C: redesigned step order and content --
@@ -233,6 +238,11 @@ export function UploadWizard({
   // F4 (P3): nothing is chosen when the page opens (no preselect).
   const [rightsBasis, setRightsBasis] = useState<RightsBasis | "">("");
   const [rightsError, setRightsError] = useState("");
+  // BD3 patch 4 (2a, 5a): optional, required with a public-domain choice.
+  const [originalAuthor, setOriginalAuthor] = useState("");
+  const [originalAuthorError, setOriginalAuthorError] = useState("");
+  const originalAuthorRef = useRef<HTMLInputElement>(null);
+  const originalAuthorRequired = rightsBasis === "public_domain" || rightsBasis === "public_domain_original";
 
   // Moves keyboard and screen-reader focus to the new step's (visually
   // hidden) heading on every step change, but not on first render.
@@ -290,6 +300,12 @@ export function UploadWizard({
     setStep((s) => Math.min(s + 1, STEPS.length));
   }
 
+  // BD5 (3a): a Save stopped because an upload is more than 3 days old
+  // brings the author back to the Files step, where the message is.
+  function goToFilesStep() {
+    setStep(2);
+  }
+
   function goBack() {
     setStep((s) => Math.max(s - 1, 1));
   }
@@ -301,10 +317,11 @@ export function UploadWizard({
     setStep(target);
   }
 
-  const byline = (penNameAvailable ? penName.trim() : "") || authorName;
+  // BD3 patch 4 (1a): an original author is the byline readers see.
+  const byline = originalAuthor.trim() || (penNameAvailable ? penName.trim() : "") || authorName;
 
   const pricing = resolveWizardPricing({ mode: priceMode, paidPrice });
-  const { priceValid, isFreeBook, priceAll, grossMinor, feeMinor, earningsMinor } = pricing;
+  const { priceValid, isFreeBook, priceAll, grossMinor, librumShareMinor, earningsMinor, royaltyPercent } = pricing;
 
   // W6: an invalid paid price blocks BOTH final buttons before anything
   // is sent. This is a submit handler, not a disabled= on the buttons:
@@ -320,6 +337,17 @@ export function UploadWizard({
       event.preventDefault();
       setStep(1);
       setShowDetailErrors(true);
+      return;
+    }
+    // BD3 patch 4 (5a): a public-domain choice needs the original
+    // author, on either button (the choice is saved with a draft too).
+    // Back to step 1, where the box is; the server says the same.
+    if (originalAuthorRequired && !originalAuthor.trim()) {
+      event.preventDefault();
+      setOriginalAuthorError(MISSING_ORIGINAL_AUTHOR_MESSAGE);
+      setStep(1);
+      if (moreDetailsRef.current) moreDetailsRef.current.open = true;
+      requestAnimationFrame(() => originalAuthorRef.current?.focus());
       return;
     }
     // F4 (P3): Publish book needs a rights choice; Save as draft never
@@ -579,6 +607,28 @@ export function UploadWizard({
                   />
                 </label>
 
+                {/* BD3 patch 4 (1a 2a 5a): shown as the byline, with
+                    "Përktheu:" under it on the book page. */}
+                <label className="flex flex-col gap-1 text-sm">
+                  {originalAuthorRequired ? "Autori origjinal" : "Autori origjinal (opsional)"}
+                  <input
+                    ref={originalAuthorRef}
+                    name="originalAuthor"
+                    type="text"
+                    value={originalAuthor}
+                    onChange={(e) => {
+                      setOriginalAuthor(e.target.value);
+                      setOriginalAuthorError("");
+                    }}
+                    maxLength={ORIGINAL_AUTHOR_MAX_LENGTH}
+                    aria-invalid={originalAuthorError ? true : undefined}
+                    aria-describedby={originalAuthorError ? "wizard-original-author-error" : undefined}
+                    className={formControlClassesFor(!!originalAuthorError)}
+                  />
+                  <FieldError id="wizard-original-author-error" message={originalAuthorError} />
+                  <span className="text-sm text-muted">{ORIGINAL_AUTHOR_HINT}</span>
+                </label>
+
                 <label className="flex flex-col gap-1 text-sm">
                   Botuar fillimisht (opsional)
                   <input
@@ -666,7 +716,7 @@ export function UploadWizard({
           <div className={step === 2 ? "flex flex-col gap-6" : "hidden"}>
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <CoverField authorId={authorId} onCoverChange={setCover} />
+                <CoverField authorId={authorId} onCoverChange={setCover} onUploadExpired={goToFilesStep} />
                 {/* FIX1 (X10): the tip moved here from the Tips box. */}
                 <p className="text-sm text-muted">
                   Kopertina duket më mirë si imazh vertikal, të paktën 1000px i lartë.
@@ -679,6 +729,7 @@ export function UploadWizard({
                 authorName={authorName}
                 authorId={authorId}
                 onManuscriptChange={setManuscript}
+                onUploadExpired={goToFilesStep}
               />
 
               <p role="status" className="text-sm text-muted">
@@ -797,8 +848,7 @@ export function UploadWizard({
                 <FieldError id="wizard-price-error" message={priceError} />
                 <span className="text-sm text-muted">
                   Lekë të plota: nga {MINIMUM_PAID_CATALOG_PRICE_ALL} deri në{" "}
-                  {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}. Librum mban një tarifë platforme prej{" "}
-                  {PLATFORM_FEE_PERCENT}%; pjesa tjetër e çdo shitjeje është e juaja.
+                  {groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}. {ROYALTY_TIERS_LINE}
                 </span>
               </label>
             ) : (
@@ -876,6 +926,9 @@ export function UploadWizard({
                       onChange={() => {
                         setRightsBasis(basis);
                         setRightsError("");
+                        // Audit r1 (L4): a stale "required" error goes
+                        // when the choice no longer needs the box.
+                        setOriginalAuthorError("");
                       }}
                       onKeyDown={(e) => {
                         // Enter on a radio must not submit the form as
@@ -934,11 +987,11 @@ export function UploadWizard({
                   <span>{formatAllMinorUnits(grossMinor)}</span>
                 </div>
                 <div className="flex items-baseline justify-between gap-4">
-                  <span className="text-muted">Tarifa e platformës Librum ({PLATFORM_FEE_PERCENT}%)</span>
-                  <span>-{formatAllMinorUnits(feeMinor)}</span>
+                  <span className="text-muted">Pjesa e Librum ({100 - royaltyPercent}%)</span>
+                  <span>-{formatAllMinorUnits(librumShareMinor)}</span>
                 </div>
                 <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
-                  <span className="font-medium text-foreground">Ju fitoni për çdo shitje</span>
+                  <span className="font-medium text-foreground">Honorari juaj për çdo shitje ({royaltyPercent}%)</span>
                   <span className="font-serif text-2xl text-primary">
                     {formatAllMinorUnits(earningsMinor)}
                   </span>

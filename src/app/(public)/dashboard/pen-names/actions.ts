@@ -79,7 +79,7 @@ async function readStagedPhoto(
   const { data, error } = await supabase.storage.from(STAGING_BUCKET).download(tempPath);
   if (error || !data) {
     console.error("pen names: staged photo download failed:", error);
-    fail("Fotoja e ngarkuar nuk u lexua dot. Provoni përsëri.");
+    fail("Fotoja e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidheni përsëri.");
   }
   const bytes = Buffer.from(await data.arrayBuffer());
   if (bytes.length > PEN_NAME_PHOTO_MAX_BYTES) fail("Ky imazh e kalon kufirin prej 5 MB.");

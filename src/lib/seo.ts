@@ -66,11 +66,22 @@ export function buildBookJsonLd(
     coverUrl,
     pen,
     paidCheckoutOn,
+    originalAuthor = null,
+    translators = [],
+    penIsTranslator = false,
   }: {
     origin: string;
     coverUrl: string | null;
     pen: { id: string; name: string } | null;
     paidCheckoutOn: boolean;
+    // BD3 patch 4 (1a): a translated book's "Autori origjinal" is its
+    // author; the translators the author typed (else the pen name, with
+    // its page, when the page names it so) are its translator.
+    originalAuthor?: string | null;
+    translators?: readonly string[];
+    // Audit r1 (H1): only when the page names the pen name as translator
+    // (no typed translator, and not a "public_domain" book).
+    penIsTranslator?: boolean;
   },
 ): Record<string, unknown> {
   const url = `${origin}${bookPagePath(book.id)}`;
@@ -85,8 +96,15 @@ export function buildBookJsonLd(
   if (book.subtitle) data.alternativeHeadline = book.subtitle;
   if (book.description) data.description = book.description;
   if (coverUrl) data.image = coverUrl;
-  if (pen) {
-    data.author = { "@type": "Person", name: pen.name, url: `${origin}${authorPagePath(pen.id)}` };
+  const penPerson = pen ? { "@type": "Person", name: pen.name, url: `${origin}${authorPagePath(pen.id)}` } : null;
+  const original = originalAuthor && originalAuthor.trim() ? originalAuthor.trim() : null;
+  if (original) {
+    data.author = { "@type": "Person", name: original };
+    const named = translators.map((t) => t.trim()).filter(Boolean);
+    if (named.length > 0) data.translator = named.map((name) => ({ "@type": "Person", name }));
+    else if (penIsTranslator && penPerson) data.translator = penPerson;
+  } else if (penPerson) {
+    data.author = penPerson;
   }
   if (book.language && isSupportedLanguage(book.language)) data.inLanguage = book.language;
   if (book.isbn && isValidIsbn(book.isbn)) data.isbn = book.isbn.replace(/[\s-]/g, "");
