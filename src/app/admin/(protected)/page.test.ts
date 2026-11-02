@@ -244,6 +244,27 @@ describe("AdminPage (Today)", () => {
     expect(mockListAudit).not.toHaveBeenCalled();
   });
 
+  it("reader reviews (BD13, Q5b): a tile for reports.resolve holders only, oldest first; a failed read says so", async () => {
+    tableRows = {
+      staff_list_pending_reader_reviews: {
+        data: [{ updated_at: "2026-10-11T08:00:00Z" }, { updated_at: "2026-10-15T08:00:00Z" }],
+        error: null,
+      },
+    };
+    const html = await renderAs("moderator");
+    expect(rpcCalls.map((c) => c.name)).toContain("staff_list_pending_reader_reviews");
+    expect(html).toMatch(/href="\/admin\/reader-reviews"[^>]*>.*Reader reviews waiting.*>2<.*Oldest: 11 Oct 2026/);
+
+    rpcCalls.length = 0;
+    expect(await renderAs("support")).not.toContain("Reader reviews waiting");
+    expect(rpcCalls.map((c) => c.name)).not.toContain("staff_list_pending_reader_reviews");
+
+    tableRows = { staff_list_pending_reader_reviews: { data: null, error: { message: "boom" } } };
+    const failed = await renderAs("admin");
+    expect(failed).toMatch(/Reader reviews waiting.*>—<.*Couldn’t load/);
+    expect(failed).toContain("Some items couldn’t be loaded.");
+  });
+
   it("editor: no tiles, Nothing waiting, no activity, and no queue queries at all", async () => {
     const html = await renderAs("editor");
     expect(html).not.toContain('aria-label="Waiting"');

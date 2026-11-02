@@ -267,7 +267,26 @@ describe("/admin/people/[id]", () => {
     expect(html).toContain("Took 1 book out of the Bookstore");
     expect(html).toContain("Still suspended");
     expect(rpcCalls.find((c) => c.fn === "staff_profile_display_names")?.args).toEqual({ p_ids: ["staff-1"] });
-    expect(adminTables).not.toContain("profiles");
+    // BD13: the only profiles read is the Review name box's (one row, one column).
+    expect(adminTables.filter((t) => t === "profiles")).toHaveLength(1);
+  });
+
+  it("shows the review name box (BD13, Q2a)", async () => {
+    rpcResult = () => ({ data: [person()], error: null });
+    tables = { profiles: { data: [{ review_name: "Lexuesja Ana" }], error: null } };
+    const named = await renderPerson(ANA);
+    expect(named).toContain("Review name");
+    expect(named).toContain("Shown on their reviews as <strong");
+    expect(named).toContain("Lexuesja Ana");
+    expect(named).toContain('name="review_name"');
+
+    tables = { profiles: { data: [{ review_name: null }], error: null } };
+    expect(await renderPerson(ANA)).toContain("Not chosen yet. They choose it on their first review.");
+
+    tables = { profiles: { data: null, error: { message: "boom" } } };
+    const failed = await renderPerson(ANA);
+    expect(failed).not.toContain('name="review_name"');
+    expect(failed).toContain("Couldn&#x27;t load everything about this person.");
   });
 
   it("tells staff that a staff account can't be suspended", async () => {

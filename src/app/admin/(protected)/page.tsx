@@ -60,11 +60,12 @@ type WaitingRefundRow = {
 export default async function AdminPage() {
   const { role } = await requireStaff("admin.access");
 
-  const { showReports, showRefunds, showActivity, showReviews } = resolveTodayVisibility({
+  const { showReports, showRefunds, showActivity, showReviews, showReaderReviews } = resolveTodayVisibility({
     reportsView: roleHasPermission(role, "reports.view"),
     refundsView: roleHasPermission(role, "refunds.view"),
     auditView: roleHasPermission(role, "audit.view"),
     booksReview: roleHasPermission(role, "books.review"),
+    readerReviewsResolve: roleHasPermission(role, "reports.resolve"),
   });
 
   // Labels only, from `.allowed`: the resolvers' reasons and the raw
@@ -148,6 +149,15 @@ export default async function AdminPage() {
   }));
   const todoItems = buildTodoItems(todoReports, todoRefunds, TODO_LIMIT, new Date(), todoReviews);
 
+  // BD13 (Q5b): no staff email, so this tile is where a waiting reader
+  // review shows. staff_list_pending_reader_reviews() checks
+  // reports.resolve itself and returns oldest first.
+  const readerReviewsResult = showReaderReviews
+    ? await supabase.rpc("staff_list_pending_reader_reviews")
+    : null;
+  const readerReviewsFailed = Boolean(readerReviewsResult?.error);
+  const waitingReaderReviews = ((readerReviewsResult?.data as { updated_at: string }[] | null) ?? []);
+
   const activityResult = showActivity ? await listAdminAuditEvents({ limit: 5 }) : null;
   const activity: AuditEventRow[] = activityResult?.ok ? activityResult.data : [];
 
@@ -159,6 +169,14 @@ export default async function AdminPage() {
       failed: reviewsFailed,
       count: reviewsResult?.total ?? 0,
       oldestAt: todoReviews[0]?.submittedAt ?? null,
+    },
+    showReaderReviews && {
+      key: "reader-reviews",
+      href: "/admin/reader-reviews",
+      label: "Reader reviews waiting",
+      failed: readerReviewsFailed,
+      count: waitingReaderReviews.length,
+      oldestAt: waitingReaderReviews[0]?.updated_at ?? null,
     },
     showReports && {
       key: "reports",
@@ -226,9 +244,9 @@ export default async function AdminPage() {
             To do
           </h2>
           <p className="mt-1 mb-4 text-sm text-muted">Oldest first. Each item opens the page where you act on it.</p>
-          {(reportsFailed || refundsFailed || reviewsFailed) && (
+          {(reportsFailed || refundsFailed || reviewsFailed || readerReviewsFailed) && (
             <p role="alert" className="mb-3 text-sm text-red-700">
-              Some items couldn’t be loaded. Open Books, Book reports or Refund requests to check.
+              Some items couldn’t be loaded. Open Books, Reader reviews, Book reports or Refund requests to check.
             </p>
           )}
           {todoItems.length === 0 ? (

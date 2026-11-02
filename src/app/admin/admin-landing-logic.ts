@@ -21,12 +21,22 @@ export function resolveTodayVisibility(permissions: {
   refundsView: boolean;
   auditView: boolean;
   booksReview?: boolean;
-}): { showReports: boolean; showRefunds: boolean; showActivity: boolean; showReviews: boolean } {
+  readerReviewsResolve?: boolean;
+}): {
+  showReports: boolean;
+  showRefunds: boolean;
+  showActivity: boolean;
+  showReviews: boolean;
+  showReaderReviews: boolean;
+} {
   return {
     showReports: permissions.reportsView,
     showRefunds: permissions.refundsView,
     showActivity: permissions.auditView,
     showReviews: permissions.booksReview === true,
+    // BD13 (Q5b): reader reviews waiting for staff, for the roles that
+    // decide them (reports.resolve: owner, admin, moderator).
+    showReaderReviews: permissions.readerReviewsResolve === true,
   };
 }
 

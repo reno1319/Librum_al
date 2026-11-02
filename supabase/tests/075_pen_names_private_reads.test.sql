@@ -173,9 +173,10 @@ insert into public.purchases (book_id, reader_id, stripe_checkout_session_id, am
   ('e0750001-0000-4000-8000-0000000000a4', 'e0750000-0000-4000-8000-0000000000aa', 'cs_p075_2', 0),
   ('e0750001-0000-4000-8000-0000000000a1', 'e0750000-0000-4000-8000-00000000000b', 'cs_p075_3', 0);
 
-insert into public.reviews (book_id, reader_id, rating, body) values
-  ('e0750001-0000-4000-8000-0000000000a1', 'e0750000-0000-4000-8000-0000000000aa', 5, 'R review'),
-  ('e0750001-0000-4000-8000-0000000000a1', 'e0750000-0000-4000-8000-00000000000b', 4, 'B review');
+-- BD13: approved, so public_reviews shows them.
+insert into public.reviews (book_id, reader_id, rating, body, status) values
+  ('e0750001-0000-4000-8000-0000000000a1', 'e0750000-0000-4000-8000-0000000000aa', 5, 'R review', 'approved'),
+  ('e0750001-0000-4000-8000-0000000000a1', 'e0750000-0000-4000-8000-00000000000b', 4, 'B review', 'approved');
 
 insert into public.bundle_checkout_snapshots
   (id, bundle_id, bundle_title, author_id, reader_id, bundle_price_cents_at_checkout, items, protection_expires_at, fulfilled_at) values
@@ -248,12 +249,11 @@ begin
 
   -- reviews (C3) and book_contributors (C4, O14)
   perform pg_temp.assert(not has_table_privilege('anon', 'public.reviews', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
-    and has_table_privilege('authenticated', 'public.reviews', 'SELECT, INSERT')
-    and not has_table_privilege('authenticated', 'public.reviews', 'DELETE, TRUNCATE, REFERENCES, TRIGGER')
-    and has_column_privilege('authenticated', 'public.reviews', 'body', 'UPDATE')
-    and not has_column_privilege('authenticated', 'public.reviews', 'created_at', 'UPDATE')
+    and has_table_privilege('authenticated', 'public.reviews', 'SELECT')
+    and not has_table_privilege('authenticated', 'public.reviews', 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+    and not has_column_privilege('authenticated', 'public.reviews', 'body', 'UPDATE')
     and not exists (select 1 from pg_catalog.pg_policies where tablename = 'reviews' and cmd = 'DELETE'),
-    'part1: reviews grants fit the upsert; no delete (C3, O7)');
+    'part1: reviews are SELECT-only for authenticated; writes go through submit_reader_review() (BD13); no delete (C3, O7)');
   perform pg_temp.assert(has_table_privilege('anon', 'public.book_contributors', 'SELECT')
     and not has_table_privilege('anon', 'public.book_contributors', 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
     and has_table_privilege('authenticated', 'public.book_contributors', 'SELECT, INSERT, DELETE')
@@ -277,8 +277,8 @@ begin
   perform pg_temp.assert(pg_temp.cols('public.public_series') = 'id,title,pen_name_id,created_at', 'part1: public_series columns');
   perform pg_temp.assert(pg_temp.cols('public.public_bundles') =
     'id,title,description,price_cents,status,created_at,updated_at,price_all,pen_name_id', 'part1: public_bundles columns');
-  perform pg_temp.assert(pg_temp.cols('public.public_reviews') = 'id,book_id,rating,body,created_at,reviewer_name',
-    'part1: public_reviews columns (no reader_id)');
+  perform pg_temp.assert(pg_temp.cols('public.public_reviews') = 'id,book_id,rating,body,created_at,reviewer_name,verified,reviewer_is_author',
+    'part1: public_reviews columns (no reader_id; BD13 adds verified and reviewer_is_author)');
   perform pg_temp.assert(pg_temp.cols('public.reader_bundle_purchases') =
     'id,stripe_checkout_session_id,stripe_payment_intent_id,bundle_id,bundle_title,reader_id,bundle_price_cents_at_checkout,total_amount_cents,items,protection_expires_at,fulfilled_at,refunded_at,created_at,regime,currency,royalty_rate_bps',
     'part1: reader_bundle_purchases columns (no author_id)');
@@ -576,7 +576,10 @@ insert into pg_temp.allow_fn values
   ('list_staff_members', 'staff.view'),
   ('staff_profile_display_names', 'refunds.view'),
   -- PEOPLE-1 (20261023090000): the People list, owner and admin only.
-  ('admin_list_people', 'people.view');
+  ('admin_list_people', 'people.view'),
+  -- BD13 (20261102120000): the review queue returns reader_id (the link
+  -- to the person's page); owner, admin and moderator.
+  ('staff_list_pending_reader_reviews', 'reports.resolve');
 
 do $$
 declare
@@ -850,23 +853,25 @@ do $$
 declare
   r text := 'e0750000-0000-4000-8000-0000000000aa';
 begin
+  -- BD13: the direct upsert is refused; readers write through
+  -- submit_reader_review() (pinned by suite 088). Edited here as the
+  -- owner so the name checks below keep their shape.
   perform pg_temp.assert(pg_temp.run_as('authenticated', r,
       $q$insert into public.reviews (book_id, reader_id, rating, body) values ('e0750001-0000-4000-8000-0000000000a1', 'e0750000-0000-4000-8000-0000000000aa', 3, 'edited')
-         on conflict (book_id, reader_id) do update set rating = excluded.rating, body = excluded.body, book_id = excluded.book_id, reader_id = excluded.reader_id$q$) = 'OK:1',
-    'part9: the review upsert runs as the reader');
-  perform pg_temp.assert((select body from public.reviews where reader_id = r::uuid) = 'edited',
-    'part9: the review upsert updated the reader''s review');
+         on conflict (book_id, reader_id) do update set rating = excluded.rating, body = excluded.body, book_id = excluded.book_id, reader_id = excluded.reader_id$q$) like '42501:%',
+    'part9: the direct review upsert is refused (BD13)');
+  update public.reviews set rating = 3, body = 'edited' where reader_id = r::uuid;
   perform pg_temp.assert(pg_temp.run_as('authenticated', r, 'delete from public.reviews') like '42501:%',
     'part9: no review delete through the API');
   perform pg_temp.assert(pg_temp.value_as('anon', null,
       'select string_agg(coalesce(reviewer_name, ''<null>'') || ''='' || body, '','' order by body) from public.public_reviews where book_id = ''e0750001-0000-4000-8000-0000000000a1''')
-      = 'P075 Ben=B review,<null>=edited',
-    'part9: a reviewer who is an author with a book shows their default pen name; a reader shows none (22a)');
+      = '<null>=B review,<null>=edited',
+    'part9: a reviewer with no chosen review name shows none, an author with a book included -- never a pen name (BD13 replaces 22a)');
 
   -- audit PEN-2 r1 F3: an author-role account with no book is not named
   -- (20261019154308). C is an author with a default pen name and no book.
-  insert into public.reviews (book_id, reader_id, rating, body) values
-    ('e0750001-0000-4000-8000-0000000000a1', 'e0750000-0000-4000-8000-00000000000c', 4, 'C review');
+  insert into public.reviews (book_id, reader_id, rating, body, status) values
+    ('e0750001-0000-4000-8000-0000000000a1', 'e0750000-0000-4000-8000-00000000000c', 4, 'C review', 'approved');
   perform pg_temp.assert(pg_temp.value_as('anon', null,
       'select coalesce(reviewer_name, ''<null>'') from public.public_reviews where body = ''C review''') = '<null>'
     and (select count(*) from public.pen_names where author_id = 'e0750000-0000-4000-8000-00000000000c') = 1

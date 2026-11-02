@@ -185,9 +185,9 @@ export type PublicSeries = {
   created_at: string;
 };
 
-// PEN-NAMES-2: public_reviews -- no reader_id. reviewer_name is the
-// reviewer's default pen name when they are an author with a book (22a),
-// otherwise null ("A Librum reader").
+// PEN-NAMES-2: public_reviews -- no reader_id. BD13: reviewer_name is
+// the account's chosen review name, else null ("Një lexues i Librum");
+// never a pen name (it replaces 22a).
 export type PublicReview = {
   id: string;
   book_id: string;
@@ -195,6 +195,13 @@ export type PublicReview = {
   body: string;
   created_at: string;
   reviewer_name: string | null;
+  // BD13: the reviewer paid more than 0 lek for this book and was not
+  // refunded (Q7a). Only approved reviews are in the view.
+  verified: boolean;
+  // BD13: the reviewer's account was an author account when staff
+  // approved this review ("Autor në Librum" tag); frozen then, never
+  // which pen name.
+  reviewer_is_author: boolean;
 };
 
 export type Contributor = {

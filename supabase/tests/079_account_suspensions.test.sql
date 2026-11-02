@@ -199,8 +199,9 @@ insert into public.purchases (book_id, reader_id, amount_cents, refunded_at) val
   ('e0790001-0000-4000-8000-0000000000a1', 'e0790000-0000-4000-8000-0000000000ab', 499, now()),
   ('e0790001-0000-4000-8000-0000000000b1', 'e0790000-0000-4000-8000-0000000000ab', 499, null);
 
-insert into public.reviews (book_id, reader_id, rating, body) values
-  ('e0790001-0000-4000-8000-0000000000b1', 'e0790000-0000-4000-8000-0000000000ab', 5, 'P079 review');
+-- BD13: approved, so public_reviews shows it.
+insert into public.reviews (book_id, reader_id, rating, body, status) values
+  ('e0790001-0000-4000-8000-0000000000b1', 'e0790000-0000-4000-8000-0000000000ab', 5, 'P079 review', 'approved');
 
 insert into public.payout_minimum_policy (currency, minimum_threshold_minor, is_active) values ('ALL', 1500, true);
 insert into public.author_payout_settings (author_id, currency, threshold_minor) values
