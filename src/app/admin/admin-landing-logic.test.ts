@@ -26,26 +26,51 @@ function visibilityFor(role: StaffRole) {
     refundsView: roleHasPermission(role, "refunds.view"),
     auditView: roleHasPermission(role, "audit.view"),
     booksReview: roleHasPermission(role, "books.review"),
+    readerReviewsResolve: roleHasPermission(role, "reports.resolve"),
   });
 }
 
 describe("resolveTodayVisibility", () => {
   it("owner and admin: both tiles and recent activity", () => {
     for (const role of ["owner", "admin"] as StaffRole[]) {
-      expect(visibilityFor(role)).toEqual({ showReports: true, showRefunds: true, showActivity: true, showReviews: true });
+      expect(visibilityFor(role)).toEqual({
+        showReports: true,
+        showRefunds: true,
+        showActivity: true,
+        showReviews: true,
+        showReaderReviews: true,
+      });
     }
   });
 
-  it("moderator: the reports tile only", () => {
-    expect(visibilityFor("moderator")).toEqual({ showReports: true, showRefunds: false, showActivity: false, showReviews: false });
+  it("moderator: the reports and reader reviews tiles only", () => {
+    expect(visibilityFor("moderator")).toEqual({
+      showReports: true,
+      showRefunds: false,
+      showActivity: false,
+      showReviews: false,
+      showReaderReviews: true,
+    });
   });
 
   it("support: the refunds tile only", () => {
-    expect(visibilityFor("support")).toEqual({ showReports: false, showRefunds: true, showActivity: false, showReviews: false });
+    expect(visibilityFor("support")).toEqual({
+      showReports: false,
+      showRefunds: true,
+      showActivity: false,
+      showReviews: false,
+      showReaderReviews: false,
+    });
   });
 
   it("editor: no tiles and no activity", () => {
-    expect(visibilityFor("editor")).toEqual({ showReports: false, showRefunds: false, showActivity: false, showReviews: false });
+    expect(visibilityFor("editor")).toEqual({
+      showReports: false,
+      showRefunds: false,
+      showActivity: false,
+      showReviews: false,
+      showReaderReviews: false,
+    });
   });
 
   it("each flag follows exactly its own permission", () => {
@@ -58,7 +83,12 @@ describe("resolveTodayVisibility", () => {
               showRefunds: refundsView,
               showActivity: auditView,
               showReviews: booksReview,
+              showReaderReviews: false,
             });
+            expect(
+              resolveTodayVisibility({ reportsView, refundsView, auditView, booksReview, readerReviewsResolve: true })
+                .showReaderReviews,
+            ).toBe(true);
           }
         }
       }

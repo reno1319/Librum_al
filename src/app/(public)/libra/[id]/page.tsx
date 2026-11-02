@@ -56,6 +56,20 @@ import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER } from "@/lib
 import { bookWhatsappShareHref } from "@/lib/contact";
 import { bookPagePath, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
 import { pageErrorMessage } from "@/lib/page-messages";
+import {
+  ANONYMOUS_REVIEWER_NAME,
+  AUTHOR_REVIEWER_LABEL,
+  REVIEW_BODY_MAX,
+  REVIEW_EDIT_WARNING,
+  REVIEW_NAME_HELP,
+  REVIEW_NAME_MAX,
+  REVIEW_PENDING_NOTICE,
+  REVIEW_RULES_NOTE,
+  REVIEW_UNCHANGED_NOTICE,
+  VERIFIED_PURCHASE_LABEL,
+  ownReviewNotice,
+  type OwnReview,
+} from "@/lib/reader-reviews";
 
 // LIBRUM 2.0 UI-5: this page is the reader DECISION + PURCHASE surface
 // -- Bookstore (UI-4) owns discovery/browsing, this page owns "should I
@@ -126,7 +140,8 @@ type BookWithAuthor = PublicBook & {
 // actual authoritative order both surfaces agree on.
 type SeriesEntry = Pick<PublicBook, "id" | "title" | "series_position" | "created_at">;
 // The caller's own review, read from the base table (own-row policy).
-type MyReview = { id: string; rating: number; body: string | null };
+// BD13: with its status and, when rejected, the reason and staff note.
+type MyReview = OwnReview;
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so
 // this route must never be statically cached -- see V3 §3.
@@ -406,12 +421,12 @@ export default async function BookDetailPage({
     { data: youMightLikeData },
     { data: followRow },
   ] = await Promise.all([
-    // PEN-NAMES-2 (22a): reviews come from public_reviews -- no reader_id;
-    // reviewer_name is the reviewer's default pen name when they are an
-    // author with a book, otherwise null.
+    // PEN-NAMES-2 (22a): reviews come from public_reviews -- no reader_id.
+    // BD13: approved reviews only; reviewer_name is the chosen review name
+    // or null, never a pen name; verified is the badge.
     supabase
       .from("public_reviews")
-      .select("id, book_id, rating, body, created_at, reviewer_name")
+      .select("id, book_id, rating, body, created_at, reviewer_name, verified, reviewer_is_author")
       .eq("book_id", id)
       .order("created_at", { ascending: false })
       .returns<PublicReview[]>(),
@@ -419,7 +434,7 @@ export default async function BookDetailPage({
     user
       ? supabase
           .from("reviews")
-          .select("id, rating, body")
+          .select("id, rating, body, status, rejection_reason, rejection_note")
           .eq("book_id", id)
           .eq("reader_id", user.id)
           .maybeSingle<MyReview>()
@@ -511,6 +526,19 @@ export default async function BookDetailPage({
       ? allReviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount
       : 0;
   const myReview: MyReview | null = myReviewRow ?? null;
+  const myReviewNotice = ownReviewNotice(myReview);
+
+  // BD13 (Q2a): the account's public review name, read only for a reader
+  // who may review (own-row read). Null = the form asks for one.
+  let myReviewName: string | null = null;
+  if (owned && user) {
+    const { data: ownProfile } = await supabase
+      .from("profiles")
+      .select("review_name")
+      .eq("id", user.id)
+      .maybeSingle<{ review_name: string | null }>();
+    myReviewName = ownProfile?.review_name ?? null;
+  }
 
   const seriesInfo: PublicSeries | null = seriesRow ?? null;
   // LIBRUM 2.0 PRODUCT-3: orderSeriesBooks() is the same canonical
@@ -946,11 +974,6 @@ export default async function BookDetailPage({
               )}
             </p>
           )}
-          {reviewStatus === "success" && (
-            <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
-              Faleminderit për vlerësimin!
-            </p>
-          )}
           {reportStatus === "success" && (
             <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
               Faleminderit! E morëm raportimin tuaj dhe do ta shqyrtojmë.
@@ -1255,8 +1278,19 @@ export default async function BookDetailPage({
       {/* ============================================================
           Reviews
           ============================================================ */}
-      <section className="mt-14">
+      {/* BD13: id="vleresimet" is where the end page's review link
+          (BD4b) and the after-save redirect land. */}
+      <section id="vleresimet" className="mt-14 scroll-mt-24">
         <h2 className={SECTION_HEADING}>Vlerësimet</h2>
+
+        {(reviewStatus === "pending" || reviewStatus === "unchanged") && (
+          <p
+            role="status"
+            className="mt-4 max-w-[42.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700"
+          >
+            {reviewStatus === "pending" ? REVIEW_PENDING_NOTICE : REVIEW_UNCHANGED_NOTICE}
+          </p>
+        )}
 
         {owned && (
           <form
@@ -1266,6 +1300,36 @@ export default async function BookDetailPage({
             <p className="text-sm font-medium">
               {myReview ? "Përditësoni vlerësimin tuaj" : "Lini një vlerësim"}
             </p>
+            {myReviewNotice && (
+              <div
+                className={`rounded-[3px] px-3 py-2 text-sm ${
+                  myReviewNotice.tone === "warning" ? "bg-amber-50 text-amber-800" : "bg-blue-50 text-blue-800"
+                }`}
+              >
+                {myReviewNotice.lines.map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+              </div>
+            )}
+            {myReviewName ? (
+              <p className="text-sm text-muted">
+                Shfaqeni si: <span className="font-medium text-foreground">{myReviewName}</span>
+              </p>
+            ) : (
+              <label className="flex flex-col gap-1 text-sm">
+                Emri që shfaqet
+                <input
+                  type="text"
+                  name="review_name"
+                  required
+                  minLength={2}
+                  maxLength={REVIEW_NAME_MAX}
+                  autoComplete="nickname"
+                  className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
+                />
+                <span className="text-xs text-muted">{REVIEW_NAME_HELP}</span>
+              </label>
+            )}
             <label className="flex flex-col gap-1 text-sm">
               Yjet
               <select
@@ -1289,16 +1353,21 @@ export default async function BookDetailPage({
               <textarea
                 name="body"
                 rows={3}
+                maxLength={REVIEW_BODY_MAX}
                 defaultValue={myReview?.body ?? ""}
                 className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
               />
             </label>
+            {myReview?.status === "approved" && (
+              <p className="text-xs text-muted">{REVIEW_EDIT_WARNING}</p>
+            )}
             <button
               type="submit"
               className={buttonClasses("primary", "md", "w-fit rounded-[3px]")}
             >
               {myReview ? "Përditësoni vlerësimin" : "Dërgoni vlerësimin"}
             </button>
+            <p className="text-xs text-muted">{REVIEW_RULES_NOTE}</p>
           </form>
         )}
 
@@ -1308,11 +1377,21 @@ export default async function BookDetailPage({
           <ul className="mt-6 flex max-w-[42.5rem] flex-col gap-4">
             {allReviews.map((review) => (
               <li key={review.id} className="border-t border-border pt-4">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <StarRating rating={review.rating} />
                   <span className="text-sm font-medium">
-                    {review.reviewer_name ?? "Një lexues i Librum"}
+                    {review.reviewer_name ?? ANONYMOUS_REVIEWER_NAME}
                   </span>
+                  {review.verified && (
+                    <span className="rounded-[3px] bg-green-50 px-1.5 py-0.5 text-xs font-medium text-green-800">
+                      {VERIFIED_PURCHASE_LABEL}
+                    </span>
+                  )}
+                  {review.reviewer_is_author && (
+                    <span className="rounded-[3px] border border-border px-1.5 py-0.5 text-xs font-medium text-muted">
+                      {AUTHOR_REVIEWER_LABEL}
+                    </span>
+                  )}
                 </div>
                 {review.body && (
                   <p className="mt-1 text-sm text-foreground/90">

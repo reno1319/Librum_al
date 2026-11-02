@@ -99,7 +99,7 @@ describe("readLibrumPages", () => {
         { title: "Deti i dimrit", url: `${ORIGIN}/libra/11111111-1111-4111-8111-111111111111` },
         { title: "Rruga e gjatë", url: `${ORIGIN}/libra/22222222-2222-4222-8222-222222222222` },
       ],
-      reviewUrl: `${ORIGIN}/libra/${BOOK_ID}`,
+      reviewUrl: `${ORIGIN}/libra/${BOOK_ID}#vleresimet`,
     });
   });
 

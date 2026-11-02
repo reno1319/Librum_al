@@ -166,13 +166,21 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
   // can't tie a review to an account.
   it("reviews come from public_reviews with reviewer_name, and never select reader_id or a profiles join", () => {
     expect(source).toContain('.from("public_reviews")');
-    expect(source).toContain('.select("id, book_id, rating, body, created_at, reviewer_name")');
+    // BD13: plus the verified-purchase flag (5a) and the author tag, still
+    // no account column.
+    expect(source).toContain(
+      '.select("id, book_id, rating, body, created_at, reviewer_name, verified, reviewer_is_author")',
+    );
     expect(source).not.toMatch(/profiles\(display_name\)/);
     expect(source).not.toMatch(/\.from\("public_reviews"\)\s*\.select\("[^"]*reader_id/);
   });
 
   it("review names show reviewer_name with a generic fallback, never a profiles field", () => {
-    expect(source).toContain('review.reviewer_name ?? "Një lexues i Librum"');
+    // BD13: the fallback text moved to src/lib/reader-reviews.ts.
+    expect(source).toContain("review.reviewer_name ?? ANONYMOUS_REVIEWER_NAME");
+    // BD13: an author reviewer gets only the neutral tag, never a pen name.
+    expect(source).toContain("{review.reviewer_is_author && (");
+    expect(source).toContain("{AUTHOR_REVIEWER_LABEL}");
     expect(source).not.toMatch(/review\.profiles[^`]/); // the one hit left is a backticked comment
   });
 
