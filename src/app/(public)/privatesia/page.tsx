@@ -38,6 +38,9 @@ export const metadata: Metadata = {
 // show on the first page of every downloaded book, not only in its
 // metadata. Privacy now has its own date (Renato 1 Nov, "3. a"),
 // PRIVACY_LAST_UPDATED in src/lib/policy-dates.ts.
+// BD13 (Renato 2 Nov, "c"): reviews show after staff approval, with
+// the review name, and an author account's review carries the public
+// "Autor në Librum" tag.
 export default function PrivacyPage() {
   return (
     <main className="flex-1">
@@ -184,10 +187,12 @@ export default function PrivacyPage() {
                 Çfarë shohin të tjerët
               </h2>
               <p className="mt-2">
-                Vlerësimet tuaja shfaqen me emrin që shfaqni. Autorët
-                shfaqen me pseudonimin e tyre, dhe emri i llogarisë së një
-                autori mbetet privat. Autorët shohin shitjet e librave të
-                tyre, por jo kush i bleu.
+                Vlerësimet tuaja shfaqen, pasi i miraton stafi, me emrin që
+                zgjidhni për vlerësimet. Nëse keni llogari autori, pranë
+                vlerësimit shfaqet &ldquo;Autor në Librum&rdquo;. Autorët shfaqen me
+                pseudonimin e tyre, dhe emri i llogarisë së një autori mbetet
+                privat. Autorët shohin shitjet e librave të tyre, por jo kush
+                i bleu.
               </p>
             </section>
 
