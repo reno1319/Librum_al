@@ -566,9 +566,12 @@ select pg_temp.expect_error('anon', null,
 select pg_temp.expect_ok('anon', null,
   $q$select 1 from public.public_books where id::text like 'e0661000-%'$q$,
   2, 'part5 (PEN-NAMES-2): anon sees exactly the two published P066 books through public_books');
+-- BD15 P1 (N2, migration 20261103200000): a live bundle is listed only
+-- while its pen name is public; author B's only book is a draft, so B's
+-- published bundle (a historical fixture row) is not listed.
 select pg_temp.expect_ok('anon', null,
   $q$select 1 from public.public_bundles where id::text like 'e0662000-%'$q$,
-  2, 'part5 (PEN-NAMES-2): anon sees exactly the two published P066 bundles through public_bundles');
+  1, 'part5 (PEN-NAMES-2, BD15 N2): anon sees exactly the one published P066 bundle whose pen name is public');
 select pg_temp.expect_error('anon', null,
   $q$select 1 from public.books$q$,
   '42501', 'permission denied for table books', 'part5 (PEN-NAMES-2): anon is refused the base books table');
@@ -612,7 +615,7 @@ select pg_temp.expect_ok('service_role', null,
         and status = 'draft' and price_all = 199 returning id$q$,
   1, 'part7: service_role publishes a book with the compare-and-set filters');
 select pg_temp.expect_ok('service_role', null,
-  $q$update public.books set title = 'edited', price_all = 250
+  $q$update public.books set subtitle = 'edited', price_all = 250
       where id = 'e0661000-0000-0000-0000-0000000000a3' and author_id = 'e0660000-0000-0000-0000-00000000000a' returning id$q$,
   1, 'part7: service_role writes metadata and price_all in one row update');
 select pg_temp.expect_ok('service_role', null,
@@ -636,7 +639,7 @@ do $$
 begin
   perform pg_temp.assert(
     (select status = 'published' and published_at is not null from public.books where id = 'e0661000-0000-0000-0000-0000000000a1')
-    and (select price_all = 250 and title = 'edited' from public.books where id = 'e0661000-0000-0000-0000-0000000000a3')
+    and (select price_all = 250 and subtitle = 'edited' from public.books where id = 'e0661000-0000-0000-0000-0000000000a3')
     and (select status = 'draft' from public.books where id = 'e0661000-0000-0000-0000-0000000000a2')
     and (select status = 'draft' from public.books where id = 'e0661000-0000-0000-0000-0000000000b1')
     and (select price_all = 399 and status = 'published' from public.bundles where id = 'e0662000-0000-0000-0000-0000000000a2'),
