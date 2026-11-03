@@ -452,11 +452,10 @@ describe("UploadWizard: FIX1 per-field messages and wording", () => {
     expect(source).toContain("!readiness.missingDescription &&");
   });
 
-  it("replaces the false 'saved as a draft first' sentence with W-A", () => {
+  // BD15 P2: the W-A sentence lived on books/new/page.tsx, which now opens
+  // the new editor (a draft is saved at every "Ruaj"); the wizard itself
+  // is removed with these tests in P4.
+  it("books/new no longer carries the false 'saved as a draft first' sentence", () => {
     expect(pageSource).not.toContain("saved as a draft first");
-    // ADMIN-3-REVIEW (B): the final button's new label.
-    expect(pageSource).toContain(
-      "Asgjë nuk ruhet derisa të shtypni &quot;Ruajeni si draft&quot; ose &quot;Dërgojeni për shqyrtim&quot;.",
-    );
   });
 });

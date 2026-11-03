@@ -135,6 +135,8 @@ const MISSING_DESCRIPTION_SHORT_MESSAGE = "Shtoni një përshkrim para publikimi
 // sentence on both publish paths; createBook adds "Saved as draft" as
 // its success line, as for the missing description.
 const MISSING_RIGHTS_MESSAGE = "Zgjidhni të drejtat para publikimit.";
+// BD15 P2: a draft from the new editor without its manuscript or cover.
+const MISSING_FILES_MESSAGE = "Shtoni dorëshkrimin dhe kopertinën para se ta dërgoni për shqyrtim.";
 
 // F4 (D3): the existing generic refusal, also used when the rights
 // choice cannot be read at all (before the migration, or a read error).
@@ -1252,7 +1254,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   // author's row or any id mismatch stops here, before any upload.
   const { data: existing, error: existingError } = await supabase
     .from("books")
-    .select("id, cover_path, file_path, author_id, language, status, price_all, isbn, pen_name_id, original_author")
+    .select("id, cover_path, file_path, author_id, language, status, price_all, isbn, pen_name_id, original_author, title, published_at")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .single();
@@ -1261,7 +1263,12 @@ export async function updateBook(bookId: string, formData: FormData) {
     redirect("/dashboard");
   }
 
-  const title = String(formData.get("title") ?? "").trim();
+  // BD15 P1/P2 (N1, migration 20261103200000): once a book has been
+  // published its title and pen name are locked (LB480/LB481). The Edit
+  // page shows both as fixed then; anything submitted for them is
+  // ignored here and the stored title is kept.
+  const lockedAfterPublish = typeof existing.published_at === "string" && existing.published_at !== "";
+  const title = lockedAfterPublish ? existing.title : String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const keywords = normalizeKeywords(formData.get("keywords"));
   const isbn = String(formData.get("isbn") ?? "").trim() || null;
@@ -1395,7 +1402,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   // without the Pen name field leaves the book's pen name untouched; a
   // present, empty field means the author's default pen name
   // (PEN-NAMES-1).
-  const penNamePresent = formData.has("penName");
+  const penNamePresent = !lockedAfterPublish && formData.has("penName");
   const penName = String(formData.get("penName") ?? "").trim() || null;
   // PEN-NAMES-1 (10a): resolved through the server-only pen name writer
   // (found by name or created), before any upload. 14a -- a book in a
@@ -1901,7 +1908,7 @@ export async function updateBook(bookId: string, formData: FormData) {
     }
     // ADMIN-3-REVIEW (S3): the live-files trigger (LB463) or the publish
     // gate (LB462) caught a change that landed after the read above.
-    if (updateError.code === "LB463" || updateError.code === "LB462") {
+    if (updateError.code === "LB463" || updateError.code === "LB462" || updateError.code === "LB480" || updateError.code === "LB481") {
       redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
     }
     const penNameMessage = penNameErrorMessage(updateError);
@@ -2109,6 +2116,11 @@ type PerformPublishResult =
       ok: false;
       reason:
         | "not_found"
+        // BD15 P2: the new editor saves a draft before it has a
+        // manuscript or a cover (both columns are nullable). Such a book
+        // is never sent for review or published. Checked first, after
+        // the takedown: the author adds them on the edit page.
+        | "missing_files"
         | "missing_all_price"
         // FIX1 (X16): an empty (after trimming) description. Checked
         // after the price and before paid permission: the author can fix
@@ -2158,7 +2170,7 @@ async function performPublish(
 
   const { data: book } = await supabase
     .from("books")
-    .select("status, price_all, published_at, description")
+    .select("status, price_all, published_at, description, file_path, cover_path")
     .eq("id", bookId)
     .eq("author_id", userId)
     .single();
@@ -2176,6 +2188,13 @@ async function performPublish(
   }
   if (takedown.kind === "unavailable") {
     return { ok: false, reason: "takedown_unavailable" };
+  }
+
+  // BD15 P2: no manuscript or no cover yet -- see "missing_files". Both
+  // columns are in the select above, so a row always carries them
+  // (null when empty).
+  if (book.file_path === null || book.cover_path === null || book.file_path === "" || book.cover_path === "") {
+    return { ok: false, reason: "missing_files" };
   }
 
   // ADMIN-3-REVIEW (M2): the gate itself now lives in ONE shared helper,
@@ -2408,6 +2427,9 @@ export async function publishBook(bookId: string) {
     // and points at the one action that clears it. Unlike the paid-mode
     // denial below, it is safe to be specific: it describes the author's
     // OWN row back to them and leaks nothing about this deployment.
+    if (result.reason === "missing_files") {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_FILES_MESSAGE)}`);
+    }
     if (result.reason === "missing_all_price") {
       redirect(
         `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,

@@ -365,7 +365,8 @@ describe("updateBook while paid publishing is closed", () => {
     seedBook({ status: "published", price_all: 199 });
 
     expect(await redirectOf(updateBook(BOOK_ID, bookForm("199")))).toBe(BOOK_SAVED);
-    expect(book()).toMatchObject({ status: "published", price_all: 199, title: "Book, edited" });
+    // BD15 P2: a published book keeps its title (N1 lock).
+    expect(book()).toMatchObject({ status: "published", price_all: 199, title: "Book", description: "New description" });
   });
 
   it("published, paid -> free is allowed", async () => {
@@ -379,7 +380,7 @@ describe("updateBook while paid publishing is closed", () => {
     seedBook({ status: "published", price_all: 0 });
 
     expect(await redirectOf(updateBook(BOOK_ID, bookForm("0")))).toBe(BOOK_SAVED);
-    expect(book()).toMatchObject({ status: "published", price_all: 0, title: "Book, edited" });
+    expect(book()).toMatchObject({ status: "published", price_all: 0, title: "Book", description: "New description" });
   });
 
   it("published, null -> free is allowed", async () => {

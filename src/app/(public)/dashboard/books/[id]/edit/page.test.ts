@@ -137,7 +137,11 @@ describe("Edit page: published_at is never author-editable", () => {
     // to keep the Edit surface focused, so published_at should not
     // appear here at all (the public Book Detail page is the actual
     // required surface for it).
-    expect(source).not.toContain("published_at");
+    // BD15 P2: the one exception -- it is read to show the title and
+    // pen name as locked once the book has been published (N1), never
+    // shown or submitted.
+    expect(source.match(/published_at/g)).toHaveLength(1);
+    expect(source).toContain("const lockedAfterPublish = Boolean(book.published_at);");
   });
 });
 
