@@ -612,7 +612,7 @@ select pg_temp.expect_ok('service_role', null,
         and status = 'draft' and price_all = 199 returning id$q$,
   1, 'part7: service_role publishes a book with the compare-and-set filters');
 select pg_temp.expect_ok('service_role', null,
-  $q$update public.books set title = 'edited', price_all = 250
+  $q$update public.books set subtitle = 'edited', price_all = 250
       where id = 'e0661000-0000-0000-0000-0000000000a3' and author_id = 'e0660000-0000-0000-0000-00000000000a' returning id$q$,
   1, 'part7: service_role writes metadata and price_all in one row update');
 select pg_temp.expect_ok('service_role', null,
@@ -636,7 +636,7 @@ do $$
 begin
   perform pg_temp.assert(
     (select status = 'published' and published_at is not null from public.books where id = 'e0661000-0000-0000-0000-0000000000a1')
-    and (select price_all = 250 and title = 'edited' from public.books where id = 'e0661000-0000-0000-0000-0000000000a3')
+    and (select price_all = 250 and subtitle = 'edited' from public.books where id = 'e0661000-0000-0000-0000-0000000000a3')
     and (select status = 'draft' from public.books where id = 'e0661000-0000-0000-0000-0000000000a2')
     and (select status = 'draft' from public.books where id = 'e0661000-0000-0000-0000-0000000000b1')
     and (select price_all = 399 and status = 'published' from public.bundles where id = 'e0662000-0000-0000-0000-0000000000a2'),

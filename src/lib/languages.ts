@@ -4,16 +4,12 @@
 // localization framework and not a full ISO-639 selector (PUBLISHING-
 // UX-1 Part A's own audit explicitly recommended against that).
 //
-// This is product configuration, not a database invariant -- books.
-// language (migration 044) carries no DB CHECK constraint precisely so
-// that adding a fourth launch language later never requires a
-// migration, only a change to this file plus whatever server-side
-// validation already reads it (createBook()/updateBook() in
-// src/app/(public)/dashboard/books/actions.ts).
+// BD15 P1 (3 Nov 2026): Albanian and English only. The database now
+// enforces the same set (books_language_check, migration
+// 20261103200000), so a code added here needs that CHECK widened first.
 export const LANGUAGES = [
   { code: "sq", label: "Shqip" },
   { code: "en", label: "Anglisht" },
-  { code: "it", label: "Italisht" },
 ] as const;
 
 export type LanguageCode = (typeof LANGUAGES)[number]["code"];

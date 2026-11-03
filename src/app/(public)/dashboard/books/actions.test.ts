@@ -430,7 +430,7 @@ describe("createBook: bibliographic metadata (PUBLISHING-UX-1 Part B)", () => {
   });
 
   it("accepts every currently supported language code", async () => {
-    for (const code of ["sq", "en", "it"]) {
+    for (const code of ["sq", "en"]) {
       resetMocks();
       const formData = await buildFormData();
       formData.set("language", code);
@@ -664,11 +664,11 @@ describe("updateBook: bibliographic metadata (PUBLISHING-UX-1 Part B FINAL PRE-C
     const formData = await buildFormData();
     formData.delete("cover");
     formData.delete("manuscript");
-    formData.set("language", "it");
+    formData.set("language", "en");
 
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ language: "it" });
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ language: "en" });
   });
 
   // Tests H/I: original_publication_date -- absent (no update),
@@ -918,7 +918,7 @@ describe("createBook: language remains strict -- unaffected by updateBook's pres
     expect(mockInsert).not.toHaveBeenCalled();
   });
 
-  it.each(["sq", "en", "it"])("still accepts currently supported language %s on create", async (code) => {
+  it.each(["sq", "en"])("still accepts currently supported language %s on create", async (code) => {
     const formData = await buildFormData();
     formData.set("language", code);
 
