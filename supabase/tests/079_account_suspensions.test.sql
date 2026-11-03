@@ -192,6 +192,10 @@ insert into public.bundle_books (bundle_id, book_id) values
 
 insert into public.series (id, author_id, title) values
   ('e0790003-0000-4000-8000-0000000000a1', 'e0790000-0000-4000-8000-00000000000a', 'P079 Series');
+-- BD14 (migration 20261103160000): a series is public only with a
+-- published book, so A's published book a1 sits in it.
+update public.books set series_id = 'e0790003-0000-4000-8000-0000000000a1', series_position = 1
+ where id = 'e0790001-0000-4000-8000-0000000000a1';
 
 insert into public.purchases (book_id, reader_id, amount_cents, refunded_at) values
   ('e0790001-0000-4000-8000-0000000000a1', 'e0790000-0000-4000-8000-0000000000aa', 499, null),

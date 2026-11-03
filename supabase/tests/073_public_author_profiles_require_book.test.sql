@@ -14,6 +14,10 @@
 -- series or bundle carries it, and an account's display name is never
 -- public. Every assertion below states that replacement rule.
 --
+-- BD14 (migration 20261103160000) narrows it: only a book that is, or
+-- once was, published (books.published_at) makes its pen name public; a
+-- draft no longer does. The pen name's own author always sees it (Q1a).
+--
 -- To reproduce, from the repo root, against a disposable PostgreSQL 17
 -- instance (17 or newer: schema.sql uses the MAINTAIN privilege):
 --
@@ -83,14 +87,15 @@ end $$;
 -- PEN-NAMES-2: through public_pen_names (pen names that carry a book).
 -- ============================================================
 create temp table expected_names (name text);
-insert into expected_names values ('P073 Pen B'), ('P073 Pen C'), ('P073 R pen');
+-- BD14: only C's book is published; B's and R's drafts list nothing.
+insert into expected_names values ('P073 Pen C');
 grant select on expected_names to anon, authenticated;
 
 set role anon;
 select pg_temp.assert(
   (select array_agg(name order by name) from public.public_pen_names where name like 'P073 %')
     = (select array_agg(name order by name) from expected_names),
-  'part1 (anon, PEN-NAMES-2): exactly the pen names that carry a draft or published book are listed');
+  'part1 (anon, BD14): exactly the pen names that carry a published book are listed');
 select pg_temp.assert(
   not exists (select 1 from public.public_pen_names where name = 'P073 Signup Name A'),
   'part1 (anon, PEN-NAMES-2): a book-less author''s signup (default pen) name is not readable');
@@ -101,8 +106,8 @@ select pg_temp.assert(
   not exists (select 1 from public.public_pen_names where name = 'P073 Reader'),
   'part1 (anon, PEN-NAMES-2): a reader''s account display name is never listed, even with a book row (only the pen name the book carries is)');
 select pg_temp.assert(
-  (select count(*) from public.public_pen_names where name = 'P073 Pen B') = 1,
-  'part1 (anon, PEN-NAMES-2): a draft-only author''s pen name is readable');
+  not exists (select 1 from public.public_pen_names where name = 'P073 Pen B'),
+  'part1 (anon, BD14): a draft-only author''s pen name is NOT readable');
 reset role;
 
 -- authenticated as a different user, and as the book-less author themself
@@ -110,12 +115,13 @@ set role authenticated;
 select set_config('request.jwt.claim.sub', 'e0730000-0000-4000-8000-0000000000aa', true);
 select pg_temp.assert(
   (select array_agg(name order by name) from public.public_pen_names where name like 'P073 %')
-    = (select array_agg(name order by name) from expected_names),
-  'part1 (authenticated reader, PEN-NAMES-2): the same pen names are listed');
+    = array['P073 Pen C', 'P073 R pen'],
+  'part1 (authenticated R, BD14 Q1a): the public pen names plus R''s own draft pen name, nothing else');
 select set_config('request.jwt.claim.sub', 'e0730000-0000-4000-8000-00000000000a', true);
 select pg_temp.assert(
-  not exists (select 1 from public.public_pen_names where name = 'P073 Signup Name A'),
-  'part1 (authenticated, self, PEN-NAMES-2): a book-less author''s pen name is not listed even to themself');
+  (select array_agg(name order by name) from public.public_pen_names where name like 'P073 %')
+      = array['P073 Pen C', 'P073 Signup Name A'],
+  'part1 (authenticated, self, BD14 Q1a): a book-less author sees their own pen name, plus the public ones, nothing else');
 select set_config('request.jwt.claim.sub', '', true);
 reset role;
 
@@ -126,8 +132,35 @@ insert into public.books (id, author_id, title) values
   ('e0730001-0000-4000-8000-00000000000a', 'e0730000-0000-4000-8000-00000000000a', 'P073 A first draft');
 set role anon;
 select pg_temp.assert(
+  not exists (select 1 from public.public_pen_names where name = 'P073 Signup Name A'),
+  'part2 (BD14): a first draft does NOT list the author''s pen name');
+reset role;
+
+-- (A direct insert as the table owner: an UPDATE to 'published' needs
+-- an approved review, ADMIN-3.)
+delete from public.books where id = 'e0730001-0000-4000-8000-00000000000a';
+insert into public.books (id, author_id, title, status, price_cents, price_all, published_at) values
+  ('e0730001-0000-4000-8000-00000000000a', 'e0730000-0000-4000-8000-00000000000a', 'P073 A published', 'published', 0, 199, now());
+set role anon;
+select pg_temp.assert(
   exists (select 1 from public.public_pen_names where name = 'P073 Signup Name A'),
-  'part2 (PEN-NAMES-2): an author''s pen name is listed as soon as they create a first draft');
+  'part2 (BD14): the pen name is listed once the book is published');
+reset role;
+
+-- BD14 Q3a: unpublishing keeps published_at, so the pen name stays.
+update public.books set status = 'draft'
+ where id = 'e0730001-0000-4000-8000-00000000000a';
+set role anon;
+select pg_temp.assert(
+  exists (select 1 from public.public_pen_names where name = 'P073 Signup Name A'),
+  'part2 (BD14 Q3a): an unpublished (once published) book keeps its pen name listed');
+reset role;
+
+delete from public.books where id = 'e0730001-0000-4000-8000-00000000000a';
+set role anon;
+select pg_temp.assert(
+  not exists (select 1 from public.public_pen_names where name = 'P073 Signup Name A'),
+  'part2 (BD14 Q3a): deleting the only once-published book hides the pen name again');
 reset role;
 
 delete from public.books where id = 'e0730001-0000-4000-8000-00000000000b';
