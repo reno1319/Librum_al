@@ -19,11 +19,13 @@
 --      cannot be unpublished by its author or deleted; a published
 --      public-domain edition is always its work's picked one.
 --   5. Contributors: at most 3 per book.
---   6. Views: public_books hides the uploader's pen name on a
---      public-domain edition without an editor mention, and shows the
---      new columns; public_bundles shows pen_name_id only when the pen
---      name is public (N2), and a bundle cannot be published under a
---      pen name that is not.
+--   6. Views: public_books shows the new columns; public_bundles lists
+--      a bundle only when its pen name is public (N2), and a bundle
+--      cannot be published under a pen name that is not. pen_name_id
+--      stays a plain column in both, so the Data API can still embed
+--      public_pen_names through it. Hiding a non-credited uploader's pen
+--      name on a public-domain edition comes with P7, which links books
+--      to works (until then pd_work_id is never set).
 --   7. book_makes_pen_name_public: a public-domain edition makes its
 --      uploader's pen name public only with an editor mention.
 --   8. Backfill: categories from genre, edition_number from a plain
@@ -498,11 +500,14 @@ grant execute on function public.book_is_publicly_listed(public.books)
   to anon, authenticated, service_role;
 
 -- ------------------------------------------------------------
--- 9. public_books: the new columns appended; the uploader's pen name of
---    a public-domain edition without an editor mention is shown only to
---    the uploader. Never ai_used (it is not on books).
---    Same leading columns, so CREATE OR REPLACE keeps every grant and
---    the policies that read it.
+-- 9. public_books: the new columns appended, never ai_used (it is not
+--    on books). Same leading columns, so CREATE OR REPLACE keeps every
+--    grant and the policies that read it. Every column stays a plain
+--    reference to a books column: the Data API (PostgREST) finds the
+--    view's relationships (pen:public_pen_names, series, contributors)
+--    only through plain columns, never through an expression.
+--    P7 hides a non-credited uploader's pen name on a public-domain
+--    edition without breaking that (BD15 P1 audit N1 and r2).
 -- ------------------------------------------------------------
 create or replace view public.public_books
   with (security_barrier)
@@ -511,11 +516,7 @@ as
          b.isbn, b.language, b.publisher, b.edition, b.original_publication_date,
          b.genre, b.series_id, b.series_position, b.price_cents, b.cover_path,
          b.status, b.published_at, b.created_at, b.updated_at, b.price_all,
-         b.librum_choice_at,
-         case
-           when b.pd_work_id is null or b.pd_editor_credit or b.author_id = auth.uid()
-             then b.pen_name_id
-         end as pen_name_id,
+         b.librum_choice_at, b.pen_name_id,
          b.original_author,
          -- BD15 P1 (migration 20261103200000): appended last.
          b.categories, b.is_adult, b.reading_age_min, b.edition_number,
@@ -526,24 +527,21 @@ as
      or public.user_owns_book(b.id);
 
 -- ------------------------------------------------------------
--- 10. N2: public_bundles shows its pen name only when the pen name is
---     public by the book rule (or to the bundle's author), and a bundle
+-- 10. N2: a published bundle is listed only while its pen name is
+--     public by the book rule (its author always sees it), and a bundle
 --     cannot be published under a pen name that is not public.
+--     pen_name_id stays a plain column (see 9).
 -- ------------------------------------------------------------
 create or replace view public.public_bundles
   with (security_barrier)
 as
   select bu.id, bu.title, bu.description, bu.price_cents, bu.status,
-         bu.created_at, bu.updated_at, bu.price_all,
-         case
-           when bu.author_id = auth.uid()
-             or exists (select 1 from public.books b
-                         where b.pen_name_id = bu.pen_name_id
-                           and public.book_makes_pen_name_public(b))
-             then bu.pen_name_id
-         end as pen_name_id
+         bu.created_at, bu.updated_at, bu.price_all, bu.pen_name_id
   from public.bundles bu
-  where bu.status = 'published'
+  where (bu.status = 'published'
+         and exists (select 1 from public.books b
+                      where b.pen_name_id = bu.pen_name_id
+                        and public.book_makes_pen_name_public(b)))
      or bu.author_id = auth.uid();
 
 create function public.bundles_require_public_pen_name()

@@ -11,11 +11,13 @@
 --          (picked by staff), the picked edition cannot be unpublished
 --          or deleted by its author but staff takedowns, suspensions and
 --          account deletion still work, swap, no series or bundle
---          without an editor mention, and the uploader's pen name hidden
---          without one (Renato's Q1, 3 Nov);
+--          without an editor mention, and no public pen name from the
+--          edition without one (Renato's Q1, 3 Nov; the byline itself
+--          is P7's);
 -- * part4  at most 3 contributors, no error oracle for a stranger;
--- * part5  N2: public_bundles shows a pen name only when it is public,
---          and a bundle cannot be published under a hidden one;
+-- * part5  N2: public_bundles lists a live bundle only while its pen
+--          name is public, a bundle cannot be published under a hidden
+--          one, and pen_name_id stays a plain column (r2);
 -- * part6  N8 (BD14 audit): a once-published book cannot move to
 --          another pen name; a suspended author's pen name and bundle
 --          pen name are hidden from a signed-in reader;
@@ -311,16 +313,9 @@ select pg_temp.assert(pg_temp.run_as(null, null,
   like '23503:%',
   'part3: only an edition of this work can be picked');
 
--- The uploader's pen name stays hidden without an editor mention.
-select pg_temp.assert(pg_temp.value_as('anon', null,
-  $q$select (pen_name_id is null)::text from public.public_books where id = 'e0900001-0000-4000-8000-0000000000f1'$q$) = 'true',
-  'part3 (Q1): anon sees the picked edition without its uploader''s pen name');
-select pg_temp.assert(pg_temp.value_as('authenticated', 'e0900000-0000-4000-8000-0000000000aa',
-  $q$select (pen_name_id is null)::text from public.public_books where id = 'e0900001-0000-4000-8000-0000000000f1'$q$) = 'true',
-  'part3 (Q1): so does a signed-in reader');
-select pg_temp.assert(pg_temp.value_as('authenticated', 'e0900000-0000-4000-8000-0000000000a1',
-  $q$select (pen_name_id is not null)::text from public.public_books where id = 'e0900001-0000-4000-8000-0000000000f1'$q$) = 'true',
-  'part3: the uploader still sees their own pen name on it');
+-- The edition does not make the uploader's pen name public. (Hiding the
+-- byline on the edition itself, and the owner clause of
+-- public_pen_names, come with P7: BD15 P1 audit N1 and r2.)
 select pg_temp.assert(pg_temp.value_as('anon', null,
   $q$select count(*)::text from public.public_pen_names where name = 'P090 Uli'$q$) = '0',
   'part3 (Q1): the edition does not make the uploader''s pen name public');
@@ -347,8 +342,6 @@ select pg_temp.assert(pg_temp.run_as(null, null,
 -- With the editor mention the pen name shows, as an editor line.
 update public.books set pd_editor_credit = true where id = 'e0900001-0000-4000-8000-0000000000f1';
 select pg_temp.assert(pg_temp.value_as('anon', null,
-  $q$select (pen_name_id is not null)::text from public.public_books where id = 'e0900001-0000-4000-8000-0000000000f1'$q$) = 'true'
-  and pg_temp.value_as('anon', null,
   $q$select count(*)::text from public.public_pen_names where name = 'P090 Uli'$q$) = '1',
   'part3 (Q1): with the editor mention the uploader''s pen name is public');
 select pg_temp.assert(pg_temp.run_as(null, null,
@@ -430,7 +423,7 @@ select pg_temp.assert(pg_temp.run_as('service_role', null,
   'part5 (N2): a bundle cannot be published under a pen name with no published book');
 select pg_temp.assert(pg_temp.value_as('authenticated', 'e0900000-0000-4000-8000-0000000000ee',
   $q$select (pen_name_id is not null)::text from public.public_bundles where id = 'e0900004-0000-4000-8000-0000000000ee'$q$) = 'true',
-  'part5: the bundle''s author sees its pen name');
+  'part5: the bundle''s author sees their draft bundle and its pen name');
 -- A bundle published while its pen name was public, whose books are
 -- then deleted: readers see the bundle without the pen name.
 insert into public.books (id, author_id, title, status, price_all, published_at) values
@@ -440,13 +433,27 @@ select pg_temp.assert(pg_temp.run_as('service_role', null,
   'part5: with a published book of that pen name it can');
 select pg_temp.assert(pg_temp.value_as('authenticated', 'e0900000-0000-4000-8000-0000000000aa',
   $q$select (pen_name_id is not null)::text from public.public_bundles where id = 'e0900004-0000-4000-8000-0000000000ee'$q$) = 'true',
-  'part5 (N8): a signed-in reader sees the live bundle''s public pen name');
+  'part5 (N8): a signed-in reader sees the live bundle and its public pen name');
 delete from public.books where id = 'e0900001-0000-4000-8000-0000000000e1';
 select pg_temp.assert(pg_temp.value_as('authenticated', 'e0900000-0000-4000-8000-0000000000aa',
-  $q$select (pen_name_id is null)::text from public.public_bundles where id = 'e0900004-0000-4000-8000-0000000000ee'$q$) = 'true'
+  $q$select count(*)::text from public.public_bundles where id = 'e0900004-0000-4000-8000-0000000000ee'$q$) = '0'
   and pg_temp.value_as('anon', null,
-  $q$select (pen_name_id is null)::text from public.public_bundles where id = 'e0900004-0000-4000-8000-0000000000ee'$q$) = 'true',
-  'part5 (N2, N8): once no book makes it public, readers no longer see the bundle''s pen name');
+  $q$select count(*)::text from public.public_bundles where id = 'e0900004-0000-4000-8000-0000000000ee'$q$) = '0',
+  'part5 (N2, N8): once no book makes its pen name public, readers no longer see the bundle');
+select pg_temp.assert(pg_temp.value_as('authenticated', 'e0900000-0000-4000-8000-0000000000ee',
+  $q$select count(*)::text from public.public_bundles where id = 'e0900004-0000-4000-8000-0000000000ee'$q$) = '1',
+  'part5: its author still does');
+
+-- r2: every view column the Data API embeds through stays a plain
+-- column. PostgREST finds a view's relationships only through plain
+-- references to base-table columns; an expression (CASE) loses the
+-- pen:public_pen_names embed the whole site uses.
+select pg_temp.assert(
+  pg_catalog.pg_get_viewdef('public.public_books'::regclass) !~* '\mcase\M'
+  and pg_catalog.pg_get_viewdef('public.public_bundles'::regclass) !~* '\mcase\M'
+  and pg_catalog.pg_get_viewdef('public.public_books'::regclass) ~ '\n\s+pen_name_id,\n'
+  and pg_catalog.pg_get_viewdef('public.public_bundles'::regclass) ~ '\n\s+pen_name_id\n\s+FROM ',
+  'part5 (r2): pen_name_id is a plain column in public_books and public_bundles');
 
 -- ============================================================
 -- Part 6: N8, suspension seen by a signed-in reader.
