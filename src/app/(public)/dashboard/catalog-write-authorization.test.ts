@@ -879,7 +879,8 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
   it("updateBook on a published paid book, same price: metadata edit succeeds", async () => {
     seed({ book: { status: "published", price_all: 199, published_at: "2026-09-01T00:00:00Z" } });
     expect(await redirectOf(updateBook(BOOK_ID, editBookForm("199")))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
-    expect(bookRow()).toMatchObject({ title: "Book, edited", price_all: 199, status: "published" });
+    // BD15 P2: a published book keeps its title (N1 lock); the rest is edited.
+    expect(bookRow()).toMatchObject({ title: "Book", description: "New description", price_all: 199, status: "published" });
   });
 
   it("publishBook: the catalog writer sets status and first published_at", async () => {
@@ -1261,13 +1262,15 @@ describe("the privileged client stays server-only", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the catalog writer is used only by the two dashboard action modules", () => {
+  it("the catalog writer is used only by the dashboard action modules", () => {
     const users = sourceFiles(path.join(REPO_ROOT, "src"))
       .filter((file) => /from\s+["']@\/lib\/catalog-write-client["']/.test(readFileSync(file, "utf8")))
       .map((file) => path.relative(REPO_ROOT, file))
       .sort();
     expect(users).toEqual([
       "src/app/(public)/dashboard/books/actions.ts",
+      // BD15 P2: the new editor's Details save (draft insert/update).
+      "src/app/(public)/dashboard/books/editor-actions.ts",
       "src/app/(public)/dashboard/bundles/actions.ts",
     ]);
   });
@@ -1778,5 +1781,55 @@ describe("F5: the Librum's choice pick is cleared on unpublish and on a real pub
     expect(await redirectOf(publishBook(BOOK_ID))).toBe("/dashboard?success=Libri%20juaj%20u%20publikua");
     expect(bookRow().status).toBe("published");
     expect(console.error).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================
+// BD15 P2: a draft may now have no manuscript or cover (the new editor
+// saves Details first), and a published book's title and pen name are
+// locked (N1, migration 20261103200000).
+// ============================================================
+describe("BD15 P2: drafts without files, and the locks after first publish", () => {
+  it.each([
+    ["no manuscript", { file_path: null }],
+    ["no cover", { cover_path: null }],
+  ])("publishBook refuses a draft with %s, before any write", async (_label, missing) => {
+    openPaidPublishing();
+    seed({ book: missing });
+    expect(await redirectOf(publishBook(BOOK_ID))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Shtoni dorëshkrimin dhe kopertinën para se ta dërgoni për shqyrtim.")}`,
+    );
+    expect(writes).toEqual([]);
+    expect(bookRow()).toMatchObject({ status: "draft" });
+  });
+
+  it("updateBook keeps the title and pen name of a book that was published once, even as a draft again", async () => {
+    seed({ book: { status: "draft", published_at: "2026-09-01T00:00:00Z", pen_name_id: "pen-original" } });
+    const form = editBookForm("0");
+    form.set("penName", "A New Pen Name");
+    await redirectOf(updateBook(BOOK_ID, form));
+    const update = writes.find((w) => w.table === "books" && w.op === "update")!;
+    expect(update.payload).toMatchObject({ title: "Book", description: "New description" });
+    expect(update.payload).not.toHaveProperty("pen_name_id");
+    expect(bookRow()).toMatchObject({ title: "Book", pen_name_id: "pen-original" });
+  });
+
+  it("updateBook still edits the title and pen name of a never-published draft", async () => {
+    seed({ book: { status: "draft", published_at: null } });
+    const form = editBookForm("0");
+    form.set("penName", "A New Pen Name");
+    await redirectOf(updateBook(BOOK_ID, form));
+    const update = writes.find((w) => w.table === "books" && w.op === "update")!;
+    expect(update.payload).toMatchObject({ title: "Book, edited", pen_name_id: "f0000000-0000-4000-8000-00000000pen0" });
+  });
+});
+
+describe("BD15 P2 audit r1 (F2): an older book that was live once", () => {
+  it("is not refused for a missing cover when it is published again", async () => {
+    openPaidPublishing();
+    seed({ book: { cover_path: null, published_at: "2026-09-01T00:00:00Z" } });
+    expect(await redirectOf(publishBook(BOOK_ID))).not.toContain(
+      encodeURIComponent("Shtoni dorëshkrimin dhe kopertinën para se ta dërgoni për shqyrtim."),
+    );
   });
 });

@@ -197,8 +197,10 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
 });
 
 describe("AUTHOR-1B privacy contract: EPUB dc:creator is sourced from the resolved public name, not display_name", () => {
+  // BD15 P2: books/new/page.tsx no longer builds an EPUB (it opens the
+  // new editor's Details tab); the manuscript comes back to the editor
+  // in P3, which takes this check with it.
   const dashboardFiles = [
-    "app/(public)/dashboard/books/new/page.tsx",
     "app/(public)/dashboard/books/[id]/edit/page.tsx",
   ];
 

@@ -286,6 +286,11 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Çdo lidhje duhet të jetë një adresë e plotë interneti që fillon me https://.",
   "Çdo lidhje mund të shtohet vetëm një herë.",
   AUTH_GENERIC_ERROR_MESSAGE,
+  "Disa fusha nuk janë plotësuar si duhet. Kontrolloni të dhënat dhe provoni përsëri.",
+  "Ky libër është i publikuar ose në shqyrtim, prandaj ndryshohet këtu.",
+  "Shtoni dorëshkrimin dhe kopertinën para se ta dërgoni për shqyrtim.",
+  "Të dhënat u ruajtën, por kontribuesit jo të gjithë. Kontrolloni listën dhe ruajeni përsëri.",
+  "Të dhënat u ruajtën, por zgjedhja e të drejtave jo. Zgjidheni përsëri dhe ruajeni.",
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([

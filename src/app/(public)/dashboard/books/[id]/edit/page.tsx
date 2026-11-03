@@ -54,6 +54,7 @@ import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 import { ebookCoverNotice } from "@/lib/ebook-cover-notice";
+import { PEN_NAME_LOCKED_NOTE, TITLE_LOCKED_NOTE, editorPath } from "@/lib/book-editor-copy";
 
 // LIBRUM 2.0 SEO-1: a static title, not "Edit <book title>" -- getting
 // the real title would mean a second query inside generateMetadata()
@@ -254,6 +255,8 @@ export default async function EditBookPage({
   const bookPenName = book.pen?.name && book.pen.name !== defaultPenName ? book.pen.name : "";
   const currentRightsBasis = rightsState.kind === "present" ? rightsState.declaration.basis : null;
   const authorPublicName = resolvePublicAuthorName(profile);
+  // BD15 P2: title and pen name are fixed once the book has been published.
+  const lockedAfterPublish = Boolean(book.published_at);
 
   const readiness = resolvePublishReadiness({
     book,
@@ -270,6 +273,18 @@ export default async function EditBookPage({
       <div className="mt-2">
         <PageHeader title="Ndryshoni librin" description={book.title} />
       </div>
+      {/* BD15 P2: a draft's details are filled in the new editor; this
+          page keeps the manuscript, cover and price until P3 and P4. */}
+      {book.status === "draft" && !inReview && (
+        <p className="mt-2 text-sm">
+          <Link
+            href={editorPath(book.id, "details")}
+            className="focus-ring rounded-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
+          >
+            Plotësoni të dhënat te redaktori i ri
+          </Link>
+        </p>
+      )}
 
       {error && (
         <Alert variant="error" className="mt-4">
@@ -304,6 +319,19 @@ export default async function EditBookPage({
             <section id="details" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal">Të dhënat e librit</h2>
               <div className="mt-4 flex flex-col gap-4">
+                {/* BD15 P2 (N1, migration 20261103200000): a book that has
+                    been published keeps its title and pen name. Shown as
+                    fixed text; updateBook ignores both for such a book. */}
+                {lockedAfterPublish ? (
+                  <div className="flex flex-col gap-1 text-sm">
+                    <span>Titulli</span>
+                    <p className="rounded-control border border-border bg-background px-3 py-2">{book.title}</p>
+                    <span className="text-sm text-muted">{TITLE_LOCKED_NOTE}</span>
+                    <span className="mt-2">Pseudonimi</span>
+                    <p className="rounded-control border border-border bg-background px-3 py-2">{book.pen?.name ?? authorPublicName}</p>
+                    <span className="text-sm text-muted">{PEN_NAME_LOCKED_NOTE}</span>
+                  </div>
+                ) : (
                 <label className="flex flex-col gap-1 text-sm">
                   Titulli
                   <input
@@ -314,11 +342,12 @@ export default async function EditBookPage({
                     className={formControlClasses}
                   />
                 </label>
+                )}
 
                 {/* F4 (P1, Q1 = a): directly under Title. Cleared to the
                     default pen name when emptied. PEN-NAMES-2: always
                     shown (pen names exist since PEN-NAMES-1). */}
-                {(
+                {!lockedAfterPublish && (
                   <label className="flex flex-col gap-1 text-sm">
                     Pseudonimi (opsional)
                     <input

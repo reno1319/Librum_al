@@ -1032,7 +1032,7 @@ describe("performPublish: price_all is the SOLE free/paid authority (ALL-WIRING-
       "utf8",
     );
     const selectList = source.match(/\.select\("status, [^"]*"\)/)?.[0];
-    expect(selectList).toBe('.select("status, price_all, published_at, description")');
+    expect(selectList).toBe('.select("status, price_all, published_at, description, file_path, cover_path")');
   });
 });
 
