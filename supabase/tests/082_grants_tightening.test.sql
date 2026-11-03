@@ -270,11 +270,14 @@ select pg_temp.assert(
     where n.nspname = 'public'
       and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
       and has_function_privilege('anon', p.oid, 'EXECUTE'))
-  = 'enforce_author_payouts_immutability() ; enforce_book_rights_declarations_append_only() ; '
+  -- BD14 (migration 20261103160000): book_makes_pen_name_public(books),
+  -- called by public_pen_names and public_series as the caller.
+  = 'book_makes_pen_name_public(books) ; '
+    || 'enforce_author_payouts_immutability() ; enforce_book_rights_declarations_append_only() ; '
     || 'enforce_bundle_checkout_snapshots_financial_facts_immutability() ; enforce_payout_reversal_matches_original() ; '
     || 'pen_name_links_valid(jsonb) ; reject_payout_destination_snapshot_mutation() ; '
     || 'search_books(text,text,integer,integer,integer) ; staff_has_permission(text) ; user_owns_book(uuid)',
-  'part4: anon can EXECUTE exactly the nine allowed public functions');
+  'part4: anon can EXECUTE exactly the ten allowed public functions');
 
 do $$
 begin

@@ -256,7 +256,8 @@ begin
       = array['id', 'name', 'bio', 'avatar_path', 'links'],
     'part2: exactly id, name, bio, avatar_path, links -- no author_id');
   perform pg_temp.assert(
-    (select reloptions from pg_class where oid = 'public.public_pen_names'::regclass) is null
+    -- BD14: security_barrier, because the rows now depend on the caller.
+    (select reloptions from pg_class where oid = 'public.public_pen_names'::regclass) = array['security_barrier=true']
     and (select relowner from pg_class where oid = 'public.public_pen_names'::regclass)
       = (select relowner from pg_class where oid = 'public.pen_names'::regclass),
     'part2: a definer-rights view owned like pen_names');
@@ -270,20 +271,33 @@ begin
 
   v := pg_temp.value_as('anon', null,
     $q$select string_agg(name, ',' order by name) from public.public_pen_names where name like 'P074%'$q$);
-  perform pg_temp.assert(v = 'P074 Ana,P074 Ben,P074 Owl',
-    format('part2: anon sees pen names with a book (draft included), not the unused one nor a book-less signup name -- got %s', v));
+  -- BD14: Ben's only book is a draft, so Ben is not listed.
+  perform pg_temp.assert(v = 'P074 Ana,P074 Owl',
+    format('part2 (BD14): anon sees pen names with a published book only -- not a draft-only one, the unused one nor a book-less signup name -- got %s', v));
   v := pg_temp.value_as('anon', null,
     $q$select bio || '|' || links::text from public.public_pen_names where id = 'e0740002-0000-4000-8000-000000000001'$q$);
   perform pg_temp.assert(v = 'New owl bio|["https://a.example", "https://b.example/x?y=1"]', format('part2: bio and links readable -- got %s', v));
   v := pg_temp.run_as('anon', null, $q$update public.public_pen_names set bio = 'x' where false$q$);
   perform pg_temp.assert(v like '42501:%', format('part2: anon cannot write through the view -- got %s', v));
 
-  -- A series alone makes a pen name public.
+  -- BD14: a series alone no longer makes its pen name (or itself)
+  -- public; once it holds a published book, both are listed.
   insert into public.series (id, author_id, title, pen_name_id)
   values ('e0740003-0000-4000-8000-000000000009', 'e0740000-0000-4000-8000-00000000000a', 'P074 Unused series', 'e0740002-0000-4000-8000-000000000002');
   v := pg_temp.value_as('anon', null,
-    $q$select count(*)::text from public.public_pen_names where id = 'e0740002-0000-4000-8000-000000000002'$q$);
-  perform pg_temp.assert(v = '1', format('part2: a pen name used by a series is listed -- got %s', v));
+    $q$select count(*)::text from public.public_pen_names where id = 'e0740002-0000-4000-8000-000000000002'$q$)
+    || '/' || pg_temp.value_as('anon', null,
+    $q$select count(*)::text from public.public_series where id = 'e0740003-0000-4000-8000-000000000009'$q$);
+  perform pg_temp.assert(v = '0/0', format('part2 (BD14): a series with no published book lists neither itself nor its pen name -- got %s', v));
+  insert into public.books (id, author_id, title, status, price_all, published_at, pen_name_id, series_id, series_position)
+  values ('e0740001-0000-4000-8000-0000000000a9', 'e0740000-0000-4000-8000-00000000000a', 'P074 In series', 'published', 199, now(),
+          'e0740002-0000-4000-8000-000000000002', 'e0740003-0000-4000-8000-000000000009', 1);
+  v := pg_temp.value_as('anon', null,
+    $q$select count(*)::text from public.public_pen_names where id = 'e0740002-0000-4000-8000-000000000002'$q$)
+    || '/' || pg_temp.value_as('anon', null,
+    $q$select count(*)::text from public.public_series where id = 'e0740003-0000-4000-8000-000000000009'$q$);
+  perform pg_temp.assert(v = '1/1', format('part2 (BD14): with a published book, the series and its pen name are listed -- got %s', v));
+  delete from public.books where id = 'e0740001-0000-4000-8000-0000000000a9';
   delete from public.series where id = 'e0740003-0000-4000-8000-000000000009';
 end $$;
 
