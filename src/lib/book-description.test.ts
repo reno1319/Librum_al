@@ -164,3 +164,40 @@ describe("editor round trip", () => {
     expect(descriptionFromEditorDom(dom)).toBe(stored);
   });
 });
+
+// Audit r1 (F1, F3): markers only where formatting changes; stable.
+describe("canonical form is stable", () => {
+  it("keeps bold inside italic and italic inside bold", () => {
+    const nested = root([el("p", [el("em", ["a", el("strong", ["b"])]), " c"])]);
+    const stored = descriptionFromEditorDom(nested);
+    expect(stored).toBe("*a**b*** c");
+    const [block] = parseDescription(stored);
+    expect(block.kind === "paragraph" && block.lines[0]).toEqual([
+      { text: "a", bold: false, italic: true },
+      { text: "b", bold: true, italic: true },
+      { text: " c", bold: false, italic: false },
+    ]);
+  });
+
+  it("normalize is idempotent on random input", () => {
+    const alphabet = ["*", "**", "\\", "-", "- ", "1. ", "12\\.", "\n", "\n\n", " ", "a", "ë", "b", " ", "\u0007"];
+    let seed = 42;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (let i = 0; i < 5000; i++) {
+      let input = "";
+      const n = Math.floor(rand() * 20);
+      for (let j = 0; j < n; j++) input += alphabet[Math.floor(rand() * alphabet.length)];
+      const once = normalizeDescription(input);
+      if (!once.ok) continue;
+      expect(normalizeDescription(once.value)).toEqual(once);
+    }
+  });
+
+  it("a numbered list longer than 999 items reads back as a list", () => {
+    const stored = Array.from({ length: 1001 }, (_, i) => `${i + 1}. x`).join("\n");
+    const blocks = parseDescription(stored);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].kind).toBe("numbers");
+    expect(serializeDescription(blocks)).toBe(stored);
+  });
+});

@@ -1823,3 +1823,13 @@ describe("BD15 P2: drafts without files, and the locks after first publish", () 
     expect(update.payload).toMatchObject({ title: "Book, edited", pen_name_id: "f0000000-0000-4000-8000-00000000pen0" });
   });
 });
+
+describe("BD15 P2 audit r1 (F2): an older book that was live once", () => {
+  it("is not refused for a missing cover when it is published again", async () => {
+    openPaidPublishing();
+    seed({ book: { cover_path: null, published_at: "2026-09-01T00:00:00Z" } });
+    expect(await redirectOf(publishBook(BOOK_ID))).not.toContain(
+      encodeURIComponent("Shtoni dorëshkrimin dhe kopertinën para se ta dërgoni për shqyrtim."),
+    );
+  });
+});

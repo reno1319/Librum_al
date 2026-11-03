@@ -41,9 +41,9 @@ function groupThousands(value: number): string {
 }
 
 const BULLET_LINE = /^- /;
-const NUMBER_LINE = /^\d{1,3}\. /;
+const NUMBER_LINE = /^\d{1,9}\. /;
 const ESCAPED_BULLET_LINE = /^\\-/;
-const ESCAPED_NUMBER_LINE = /^(\d{1,3})\\\./;
+const ESCAPED_NUMBER_LINE = /^(\d{1,9})\\\./;
 
 // Line breaks become "\n"; tabs become spaces; every other control
 // character (and the Unicode line/paragraph separators) is dropped.
@@ -164,16 +164,29 @@ function escapeText(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/\*/g, "\\*");
 }
 
+// Markers are written only where bold or italic actually changes, and
+// everything still open is closed at the end of the line. Within one
+// change there is at most one "**" and one "*", and the reader toggles
+// both whichever way "***" is split, so every line reads back exactly
+// (audit r1, F1).
 function serializeLine(line: DescriptionLine): string {
-  return line
-    .map((run) => {
-      const text = escapeText(run.text);
-      if (run.bold && run.italic) return `***${text}***`;
-      if (run.bold) return `**${text}**`;
-      if (run.italic) return `*${text}*`;
-      return text;
-    })
-    .join("");
+  let out = "";
+  let bold = false;
+  let italic = false;
+  for (const run of mergeRuns(line)) {
+    if (run.bold !== bold) {
+      out += "**";
+      bold = run.bold;
+    }
+    if (run.italic !== italic) {
+      out += "*";
+      italic = run.italic;
+    }
+    out += escapeText(run.text);
+  }
+  if (bold) out += "**";
+  if (italic) out += "*";
+  return out;
 }
 
 function serializeParagraphLine(line: DescriptionLine): string {
@@ -183,7 +196,7 @@ function serializeParagraphLine(line: DescriptionLine): string {
     // the canonical form never depends on what follows the dash.
     return `\\${text}`;
   }
-  const numbered = /^(\d{1,3})\./.exec(text);
+  const numbered = /^(\d{1,9})\./.exec(text);
   if (numbered) return `${numbered[1]}\\.${text.slice(numbered[0].length)}`;
   return text;
 }

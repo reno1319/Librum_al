@@ -2192,8 +2192,12 @@ async function performPublish(
 
   // BD15 P2: no manuscript or no cover yet -- see "missing_files". Both
   // columns are in the select above, so a row always carries them
-  // (null when empty).
-  if (book.file_path === null || book.cover_path === null || book.file_path === "" || book.cover_path === "") {
+  // (null when empty). Only a book never published: an older book that
+  // was live once keeps the rules it was published under (audit r1, F2).
+  if (
+    book.published_at === null &&
+    (book.file_path === null || book.cover_path === null || book.file_path === "" || book.cover_path === "")
+  ) {
     return { ok: false, reason: "missing_files" };
   }
 
