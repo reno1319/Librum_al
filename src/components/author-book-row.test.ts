@@ -134,6 +134,35 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     expect(html.indexOf(`href="/libra/${BOOK.id}"`)).toBeGreaterThan(html.indexOf("<summary"));
   });
 
+  // BD15 P5a (P4 audit F8): a plain draft opens the editor, each menu
+  // item on its own tab; a book in review is read-only.
+  it("a plain draft: the button and the three edit items open the editor's tabs", () => {
+    const html = render();
+    const editor = `/dashboard/books/${BOOK.id}/editor?tab=`;
+    expect(html).toContain(`href="${editor}details"`);
+    expect(html).toContain(`href="${editor}content"`);
+    expect(html).toContain(`href="${editor}pricing"`);
+    expect(html).not.toContain(`href="${editBase}"`);
+    expect(html).not.toContain(`href="${editBase}#`);
+  });
+
+  it("in review: Shikoni çfarë dërguat (the read-only edit page) and no edit items", () => {
+    const html = render({ review: { inReview: true, sentBack: null } });
+    expect(html).toContain(`href="${editBase}"`);
+    expect(html).toContain(">Shikoni çfarë dërguat<");
+    for (const label of ["Ndryshoni të dhënat", "Ndryshoni dorëshkrimin ose kopertinën", "Ndryshoni çmimin"]) {
+      expect(html).not.toContain(`>${label}<`);
+    }
+  });
+
+  it("a taken-down draft keeps the edit page links", () => {
+    const html = render({
+      takedown: { takenDownAt: "2026-10-19T10:00:00Z", reason: "copyright", message: "Proof please", bundleTitles: [] },
+    });
+    expect(html).toContain(`href="${editBase}#files"`);
+    expect(html).not.toContain("/editor?tab=");
+  });
+
   it("a draft: Vazhdoni përgatitjen plus ···, no View or Unpublish, Delete kept", () => {
     const html = render();
     expect(html).toContain("Vazhdoni përgatitjen");

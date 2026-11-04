@@ -150,6 +150,10 @@ insert into public.books (id, author_id, title, description, keywords, status, p
   ('e0871000-0000-4000-8000-0000000000a4', 'e0870000-0000-4000-8000-00000000000a', 'R087 Review', 'About it.', '', 'draft', 199, null,
    'e0870000-0000-4000-8000-00000000000a/e0871000-0000-4000-8000-0000000000a4/f0000000-0000-4000-8000-000000000001.epub',
    'e087c0de-0000-4000-8000-0000000000a4/cover.png', 'Homeri');
+-- BD15 P5a (migration 20261104120000): request_book_review() refuses a
+-- book with no "AI used" answer (LB489), so each fixture book has one.
+insert into public.book_ai_disclosures (book_id, ai_used)
+select id, false from public.books where title like 'R087%';
 
 -- part1
 select pg_temp.assert(

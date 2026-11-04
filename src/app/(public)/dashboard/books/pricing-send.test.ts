@@ -14,7 +14,7 @@ import {
   SEND_INCOMPLETE_MESSAGE,
   SEND_TICKS_MISSING_MESSAGE,
 } from "@/lib/book-pricing";
-import { SENT_FOR_REVIEW_MESSAGE } from "@/lib/book-review-copy";
+import { IN_REVIEW_LOCKED_MESSAGE, SENT_FOR_REVIEW_MESSAGE } from "@/lib/book-review-copy";
 
 // BD15 P4: saveBookPricing -- the Pricing tab's save and "Send for
 // review" -- against one recording Supabase double. The collaborators
@@ -84,6 +84,7 @@ type DbWrite = { table: string; op: string; payload: unknown; filters: Filter[] 
 let book: Record<string, unknown>;
 let dbWrites: DbWrite[] = [];
 let updateRows: unknown[] = [{ id: BOOK_ID }];
+let updateError: { code: string; message: string } | null = null;
 let storageCalls: { op: string; bucket: string; path: unknown; options?: unknown }[] = [];
 let stored: Record<string, { bytes: Buffer; metadata: Record<string, string> }> = {};
 let infoFails = false;
@@ -105,6 +106,7 @@ function query(table: string) {
     dbWrites.push({ table, op, payload, filters: [...filters] });
     events.push(`db:${op}:${table}`);
     // A write that matched applies to the one row, as the database would.
+    if (table === "books" && op === "update" && updateError) return { data: null, error: updateError };
     if (table === "books" && op === "update" && updateRows.length > 0) Object.assign(book, payload);
     return { data: updateRows, error: null };
   };
@@ -233,6 +235,7 @@ beforeEach(async () => {
   };
   dbWrites = [];
   updateRows = [{ id: BOOK_ID }];
+  updateError = null;
   storageCalls = [];
   stored = { [`manuscripts:${OWN_EPUB}`]: { bytes: await directEpub(), metadata: {} } };
   infoFails = false;
@@ -401,6 +404,25 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
     expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
   });
 
+  // Audit r1, F4: the book was sent for review from another tab while
+  // this send ran; the author is sent to the read-only page, not told
+  // that saving failed.
+  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(IN_REVIEW_LOCKED_MESSAGE)}`;
+
+  it("a failed record of the ticks on a book sent meanwhile goes to the read-only page", async () => {
+    recordOk = false;
+    bookReviewsDoubleState.pendingSequence = [false, true];
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(IN_REVIEW_EDIT);
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+  });
+
+  it("a failed ebook rewrite on a book sent meanwhile goes to the read-only page", async () => {
+    infoFails = true;
+    bookReviewsDoubleState.pendingSequence = [false, true];
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(IN_REVIEW_EDIT);
+    expect(declarations).toEqual([]);
+  });
+
   it("a paid book while paid publishing is closed is refused by the publish gate", async () => {
     paidPublishing = false;
     book.price_all = 249;
@@ -420,6 +442,23 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
       `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër po pret tashmë shqyrtimin.")}`,
     );
     expect(publishWrites()).toEqual([]);
+  });
+
+  // BD15 P5a: the database's own completeness check (LB489).
+  it("a request refused as incomplete names what is missing, on the tab", async () => {
+    bookReviewsDoubleState.requestResult = { ok: false, reason: "incomplete" };
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(
+      `${EDITOR}&error=${encodeURIComponent("Libri nuk është gati për shqyrtim. Plotësoni të gjitha pjesët që mungojnë dhe provoni përsëri.")}`,
+    );
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("a price write refused because the book went into review (LB490): the read-only edit page", async () => {
+    book.price_all = 500;
+    updateError = { code: "LB490", message: "x" };
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`,
+    );
   });
 
   it("a failed request fails closed with the generic sentence", async () => {

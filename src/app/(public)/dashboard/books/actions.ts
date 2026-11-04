@@ -83,6 +83,8 @@ import {
 import {
   deletedBookManuscriptKeys,
   getBookReviewState,
+  isInReviewLockError,
+  isWaitingForReview,
   readReviewSnapshots,
   removeUnretainedManuscripts,
   requestBookReview,
@@ -91,6 +93,7 @@ import {
 import {
   ALREADY_IN_REVIEW_MESSAGE,
   BOOK_CHANGED_WHILE_EDITING_MESSAGE,
+  IN_REVIEW_LOCKED_MESSAGE,
   LIVE_FILES_IN_BUNDLE_MESSAGE,
   LIVE_FILES_REQUEST_FAILED_MESSAGE,
   LIVE_FILES_SAVED_MESSAGE,
@@ -1436,6 +1439,22 @@ export async function updateBook(bookId: string, formData: FormData) {
     redirect("/dashboard");
   }
 
+  // BD15 P5a (Renato 11-04, Q2 a and Q3 a): a book waiting for review is
+  // read-only -- the author cancels the review first. An unreadable
+  // review state of a draft refuses too (the database refuses the write
+  // anyway, LB490). A live book has no pending review.
+  if (existing.status === "draft") {
+    const reviewState = await getBookReviewState(supabase, existing.id);
+    if (reviewState.kind !== "ok") {
+      redirect(
+        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`,
+      );
+    }
+    if (reviewState.pending) {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(IN_REVIEW_LOCKED_MESSAGE)}`);
+    }
+  }
+
   // BD15 P1/P2 (N1, migration 20261103200000): once a book has been
   // published its title and pen name are locked (LB480/LB481). The Edit
   // page shows both as fixed then; anything submitted for them is
@@ -1785,8 +1804,8 @@ export async function updateBook(bookId: string, formData: FormData) {
   // BD3 patch 4 (2b, 16:45Z a): a changed original author goes through
   // the same review as a new file or cover -- Librum's approval binds to
   // it (migration 20261101170000) -- so it is handled the same way: a
-  // live book goes back to draft in the same write and is sent again,
-  // and a draft already waiting gets its pending snapshot replaced.
+  // live book goes back to draft in the same write and is sent again.
+  // (BD15 P5a: a draft waiting for review never gets here, see above.)
   const reviewChange = filesChanged || originalAuthorChanged;
   if (reviewChange && wasLive) {
     const membership = await bookBelongsToPublishedBundle(supabase, existing.id);
@@ -1803,18 +1822,6 @@ export async function updateBook(bookId: string, formData: FormData) {
       );
     }
   }
-  // D: a draft already waiting for review gets its pending snapshot
-  // replaced (request_book_review cancels the stale row and inserts a new
-  // one, P1) when its file or cover changes. Read only when they change;
-  // an unreadable state leaves the stale row for the approve RPC to
-  // refuse (it binds to the current files) and the author can send it
-  // again.
-  let wasPending = false;
-  if (reviewChange && !wasLive) {
-    const reviewState = await getBookReviewState(supabase, existing.id);
-    wasPending = reviewState.kind === "ok" && reviewState.pending;
-  }
-
   // CATALOG-WRITE-AUTH-1 / PEN-2: the trusted writer is created only now,
   // after authentication, the ownership read, price validation, the
   // repricing gate and both input validations. It uploads the cover
@@ -1990,6 +1997,10 @@ export async function updateBook(bookId: string, formData: FormData) {
     }
     // ADMIN-3-REVIEW (S3): the live-files trigger (LB463) or the publish
     // gate (LB462) caught a change that landed after the read above.
+    // BD15 P5a: the book was sent for review after the check above.
+    if (isInReviewLockError(updateError)) {
+      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(IN_REVIEW_LOCKED_MESSAGE)}`);
+    }
     if (updateError.code === "LB463" || updateError.code === "LB462" || updateError.code === "LB480" || updateError.code === "LB481") {
       redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
     }
@@ -2043,14 +2054,13 @@ export async function updateBook(bookId: string, formData: FormData) {
     }
   }
 
-  // ADMIN-3-REVIEW (C, D): the row is proven a draft with the new files.
-  // A book that was live, or was waiting for review, is sent for review
-  // with them now (a stale pending snapshot is replaced, P1). If the
-  // request fails, the book stays a draft and the author can press Send
-  // for review (S5).
+  // ADMIN-3-REVIEW (C): the row is proven a draft with the new files.
+  // A book that was live is sent for review with them now. If the
+  // request fails, the book stays a draft and the author sends it from
+  // the editor (S5).
   let reviewRequestFailed = false;
   let reviewAlreadyApproved = false;
-  if (reviewChange && (wasLive || wasPending)) {
+  if (reviewChange && wasLive) {
     const request = await requestBookReview(supabase, existing.id);
     reviewRequestFailed = !request.ok && request.reason !== "already_pending" && request.reason !== "already_approved";
     // BD3 patch 4, audit r2 (M1): the author put back the original author
@@ -2097,7 +2107,7 @@ export async function updateBook(bookId: string, formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath(`/libra/${bookId}`);
   revalidatePath("/");
-  if (reviewChange && (wasLive || wasPending)) {
+  if (reviewChange && wasLive) {
     if (reviewAlreadyApproved) {
       redirectAfterSave(
         ebookCoverWarning,
@@ -2121,7 +2131,7 @@ export async function updateBook(bookId: string, formData: FormData) {
 // BD15 P3: the new editor's Content tab (PLAN-BD15-r1 §2.4) -- the
 // manuscript, the cover, ISBN, publisher and the staff-only "AI used"
 // answer of the author's own DRAFT. A live book or a book in review is
-// still changed on the edit page (updateBook) until P5, so this action
+// still changed on the edit page (updateBook) until P5b, so this action
 // never touches review state: it refuses anything but a draft with no
 // pending review, and its row write is bound to status 'draft'.
 //
@@ -2131,6 +2141,13 @@ export async function updateBook(bookId: string, formData: FormData) {
 // and only after the write is proven the superseded objects removed
 // (Renato 11-04, Q1 a: a replaced manuscript goes at once, as today;
 // removeUnretainedManuscripts keeps the approved file buyers get).
+// BD15 P5a: a write refused because the book is waiting for review
+// (LB490) -- it was sent from another tab. The edit page shows it
+// read-only with "Anulo shqyrtimin".
+function toInReviewEditPage(bookId: string): never {
+  redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(IN_REVIEW_LOCKED_MESSAGE)}`);
+}
+
 export async function saveBookContent(bookId: string, formData: FormData) {
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
     // The edit page shows the maintenance notice (audit r1, F1: the
@@ -2308,6 +2325,9 @@ export async function saveBookContent(bookId: string, formData: FormData) {
     if (updateError) {
       console.error("saveBookContent: book update failed", { bookId: existing.id, code: updateError.code ?? null });
       await removeNewUploads();
+      // BD15 P5a (P3 audit F3): sent for review in another tab after the
+      // check above; the book is read-only now.
+      if (isInReviewLockError(updateError)) toInReviewEditPage(existing.id);
       if (["LB462", "LB463"].includes(updateError.code ?? "")) fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
       fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
     }
@@ -2336,9 +2356,13 @@ export async function saveBookContent(bookId: string, formData: FormData) {
 
   // The files are saved; an AI answer that fails to save is reported on
   // the tab, never undoing them.
-  if (aiAnswer !== null && !(await writeAiDisclosure(existing.id, aiAnswer))) {
-    console.error("saveBookContent: AI answer not recorded", { bookId: existing.id });
-    redirectAfterSave(ebookSync.ebookCoverWarning, withQuery(here, "error", AI_NOT_SAVED_MESSAGE));
+  if (aiAnswer !== null) {
+    const aiWrite = await writeAiDisclosure(existing.id, aiAnswer);
+    if (aiWrite === "in_review") toInReviewEditPage(existing.id);
+    if (aiWrite !== "ok") {
+      console.error("saveBookContent: AI answer not recorded", { bookId: existing.id });
+      redirectAfterSave(ebookSync.ebookCoverWarning, withQuery(here, "error", AI_NOT_SAVED_MESSAGE));
+    }
   }
 
   const next = editorPath(existing.id, String(formData.get("intent") ?? "") === "next" ? "pricing" : "content");
@@ -2447,7 +2471,8 @@ async function restampLibrumEbookForSend({
 //   1. the price is saved (so a refusal below never loses it);
 //   2. both ticks (Renato 11-04, Q2 a: unticked on every send);
 //   3. Details, Content (file, cover, AI answer) and the rights choice
-//      are complete -- the app-side check; the DB guard comes in P5;
+//      are complete -- the app-side check; request_book_review refuses
+//      a book with no file, cover or AI answer too (P5a, LB489);
 //   4. the ebook is re-stamped with the current title and byline;
 //   5. the ticks are recorded (a new rights declaration row);
 //   6. performPublish(): the same gate as everywhere else -- review, or
@@ -2527,6 +2552,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
     ).select("id");
     if (error) {
       console.error("saveBookPricing: price update failed", { bookId: existing.id, code: error.code ?? null });
+      if (isInReviewLockError(error)) toInReviewEditPage(existing.id);
       fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
     }
     if (!isExactlyOneRowWritten(rows)) fail(CATALOG_ROW_CHANGED_MESSAGE);
@@ -2573,12 +2599,16 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
     userId: user.id,
     book: existing,
   });
-  if (restamp === "failed") fail(EBOOK_RESTAMP_FAILED_MESSAGE);
+  if (restamp === "failed") {
+    if (await isWaitingForReview(supabase, existing.id)) toInReviewEditPage(existing.id);
+    fail(EBOOK_RESTAMP_FAILED_MESSAGE);
+  }
 
   // 5. The ticks, recorded for this send.
   const recorded = await recordRightsDeclaration(existing.id, rightsBasis, { atSend: true });
   if (!recorded.ok) {
     console.error("saveBookPricing: send confirmation not recorded", { bookId: existing.id, reason: recorded.reason });
+    if (await isWaitingForReview(supabase, existing.id)) toInReviewEditPage(existing.id);
     fail(SEND_CONFIRMATION_NOT_SAVED_MESSAGE);
   }
 
@@ -2597,6 +2627,9 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
         break;
       case "missing_rights":
         fail(MISSING_RIGHTS_MESSAGE);
+        break;
+      case "send_incomplete":
+        fail(SEND_INCOMPLETE_MESSAGE);
         break;
       case "already_in_review":
         redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
@@ -2758,6 +2791,7 @@ type PerformPublishResult =
         // a draft is sent for review only from the editor's Pricing tab,
         // with the two ticks recorded. Nothing was written.
         | "send_from_editor"
+        | "send_incomplete"
         | "paid_mode_required"
         | "update_failed";
     };
@@ -2893,6 +2927,11 @@ async function performPublish(
       }
       if (request.reason === "taken_down") {
         return { ok: false, reason: "taken_down" };
+      }
+      // BD15 P5a: the database's own check (LB489) -- the manuscript,
+      // the cover or the AI answer went missing after the app's check.
+      if (request.reason === "incomplete") {
+        return { ok: false, reason: "send_incomplete" };
       }
       // "already_approved": an approval landed after the read above, so
       // the publish below goes ahead (the trigger re-checks it).
@@ -3530,6 +3569,8 @@ export async function addContributor(bookId: string, formData: FormData) {
   });
 
   if (error) {
+    // BD15 P5a: a book waiting for review is read-only (LB490).
+    if (isInReviewLockError(error)) toInReviewEditPage(bookId);
     // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: was error.message -- see the
     // identical correction in src/app/books/[id]/actions.ts for why.
     redirect(
@@ -3565,7 +3606,9 @@ export async function removeContributor(bookId: string, contributorId: string) {
     redirect("/dashboard");
   }
 
-  await supabase.from("book_contributors").delete().eq("id", contributorId);
+  const { error } = await supabase.from("book_contributors").delete().eq("id", contributorId);
+  // BD15 P5a: a book waiting for review is read-only (LB490).
+  if (isInReviewLockError(error)) toInReviewEditPage(bookId);
 
   revalidatePath(`/dashboard/books/${bookId}/edit`);
   revalidatePath(`/libra/${bookId}`);

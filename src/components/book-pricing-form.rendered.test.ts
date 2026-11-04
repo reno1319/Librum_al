@@ -106,6 +106,12 @@ describe("BookPricingForm", () => {
     expect(button(render(), "Ruaj draftin")).toContain('value="save"');
   });
 
+  it("BD15 P5a (P4 audit F7): Publiko says a changed byline goes back to review", () => {
+    const note = "Nëse emri i autorit brenda librit elektronik duhet përditësuar, libri kalon përsëri në shqyrtim.";
+    expect(render({ approvalValid: true })).toContain(note);
+    expect(render()).not.toContain(note);
+  });
+
   it("what is missing is listed with links to its tab, and Send is disabled", () => {
     const html = render({
       missing: [

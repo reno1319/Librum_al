@@ -53,11 +53,12 @@ vi.mock("@/lib/staff-alerts", () => ({
 // grants are covered in book-ai-disclosure.test.ts and the SQL tests).
 const aiWrites: { bookId: string; answer: string }[] = [];
 let aiWriteOk = true;
+let aiWriteResult: "ok" | "in_review" | "failed" | null = null;
 vi.mock("@/lib/book-ai-disclosure", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   writeAiDisclosure: async (bookId: string, answer: string) => {
     aiWrites.push({ bookId, answer });
-    return aiWriteOk;
+    return aiWriteResult ?? (aiWriteOk ? "ok" : "failed");
   },
 }));
 
@@ -353,6 +354,7 @@ beforeEach(() => {
   resetBookReviewsDouble();
   aiWrites.length = 0;
   aiWriteOk = true;
+  aiWriteResult = null;
   for (const level of ["log", "info", "warn", "error"] as const) {
     vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
       consoleOutput.push(args);
@@ -1157,13 +1159,37 @@ describe("updateBook and review (ADMIN-3)", () => {
     expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
-  it("a draft waiting for review: its snapshot is replaced with the new files", async () => {
+  // BD15 P5a (Renato 11-04, Q2 a / Q3 a): a book in review is read-only.
+  it("a draft waiting for review is refused before any upload or write", async () => {
     bookReadResult = { data: row({ status: "draft" }), error: null };
     bookReviewsDoubleState.pending = true;
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
-    expect(fns()).toEqual(["getBookReviewState", "requestBookReview"]);
-    expect(bookUpdates()[0].payload).toMatchObject({ status: "draft" });
-    expect(mockReviewStaffEmail).toHaveBeenCalledTimes(1);
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`,
+    );
+    expect(fns()).toEqual(["getBookReviewState"]);
+    expect(dbWrites).toEqual([]);
+    expect(storageCalls.filter((c) => c.op === "upload")).toEqual([]);
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
+  });
+
+  // Audit r1, F6 (mutant A2): an unreadable review state of a draft
+  // fails closed, before any upload or write.
+  it("a draft whose review state cannot be read is refused before any upload or write", async () => {
+    bookReadResult = { data: row({ status: "draft" }), error: null };
+    bookReviewsDoubleState.stateKind = "unavailable";
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`,
+    );
+    expect(dbWrites).toEqual([]);
+    expect(storageCalls.filter((c) => c.op === "upload")).toEqual([]);
+  });
+
+  it("LB490 on the write (sent for review in another tab): the in-review message, the new uploads removed", async () => {
+    updateResult = { data: null, error: { code: "LB490", message: "x" } };
+    expect(await run(updateBook(BOOK_ID, withCover(editForm(), PNG)))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`,
+    );
+    expect(removals().map((c) => c.bucket)).toEqual(["covers"]);
   });
 
   it("a draft not waiting for review is not sent for review by a file change", async () => {
@@ -1584,6 +1610,24 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
     const target = await run(saveBookContent(BOOK_ID, form({ aiUsed: "no" })));
     expect(bookUpdates()).toHaveLength(1);
     expect(target).toBe(`${CONTENT}&error=${encodeURIComponent("Përgjigja për AI nuk u ruajt. Zgjidheni përsëri dhe ruajeni.")}`);
+  });
+
+  // BD15 P5a (P3 audit F3): "Send for review" from another tab landed
+  // between the check and the write; the database refuses (LB490).
+  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`;
+  it("LB490 on the write: the new uploads removed, the old files kept, sent to the read-only edit page", async () => {
+    updateResult = { data: null, error: { code: "LB490", message: "x" } };
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(IN_REVIEW_EDIT);
+    expect(removals().flatMap((c) => c.paths)).not.toContain(OWN_PNG);
+    expect(removals().flatMap((c) => c.paths)).not.toContain(OWN_EPUB);
+    expect(removals().map((c) => c.bucket)).toEqual(expect.arrayContaining(["covers", "manuscripts"]));
+    expect(aiWrites).toEqual([]);
+  });
+
+  it("an AI answer refused because the book went into review: sent to the read-only edit page", async () => {
+    aiWriteResult = "in_review";
+    expect(await run(saveBookContent(BOOK_ID, form({ aiUsed: "yes" })))).toBe(IN_REVIEW_EDIT);
   });
 
   it("an invalid new ISBN is refused before any upload; an unchanged stored one is kept", async () => {

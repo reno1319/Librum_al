@@ -17,7 +17,8 @@ import { createCatalogWriteClient } from "@/lib/catalog-write-client";
 import { resolveOwnPenNameId } from "@/lib/pen-name-write-client";
 import { penNameErrorMessage } from "@/lib/pen-names";
 import { getRightsDeclarationState, recordRightsDeclaration } from "@/lib/book-rights";
-import { getBookReviewState } from "@/lib/book-reviews";
+import { getBookReviewState, isInReviewLockError, isWaitingForReview } from "@/lib/book-reviews";
+import { IN_REVIEW_LOCKED_MESSAGE } from "@/lib/book-review-copy";
 import { CATALOG_ROW_CHANGED_MESSAGE, isExactlyOneRowWritten } from "@/lib/paid-repricing";
 import { parseBookDetails, type DetailsContributor } from "@/lib/book-details";
 import {
@@ -249,6 +250,11 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
       .select("id");
     if (error) {
       console.error("saveBookDetails: update failed", { bookId: existing.id, code: error.code ?? null });
+      // BD15 P5a: sent for review from another tab after the check
+      // above; the book is read-only now (LB490).
+      if (isInReviewLockError(error)) {
+        redirect(withQuery(`/dashboard/books/${existing.id}/edit`, "error", IN_REVIEW_LOCKED_MESSAGE));
+      }
       redirect(withQuery(here, "error", penNameErrorMessage(error) ?? SAVE_FAILED_MESSAGE));
     }
     if (!isExactlyOneRowWritten(data) || data?.[0]?.id !== existing.id) {
@@ -264,6 +270,10 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
   // The book row is saved; a contributor or rights failure below never
   // loses it, it is reported on the page the author lands on.
   if (!(await syncContributors(supabase, savedId, details.contributors))) {
+    // Audit r1, F4: sent for review from another tab after the row save.
+    if (await isWaitingForReview(supabase, savedId)) {
+      redirect(withQuery(`/dashboard/books/${savedId}/edit`, "error", IN_REVIEW_LOCKED_MESSAGE));
+    }
     redirect(withQuery(editorPath(savedId, "details"), "error", CONTRIBUTORS_NOT_SAVED_MESSAGE));
   }
 
@@ -274,6 +284,9 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
       const recorded = await recordRightsDeclaration(savedId, details.rightsBasis);
       if (!recorded.ok) {
         console.error("saveBookDetails: rights declaration not recorded", { bookId: savedId, reason: recorded.reason });
+        if (await isWaitingForReview(supabase, savedId)) {
+          redirect(withQuery(`/dashboard/books/${savedId}/edit`, "error", IN_REVIEW_LOCKED_MESSAGE));
+        }
         redirect(withQuery(editorPath(savedId, "details"), "error", RIGHTS_NOT_SAVED_MESSAGE));
       }
     }

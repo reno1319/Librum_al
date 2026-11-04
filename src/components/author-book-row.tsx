@@ -6,7 +6,13 @@ import { DeleteBookButton } from "@/app/(public)/dashboard/delete-book-button";
 import { buttonClasses } from "@/components/ui/button";
 import type { Book } from "@/lib/types";
 import { buildAuthorTakedownNoticeLines, type AuthorTakedownNotice } from "@/lib/takedown-reasons";
-import { IN_REVIEW_LABEL, buildAuthorSentBackNoticeLines, type AuthorReviewNotice } from "@/lib/book-review-copy";
+import {
+  IN_REVIEW_LABEL,
+  IN_REVIEW_VIEW_LABEL,
+  buildAuthorSentBackNoticeLines,
+  type AuthorReviewNotice,
+} from "@/lib/book-review-copy";
+import { editorPath } from "@/lib/book-editor-copy";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
 
@@ -94,6 +100,7 @@ export function AuthorBookRow({
   const isTakenDown = takedown !== null;
   const isInReview = !isTakenDown && isDraft && review?.inReview === true;
   const sentBack = !isTakenDown && isDraft && !isInReview ? (review?.sentBack ?? null) : null;
+  const isPlainDraft = isDraft && !isTakenDown && !isInReview;
   const priceLabel = formatCatalogPriceLabel(book.price_all);
   const isFree = resolveCatalogPriceState(book.price_all) === "free";
 
@@ -192,9 +199,9 @@ export function AuthorBookRow({
       </div>
 
       <div className="relative flex w-full flex-wrap items-center gap-2 sm:w-auto">
-        {isDraft && !isTakenDown && !isInReview ? (
+        {isPlainDraft ? (
           <Link
-            href={`/dashboard/books/${book.id}/edit`}
+            href={editorPath(book.id, "details")}
             className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] bg-accent px-4 text-sm font-bold text-accent-foreground transition-colors hover:bg-[#c9a42c]"
           >
             Vazhdoni përgatitjen
@@ -204,7 +211,7 @@ export function AuthorBookRow({
             href={`/dashboard/books/${book.id}/edit`}
             className={buttonClasses("outline", "sm", "min-h-11 rounded-[3px] border-[#c9c0ae] px-4 font-semibold")}
           >
-            Ndryshoni
+            {isInReview ? IN_REVIEW_VIEW_LABEL : "Ndryshoni"}
           </Link>
         )}
 
@@ -221,21 +228,37 @@ export function AuthorBookRow({
               they end the row and it opens leftwards under the ···. */}
           <div className="absolute left-0 top-full z-10 mt-1 w-60 sm:left-auto sm:right-0 rounded-[3px] border border-border bg-surface py-1 shadow-md">
             <ul>
-              <li>
-                <Link href={`/dashboard/books/${book.id}/edit#details`} className={MENU_ITEM_CLASSES}>
-                  Ndryshoni të dhënat
-                </Link>
-              </li>
-              <li>
-                <Link href={`/dashboard/books/${book.id}/edit#files`} className={MENU_ITEM_CLASSES}>
-                  Ndryshoni dorëshkrimin ose kopertinën
-                </Link>
-              </li>
-              <li>
-                <Link href={`/dashboard/books/${book.id}/edit#pricing`} className={MENU_ITEM_CLASSES}>
-                  Ndryshoni çmimin
-                </Link>
-              </li>
+              {/* BD15 P5a: a book in review is read-only (no edit items);
+                  a plain draft is edited in the editor, on the matching
+                  tab (P4 audit F8). */}
+              {!isInReview && (
+                <>
+                  <li>
+                    <Link
+                      href={isPlainDraft ? editorPath(book.id, "details") : `/dashboard/books/${book.id}/edit#details`}
+                      className={MENU_ITEM_CLASSES}
+                    >
+                      Ndryshoni të dhënat
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      href={isPlainDraft ? editorPath(book.id, "content") : `/dashboard/books/${book.id}/edit#files`}
+                      className={MENU_ITEM_CLASSES}
+                    >
+                      Ndryshoni dorëshkrimin ose kopertinën
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      href={isPlainDraft ? editorPath(book.id, "pricing") : `/dashboard/books/${book.id}/edit#pricing`}
+                      className={MENU_ITEM_CLASSES}
+                    >
+                      Ndryshoni çmimin
+                    </Link>
+                  </li>
+                </>
+              )}
               {/* PREVIEW-1 (A5, Renato 6a): before it's live (draft, in
                   review, sent back, taken down), the book's own page is
                   the author's preview of it. */}

@@ -749,31 +749,28 @@ describe("updateBook: a changed original author goes back to review (2b)", () =>
     expect(writerUpdates()).toHaveLength(0);
   });
 
-  it("a draft waiting for review: its pending snapshot is replaced", async () => {
+  // BD15 P5a (Renato 11-04, Q2 a / Q3 a): a book in review is read-only.
+  it("a draft waiting for review: refused, nothing written or sent", async () => {
     existingRow = { ...existingRow, status: "draft", original_author: "Homeri" };
     bookReviewsDoubleState.pending = true;
-    await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homer" })));
-    expect(payload()).toMatchObject({ original_author: "Homer", status: "draft" });
-    expect(requests()).toEqual([{ fn: "requestBookReview", bookId: BOOK_ID }]);
+    expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homer" })))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.`,
+    );
+    expect(writerUpdates()).toHaveLength(0);
+    expect(requests()).toHaveLength(0);
   });
 
-  it("the approved name put back while another is waiting: the stale review is withdrawn (audit r2, M1)", async () => {
-    existingRow = { ...existingRow, status: "draft", original_author: "X" };
-    bookReviewsDoubleState.pending = true;
+  it("a live book back to an already approved name: the request is withdrawn, the author told (audit r2, M1)", async () => {
+    existingRow = { ...existingRow, status: "published", original_author: "X" };
     bookReviewsDoubleState.requestResult = { ok: false, reason: "already_approved" };
     expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homeri" })))).toBe(
       `/dashboard/books/${BOOK_ID}/edit?success=${ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE}`,
     );
-    expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual([
-      "getBookReviewState",
-      "requestBookReview",
-      "withdrawBookReview",
-    ]);
+    expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["requestBookReview", "withdrawBookReview"]);
   });
 
   it("M1: when the withdraw fails, the author is told to send it again", async () => {
-    existingRow = { ...existingRow, status: "draft", original_author: "X" };
-    bookReviewsDoubleState.pending = true;
+    existingRow = { ...existingRow, status: "published", original_author: "X" };
     bookReviewsDoubleState.requestResult = { ok: false, reason: "already_approved" };
     bookReviewsDoubleState.withdrawResult = { ok: false, reason: "failed" };
     expect(await redirectOf(updateBook(BOOK_ID, editForm({ originalAuthor: "Homeri" })))).toBe(
