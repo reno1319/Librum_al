@@ -71,7 +71,7 @@ export default async function NewBookPage({
     <BookEditorShell
       bookId={null}
       heading="Libër i ri"
-      statusLine="Libër elektronik · Draft i ri"
+      statusLabel="Draft i ri"
       tab="details"
       done={{ details: false, content: false, pricing: false }}
       error={pageErrorMessage(rawError)}

@@ -6,11 +6,15 @@ import { EDITOR_TABS, editorPath, type EditorTab } from "@/lib/book-editor-copy"
 // tabs with their done / not done state, and the page's one message.
 // A server component; the tabs are plain links (each tab is its own
 // page load, saved by its own form).
+//
+// D1 (mockup v5): a "Draft" pill beside "Libër elektronik", and the
+// tabs as three boxes -- the open one white with a green line under it,
+// the others light beige, each with ✓ or its number.
 
 export function BookEditorShell({
   bookId,
   heading,
-  statusLine,
+  statusLabel,
   tab,
   done,
   error,
@@ -19,7 +23,8 @@ export function BookEditorShell({
 }: {
   bookId: string | null;
   heading: string;
-  statusLine: string;
+  // The pill: "Draft", "Draft i ri".
+  statusLabel: string;
   tab: EditorTab;
   done: Record<EditorTab, boolean>;
   error: string | null;
@@ -34,33 +39,52 @@ export function BookEditorShell({
       >
         &larr; Librat e mi
       </Link>
-      <h1 className="mt-4 break-words font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
+      <h1 className="mt-3 break-words font-serif text-[1.875rem] font-normal leading-tight text-primary sm:text-[2.5rem]">
         {heading}
       </h1>
-      <p className="mt-1 text-sm text-muted">{statusLine}</p>
+      <p className="mt-1.5 flex items-center gap-2 text-sm text-muted">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-hover px-2.5 py-0.5 text-xs font-semibold uppercase tracking-[0.04em] text-foreground">
+          <span aria-hidden="true" className="h-[7px] w-[7px] rounded-full bg-control" />
+          {statusLabel}
+        </span>
+        <span>Libër elektronik</span>
+      </p>
 
-      <nav aria-label="Pjesët e librit" className="mt-6">
-        <ol className="grid grid-cols-3 gap-2 sm:gap-3">
+      <nav aria-label="Pjesët e librit" className="mt-5">
+        <ol className="grid grid-cols-3 gap-1.5 sm:gap-3">
           {EDITOR_TABS.map((t, i) => {
             const current = t.key === tab;
-            const state = done[t.key] ? "Plotësuar" : current ? "Në progres" : "Pa plotësuar";
+            const isDone = done[t.key];
+            const state = isDone ? "Plotësuar" : current ? "Në progres" : "Pa plotësuar";
             const body = (
               <>
-                <span className="text-xs text-muted">{i + 1}</span>
-                <span className={`text-sm ${current ? "font-bold text-primary" : "text-foreground"}`}>{t.label}</span>
-                <span className={`text-xs ${done[t.key] ? "text-primary" : "text-muted"}`}>
-                  {done[t.key] ? "✓ " : ""}
-                  {state}
+                <span
+                  aria-hidden="true"
+                  className={`grid h-5 w-5 flex-none place-items-center rounded-full border-[1.5px] text-[11px] font-bold ${
+                    isDone
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : current
+                        ? "border-primary bg-surface text-primary"
+                        : "border-control bg-surface text-muted"
+                  }`}
+                >
+                  {isDone ? "✓" : i + 1}
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className={`text-sm font-bold sm:text-base ${current ? "text-foreground" : "text-primary"}`}>
+                    {t.label}
+                  </span>
+                  <span className="text-xs text-muted max-sm:sr-only">{state}</span>
                 </span>
               </>
             );
-            const classes = `flex flex-col gap-0.5 rounded-[4px] border px-3 py-2 ${
-              current ? "border-primary bg-surface" : "border-border"
+            const classes = `flex h-full min-w-0 flex-col items-start gap-1.5 rounded-t-lg border-b-[3px] p-2.5 sm:flex-row sm:items-center sm:gap-2.5 sm:px-5 sm:pt-3.5 sm:pb-3 ${
+              current ? "border-primary bg-surface" : "border-transparent bg-surface-hover"
             }`;
             return (
               <li key={t.key}>
                 {bookId && !current ? (
-                  <Link href={editorPath(bookId, t.key)} className={`focus-ring ${classes} hover:bg-surface-hover`}>
+                  <Link href={editorPath(bookId, t.key)} className={`focus-ring ${classes} hover:bg-[#e7e0d1]`}>
                     {body}
                   </Link>
                 ) : (

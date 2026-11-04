@@ -287,6 +287,32 @@ describe("saveBookPricing: Ruaj draftin", () => {
     expect(dbWrites).toEqual([]);
   });
 
+  // D1: "← Përmbajtja" saves first, then goes back.
+  const CONTENT_TAB = `/dashboard/books/${BOOK_ID}/editor?tab=content`;
+  it("back: saves the price, then goes to Content", async () => {
+    const target = await run(saveBookPricing(BOOK_ID, form({ intent: "back", priceMode: "paid", price: "249" })));
+    expect(priceWrites()[0].payload).toEqual({ price_all: 249 });
+    expect(target).toBe(`${CONTENT_TAB}&success=${encodeURIComponent("U ruajt si draft")}`);
+  });
+
+  it("back with no price chosen: nothing to save, it just goes back", async () => {
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "back" })))).toBe(CONTENT_TAB);
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("back with a price that is not valid stays on the tab with the message, nothing written", async () => {
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "back", priceMode: "paid", price: "50" })))).toBe(
+      err(PRICE_INVALID_MESSAGE),
+    );
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("back never sends, even with both ticks", async () => {
+    await run(saveBookPricing(BOOK_ID, form({ intent: "back", priceMode: "free", worldwideRights: "on", acceptAuthorTerms: "on" })));
+    expect(declarations).toEqual([]);
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+  });
+
   it("a public-domain book is free whatever the form says", async () => {
     rightsState = { kind: "present", declaration: { basis: "public_domain" } };
     await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "500" })));

@@ -129,7 +129,11 @@ export function royaltyPreview(mode: PriceMode | null, rawPrice: string): Royalt
 export const PRICING_WHERE_HEADING = "Ku shitet";
 export const PRICING_WHERE_LINE = "Librum shet në të gjithë botën, në një treg të vetëm: librum.al.";
 export const WORLDWIDE_RIGHTS_TEXT = "Kam të drejtat për ta shitur këtë libër në të gjithë botën";
-export const ACCEPT_TERMS_TEXT_BEFORE_LINK = "Konfirmoj që kam të drejtat e këtij libri dhe pranoj";
+// D1 (Renato 11-04, mockup v3): tick 1 is the rights, tick 2 only the
+// Terms -- it no longer repeats "kam të drejtat". The sentence is
+// recorded at every send, so the change bumps SEND_CONFIRMATION_VERSION
+// (book-rights.ts) to send-v2; older rows keep their send-v1 text.
+export const ACCEPT_TERMS_TEXT_BEFORE_LINK = "Pranoj";
 export const ACCEPT_TERMS_LINK_TEXT = "Kushtet e Librum për autorët";
 /** The Terms tick as one sentence, as it is recorded. */
 export const ACCEPT_TERMS_TEXT = `${ACCEPT_TERMS_TEXT_BEFORE_LINK} ${ACCEPT_TERMS_LINK_TEXT}`;
@@ -137,19 +141,25 @@ export const TERMS_PAGE_PATH = "/kushtet";
 
 export const PRICE_PAID_LABEL = "Me pagesë";
 export const PRICE_FREE_LABEL = "Falas";
-export const PRICE_INPUT_LABEL = "Çmimi në lekë";
+export const PRICE_INPUT_LABEL = "Çmimi për lexuesin";
 export const PRICE_HINT = `Minimumi ${MINIMUM_PAID_CATALOG_PRICE_ALL} lekë. Një çmim i vetëm, në lekë.`;
+export const PRICING_PRICE_HELP = "Zgjidhni nëse libri shitet apo jepet falas.";
+export const PRICE_PAID_SUBLINE = "Lexuesi e blen";
+export const PRICE_FREE_SUBLINE = "0 lekë për lexuesin";
+export const ROYALTY_HEADING = "Sa merrni";
+export const ROYALTY_PERCENT_LABEL = "Përqindja juaj";
+export const ROYALTY_TOTAL_LABEL = "Ju merrni për çdo shitje";
 export const PUBLIC_DOMAIN_FREE_ONLY_NOTE =
   "Librat e domenit publik në Librum janë vetëm falas.";
 export const FREE_BOOK_LINE = "Lexuesit e shkarkojnë falas pasi hyjnë në llogari.";
-export const PREVIEW_EMPTY_LINE = "Shkruaj një çmim për të parë sa merr.";
+export const PREVIEW_EMPTY_LINE = "Shkruani një çmim për të parë sa merrni.";
 export const PREVIEW_TOO_LOW_LINE = `Çmimi më i ulët është ${MINIMUM_PAID_CATALOG_PRICE_ALL} lekë.`;
 // Renato 11-04 Q1 b: the agreed sentence, unchanged. POK build: name the
 // rate for authors outside Albania once their country is known.
 export const ROYALTY_TAX_LINE = "Shuma është para tatimit 15% që mbahet në burim.";
 export const ROYALTY_RATES_LINE = `${REDUCED_ROYALTY_PERCENT}% për çmime nën ${STANDARD_ROYALTY_FROM_ALL} lekë, ${STANDARD_ROYALTY_PERCENT}% nga ${STANDARD_ROYALTY_FROM_ALL} lekë e lart.`;
 export const BUYING_OPENS_SOON_LINE =
-  "Blerjet hapen së shpejti. Deri atëherë libri yt mund të dalë live, por butoni “Bli” nuk është ende aktiv.";
+  "Blerjet hapen së shpejti. Deri atëherë libri juaj mund të dalë live, por butoni “Bli” nuk është ende aktiv.";
 export const PAID_PUBLISHING_CLOSED_LINE =
   "Publikimi me pagesë nuk ka nisur ende. Librat falas mund t'i publikoni që tani.";
 

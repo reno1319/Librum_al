@@ -39,7 +39,7 @@ export const CONTENT_SAVED_MESSAGE = DETAILS_SAVED_MESSAGE;
 export const AI_NOT_SAVED_MESSAGE =
   "Përgjigja për AI nuk u ruajt. Zgjidheni përsëri dhe ruajeni.";
 export const AI_QUESTION =
-  "A ke përdorur AI për të krijuar tekstin, përkthimin ose kopertinën?";
+  "A keni përdorur AI për të krijuar tekstin, përkthimin ose ballinën?";
 export const AI_STAFF_ONLY_NOTE =
   "Këtë përgjigje e sheh vetëm ekipi i Librum. Nuk shfaqet në faqen e librit.";
 export const DRM_FREE_NOTE =

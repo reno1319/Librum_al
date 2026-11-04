@@ -40,6 +40,8 @@ import {
   SEND_INCOMPLETE_MESSAGE,
   SEND_TICKS_MISSING_MESSAGE,
   hasSendTicks,
+  isFreeOnlyRightsBasis,
+  parsePriceMode,
   resolvePricingSubmission,
 } from "@/lib/book-pricing";
 import {
@@ -2365,7 +2367,9 @@ export async function saveBookContent(bookId: string, formData: FormData) {
     }
   }
 
-  const next = editorPath(existing.id, String(formData.get("intent") ?? "") === "next" ? "pricing" : "content");
+  // D1: "← Të dhënat" saves first, then goes back.
+  const intent = String(formData.get("intent") ?? "");
+  const next = editorPath(existing.id, intent === "next" ? "pricing" : intent === "back" ? "details" : "content");
   redirectAfterSave(ebookSync.ebookCoverWarning, `${next}&success=${encodeURIComponent(CONTENT_SAVED_MESSAGE)}`);
 }
 
@@ -2534,6 +2538,16 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
   if (rights.kind === "unavailable") fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
   const rightsBasis = rights.kind === "present" ? rights.declaration.basis : null;
 
+  // D1: "← Përmbajtja" saves first, then goes back. With no price
+  // chosen yet there is nothing to save, so it just goes back; a price
+  // that is not valid stays here with its message, so nothing typed is
+  // lost.
+  const intent = String(formData.get("intent") ?? "");
+  const back = editorPath(existing.id, "content");
+  if (intent === "back" && !isFreeOnlyRightsBasis(rightsBasis) && parsePriceMode(formData.get(PRICE_MODE_FIELD)) === null) {
+    redirect(back);
+  }
+
   // 1. The price. A public-domain book is free only.
   const pricing = resolvePricingSubmission({
     mode: formData.get(PRICE_MODE_FIELD),
@@ -2560,8 +2574,8 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/books");
 
-  if (String(formData.get("intent") ?? "") !== "send") {
-    redirect(`${here}&success=${encodeURIComponent(DETAILS_SAVED_MESSAGE)}`);
+  if (intent !== "send") {
+    redirect(`${intent === "back" ? back : here}&success=${encodeURIComponent(DETAILS_SAVED_MESSAGE)}`);
   }
 
   // 2. Both ticks, every send.

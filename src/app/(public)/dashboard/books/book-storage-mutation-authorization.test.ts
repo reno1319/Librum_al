@@ -1597,6 +1597,20 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
     );
   });
 
+  it("D1: '← Të dhënat' saves first, then goes back to Details", async () => {
+    const target = await run(saveBookContent(BOOK_ID, form({ aiUsed: "no", publisher: "Botime X", intent: "back" })));
+    expect(aiWrites).toEqual([{ bookId: BOOK_ID, answer: "no" }]);
+    expect(bookUpdates()[0].payload).toMatchObject({ publisher: "Botime X" });
+    expect(target).toBe(
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&success=${encodeURIComponent("U ruajt si draft")}`,
+    );
+  });
+
+  it("D1: a back press whose save fails stays on Content with the message", async () => {
+    const target = await run(saveBookContent(BOOK_ID, form({ isbn: "123", intent: "back" })));
+    expect(target).toMatch(new RegExp(`^${CONTENT.replace(/[?]/g, "\\?")}&error=`));
+  });
+
   it("no answer ticked records nothing; any other value is refused before any write", async () => {
     await run(saveBookContent(BOOK_ID, form()));
     expect(aiWrites).toEqual([]);

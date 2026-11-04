@@ -142,7 +142,7 @@ export default async function BookEditorPage({
   // BD15 P3 (mockup): the manuscript, the cover and the AI answer.
   const contentMissing = [
     ...(book.file_path === null ? ["Dorëshkrimi"] : []),
-    ...(book.cover_path === null ? ["Kopertina"] : []),
+    ...(book.cover_path === null ? ["Ballina"] : []),
     ...(!ai.ok || ai.answer === null ? ["Pyetja për AI"] : []),
   ];
   const done: Record<EditorTab, boolean> = {
@@ -179,7 +179,7 @@ export default async function BookEditorPage({
     <BookEditorShell
       bookId={book.id}
       heading={book.title}
-      statusLine="Libër elektronik · Draft"
+      statusLabel="Draft"
       tab={tab}
       done={done}
       error={pageErrorMessage(rawError)}

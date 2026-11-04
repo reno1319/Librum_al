@@ -119,11 +119,11 @@ describe("recordRightsDeclaration", () => {
     await recordRightsDeclaration(BOOK, "public_domain_original", { atSend: true });
     expect(inserted()[0]).toMatchObject({
       basis: "public_domain_original",
-      statement_version: "rights-v2+send-v1+terms-sq-2",
+      statement_version: "rights-v2+send-v2+terms-sq-2",
       statement_text:
         `${RIGHTS_STATEMENTS.public_domain_original.text}. ` +
         "Kam të drejtat për ta shitur këtë libër në të gjithë botën. " +
-        "Konfirmoj që kam të drejtat e këtij libri dhe pranoj Kushtet e Librum për autorët",
+        "Pranoj Kushtet e Librum për autorët",
     });
   });
 
