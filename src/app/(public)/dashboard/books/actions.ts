@@ -21,17 +21,31 @@ import {
 } from "@/lib/cover-resize";
 import { LIBRUM_MADE_EBOOK_METADATA, readLibrumMadeMarker, syncCoverIntoLibrumEbook } from "@/lib/ebook-cover-sync";
 import { withEbookCoverWarning } from "@/lib/ebook-cover-notice";
-import { readLibrumEbookCover } from "@/lib/epub-cover";
+import { readLibrumEbookCover, restampLibrumEpubMetadata } from "@/lib/epub-cover";
 import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { checkPublishGate } from "@/lib/publish-readiness";
 import { INVALID_ISBN_MESSAGE, isValidIsbn } from "@/lib/book-identifiers";
-import { parseAiAnswer, writeAiDisclosure } from "@/lib/book-ai-disclosure";
+import { parseAiAnswer, readAiDisclosure, writeAiDisclosure } from "@/lib/book-ai-disclosure";
+import { missingDetails } from "@/lib/book-details";
+import {
+  EBOOK_RESTAMP_FAILED_MESSAGE,
+  PRICE_FIELD,
+  PRICE_INVALID_MESSAGE,
+  PRICE_MODE_FIELD,
+  PRICE_MODE_MISSING_MESSAGE,
+  SEND_CONFIRMATION_NOT_SAVED_MESSAGE,
+  SEND_INCOMPLETE_MESSAGE,
+  SEND_TICKS_MISSING_MESSAGE,
+  hasSendTicks,
+  resolvePricingSubmission,
+} from "@/lib/book-pricing";
 import {
   AI_NOT_SAVED_MESSAGE,
   CONTENT_SAVED_MESSAGE,
+  DETAILS_SAVED_MESSAGE,
   EDITOR_ONLY_DRAFTS_MESSAGE,
   editorPath,
 } from "@/lib/book-editor-copy";
@@ -151,6 +165,10 @@ const PUBLISH_NOT_POSSIBLE_YET_QUERY =
   encodeURIComponent(
     "Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj",
   );
+
+// BD15 P4: the two existing publish sentences, named for saveBookPricing.
+const BOOK_PUBLISHED_MESSAGE = "Libri juaj u publikua";
+const PAID_PUBLISHING_UNAVAILABLE_MESSAGE = "Publikimi me pagesë nuk është i mundur tani";
 
 // F4 (P6): a published book cannot have its description cleared.
 const PUBLISHED_NEEDS_DESCRIPTION_MESSAGE = "Një libër i publikuar duhet të ketë përshkrim.";
@@ -2323,6 +2341,281 @@ export async function saveBookContent(bookId: string, formData: FormData) {
   redirectAfterSave(ebookSync.ebookCoverWarning, `${next}&success=${encodeURIComponent(CONTENT_SAVED_MESSAGE)}`);
 }
 
+// BD15 P4: at "Send for review", a Librum-made ebook gets the book's
+// CURRENT title and byline written into it (restampLibrumEpubMetadata):
+// the Word conversion wrote them at upload, and the Details tab may have
+// changed either since. Directly uploaded ebooks are never touched. A
+// rewrite is stored under a fresh versioned key with the same
+// compare-and-set on file_path the Content tab uses, and the superseded
+// key goes through the same retention rule (removeUnretainedManuscripts:
+// the last approved file stays the buyers'). "failed" stops the send, so
+// a book never goes to review with an ebook that names the old title.
+async function restampLibrumEbookForSend({
+  supabase,
+  catalogWriter,
+  userId,
+  book,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  catalogWriter: ReturnType<typeof createCatalogWriteClient>;
+  userId: string;
+  book: { id: string; title: string; pen_name_id: string | null; file_path: string | null };
+}): Promise<"unchanged" | "stamped" | "failed"> {
+  const caller = "saveBookPricing";
+  if (book.file_path === null || !isOwnBookManuscriptPath(book.file_path, userId, book.id)) return "unchanged";
+  const marker = await readLibrumMadeMarker(catalogWriter.storage, book.file_path);
+  if (marker === "no") return "unchanged";
+  if (marker === "unknown") {
+    console.error(`${caller}: could not check whether Librum made the current ebook`, { bookId: book.id });
+    return "failed";
+  }
+  const current = await downloadStoredBytes(catalogWriter, BOOK_MANUSCRIPTS_BUCKET, book.file_path);
+  if (current === null) {
+    console.error(`${caller}: current ebook not read`, { bookId: book.id });
+    return "failed";
+  }
+  const authorName = await readPenNameForEbook(supabase, userId, book.pen_name_id);
+  const restamped = await restampLibrumEpubMetadata(current, { title: book.title, authorName });
+  if (!restamped.ok) {
+    // Marked, but not the shape Librum writes: left as it is (as W7).
+    console.error(`${caller}: marked ebook is not a Librum-made package; title not rewritten`, {
+      bookId: book.id,
+      reason: restamped.reason,
+    });
+    return "unchanged";
+  }
+  if (!restamped.changed) return "unchanged";
+  if (restamped.bytes.length > MAX_MANUSCRIPT_BYTES || !(await validateEpubStructure(restamped.bytes)).valid) {
+    console.error(`${caller}: rewritten ebook failed the ebook checks`, { bookId: book.id });
+    return "failed";
+  }
+
+  const newPath = newBookManuscriptPath(userId, book.id);
+  const { error: uploadError } = await catalogWriter.storage.from(BOOK_MANUSCRIPTS_BUCKET).upload(newPath, restamped.bytes, {
+    contentType: "application/epub+zip",
+    metadata: { ...LIBRUM_MADE_EBOOK_METADATA },
+  });
+  if (uploadError) {
+    console.error(`${caller}: rewritten ebook upload failed`, { bookId: book.id });
+    return "failed";
+  }
+  const { data: rows, error: updateError } = await catalogWriter
+    .from("books")
+    .update({ file_path: newPath })
+    .eq("id", book.id)
+    .eq("author_id", userId)
+    .eq("status", "draft")
+    .eq("file_path", book.file_path)
+    .select("id");
+  if (updateError || !isExactlyOneRowWritten(rows)) {
+    console.error(`${caller}: guarded file_path update did not change exactly one row`, {
+      bookId: book.id,
+      code: updateError?.code ?? null,
+    });
+    await removeNewManuscriptUpload(catalogWriter, newPath, userId, book.id, caller);
+    return "failed";
+  }
+  await removeUnretainedManuscripts(catalogWriter, catalogWriter, {
+    authorId: userId,
+    bookId: book.id,
+    superseded: [book.file_path],
+    caller,
+  });
+  return "stamped";
+}
+
+// BD15 P4: the new editor's Pricing tab (PLAN-BD15-r1 §2.5). Saves the
+// price ("Ruaj draftin"), or saves it and sends the book for review
+// ("Dërgo për shqyrtim"). Drafts only, not while in review, not while
+// taken down -- the edit page knows those states.
+//
+// Sending, in order, each step refusing before the next:
+//   1. the price is saved (so a refusal below never loses it);
+//   2. both ticks (Renato 11-04, Q2 a: unticked on every send);
+//   3. Details, Content (file, cover, AI answer) and the rights choice
+//      are complete -- the app-side check; the DB guard comes in P5;
+//   4. the ebook is re-stamped with the current title and byline;
+//   5. the ticks are recorded (a new rights declaration row);
+//   6. performPublish(): the same gate as everywhere else -- review, or
+//      publish when Librum's approval still matches the files (3a).
+export async function saveBookPricing(bookId: string, formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(`/dashboard/books/${bookId}/edit`);
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect("/login");
+  }
+
+  const here = editorPath(bookId, "pricing");
+  const fail = (message: string): never => redirect(withQuery(here, "error", message));
+
+  const { data: existing, error: existingError } = await supabase
+    .from("books")
+    .select("id, author_id, status, title, pen_name_id, price_all, file_path, cover_path, description, categories, original_author")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle<{
+      id: string;
+      author_id: string;
+      status: string;
+      title: string;
+      pen_name_id: string | null;
+      price_all: number | null;
+      file_path: string | null;
+      cover_path: string | null;
+      description: string | null;
+      categories: string[] | null;
+      original_author: string | null;
+    }>();
+  if (existingError || !existing || existing.id !== bookId || existing.author_id !== user.id) {
+    redirect("/dashboard");
+  }
+
+  const toEditPage = () =>
+    redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(EDITOR_ONLY_DRAFTS_MESSAGE)}`);
+  if (existing.status !== "draft") toEditPage();
+  const [review, takedown, rights] = await Promise.all([
+    getBookReviewState(supabase, existing.id),
+    getActiveTakedownState(supabase, existing.id),
+    getRightsDeclarationState(existing.id),
+  ]);
+  if (review.kind !== "ok" || review.pending) toEditPage();
+  if (takedown.kind !== "none") {
+    redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
+  }
+  const rightsBasis = rights.kind === "present" ? rights.declaration.basis : null;
+
+  // 1. The price. A public-domain book is free only.
+  const pricing = resolvePricingSubmission({
+    mode: formData.get(PRICE_MODE_FIELD),
+    price: formData.get(PRICE_FIELD),
+    rightsBasis,
+  });
+  const priceAll = pricing.ok
+    ? pricing.priceAll
+    : fail(pricing.reason === "missing_mode" ? PRICE_MODE_MISSING_MESSAGE : PRICE_INVALID_MESSAGE);
+  if (priceAll !== existing.price_all) {
+    // A draft only (compare-and-set on status and the price read above),
+    // through the trusted writer: price_all is a protected column.
+    const { data: rows, error } = await applyCatalogRowGuard(
+      createCatalogWriteClient().from("books").update({ price_all: priceAll }).eq("id", existing.id).eq("author_id", user.id),
+      { status: "draft", priceAll: existing.price_all },
+    ).select("id");
+    if (error) {
+      console.error("saveBookPricing: price update failed", { bookId: existing.id, code: error.code ?? null });
+      fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+    }
+    if (!isExactlyOneRowWritten(rows)) fail(CATALOG_ROW_CHANGED_MESSAGE);
+  }
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/books");
+
+  if (String(formData.get("intent") ?? "") !== "send") {
+    redirect(`${here}&success=${encodeURIComponent(DETAILS_SAVED_MESSAGE)}`);
+  }
+
+  // 2. Both ticks, every send.
+  if (!hasSendTicks(formData)) fail(SEND_TICKS_MISSING_MESSAGE);
+
+  // 3. Every tab complete. The rights choice must be readable.
+  if (rights.kind === "unavailable") redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
+  const ai = await readAiDisclosure(existing.id);
+  const detailsMissing = missingDetails({
+    title: existing.title,
+    categories: existing.categories,
+    description: existing.description,
+    rightsBasis,
+    originalAuthor: existing.original_author,
+  });
+  if (
+    detailsMissing.length > 0 ||
+    existing.file_path === null ||
+    existing.cover_path === null ||
+    !ai.ok ||
+    ai.answer === null ||
+    rightsBasis === null
+  ) {
+    fail(SEND_INCOMPLETE_MESSAGE);
+  }
+
+  // 4. The current title and byline inside a Librum-made ebook.
+  const restamp = await restampLibrumEbookForSend({
+    supabase,
+    catalogWriter: createCatalogWriteClient(),
+    userId: user.id,
+    book: existing,
+  });
+  if (restamp === "failed") fail(EBOOK_RESTAMP_FAILED_MESSAGE);
+
+  // 5. The ticks, recorded for this send.
+  const recorded = await recordRightsDeclaration(existing.id, rightsBasis, { atSend: true });
+  if (!recorded.ok) {
+    console.error("saveBookPricing: send confirmation not recorded", { bookId: existing.id, reason: recorded.reason });
+    fail(SEND_CONFIRMATION_NOT_SAVED_MESSAGE);
+  }
+
+  // 6. The one publish gate.
+  const result = await performPublish(supabase, existing.id, user.id);
+  if (!result.ok) {
+    switch (result.reason) {
+      case "missing_files":
+        fail(MISSING_FILES_MESSAGE);
+        break;
+      case "missing_all_price":
+        fail(MISSING_ALL_PRICE_MESSAGE);
+        break;
+      case "missing_description":
+        fail(MISSING_DESCRIPTION_SHORT_MESSAGE);
+        break;
+      case "missing_rights":
+        fail(MISSING_RIGHTS_MESSAGE);
+        break;
+      case "already_in_review":
+        redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
+        break;
+      case "taken_down":
+        redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
+        break;
+      case "book_changed":
+        fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+        break;
+      case "paid_mode_required":
+        fail(PAID_PUBLISHING_UNAVAILABLE_MESSAGE);
+        break;
+      case "rights_unavailable":
+      case "takedown_unavailable":
+      case "review_unavailable":
+        redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
+        break;
+      default:
+        redirect("/dashboard");
+    }
+    return;
+  }
+
+  if (result.outcome === "sent_for_review") {
+    revalidatePath("/dashboard");
+    redirect(`/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`);
+  }
+
+  // Published (Librum's approval still matched): as publishBook().
+  if (result.wasNewlyPublished) {
+    sendNewBookEmailsAfterResponse("saveBookPricing", { bookId: existing.id, authorId: user.id });
+  }
+  try {
+    revalidatePath("/dashboard");
+    revalidatePath("/");
+  } catch (error) {
+    console.error("saveBookPricing: revalidatePath failed after a successful publish", { bookId: existing.id, error });
+  }
+  redirect(`/dashboard?success=${encodeURIComponent(BOOK_PUBLISHED_MESSAGE)}`);
+}
+
 // ADMIN-3-REVIEW (E): the author's "Cancel review" -- the pending review
 // becomes 'withdrawn' (withdraw_book_review checks the caller owns the
 // book) and the book simply stays a draft. Nothing is removed: the last
@@ -2351,7 +2644,8 @@ export async function cancelBookReview(bookId: string) {
 
   revalidatePath("/dashboard");
   revalidatePath(`/dashboard/books/${bookId}/edit`);
-  redirect(`/dashboard/books/${bookId}/edit?success=${encodeURIComponent(REVIEW_CANCELLED_MESSAGE)}`);
+  // BD15 P4: the book is a plain draft again, edited in the new editor.
+  redirect(`${editorPath(bookId, "details")}&success=${encodeURIComponent(REVIEW_CANCELLED_MESSAGE)}`);
 }
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART B: the ONE authoritative, non-

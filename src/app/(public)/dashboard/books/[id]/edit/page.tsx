@@ -241,6 +241,19 @@ export default async function EditBookPage({
       .returns<{ name: string; is_default: boolean }[]>(),
     getBookReviewState(supabase, book.id),
   ]);
+  // BD15 P4: a draft that is not waiting for review and not taken down
+  // is edited and sent only in the new editor (its Pricing tab asks for
+  // the two ticks). The editor redirects exactly the other drafts back
+  // here. Actions that leave a plain draft send the author to the editor
+  // themselves (cancelBookReview), so no message is lost on the way.
+  if (
+    book.status === "draft" &&
+    reviewState.kind === "ok" &&
+    !reviewState.pending &&
+    takedown.state.kind === "none"
+  ) {
+    redirect(editorPath(book.id, "details"));
+  }
   const isLive = book.status === "published";
   const inReview = !takedown.notice && book.status === "draft" && reviewState.kind === "ok" && reviewState.pending;
   const sentBack =
@@ -273,18 +286,6 @@ export default async function EditBookPage({
       <div className="mt-2">
         <PageHeader title="Ndryshoni librin" description={book.title} />
       </div>
-      {/* BD15 P2: a draft's details are filled in the new editor; this
-          page keeps the manuscript, cover and price until P3 and P4. */}
-      {book.status === "draft" && !inReview && (
-        <p className="mt-2 text-sm">
-          <Link
-            href={editorPath(book.id, "details")}
-            className="focus-ring rounded-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
-          >
-            Plotësoni të dhënat te redaktori i ri
-          </Link>
-        </p>
-      )}
 
       {error && (
         <Alert variant="error" className="mt-4">

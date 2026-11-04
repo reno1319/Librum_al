@@ -1,9 +1,14 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { saveBookDetails } from "../../editor-actions";
-import { saveBookContent } from "../../actions";
+import { saveBookContent, saveBookPricing } from "../../actions";
+import { BookPricingForm, type PricingMissing } from "@/components/book-pricing-form";
+import { isFreeOnlyRightsBasis } from "@/lib/book-pricing";
+import { canPublishPaidTitle, canStartPaidCheckout } from "@/lib/paid-readiness";
+import { getActiveTakedownState } from "@/lib/book-takedowns";
+import { buildAuthorSentBackNoticeLines } from "@/lib/book-review-copy";
+import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { BookContentForm } from "@/components/book-content-form";
 import { readAiDisclosure } from "@/lib/book-ai-disclosure";
 import { ebookCoverNotice } from "@/lib/ebook-cover-notice";
@@ -13,13 +18,7 @@ import { BookDetailsForm, type DetailsFormValues } from "@/components/book-detai
 import { getRightsDeclarationState } from "@/lib/book-rights";
 import { getBookReviewState } from "@/lib/book-reviews";
 import { missingDetails } from "@/lib/book-details";
-import {
-  OPEN_EDIT_PAGE_LABEL,
-  PRICING_TAB_INTERIM_NOTE,
-  isEditorTab,
-  type EditorTab,
-} from "@/lib/book-editor-copy";
-import { buttonClasses } from "@/components/ui/button";
+import { isEditorTab, type EditorTab } from "@/lib/book-editor-copy";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
@@ -55,10 +54,11 @@ type EditorBook = {
   publisher: string | null;
 };
 
-// BD15 P2: the new book editor for a draft (PLAN-BD15-r1 §2.2). Details
-// (P2) and Content (P3) are built here; Pricing points to the existing
-// edit page until P4. A live book or a book in review keeps the existing
-// edit page until P5.
+// BD15 P2: the new book editor for a draft (PLAN-BD15-r1 §2.2): Details
+// (P2), Content (P3) and Pricing with "Send for review" (P4). A live
+// book, a book in review and a taken-down book keep the existing edit
+// page until P5; the edit page sends every other draft here (P4), so
+// the editor's Pricing tab is the one way a draft is sent.
 export default async function BookEditorPage({
   params,
   searchParams,
@@ -91,8 +91,15 @@ export default async function BookEditorPage({
   if (!book || book.author_id !== user.id) notFound();
 
   if (book.status !== "draft") redirect(`/dashboard/books/${book.id}/edit`);
-  const review = await getBookReviewState(supabase, book.id);
-  if (review.kind !== "ok" || review.pending) redirect(`/dashboard/books/${book.id}/edit`);
+  // BD15 P4: exactly the complement of the edit page's redirect here
+  // (editorOwnsDraft), so the two pages never send a book back and forth.
+  const [review, takedown] = await Promise.all([
+    getBookReviewState(supabase, book.id),
+    getActiveTakedownState(supabase, book.id),
+  ]);
+  if (review.kind !== "ok" || review.pending || takedown.kind !== "none") {
+    redirect(`/dashboard/books/${book.id}/edit`);
+  }
 
   const [{ data: penNames }, { data: series }, { data: contributors }, rights, ai] = await Promise.all([
     supabase
@@ -124,19 +131,30 @@ export default async function BookEditorPage({
   const penNameList = penNames ?? [];
   const lockedPenName = penNameList.find((p) => p.id === book.pen_name_id)?.name ?? null;
 
+  const detailsMissing = missingDetails({
+    title: book.title,
+    categories: book.categories,
+    description: book.description,
+    rightsBasis,
+    originalAuthor: book.original_author,
+  });
+  // BD15 P3 (mockup): the manuscript, the cover and the AI answer.
+  const contentMissing = [
+    ...(book.file_path === null ? ["Dorëshkrimi"] : []),
+    ...(book.cover_path === null ? ["Kopertina"] : []),
+    ...(!ai.ok || ai.answer === null ? ["Pyetja për AI"] : []),
+  ];
   const done: Record<EditorTab, boolean> = {
-    details:
-      missingDetails({
-        title: book.title,
-        categories: book.categories,
-        description: book.description,
-        rightsBasis,
-        originalAuthor: book.original_author,
-      }).length === 0,
-    // BD15 P3 (mockup): the manuscript, the cover and the AI answer.
-    content: book.file_path !== null && book.cover_path !== null && ai.ok && ai.answer !== null,
+    details: detailsMissing.length === 0,
+    content: contentMissing.length === 0,
     pricing: book.price_all !== null,
   };
+  // BD15 P4: what "Send for review" still needs from the other tabs.
+  const sendMissing: PricingMissing[] = [
+    ...detailsMissing.map((label) => ({ tab: "details" as const, label })),
+    ...contentMissing.map((label) => ({ tab: "content" as const, label })),
+  ];
+  const sentBack = review.latestSentBack;
 
   const initial: DetailsFormValues = {
     title: book.title,
@@ -166,6 +184,17 @@ export default async function BookEditorPage({
       error={pageErrorMessage(rawError)}
       success={pageSuccessMessage(rawSuccess)}
     >
+      {/* BD15 P4: a book Librum sent back is fixed here now, so the
+          staff note shows on every tab until it is sent again. */}
+      {sentBack && (
+        <Alert variant="warning" className="mt-4">
+          {buildAuthorSentBackNoticeLines(sentBack, formatTimestampAsDate).map((line, index) => (
+            <p key={index} className={index === 0 ? "font-semibold" : "mt-1 whitespace-pre-wrap break-words"}>
+              {line}
+            </p>
+          ))}
+        </Alert>
+      )}
       {tab === "details" ? (
         <BookDetailsForm
           action={saveBookDetails.bind(null, book.id)}
@@ -202,12 +231,18 @@ export default async function BookEditorPage({
           />
         </>
       ) : (
-        <div className="mt-8 flex flex-col items-start gap-4 rounded-[4px] border border-border bg-surface p-6">
-          <p>{PRICING_TAB_INTERIM_NOTE}</p>
-          <Link href={`/dashboard/books/${book.id}/edit`} className={buttonClasses("primary", "md", "rounded-full")}>
-            {OPEN_EDIT_PAGE_LABEL}
-          </Link>
-        </div>
+        <BookPricingForm
+          action={saveBookPricing.bind(null, book.id)}
+          bookId={book.id}
+          initialPriceAll={book.price_all}
+          freeOnly={isFreeOnlyRightsBasis(rightsBasis)}
+          paidPublishingAvailable={canPublishPaidTitle()}
+          checkoutAvailable={canStartPaidCheckout()}
+          approvalValid={review.approvalValid}
+          title={book.title}
+          penName={lockedPenName ?? ""}
+          missing={sendMissing}
+        />
       )}
     </BookEditorShell>
   );

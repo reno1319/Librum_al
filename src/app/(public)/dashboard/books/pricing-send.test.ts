@@ -1,0 +1,445 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import JSZip from "jszip";
+import {
+  BOOK_FIXTURE_AUTHOR_ID as USER_ID,
+  BOOK_FIXTURE_BOOK_ID as BOOK_ID,
+} from "@/lib/book-storage-path-test-fixtures";
+import { canonicalBookManuscriptPath, canonicalBookCoverPath } from "@/lib/book-storage-path";
+import { generateEpub } from "@/lib/epub-generator";
+import {
+  EBOOK_RESTAMP_FAILED_MESSAGE,
+  PRICE_INVALID_MESSAGE,
+  PRICE_MODE_MISSING_MESSAGE,
+  SEND_CONFIRMATION_NOT_SAVED_MESSAGE,
+  SEND_INCOMPLETE_MESSAGE,
+  SEND_TICKS_MISSING_MESSAGE,
+} from "@/lib/book-pricing";
+import { SENT_FOR_REVIEW_MESSAGE } from "@/lib/book-review-copy";
+
+// BD15 P4: saveBookPricing -- the Pricing tab's save and "Send for
+// review" -- against one recording Supabase double. The collaborators
+// with their own suites (review state, takedown, rights, AI answer,
+// paid permission) are settable doubles; performPublish and the ebook
+// re-stamp run for real.
+
+class RedirectSignal extends Error {
+  constructor(public target: string) {
+    super(`REDIRECT:${target}`);
+  }
+}
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => {
+    throw new RedirectSignal(url);
+  },
+}));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/server", () => ({ after: vi.fn() }));
+vi.mock("@/lib/recovery-guard", () => ({ redirectIfRecoverySessionActive: vi.fn() }));
+vi.mock("@/lib/book-reviews", async (importOriginal) => {
+  const { bookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+  return bookReviewsDouble(await importOriginal<object>());
+});
+const staffEmails: unknown[] = [];
+vi.mock("@/lib/staff-alerts", () => ({
+  sendReviewRequestedStaffEmail: async (args: unknown) => {
+    staffEmails.push(args);
+  },
+}));
+vi.mock("@/lib/email", () => ({ sendNewBookEmails: vi.fn(async () => undefined) }));
+
+let takedownKind: "none" | "active" | "unavailable" = "none";
+vi.mock("@/lib/book-takedowns", () => ({
+  getActiveTakedownState: async () => (takedownKind === "active" ? { kind: "active", takedown: {} } : { kind: takedownKind }),
+}));
+
+type Basis = "own_rights" | "public_domain" | "public_domain_original";
+let rightsState: { kind: "present"; declaration: { basis: Basis } } | { kind: "none" } | { kind: "unavailable" };
+const declarations: { bookId: string; basis: unknown; options: unknown }[] = [];
+let recordOk = true;
+vi.mock("@/lib/book-rights", () => ({
+  getRightsDeclarationState: async () => rightsState,
+  recordRightsDeclaration: async (bookId: string, basis: unknown, options: unknown) => {
+    declarations.push({ bookId, basis, options });
+    return recordOk ? { ok: true, declaration: {} } : { ok: false, reason: "error" };
+  },
+}));
+
+let aiRead: { ok: true; answer: "yes" | "no" | null } | { ok: false } = { ok: true, answer: "no" };
+vi.mock("@/lib/book-ai-disclosure", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  readAiDisclosure: async () => aiRead,
+}));
+
+let paidPublishing = true;
+vi.mock("@/lib/paid-readiness", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  canPublishPaidTitle: () => paidPublishing,
+}));
+
+// ---- the recording Supabase double ----
+
+type Filter = { kind: string; column: string; value: unknown };
+type DbWrite = { table: string; op: string; payload: unknown; filters: Filter[] };
+
+let book: Record<string, unknown>;
+let dbWrites: DbWrite[] = [];
+let updateRows: unknown[] = [{ id: BOOK_ID }];
+let storageCalls: { op: string; bucket: string; path: unknown; options?: unknown }[] = [];
+let stored: Record<string, { bytes: Buffer; metadata: Record<string, string> }> = {};
+let infoFails = false;
+const events: string[] = [];
+
+function query(table: string) {
+  const filters: Filter[] = [];
+  let op = "select";
+  let payload: unknown;
+  const resolve = () => {
+    if (op === "select") {
+      if (table === "books") return { data: book, error: null };
+      if (table === "pen_names") return { data: { name: "Emri i Ri" }, error: null };
+      return { data: null, error: null };
+    }
+    dbWrites.push({ table, op, payload, filters: [...filters] });
+    events.push(`db:${op}:${table}`);
+    // A write that matched applies to the one row, as the database would.
+    if (table === "books" && op === "update" && updateRows.length > 0) Object.assign(book, payload);
+    return { data: updateRows, error: null };
+  };
+  const chain: Record<string, unknown> = new Proxy(
+    {},
+    {
+      get(_t, prop: string) {
+        if (prop === "then") {
+          return (f: (v: unknown) => unknown, r?: (e: unknown) => unknown) => Promise.resolve().then(resolve).then(f, r);
+        }
+        if (prop === "single" || prop === "maybeSingle") return () => Promise.resolve(resolve());
+        return (...args: unknown[]) => {
+          if (prop === "update" || prop === "insert" || prop === "delete") {
+            op = prop;
+            payload = args[0];
+          } else if (prop === "eq" || prop === "is" || prop === "neq" || prop === "not") {
+            filters.push({ kind: prop, column: String(args[0]), value: prop === "not" ? args[2] : args[1] });
+          }
+          return chain;
+        };
+      },
+    },
+  );
+  return chain;
+}
+
+function bucket(name: string) {
+  return {
+    info: async (path: string) => {
+      storageCalls.push({ op: "info", bucket: name, path });
+      if (infoFails) return { data: null, error: { message: "info failed" } };
+      const object = stored[`${name}:${path}`];
+      return object ? { data: { name: path, metadata: object.metadata }, error: null } : { data: null, error: { message: "nf" } };
+    },
+    download: async (path: string) => {
+      storageCalls.push({ op: "download", bucket: name, path });
+      const object = stored[`${name}:${path}`];
+      return object
+        ? { data: { arrayBuffer: async () => new Uint8Array(object.bytes).buffer }, error: null }
+        : { data: null, error: { message: "nf" } };
+    },
+    upload: async (path: string, bytes: Buffer, options: unknown) => {
+      storageCalls.push({ op: "upload", bucket: name, path, options });
+      events.push(`storage:upload:${name}`);
+      stored[`${name}:${path}`] = { bytes, metadata: (options as { metadata?: Record<string, string> }).metadata ?? {} };
+      return { error: null };
+    },
+    remove: async (paths: string[]) => {
+      storageCalls.push({ op: "remove", bucket: name, path: paths });
+      return { data: [], error: null };
+    },
+  };
+}
+
+const sessionClient = {
+  auth: { getUser: async () => ({ data: { user: { id: USER_ID } } }) },
+  from: (table: string) => query(table),
+  rpc: async () => ({ data: null, error: null }),
+  storage: { from: (name: string) => bucket(name) },
+};
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
+vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => sessionClient }));
+
+const { saveBookPricing } = await import("./actions");
+const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+
+const OWN_EPUB = canonicalBookManuscriptPath(USER_ID, BOOK_ID);
+const EDITOR = `/dashboard/books/${BOOK_ID}/editor?tab=pricing`;
+const err = (message: string) => `${EDITOR}&error=${encodeURIComponent(message)}`;
+
+async function run(action: Promise<unknown>): Promise<string> {
+  try {
+    await action;
+  } catch (e) {
+    if (e instanceof RedirectSignal) return e.target;
+    throw e;
+  }
+  return "(no redirect)";
+}
+
+function form(fields: Record<string, string>): FormData {
+  const f = new FormData();
+  for (const [k, v] of Object.entries(fields)) f.set(k, v);
+  return f;
+}
+const SEND = { intent: "send", priceMode: "free", worldwideRights: "on", acceptAuthorTerms: "on" };
+
+const priceWrites = () => dbWrites.filter((w) => w.table === "books" && (w.payload as Record<string, unknown>)?.price_all !== undefined);
+const fileWrites = () => dbWrites.filter((w) => w.table === "books" && (w.payload as Record<string, unknown>)?.file_path !== undefined);
+const publishWrites = () => dbWrites.filter((w) => w.table === "books" && (w.payload as Record<string, unknown>)?.status === "published");
+
+async function directEpub(): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+  zip.file("content.opf", "<package/>");
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+}
+async function librumEpub(title: string, authorName: string): Promise<Buffer> {
+  return generateEpub({
+    bookId: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+    title,
+    authorName,
+    sections: [{ heading: "Kapitulli 1", html: "<p>Teksti.</p>" }],
+    images: [],
+  });
+}
+
+beforeEach(async () => {
+  resetBookReviewsDouble();
+  bookReviewsDoubleState.approvalValid = false;
+  book = {
+    id: BOOK_ID,
+    author_id: USER_ID,
+    status: "draft",
+    title: "Titulli i Ri",
+    pen_name_id: "f0000000-0000-4000-8000-000000000001",
+    price_all: null,
+    published_at: null,
+    file_path: OWN_EPUB,
+    cover_path: canonicalBookCoverPath(USER_ID, BOOK_ID, "jpg"),
+    description: "Një përshkrim.",
+    categories: ["Letërsi artistike"],
+    original_author: null,
+  };
+  dbWrites = [];
+  updateRows = [{ id: BOOK_ID }];
+  storageCalls = [];
+  stored = { [`manuscripts:${OWN_EPUB}`]: { bytes: await directEpub(), metadata: {} } };
+  infoFails = false;
+  events.length = 0;
+  takedownKind = "none";
+  rightsState = { kind: "present", declaration: { basis: "own_rights" } };
+  declarations.length = 0;
+  recordOk = true;
+  aiRead = { ok: true, answer: "no" };
+  paidPublishing = true;
+  staffEmails.length = 0;
+});
+
+describe("saveBookPricing: Ruaj draftin", () => {
+  it("saves Falas as 0 on the author's own draft and stays on the tab", async () => {
+    const target = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })));
+    expect(target).toBe(`${EDITOR}&success=${encodeURIComponent("U ruajt si draft")}`);
+    expect(priceWrites()).toHaveLength(1);
+    expect(priceWrites()[0].payload).toEqual({ price_all: 0 });
+    expect(priceWrites()[0].filters).toEqual(
+      expect.arrayContaining([
+        { kind: "eq", column: "id", value: BOOK_ID },
+        { kind: "eq", column: "author_id", value: USER_ID },
+        { kind: "eq", column: "status", value: "draft" },
+        { kind: "is", column: "price_all", value: null },
+      ]),
+    );
+    expect(declarations).toEqual([]);
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+  });
+
+  it("saves a paid price, with no tick needed", async () => {
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "249" })));
+    expect(priceWrites()[0].payload).toEqual({ price_all: 249 });
+  });
+
+  it.each(["50", "0", "9.99", "abc", ""])("refuses the paid price %j without a write", async (price) => {
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price })))).toBe(
+      err(PRICE_INVALID_MESSAGE),
+    );
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("refuses a form with neither Me pagesë nor Falas", async () => {
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save" })))).toBe(err(PRICE_MODE_MISSING_MESSAGE));
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("a public-domain book is free whatever the form says", async () => {
+    rightsState = { kind: "present", declaration: { basis: "public_domain" } };
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "500" })));
+    expect(priceWrites()[0].payload).toEqual({ price_all: 0 });
+  });
+
+  it("a new translation of a public-domain work can be paid", async () => {
+    rightsState = { kind: "present", declaration: { basis: "public_domain_original" } };
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "500" })));
+    expect(priceWrites()[0].payload).toEqual({ price_all: 500 });
+  });
+
+  it("an unchanged price is not written again", async () => {
+    book.price_all = 0;
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })));
+    expect(priceWrites()).toEqual([]);
+  });
+
+  it("a write that matches no row (changed under the author) is refused", async () => {
+    updateRows = [];
+    const target = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })));
+    expect(target).toContain(`${EDITOR}&error=`);
+  });
+
+  it.each([
+    ["a live book", () => (book.status = "published")],
+    ["a book in review", () => (bookReviewsDoubleState.pending = true)],
+    ["an unreadable review state", () => (bookReviewsDoubleState.stateKind = "unavailable")],
+  ])("%s goes to the edit page, nothing written", async (_l, setUp) => {
+    setUp();
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toMatch(
+      new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`),
+    );
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("a taken-down book goes to the edit page, nothing written", async () => {
+    takedownKind = "active";
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toMatch(
+      new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`),
+    );
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("someone else's book goes to the dashboard", async () => {
+    book.author_id = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toBe("/dashboard");
+    expect(dbWrites).toEqual([]);
+  });
+});
+
+describe("saveBookPricing: Dërgo për shqyrtim", () => {
+  it("sends a complete draft for review: price, then the ticks recorded, then the request", async () => {
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target).toBe(`/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`);
+    expect(priceWrites()[0].payload).toEqual({ price_all: 0 });
+    expect(declarations).toEqual([{ bookId: BOOK_ID, basis: "own_rights", options: { atSend: true } }]);
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toHaveLength(1);
+    expect(staffEmails).toHaveLength(1);
+    expect(publishWrites()).toEqual([]);
+    // A directly uploaded ebook is never rewritten.
+    expect(storageCalls.filter((c) => c.op === "upload")).toEqual([]);
+  });
+
+  it("publishes at once when Librum's approval still matches the files (3a)", async () => {
+    bookReviewsDoubleState.approvalValid = true;
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target).toBe(`/dashboard?success=${encodeURIComponent("Libri juaj u publikua")}`);
+    expect(publishWrites()).toHaveLength(1);
+  });
+
+  it.each([
+    ["no tick", {}],
+    ["only the worldwide tick", { worldwideRights: "on" }],
+    ["only the Terms tick", { acceptAuthorTerms: "on" }],
+  ])("%s: refused after the price is kept, nothing recorded or requested", async (_l, ticks) => {
+    const target = await run(saveBookPricing(BOOK_ID, form({ intent: "send", priceMode: "free", ...ticks })));
+    expect(target).toBe(err(SEND_TICKS_MISSING_MESSAGE));
+    expect(priceWrites()).toHaveLength(1);
+    expect(declarations).toEqual([]);
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+  });
+
+  it.each([
+    ["no AI answer", () => (aiRead = { ok: true, answer: null })],
+    ["an unreadable AI answer", () => (aiRead = { ok: false })],
+    ["no manuscript", () => (book.file_path = null)],
+    ["no cover", () => (book.cover_path = null)],
+    ["no category", () => (book.categories = [])],
+    ["no description", () => (book.description = "")],
+    ["no rights choice", () => (rightsState = { kind: "none" })],
+  ])("%s: not ready, nothing recorded or requested", async (_l, setUp) => {
+    setUp();
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err(SEND_INCOMPLETE_MESSAGE));
+    expect(declarations).toEqual([]);
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+  });
+
+  it("a failed record of the ticks stops the send", async () => {
+    recordOk = false;
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err(SEND_CONFIRMATION_NOT_SAVED_MESSAGE));
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+  });
+
+  it("a paid book while paid publishing is closed is refused by the publish gate", async () => {
+    paidPublishing = false;
+    book.price_all = 249;
+    expect(
+      await run(saveBookPricing(BOOK_ID, form({ ...SEND, priceMode: "paid", price: "249" }))),
+    ).toBe(err("Publikimi me pagesë nuk është i mundur tani"));
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+  });
+
+  describe("the Librum-made ebook re-stamp", () => {
+    it("writes the current title and pen name into a fresh key before the request", async () => {
+      stored[`manuscripts:${OWN_EPUB}`] = { bytes: await librumEpub("Titulli i Vjetër", "Emri i Vjetër"), metadata: { librum: "made" } };
+      const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+      expect(target).toBe(`/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`);
+      const upload = storageCalls.find((c) => c.op === "upload");
+      expect(upload?.bucket).toBe("manuscripts");
+      expect(String(upload?.path)).toMatch(new RegExp(`^${USER_ID}/${BOOK_ID}/[0-9a-f-]{36}\\.epub$`));
+      expect((upload?.options as { metadata: unknown }).metadata).toEqual({ librum: "made" });
+      const zip = await JSZip.loadAsync(stored[`manuscripts:${String(upload?.path)}`].bytes);
+      const opf = await zip.file("OEBPS/content.opf")!.async("string");
+      expect(opf).toContain("<dc:title>Titulli i Ri</dc:title>");
+      expect(opf).toContain("<dc:creator>Emri i Ri</dc:creator>");
+      // Compare-and-set on the file it read, on the author's own draft.
+      expect(fileWrites()).toHaveLength(1);
+      expect(fileWrites()[0].payload).toEqual({ file_path: upload?.path });
+      expect(fileWrites()[0].filters).toEqual(
+        expect.arrayContaining([
+          { kind: "eq", column: "file_path", value: OWN_EPUB },
+          { kind: "eq", column: "status", value: "draft" },
+          { kind: "eq", column: "author_id", value: USER_ID },
+        ]),
+      );
+      expect(events.indexOf("storage:upload:manuscripts")).toBeLessThan(
+        events.lastIndexOf("db:update:books"),
+      );
+      expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toHaveLength(1);
+    });
+
+    it("an ebook that already names this title and pen name is not rewritten", async () => {
+      stored[`manuscripts:${OWN_EPUB}`] = { bytes: await librumEpub("Titulli i Ri", "Emri i Ri"), metadata: { librum: "made" } };
+      await run(saveBookPricing(BOOK_ID, form(SEND)));
+      expect(storageCalls.filter((c) => c.op === "upload")).toEqual([]);
+      expect(fileWrites()).toEqual([]);
+    });
+
+    it("an unreadable marker stops the send", async () => {
+      infoFails = true;
+      expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err(EBOOK_RESTAMP_FAILED_MESSAGE));
+      expect(declarations).toEqual([]);
+      expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+    });
+
+    it("a lost compare-and-set removes the new upload and stops the send", async () => {
+      stored[`manuscripts:${OWN_EPUB}`] = { bytes: await librumEpub("Titulli i Vjetër", "Emri i Vjetër"), metadata: { librum: "made" } };
+      book.price_all = 0;
+      updateRows = [];
+      expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err(EBOOK_RESTAMP_FAILED_MESSAGE));
+      const upload = storageCalls.find((c) => c.op === "upload");
+      expect(storageCalls).toContainEqual({ op: "remove", bucket: "manuscripts", path: [upload?.path] });
+      expect(declarations).toEqual([]);
+    });
+  });
+});

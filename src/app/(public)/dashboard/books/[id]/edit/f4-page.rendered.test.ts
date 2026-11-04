@@ -83,11 +83,6 @@ function radio(html: string, basis: string): string {
   return match![0];
 }
 
-function publishButton(html: string): string {
-  const start = html.lastIndexOf("<button", html.indexOf("Dërgojeni për shqyrtim</button>"));
-  return html.slice(start, html.indexOf("Dërgojeni për shqyrtim</button>"));
-}
-
 beforeEach(() => {
   book = {
     id: BOOK_ID,
@@ -106,7 +101,10 @@ beforeEach(() => {
     series_position: null,
     price_all: 0,
     price_cents: 0,
-    status: "draft",
+    // BD15 P4: a plain draft now opens the new editor (see "a plain
+    // draft" below), so these field checks render a live book, which
+    // this page still edits until P5. No published_at: nothing locked.
+    status: "published",
     cover_path: null,
     file_path: null,
     // PEN-NAMES-2 (D4): books.pen_name is gone; the page embeds the
@@ -200,27 +198,13 @@ describe("Edit page: Rights (P3)", () => {
   });
 });
 
-describe("Edit page: the Publishing box (P4, D3)", () => {
-  it("no declaration -> 'Zgjidhni të drejtat para publikimit.' and Publish disabled", async () => {
-    const html = await render();
-    expect(html).toContain("Zgjidhni të drejtat para publikimit.");
-    expect(publishButton(html)).toContain('disabled=""');
-  });
-
-  it("the description notice comes first when both are missing", async () => {
-    book.description = "";
-    const html = await render();
-    expect(html).toContain("Shtoni një përshkrim para publikimit.");
-    expect(html).not.toContain("Zgjidhni të drejtat para publikimit.");
-  });
-
-  it("with a declaration -> Ready to send for review, the control enabled", async () => {
-    rightsState = { kind: "present", declaration: { basis: "own_rights" } };
-    const html = await render();
-    // ADMIN-3-REVIEW (B): no approval yet, so the line names the review.
-    expect(html).toContain("Gati për t&#x27;u dërguar për shqyrtim.");
-    expect(html).not.toContain("Zgjidhni të drejtat para publikimit.");
-    expect(publishButton(html)).not.toContain('disabled=""');
+// BD15 P4: the draft Publishing box moved to the editor's Pricing tab
+// (its tests: src/components/book-pricing-form.rendered.test.ts and
+// pricing-send.test.ts). A plain draft never renders here any more.
+describe("Edit page: a plain draft (BD15 P4)", () => {
+  it("is sent to the new editor", async () => {
+    book.status = "draft";
+    await expect(render()).rejects.toThrow(`REDIRECT:/dashboard/books/${BOOK_ID}/editor?tab=details`);
   });
 });
 
@@ -240,18 +224,10 @@ describe("Edit page before the migration (D2/D3)", () => {
     expect(html).not.toContain(">Të drejtat</legend>");
   });
 
-  it("the Publishing box shows the existing generic sentence and Publish is disabled", async () => {
-    const html = await render();
-    expect(html).toContain("Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj");
-    expect(html).not.toContain("Zgjidhni të drejtat para publikimit.");
-    expect(publishButton(html)).toContain('disabled=""');
-  });
-
-  it("a rights table that exists but cannot be read also hides the choice and shows the generic sentence", async () => {
+  it("a rights table that exists but cannot be read also hides the choice", async () => {
     features = { penName: true, rights: true };
     const html = await render();
     expect(html).not.toContain('name="rightsBasis"');
-    expect(html).toContain("Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj");
   });
 });
 
