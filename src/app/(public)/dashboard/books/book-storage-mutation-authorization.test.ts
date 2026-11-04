@@ -49,6 +49,18 @@ vi.mock("@/lib/staff-alerts", () => ({
   sendReviewRequestedStaffEmail: (args: unknown) => mockReviewStaffEmail(args),
 }));
 
+// BD15 P3: the staff-only AI answer, recorded here (its own module and
+// grants are covered in book-ai-disclosure.test.ts and the SQL tests).
+const aiWrites: { bookId: string; answer: string }[] = [];
+let aiWriteOk = true;
+vi.mock("@/lib/book-ai-disclosure", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  writeAiDisclosure: async (bookId: string, answer: string) => {
+    aiWrites.push({ bookId, answer });
+    return aiWriteOk;
+  },
+}));
+
 type Filter = { kind: string; column: string; value: unknown };
 type DbWrite = { table: string; op: string; payload: unknown; filters: Filter[] };
 type StorageCall = { op: string; bucket: string; paths: unknown[] };
@@ -219,7 +231,7 @@ vi.mock("@/lib/catalog-write-client", async () => {
   };
 });
 
-const { createBook, updateBook, deleteBook, cancelBookReview } = await import("./actions");
+const { createBook, updateBook, deleteBook, cancelBookReview, saveBookContent } = await import("./actions");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
 
 // COVERS-1: a real 1x1 PNG and JPEG, since every cover is now decoded and re-encoded.
@@ -339,6 +351,8 @@ beforeEach(() => {
   consoleOutput = [];
   bundleBooksResult = { data: [], error: null };
   resetBookReviewsDouble();
+  aiWrites.length = 0;
+  aiWriteOk = true;
   for (const level of ["log", "info", "warn", "error"] as const) {
     vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
       consoleOutput.push(args);
@@ -1481,5 +1495,176 @@ describe("W7: the cover inside a Librum-made ebook", () => {
     expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
     expect(uploadedEbook()).toEqual(direct);
     expect(uploadedEbookMetadata()).toBeUndefined();
+  });
+});
+
+// ============================================================
+// BD15 P3: the new editor's Content tab save (saveBookContent).
+// ============================================================
+describe("saveBookContent (BD15 P3, the Content tab)", () => {
+  const CONTENT = `/dashboard/books/${BOOK_ID}/editor?tab=content`;
+  const contentRow = (o: Record<string, unknown> = {}) =>
+    row({ title: "Title", pen_name_id: null, isbn: null, ...o });
+  const form = (o: Record<string, string> = {}) => {
+    const f = new FormData();
+    f.set("isbn", "");
+    f.set("publisher", "");
+    for (const [k, v] of Object.entries(o)) f.set(k, v);
+    return f;
+  };
+
+  beforeEach(() => {
+    bookReadResult = { data: contentRow(), error: null };
+    mockReviewStaffEmail.mockClear();
+  });
+
+  it("a new manuscript and cover: fresh keys uploaded before one guarded draft-only write", async () => {
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(`${CONTENT}&success=${encodeURIComponent("U ruajt si draft")}`);
+    const [write] = bookUpdates();
+    expect(write.payload).toEqual({ isbn: null, publisher: null, cover_path: NEW_JPG, file_path: NEW_EPUB });
+    expect(write.filters).toEqual(
+      expect.arrayContaining([
+        { kind: "eq", column: "id", value: BOOK_ID },
+        { kind: "eq", column: "author_id", value: USER_ID },
+        { kind: "eq", column: "status", value: "draft" },
+        { kind: "eq", column: "cover_path", value: OWN_PNG },
+        { kind: "eq", column: "file_path", value: OWN_EPUB },
+      ]),
+    );
+    // Uploads strictly before the row write; superseded objects after it.
+    const firstUpload = events.findIndex((e) => e.startsWith("storage:upload"));
+    const write0 = events.indexOf("db:update:books");
+    expect(firstUpload).toBeGreaterThanOrEqual(0);
+    expect(firstUpload).toBeLessThan(write0);
+    expect(removals().flatMap((c) => c.paths)).toEqual(expect.arrayContaining([OWN_PNG]));
+    // No review state is touched by a draft's Content save.
+    expect(dbWrites.some((w) => w.table === "book_reviews")).toBe(false);
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
+  });
+
+  it("a draft with no files yet compares both paths with IS NULL", async () => {
+    bookReadResult = { data: contentRow({ cover_path: null, file_path: null }), error: null };
+    await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    const [write] = bookUpdates();
+    expect(write.filters).toEqual(
+      expect.arrayContaining([
+        { kind: "is", column: "cover_path", value: null },
+        { kind: "is", column: "file_path", value: null },
+      ]),
+    );
+  });
+
+  it("no upload: no path key is written and no Storage call is made", async () => {
+    await run(saveBookContent(BOOK_ID, form({ publisher: "Botime X" })));
+    const [write] = bookUpdates();
+    expect(write.payload).toEqual({ isbn: null, publisher: "Botime X" });
+    expect(storageCalls).toEqual([]);
+  });
+
+  it("records the AI answer after the files are saved, and goes on to Pricing on 'next'", async () => {
+    const target = await run(saveBookContent(BOOK_ID, form({ aiUsed: "yes", intent: "next" })));
+    expect(aiWrites).toEqual([{ bookId: BOOK_ID, answer: "yes" }]);
+    expect(target).toBe(
+      `/dashboard/books/${BOOK_ID}/editor?tab=pricing&success=${encodeURIComponent("U ruajt si draft")}`,
+    );
+  });
+
+  it("no answer ticked records nothing; any other value is refused before any write", async () => {
+    await run(saveBookContent(BOOK_ID, form()));
+    expect(aiWrites).toEqual([]);
+    const target = await run(saveBookContent(BOOK_ID, form({ aiUsed: "maybe" })));
+    expect(target).toBe(`${CONTENT}&error=${encodeURIComponent("Përgjigja për AI nuk u ruajt. Zgjidheni përsëri dhe ruajeni.")}`);
+    expect(bookUpdates()).toHaveLength(1);
+  });
+
+  it("a failed AI write keeps the saved files and says so on the tab", async () => {
+    aiWriteOk = false;
+    const target = await run(saveBookContent(BOOK_ID, form({ aiUsed: "no" })));
+    expect(bookUpdates()).toHaveLength(1);
+    expect(target).toBe(`${CONTENT}&error=${encodeURIComponent("Përgjigja për AI nuk u ruajt. Zgjidheni përsëri dhe ruajeni.")}`);
+  });
+
+  it("an invalid new ISBN is refused before any upload; an unchanged stored one is kept", async () => {
+    const bad = await run(saveBookContent(BOOK_ID, withCover(form({ isbn: "123" }))));
+    expect(bad.startsWith(`${CONTENT}&error=`)).toBe(true);
+    expect(storageCalls).toEqual([]);
+    expect(bookUpdates()).toEqual([]);
+    bookReadResult = { data: contentRow({ isbn: "legacy-123" }), error: null };
+    await run(saveBookContent(BOOK_ID, form({ isbn: "legacy-123" })));
+    expect(bookUpdates()[0].payload).toEqual(expect.objectContaining({ isbn: "legacy-123" }));
+  });
+
+  it("a rejected file comes back to the Content tab (the message is joined with &)", async () => {
+    const f = form();
+    f.set("manuscript", new File([new Uint8Array(Buffer.from("not a zip"))], "book.epub"));
+    const target = await run(saveBookContent(BOOK_ID, f));
+    expect(target.startsWith(`${CONTENT}&error=`)).toBe(true);
+    expect(storageCalls).toEqual([]);
+    expect(bookUpdates()).toEqual([]);
+  });
+
+  it("a live book, or a draft waiting for review, is sent to the edit page untouched", async () => {
+    const editError = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër është i publikuar ose në shqyrtim, prandaj ndryshohet këtu.")}`;
+    bookReadResult = { data: contentRow({ status: "published" }), error: null };
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(editError);
+    bookReadResult = { data: contentRow(), error: null };
+    bookReviewsDoubleState.pending = true;
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(editError);
+    bookReviewsDoubleState.pending = false;
+    bookReviewsDoubleState.stateKind = "unavailable";
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(editError);
+    expect(storageCalls).toEqual([]);
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("another author's book, a row with another id, or no session never reaches Storage", async () => {
+    bookReadResult = { data: contentRow({ author_id: OTHER_AUTHOR }), error: null };
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe("/dashboard");
+    bookReadResult = { data: contentRow({ id: OTHER_BOOK }), error: null };
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe("/dashboard");
+    signedInUserId = null;
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe("/login");
+    expect(storageCalls).toEqual([]);
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("a write error removes the new uploads; a concurrent publish (LB463) gets its own message", async () => {
+    updateResult = { data: null, error: { code: "LB463", message: "x" } };
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(
+      `${CONTENT}&error=${encodeURIComponent("Libri juaj ndryshoi ndërsa po e redaktonit. Rifreskoni faqen dhe provoni përsëri.")}`,
+    );
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).toEqual(expect.arrayContaining([NEW_JPG, NEW_EPUB]));
+    expect(removed).not.toContain(OWN_PNG);
+    expect(removed).not.toContain(OWN_EPUB);
+    expect(aiWrites).toEqual([]);
+  });
+
+  it("a failed upload removes the other new upload and writes nothing", async () => {
+    failUploadsTo = new Set(["manuscripts:*"]);
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(`${CONTENT}&error=${encodeURIComponent("Dorëshkrimi nuk u ngarkua dot. Provoni përsëri")}`);
+    expect(bookUpdates()).toEqual([]);
+    expect(removals().flatMap((c) => c.paths)).toEqual(expect.arrayContaining([NEW_JPG]));
+  });
+
+  it("a form with nothing to write saves only the AI answer", async () => {
+    const f = new FormData();
+    f.set("aiUsed", "no");
+    await run(saveBookContent(BOOK_ID, f));
+    expect(bookUpdates()).toEqual([]);
+    expect(aiWrites).toEqual([{ bookId: BOOK_ID, answer: "no" }]);
+  });
+
+  it("a write that matched no row removes the new uploads and keeps the old objects", async () => {
+    updateResult = { data: [], error: null };
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target.startsWith(`${CONTENT}&error=`)).toBe(true);
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).not.toContain(OWN_PNG);
+    expect(removed).not.toContain(OWN_EPUB);
+    expect(removed).toEqual(expect.arrayContaining([NEW_JPG, NEW_EPUB]));
   });
 });

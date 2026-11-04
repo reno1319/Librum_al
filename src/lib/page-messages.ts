@@ -291,6 +291,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Shtoni dorëshkrimin dhe kopertinën para se ta dërgoni për shqyrtim.",
   "Të dhënat u ruajtën, por kontribuesit jo të gjithë. Kontrolloni listën dhe ruajeni përsëri.",
   "Të dhënat u ruajtën, por zgjedhja e të drejtave jo. Zgjidheni përsëri dhe ruajeni.",
+  "Përgjigja për AI nuk u ruajt. Zgjidheni përsëri dhe ruajeni.",
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([

@@ -3,13 +3,17 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { saveBookDetails } from "../../editor-actions";
+import { saveBookContent } from "../../actions";
+import { BookContentForm } from "@/components/book-content-form";
+import { readAiDisclosure } from "@/lib/book-ai-disclosure";
+import { ebookCoverNotice } from "@/lib/ebook-cover-notice";
+import { Alert } from "@/components/ui/alert";
 import { BookEditorShell } from "@/components/book-editor-shell";
 import { BookDetailsForm, type DetailsFormValues } from "@/components/book-details-form";
 import { getRightsDeclarationState } from "@/lib/book-rights";
 import { getBookReviewState } from "@/lib/book-reviews";
 import { missingDetails } from "@/lib/book-details";
 import {
-  CONTENT_TAB_INTERIM_NOTE,
   OPEN_EDIT_PAGE_LABEL,
   PRICING_TAB_INTERIM_NOTE,
   isEditorTab,
@@ -47,21 +51,23 @@ type EditorBook = {
   file_path: string | null;
   cover_path: string | null;
   price_all: number | null;
+  isbn: string | null;
+  publisher: string | null;
 };
 
-// BD15 P2: the new book editor for a draft (PLAN-BD15-r1 §2.2). The
-// Details tab is built here; Content (P3) and Pricing (P4) point to the
-// existing edit page until they are. A live book or a book in review
-// keeps the existing edit page until P5.
+// BD15 P2: the new book editor for a draft (PLAN-BD15-r1 §2.2). Details
+// (P2) and Content (P3) are built here; Pricing points to the existing
+// edit page until P4. A live book or a book in review keeps the existing
+// edit page until P5.
 export default async function BookEditorPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; error?: string; success?: string }>;
+  searchParams: Promise<{ tab?: string; error?: string; success?: string; ebook_cover?: string }>;
 }) {
   const { id } = await params;
-  const { tab: rawTab, error: rawError, success: rawSuccess } = await searchParams;
+  const { tab: rawTab, error: rawError, success: rawSuccess, ebook_cover: rawEbookCover } = await searchParams;
   const tab: EditorTab = isEditorTab(rawTab) ? rawTab : "details";
 
   if (!UUID.test(id)) notFound();
@@ -77,7 +83,7 @@ export default async function BookEditorPage({
   const { data: book } = await supabase
     .from("books")
     .select(
-      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, categories, keywords, original_author, status, published_at, file_path, cover_path, price_all",
+      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, categories, keywords, original_author, status, published_at, file_path, cover_path, price_all, isbn, publisher",
     )
     .eq("id", id)
     .eq("author_id", user.id)
@@ -88,7 +94,7 @@ export default async function BookEditorPage({
   const review = await getBookReviewState(supabase, book.id);
   if (review.kind !== "ok" || review.pending) redirect(`/dashboard/books/${book.id}/edit`);
 
-  const [{ data: penNames }, { data: series }, { data: contributors }, rights] = await Promise.all([
+  const [{ data: penNames }, { data: series }, { data: contributors }, rights, ai] = await Promise.all([
     supabase
       .from("pen_names")
       .select("id, name, is_default")
@@ -108,6 +114,9 @@ export default async function BookEditorPage({
       .order("created_at")
       .returns<{ id: string; name: string; role: string }[]>(),
     getRightsDeclarationState(book.id),
+    // BD15 P3: the staff-only AI answer, read by the trusted writer only
+    // now that the book is proven the caller's own draft.
+    readAiDisclosure(book.id),
   ]);
 
   const rightsBasis = rights.kind === "present" ? rights.declaration.basis : null;
@@ -124,7 +133,8 @@ export default async function BookEditorPage({
         rightsBasis,
         originalAuthor: book.original_author,
       }).length === 0,
-    content: book.file_path !== null && book.cover_path !== null,
+    // BD15 P3 (mockup): the manuscript, the cover and the AI answer.
+    content: book.file_path !== null && book.cover_path !== null && ai.ok && ai.answer !== null,
     pricing: book.price_all !== null,
   };
 
@@ -165,9 +175,35 @@ export default async function BookEditorPage({
           penNames={penNameList}
           series={series ?? []}
         />
+      ) : tab === "content" ? (
+        <>
+          {ebookCoverNotice(rawEbookCover) && (
+            <Alert variant="warning" className="mt-4">
+              {ebookCoverNotice(rawEbookCover)}
+            </Alert>
+          )}
+          <BookContentForm
+            action={saveBookContent.bind(null, book.id)}
+            book={{
+              id: book.id,
+              title: book.title,
+              language: book.language,
+              isbn: book.isbn,
+              publisher: book.publisher,
+              hasManuscript: book.file_path !== null,
+              coverUrl: book.cover_path
+                ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
+                : null,
+            }}
+            authorId={user.id}
+            authorName={penNameList.find((p) => p.id === book.pen_name_id)?.name ?? ""}
+            aiAnswer={ai.ok ? ai.answer : null}
+            aiUnreadable={!ai.ok}
+          />
+        </>
       ) : (
         <div className="mt-8 flex flex-col items-start gap-4 rounded-[4px] border border-border bg-surface p-6">
-          <p>{tab === "content" ? CONTENT_TAB_INTERIM_NOTE : PRICING_TAB_INTERIM_NOTE}</p>
+          <p>{PRICING_TAB_INTERIM_NOTE}</p>
           <Link href={`/dashboard/books/${book.id}/edit`} className={buttonClasses("primary", "md", "rounded-full")}>
             {OPEN_EDIT_PAGE_LABEL}
           </Link>
