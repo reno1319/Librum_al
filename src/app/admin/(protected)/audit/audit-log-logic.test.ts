@@ -544,5 +544,8 @@ describe("book review audit events", () => {
     expect(formatAuditDetails("book.review_approved", { first_publication: true })).toBe("First publication");
     expect(formatAuditDetails("book.review_approved", { first_publication: false })).toBe("Live again");
     expect(formatAuditDetails("book.review_approved", {})).toBeNull();
+    // BD15 P5b-2: changes to a book that stayed live.
+    expect(formatAuditDetails("book.review_approved", { first_publication: false, live_update: true })).toBe("Live update");
+    expect(formatAuditDetails("book.review_approved", { first_publication: false, live_update: "true" })).toBe("Live again");
   });
 });

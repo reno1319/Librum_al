@@ -30,6 +30,7 @@ const {
   sendNewBookEmails,
   sendBookTakedownEmail,
   sendBookApprovedEmail,
+  sendBookChangesApprovedEmail,
   sendBookSentBackEmail,
   sendAccountSuspendedEmail,
   sendAccountSuspensionLiftedEmail,
@@ -306,6 +307,24 @@ describe("sendBookApprovedEmail / sendBookSentBackEmail", () => {
     expect(args.html).not.toContain("<script>");
     expect(args.html).toContain("/dashboard");
     expect(args.html).toContain("Pyetje? Na shkruani te support@librum.al");
+    expect(args.html).not.toContain("mbetet në shitje");
+  });
+
+  // BD15 P5b-2: a live book's changes.
+  it("approved changes of a live book: their own subject, never 'u publikua', title escaped", async () => {
+    await sendBookChangesApprovedEmail("ana@example.com", { title: "<b>Kënga</b>", bookId: "22222222-2222-4222-8222-222222222222" });
+    const args = sendMock.mock.calls[0][0];
+    expect(args.subject).toBe('Ndryshimet e librit "<b>Kënga</b>" u miratuan');
+    expect(args.html).toContain("tani lexuesit shohin versionin e ri");
+    expect(args.html).not.toContain("u publikua");
+    expect(args.html).toContain("&lt;b&gt;Kënga&lt;/b&gt;");
+    expect(args.html).not.toContain("<b>Kënga</b>");
+    expect(args.html).toContain("/libra/22222222-2222-4222-8222-222222222222");
+  });
+
+  it("a live book's changes sent back: says the book stays on sale as it was", async () => {
+    await sendBookSentBackEmail("ana@example.com", { title: "T", reasonLabel: "R", message: "M", live: true });
+    expect(sendMock.mock.calls[0][0].html).toContain("Libri juaj mbetet në shitje siç ishte para këtyre ndryshimeve.");
   });
 });
 

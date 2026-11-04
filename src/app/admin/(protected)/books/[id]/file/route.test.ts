@@ -87,6 +87,34 @@ describe("GET /admin/books/[id]/file", () => {
     ]);
   });
 
+  // BD15 P5b-2: a live book in review -- its waiting manuscript is the
+  // snapshot; the live file is what buyers keep.
+  describe("a live book's changes", () => {
+    const LIVE_FILE = `${AUTHOR}/${BOOK}.epub`;
+    beforeEach(() => {
+      rows.books = { data: { id: BOOK, author_id: AUTHOR, status: "published", file_path: LIVE_FILE }, error: null };
+      rows.book_pending_changes = { data: { file_path: FILE }, error: null };
+    });
+
+    it("signs the waiting manuscript when it is still the snapshot", async () => {
+      const response = await call();
+      expect(target(response)).toBe(SIGNED);
+      expect(mockSign).toHaveBeenCalledWith("manuscripts", FILE, 300, { download: true });
+      expect(reads.map((r) => [r.table, r.id])).toContainEqual(["book_pending_changes", BOOK]);
+    });
+
+    it.each<[string, () => void, string]>([
+      ["the waiting manuscript changed since", () => (rows.book_pending_changes = { data: { file_path: LIVE_FILE }, error: null }), "The author changed the file. Reload."],
+      ["no waiting row", () => (rows.book_pending_changes = { data: null, error: null }), "The author changed the file. Reload."],
+      ["an unreadable waiting row", () => (rows.book_pending_changes = { data: null, error: { code: "42501" } }), "That file isn't available."],
+    ])("%s: signs nothing", async (_label, arrange, message) => {
+      arrange();
+      const response = await call();
+      expect(target(response)).toBe(`/admin/books/${BOOK}?error=${message}`);
+      expect(mockSign).not.toHaveBeenCalled();
+    });
+  });
+
   it("the author changed the file since: says so, signs nothing", async () => {
     rows.books = { data: { id: BOOK, author_id: AUTHOR, file_path: `${AUTHOR}/${BOOK}.epub` }, error: null };
     const response = await call();

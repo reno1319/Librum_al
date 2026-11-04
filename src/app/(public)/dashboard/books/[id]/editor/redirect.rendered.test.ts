@@ -16,7 +16,17 @@ vi.mock("next/navigation", () => ({
     throw new Error(`REDIRECT:${url}`);
   },
 }));
-vi.mock("../../../editor-actions", () => ({ saveBookDetails: { bind: () => async () => undefined } }));
+vi.mock("../../../editor-actions", () => ({
+  saveBookDetails: { bind: () => async () => undefined },
+  discardBookPendingChanges: { bind: () => async () => undefined },
+}));
+// BD15 P5b-2: a live book's waiting changes.
+let pendingRead: { ok: true; pending: Record<string, unknown> | null } | { ok: false } = { ok: true, pending: null };
+vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => ({}) }));
+vi.mock("@/lib/book-pending-changes", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  readPendingChanges: async () => pendingRead,
+}));
 vi.mock("../../../actions", () => ({
   saveBookContent: { bind: () => async () => undefined },
   saveBookPricing: { bind: () => async () => undefined },
@@ -97,6 +107,7 @@ beforeEach(() => {
   };
   reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: null };
   takedown = { kind: "none" };
+  pendingRead = { ok: true, pending: null };
 });
 
 describe("editor page: which books it takes", () => {
@@ -106,8 +117,51 @@ describe("editor page: which books it takes", () => {
     expect(html).not.toContain("REDIRECT");
   });
 
-  it("a live book goes to the edit page", async () => {
+  // BD15 P5b-2: a live book stays live and opens here.
+  it("a live book renders the editor, marked as on sale, with the live notice", async () => {
     book.status = "published";
+    book.description = "Live description";
+    const html = await render();
+    expect(html).toContain("Në shitje");
+    expect(html).toContain("Hiqeni nga shitja ose fshijeni librin");
+    expect(html).not.toContain("Hidhni ndryshimet");
+  });
+
+  it("a live book with waiting changes lists what changed and offers to discard them", async () => {
+    book.status = "published";
+    book.description = "Live description";
+    pendingRead = {
+      ok: true,
+      pending: { filePath: null, coverPath: null, description: "New description", isAdult: false, originalAuthor: null },
+    };
+    const html = await render();
+    expect(html).toContain("Hidhni ndryshimet");
+    expect(html).toContain("New description");
+  });
+
+  // Audit r1 F1: no rights record (the mock answers "none") -> own rights,
+  // the only basis the database allows such a book, shown and sent.
+  it("a live book with no rights record shows and sends own rights, not a missing step", async () => {
+    book.status = "published";
+    book.description = "Live description";
+    const html = await render();
+    expect(html).toContain('<input type="hidden" name="rightsBasis" value="own_rights"/>');
+  });
+
+  it("a draft with no rights record still asks for it", async () => {
+    const html = await render();
+    expect(html).not.toContain('<input type="hidden" name="rightsBasis"');
+  });
+
+  it("a live book whose waiting changes cannot be read goes to the dashboard, nothing shown", async () => {
+    book.status = "published";
+    pendingRead = { ok: false };
+    await expect(render()).rejects.toThrow("REDIRECT:/dashboard?error=");
+  });
+
+  it("a live book in review goes to the edit page (read-only there)", async () => {
+    book.status = "published";
+    reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null };
     await expect(render()).rejects.toThrow(TO_EDIT_PAGE);
   });
 

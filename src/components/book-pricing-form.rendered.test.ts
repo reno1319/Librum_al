@@ -189,7 +189,9 @@ describe("BookPricingForm", () => {
     expect(box("ACCEPT_TERMS_FIELD")).toContain("checked={terms}");
     expect(box("ACCEPT_TERMS_FIELD")).toContain("onChange={(e) => setTerms(e.target.checked)}");
     expect(src).toContain("pricingTodo(bookId, missing, { worldwide, terms })");
-    expect(src).toContain("primaryBlocked={todo.length > 0}");
+    // BD15 P5b-2: a live book with no waiting change has nothing to send.
+    expect(src).toContain("const sendBlocked = todo.length > 0 || (live !== null && !live.hasChanges);");
+    expect(src).toContain("primaryBlocked={sendBlocked}");
   });
 
   it("the reader preview shows the title, the pen name and the price", () => {

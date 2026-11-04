@@ -11,7 +11,15 @@ import {
   EditorSection,
 } from "@/components/book-editor-ui";
 import { groupAllDigits } from "@/lib/catalog-price";
-import { editorPath, EDITOR_TABS, type EditorTab } from "@/lib/book-editor-copy";
+import {
+  editorPath,
+  EDITOR_TABS,
+  LIVE_SAVE_BUTTON,
+  NO_CHANGES_TO_SEND_NOTE,
+  SEND_CHANGES_BUTTON,
+  type EditorTab,
+} from "@/lib/book-editor-copy";
+import { PRICE_CHANGE_CONFIRM_FIELD, priceChangeConfirmText } from "@/lib/price-change-confirm";
 import {
   ACCEPT_TERMS_FIELD,
   ACCEPT_TERMS_LINK_TEXT,
@@ -109,8 +117,13 @@ export function BookPricingForm({
   title,
   penName,
   missing,
+  live = null,
 }: {
   action: (formData: FormData) => void | Promise<void>;
+  // BD15 P5b-2: a live book -- its saved price (a new one needs the tick
+  // under the price, LIVE-PRICE-CONFIRM-1) and whether it has waiting
+  // changes to send. The button sends them; the book stays live.
+  live?: { currentPriceAll: number | null; hasChanges: boolean } | null;
   bookId: string;
   initialPriceAll: number | null;
   // Public-domain book: "Falas" only.
@@ -135,7 +148,13 @@ export function BookPricingForm({
   const [worldwide, setWorldwide] = useState(false);
   const [terms, setTerms] = useState(false);
   const todo = pricingTodo(bookId, missing, { worldwide, terms });
-  const sendLabel = approvalValid ? PUBLISH_APPROVED_BUTTON : SEND_FOR_REVIEW_BUTTON;
+  const sendLabel = live ? SEND_CHANGES_BUTTON : approvalValid ? PUBLISH_APPROVED_BUTTON : SEND_FOR_REVIEW_BUTTON;
+  // The price this form would save, for a live book's confirm tick.
+  const newPriceAll = mode === "free" ? 0 : preview.kind === "paid" ? preview.priceAll : null;
+  const priceChanging = live !== null && newPriceAll !== null && newPriceAll !== live.currentPriceAll;
+  const sendBlocked = todo.length > 0 || (live !== null && !live.hasChanges);
+  const sendNote =
+    live !== null && !live.hasChanges ? NO_CHANGES_TO_SEND_NOTE : pricingTodoNote(todo.length);
 
   return (
     <form action={action} className="mt-2 flex flex-col gap-2">
@@ -219,6 +238,21 @@ export function BookPricingForm({
           </>
         )}
       </EditorSection>
+
+      {priceChanging && (
+        // Keyed by the new price, so a tick given for one price is
+        // cleared when the price changes again.
+        <label key={newPriceAll} className={`${TICK_CLASSES} rounded-lg border border-border bg-surface px-4 py-3`}>
+          <input
+            type="checkbox"
+            name={PRICE_CHANGE_CONFIRM_FIELD}
+            value={String(newPriceAll)}
+            required
+            className={TICK_INPUT_CLASSES}
+          />
+          <span>{priceChangeConfirmText(live.currentPriceAll, newPriceAll)}</span>
+        </label>
+      )}
 
       <EditorSection id="pricing-royalty" title={ROYALTY_HEADING} live>
         {preview.kind === "free" ? (
@@ -309,8 +343,9 @@ export function BookPricingForm({
         backLabel="Përmbajtja"
         primaryLabel={sendLabel}
         primaryIntent="send"
-        primaryBlocked={todo.length > 0}
-        primaryNote={pricingTodoNote(todo.length)}
+        primaryBlocked={sendBlocked}
+        primaryNote={sendNote}
+        saveLabel={live ? LIVE_SAVE_BUTTON : undefined}
         extra={approvalValid ? <p className="text-sm text-muted sm:text-right">{PUBLISH_APPROVED_NOTE}</p> : undefined}
       />
     </form>

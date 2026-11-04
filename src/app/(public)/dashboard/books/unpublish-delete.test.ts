@@ -111,6 +111,10 @@ const mockCreateClient = vi.fn(() =>
       if (table === "purchases" || table === "author_book_purchases") {
         return { select: () => makeChain(() => mockPurchaseCountResult()) };
       }
+      // BD15 P5b-2: deleteBook reads a live book's waiting changes (none).
+      if (table === "book_pending_changes") {
+        return { select: () => makeChain(() => ({ data: null, error: null })) };
+      }
       throw new Error(`unexpected table in this focused test: ${table}`);
     },
     storage: {

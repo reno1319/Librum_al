@@ -11,7 +11,7 @@ import {
   EditorSection,
   Optional,
 } from "@/components/book-editor-ui";
-import { AI_QUESTION, AI_STAFF_ONLY_NOTE, DRM_FREE_NOTE } from "@/lib/book-editor-copy";
+import { AI_QUESTION, AI_STAFF_ONLY_NOTE, DRM_FREE_NOTE, LIVE_SAVE_BUTTON } from "@/lib/book-editor-copy";
 import type { AiAnswer } from "@/lib/book-ai-disclosure";
 
 // BD15 P3: the new editor's Content tab (PLAN-BD15-r1 §2.4; mockup
@@ -47,8 +47,12 @@ export function BookContentForm({
   authorName,
   aiAnswer,
   aiUnreadable,
+  live = false,
 }: {
   action: (formData: FormData) => void | Promise<void>;
+  // BD15 P5b-2: a live book -- a new manuscript or ballinë waits for
+  // Librum's review; the save button says so.
+  live?: boolean;
   book: ContentFormBook;
   authorId: string;
   // The book's byline (its pen name), for the ebook Librum makes from Word.
@@ -159,6 +163,7 @@ export function BookContentForm({
         primaryLabel="Ruaj dhe vazhdo"
         primaryIntent="next"
         primaryNote="Hapi tjetër: Çmimi"
+        saveLabel={live ? LIVE_SAVE_BUTTON : undefined}
       />
     </form>
   );

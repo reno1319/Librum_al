@@ -37,6 +37,13 @@ let recorded: string[];
 let failContributorInsert: { code: string } | null;
 let failBookUpdate: { code: string } | null;
 let currentUser: string | null;
+// BD15 P5b-2: the two writer RPCs of book_pending_changes.
+let rpcCalls: { fn: string; args: Row }[];
+let rpcError: { code?: string; message?: string } | null;
+let removedCovers: string[];
+// Audit r1 F3/M5: what the discard RPC answers, and what happens meanwhile.
+let discardAnswer: boolean | null;
+let afterRpc: (() => void) | null;
 
 function query(table: string, scope: "session" | "writer") {
   const filters: [string, unknown][] = [];
@@ -107,8 +114,43 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 vi.mock("@/lib/catalog-write-client", () => ({
-  createCatalogWriteClient: () => ({ from: (table: string) => query(table, "writer") }),
+  createCatalogWriteClient: () => ({
+    from: (table: string) => query(table, "writer"),
+    // save/discard_book_pending_changes, as the database would.
+    rpc: async (fn: string, args: Row) => {
+      rpcCalls.push({ fn, args });
+      if (rpcError) return { data: null, error: rpcError };
+      const others = (tables.book_pending_changes ?? []).filter((r) => r.book_id !== args.p_book_id);
+      const had = (tables.book_pending_changes ?? []).length !== others.length;
+      if (fn === "discard_book_pending_changes") {
+        tables.book_pending_changes = others;
+        afterRpc?.();
+        return { data: discardAnswer ?? had, error: null };
+      }
+      tables.book_pending_changes = [
+        ...others,
+        {
+          book_id: args.p_book_id,
+          file_path: args.p_file_path,
+          cover_path: args.p_cover_path,
+          description: args.p_description,
+          is_adult: args.p_is_adult,
+          original_author: args.p_original_author,
+        },
+      ];
+      return { data: null, error: null };
+    },
+    storage: {
+      from: () => ({
+        remove: async (paths: string[]) => {
+          removedCovers.push(...paths);
+          return { error: null };
+        },
+      }),
+    },
+  }),
 }));
+const retentionCalls: unknown[] = [];
 vi.mock("@/lib/pen-name-write-client", () => ({
   resolveOwnPenNameId: async () => ({ ok: true, penNameId: PEN }),
 }));
@@ -116,6 +158,9 @@ vi.mock("@/lib/book-reviews", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   getBookReviewState: async () => ({ kind: "ok", pending: reviewPending, approvalValid: false, latestSentBack: null }),
   isWaitingForReview: async () => waitingAfterSave,
+  removeUnretainedManuscripts: async (...args: unknown[]) => {
+    retentionCalls.push(args[2]);
+  },
 }));
 vi.mock("@/lib/book-rights", () => ({
   getRightsDeclarationState: async () =>
@@ -127,7 +172,7 @@ vi.mock("@/lib/book-rights", () => ({
   },
 }));
 
-const { saveBookDetails, createSeriesFromEditor } = await import("./editor-actions");
+const { saveBookDetails, createSeriesFromEditor, discardBookPendingChanges } = await import("./editor-actions");
 
 function seed(book: Row = {}) {
   tables = {
@@ -152,6 +197,7 @@ function seed(book: Row = {}) {
       { id: OTHER_SERIES, author_id: OTHER },
     ],
     book_contributors: [],
+    book_pending_changes: [],
   };
 }
 
@@ -185,6 +231,12 @@ beforeEach(() => {
   failContributorInsert = null;
   failBookUpdate = null;
   currentUser = USER;
+  rpcCalls = [];
+  rpcError = null;
+  removedCovers = [];
+  retentionCalls.length = 0;
+  discardAnswer = null;
+  afterRpc = null;
 });
 
 describe("saveBookDetails: the first save creates the draft", () => {
@@ -281,13 +333,17 @@ describe("saveBookDetails: an existing draft", () => {
     expect(catalogWrites).toEqual([]);
   });
 
-  it("a live book or a book in review stays on the existing edit page", async () => {
+  it("a book in review (draft or live) or neither draft nor live stays on the existing edit page", async () => {
+    seed({ status: "archived" });
+    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toMatch(
+      new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`),
+    );
     seed({ status: "published", published_at: "2026-10-01T00:00:00Z" });
+    reviewPending = true;
     expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toMatch(
       new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`),
     );
     seed();
-    reviewPending = true;
     expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toMatch(
       new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`),
     );
@@ -399,5 +455,218 @@ describe("createSeriesFromEditor", () => {
     expect((await createSeriesFromEditor("Seri", OTHER_PEN)).ok).toBe(false);
     expect((await createSeriesFromEditor("   ", PEN)).ok).toBe(false);
     expect(tables.series).toHaveLength(2);
+  });
+});
+
+// BD15 P5b-2: a live book saved from the editor stays live.
+const COVER_LIVE = "11111111-1111-4111-8111-aaaaaaaaaaaa/cover.jpg";
+const COVER_WAITING = "22222222-2222-4222-8222-bbbbbbbbbbbb/cover.jpg";
+const FILE_LIVE = `${USER}/${BOOK}/v1.epub`;
+const FILE_WAITING = `${USER}/${BOOK}/v2.epub`;
+
+function seedLive(pending: Row | null = null) {
+  seed({
+    status: "published",
+    published_at: "2026-10-01T00:00:00Z",
+    title: "Libri",
+    file_path: FILE_LIVE,
+    cover_path: COVER_LIVE,
+    description: "Live text",
+    is_adult: false,
+    original_author: null,
+    categories: ["Romancë"],
+  });
+  rightsBasis = "own_rights";
+  if (pending) {
+    tables.book_pending_changes = [
+      {
+        book_id: BOOK,
+        file_path: FILE_LIVE,
+        cover_path: COVER_LIVE,
+        description: "Live text",
+        is_adult: false,
+        original_author: null,
+        ...pending,
+      },
+    ];
+  }
+}
+
+const liveForm = (values: Record<string, string | string[]> = {}) =>
+  form({ title: "Libri", description: "Live text", categories: ["Romancë"], rightsBasis: "own_rights", ...values });
+
+describe("saveBookDetails: a live book (P5b-2)", () => {
+  it("writes the fields that need no review onto the live row, bound to status published", async () => {
+    seedLive();
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm({ subtitle: "Nën", keywords: "a, b", categories: ["Poezi"] })));
+    const update = catalogWrites.find((w) => w.op === "update")!;
+    expect(update.filters).toEqual(expect.arrayContaining([["id", BOOK], ["author_id", USER], ["status", "published"]]));
+    expect(update.payload).toMatchObject({ subtitle: "Nën", keywords: "a, b", categories: ["Poezi"] });
+    for (const key of ["title", "pen_name_id", "description", "is_adult", "original_author", "file_path", "cover_path", "price_all", "status"]) {
+      expect(update.payload).not.toHaveProperty(key);
+    }
+    // Nothing that needs review changed: no waiting row is written.
+    expect(rpcCalls).toEqual([]);
+    expect(target).toMatch(/editor\?tab=details&success=/);
+    expect(decodeURIComponent(target)).toContain("Ndryshimet u ruajtën");
+  });
+
+  it("a new description waits for review with the live files; the live row keeps its text", async () => {
+    seedLive();
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm({ description: "New text" })));
+    expect(bookRow().description).toBe("Live text");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0]).toEqual({
+      fn: "save_book_pending_changes",
+      args: {
+        p_author_id: USER,
+        p_book_id: BOOK,
+        p_file_path: FILE_LIVE,
+        p_cover_path: COVER_LIVE,
+        p_description: "New text",
+        p_is_adult: false,
+        p_original_author: null,
+      },
+    });
+    expect(decodeURIComponent(target)).toContain("nuk dalin te lexuesit");
+  });
+
+  it("keeps a waiting manuscript and ballinë when the description changes again", async () => {
+    seedLive({ file_path: FILE_WAITING, cover_path: COVER_WAITING, description: "Waiting text" });
+    await redirectOf(saveBookDetails(BOOK, liveForm({ description: "Newer text" })));
+    expect(rpcCalls[0].args).toMatchObject({ p_file_path: FILE_WAITING, p_cover_path: COVER_WAITING, p_description: "Newer text" });
+  });
+
+  it("putting everything back as it is live drops the waiting row instead", async () => {
+    seedLive({ description: "Waiting text" });
+    await redirectOf(saveBookDetails(BOOK, liveForm()));
+    expect(rpcCalls.map((c) => c.fn)).toEqual(["discard_book_pending_changes"]);
+    expect(tables.book_pending_changes).toEqual([]);
+  });
+
+  it("a new 18+ label waits; the reading age is not written early", async () => {
+    seedLive();
+    await redirectOf(saveBookDetails(BOOK, liveForm({ isAdult: "yes" })));
+    const update = catalogWrites.find((w) => w.op === "update")!;
+    expect(update.payload).not.toHaveProperty("reading_age_min");
+    expect(rpcCalls[0].args).toMatchObject({ p_is_adult: true });
+  });
+
+  it("refuses a different rights basis before any write (Q4 a)", async () => {
+    seedLive();
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm({ rightsBasis: "public_domain", originalAuthor: "Naim Frashëri" })));
+    expect(decodeURIComponent(target)).toContain("Të drejtat e një libri në shitje nuk ndryshohen");
+    expect(catalogWrites).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+    expect(recorded).toEqual([]);
+  });
+
+  it("audit r1 F1: an older live book with no rights record saves as own rights and records it", async () => {
+    seedLive();
+    rightsBasis = null;
+    await redirectOf(saveBookDetails(BOOK, liveForm({ subtitle: "Nën" })));
+    expect(recorded).toEqual(["own_rights"]);
+  });
+
+  it("refuses an empty description on a live book before any write", async () => {
+    seedLive();
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm({ description: "" })));
+    expect(target).toMatch(/error=/);
+    expect(catalogWrites).toEqual([]);
+  });
+
+  it("maps the database's refusals: LB490 to the read-only page, LB493 and LB491 to their messages", async () => {
+    seedLive();
+    rpcError = { code: "LB490" };
+    expect(await redirectOf(saveBookDetails(BOOK, liveForm({ description: "X" })))).toMatch(
+      new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`),
+    );
+    seedLive();
+    rpcError = { code: "LB493" };
+    expect(decodeURIComponent(await redirectOf(saveBookDetails(BOOK, liveForm({ isAdult: "yes" }))))).toContain(
+      "Një libër 18+ nuk mund të jetë",
+    );
+    seedLive();
+    rpcError = { code: "LB491" };
+    // Audit r1 F5: the live fields were already saved; it says what was not.
+    expect(decodeURIComponent(await redirectOf(saveBookDetails(BOOK, liveForm({ description: "X" }))))).toContain(
+      "Ndryshimet e tjera u ruajtën, por përshkrimi",
+    );
+  });
+
+  it("a live row that is no longer live (zero rows) writes no waiting change", async () => {
+    seedLive();
+    failBookUpdate = null;
+    bookRow().status = "published";
+    // The write's status filter misses once the book went offline meanwhile.
+    const original = bookRow();
+    original.status = "published";
+    tables.books = [{ ...original, status: "draft" }];
+    reviewPending = false;
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm({ description: "X" })));
+    // readOwnBook now sees a draft: the draft path runs instead, never the RPC.
+    expect(rpcCalls).toEqual([]);
+    expect(target).toMatch(/editor\?tab=/);
+  });
+});
+
+describe("discardBookPendingChanges (P5b-2)", () => {
+  it("drops the waiting row and removes only the files only it named", async () => {
+    seedLive({ file_path: FILE_WAITING, cover_path: COVER_WAITING, description: "Waiting" });
+    const target = await redirectOf(discardBookPendingChanges(BOOK));
+    expect(rpcCalls).toEqual([{ fn: "discard_book_pending_changes", args: { p_author_id: USER, p_book_id: BOOK } }]);
+    expect(removedCovers).toEqual([COVER_WAITING]);
+    expect(retentionCalls).toEqual([
+      expect.objectContaining({ authorId: USER, bookId: BOOK, superseded: [FILE_WAITING] }),
+    ]);
+    expect(decodeURIComponent(target)).toContain("Ndryshimet që prisnin u hodhën");
+  });
+
+  it("never removes the live ballinë or manuscript", async () => {
+    seedLive({ description: "Waiting" });
+    await redirectOf(discardBookPendingChanges(BOOK));
+    expect(removedCovers).toEqual([]);
+    expect(retentionCalls).toEqual([]);
+  });
+
+  it("nothing discarded (another tab already did): nothing removed", async () => {
+    seedLive({ file_path: FILE_WAITING, cover_path: COVER_WAITING });
+    discardAnswer = false;
+    const target = await redirectOf(discardBookPendingChanges(BOOK));
+    expect(removedCovers).toEqual([]);
+    expect(retentionCalls).toEqual([]);
+    expect(decodeURIComponent(target)).toContain("Nuk kishte ndryshime për të hedhur.");
+  });
+
+  it("audit r1 F3: a waiting ballinë that became the live one meanwhile is kept", async () => {
+    seedLive({ cover_path: COVER_WAITING });
+    // A new row object, so the action's own earlier read is not changed.
+    afterRpc = () => (tables.books = tables.books.map((b) => (b.id === BOOK ? { ...b, cover_path: COVER_WAITING } : b)));
+    await redirectOf(discardBookPendingChanges(BOOK));
+    expect(removedCovers).toEqual([]);
+  });
+
+  it("audit r1 F3: a waiting ballinë a new waiting row names (another tab) is kept", async () => {
+    seedLive({ cover_path: COVER_WAITING });
+    afterRpc = () =>
+      (tables.book_pending_changes = [
+        { book_id: BOOK, file_path: FILE_LIVE, cover_path: COVER_WAITING, description: "X", is_adult: false, original_author: null },
+      ]);
+    await redirectOf(discardBookPendingChanges(BOOK));
+    expect(removedCovers).toEqual([]);
+  });
+
+  it("in review (LB490) goes to the read-only edit page, nothing removed", async () => {
+    seedLive({ cover_path: COVER_WAITING });
+    rpcError = { code: "LB490" };
+    expect(await redirectOf(discardBookPendingChanges(BOOK))).toMatch(new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`));
+    expect(removedCovers).toEqual([]);
+  });
+
+  it("another author's book goes back to the dashboard, untouched", async () => {
+    seedLive({ cover_path: COVER_WAITING });
+    currentUser = OTHER;
+    expect(await redirectOf(discardBookPendingChanges(BOOK))).toBe("/dashboard");
+    expect(rpcCalls).toEqual([]);
   });
 });

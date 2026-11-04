@@ -6,7 +6,14 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff } from "@/lib/staff";
-import { sendBookApprovedEmail, sendBookSentBackEmail, sendBookTakedownEmail, sendNewBookEmails } from "@/lib/email";
+import {
+  sendBookApprovedEmail,
+  sendBookChangesApprovedEmail,
+  sendBookSentBackEmail,
+  sendBookTakedownEmail,
+  sendNewBookEmails,
+} from "@/lib/email";
+import { BOOK_COVERS_BUCKET, classifyBookCoverPath } from "@/lib/book-storage-path";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
 import { authorTakedownReasonLabel } from "@/lib/takedown-reasons";
@@ -240,6 +247,7 @@ type ReviewedBook = {
   price_all: number | null;
   description: string | null;
   pen_name_id: string | null;
+  cover_path: string | null;
 };
 
 export async function approveBookReviewAsStaff(formData: FormData) {
@@ -259,7 +267,7 @@ export async function approveBookReviewAsStaff(formData: FormData) {
   const admin = createAdminClient();
   const { data: book, error: bookError } = await admin
     .from("books")
-    .select("id, title, author_id, status, price_all, description, pen_name_id")
+    .select("id, title, author_id, status, price_all, description, pen_name_id, cover_path")
     .eq("id", validation.bookId)
     .maybeSingle<ReviewedBook>();
   if (bookError || !book) {
@@ -303,7 +311,11 @@ export async function approveBookReviewAsStaff(formData: FormData) {
   try {
     const { data: author } = await admin.auth.admin.getUserById(book.author_id);
     const email = author?.user?.email;
-    if (email) await sendBookApprovedEmail(email, { title: book.title, bookId: book.id });
+    // BD15 P5b-2: a live book's approved changes get their own email.
+    if (email) {
+      if (book.status === "published") await sendBookChangesApprovedEmail(email, { title: book.title, bookId: book.id });
+      else await sendBookApprovedEmail(email, { title: book.title, bookId: book.id });
+    }
   } catch (followUpError) {
     console.error("approveBookReviewAsStaff: the author email failed after a successful approval", {
       bookId: book.id,
@@ -339,6 +351,28 @@ export async function approveBookReviewAsStaff(formData: FormData) {
     bookId: book.id,
     caller: "approveBookReviewAsStaff",
   });
+  // BD15 P5b-2: a live book's approved new ballinë replaced the one
+  // readers saw; that one is removed once the book is proven to name the
+  // new one (best effort; never another book's key).
+  if (book.status === "published" && book.cover_path !== null && book.cover_path !== validation.coverPath) {
+    try {
+      const { data: now } = await admin
+        .from("books")
+        .select("cover_path")
+        .eq("id", book.id)
+        .maybeSingle<{ cover_path: string | null }>();
+      if (
+        now &&
+        now.cover_path === validation.coverPath &&
+        classifyBookCoverPath(book.cover_path, book.author_id, book.id) !== "unsafe"
+      ) {
+        const { error: removeError } = await admin.storage.from(BOOK_COVERS_BUCKET).remove([book.cover_path]);
+        if (removeError) console.error("approveBookReviewAsStaff: replaced cover not removed", { bookId: book.id });
+      }
+    } catch {
+      console.error("approveBookReviewAsStaff: replaced cover not removed", { bookId: book.id });
+    }
+  }
 
   revalidateAll(
     [
@@ -402,10 +436,17 @@ export async function sendBackBookReviewAsStaff(formData: FormData) {
       const { data: author } = await admin.auth.admin.getUserById(review.author_id);
       const email = author?.user?.email;
       if (email) {
+        // BD15 P5b-2: a live book's changes were sent back; it stays live.
+        const { data: sentBackBook } = await admin
+          .from("books")
+          .select("status")
+          .eq("id", validation.bookId)
+          .maybeSingle<{ status: string }>();
         await sendBookSentBackEmail(email, {
           title: review.book_title,
           reasonLabel: authorTakedownReasonLabel(review.reason),
           message: review.message_to_author,
+          live: sentBackBook?.status === "published",
         });
       }
       // N3: nothing the rule keeps is removed (the book's current file

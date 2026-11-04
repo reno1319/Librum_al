@@ -384,9 +384,28 @@ export async function sendBookApprovedEmail(to: string, { title, bookId }: { tit
   );
 }
 
+// BD15 P5b-2: the changes a live book sent were approved; it stayed live.
+export async function sendBookChangesApprovedEmail(to: string, { title, bookId }: { title: string; bookId: string }) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    `Ndryshimet e librit "${title}" u miratuan`,
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Ndryshimet e librit <strong>${escapeEmailHtml(title)}</strong> u miratuan</h1>
+        <p>I kontrolluam dhe tani lexuesit shohin versionin e ri.</p>
+        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
+      </div>`,
+  );
+}
+
 export async function sendBookSentBackEmail(
   to: string,
-  { title, reasonLabel, message }: { title: string; reasonLabel: string; message: string },
+  {
+    title,
+    reasonLabel,
+    message,
+    live = false,
+  }: { title: string; reasonLabel: string; message: string; live?: boolean },
 ) {
   const origin = resolveSiteOrigin();
   await sendEmail(
@@ -396,7 +415,9 @@ export async function sendBookSentBackEmail(
         <h1 style="font-size: 20px;">Librum jua ktheu librin <strong>${escapeEmailHtml(title)}</strong> për ndryshime</h1>
         <p>Arsyeja: ${escapeEmailHtml(reasonLabel)}</p>
         <p>${escapeEmailHtmlWithBreaks(message)}</p>
-        <p>Rregullojeni dhe dërgojeni përsëri për shqyrtim.</p>
+        <p>Rregullojeni dhe dërgojeni përsëri për shqyrtim.</p>${
+          live ? "\n        <p>Libri juaj mbetet në shitje siç ishte para këtyre ndryshimeve.</p>" : ""
+        }
         <p>${QUESTIONS_LINE}</p>
         <p><a href="${origin}/dashboard">Hapni panelin e autorit</a></p>
       </div>`,

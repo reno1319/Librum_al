@@ -92,6 +92,13 @@ let penNameReadResult: Result = { data: { name: "Emri i Penës" }, error: null }
 // PEN-2 (L10): every Storage call made through the catalog writer
 // (service role), as "<op>:<bucket>".
 let writerStorageOps: string[] = [];
+// BD15 P5b-2: a live book's waiting changes (none by default).
+let pendingReadResult: Result = { data: null, error: null };
+let rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
+// Audit r1 F7: what later reads of books return (a change in between).
+let bookReads = 0;
+let bookReadAfterFirst: Result | null = null;
+let rpcError: { code?: string; message?: string } | null = null;
 
 function query(table: string) {
   const filters: Filter[] = [];
@@ -100,9 +107,13 @@ function query(table: string) {
   let returning = false;
   const resolve = (): Result => {
     if (op === "select") {
-      if (table === "books") return bookReadResult;
+      if (table === "books") {
+        bookReads += 1;
+        return bookReads > 1 && bookReadAfterFirst ? bookReadAfterFirst : bookReadResult;
+      }
       if (table === "bundle_books") return bundleBooksResult;
       if (table === "pen_names") return penNameReadResult;
+      if (table === "book_pending_changes") return pendingReadResult;
       if (table === "purchases" || table === "author_book_purchases") return { data: null, error: null, count: 0 } as Result;
       throw new Error(`unexpected read of ${table}`);
     }
@@ -214,6 +225,12 @@ const sessionClient = {
   },
   from: (table: string) => query(table),
   storage: { from: (bucket: string) => storageBucket(bucket) },
+  // BD15 P5b-2: save_book_pending_changes for a live book's files.
+  rpc: async (fn: string, args: Record<string, unknown>) => {
+    rpcCalls.push({ fn, args });
+    events.push(`rpc:${fn}`);
+    return { data: null, error: rpcError };
+  },
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
 // PEN-NAMES-1: the pen name box resolves through the server-only pen
@@ -338,6 +355,11 @@ beforeEach(() => {
   updateResult = null;
   deleteResult = null;
   removeError = null;
+  pendingReadResult = { data: null, error: null };
+  rpcCalls = [];
+  rpcError = null;
+  bookReads = 0;
+  bookReadAfterFirst = null;
   failUploadsTo = new Set();
   // W7: a cover change reads the book's own stored ebook to see whether
   // Librum made it; by default it is a directly uploaded one (untouched).
@@ -750,6 +772,52 @@ describe("deleteBook", () => {
       { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] },
     ]);
     expect(events.indexOf("db:delete:books")).toBeLessThan(events.indexOf("storage:remove:covers"));
+  });
+
+  // BD15 P5b-2: a live book's waiting manuscript and ballinë go with it;
+  // a waiting value that is not this book's own key is left alone; a
+  // failed read of the waiting changes stops the delete.
+  const PENDING_EPUB = `${USER_ID}/${BOOK_ID}/0a0b0c0d-1111-4111-8111-0a0b0c0d0e0f.epub`;
+  const PENDING_COVER = "1a2b3c4d-2222-4222-8222-1a2b3c4d5e6f/cover.jpg";
+  const pendingRow = (o: Record<string, unknown> = {}) => ({
+    book_id: BOOK_ID,
+    file_path: PENDING_EPUB,
+    cover_path: PENDING_COVER,
+    description: "D",
+    is_adult: false,
+    original_author: null,
+    ...o,
+  });
+  it("removes a live book's waiting manuscript and ballinë after the delete", async () => {
+    pendingReadResult = { data: pendingRow(), error: null };
+    await run(deleteBook(BOOK_ID));
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).toEqual(expect.arrayContaining([OWN_PNG, OWN_EPUB, PENDING_EPUB, PENDING_COVER]));
+    expect(events.indexOf("db:delete:books")).toBeLessThan(events.indexOf("storage:remove:covers"));
+  });
+
+  it("never removes a waiting manuscript of another author or book, nor the live cover twice", async () => {
+    const OTHER_EPUB = `${OTHER_AUTHOR}/${BOOK_ID}/0a0b0c0d-1111-4111-8111-0a0b0c0d0e0f.epub`;
+    pendingReadResult = { data: pendingRow({ file_path: OTHER_EPUB, cover_path: OWN_PNG }), error: null };
+    await run(deleteBook(BOOK_ID));
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).not.toContain(OTHER_EPUB);
+    expect(removed.filter((p) => p === OWN_PNG)).toHaveLength(1);
+  });
+
+  it("audit r1 F7: a waiting ballinë that is also the live new-shape cover is removed once", async () => {
+    bookReadResult = { data: row({ cover_path: RANDOM_STORED }), error: null };
+    pendingReadResult = { data: pendingRow({ cover_path: RANDOM_STORED }), error: null };
+    await run(deleteBook(BOOK_ID));
+    expect(removals().flatMap((c) => c.paths).filter((p) => p === RANDOM_STORED)).toHaveLength(1);
+  });
+
+  it("a failed read of the waiting changes stops the delete before any write", async () => {
+    pendingReadResult = { data: null, error: { code: "XX000", message: "x" } } as Result;
+    const target = await run(deleteBook(BOOK_ID));
+    expect(target).toContain("/dashboard?error=");
+    expect(bookDeletes()).toEqual([]);
+    expect(removals()).toEqual([]);
   });
 
   // PEN-2 (L10): a new-shape cover read from the author's own row is
@@ -1225,6 +1293,14 @@ describe("cancelBookReview (ADMIN-3, E)", () => {
     expect(storageCalls).toEqual([]);
   });
 
+  it("audit r1 F2: a live book's changes: it stays on sale, and the message says so", async () => {
+    bookReadResult = { data: row({ status: "published" }), error: null };
+    expect(await run(cancelBookReview(BOOK_ID))).toBe(
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&success=${encodeURIComponent("Shqyrtimi u anulua. Libri mbetet në shitje; ndryshimet tuaja presin përsëri te redaktori.")}`,
+    );
+    expect(dbWrites).toEqual([]);
+  });
+
   it("not waiting: says so", async () => {
     bookReviewsDoubleState.withdrawResult = { ok: false, reason: "not_pending" };
     expect(await run(cancelBookReview(BOOK_ID))).toBe(
@@ -1663,11 +1739,8 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
     expect(bookUpdates()).toEqual([]);
   });
 
-  it("a live book, or a draft waiting for review, is sent to the edit page untouched", async () => {
+  it("a draft waiting for review is sent to the edit page untouched", async () => {
     const editError = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër është i publikuar ose në shqyrtim, prandaj ndryshohet këtu.")}`;
-    bookReadResult = { data: contentRow({ status: "published" }), error: null };
-    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(editError);
-    bookReadResult = { data: contentRow(), error: null };
     bookReviewsDoubleState.pending = true;
     expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(editError);
     bookReviewsDoubleState.pending = false;
@@ -1675,6 +1748,61 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
     expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(editError);
     expect(storageCalls).toEqual([]);
     expect(dbWrites).toEqual([]);
+  });
+
+  // BD15 P5b-2: a live book stays as it is; the new ballinë waits.
+  const LIVE_ROW = { status: "published", description: "Përshkrimi", is_adult: false, original_author: null };
+  it("a live book: the new ballinë goes to the waiting changes, the live book keeps its own", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    const target = await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(target).toContain("success=");
+    const save = rpcCalls.find((c) => c.fn === "save_book_pending_changes");
+    expect(save?.args).toMatchObject({ p_author_id: USER_ID, p_book_id: BOOK_ID, p_cover_path: NEW_JPG, p_file_path: OWN_EPUB });
+    for (const u of bookUpdates()) {
+      expect(u.payload).not.toHaveProperty("cover_path");
+      expect(u.payload).not.toHaveProperty("file_path");
+    }
+    expect(removals().flatMap((c) => c.paths)).not.toContain(OWN_PNG);
+  });
+
+  it("audit r1 F7: a live book's new manuscript goes to the waiting changes, never onto the live row", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    await run(saveBookContent(BOOK_ID, await withManuscript(form())));
+    const save = rpcCalls.find((c) => c.fn === "save_book_pending_changes");
+    expect(save?.args).toMatchObject({ p_file_path: NEW_EPUB });
+    for (const u of bookUpdates()) expect(u.payload).not.toHaveProperty("file_path");
+  });
+
+  const WAITING_COVER = "2b3c4d5e-3333-4333-8333-2b3c4d5e6f70/cover.jpg";
+  it("audit r1 F7: the replaced waiting ballinë is removed when the live book still has its own", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    pendingReadResult = {
+      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER, description: "Përshkrimi", is_adult: false, original_author: null },
+      error: null,
+    };
+    await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(removals().flatMap((c) => c.paths)).toContain(WAITING_COVER);
+  });
+
+  it("audit r1 F7: the replaced waiting ballinë is kept when it became the live one meanwhile", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    bookReadAfterFirst = { data: contentRow({ ...LIVE_ROW, cover_path: WAITING_COVER }), error: null };
+    pendingReadResult = {
+      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER, description: "Përshkrimi", is_adult: false, original_author: null },
+      error: null,
+    };
+    await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(removals().flatMap((c) => c.paths)).not.toContain(WAITING_COVER);
+  });
+
+  it("a live book whose waiting save is refused removes the new upload and keeps the live files", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    rpcError = { code: "LB491", message: "x" };
+    const target = await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(target).toContain("error=");
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).toContainEqual(NEW_JPG);
+    expect(removed).not.toContain(OWN_PNG);
   });
 
   it("another author's book, a row with another id, or no session never reaches Storage", async () => {
