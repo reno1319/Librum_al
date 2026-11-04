@@ -66,6 +66,18 @@ const UNSUPPORTED_FORMAT_ERROR = "Format kopertine i papranuar. Përdorni JPEG o
 // FIX1 (X10): Renato's W-C pick -- warn, but allow.
 const MIN_RECOMMENDED_COVER_HEIGHT = 1000;
 const SMALL_COVER_WARNING = "Ky imazh është më pak se 1000px i lartë, ndaj mund të duket i turbullt.";
+// BD15 P3 (PLAN-BD15-r1 §2.4): the picked image's size, and a warning
+// (never a block) when it is far from the recommended 1 : 1.6 shape.
+const RECOMMENDED_COVER_HINT = "Përmasa e rekomanduar: 1600 × 2560 px (raport 1 : 1,6).";
+const COVER_RATIO_MIN = 1.4;
+const COVER_RATIO_MAX = 1.8;
+const COVER_RATIO_WARNING =
+  "Kjo kopertinë nuk e ka raportin 1 : 1,6, ndaj në disa vende mund të duket e prerë.";
+export function coverRatioIsOff(width: number, height: number): boolean {
+  if (!(width > 0 && height > 0)) return false;
+  const ratio = height / width;
+  return ratio < COVER_RATIO_MIN || ratio > COVER_RATIO_MAX;
+}
 
 export function CoverField({
   authorId,
@@ -99,6 +111,7 @@ export function CoverField({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [readyFileName, setReadyFileName] = useState<string | null>(null);
   const [smallCover, setSmallCover] = useState(false);
+  const [coverSize, setCoverSize] = useState<{ width: number; height: number } | null>(null);
   // BD5: bumped to give the file picker a fresh, empty input after an
   // expired upload, so picking the same file again fires onChange.
   const [pickerKey, setPickerKey] = useState(0);
@@ -157,6 +170,7 @@ export function CoverField({
     setPreviewUrl(null);
     setReadyFileName(null);
     setSmallCover(false);
+    setCoverSize(null);
     setStatus("error");
     setErrorMessage(TEMP_UPLOAD_EXPIRED_MESSAGE);
     setPickerKey((key) => key + 1);
@@ -202,6 +216,7 @@ export function CoverField({
     setErrorMessage("");
     setReadyFileName(null);
     setSmallCover(false);
+    setCoverSize(null);
 
     if (!file) {
       setStatus("idle");
@@ -243,6 +258,7 @@ export function CoverField({
     probe.onload = () => {
       if (isStale(myRequestId)) return;
       setSmallCover(probe.naturalHeight < MIN_RECOMMENDED_COVER_HEIGHT);
+      setCoverSize({ width: probe.naturalWidth, height: probe.naturalHeight });
     };
     probe.src = nextPreviewUrl;
     const extension = file.type === "image/png" ? "png" : "jpg";
@@ -371,7 +387,7 @@ export function CoverField({
           onChange={(e) => handleCoverChange(e.target.files?.[0] ?? null)}
         />
         <span className="text-sm text-muted">
-          JPEG ose PNG · deri në 5 MB.
+          JPEG ose PNG · deri në 5 MB. {RECOMMENDED_COVER_HINT}
           {isReplaceMode ? " Lëreni bosh për të mbajtur kopertinën aktuale." : ""}
         </span>
       </label>
@@ -394,6 +410,18 @@ export function CoverField({
       {status === "success" && readyFileName && (
         <p role="status" className="text-sm font-semibold text-primary">
           Kopertina gati: {readyFileName}
+        </p>
+      )}
+
+      {coverSize && status !== "error" && (
+        <p className="text-sm text-muted">
+          Përmasat: {coverSize.width} × {coverSize.height} px
+        </p>
+      )}
+
+      {coverSize && status !== "error" && coverRatioIsOff(coverSize.width, coverSize.height) && (
+        <p role="status" className="text-sm font-medium text-[#7a5a00]">
+          {COVER_RATIO_WARNING}
         </p>
       )}
 

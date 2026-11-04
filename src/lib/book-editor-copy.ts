@@ -33,10 +33,19 @@ export const TITLE_LOCKED_NOTE =
 export const PEN_NAME_LOCKED_NOTE = "🔒 Emri i autorit nuk ndryshohet pasi libri publikohet.";
 export const TITLE_WILL_LOCK_NOTE = "Pas publikimit titulli nuk mund të ndryshohet më.";
 
-// Until P3 and P4 bring the Content and Pricing tabs, those parts are
-// added on the existing edit page.
-export const CONTENT_TAB_INTERIM_NOTE =
-  "Dorëshkrimi, kopertina dhe pjesa tjetër e përmbajtjes shtohen ende te faqja e ndryshimit të librit.";
+// Until P4 brings the Pricing tab, the price and sending for review
+// are done on the existing edit page.
 export const PRICING_TAB_INTERIM_NOTE =
   "Çmimi dhe dërgimi për shqyrtim bëhen ende te faqja e ndryshimit të librit.";
 export const OPEN_EDIT_PAGE_LABEL = "Hapni faqen e ndryshimit";
+
+// BD15 P3: the Content tab.
+export const CONTENT_SAVED_MESSAGE = DETAILS_SAVED_MESSAGE;
+export const AI_NOT_SAVED_MESSAGE =
+  "Përgjigja për AI nuk u ruajt. Zgjidheni përsëri dhe ruajeni.";
+export const AI_QUESTION =
+  "A ke përdorur AI për të krijuar tekstin, përkthimin ose kopertinën?";
+export const AI_STAFF_ONLY_NOTE =
+  "Këtë përgjigje e sheh vetëm ekipi i Librum. Nuk shfaqet në faqen e librit.";
+export const DRM_FREE_NOTE =
+  "Të gjithë librat në Librum shiten pa DRM: lexuesi mund ta hapë në çdo pajisje.";

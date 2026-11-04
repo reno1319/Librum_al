@@ -28,6 +28,13 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { checkPublishGate } from "@/lib/publish-readiness";
 import { INVALID_ISBN_MESSAGE, isValidIsbn } from "@/lib/book-identifiers";
+import { parseAiAnswer, writeAiDisclosure } from "@/lib/book-ai-disclosure";
+import {
+  AI_NOT_SAVED_MESSAGE,
+  CONTENT_SAVED_MESSAGE,
+  EDITOR_ONLY_DRAFTS_MESSAGE,
+  editorPath,
+} from "@/lib/book-editor-copy";
 import { getRightsDeclarationState, recordRightsDeclaration } from "@/lib/book-rights";
 import { resolveOwnPenNameId } from "@/lib/pen-name-write-client";
 import { penNameErrorMessage } from "@/lib/pen-names";
@@ -199,6 +206,14 @@ function normalizeKeywords(raw: FormDataEntryValue | null): string {
 // its update-payload call site for how `present` is actually used.
 type ResolvedOptionalText = { present: boolean; value: string | null };
 
+// BD15 P3: a message joined onto a path. The new editor's paths already
+// carry "?tab=...", so the message is joined with "&" there; every older
+// path (no "?") gets exactly "?error=" as before. The same helper as
+// editor-actions.ts (page-messages.sources.test.ts reads its calls).
+function withQuery(path: string, key: "error" | "success", message: string): string {
+  return `${path}${path.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(message)}`;
+}
+
 // Shared trim/empty-becomes-null/length-bound normalization for
 // subtitle, publisher, and edition -- all three are optional free text
 // with the exact same shape. Mirrors migration 044's own CHECK
@@ -221,7 +236,7 @@ function resolveBoundedOptionalText(
     // file now; fieldLabel is always one of this file's own hardcoded
     // call-site labels ("Nëntitulli"/"Botuesi"/"Botimi"), never user input.
     redirect(
-      `${errorPath}?error=${encodeURIComponent(`${fieldLabel} mund të ketë deri në ${maxLength} karaktere`)}`,
+      withQuery(errorPath, "error", `${fieldLabel} mund të ketë deri në ${maxLength} karaktere`),
     );
   }
   return { present, value };
@@ -240,7 +255,7 @@ function resolveLanguage(formData: FormData, errorPath: string): ResolvedOptiona
   const value = String(formData.get("language") ?? "").trim();
   if (!value) return { present, value: null };
   if (!isSupportedLanguage(value)) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Zgjidhni një gjuhë të pranuar")}`);
+    redirect(withQuery(errorPath, "error", "Zgjidhni një gjuhë të pranuar"));
   }
   return { present, value };
 }
@@ -291,7 +306,7 @@ function resolveLanguageForUpdate(
 
   if (value === existingLanguage) return { action: "preserve" };
 
-  redirect(`${errorPath}?error=${encodeURIComponent("Zgjidhni një gjuhë të pranuar")}`);
+  redirect(withQuery(errorPath, "error", "Zgjidhni një gjuhë të pranuar"));
 }
 
 // The author-supplied "originally published" date -- a genuinely
@@ -310,16 +325,16 @@ function resolveOriginalPublicationDate(formData: FormData, errorPath: string): 
   if (!raw) return { present, value: null };
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Shkruani një datë të vlefshme të botimit të parë")}`);
+    redirect(withQuery(errorPath, "error", "Shkruani një datë të vlefshme të botimit të parë"));
   }
 
   const parsed = new Date(`${raw}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Shkruani një datë të vlefshme të botimit të parë")}`);
+    redirect(withQuery(errorPath, "error", "Shkruani një datë të vlefshme të botimit të parë"));
   }
 
   if (parsed.getTime() > Date.now()) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Data e botimit të parë nuk mund të jetë në të ardhmen")}`);
+    redirect(withQuery(errorPath, "error", "Data e botimit të parë nuk mund të jetë në të ardhmen"));
   }
 
   return { present, value: raw };
@@ -341,10 +356,10 @@ function resolveOriginalAuthorInput(formData: FormData, errorPath: string, requi
   const present = formData.has("originalAuthor");
   const raw = normalizeOriginalAuthor(String(formData.get("originalAuthor") ?? ""));
   if (raw.length > ORIGINAL_AUTHOR_MAX_LENGTH) {
-    redirect(`${errorPath}?error=${encodeURIComponent(ORIGINAL_AUTHOR_TOO_LONG_MESSAGE)}`);
+    redirect(withQuery(errorPath, "error", ORIGINAL_AUTHOR_TOO_LONG_MESSAGE));
   }
   if (!raw && required) {
-    redirect(`${errorPath}?error=${encodeURIComponent(MISSING_ORIGINAL_AUTHOR_MESSAGE)}`);
+    redirect(withQuery(errorPath, "error", MISSING_ORIGINAL_AUTHOR_MESSAGE));
   }
   return { present, value: raw || null };
 }
@@ -387,18 +402,18 @@ type ResolvedManuscript =
 // precedent for a dynamic-content message (see addContributor()'s own
 // redirect further below) -- never exposing a ZIP-parser error, a
 // stack trace, or an archive path either way.
-function epubValidationErrorQuery(
+function epubValidationErrorMessage(
   reason: Extract<EpubValidationResult, { valid: false }>["reason"],
 ): string {
   switch (reason) {
     case "too_many_entries":
     case "too_large_uncompressed":
     case "entry_too_large":
-      return encodeURIComponent("EPUB-i është shumë i madh ose ka shumë skedarë.");
+      return "EPUB-i është shumë i madh ose ka shumë skedarë.";
     case "encrypted_or_drm":
-      return encodeURIComponent("Ky EPUB përdor enkriptim/DRM që Librum nuk e mbështet.");
+      return "Ky EPUB përdor enkriptim/DRM që Librum nuk e mbështet.";
     default:
-      return encodeURIComponent("Ky skedar nuk duket si EPUB i vlefshëm");
+      return "Ky skedar nuk duket si EPUB i vlefshëm";
   }
 }
 
@@ -426,7 +441,7 @@ async function resolveManuscriptInput(
     // this same value is later handed to remove().
     if (!isOwnTemporaryManuscriptUploadPath(tempPath, userId)) {
       redirect(
-        `${errorPath}?error=${encodeURIComponent("Dorëshkrimi i zgjedhur nuk vlen më. Zgjidhni skedarin përsëri")}`,
+        withQuery(errorPath, "error", "Dorëshkrimi i zgjedhur nuk vlen më. Zgjidhni skedarin përsëri"),
       );
     }
 
@@ -435,7 +450,7 @@ async function resolveManuscriptInput(
       .download(tempPath);
     if (downloadError || !data) {
       console.error("resolveManuscriptInput: temp manuscript download failed:", downloadError);
-      redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi i ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri")}`);
+      redirect(withQuery(errorPath, "error", "Dorëshkrimi i ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri"));
     }
 
     bytes = Buffer.from(await data!.arrayBuffer());
@@ -446,7 +461,7 @@ async function resolveManuscriptInput(
       return { present: false };
     }
     if (!manuscript.name.toLowerCase().endsWith(".epub")) {
-      redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi duhet të jetë skedar EPUB")}`);
+      redirect(withQuery(errorPath, "error", "Dorëshkrimi duhet të jetë skedar EPUB"));
     }
     bytes = Buffer.from(await manuscript.arrayBuffer());
   }
@@ -455,7 +470,7 @@ async function resolveManuscriptInput(
   // browser's own pre-upload check) alone for bytes that came back
   // from a temp Storage download.
   if (bytes.length > MAX_MANUSCRIPT_BYTES) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi duhet të jetë nën 50 MB")}`);
+    redirect(withQuery(errorPath, "error", "Dorëshkrimi duhet të jetë nën 50 MB"));
   }
 
   const manuscriptValidation = await validateEpubStructure(bytes);
@@ -473,7 +488,7 @@ async function resolveManuscriptInput(
       reason: manuscriptValidation.reason,
       compressedBytes: bytes.length,
     });
-    redirect(`${errorPath}?error=${epubValidationErrorQuery(manuscriptValidation.reason)}`);
+    redirect(withQuery(errorPath, "error", epubValidationErrorMessage(manuscriptValidation.reason)));
   }
 
   return { present: true, bytes, tempPathToCleanup };
@@ -527,7 +542,7 @@ async function resolveCoverInput(
     // BOOK-STORAGE-MUTATION-AUTH-1: exact temporary-key shape, as for
     // the manuscript above.
     if (!isOwnTemporaryCoverUploadPath(tempPath, userId)) {
-      redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri")}`);
+      redirect(withQuery(errorPath, "error", "Kopertina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri"));
     }
 
     const { data, error: downloadError } = await supabase.storage
@@ -535,7 +550,7 @@ async function resolveCoverInput(
       .download(tempPath);
     if (downloadError || !data) {
       console.error("resolveCoverInput: temp cover download failed:", downloadError);
-      redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri")}`);
+      redirect(withQuery(errorPath, "error", "Kopertina e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri"));
     }
 
     bytes = Buffer.from(await data!.arrayBuffer());
@@ -552,7 +567,7 @@ async function resolveCoverInput(
   // browser's own pre-upload check) alone for bytes that came back
   // from a temp Storage download.
   if (bytes.length > MAX_COVER_BYTES) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Imazhi i kopertinës duhet të jetë nën 5 MB")}`);
+    redirect(withQuery(errorPath, "error", "Imazhi i kopertinës duhet të jetë nën 5 MB"));
   }
 
   // The SAME authoritative byte-signature check every cover has always
@@ -564,13 +579,13 @@ async function resolveCoverInput(
   const coverFile = new File([new Uint8Array(bytes)], "cover", { type: "application/octet-stream" });
   const coverKind = await detectCoverImageKind(coverFile);
   if (!coverKind) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Ky nuk duket si imazh i vlefshëm JPEG ose PNG")}`);
+    redirect(withQuery(errorPath, "error", "Ky nuk duket si imazh i vlefshëm JPEG ose PNG"));
   }
   // COVERS-1: the signature check above still gates what gets decoded;
   // the stored cover is always the shrunk JPEG, never the raw upload.
   const shrunk = await shrinkImageToJpeg(bytes, BOOK_COVER_SIZE);
   if (!shrunk) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e ngarkuar nuk u lexua dot. Provoni përsëri")}`);
+    redirect(withQuery(errorPath, "error", "Kopertina e ngarkuar nuk u lexua dot. Provoni përsëri"));
   }
   const { extension, contentType } = resolveVerifiedCoverStorageDetails("jpeg");
 
@@ -649,13 +664,13 @@ async function resolveSeriesSelection(
     .maybeSingle();
 
   if (!series) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Zgjidhni një nga seritë tuaja")}`);
+    redirect(withQuery(errorPath, "error", "Zgjidhni një nga seritë tuaja"));
   }
 
   const rawPosition = String(formData.get("seriesPosition") ?? "").trim();
   const seriesPosition = rawPosition ? Number(rawPosition) : null;
   if (seriesPosition != null && (!Number.isInteger(seriesPosition) || seriesPosition < 1)) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Vendi në seri duhet të jetë numër i plotë pozitiv")}`);
+    redirect(withQuery(errorPath, "error", "Vendi në seri duhet të jetë numër i plotë pozitiv"));
   }
 
   return { seriesId, seriesPosition };
@@ -762,6 +777,142 @@ function temporaryUploadRemovals(
     removals.push({ bucket: BOOK_MANUSCRIPTS_BUCKET, path: tempCoverPath });
   }
   return removals;
+}
+
+// W7: a Librum-made (Word) ebook carries the cover inside it (1a), with
+// the saved title and pen name (3a); used by updateBook and (BD15 P3)
+// saveBookContent, moved here unchanged. Adds to or rewrites
+// uploadsBeforeWrite; returns whether the one-line warning is due and
+// the fresh manuscript key it added for a cover-only change (else null).
+type PendingUpload = {
+  bucket: typeof BOOK_COVERS_BUCKET | typeof BOOK_MANUSCRIPTS_BUCKET;
+  path: string;
+  bytes: Buffer;
+  contentType: string;
+  kind: "cover" | "manuscript";
+  // W7 r2 (R2): the Librum-made marker on a Librum-made ebook.
+  metadata?: Record<string, string>;
+};
+
+async function syncLibrumEbookCover({
+  supabase,
+  catalogWriter,
+  userId,
+  existing,
+  coverResult,
+  title,
+  penNameId,
+  uploadsBeforeWrite,
+  caller,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  catalogWriter: ReturnType<typeof createCatalogWriteClient>;
+  userId: string;
+  existing: { id: string; file_path: string | null; cover_path: string | null; pen_name_id?: string | null };
+  coverResult: ResolvedCover;
+  title: string;
+  penNameId: string | null;
+  uploadsBeforeWrite: PendingUpload[];
+  caller: string;
+}): Promise<{ ebookCoverWarning: boolean; newManuscriptPath: string | null }> {
+  // Directly uploaded ebooks are never
+  // touched (2a), and a failed swap never fails the save: the ebook is
+  // then stored as it was, the reason is logged and the success message
+  // gets one more line (Q1 b-lite).
+  //   - A new ebook in this save: the new cover goes in; without one, the
+  //     sharp cover already inside the current ebook is carried over (4b)
+  //     -- read only when Storage marks that ebook Librum-made (R2) --
+  //     else the stored site cover, re-encoded as a 1600px JPEG (R1).
+  //   - Only a new cover: Storage is asked (info(), no download) whether
+  //     Librum made the current ebook (R2). Only then is it downloaded and
+  //     rewritten to a FRESH versioned key, exactly like an uploaded
+  //     replacement -- the same compare-and-set on file_path, the same
+  //     review and retention rules (buyers keep the last approved file
+  //     until Librum approves this one). The shape check runs again on the
+  //     downloaded bytes. No marker (every ebook stored before W7, 5a) or
+  //     an unreadable marker: no swap. The cover change already takes a
+  //     live book to review.
+  let ebookCoverWarning = false;
+  let newManuscriptPath: string | null = null;
+  const ownStoredManuscript =
+    existing.file_path !== null && isOwnBookManuscriptPath(existing.file_path, userId, existing.id)
+      ? existing.file_path
+      : null;
+  const ebookPenNameId = penNameId ?? existing.pen_name_id ?? null;
+  const getEbookAuthorName = () => readPenNameForEbook(supabase, userId, ebookPenNameId);
+  const pendingManuscriptUpload = uploadsBeforeWrite.find((upload) => upload.kind === "manuscript");
+  if (pendingManuscriptUpload) {
+    const sync = await syncCoverIntoLibrumEbook(pendingManuscriptUpload.bytes, {
+      getCoverJpeg: async () => {
+        if (coverResult.present) return ebookCoverJpeg(coverResult);
+        if (ownStoredManuscript !== null && (await readLibrumMadeMarker(catalogWriter.storage, ownStoredManuscript)) === "yes") {
+          const current = await downloadStoredBytes(catalogWriter, BOOK_MANUSCRIPTS_BUCKET, ownStoredManuscript);
+          const carried = current ? await readLibrumEbookCover(current) : null;
+          if (carried) return carried;
+        }
+        if (
+          existing.cover_path !== null &&
+          classifyBookCoverPath(existing.cover_path, userId, existing.id) !== "unsafe"
+        ) {
+          const stored = await downloadStoredBytes(catalogWriter, BOOK_COVERS_BUCKET, existing.cover_path);
+          // R1: a stored cover may be a PNG; the ebook needs a JPEG.
+          return stored ? shrinkImageToJpeg(stored, EBOOK_COVER_SIZE) : null;
+        }
+        return null;
+      },
+      title,
+      getAuthorName: getEbookAuthorName,
+      maxBytes: MAX_MANUSCRIPT_BYTES,
+      caller,
+      bookId: existing.id,
+    });
+    if (sync.kind === "embedded") pendingManuscriptUpload.bytes = sync.bytes;
+    if (sync.kind !== "not_librum_made") pendingManuscriptUpload.metadata = { ...LIBRUM_MADE_EBOOK_METADATA };
+    ebookCoverWarning = sync.kind === "skipped";
+  } else if (coverResult.present && ownStoredManuscript !== null) {
+    const marker = await readLibrumMadeMarker(catalogWriter.storage, ownStoredManuscript);
+    if (marker === "unknown") {
+      console.error(`${caller}: could not check whether Librum made the current ebook; cover not put inside it`, {
+        bookId: existing.id,
+      });
+    }
+    if (marker === "yes") {
+      const current = await downloadStoredBytes(catalogWriter, BOOK_MANUSCRIPTS_BUCKET, ownStoredManuscript);
+      if (current === null) {
+        console.error(`${caller}: current ebook not read; cover not put inside it`, { bookId: existing.id });
+        ebookCoverWarning = true;
+      } else {
+        const sync = await syncCoverIntoLibrumEbook(current, {
+          getCoverJpeg: () => ebookCoverJpeg(coverResult),
+          title,
+          getAuthorName: getEbookAuthorName,
+          maxBytes: MAX_MANUSCRIPT_BYTES,
+          caller,
+          bookId: existing.id,
+        });
+        if (sync.kind === "embedded") {
+          newManuscriptPath = newBookManuscriptPath(userId, existing.id);
+          uploadsBeforeWrite.push({
+            bucket: BOOK_MANUSCRIPTS_BUCKET,
+            path: newManuscriptPath,
+            bytes: sync.bytes,
+            contentType: "application/epub+zip",
+            kind: "manuscript",
+            metadata: { ...LIBRUM_MADE_EBOOK_METADATA },
+          });
+        } else if (sync.kind === "skipped") {
+          ebookCoverWarning = true;
+        } else {
+          // Marked, but not the shape Librum writes: left untouched.
+          console.error(`${caller}: marked ebook is not a Librum-made package; cover not put inside it`, {
+            bookId: existing.id,
+          });
+        }
+      }
+    }
+  }
+
+  return { ebookCoverWarning, newManuscriptPath };
 }
 
 export async function createBook(formData: FormData) {
@@ -1523,15 +1674,6 @@ export async function updateBook(bookId: string, formData: FormData) {
   // every replacement goes to a FRESH key, so it touches no live object
   // and is uploaded BEFORE the write, as the row must never point at a
   // missing object; nothing is ever overwritten in place.
-  type PendingUpload = {
-    bucket: typeof BOOK_COVERS_BUCKET | typeof BOOK_MANUSCRIPTS_BUCKET;
-    path: string;
-    bytes: Buffer;
-    contentType: string;
-    kind: "cover" | "manuscript";
-    // W7 r2 (R2): the Librum-made marker on a Librum-made ebook.
-    metadata?: Record<string, string>;
-  };
   const uploadsBeforeWrite: PendingUpload[] = [];
 
   let newCoverPath: string | null = null;
@@ -1658,102 +1800,20 @@ export async function updateBook(bookId: string, formData: FormData) {
   // manuscript, and writes the row below.
   const catalogWriter = createCatalogWriteClient();
 
-  // W7: a Librum-made (Word) ebook carries the cover inside it (1a), with
-  // the saved title and pen name (3a). Directly uploaded ebooks are never
-  // touched (2a), and a failed swap never fails the save: the ebook is
-  // then stored as it was, the reason is logged and the success message
-  // gets one more line (Q1 b-lite).
-  //   - A new ebook in this save: the new cover goes in; without one, the
-  //     sharp cover already inside the current ebook is carried over (4b)
-  //     -- read only when Storage marks that ebook Librum-made (R2) --
-  //     else the stored site cover, re-encoded as a 1600px JPEG (R1).
-  //   - Only a new cover: Storage is asked (info(), no download) whether
-  //     Librum made the current ebook (R2). Only then is it downloaded and
-  //     rewritten to a FRESH versioned key, exactly like an uploaded
-  //     replacement -- the same compare-and-set on file_path, the same
-  //     review and retention rules (buyers keep the last approved file
-  //     until Librum approves this one). The shape check runs again on the
-  //     downloaded bytes. No marker (every ebook stored before W7, 5a) or
-  //     an unreadable marker: no swap. The cover change already takes a
-  //     live book to review.
-  let ebookCoverWarning = false;
-  const ownStoredManuscript =
-    existing.file_path !== null && isOwnBookManuscriptPath(existing.file_path, user.id, existing.id)
-      ? existing.file_path
-      : null;
-  const ebookPenNameId = penNameId ?? (existing as { pen_name_id?: string | null }).pen_name_id ?? null;
-  const getEbookAuthorName = () => readPenNameForEbook(supabase, user.id, ebookPenNameId);
-  const pendingManuscriptUpload = uploadsBeforeWrite.find((upload) => upload.kind === "manuscript");
-  if (pendingManuscriptUpload) {
-    const sync = await syncCoverIntoLibrumEbook(pendingManuscriptUpload.bytes, {
-      getCoverJpeg: async () => {
-        if (coverResult.present) return ebookCoverJpeg(coverResult);
-        if (ownStoredManuscript !== null && (await readLibrumMadeMarker(catalogWriter.storage, ownStoredManuscript)) === "yes") {
-          const current = await downloadStoredBytes(catalogWriter, BOOK_MANUSCRIPTS_BUCKET, ownStoredManuscript);
-          const carried = current ? await readLibrumEbookCover(current) : null;
-          if (carried) return carried;
-        }
-        if (
-          existing.cover_path !== null &&
-          classifyBookCoverPath(existing.cover_path, user.id, existing.id) !== "unsafe"
-        ) {
-          const stored = await downloadStoredBytes(catalogWriter, BOOK_COVERS_BUCKET, existing.cover_path);
-          // R1: a stored cover may be a PNG; the ebook needs a JPEG.
-          return stored ? shrinkImageToJpeg(stored, EBOOK_COVER_SIZE) : null;
-        }
-        return null;
-      },
-      title,
-      getAuthorName: getEbookAuthorName,
-      maxBytes: MAX_MANUSCRIPT_BYTES,
-      caller: "updateBook",
-      bookId: existing.id,
-    });
-    if (sync.kind === "embedded") pendingManuscriptUpload.bytes = sync.bytes;
-    if (sync.kind !== "not_librum_made") pendingManuscriptUpload.metadata = { ...LIBRUM_MADE_EBOOK_METADATA };
-    ebookCoverWarning = sync.kind === "skipped";
-  } else if (coverResult.present && ownStoredManuscript !== null) {
-    const marker = await readLibrumMadeMarker(catalogWriter.storage, ownStoredManuscript);
-    if (marker === "unknown") {
-      console.error("updateBook: could not check whether Librum made the current ebook; cover not put inside it", {
-        bookId: existing.id,
-      });
-    }
-    if (marker === "yes") {
-      const current = await downloadStoredBytes(catalogWriter, BOOK_MANUSCRIPTS_BUCKET, ownStoredManuscript);
-      if (current === null) {
-        console.error("updateBook: current ebook not read; cover not put inside it", { bookId: existing.id });
-        ebookCoverWarning = true;
-      } else {
-        const sync = await syncCoverIntoLibrumEbook(current, {
-          getCoverJpeg: () => ebookCoverJpeg(coverResult),
-          title,
-          getAuthorName: getEbookAuthorName,
-          maxBytes: MAX_MANUSCRIPT_BYTES,
-          caller: "updateBook",
-          bookId: existing.id,
-        });
-        if (sync.kind === "embedded") {
-          newManuscriptPath = newBookManuscriptPath(user.id, existing.id);
-          uploadsBeforeWrite.push({
-            bucket: BOOK_MANUSCRIPTS_BUCKET,
-            path: newManuscriptPath,
-            bytes: sync.bytes,
-            contentType: "application/epub+zip",
-            kind: "manuscript",
-            metadata: { ...LIBRUM_MADE_EBOOK_METADATA },
-          });
-        } else if (sync.kind === "skipped") {
-          ebookCoverWarning = true;
-        } else {
-          // Marked, but not the shape Librum writes: left untouched.
-          console.error("updateBook: marked ebook is not a Librum-made package; cover not put inside it", {
-            bookId: existing.id,
-          });
-        }
-      }
-    }
-  }
+  // W7: the cover inside a Librum-made ebook (syncLibrumEbookCover).
+  const ebookSync = await syncLibrumEbookCover({
+    supabase,
+    catalogWriter,
+    userId: user.id,
+    existing,
+    coverResult,
+    title,
+    penNameId,
+    uploadsBeforeWrite,
+    caller: "updateBook",
+  });
+  const ebookCoverWarning = ebookSync.ebookCoverWarning;
+  if (ebookSync.newManuscriptPath !== null) newManuscriptPath = ebookSync.newManuscriptPath;
 
   for (const upload of uploadsBeforeWrite) {
     // Both go to a fresh key and never overwrite anything, so neither
@@ -2034,6 +2094,226 @@ export async function updateBook(bookId: string, formData: FormData) {
     }
   }
   redirectAfterSave(ebookCoverWarning, `/dashboard?success=${encodeURIComponent("Libri u përditësua")}`);
+}
+
+// BD15 P3: the new editor's Content tab (PLAN-BD15-r1 §2.4) -- the
+// manuscript, the cover, ISBN, publisher and the staff-only "AI used"
+// answer of the author's own DRAFT. A live book or a book in review is
+// still changed on the edit page (updateBook) until P5, so this action
+// never touches review state: it refuses anything but a draft with no
+// pending review, and its row write is bound to status 'draft'.
+//
+// The file handling is updateBook's, unchanged: both inputs validated
+// before any upload, fresh keys uploaded before the write, a compare-
+// and-set on the paths read, the W7 cover inside a Librum-made ebook,
+// and only after the write is proven the superseded objects removed
+// (Renato 11-04, Q1 a: a replaced manuscript goes at once, as today;
+// removeUnretainedManuscripts keeps the approved file buyers get).
+export async function saveBookContent(bookId: string, formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(editorPath(bookId, "content"));
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect("/login");
+  }
+
+  const here = editorPath(bookId, "content");
+  const fail = (message: string): never => redirect(withQuery(here, "error", message));
+
+  // The same ownership-bound read as updateBook: the row's own id must be
+  // exactly the id named, before any upload.
+  const { data: existing, error: existingError } = await supabase
+    .from("books")
+    .select("id, author_id, status, title, pen_name_id, cover_path, file_path, isbn")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle<{
+      id: string;
+      author_id: string;
+      status: string;
+      title: string;
+      pen_name_id: string | null;
+      cover_path: string | null;
+      file_path: string | null;
+      isbn: string | null;
+    }>();
+  if (existingError || !existing || existing.id !== bookId || existing.author_id !== user.id) {
+    redirect("/dashboard");
+  }
+
+  // Drafts only, and not while waiting for review (an unreadable review
+  // state counts as waiting): the edit page knows those rules.
+  const toEditPage = () =>
+    redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(EDITOR_ONLY_DRAFTS_MESSAGE)}`);
+  if (existing.status !== "draft") toEditPage();
+  const review = await getBookReviewState(supabase, existing.id);
+  if (review.kind !== "ok" || review.pending) toEditPage();
+
+  // ISBN: the rule createBook/updateBook apply; an unchanged stored value
+  // is kept as it is (FIX1 X9).
+  const isbnPresent = formData.has("isbn");
+  const isbn = String(formData.get("isbn") ?? "").trim() || null;
+  if (isbnPresent && isbn !== null && isbn !== existing.isbn && !isValidIsbn(isbn)) {
+    fail(INVALID_ISBN_MESSAGE);
+  }
+  const publisherResolved = resolveBoundedOptionalText(formData, "publisher", PUBLISHER_MAX_LENGTH, "Botuesi", here);
+  // Not answered stays not answered; a value other than yes/no is refused.
+  const rawAi = formData.get("aiUsed");
+  const aiAnswer = parseAiAnswer(rawAi);
+  if (rawAi !== null && rawAi !== "" && aiAnswer === null) {
+    fail(AI_NOT_SAVED_MESSAGE);
+  }
+
+  // Both inputs validated before any upload (QA-FIX-3).
+  const coverResult = await resolveCoverInput(supabase, user.id, formData, here);
+  const manuscriptResult = await resolveManuscriptInput(supabase, user.id, formData, here, existing.id);
+
+  const uploadsBeforeWrite: PendingUpload[] = [];
+  let newCoverPath: string | null = null;
+  let coverPathToRemove: string | null = null;
+  let tempCoverToCleanup: string | null = null;
+  if (coverResult.present) {
+    newCoverPath = newBookCoverPath(coverResult.extension);
+    const storedCoverClass = classifyBookCoverPath(existing.cover_path, user.id, existing.id);
+    uploadsBeforeWrite.push({
+      bucket: BOOK_COVERS_BUCKET,
+      path: newCoverPath,
+      bytes: coverResult.bytes,
+      contentType: coverResult.contentType,
+      kind: "cover",
+    });
+    if (storedCoverClass !== "unsafe" && existing.cover_path !== newCoverPath) {
+      coverPathToRemove = existing.cover_path;
+    } else if (storedCoverClass === "unsafe" && existing.cover_path !== null) {
+      console.warn("saveBookContent: stored cover path is not this book's own key; left untouched", {
+        bookId: existing.id,
+        coverPathClass: storedCoverClass,
+      });
+    }
+    tempCoverToCleanup = coverResult.tempPathToCleanup;
+  }
+
+  let newManuscriptPath: string | null = null;
+  let tempManuscriptToCleanup: string | null = null;
+  if (manuscriptResult.present) {
+    newManuscriptPath = newBookManuscriptPath(user.id, existing.id);
+    if (existing.file_path !== null && !isOwnBookManuscriptPath(existing.file_path, user.id, existing.id)) {
+      console.warn("saveBookContent: stored manuscript path is not this book's own key; left untouched", {
+        bookId: existing.id,
+        manuscriptPathClass: "unsafe",
+      });
+    }
+    uploadsBeforeWrite.push({
+      bucket: BOOK_MANUSCRIPTS_BUCKET,
+      path: newManuscriptPath,
+      bytes: manuscriptResult.bytes,
+      contentType: "application/epub+zip",
+      kind: "manuscript",
+    });
+    tempManuscriptToCleanup = manuscriptResult.tempPathToCleanup;
+  }
+
+  const catalogWriter = createCatalogWriteClient();
+  const ebookSync = await syncLibrumEbookCover({
+    supabase,
+    catalogWriter,
+    userId: user.id,
+    existing,
+    coverResult,
+    title: existing.title,
+    penNameId: null,
+    uploadsBeforeWrite,
+    caller: "saveBookContent",
+  });
+  if (ebookSync.newManuscriptPath !== null) newManuscriptPath = ebookSync.newManuscriptPath;
+
+  const removeNewUploads = async () => {
+    if (newCoverPath !== null) await removeNewCoverUpload(catalogWriter, newCoverPath, "saveBookContent");
+    if (newManuscriptPath !== null) {
+      await removeNewManuscriptUpload(catalogWriter, newManuscriptPath, user.id, existing.id, "saveBookContent");
+    }
+  };
+
+  for (const upload of uploadsBeforeWrite) {
+    const { error: uploadError } = await catalogWriter.storage.from(upload.bucket).upload(upload.path, upload.bytes, {
+      contentType: upload.contentType,
+      ...(upload.kind === "cover" ? { cacheControl: IMAGE_CACHE_CONTROL_SECONDS } : {}),
+      ...(upload.metadata ? { metadata: upload.metadata } : {}),
+    });
+    if (uploadError) {
+      console.error(`saveBookContent: ${upload.kind} upload failed`, { bookId: existing.id });
+      await removeNewUploads();
+      fail(
+        upload.kind === "cover"
+          ? "Imazhi i kopertinës nuk u ngarkua dot. Provoni përsëri"
+          : "Dorëshkrimi nuk u ngarkua dot. Provoni përsëri",
+      );
+    }
+  }
+
+  // One guarded row write: the caller's own draft, with the paths it read
+  // (compare-and-set), so the superseded objects removed below are
+  // provably the ones this write replaced.
+  let query = catalogWriter
+    .from("books")
+    .update({
+      ...(isbnPresent ? { isbn } : {}),
+      ...(publisherResolved.present ? { publisher: publisherResolved.value } : {}),
+      ...(newCoverPath !== null ? { cover_path: newCoverPath } : {}),
+      ...(newManuscriptPath !== null ? { file_path: newManuscriptPath } : {}),
+    })
+    .eq("id", existing.id)
+    .eq("author_id", user.id)
+    .eq("status", "draft");
+  if (newCoverPath !== null) {
+    query = existing.cover_path === null ? query.is("cover_path", null) : query.eq("cover_path", existing.cover_path);
+  }
+  if (newManuscriptPath !== null) {
+    query = existing.file_path === null ? query.is("file_path", null) : query.eq("file_path", existing.file_path);
+  }
+  const { data: updatedRows, error: updateError } = await query.select("id");
+  if (updateError) {
+    console.error("saveBookContent: book update failed", { bookId: existing.id, code: updateError.code ?? null });
+    await removeNewUploads();
+    if (["LB462", "LB463"].includes(updateError.code ?? "")) fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+    fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+  }
+  if (!isExactlyOneRowWritten(updatedRows) || updatedRows?.[0]?.id !== existing.id) {
+    console.error("saveBookContent: guarded update did not change exactly one row", { bookId: existing.id });
+    await removeNewUploads();
+    fail(CATALOG_ROW_CHANGED_MESSAGE);
+  }
+
+  // Superseded objects, only now that the write is proven (best effort).
+  if (newManuscriptPath !== null) {
+    await removeUnretainedManuscripts(catalogWriter, catalogWriter, {
+      authorId: user.id,
+      bookId: existing.id,
+      superseded: [existing.file_path],
+      caller: "saveBookContent",
+    });
+  }
+  const removals = temporaryUploadRemovals(user.id, tempManuscriptToCleanup, tempCoverToCleanup);
+  if (coverPathToRemove !== null) removals.unshift({ bucket: BOOK_COVERS_BUCKET, path: coverPathToRemove });
+  await removeProvenBookStorageObjects(supabase, removals, "saveBookContent");
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/books");
+
+  // The files are saved; an AI answer that fails to save is reported on
+  // the tab, never undoing them.
+  if (aiAnswer !== null && !(await writeAiDisclosure(existing.id, aiAnswer))) {
+    console.error("saveBookContent: AI answer not recorded", { bookId: existing.id });
+    redirectAfterSave(ebookSync.ebookCoverWarning, withQuery(here, "error", AI_NOT_SAVED_MESSAGE));
+  }
+
+  const next = editorPath(existing.id, String(formData.get("intent") ?? "") === "next" ? "pricing" : "content");
+  redirectAfterSave(ebookSync.ebookCoverWarning, `${next}&success=${encodeURIComponent(CONTENT_SAVED_MESSAGE)}`);
 }
 
 // ADMIN-3-REVIEW (E): the author's "Cancel review" -- the pending review
