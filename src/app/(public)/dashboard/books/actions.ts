@@ -2111,7 +2111,9 @@ export async function updateBook(bookId: string, formData: FormData) {
 // removeUnretainedManuscripts keeps the approved file buyers get).
 export async function saveBookContent(bookId: string, formData: FormData) {
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    redirectForMaintenance(editorPath(bookId, "content"));
+    // The edit page shows the maintenance notice (audit r1, F1: the
+    // editor path already carries "?tab=").
+    redirectForMaintenance(`/dashboard/books/${bookId}/edit`);
   }
 
   const supabase = await createClient();
@@ -2259,34 +2261,39 @@ export async function saveBookContent(bookId: string, formData: FormData) {
   // One guarded row write: the caller's own draft, with the paths it read
   // (compare-and-set), so the superseded objects removed below are
   // provably the ones this write replaced.
-  let query = catalogWriter
-    .from("books")
-    .update({
-      ...(isbnPresent ? { isbn } : {}),
-      ...(publisherResolved.present ? { publisher: publisherResolved.value } : {}),
-      ...(newCoverPath !== null ? { cover_path: newCoverPath } : {}),
-      ...(newManuscriptPath !== null ? { file_path: newManuscriptPath } : {}),
-    })
-    .eq("id", existing.id)
-    .eq("author_id", user.id)
-    .eq("status", "draft");
-  if (newCoverPath !== null) {
-    query = existing.cover_path === null ? query.is("cover_path", null) : query.eq("cover_path", existing.cover_path);
-  }
-  if (newManuscriptPath !== null) {
-    query = existing.file_path === null ? query.is("file_path", null) : query.eq("file_path", existing.file_path);
-  }
-  const { data: updatedRows, error: updateError } = await query.select("id");
-  if (updateError) {
-    console.error("saveBookContent: book update failed", { bookId: existing.id, code: updateError.code ?? null });
-    await removeNewUploads();
-    if (["LB462", "LB463"].includes(updateError.code ?? "")) fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
-    fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
-  }
-  if (!isExactlyOneRowWritten(updatedRows) || updatedRows?.[0]?.id !== existing.id) {
-    console.error("saveBookContent: guarded update did not change exactly one row", { bookId: existing.id });
-    await removeNewUploads();
-    fail(CATALOG_ROW_CHANGED_MESSAGE);
+  const payload = {
+    ...(isbnPresent ? { isbn } : {}),
+    ...(publisherResolved.present ? { publisher: publisherResolved.value } : {}),
+    ...(newCoverPath !== null ? { cover_path: newCoverPath } : {}),
+    ...(newManuscriptPath !== null ? { file_path: newManuscriptPath } : {}),
+  };
+  // Audit r1, F4: nothing to write (a form without these fields) goes
+  // straight on to the AI answer; there is then no upload either.
+  if (Object.keys(payload).length > 0) {
+    let query = catalogWriter
+      .from("books")
+      .update(payload)
+      .eq("id", existing.id)
+      .eq("author_id", user.id)
+      .eq("status", "draft");
+    if (newCoverPath !== null) {
+      query = existing.cover_path === null ? query.is("cover_path", null) : query.eq("cover_path", existing.cover_path);
+    }
+    if (newManuscriptPath !== null) {
+      query = existing.file_path === null ? query.is("file_path", null) : query.eq("file_path", existing.file_path);
+    }
+    const { data: updatedRows, error: updateError } = await query.select("id");
+    if (updateError) {
+      console.error("saveBookContent: book update failed", { bookId: existing.id, code: updateError.code ?? null });
+      await removeNewUploads();
+      if (["LB462", "LB463"].includes(updateError.code ?? "")) fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+      fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+    }
+    if (!isExactlyOneRowWritten(updatedRows) || updatedRows?.[0]?.id !== existing.id) {
+      console.error("saveBookContent: guarded update did not change exactly one row", { bookId: existing.id });
+      await removeNewUploads();
+      fail(CATALOG_ROW_CHANGED_MESSAGE);
+    }
   }
 
   // Superseded objects, only now that the write is proven (best effort).

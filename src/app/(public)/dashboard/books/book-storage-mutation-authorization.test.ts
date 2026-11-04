@@ -1629,6 +1629,35 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
     expect(dbWrites).toEqual([]);
   });
 
+  it("a write error removes the new uploads; a concurrent publish (LB463) gets its own message", async () => {
+    updateResult = { data: null, error: { code: "LB463", message: "x" } };
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(
+      `${CONTENT}&error=${encodeURIComponent("Libri juaj ndryshoi ndërsa po e redaktonit. Rifreskoni faqen dhe provoni përsëri.")}`,
+    );
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).toEqual(expect.arrayContaining([NEW_JPG, NEW_EPUB]));
+    expect(removed).not.toContain(OWN_PNG);
+    expect(removed).not.toContain(OWN_EPUB);
+    expect(aiWrites).toEqual([]);
+  });
+
+  it("a failed upload removes the other new upload and writes nothing", async () => {
+    failUploadsTo = new Set(["manuscripts:*"]);
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(`${CONTENT}&error=${encodeURIComponent("Dorëshkrimi nuk u ngarkua dot. Provoni përsëri")}`);
+    expect(bookUpdates()).toEqual([]);
+    expect(removals().flatMap((c) => c.paths)).toEqual(expect.arrayContaining([NEW_JPG]));
+  });
+
+  it("a form with nothing to write saves only the AI answer", async () => {
+    const f = new FormData();
+    f.set("aiUsed", "no");
+    await run(saveBookContent(BOOK_ID, f));
+    expect(bookUpdates()).toEqual([]);
+    expect(aiWrites).toEqual([{ bookId: BOOK_ID, answer: "no" }]);
+  });
+
   it("a write that matched no row removes the new uploads and keeps the old objects", async () => {
     updateResult = { data: [], error: null };
     const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
