@@ -166,6 +166,32 @@ describe("BookPricingForm", () => {
     expect(back).toContain('value="back"');
   });
 
+  it("audit r1 F1: Enter in a text box saves and stays -- Ruaj draftin is the form's first submit button", () => {
+    const html = render({ initialPriceAll: 249 });
+    const first = html.match(/<button type="submit"[^>]*>/)![0];
+    expect(first).toContain('value="save"');
+    expect(html.indexOf('value="back"')).toBeGreaterThan(html.indexOf('value="send"'));
+  });
+
+  // Audit r1 F2: no DOM here to click, so the wiring is pinned in the
+  // source: each box is controlled by its own state and its onChange
+  // sets that state, and the to-do list reads both.
+  it("audit r1 F2: each tick is wired to its own state, and the to-do list reads both", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("./book-pricing-form.tsx", import.meta.url), "utf8");
+    const box = (field: string) => {
+      const at = src.indexOf(`name={${field}}`);
+      expect(at).toBeGreaterThan(-1);
+      return src.slice(src.lastIndexOf("<input", at), src.indexOf("/>", at));
+    };
+    expect(box("WORLDWIDE_RIGHTS_FIELD")).toContain("checked={worldwide}");
+    expect(box("WORLDWIDE_RIGHTS_FIELD")).toContain("onChange={(e) => setWorldwide(e.target.checked)}");
+    expect(box("ACCEPT_TERMS_FIELD")).toContain("checked={terms}");
+    expect(box("ACCEPT_TERMS_FIELD")).toContain("onChange={(e) => setTerms(e.target.checked)}");
+    expect(src).toContain("pricingTodo(bookId, missing, { worldwide, terms })");
+    expect(src).toContain("primaryBlocked={todo.length > 0}");
+  });
+
   it("the reader preview shows the title, the pen name and the price", () => {
     const html = render({ initialPriceAll: 1500 });
     expect(html).toContain("Libri im");

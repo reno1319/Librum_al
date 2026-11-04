@@ -108,20 +108,11 @@ export function EditorActionBar({
           Po ruhet…
         </p>
       )}
+      {/* DOM order is Ruaj draftin, main button, back link: Enter in a
+          text box presses the first one, so it saves and stays, as
+          before (audit r1, F1). On a computer the back link is moved to
+          the left with CSS order only. */}
       <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-[1fr_auto_auto]">
-        {backLabel ? (
-          <button
-            type="submit"
-            name="intent"
-            value="back"
-            disabled={pending}
-            className={`${EDITOR_LINK_BUTTON} order-3 justify-self-center sm:order-none sm:justify-self-start sm:self-center`}
-          >
-            &larr; {backLabel}
-          </button>
-        ) : (
-          <span className="hidden sm:block" />
-        )}
         <button type="submit" name="intent" value="save" disabled={pending} className={EDITOR_SECONDARY_BUTTON}>
           Ruaj draftin
         </button>
@@ -137,6 +128,19 @@ export function EditorActionBar({
           </button>
           {primaryNote && <small className="text-center text-[13px] text-muted">{primaryNote}</small>}
         </div>
+        {backLabel ? (
+          <button
+            type="submit"
+            name="intent"
+            value="back"
+            disabled={pending}
+            className={`${EDITOR_LINK_BUTTON} justify-self-center sm:order-first sm:self-center sm:justify-self-start`}
+          >
+            &larr; {backLabel}
+          </button>
+        ) : (
+          <span className="hidden sm:order-first sm:block" />
+        )}
       </div>
       {extra}
     </div>
