@@ -98,13 +98,13 @@ describe("addContributor: ERR-2 error-message mapping", () => {
     formData.set("role", "Editor");
     mockInsertContributor.mockResolvedValue({ error: { code: "LB490", message: "x" } });
     await expect(addContributor("book-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect).toHaveBeenCalledWith(`/dashboard/books/book-1/edit?error=${IN_REVIEW}`);
+    expect(mockRedirect).toHaveBeenCalledWith(`/dashboard/books/book-1/editor?tab=details&error=${IN_REVIEW}`);
   });
 
   it("a removal refused as in review (LB490) says so; a removal that works redirects nowhere", async () => {
     mockDeleteContributor.mockResolvedValue({ error: { code: "LB490", message: "x" } });
     await expect(removeContributor("book-1", "c-1")).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect).toHaveBeenCalledWith(`/dashboard/books/book-1/edit?error=${IN_REVIEW}`);
+    expect(mockRedirect).toHaveBeenCalledWith(`/dashboard/books/book-1/editor?tab=details&error=${IN_REVIEW}`);
     mockRedirect.mockClear();
     mockDeleteContributor.mockResolvedValue({ error: null });
     await expect(removeContributor("book-1", "c-1")).resolves.toBeUndefined();

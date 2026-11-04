@@ -118,6 +118,7 @@ export function BookPricingForm({
   penName,
   missing,
   live = null,
+  sendRefusedNote = null,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   // BD15 P5b-2: a live book -- its saved price (a new one needs the tick
@@ -136,6 +137,10 @@ export function BookPricingForm({
   penName: string;
   // What the other tabs still need before sending.
   missing: PricingMissing[];
+  // BD15 P5b-3a (Renato 11-04, Q2 a): a taken-down book -- its price
+  // still saves, but it cannot be sent; this note stands under the
+  // blocked button. The server refuses the send on its own.
+  sendRefusedNote?: string | null;
 }) {
   const [mode, setMode] = useState<PriceMode | null>(
     freeOnly ? "free" : initialPriceAll === null ? null : initialPriceAll === 0 ? "free" : "paid",
@@ -152,9 +157,10 @@ export function BookPricingForm({
   // The price this form would save, for a live book's confirm tick.
   const newPriceAll = mode === "free" ? 0 : preview.kind === "paid" ? preview.priceAll : null;
   const priceChanging = live !== null && newPriceAll !== null && newPriceAll !== live.currentPriceAll;
-  const sendBlocked = todo.length > 0 || (live !== null && !live.hasChanges);
+  const sendBlocked = sendRefusedNote !== null || todo.length > 0 || (live !== null && !live.hasChanges);
   const sendNote =
-    live !== null && !live.hasChanges ? NO_CHANGES_TO_SEND_NOTE : pricingTodoNote(todo.length);
+    sendRefusedNote ??
+    (live !== null && !live.hasChanges ? NO_CHANGES_TO_SEND_NOTE : pricingTodoNote(todo.length));
 
   return (
     <form action={action} className="mt-2 flex flex-col gap-2">

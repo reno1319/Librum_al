@@ -260,7 +260,7 @@ describe("AdminBookPage", () => {
       rows.book_reviews = { data: [pending], error: null };
     });
 
-    it("books.review staff get the panel: file link, cover, four checks, Approve and Send back", async () => {
+    it("books.review staff get the panel: file link, cover, three checks, Approve and Send back", async () => {
       const html = await render("admin");
       expect(html).toContain("Review this book");
       expect(html).toContain("In review");
@@ -270,12 +270,14 @@ describe("AdminBookPage", () => {
       for (const label of [
         "The cover is fine",
         "The book file opens",
-        "It isn't someone else's work",
-        "The author declared their rights",
+        // BD15 P5b-3a (Renato 11-04, b): one box for the rights.
+        "The author declared their rights and it isn't someone else's work",
       ]) {
         expect(html.replace(/&#x27;/g, "'")).toContain(label);
       }
-      expect(html.match(/type="checkbox"[^>]*required=""/g) ?? []).toHaveLength(4);
+      expect(html.match(/type="checkbox"[^>]*required=""/g) ?? []).toHaveLength(3);
+      expect(html).toContain('name="rights_ok"');
+      expect(html).not.toContain('name="not_someone_elses_work"');
       expect(html).toContain(`name="reviewId" value="${REVIEW_ID}"`);
       expect(html).toContain(`name="filePath" value="${FILE}"`);
       expect(html).toContain(`name="coverPath" value="${COVER}"`);

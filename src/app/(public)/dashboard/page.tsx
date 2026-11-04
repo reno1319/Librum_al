@@ -10,6 +10,8 @@ import { formatTransactionMinorUnits, type CurrencyTotals } from "@/lib/transact
 import { AuthorBookRow } from "@/components/author-book-row";
 import { loadAuthorTakedownNotices } from "@/lib/book-takedowns";
 import { loadAuthorReviewNotices } from "@/lib/book-reviews";
+import type { AuthorReviewNotice } from "@/lib/book-review-copy";
+import { editorPath } from "@/lib/book-editor-copy";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
@@ -124,10 +126,19 @@ export default async function DashboardPage({
     .returns<Book[]>();
 
   const allBooks = books ?? [];
+  // ADMIN-3-REVIEW (F, N9): the author's review rows, one read. BD15
+  // P5b-3a: read before the attention card, which skips drafts in review.
+  const reviewNotices =
+    allBooks.length > 0 ? await loadAuthorReviewNotices(supabase, user.id) : new Map<string, AuthorReviewNotice>();
 
   const attention = resolveDashboardAttention({
     books: allBooks,
     paidPublishingAvailable: canPublishPaidTitle(),
+    inReviewBookIds: new Set(
+      Array.from(reviewNotices.entries())
+        .filter(([, notice]) => notice.inReview)
+        .map(([bookId]) => bookId),
+    ),
   });
 
   const heading = (
@@ -200,8 +211,6 @@ export default async function DashboardPage({
   // ADMIN-2-TAKEDOWN (G): the notices for books Librum took down, read
   // with the author's own session (RLS: own rows; named columns only).
   const takedownNotices = await loadAuthorTakedownNotices(supabase, user.id);
-  // ADMIN-3-REVIEW (F, N9): the author's review rows, one read.
-  const reviewNotices = await loadAuthorReviewNotices(supabase, user.id);
   const schedulerEnabled = isSchedulerEnabled(process.env.PAYOUT_SCHEDULER_ENABLED);
 
   const publishedCount = allBooks.filter((book) => book.status === "published").length;
@@ -258,7 +267,7 @@ export default async function DashboardPage({
               ` — ${draftIncompleteCount === 1 ? "1 gjë" : `${draftIncompleteCount} gjëra`} për të parë para publikimit.`}
           </p>
           <Link
-            href={`/dashboard/books/${attention.book.id}/edit`}
+            href={editorPath(attention.book.id, "details")}
             className="focus-ring rounded-sm font-medium underline"
           >
             Vazhdoni redaktimin

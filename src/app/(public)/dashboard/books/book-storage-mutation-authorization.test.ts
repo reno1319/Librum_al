@@ -1304,7 +1304,8 @@ describe("cancelBookReview (ADMIN-3, E)", () => {
   it("not waiting: says so", async () => {
     bookReviewsDoubleState.withdrawResult = { ok: false, reason: "not_pending" };
     expect(await run(cancelBookReview(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër nuk po pret shqyrtim.")}`,
+      // BD15 P5b-3a: back to the editor (the old edit page is retired).
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&error=${encodeURIComponent("Ky libër nuk po pret shqyrtim.")}`,
     );
   });
 
@@ -1704,8 +1705,9 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
 
   // BD15 P5a (P3 audit F3): "Send for review" from another tab landed
   // between the check and the write; the database refuses (LB490).
-  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`;
-  it("LB490 on the write: the new uploads removed, the old files kept, sent to the read-only edit page", async () => {
+  // BD15 P5b-3a: the editor shows a book in review read-only.
+  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK_ID}/editor?tab=details&error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`;
+  it("LB490 on the write: the new uploads removed, the old files kept, sent to the read-only editor", async () => {
     updateResult = { data: null, error: { code: "LB490", message: "x" } };
     const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
     expect(target).toBe(IN_REVIEW_EDIT);
@@ -1715,7 +1717,7 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
     expect(aiWrites).toEqual([]);
   });
 
-  it("an AI answer refused because the book went into review: sent to the read-only edit page", async () => {
+  it("an AI answer refused because the book went into review: sent to the read-only editor", async () => {
     aiWriteResult = "in_review";
     expect(await run(saveBookContent(BOOK_ID, form({ aiUsed: "yes" })))).toBe(IN_REVIEW_EDIT);
   });
@@ -1739,13 +1741,16 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
     expect(bookUpdates()).toEqual([]);
   });
 
-  it("a draft waiting for review is sent to the edit page untouched", async () => {
-    const editError = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër është i publikuar ose në shqyrtim, prandaj ndryshohet këtu.")}`;
+  it("a draft waiting for review is sent to the read-only editor untouched", async () => {
+    const editError = IN_REVIEW_EDIT;
     bookReviewsDoubleState.pending = true;
     expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(editError);
     bookReviewsDoubleState.pending = false;
     bookReviewsDoubleState.stateKind = "unavailable";
-    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(editError);
+    // An unreadable review state saves nothing and stays on the tab.
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(
+      `/dashboard/books/${BOOK_ID}/editor?tab=content&error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`,
+    );
     expect(storageCalls).toEqual([]);
     expect(dbWrites).toEqual([]);
   });

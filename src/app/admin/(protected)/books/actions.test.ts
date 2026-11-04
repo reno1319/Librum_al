@@ -261,7 +261,8 @@ const REVIEW_ID = "55555555-5555-4555-8555-555555555555";
 const AUTHOR_ID = "66666666-6666-4666-8666-666666666666";
 const FILE = `${AUTHOR_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020100.epub`;
 const COVER = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
-const ALL_CHECKS = { cover_is_fine: "on", file_opens: "on", not_someone_elses_work: "on", rights_declared: "on" };
+// BD15 P5b-3a (Renato 11-04, b): three staff boxes.
+const ALL_CHECKS = { cover_is_fine: "on", file_opens: "on", rights_ok: "on" };
 
 function resetReviewMocks(): void {
   mockRedirect.mockClear();
@@ -319,7 +320,7 @@ describe("approveBookReviewAsStaff", () => {
     f.delete("file_opens");
     const target = await redirectOf(() => approveBookReviewAsStaff(f));
     expect(mockRequireStaff).toHaveBeenCalledWith("books.review");
-    expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent("Tick all four checks before you approve.")}`);
+    expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent("Tick all three checks before you approve.")}`);
     expect(mockRpc).not.toHaveBeenCalled();
   });
 

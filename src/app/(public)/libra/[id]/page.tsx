@@ -56,6 +56,7 @@ import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER } from "@/lib
 import { bookWhatsappShareHref } from "@/lib/contact";
 import { bookPagePath, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
 import { pageErrorMessage } from "@/lib/page-messages";
+import { editorPath } from "@/lib/book-editor-copy";
 import {
   ANONYMOUS_REVIEWER_NAME,
   AUTHOR_REVIEWER_LABEL,
@@ -1599,7 +1600,7 @@ function PurchasePanel({
     return (
       <div className="flex flex-col gap-3">
         <span className="text-sm text-muted">Ky është libri juaj</span>
-        <Link href={`/dashboard/books/${bookId}/edit`} className={PRIMARY_ACTION_CLASSES}>
+        <Link href={editorPath(bookId, "details")} className={PRIMARY_ACTION_CLASSES}>
           Menaxhoni librin
         </Link>
         <a href={`/api/books/${bookId}/download`} className={SECONDARY_ACTION_CLASSES}>

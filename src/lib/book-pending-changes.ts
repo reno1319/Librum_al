@@ -38,23 +38,29 @@ type PendingRow = {
   description: string;
   is_adult: boolean;
   original_author: string | null;
+  created_at: string;
 };
 
-export type PendingChangesRead = { ok: true; pending: PendingChanges | null } | { ok: false };
+// BD15 P5b-3a: when the waiting changes were first saved. A sent-back
+// note belongs to the changes it was about: after "Hidhni ndryshimet"
+// and a new change, the old note no longer shows (editor page).
+export type PendingChangesRead =
+  | { ok: true; pending: PendingChanges | null; createdAt: string | null }
+  | { ok: false };
 
 /** The book's waiting changes, or null. The caller proved ownership. */
 export async function readPendingChanges(service: CatalogWriter, bookId: string): Promise<PendingChangesRead> {
   try {
     const { data, error } = await service
       .from("book_pending_changes")
-      .select("book_id, file_path, cover_path, description, is_adult, original_author")
+      .select("book_id, file_path, cover_path, description, is_adult, original_author, created_at")
       .eq("book_id", bookId)
       .maybeSingle<PendingRow>();
     if (error) {
       console.error("readPendingChanges: read failed", { bookId, code: error.code ?? null });
       return { ok: false };
     }
-    if (!data) return { ok: true, pending: null };
+    if (!data) return { ok: true, pending: null, createdAt: null };
     if (data.book_id !== bookId) return { ok: false };
     return {
       ok: true,
@@ -65,6 +71,7 @@ export async function readPendingChanges(service: CatalogWriter, bookId: string)
         isAdult: data.is_adult,
         originalAuthor: data.original_author,
       },
+      createdAt: data.created_at,
     };
   } catch {
     console.error("readPendingChanges: read failed", { bookId });

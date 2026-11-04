@@ -191,7 +191,7 @@ export const ALLOWED_AGAIN_SUCCESS_MESSAGE = "The author can publish this book a
 // ADMIN-3-REVIEW (H): Approve and Send back
 // ------------------------------------------------------------
 
-export const CHECKLIST_INCOMPLETE_MESSAGE = "Tick all four checks before you approve.";
+export const CHECKLIST_INCOMPLETE_MESSAGE = "Tick all three checks before you approve.";
 export const SEND_BACK_MESSAGE_TOO_LONG_MESSAGE = `Please keep the message under ${SEND_BACK_MESSAGE_MAX_LENGTH} characters.`;
 export const GENERIC_REVIEW_ERROR_MESSAGE = "Something went wrong. Please try again.";
 export const APPROVED_SUCCESS_MESSAGE = "Book approved. It's live in the Bookstore now.";
@@ -199,11 +199,18 @@ export const SENT_BACK_SUCCESS_MESSAGE = "Book sent back. The author sees your m
 export const AUTHOR_CHANGED_FILES_MESSAGE = "The author changed the file or cover. Reload and check again.";
 export const AUTHOR_CHANGED_BOOK_MESSAGE = "The author changed the book. Reload and check again.";
 
-/** The canonical checklist the RPC and the table's check require. */
-export const APPROVED_CHECKLIST = Object.fromEntries(REVIEW_CHECKLIST_ITEMS.map((item) => [item.key, true])) as Record<
-  (typeof REVIEW_CHECKLIST_ITEMS)[number]["key"],
-  true
->;
+/**
+ * The canonical checklist the RPC and the table's check require: its four
+ * stored keys, exactly. BD15 P5b-3a (Renato 11-04, b): staff tick three
+ * boxes; the one rights box ("rights_ok") stands for both
+ * not_someone_elses_work and rights_declared, so no migration.
+ */
+export const APPROVED_CHECKLIST = {
+  cover_is_fine: true,
+  file_opens: true,
+  not_someone_elses_work: true,
+  rights_declared: true,
+} as const;
 
 export type ApproveFormValidation =
   | {

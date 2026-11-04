@@ -134,6 +134,17 @@ describe("BookPricingForm", () => {
     expect(html).toContain("Plotësoni 4 gjëra më lart");
   });
 
+  // BD15 P5b-3a (Renato 11-04, Q2 a): a taken-down book's price still
+  // saves, but Send is disabled with Librum's reason in place of the
+  // to-do count.
+  it("a taken-down book: Send disabled with the refusal note, Save still there", () => {
+    const html = render({ sendRefusedNote: "Librum e hoqi këtë libër, prandaj nuk mund ta dërgoni tani." });
+    expect(button(html, "Dërgo për shqyrtim")).toContain('disabled=""');
+    expect(html).toContain("Librum e hoqi këtë libër, prandaj nuk mund ta dërgoni tani.");
+    expect(html).not.toContain("Plotësoni 2 gjëra më lart");
+    expect(html).toContain('value="save"');
+  });
+
   it("D1: on first paint the two boxes are unticked, so Send is a dashed, disabled button", () => {
     const html = render();
     const send = button(html, "Dërgo për shqyrtim");
@@ -190,7 +201,10 @@ describe("BookPricingForm", () => {
     expect(box("ACCEPT_TERMS_FIELD")).toContain("onChange={(e) => setTerms(e.target.checked)}");
     expect(src).toContain("pricingTodo(bookId, missing, { worldwide, terms })");
     // BD15 P5b-2: a live book with no waiting change has nothing to send.
-    expect(src).toContain("const sendBlocked = todo.length > 0 || (live !== null && !live.hasChanges);");
+    // P5b-3a: a taken-down book is never sent (sendRefusedNote).
+    expect(src).toContain(
+      "const sendBlocked = sendRefusedNote !== null || todo.length > 0 || (live !== null && !live.hasChanges);",
+    );
     expect(src).toContain("primaryBlocked={sendBlocked}");
   });
 

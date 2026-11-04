@@ -238,7 +238,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "This request is no longer awaiting review -- it may have already been reviewed or cancelled.",
   "This review no longer exists.",
   "This staff member no longer exists.",
-  "Tick all four checks before you approve.",
+  "Tick all three checks before you approve.",
   "Title is required.",
   "Title must be 200 characters or fewer.",
   "Të dhënat bankare nuk u ruajtën. Kontrolloni të dhënat dhe provoni përsëri.",
@@ -288,7 +288,6 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Çdo lidhje mund të shtohet vetëm një herë.",
   AUTH_GENERIC_ERROR_MESSAGE,
   "Disa fusha nuk janë plotësuar si duhet. Kontrolloni të dhënat dhe provoni përsëri.",
-  "Ky libër është i publikuar ose në shqyrtim, prandaj ndryshohet këtu.",
   "Shtoni dorëshkrimin dhe ballinën para se ta dërgoni për shqyrtim.",
   "Të dhënat u ruajtën, por kontribuesit jo të gjithë. Kontrolloni listën dhe ruajeni përsëri.",
   "Të dhënat u ruajtën, por zgjedhja e të drejtave jo. Zgjidheni përsëri dhe ruajeni.",
@@ -362,6 +361,8 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Nuk kishte ndryshime për të hedhur.",
   "Ndryshimet u dërguan për shqyrtim. Libri mbetet në shitje siç është derisa Librum t'i miratojë.",
   "Shqyrtimi u anulua. Libri mbetet në shitje; ndryshimet tuaja presin përsëri te redaktori.",
+  // BD15 P5b-3a: "Hiqeni nga shitja" in the editor's Veprime box.
+  "Libri u hoq nga shitja. Tani është draft.",
 ]);
 
 type QueryValue = string | string[] | undefined;

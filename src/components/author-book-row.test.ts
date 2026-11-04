@@ -108,6 +108,8 @@ describe("AuthorBookRow: In review and sent back (ADMIN-3)", () => {
 describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
   const LIVE = { ...BOOK, status: "published" as const, price_all: 499 };
   const editBase = `/dashboard/books/${BOOK.id}/edit`;
+  // BD15 P5b-3a: the old edit page is retired; every book opens the editor.
+  const editor = `/dashboard/books/${BOOK.id}/editor?tab=`;
 
   it("a live book: Edit plus ···, and every menu item including View and Unpublish", () => {
     const html = render({ book: LIVE, missing: [] });
@@ -116,16 +118,18 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     expect(html).toContain(">···<");
     expect(html).not.toContain(">Më shumë veprime<");
     for (const [label, href] of [
-      ["Ndryshoni të dhënat", `${editBase}#details`],
-      ["Ndryshoni dorëshkrimin ose ballinën", `${editBase}#files`],
-      ["Ndryshoni çmimin", `${editBase}#pricing`],
+      ["Ndryshoni të dhënat", `${editor}details`],
+      ["Ndryshoni dorëshkrimin ose ballinën", `${editor}content`],
+      ["Ndryshoni çmimin", `${editor}pricing`],
       ["Shikojeni në Librari", `/libra/${BOOK.id}`],
-      ["Hiqeni nga publikimi", `${editBase}#publishing`],
+      ["Hiqeni nga shitja", `${editor}details#veprime`],
     ]) {
       expect(html).toContain(`href="${href}"`);
       expect(html).toContain(`>${label}<`);
     }
     expect(html).toContain(">Fshini<");
+    expect(html).not.toContain(`href="${editBase}"`);
+    expect(html).not.toContain(`href="${editBase}#`);
   });
 
   it("the separate View button is gone: /libra/<id> appears once, inside the menu", () => {
@@ -138,7 +142,6 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
   // item on its own tab; a book in review is read-only.
   it("a plain draft: the button and the three edit items open the editor's tabs", () => {
     const html = render();
-    const editor = `/dashboard/books/${BOOK.id}/editor?tab=`;
     expect(html).toContain(`href="${editor}details"`);
     expect(html).toContain(`href="${editor}content"`);
     expect(html).toContain(`href="${editor}pricing"`);
@@ -146,21 +149,24 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     expect(html).not.toContain(`href="${editBase}#`);
   });
 
-  it("in review: Shikoni çfarë dërguat (the read-only edit page) and no edit items", () => {
+  it("in review: Shikoni çfarë dërguat (the editor, read-only) and no edit items", () => {
     const html = render({ review: { inReview: true, sentBack: null } });
-    expect(html).toContain(`href="${editBase}"`);
+    expect(html).toContain(`href="${editor}details"`);
     expect(html).toContain(">Shikoni çfarë dërguat<");
     for (const label of ["Ndryshoni të dhënat", "Ndryshoni dorëshkrimin ose ballinën", "Ndryshoni çmimin"]) {
       expect(html).not.toContain(`>${label}<`);
     }
   });
 
-  it("a taken-down draft keeps the edit page links", () => {
+  // BD15 P5b-3a (Renato 11-04, Q2 a): a taken-down book is edited in the
+  // editor like a draft.
+  it("a taken-down draft opens the editor's tabs", () => {
     const html = render({
       takedown: { takenDownAt: "2026-10-19T10:00:00Z", reason: "copyright", message: "Proof please", bundleTitles: [] },
     });
-    expect(html).toContain(`href="${editBase}#files"`);
-    expect(html).not.toContain("/editor?tab=");
+    expect(html).toContain(`href="${editor}content"`);
+    expect(html).not.toContain(`href="${editBase}"`);
+    expect(html).not.toContain(`href="${editBase}#`);
   });
 
   it("a draft: Vazhdoni përgatitjen plus ···, no View or Unpublish, Delete kept", () => {
@@ -169,7 +175,7 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     expect(html).toContain(`aria-label="Më shumë veprime për ${BOOK.title}"`);
     expect(html).toContain(">Ndryshoni të dhënat<");
     expect(html).not.toContain("Shikojeni në Librari");
-    expect(html).not.toContain(">Hiqeni nga publikimi<");
+    expect(html).not.toContain(">Hiqeni nga shitja<");
     expect(html).toContain(">Fshini<");
   });
 
@@ -206,7 +212,7 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
 
   it("a draft keeps no Unpublish and keeps Delete", () => {
     const html = render();
-    expect(html).not.toContain(">Hiqeni nga publikimi<");
+    expect(html).not.toContain(">Hiqeni nga shitja<");
     expect(html).toContain(">Fshini<");
   });
 

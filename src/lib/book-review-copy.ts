@@ -79,6 +79,8 @@ function withFinalStop(text: string): string {
 }
 
 export const QUESTIONS_LINE = `Pyetje? Na shkruani te ${SUPPORT_EMAIL}`;
+export const SENT_BACK_FIX_LINE = "Rregullojeni dhe dërgojeni përsëri për shqyrtim.";
+export const LIVE_SENT_BACK_FIX_LINE = "Rregullojini dhe dërgojini përsëri për shqyrtim.";
 
 /**
  * F: "Librum sent this book back on <date>. Reason: <label>. <message>
@@ -88,11 +90,16 @@ export const QUESTIONS_LINE = `Pyetje? Na shkruani te ${SUPPORT_EMAIL}`;
 export function buildAuthorSentBackNoticeLines(
   notice: AuthorSentBackNotice,
   formatDate: (iso: string) => string,
+  // BD15 P5b-3a (Renato 11-04): a live book's sent-back CHANGES -- the
+  // book itself stays on sale, so the note names the changes.
+  live = false,
 ): string[] {
   return [
-    `Librum jua ktheu këtë libër për ndryshime më ${formatDate(notice.sentBackAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`,
+    live
+      ? `Librum jua ktheu ndryshimet më ${formatDate(notice.sentBackAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`
+      : `Librum jua ktheu këtë libër për ndryshime më ${formatDate(notice.sentBackAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`,
     withFinalStop(notice.message),
-    "Rregullojeni dhe dërgojeni përsëri për shqyrtim.",
+    live ? LIVE_SENT_BACK_FIX_LINE : SENT_BACK_FIX_LINE,
     QUESTIONS_LINE,
   ];
 }
@@ -156,8 +163,11 @@ export const IN_REVIEW_READ_ONLY_NOTE =
 export const REVIEW_CHECKLIST_ITEMS = [
   { key: "cover_is_fine", label: "The cover is fine" },
   { key: "file_opens", label: "The book file opens" },
-  { key: "not_someone_elses_work", label: "It isn't someone else's work" },
-  { key: "rights_declared", label: "The author declared their rights" },
+  // BD15 P5b-3a (Renato 11-04, b): one box for the rights. Ticking it
+  // records both stored checks (not_someone_elses_work, rights_declared),
+  // which admin_approve_book_review still requires -- see
+  // APPROVED_CHECKLIST in book-admin-logic.ts.
+  { key: "rights_ok", label: "The author declared their rights and it isn't someone else's work" },
 ] as const;
 export type ReviewChecklistKey = (typeof REVIEW_CHECKLIST_ITEMS)[number]["key"];
 
