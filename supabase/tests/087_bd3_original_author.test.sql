@@ -253,16 +253,16 @@ begin
   perform pg_temp.assert(to_regprocedure('public.book_review_approval_valid(uuid,text,text)') is null,
     'part4: the 3-argument approval function is gone');
   perform pg_temp.assert(
-    not has_function_privilege('anon', 'public.book_review_approval_valid(uuid,text,text,text)', 'EXECUTE')
-    and not has_function_privilege('authenticated', 'public.book_review_approval_valid(uuid,text,text,text)', 'EXECUTE')
-    and not has_function_privilege('service_role', 'public.book_review_approval_valid(uuid,text,text,text)', 'EXECUTE')
-    and (select prosecdef from pg_proc where oid = 'public.book_review_approval_valid(uuid,text,text,text)'::regprocedure)
-    and (select proconfig from pg_proc where oid = 'public.book_review_approval_valid(uuid,text,text,text)'::regprocedure)
+    not has_function_privilege('anon', 'public.book_review_approval_valid(uuid,text,text,text,text,boolean)', 'EXECUTE')
+    and not has_function_privilege('authenticated', 'public.book_review_approval_valid(uuid,text,text,text,text,boolean)', 'EXECUTE')
+    and not has_function_privilege('service_role', 'public.book_review_approval_valid(uuid,text,text,text,text,boolean)', 'EXECUTE')
+    and (select prosecdef from pg_proc where oid = 'public.book_review_approval_valid(uuid,text,text,text,text,boolean)'::regprocedure)
+    and (select proconfig from pg_proc where oid = 'public.book_review_approval_valid(uuid,text,text,text,text,boolean)'::regprocedure)
         = array['search_path=""'],
-    'part4: the 4-argument approval function is internal, SECURITY DEFINER, search_path empty');
+    'part4: the approval function (six arguments since BD15 P5b-1) is internal, SECURITY DEFINER, search_path empty');
   perform pg_temp.assert((select pg_get_triggerdef(oid) from pg_trigger where tgname = 'books_refuse_live_file_change')
-      like '%BEFORE UPDATE OF file_path, cover_path, original_author ON public.books FOR EACH ROW%',
-    'part4: the live-files guard also fires on original_author');
+      like '%BEFORE UPDATE OF file_path, cover_path, original_author, description, is_adult ON public.books FOR EACH ROW%',
+    'part4: the live-files guard also fires on original_author (and since BD15 P5b-1 description, is_adult)');
   perform pg_temp.assert(
     (select not a.attnotnull and pg_catalog.format_type(a.atttypid, a.atttypmod) = 'text'
        from pg_catalog.pg_attribute a
@@ -345,10 +345,12 @@ end $$;
 select pg_temp.assert(
   public.book_review_approval_valid('e0871000-0000-4000-8000-0000000000a4',
     (select file_path from public.books where id = 'e0871000-0000-4000-8000-0000000000a4'),
-    (select cover_path from public.books where id = 'e0871000-0000-4000-8000-0000000000a4'), 'Homer')
+    (select cover_path from public.books where id = 'e0871000-0000-4000-8000-0000000000a4'), 'Homer',
+    (select description from public.books where id = 'e0871000-0000-4000-8000-0000000000a4'), (select is_adult from public.books where id = 'e0871000-0000-4000-8000-0000000000a4'))
   and not public.book_review_approval_valid('e0871000-0000-4000-8000-0000000000a4',
     (select file_path from public.books where id = 'e0871000-0000-4000-8000-0000000000a4'),
-    (select cover_path from public.books where id = 'e0871000-0000-4000-8000-0000000000a4'), null),
+    (select cover_path from public.books where id = 'e0871000-0000-4000-8000-0000000000a4'), null,
+    (select description from public.books where id = 'e0871000-0000-4000-8000-0000000000a4'), (select is_adult from public.books where id = 'e0871000-0000-4000-8000-0000000000a4')),
   'part4: the approval function compares the original author like the file and cover (null is not ''Homer'')');
 
 do $$
