@@ -881,7 +881,7 @@ function BookGrid({
         description="Kthehuni së shpejti."
         action={
           <Link href="/" className={TEXT_LINK_CLASSES}>
-            Kthehuni te Kryefaqja
+            Kthehuni në faqen kryesore
           </Link>
         }
       />

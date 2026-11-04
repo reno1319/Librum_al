@@ -299,7 +299,7 @@ export default async function EditBookPage({
         storageKey={`librum:edit-book-draft:${book.id}`}
         fieldNames={EDIT_BOOK_DRAFT_FIELDS}
         restore={Boolean(error)}
-        notice="Ndryshimet tuaja nuk u ruajtën, por ajo që shkruat është ende në formularin më poshtë. Rregulloni problemin më sipër dhe ruajeni përsëri. Kopertinën ose dorëshkrimin që zgjodhët duhet ta zgjidhni përsëri."
+        notice="Ndryshimet tuaja nuk u ruajtën, por ajo që shkruat është ende në formularin më poshtë. Rregulloni problemin më sipër dhe ruajeni përsëri. Ballinën ose dorëshkrimin që zgjodhët duhet ta zgjidhni përsëri."
       />
       {success && (
         <Alert variant="success" className="mt-4">

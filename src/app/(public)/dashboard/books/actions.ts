@@ -162,7 +162,7 @@ const MISSING_DESCRIPTION_SHORT_MESSAGE = "Shtoni një përshkrim para publikimi
 // its success line, as for the missing description.
 const MISSING_RIGHTS_MESSAGE = "Zgjidhni të drejtat para publikimit.";
 // BD15 P2: a draft from the new editor without its manuscript or cover.
-const MISSING_FILES_MESSAGE = "Shtoni dorëshkrimin dhe kopertinën para se ta dërgoni për shqyrtim.";
+const MISSING_FILES_MESSAGE = "Shtoni dorëshkrimin dhe ballinën para se ta dërgoni për shqyrtim.";
 
 // F4 (D3): the existing generic refusal, also used when the rights
 // choice cannot be read at all (before the migration, or a read error).
@@ -565,7 +565,7 @@ async function resolveCoverInput(
     // BOOK-STORAGE-MUTATION-AUTH-1: exact temporary-key shape, as for
     // the manuscript above.
     if (!isOwnTemporaryCoverUploadPath(tempPath, userId)) {
-      redirect(withQuery(errorPath, "error", "Kopertina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri"));
+      redirect(withQuery(errorPath, "error", "Ballina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri"));
     }
 
     const { data, error: downloadError } = await supabase.storage
@@ -573,7 +573,7 @@ async function resolveCoverInput(
       .download(tempPath);
     if (downloadError || !data) {
       console.error("resolveCoverInput: temp cover download failed:", downloadError);
-      redirect(withQuery(errorPath, "error", "Kopertina e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri"));
+      redirect(withQuery(errorPath, "error", "Ballina e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri"));
     }
 
     bytes = Buffer.from(await data!.arrayBuffer());
@@ -590,7 +590,7 @@ async function resolveCoverInput(
   // browser's own pre-upload check) alone for bytes that came back
   // from a temp Storage download.
   if (bytes.length > MAX_COVER_BYTES) {
-    redirect(withQuery(errorPath, "error", "Imazhi i kopertinës duhet të jetë nën 5 MB"));
+    redirect(withQuery(errorPath, "error", "Imazhi i ballinës duhet të jetë nën 5 MB"));
   }
 
   // The SAME authoritative byte-signature check every cover has always
@@ -608,7 +608,7 @@ async function resolveCoverInput(
   // the stored cover is always the shrunk JPEG, never the raw upload.
   const shrunk = await shrinkImageToJpeg(bytes, BOOK_COVER_SIZE);
   if (!shrunk) {
-    redirect(withQuery(errorPath, "error", "Kopertina e ngarkuar nuk u lexua dot. Provoni përsëri"));
+    redirect(withQuery(errorPath, "error", "Ballina e ngarkuar nuk u lexua dot. Provoni përsëri"));
   }
   const { extension, contentType } = resolveVerifiedCoverStorageDetails("jpeg");
 
@@ -1126,7 +1126,7 @@ export async function createBook(formData: FormData) {
   if (coverError) {
     console.error("createBook: cover upload failed:", coverError);
     redirect(
-      `/dashboard/books/new?error=${encodeURIComponent("Imazhi i kopertinës nuk u ngarkua dot. Provoni përsëri")}`,
+      `/dashboard/books/new?error=${encodeURIComponent("Imazhi i ballinës nuk u ngarkua dot. Provoni përsëri")}`,
     );
   }
 
@@ -1867,7 +1867,7 @@ export async function updateBook(bookId: string, formData: FormData) {
       }
       redirect(
         upload.kind === "cover"
-          ? `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Imazhi i kopertinës nuk u ngarkua dot. Provoni përsëri")}`
+          ? `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Imazhi i ballinës nuk u ngarkua dot. Provoni përsëri")}`
           : `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Dorëshkrimi nuk u ngarkua dot. Provoni përsëri")}`,
       );
     }
@@ -2293,7 +2293,7 @@ export async function saveBookContent(bookId: string, formData: FormData) {
       await removeNewUploads();
       fail(
         upload.kind === "cover"
-          ? "Imazhi i kopertinës nuk u ngarkua dot. Provoni përsëri"
+          ? "Imazhi i ballinës nuk u ngarkua dot. Provoni përsëri"
           : "Dorëshkrimi nuk u ngarkua dot. Provoni përsëri",
       );
     }

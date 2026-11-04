@@ -20,7 +20,6 @@ describe("buildSiteHeaderNav", () => {
     });
 
     expect(nav.primaryLinks.map((l) => l.label)).toEqual([
-      "Kryefaqja",
       "Rreth nesh",
       "Si funksionon",
       "Fitimet",

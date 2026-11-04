@@ -67,7 +67,7 @@ import type { RightsBasis, Series } from "@/lib/types";
 // payouts are set up) leaves the author with a safely saved draft, not
 // a failed submission. See SaveButtons below for the native
 // name="intent" value="draft"|"publish" submitter mechanism.
-const STEPS = ["Të dhënat", "Dorëshkrimi dhe kopertina", "Çmimi"];
+const STEPS = ["Të dhënat", "Dorëshkrimi dhe ballina", "Çmimi"];
 
 // Client-side-only bounds, purely a UX nicety mirroring actions.ts's own
 // authoritative SUBTITLE_MAX_LENGTH/PUBLISHER_MAX_LENGTH/EDITION_MAX_LENGTH
@@ -96,7 +96,7 @@ const PAID_PRICE_ERROR = `Shkruani çmimin në lekë: një numër i plotë nga $
 // FIX1 (X8): Renato's W-B wording, one message beside each field.
 const TITLE_ERROR = "Shtoni një titull.";
 const GENRE_ERROR = "Zgjidhni një zhanër.";
-const FILES_ERROR = "Shtoni edhe kopertinën, edhe skedarin e dorëshkrimit për të vazhduar.";
+const FILES_ERROR = "Shtoni edhe ballinën, edhe skedarin e dorëshkrimit për të vazhduar.";
 // FIX1 (X16): shown in Readiness while the description is empty. True
 // here: Publish book always saves the draft before the publish check.
 const MISSING_DESCRIPTION_LINE =
@@ -719,7 +719,7 @@ export function UploadWizard({
                 <CoverField authorId={authorId} onCoverChange={setCover} onUploadExpired={goToFilesStep} />
                 {/* FIX1 (X10): the tip moved here from the Tips box. */}
                 <p className="text-sm text-muted">
-                  Kopertina duket më mirë si imazh vertikal, të paktën 1000px i lartë.
+                  Ballina duket më mirë si imazh vertikal, të paktën 1000px i lartë.
                 </p>
               </div>
 

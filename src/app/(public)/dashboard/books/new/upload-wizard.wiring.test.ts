@@ -30,7 +30,7 @@ describe("UploadWizard: actual step order and indicator wiring", () => {
     expect(match).not.toBeNull();
     const steps = match![1].split(",").map((s) => s.trim().replace(/^"|"$/g, "")).filter(Boolean);
     // REDESIGN STEP 5: Renato's three steps, in his own words.
-    expect(steps).toEqual(["Të dhënat", "Dorëshkrimi dhe kopertina", "Çmimi"]);
+    expect(steps).toEqual(["Të dhënat", "Dorëshkrimi dhe ballina", "Çmimi"]);
   });
 
   it("the rendered step indicator (<ol>...STEPS.map...) consumes that same STEPS array -- not a parallel unused constant", () => {
@@ -264,9 +264,9 @@ describe("UploadWizard: Step 2 (Cover & Manuscript) gate and ready-state copy", 
     );
   });
 
-  it("CoverField shows persistent \"Kopertina gati\" text and relabels to \"Zëvendësoni kopertinën\" once ready", () => {
-    expect(coverFieldSource).toContain("Kopertina gati");
-    expect(coverFieldSource).toContain("Zëvendësoni kopertinën");
+  it("CoverField shows persistent \"Ballina gati\" text and relabels to \"Zëvendësoni ballinën\" once ready", () => {
+    expect(coverFieldSource).toContain("Ballina gati");
+    expect(coverFieldSource).toContain("Zëvendësoni ballinën");
   });
 
   it("ManuscriptField shows persistent \"Dorëshkrimi gati\" text and relabels to \"Zëvendësoni dorëshkrimin\" once ready", () => {
@@ -424,13 +424,13 @@ describe("UploadWizard: FIX1 per-field messages and wording", () => {
 
   it("keeps the step-2 sentence, now under the file fields", () => {
     expect(source).toContain(
-      'const FILES_ERROR = "Shtoni edhe kopertinën, edhe skedarin e dorëshkrimit për të vazhduar.";',
+      'const FILES_ERROR = "Shtoni edhe ballinën, edhe skedarin e dorëshkrimit për të vazhduar.";',
     );
     expect(source.indexOf("{shownFilesError && (")).toBeGreaterThan(source.indexOf("<ManuscriptField"));
   });
 
   it("moves the cover tip under the cover field and out of the Tips box", () => {
-    const tip = "Kopertina duket më mirë si imazh vertikal, të paktën 1000px i lartë.";
+    const tip = "Ballina duket më mirë si imazh vertikal, të paktën 1000px i lartë.";
     expect(source.match(new RegExp(tip.replace(/\./g, "\\."), "g"))?.length).toBe(1);
     expect(source.indexOf(tip)).toBeGreaterThan(source.indexOf("<CoverField"));
     expect(source.indexOf(tip)).toBeLessThan(source.indexOf("<ManuscriptField"));

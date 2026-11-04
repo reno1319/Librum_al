@@ -60,9 +60,9 @@ type Status = "idle" | "uploading" | "success" | "error";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MANUSCRIPTS_BUCKET = "manuscripts";
-const GENERIC_ERROR = "Kopertina juaj nuk u ngarkua. Provoni përsëri.";
-const TOO_LARGE_ERROR = "Kjo kopertinë e kalon kufirin prej 5 MB.";
-const UNSUPPORTED_FORMAT_ERROR = "Format kopertine i papranuar. Përdorni JPEG ose PNG.";
+const GENERIC_ERROR = "Ballina juaj nuk u ngarkua. Provoni përsëri.";
+const TOO_LARGE_ERROR = "Kjo ballinë e kalon kufirin prej 5 MB.";
+const UNSUPPORTED_FORMAT_ERROR = "Ky format nuk pranohet për ballinën. Përdorni JPEG ose PNG.";
 // FIX1 (X10): Renato's W-C pick -- warn, but allow.
 const MIN_RECOMMENDED_COVER_HEIGHT = 1000;
 const SMALL_COVER_WARNING = "Ky imazh është më pak se 1000px i lartë, ndaj mund të duket i turbullt.";
@@ -72,7 +72,7 @@ const RECOMMENDED_COVER_HINT = "Përmasa e rekomanduar: 1600 × 2560 px (raport 
 const COVER_RATIO_MIN = 1.4;
 const COVER_RATIO_MAX = 1.8;
 const COVER_RATIO_WARNING =
-  "Kjo kopertinë nuk e ka raportin 1 : 1,6, ndaj në disa vende mund të duket e prerë.";
+  "Kjo ballinë nuk e ka raportin 1 : 1,6, ndaj në disa vende mund të duket e prerë.";
 export function coverRatioIsOff(width: number, height: number): boolean {
   if (!(width > 0 && height > 0)) return false;
   const ratio = height / width;
@@ -361,7 +361,7 @@ export function CoverField({
 
       {isReplaceMode && (
         <>
-          <p className="text-sm font-semibold text-foreground">Kopertina aktuale</p>
+          <p className="text-sm font-semibold text-foreground">Ballina aktuale</p>
           {displayedPreview ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -377,7 +377,7 @@ export function CoverField({
 
       <label className={PICKER_BOX_CLASSES}>
         <span className="font-semibold text-foreground">
-          {status === "success" ? "Zëvendësoni kopertinën" : isReplaceMode ? "Zëvendësoni imazhin e kopertinës" : "Imazhi i kopertinës"}
+          {status === "success" ? "Zëvendësoni ballinën" : isReplaceMode ? "Zëvendësoni imazhin e ballinës" : "Imazhi i ballinës"}
         </span>
         <input
           type="file"
@@ -388,7 +388,7 @@ export function CoverField({
         />
         <span className="text-sm text-muted">
           JPEG ose PNG · deri në 5 MB. {RECOMMENDED_COVER_HINT}
-          {isReplaceMode ? " Lëreni bosh për të mbajtur kopertinën aktuale." : ""}
+          {isReplaceMode ? " Lëreni bosh për të mbajtur ballinën aktuale." : ""}
         </span>
       </label>
 
@@ -403,13 +403,13 @@ export function CoverField({
 
       {status === "uploading" && (
         <p role="status" className="text-sm text-muted">
-          Po ngarkohet kopertina…
+          Po ngarkohet ballina…
         </p>
       )}
 
       {status === "success" && readyFileName && (
         <p role="status" className="text-sm font-semibold text-primary">
-          Kopertina gati: {readyFileName}
+          Ballina gati: {readyFileName}
         </p>
       )}
 

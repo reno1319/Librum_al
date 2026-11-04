@@ -423,11 +423,11 @@ function WhyLibrumSection() {
 const PUBLISHING_STEPS: { title: string; body: string }[] = [
   {
     title: "Përgatitni dorëshkrimin",
-    body: "Mbajeni gati librin e përfunduar si skedar EPUB, ose si skedar DOCX që Librum e kthen në EPUB për ju, bashkë me një imazh për kopertinën.",
+    body: "Mbajeni gati librin e përfunduar si skedar EPUB, ose si skedar DOCX që Librum e kthen në EPUB për ju, bashkë me një imazh për ballinën.",
   },
   {
     title: "Krijoni librin",
-    body: "Shtoni titullin, përshkrimin, zhanrin, kopertinën dhe të dhënat e botimit.",
+    body: "Shtoni titullin, përshkrimin, zhanrin, ballinën dhe të dhënat e botimit.",
   },
   {
     title: "Vendosni çmimin dhe botojeni",

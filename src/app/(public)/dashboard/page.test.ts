@@ -140,7 +140,7 @@ describe("DashboardPage: step 4 dashboard", () => {
     expect(html).toContain("Të gjithë (3)");
     expect(html).toContain("Të publikuar (2)");
     expect(html).toContain("Drafte (1)");
-    expect(html).toContain("Për t&#x27;u bërë: Shtoni një kopertinë");
+    expect(html).toContain("Për t&#x27;u bërë: Shtoni një ballinë");
     expect(html).not.toContain("Të dhënat e shitjeve nuk u ngarkuan");
   });
 

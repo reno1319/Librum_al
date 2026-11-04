@@ -76,7 +76,7 @@ const LEAVE_OUT: string[] = [
   "Kutitë e tekstit (Text Box): teksti i tyre zhvendoset pas paragrafit ku ndodhen;",
   // Renato 1 Nov (a, from Amazon KDP's ebook rules): Librum already puts
   // the uploaded cover in every ebook (W7), so a pasted one shows twice.
-  "Kopertinën: mos e vendosni brenda dorëshkrimit; ngarkojeni veçmas, te fusha “Imazhi i kopertinës”.",
+  "Ballinën: mos e vendosni brenda dorëshkrimit; ngarkojeni veçmas, te fusha “Imazhi i ballinës”.",
 ];
 
 export default function WordGuidePage() {

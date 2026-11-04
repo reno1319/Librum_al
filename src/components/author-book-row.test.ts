@@ -117,7 +117,7 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     expect(html).not.toContain(">Më shumë veprime<");
     for (const [label, href] of [
       ["Ndryshoni të dhënat", `${editBase}#details`],
-      ["Ndryshoni dorëshkrimin ose kopertinën", `${editBase}#files`],
+      ["Ndryshoni dorëshkrimin ose ballinën", `${editBase}#files`],
       ["Ndryshoni çmimin", `${editBase}#pricing`],
       ["Shikojeni në Librari", `/libra/${BOOK.id}`],
       ["Hiqeni nga publikimi", `${editBase}#publishing`],
@@ -150,7 +150,7 @@ describe("AuthorBookRow: the ··· menu (PHONE PASS)", () => {
     const html = render({ review: { inReview: true, sentBack: null } });
     expect(html).toContain(`href="${editBase}"`);
     expect(html).toContain(">Shikoni çfarë dërguat<");
-    for (const label of ["Ndryshoni të dhënat", "Ndryshoni dorëshkrimin ose kopertinën", "Ndryshoni çmimin"]) {
+    for (const label of ["Ndryshoni të dhënat", "Ndryshoni dorëshkrimin ose ballinën", "Ndryshoni çmimin"]) {
       expect(html).not.toContain(`>${label}<`);
     }
   });

@@ -38,6 +38,9 @@ export const metadata: Metadata = {
 // show on the first page of every downloaded book, not only in its
 // metadata. Privacy now has its own date (Renato 1 Nov, "3. a"),
 // PRIVACY_LAST_UPDATED in src/lib/policy-dates.ts.
+// D2 (Renato 11-04): "kopertinat" -> "ballinat" (twice); nothing else
+// changes. PRIVACY_LAST_UPDATED moves to the day this text goes live on
+// Production (the BD15 release sets it).
 // BD13 (Renato 2 Nov, "c"): reviews show after staff approval, with
 // the review name, and an author account's review carries the public
 // "Autor në Librum" tag.
@@ -91,7 +94,7 @@ export default function PrivacyPage() {
                 version i skedarit u shkarkua).
               </p>
               <p className="mt-2">
-                <strong>Si autor:</strong> librat, kopertinat dhe skedarët e
+                <strong>Si autor:</strong> librat, ballinat dhe skedarët e
                 dorëshkrimeve që ngarkoni, pseudonimet dhe profili juaj
                 publik i autorit, dhe deklaratat tuaja të të drejtave. Nëse
                 shtoni të dhënat bankare për pagesat e autorëve (emrin e
@@ -207,7 +210,7 @@ export default function PrivacyPage() {
               <ul className="mt-2 list-disc pl-5">
                 <li>
                   <strong>Supabase</strong> — hyrja në llogari, baza jonë e
-                  të dhënave dhe ruajtja e skedarëve për kopertinat dhe
+                  të dhënave dhe ruajtja e skedarëve për ballinat dhe
                   dorëshkrimet.
                 </li>
                 <li>

@@ -664,7 +664,7 @@ describe("temporary upload references", () => {
     async (_label, value) => {
       const f = editForm();
       f.set("coverStoragePath", value);
-      expect(await run(updateBook(BOOK_ID, f))).toContain(`error=${encodeURIComponent("Kopertina e zgjedhur nuk vlen më.")}`);
+      expect(await run(updateBook(BOOK_ID, f))).toContain(`error=${encodeURIComponent("Ballina e zgjedhur nuk vlen më.")}`);
       expect(storageCalls).toEqual([]);
     },
   );
@@ -1088,7 +1088,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   it("a new-key upload that fails stops before the row update", async () => {
     failUploadsTo = new Set(["covers:*"]);
     const target = await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
-    expect(target).toBe(`/dashboard/books/${BOOK_ID}/edit?error=Imazhi%20i%20kopertin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri`);
+    expect(target).toBe(`/dashboard/books/${BOOK_ID}/edit?error=Imazhi%20i%20ballin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri`);
     expect(dbWrites).toEqual([]);
     expect(removals()).toEqual([]);
   });
@@ -1100,7 +1100,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
 // review gets its snapshot replaced; text-only edits are unchanged.
 describe("updateBook and review (ADMIN-3)", () => {
   const SAVED_LIVE = `/dashboard?success=${encodeURIComponent(
-    "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
+    "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose ballinën e re.",
   )}`;
   const fns = () => bookReviewsDoubleState.calls.map((c) => c.fn);
 
@@ -1138,7 +1138,7 @@ describe("updateBook and review (ADMIN-3)", () => {
     bundleBooksResult = { data: [{ bundle_id: "b1" }], error: null };
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(
       `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(
-        "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose kopertinën.",
+        "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose ballinën.",
       )}`,
     );
     expect(storageCalls).toEqual([]);
@@ -1426,7 +1426,7 @@ describe("W7: the cover inside a Librum-made ebook", () => {
     await storeOwnLibrumEbook();
     failDownloadsOf = new Set([`manuscripts:${OWN_EPUB}`]);
     const liveSaved = `/dashboard?success=${encodeURIComponent(
-      "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
+      "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose ballinën e re.",
     )}`;
     expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(`${liveSaved}${WARNING}`);
     expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG, status: "draft" });
