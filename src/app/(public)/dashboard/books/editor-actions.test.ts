@@ -29,9 +29,13 @@ let tables: Record<string, Row[]>;
 let catalogWrites: { op: string; payload: Row; filters: [string, unknown][] }[];
 let sessionContributorWrites: { op: string; payload: unknown }[];
 let reviewPending: boolean;
+// Audit r1, F4: what a re-read after a failed later step sees (sent from another tab).
+let waitingAfterSave: boolean;
+let rightsRecordOk: boolean;
 let rightsBasis: string | null;
 let recorded: string[];
 let failContributorInsert: { code: string } | null;
+let failBookUpdate: { code: string } | null;
 let currentUser: string | null;
 
 function query(table: string, scope: "session" | "writer") {
@@ -61,6 +65,7 @@ function query(table: string, scope: "session" | "writer") {
     if (op === "update") {
       const rows = visible();
       catalogWrites.push({ op, payload: payload as Row, filters: [...filters] });
+      if (table === "books" && failBookUpdate) return { data: null, error: failBookUpdate };
       rows.forEach((r) => Object.assign(r, payload));
       return { data: rows.map((r) => ({ id: r.id })), error: null };
     }
@@ -107,13 +112,16 @@ vi.mock("@/lib/catalog-write-client", () => ({
 vi.mock("@/lib/pen-name-write-client", () => ({
   resolveOwnPenNameId: async () => ({ ok: true, penNameId: PEN }),
 }));
-vi.mock("@/lib/book-reviews", () => ({
+vi.mock("@/lib/book-reviews", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   getBookReviewState: async () => ({ kind: "ok", pending: reviewPending, approvalValid: false, latestSentBack: null }),
+  isWaitingForReview: async () => waitingAfterSave,
 }));
 vi.mock("@/lib/book-rights", () => ({
   getRightsDeclarationState: async () =>
     rightsBasis ? { kind: "present", declaration: { basis: rightsBasis } } : { kind: "none" },
   recordRightsDeclaration: async (_bookId: string, basis: string) => {
+    if (!rightsRecordOk) return { ok: false, reason: "error" };
     recorded.push(basis);
     return { ok: true, declaration: { basis } };
   },
@@ -170,9 +178,12 @@ beforeEach(() => {
   catalogWrites = [];
   sessionContributorWrites = [];
   reviewPending = false;
+  waitingAfterSave = false;
+  rightsRecordOk = true;
   rightsBasis = null;
   recorded = [];
   failContributorInsert = null;
+  failBookUpdate = null;
   currentUser = USER;
 });
 
@@ -283,6 +294,17 @@ describe("saveBookDetails: an existing draft", () => {
     expect(catalogWrites).toEqual([]);
   });
 
+  // BD15 P5a (P3 audit F3): sent for review from another tab after the
+  // check; the database refuses the write (LB490).
+  it("a write refused as in review (LB490) goes to the read-only edit page; contributors untouched", async () => {
+    failBookUpdate = { code: "LB490" };
+    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toBe(
+      `/dashboard/books/${BOOK}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`,
+    );
+    expect(sessionContributorWrites).toEqual([]);
+    expect(recorded).toEqual([]);
+  });
+
   it("keeps the title and pen name of a book that was published once (N1 lock)", async () => {
     seed({ published_at: "2026-10-01T00:00:00Z" });
     await redirectOf(saveBookDetails(BOOK, form({ title: "Changed", penNameId: PEN_2, subtitle: "Ok" })));
@@ -331,6 +353,31 @@ describe("saveBookDetails: contributors and rights", () => {
     );
     expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK}/editor\\?tab=details&error=`));
     expect(bookRow()).toMatchObject({ title: "Saved" });
+  });
+
+  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`;
+
+  it("a contributor failure on a book sent for review meanwhile goes to the read-only edit page", async () => {
+    failContributorInsert = { code: "LB490" };
+    waitingAfterSave = true;
+    expect(
+      await redirectOf(
+        saveBookDetails(BOOK, form({ title: "T", contributorId: [""], contributorName: ["X"], contributorRole: ["Editor"] })),
+      ),
+    ).toBe(IN_REVIEW_EDIT);
+  });
+
+  it("a rights failure on a book sent for review meanwhile goes to the read-only edit page", async () => {
+    rightsRecordOk = false;
+    waitingAfterSave = true;
+    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T", rightsBasis: "own_rights" })))).toBe(IN_REVIEW_EDIT);
+  });
+
+  it("a rights failure on a book not in review stays on the Details tab", async () => {
+    rightsRecordOk = false;
+    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T", rightsBasis: "own_rights" })))).toMatch(
+      new RegExp(`^/dashboard/books/${BOOK}/editor\\?tab=details&error=`),
+    );
   });
 
   it("records the rights choice only when it changes", async () => {

@@ -61,11 +61,27 @@ export async function getBookReviewState(supabase: SessionClient, bookId: string
   return { kind: "ok", pending: raw.pending, approvalValid: raw.approval_valid, latestSentBack };
 }
 
+// BD15 P5a (audit r1, F4): a step that failed without a database code
+// of its own (a storage rewrite, a helper that only reports "error")
+// asks this afterwards: a book now waiting for review was sent from
+// another tab, and the author is told so instead of a generic failure.
+export async function isWaitingForReview(supabase: SessionClient, bookId: string): Promise<boolean> {
+  const state = await getBookReviewState(supabase, bookId);
+  return state.kind === "ok" && state.pending;
+}
+
 export type RequestBookReviewResult =
   | { ok: true }
   | {
       ok: false;
-      reason: "already_pending" | "already_approved" | "already_published" | "taken_down" | "not_found" | "failed";
+      reason:
+        | "already_pending"
+        | "already_approved"
+        | "already_published"
+        | "taken_down"
+        | "incomplete"
+        | "not_found"
+        | "failed";
     };
 
 // request_book_review()'s own refusals, by message (P0001) or SQLSTATE.
@@ -73,6 +89,8 @@ export async function requestBookReview(supabase: SessionClient, bookId: string)
   const { error } = await supabase.rpc("request_book_review", { p_book_id: bookId });
   if (!error) return { ok: true };
   if (error.code === "LB460") return { ok: false, reason: "taken_down" };
+  // BD15 P5a: no manuscript, no cover or no "AI used" answer (LB489).
+  if (error.code === "LB489") return { ok: false, reason: "incomplete" };
   const message = typeof error.message === "string" ? error.message : "";
   if (message === "this book is already waiting for review") return { ok: false, reason: "already_pending" };
   if (message === "this book is already approved") return { ok: false, reason: "already_approved" };
@@ -80,6 +98,15 @@ export async function requestBookReview(supabase: SessionClient, bookId: string)
   if (message === "no book found for this id") return { ok: false, reason: "not_found" };
   console.error("requestBookReview: request failed", { bookId, code: error.code ?? null });
   return { ok: false, reason: "failed" };
+}
+
+// BD15 P5a: a book waiting for review is read-only (LB490): its content
+// columns, contributors and "AI used" answer refuse every write until
+// the author cancels the review.
+export const IN_REVIEW_LOCK_SQLSTATE = "LB490";
+
+export function isInReviewLockError(error: { code?: string | null } | null | undefined): boolean {
+  return error?.code === IN_REVIEW_LOCK_SQLSTATE;
 }
 
 export type WithdrawBookReviewResult = { ok: true } | { ok: false; reason: "not_pending" | "failed" };

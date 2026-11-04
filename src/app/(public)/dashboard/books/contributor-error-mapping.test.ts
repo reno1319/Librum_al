@@ -18,6 +18,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 const mockGetUser = vi.fn();
 const mockBookOwnershipSingle = vi.fn();
 const mockInsertContributor = vi.fn();
+const mockDeleteContributor = vi.fn();
 
 const mockCreateClient = vi.fn(() =>
   Promise.resolve({
@@ -35,7 +36,10 @@ const mockCreateClient = vi.fn(() =>
         };
       }
       if (table === "book_contributors") {
-        return { insert: () => mockInsertContributor() };
+        return {
+          insert: () => mockInsertContributor(),
+          delete: () => ({ eq: () => mockDeleteContributor() }),
+        };
       }
       throw new Error(`unexpected table in this focused test: ${table}`);
     },
@@ -43,7 +47,7 @@ const mockCreateClient = vi.fn(() =>
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
-const { addContributor } = await import("./actions");
+const { addContributor, removeContributor } = await import("./actions");
 
 describe("addContributor: ERR-2 error-message mapping", () => {
   beforeEach(() => {
@@ -51,6 +55,7 @@ describe("addContributor: ERR-2 error-message mapping", () => {
     mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: "author-1" } } });
     mockBookOwnershipSingle.mockReset().mockResolvedValue({ data: { id: "book-1" } });
     mockInsertContributor.mockReset();
+    mockDeleteContributor.mockReset().mockResolvedValue({ error: null });
   });
 
   it("maps a raw Postgres/PostgREST error to a stable Librum-facing message, never error.message", async () => {
@@ -81,5 +86,28 @@ describe("addContributor: ERR-2 error-message mapping", () => {
       expect.stringContaining("error=Shkruani%20nj%C3%AB%20em%C3%ABr%20dhe%20zgjidhni%20nj%C3%AB%20rol"),
     );
     expect(mockInsertContributor).not.toHaveBeenCalled();
+  });
+
+  // BD15 P5a: a book waiting for review is read-only (LB490).
+  const IN_REVIEW = encodeURIComponent(
+    "Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.",
+  );
+  it("an insert refused as in review (LB490) says the book is in review", async () => {
+    const formData = new FormData();
+    formData.set("name", "Jane Editor");
+    formData.set("role", "Editor");
+    mockInsertContributor.mockResolvedValue({ error: { code: "LB490", message: "x" } });
+    await expect(addContributor("book-1", formData)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(`/dashboard/books/book-1/edit?error=${IN_REVIEW}`);
+  });
+
+  it("a removal refused as in review (LB490) says so; a removal that works redirects nowhere", async () => {
+    mockDeleteContributor.mockResolvedValue({ error: { code: "LB490", message: "x" } });
+    await expect(removeContributor("book-1", "c-1")).rejects.toBeInstanceOf(RedirectSignal);
+    expect(mockRedirect).toHaveBeenCalledWith(`/dashboard/books/book-1/edit?error=${IN_REVIEW}`);
+    mockRedirect.mockClear();
+    mockDeleteContributor.mockResolvedValue({ error: null });
+    await expect(removeContributor("book-1", "c-1")).resolves.toBeUndefined();
+    expect(mockRedirect).not.toHaveBeenCalled();
   });
 });

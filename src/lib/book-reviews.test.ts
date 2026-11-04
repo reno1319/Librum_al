@@ -3,9 +3,11 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { BOOK_FIXTURE_AUTHOR_ID as AUTHOR, BOOK_FIXTURE_BOOK_ID as BOOK, BOOK_FIXTURE_OTHER_AUTHOR_ID as OTHER_AUTHOR, BOOK_FIXTURE_OTHER_BOOK_ID as OTHER_BOOK } from "./book-storage-path-test-fixtures";
 import {
+  isInReviewLockError,
   REVIEW_SNAPSHOT_COLUMNS,
   deletedBookManuscriptKeys,
   getBookReviewState,
+  isWaitingForReview,
   latestApprovedReview,
   loadAuthorReviewNotices,
   pendingReview,
@@ -253,6 +255,16 @@ function rpcClient(result: { data?: unknown; error?: unknown }) {
   return { client: { rpc } as never, rpc };
 }
 
+// Audit r2 (N5): the real helper, which the action suites replace.
+describe("isWaitingForReview", () => {
+  it("is true only for a readable state with a pending review", async () => {
+    const state = (pending: unknown) => rpcClient({ data: { pending, approval_valid: false, latest_sent_back: null } }).client;
+    expect(await isWaitingForReview(state(true), BOOK)).toBe(true);
+    expect(await isWaitingForReview(state(false), BOOK)).toBe(false);
+    expect(await isWaitingForReview(rpcClient({ error: { code: "XX000" } }).client, BOOK)).toBe(false);
+  });
+});
+
 describe("getBookReviewState", () => {
   it("maps book_review_state()", async () => {
     const { client, rpc } = rpcClient({
@@ -300,6 +312,16 @@ describe("requestBookReview / withdrawBookReview", () => {
     expect(await requestBookReview(rpcClient({ error: { code: "LB460", message: "x" } }).client, BOOK)).toEqual({ ok: false, reason: "taken_down" });
     expect(await requestBookReview(rpcClient({ error: { code: "XX000", message: "x" } }).client, BOOK)).toEqual({ ok: false, reason: "failed" });
     vi.restoreAllMocks();
+  });
+
+  it("BD15 P5a: LB489 (no manuscript, cover or AI answer) is 'incomplete'; LB490 is the in-review lock", async () => {
+    expect(
+      await requestBookReview(rpcClient({ error: { code: "LB489", message: "x" } }).client, BOOK),
+    ).toEqual({ ok: false, reason: "incomplete" });
+    expect(isInReviewLockError({ code: "LB490" })).toBe(true);
+    for (const e of [{ code: "LB489" }, { code: "LB463" }, { code: null }, null, undefined]) {
+      expect(isInReviewLockError(e)).toBe(false);
+    }
   });
 
   it("calls the RPCs with the book id only", async () => {

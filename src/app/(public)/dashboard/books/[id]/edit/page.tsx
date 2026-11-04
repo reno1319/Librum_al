@@ -37,11 +37,13 @@ import { getBookReviewState } from "@/lib/book-reviews";
 import {
   CANCEL_REVIEW_LABEL,
   IN_REVIEW_LABEL,
+  IN_REVIEW_READ_ONLY_NOTE,
   LIVE_FILES_WARNING,
   buildAuthorSentBackNoticeLines,
   publishControlLabel,
 } from "@/lib/book-review-copy";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
+import { descriptionPlainText } from "@/lib/book-description";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
 import { ORIGINAL_AUTHOR_EDIT_NOTE, ORIGINAL_AUTHOR_HINT, ORIGINAL_AUTHOR_MAX_LENGTH } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
@@ -311,6 +313,46 @@ export default async function EditBookPage({
       )}
 
       <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_20rem] lg:items-start">
+        {inReview ? (
+          // BD15 P5a (Renato 11-04, Q2 a and Q3 a): a book waiting for
+          // review is read-only -- what was sent, and "Anulo shqyrtimin"
+          // in the Publishing box. The database refuses edits too (LB490).
+          <section id="in-review" className="rounded-card border border-border bg-surface p-4 shadow-sm">
+            <h2 className="font-serif text-xl font-normal">Çfarë dërguat</h2>
+            <p className="mt-2 text-sm text-muted">{IN_REVIEW_READ_ONLY_NOTE}</p>
+            <div className="mt-4 flex gap-4">
+              {coverUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={coverUrl} alt="" className="h-36 w-24 shrink-0 rounded-sm object-cover" />
+              ) : null}
+              <dl className="flex flex-col gap-2 text-sm">
+                <div>
+                  <dt className="text-muted">Titulli</dt>
+                  <dd className="font-medium">{book.title}</dd>
+                </div>
+                {book.subtitle ? (
+                  <div>
+                    <dt className="text-muted">Nëntitulli</dt>
+                    <dd>{book.subtitle}</dd>
+                  </div>
+                ) : null}
+                <div>
+                  <dt className="text-muted">Dorëshkrimi</dt>
+                  <dd>{manuscriptLabel ?? "Mungon"}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted">Çmimi</dt>
+                  <dd>
+                    {book.price_all === null ? "Pa çmim ende" : book.price_all === 0 ? "Falas" : `${book.price_all} lekë`}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+            {book.description ? (
+              <p className="mt-4 whitespace-pre-wrap break-words text-sm">{descriptionPlainText(book.description)}</p>
+            ) : null}
+          </section>
+        ) : (
         <div className="flex flex-col gap-10">
           <form
             id={EDIT_BOOK_FORM_ID}
@@ -760,6 +802,7 @@ export default async function EditBookPage({
             </form>
           </section>
         </div>
+        )}
 
         <div className="flex flex-col gap-6">
           {/* PHONE PASS (D3): the Dashboard row menu's Unpublish (and the

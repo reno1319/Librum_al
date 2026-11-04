@@ -32,8 +32,14 @@ export async function readAiDisclosure(bookId: string): Promise<AiDisclosureRead
   }
 }
 
-/** Records the answer (one row per book). Caller proved ownership. */
-export async function writeAiDisclosure(bookId: string, answer: AiAnswer): Promise<boolean> {
+export type AiDisclosureWrite = "ok" | "in_review" | "failed";
+
+/**
+ * Records the answer (one row per book). Caller proved ownership.
+ * "in_review": the book is waiting for review, so the answer is locked
+ * (BD15 P5a, LB490).
+ */
+export async function writeAiDisclosure(bookId: string, answer: AiAnswer): Promise<AiDisclosureWrite> {
   try {
     const { error } = await createCatalogWriteClient()
       .from("book_ai_disclosures")
@@ -41,8 +47,9 @@ export async function writeAiDisclosure(bookId: string, answer: AiAnswer): Promi
         { book_id: bookId, ai_used: answer === "yes", answered_at: new Date().toISOString() },
         { onConflict: "book_id" },
       );
-    return !error;
+    if (!error) return "ok";
+    return error.code === "LB490" ? "in_review" : "failed";
   } catch {
-    return false;
+    return "failed";
   }
 }

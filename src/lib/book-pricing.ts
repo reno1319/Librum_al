@@ -155,6 +155,11 @@ export const PAID_PUBLISHING_CLOSED_LINE =
 
 export const SEND_FOR_REVIEW_BUTTON = "Dërgo për shqyrtim";
 export const PUBLISH_APPROVED_BUTTON = "Publiko";
+// BD15 P5a (P4 audit F7): "Publiko" goes live only while the ebook still
+// matches what Librum approved; a renamed pen name rewrites the byline
+// inside a Librum-made ebook, and that new file goes to review first.
+export const PUBLISH_APPROVED_NOTE =
+  "Libri del live menjëherë, sepse Librum e ka miratuar. Nëse emri i autorit brenda librit elektronik duhet përditësuar, libri kalon përsëri në shqyrtim.";
 
 // Messages (page-messages.ts allowlist).
 export const PRICE_MODE_MISSING_MESSAGE = "Zgjidhni “Me pagesë” ose “Falas”.";

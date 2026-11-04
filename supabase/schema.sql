@@ -13606,6 +13606,17 @@ begin
     raise exception 'this book is already approved';
   end if;
 
+  -- BD15 P5a: the Content tab's three answers (manuscript, cover, "AI
+  -- used") are required before Librum is asked to look at the book. An
+  -- already approved book is answered above (it needs no new review).
+  if v_book.file_path is null
+     or v_book.cover_path is null
+     or not exists (select 1 from public.book_ai_disclosures d where d.book_id = p_book_id)
+  then
+    raise exception 'this book needs a manuscript, a cover and the AI answer before review'
+      using errcode = 'LB489';
+  end if;
+
   select r.id, r.file_path, r.cover_path, r.original_author
     into v_pending
     from public.book_reviews r
@@ -16041,3 +16052,143 @@ create trigger bundles_require_public_pen_name
 revoke all on function public.bundles_require_public_pen_name()
   from public, anon, authenticated, service_role;
 
+-- ============================================================
+-- BD15 P5a (migration 20261104120000): the review guard.
+-- request_book_review() (restated in place above) refuses a book with
+-- no manuscript, no cover or no "AI used" answer (LB489); a book
+-- waiting for review is read-only for the app's roles (LB490). Same
+-- statements and reasoning as
+-- migrations/20261104120000_bd15_review_guard.sql.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 2. A book waiting for review is read-only
+-- ------------------------------------------------------------
+-- The one place the rule lives: the app's roles, and a pending review.
+create function public.book_is_locked_for_review(p_book_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select pg_catalog.current_setting('role') in ('anon', 'authenticated', 'service_role')
+     and exists (
+       select 1 from public.book_reviews r
+        where r.book_id = p_book_id
+          and r.status = 'pending'
+     );
+$$;
+
+revoke all on function public.book_is_locked_for_review(uuid)
+  from public, anon, authenticated, service_role;
+
+create function public.books_refuse_change_while_in_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if ((new.title, new.subtitle, new.description, new.keywords, new.isbn, new.language,
+       new.publisher, new.edition, new.original_publication_date, new.genre, new.categories,
+       new.cover_path, new.file_path, new.price_all, new.original_author, new.is_adult,
+       new.reading_age_min, new.edition_number, new.pen_name_id)
+      is distinct from
+      (old.title, old.subtitle, old.description, old.keywords, old.isbn, old.language,
+       old.publisher, old.edition, old.original_publication_date, old.genre, old.categories,
+       old.cover_path, old.file_path, old.price_all, old.original_author, old.is_adult,
+       old.reading_age_min, old.edition_number, old.pen_name_id)
+      -- A deleted series clears series_id through its foreign key (ON
+      -- DELETE SET NULL, run by a trigger, so depth > 1): allowed.
+      or ((new.series_id, new.series_position) is distinct from (old.series_id, old.series_position)
+          and not (pg_catalog.pg_trigger_depth() > 1 and new.series_id is null)))
+     and public.book_is_locked_for_review(old.id)
+  then
+    raise exception 'This book is waiting for review. Cancel the review to change it.'
+      using errcode = 'LB490';
+  end if;
+  -- Audit r2 (N2): a deleted series clears series_id through its foreign
+  -- key; its position goes with it, on every book of the series, so no
+  -- book keeps a position without a series (the app's own unlink before
+  -- the delete fails as a whole when one book is in review).
+  if pg_catalog.pg_trigger_depth() > 1 and new.series_id is null and old.series_id is not null then
+    new.series_position := null;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_refuse_change_while_in_review
+  before update of title, subtitle, description, keywords, isbn, language, publisher, edition,
+    original_publication_date, genre, categories, cover_path, file_path, price_all,
+    original_author, is_adult, reading_age_min, edition_number, pen_name_id, series_id,
+    series_position
+  on public.books
+  for each row
+  execute function public.books_refuse_change_while_in_review();
+
+revoke all on function public.books_refuse_change_while_in_review()
+  from public, anon, authenticated, service_role;
+
+-- Contributors, the "AI used" answer and the rights choice belong to
+-- the book's content too. A delete that cascades from the book itself is not refused: the
+-- book's own delete trigger cancels its pending review first.
+create function public.book_children_refuse_change_while_in_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- Audit r2 (N3): no error oracle for another account's book. A caller
+  -- who owns neither book is answered by RLS, as book_contributors_limit
+  -- does; nothing is locked or read for them.
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated')
+     and not exists (
+       select 1 from public.books b
+        where b.id in (case when tg_op = 'DELETE' then old.book_id else new.book_id end,
+                       case when tg_op = 'UPDATE' then old.book_id end)
+          and b.author_id = auth.uid()
+     )
+  then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+  -- Audit r1 (F2): wait for a "Send for review" in flight on the book
+  -- (request_book_review holds the book row FOR UPDATE), so the check
+  -- below sees the pending review it creates. Both books of an UPDATE
+  -- that moves the row, in id order.
+  perform 1 from public.books bo
+   where bo.id in (case when tg_op = 'DELETE' then old.book_id else new.book_id end,
+                   case when tg_op = 'UPDATE' then old.book_id end)
+   order by bo.id
+     for key share;
+  if public.book_is_locked_for_review(case when tg_op = 'DELETE' then old.book_id else new.book_id end)
+     or (tg_op = 'UPDATE' and public.book_is_locked_for_review(old.book_id))
+  then
+    raise exception 'This book is waiting for review. Cancel the review to change it.'
+      using errcode = 'LB490';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+create trigger book_contributors_refuse_change_while_in_review
+  before insert or update or delete on public.book_contributors
+  for each row
+  execute function public.book_children_refuse_change_while_in_review();
+
+create trigger book_ai_disclosures_refuse_change_while_in_review
+  before insert or update or delete on public.book_ai_disclosures
+  for each row
+  execute function public.book_children_refuse_change_while_in_review();
+
+-- A new rights choice is a change too (the declarations are append-only,
+-- so only an insert can change it).
+create trigger book_rights_declarations_refuse_while_in_review
+  before insert on public.book_rights_declarations
+  for each row
+  execute function public.book_children_refuse_change_while_in_review();
+
+revoke all on function public.book_children_refuse_change_while_in_review()
+  from public, anon, authenticated, service_role;

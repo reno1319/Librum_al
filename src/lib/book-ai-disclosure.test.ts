@@ -47,12 +47,17 @@ describe("book-ai-disclosure", () => {
   });
 
   it("writes one row per book (upsert on book_id) and reports a failure", async () => {
-    expect(await writeAiDisclosure(BOOK, "yes")).toBe(true);
+    expect(await writeAiDisclosure(BOOK, "yes")).toBe("ok");
     const upsert = calls.find((c) => c.op === "upsert")!;
     expect(upsert.table).toBe("book_ai_disclosures");
     expect(upsert.args[0]).toEqual(expect.objectContaining({ book_id: BOOK, ai_used: true }));
     expect(upsert.args[1]).toEqual({ onConflict: "book_id" });
     writeError = { code: "42501" };
-    expect(await writeAiDisclosure(BOOK, "no")).toBe(false);
+    expect(await writeAiDisclosure(BOOK, "no")).toBe("failed");
+  });
+
+  it("BD15 P5a: a book waiting for review refuses the answer (LB490)", async () => {
+    writeError = { code: "LB490" };
+    expect(await writeAiDisclosure(BOOK, "yes")).toBe("in_review");
   });
 });

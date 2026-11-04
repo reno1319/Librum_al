@@ -155,6 +155,27 @@ describe("Edit page: in review (E, F)", () => {
     expect(publishing).not.toMatch(/\b(hours?|days?|within|soon)\b/i);
   });
 
+  // BD15 P5a (Renato 11-04, Q2 a / Q3 a): read-only while in review.
+  it("is read-only: what was sent, no edit form, no contributor forms", async () => {
+    book.cover_path = "c0c0c0c0-0000-4000-8000-000000000000/cover.jpg";
+    book.file_path = `${USER_ID}/${BOOK_ID}/v1.epub`;
+    book.price_all = 299;
+    book.description = "**Bold** text";
+    tableData.book_contributors = [{ id: "k1", name: "Arta", role: "Translator" }];
+    const html = await render();
+    expect(html).toContain(">Çfarë dërguat</h2>");
+    expect(html).toContain("Gjatë shqyrtimit libri nuk ndryshohet.");
+    expect(html).toContain("Libri im");
+    expect(html).toContain("299 lekë");
+    expect(html).toContain("skedar EPUB");
+    expect(html).toContain("Bold text");
+    expect(html).not.toContain("**Bold**");
+    expect(html).not.toContain('id="edit-book-form"');
+    expect(html).not.toContain('name="description"');
+    expect(html).not.toContain("Shtoni bashkëpunëtor");
+    expect(html).not.toContain("Hiqeni</button>");
+  });
+
   it("an older send back is not shown while a new review is pending", async () => {
     reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: SENT_BACK };
     const html = await render();

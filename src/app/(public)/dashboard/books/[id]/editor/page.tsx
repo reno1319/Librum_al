@@ -57,8 +57,9 @@ type EditorBook = {
 // BD15 P2: the new book editor for a draft (PLAN-BD15-r1 §2.2): Details
 // (P2), Content (P3) and Pricing with "Send for review" (P4). A live
 // book, a book in review and a taken-down book keep the existing edit
-// page until P5; the edit page sends every other draft here (P4), so
-// the editor's Pricing tab is the one way a draft is sent.
+// page until P5b (a book in review shows there read-only, P5a); the
+// edit page sends every other draft here (P4), so the editor's Pricing
+// tab is the one way a draft is sent.
 export default async function BookEditorPage({
   params,
   searchParams,

@@ -16,6 +16,8 @@ import { BOOK_MANUSCRIPTS_BUCKET, isOwnBookManuscriptPath } from "@/lib/book-sto
 export type BookReviewsDoubleState = {
   stateKind: "ok" | "unavailable";
   pending: boolean;
+  /** When set, each state read takes the next value as `pending` (a send from another tab mid-action). */
+  pendingSequence: boolean[] | null;
   approvalValid: boolean;
   latestSentBack: { reason: string; message: string; sentBackAt: string } | null;
   requestResult: { ok: true } | { ok: false; reason: string };
@@ -29,6 +31,7 @@ export function defaultBookReviewsDoubleState(): BookReviewsDoubleState {
   return {
     stateKind: "ok",
     pending: false,
+    pendingSequence: null,
     approvalValid: true,
     latestSentBack: null,
     requestResult: { ok: true },
@@ -54,9 +57,17 @@ export function bookReviewsDouble<T extends object>(actual: T) {
     ...actual,
     getBookReviewState: async (_client: unknown, bookId: string) => {
       s.calls.push({ fn: "getBookReviewState", bookId });
+      if (s.pendingSequence && s.pendingSequence.length > 0) s.pending = s.pendingSequence.shift() as boolean;
       return s.stateKind === "unavailable"
         ? { kind: "unavailable" as const }
         : { kind: "ok" as const, pending: s.pending, approvalValid: s.approvalValid, latestSentBack: s.latestSentBack };
+    },
+    // The real one calls the module's own getBookReviewState, which the
+    // spread above does not reach: the same double read, made here.
+    isWaitingForReview: async (_client: unknown, bookId: string) => {
+      s.calls.push({ fn: "getBookReviewState", bookId });
+      if (s.pendingSequence && s.pendingSequence.length > 0) s.pending = s.pendingSequence.shift() as boolean;
+      return s.stateKind === "ok" && s.pending;
     },
     requestBookReview: async (_client: unknown, bookId: string) => {
       s.calls.push({ fn: "requestBookReview", bookId });

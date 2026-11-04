@@ -182,6 +182,10 @@ insert into public.books (id, author_id, title, description, status, price_all, 
    'e0770000-0000-4000-8000-00000000000b/e0770001-0000-4000-8000-0000000000b1.epub', 'e077c0de-0000-4000-8000-0000000000b1/cover.jpg');
 
 update public.books set librum_choice_at = now() where id = 'e0770001-0000-4000-8000-0000000000a2';
+-- BD15 P5a (migration 20261104120000): request_book_review() refuses a
+-- book with no "AI used" answer (LB489), so each fixture book has one.
+insert into public.book_ai_disclosures (book_id, ai_used)
+select id, false from public.books where title like 'P077%';
 
 -- What the migration's backfill writes for a book that is live (1a).
 insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, status, grandfathered, decided_at)
@@ -702,8 +706,15 @@ declare
 begin
   v := pg_temp.run_as('authenticated', a, format('select public.request_book_review(%L)', d));
   old_id := pg_temp.pending_id(d);
+  -- BD15 P5a (migration 20261104120000): the app's roles can no longer
+  -- change the file of a book waiting for review (LB490) ...
   v := pg_temp.run_as('service_role', null, format('update public.books set file_path = %L where id = %L', f3, d));
-  perform pg_temp.assert(v = 'OK:1', format('part12: a draft''s file may change while pending -- got %s', v));
+  perform pg_temp.assert(v like 'LB490:%', format('part12: a draft''s file is locked while pending (P5a) -- got %s', v));
+  -- ... so a stale snapshot can only come from Librum's own SQL session;
+  -- request_book_review still replaces it, never rewrites it.
+  execute format('update public.books set file_path = %L where id = %L', f3, d);
+  perform pg_temp.assert((select file_path from public.books where id = d) = f3,
+    'part12: the table owner may still change it');
   v := pg_temp.run_as('authenticated', a, format('select public.request_book_review(%L)', d));
   perform pg_temp.assert(v = 'OK:1', format('part12: the request with the new file is accepted -- got %s', v));
   perform pg_temp.assert((select status = 'cancelled' and decided_at is not null and file_path <> f3
@@ -901,6 +912,9 @@ insert into public.books (id, author_id, title, description, status, price_all, 
 insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, status, grandfathered, decided_at, buyer_file_only)
 select id, title, author_id, file_path, cover_path, 'approved', true, now(), true
   from public.books where id = 'e0770001-0000-4000-8000-0000000000a7';
+-- BD15 P5a (migration 20261104120000): request_book_review() refuses a
+-- book with no "AI used" answer (LB489), so each fixture book has one.
+insert into public.book_ai_disclosures (book_id, ai_used) values ('e0770001-0000-4000-8000-0000000000a7', false);
 
 do $$
 declare

@@ -144,6 +144,14 @@ export const LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE =
 // read).
 export const BOOK_CHANGED_WHILE_EDITING_MESSAGE = "Libri juaj ndryshoi ndërsa po e redaktonit. Rifreskoni faqen dhe provoni përsëri.";
 
+// BD15 P5a (Renato 11-04, Q2 a and Q3 a): a book waiting for review is
+// read-only; the author cancels the review to change anything.
+export const IN_REVIEW_LOCKED_MESSAGE =
+  "Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.";
+export const IN_REVIEW_VIEW_LABEL = "Shikoni çfarë dërguat";
+export const IN_REVIEW_READ_ONLY_NOTE =
+  "Gjatë shqyrtimit libri nuk ndryshohet. Nëse doni të ndryshoni diçka, anuloni shqyrtimin, bëni ndryshimet dhe dërgojeni përsëri.";
+
 // H: the staff side.
 export const REVIEW_CHECKLIST_ITEMS = [
   { key: "cover_is_fine", label: "The cover is fine" },

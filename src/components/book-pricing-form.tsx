@@ -24,6 +24,7 @@ import {
   PRICING_WHERE_LINE,
   PUBLIC_DOMAIN_FREE_ONLY_NOTE,
   PUBLISH_APPROVED_BUTTON,
+  PUBLISH_APPROVED_NOTE,
   ROYALTY_RATES_LINE,
   ROYALTY_TAX_LINE,
   SEND_FOR_REVIEW_BUTTON,
@@ -257,6 +258,7 @@ export function BookPricingForm({
           {approvalValid ? PUBLISH_APPROVED_BUTTON : SEND_FOR_REVIEW_BUTTON}
         </button>
       </div>
+      {approvalValid && <p className="text-sm text-muted">{PUBLISH_APPROVED_NOTE}</p>}
     </form>
   );
 }
