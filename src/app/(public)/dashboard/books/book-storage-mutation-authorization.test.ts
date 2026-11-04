@@ -1191,7 +1191,8 @@ describe("updateBook and review (ADMIN-3)", () => {
 describe("cancelBookReview (ADMIN-3, E)", () => {
   it("withdraws the pending review on the author's session and says so", async () => {
     expect(await run(cancelBookReview(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?success=${encodeURIComponent("Shqyrtimi u anulua. Libri juaj është përsëri draft.")}`,
+      // BD15 P4: a plain draft again, so the new editor.
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&success=${encodeURIComponent("Shqyrtimi u anulua. Libri juaj është përsëri draft.")}`,
     );
     expect(bookReviewsDoubleState.calls).toEqual([{ fn: "withdrawBookReview", bookId: BOOK_ID }]);
     expect(dbWrites).toEqual([]);

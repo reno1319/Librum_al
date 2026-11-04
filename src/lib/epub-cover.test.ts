@@ -9,6 +9,7 @@ import {
   embedCoverInLibrumEpub,
   isLibrumMadeEpub,
   readLibrumEbookCover,
+  restampLibrumEpubMetadata,
 } from "./epub-cover";
 
 // W7: the cover inside a Librum-made (Word) ebook.
@@ -189,5 +190,74 @@ describe("readLibrumEbookCover", () => {
   it("is null for a Librum ebook without a cover and for a direct upload", async () => {
     expect(await readLibrumEbookCover(await librumEpub())).toBeNull();
     expect(await readLibrumEbookCover(await directEpub(""))).toBeNull();
+  });
+});
+
+// BD15 P4: title and byline written again at "Send for review".
+describe("restampLibrumEpubMetadata", () => {
+  const OPF = "OEBPS/content.opf";
+
+  it("leaves an ebook that already says this title and byline unchanged", async () => {
+    const result = await restampLibrumEpubMetadata(await librumEpub(), {
+      title: INPUT.title,
+      authorName: INPUT.authorName,
+    });
+    expect(result).toEqual({ ok: true, changed: false });
+  });
+
+  it("treats blank values as keep", async () => {
+    const result = await restampLibrumEpubMetadata(await librumEpub(), { title: "  ", authorName: null });
+    expect(result).toEqual({ ok: true, changed: false });
+  });
+
+  it("writes a new title and byline, escaped, and the package stays Librum-made and valid", async () => {
+    const result = await restampLibrumEpubMetadata(await librumEpub(), {
+      title: "Ujë & Zjarr <2>",
+      authorName: 'Emër "Pseudonim"',
+    });
+    if (!result.ok || !result.changed) throw new Error("expected a rewrite");
+    const opf = await readEntry(result.bytes, OPF);
+    expect(opf).toContain("<dc:title>Ujë &amp; Zjarr &lt;2&gt;</dc:title>");
+    expect(opf).toContain("<dc:creator>Emër &quot;Pseudonim&quot;</dc:creator>");
+    expect(await isLibrumMadeEpub(result.bytes)).toBe(true);
+    expect((await validateEpubStructure(result.bytes)).valid).toBe(true);
+  });
+
+  it("changes only the byline when only the pen name differs", async () => {
+    const result = await restampLibrumEpubMetadata(await librumEpub(), {
+      title: INPUT.title,
+      authorName: "Pseudonimi i ri",
+    });
+    if (!result.ok || !result.changed) throw new Error("expected a rewrite");
+    const opf = await readEntry(result.bytes, OPF);
+    expect(opf).toContain(`<dc:title>${INPUT.title}</dc:title>`);
+    expect(opf).toContain("<dc:creator>Pseudonimi i ri</dc:creator>");
+  });
+
+  it("rewrites the cover page title and keeps the cover", async () => {
+    const embedded = await embedCoverInLibrumEpub(await librumEpub(), { coverJpeg: COVER_A });
+    if (!embedded.ok) throw new Error("embed failed");
+    const result = await restampLibrumEpubMetadata(embedded.bytes, { title: "Titulli i ri", authorName: null });
+    if (!result.ok || !result.changed) throw new Error("expected a rewrite");
+    const page = await readEntry(result.bytes, EBOOK_COVER_PAGE_ENTRY);
+    expect(page).toContain("<title>Titulli i ri</title>");
+    expect(page).toContain('alt="Titulli i ri"');
+    expect(await readLibrumEbookCover(result.bytes)).toEqual(COVER_A);
+    expect((await validateEpubStructure(result.bytes)).valid).toBe(true);
+  });
+
+  it("never touches an ebook the author uploaded directly", async () => {
+    const direct = await directEpub("<dc:identifier id=\"book-id\">isbn</dc:identifier>");
+    expect(await restampLibrumEpubMetadata(direct, { title: "X", authorName: "Y" })).toEqual({
+      ok: false,
+      reason: "not_librum_made",
+    });
+  });
+
+  it("reports bytes that are not a zip as unreadable", async () => {
+    expect(await restampLibrumEpubMetadata(Buffer.from("not a zip"), { title: "X", authorName: null })).toEqual({
+      ok: false,
+      reason: expect.stringMatching(/unreadable|not_librum_made/),
+    });
   });
 });

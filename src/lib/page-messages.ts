@@ -292,6 +292,13 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Të dhënat u ruajtën, por kontribuesit jo të gjithë. Kontrolloni listën dhe ruajeni përsëri.",
   "Të dhënat u ruajtën, por zgjedhja e të drejtave jo. Zgjidheni përsëri dhe ruajeni.",
   "Përgjigja për AI nuk u ruajt. Zgjidheni përsëri dhe ruajeni.",
+  // BD15 P4: the editor's Pricing tab (src/lib/book-pricing.ts).
+  "Zgjidhni “Me pagesë” ose “Falas”.",
+  "Shkruani një çmim në lekë të plota, nga 99 deri në 100.000, ose zgjidhni “Falas”.",
+  "Për ta dërguar për shqyrtim, shënoni të dyja kutitë: të drejtat në gjithë botën dhe Kushtet.",
+  "Libri nuk është gati për shqyrtim. Plotësoni të gjitha pjesët që mungojnë dhe provoni përsëri.",
+  "Konfirmimi juaj nuk u ruajt, ndaj libri nuk u dërgua. Provoni përsëri.",
+  "Titulli brenda librit elektronik nuk u përditësua dot, ndaj libri nuk u dërgua. Provoni përsëri.",
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([

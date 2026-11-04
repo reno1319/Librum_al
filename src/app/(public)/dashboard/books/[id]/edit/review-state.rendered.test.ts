@@ -123,19 +123,12 @@ function button(html: string, label: string): string {
 }
 
 describe("Edit page: the publish control's label (B)", () => {
-  it("a draft without a valid approval: Dërgojeni për shqyrtim", async () => {
-    const html = await render();
-    expect(button(html, "Dërgojeni për shqyrtim")).not.toContain('disabled=""');
-    expect(html).not.toContain("Publikoni</button>");
-    expect(html).toContain("Gati për t&#x27;u dërguar për shqyrtim.");
-  });
-
-  it("a draft whose approval still matches its files: Publish", async () => {
-    reviewState = { kind: "ok", pending: false, approvalValid: true, latestSentBack: null };
-    const html = await render();
-    expect(button(html, "Publikoni")).not.toContain('disabled=""');
-    expect(html).not.toContain("Dërgojeni për shqyrtim</button>");
-    expect(html).toContain("Gati për publikim.");
+  // BD15 P4: a plain draft -- with or without a valid approval -- is
+  // edited and sent in the new editor (Pricing tab: "Dërgo për shqyrtim"
+  // or "Publiko"). Only drafts the editor does not take render here.
+  it.each([false, true])("a plain draft (approval valid: %s) goes to the new editor", async (approvalValid) => {
+    reviewState = { kind: "ok", pending: false, approvalValid, latestSentBack: null };
+    await expect(render()).rejects.toThrow(`REDIRECT:/dashboard/books/${BOOK_ID}/editor?tab=details`);
   });
 
   it("an unreadable review state disables the control with the generic sentence", async () => {
@@ -180,14 +173,10 @@ describe("Edit page: in review (E, F)", () => {
 });
 
 describe("Edit page: sent back (F)", () => {
-  it("shows the send-back notice above the publish control", async () => {
+  // BD15 P4: the editor shows the note on every tab (editor/page.tsx).
+  it("a sent-back draft goes to the new editor", async () => {
     reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK };
-    const html = await render();
-    expect(html).toContain("Librum jua ktheu këtë libër për ndryshime më 19 tetor 2026. Arsyeja: ");
-    expect(html).toContain("The cover is blurry.");
-    expect(html).toContain("Rregullojeni dhe dërgojeni përsëri për shqyrtim.");
-    expect(html).toContain("Pyetje? Na shkruani te support@librum.al");
-    expect(html.indexOf("Librum jua ktheu këtë libër")).toBeLessThan(html.indexOf("Dërgojeni për shqyrtim</button>"));
+    await expect(render()).rejects.toThrow(`REDIRECT:/dashboard/books/${BOOK_ID}/editor?tab=details`);
   });
 
   it("a takedown notice replaces the send-back notice", async () => {
@@ -222,6 +211,8 @@ describe("Edit page: a live book (C)", () => {
 
   it("a draft shows no live-book warning", async () => {
     book.status = "draft";
+    // BD15 P4: a draft the editor does not take (review state unreadable).
+    reviewState = { kind: "unavailable" };
     const html = await render();
     expect(html).not.toContain(WARNING);
   });
@@ -236,9 +227,9 @@ describe("Edit page: Shikoni faqen e librit para botimit (PREVIEW-1)", () => {
   }
 
   it.each<[string, () => void]>([
-    ["a draft", () => {}],
+    // BD15 P4: plain and sent-back drafts open the new editor instead.
+    ["a draft whose review state is unreadable", () => (reviewState = { kind: "unavailable" })],
     ["a book in review", () => (reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null })],
-    ["a sent-back book", () => (reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK })],
     [
       "a taken-down book",
       () =>

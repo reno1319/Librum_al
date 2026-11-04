@@ -113,6 +113,20 @@ describe("recordRightsDeclaration", () => {
     expect(adminCalls[0].table).toBe("book_rights_declarations");
   });
 
+  // BD15 P4 (Renato 11-04, Q2 a): each "Send for review" records the
+  // two Pricing ticks beside the current rights sentence.
+  it("at send: the rights sentence and both ticks, under a version naming all three wordings", async () => {
+    await recordRightsDeclaration(BOOK, "public_domain_original", { atSend: true });
+    expect(inserted()[0]).toMatchObject({
+      basis: "public_domain_original",
+      statement_version: "rights-v2+send-v1+terms-sq-2",
+      statement_text:
+        `${RIGHTS_STATEMENTS.public_domain_original.text}. ` +
+        "Kam të drejtat për ta shitur këtë libër në të gjithë botën. " +
+        "Konfirmoj që kam të drejtat e këtij libri dhe pranoj Kushtet e Librum për autorët",
+    });
+  });
+
   it("16a: the book's pen name is read with the session client through its own pen_names row", async () => {
     await recordRightsDeclaration(BOOK, "own_rights");
     const bookSelect = sessionCalls.find((c) => c.table === "books" && c.method === "select");

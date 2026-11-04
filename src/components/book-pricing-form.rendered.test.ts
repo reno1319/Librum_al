@@ -1,0 +1,129 @@
+import { describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...rest }: { href: string; children: unknown }) =>
+    createElement("a", { href, ...rest }, children as never),
+}));
+
+const { BookPricingForm } = await import("./book-pricing-form");
+
+// BD15 P4: the Pricing tab rendered (first paint; the live preview's
+// rules are in src/lib/book-pricing.test.ts).
+
+const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
+type Props = Parameters<typeof BookPricingForm>[0];
+
+function render(overrides: Partial<Props> = {}): string {
+  const props: Props = {
+    action: async () => undefined,
+    bookId: BOOK_ID,
+    initialPriceAll: null,
+    freeOnly: false,
+    paidPublishingAvailable: true,
+    checkoutAvailable: false,
+    approvalValid: false,
+    title: "Libri im",
+    penName: "Arben Leka",
+    missing: [],
+    ...overrides,
+  };
+  return renderToStaticMarkup(createElement(BookPricingForm, props)).replace(/<!-- -->/g, "");
+}
+
+const tick = (html: string, name: string) => html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0] ?? "";
+const button = (html: string, label: string) => {
+  const end = html.indexOf(`${label}</button>`);
+  expect(end).toBeGreaterThan(-1);
+  return html.slice(html.lastIndexOf("<button", end), end);
+};
+
+describe("BookPricingForm", () => {
+  it("both ticks are there and never pre-ticked (Q2 a), the Terms link opens the Terms", () => {
+    const html = render({ initialPriceAll: 249 });
+    expect(tick(html, "worldwideRights")).toContain('type="checkbox"');
+    expect(tick(html, "worldwideRights")).not.toContain("checked");
+    expect(tick(html, "acceptAuthorTerms")).not.toContain("checked");
+    expect(html).toContain("Kam të drejtat për ta shitur këtë libër në të gjithë botën.");
+    expect(html).toContain("Konfirmoj që kam të drejtat e këtij libri dhe pranoj");
+    expect(html).toMatch(/<a href="\/kushtet"[^>]*target="_blank"[^>]*>Kushtet e Librum për autorët/);
+    expect(html).toContain("Librum shet në të gjithë botën, në një treg të vetëm: librum.al.");
+  });
+
+  it("no price yet: neither choice picked, the preview asks for a price", () => {
+    const html = render();
+    expect(tick(html, "priceMode")).not.toContain("checked");
+    expect(html).toContain("Shkruaj një çmim për të parë sa merr.");
+    expect(html).not.toContain('name="price"');
+  });
+
+  it("a stored paid price: Me pagesë picked, the box filled, the D3 preview with the tax line", () => {
+    const html = render({ initialPriceAll: 249 });
+    expect(html.match(/<input[^>]*value="paid"[^>]*>/)![0]).toContain('checked=""');
+    expect(html.match(/<input[^>]*name="price"[^>]*>/)![0]).toContain('value="249"');
+    expect(html).toContain("Minimumi 99 lekë. Një çmim i vetëm, në lekë.");
+    expect(html).toContain("<dd>70%</dd>");
+    expect(html).toContain("174,30 lekë");
+    expect(html).toContain("Shuma është para tatimit 15% që mbahet në burim.");
+    expect(html).toContain("50% për çmime nën 199 lekë, 70% nga 199 lekë e lart.");
+  });
+
+  it("below 199 lek: 50%, and what 199 lek would pay", () => {
+    const html = render({ initialPriceAll: 99 });
+    expect(html).toContain("<dd>50%</dd>");
+    expect(html).toContain("49,50 lekë");
+    expect(html).toContain("Me 199 lekë do të merrje 139,30 lekë për çdo shitje (70%).");
+  });
+
+  it("a stored free price: Falas picked, no price box", () => {
+    const html = render({ initialPriceAll: 0 });
+    expect(html.match(/<input[^>]*value="free"[^>]*>/)![0]).toContain('checked=""');
+    expect(html).not.toContain('name="price"');
+    expect(html).toContain("Lexuesit e shkarkojnë falas pasi hyjnë në llogari.");
+  });
+
+  it("a public-domain book: Falas only, as a hidden value, with the reason", () => {
+    const html = render({ freeOnly: true, initialPriceAll: 500 });
+    expect(html).toContain('<input type="hidden" name="priceMode" value="free"/>');
+    expect(html).not.toContain('value="paid"');
+    expect(html).toContain("Librat e domenit publik në Librum janë vetëm falas.");
+  });
+
+  it("paid publishing closed / buying not open yet: the matching line under a paid price", () => {
+    expect(render({ initialPriceAll: 249, paidPublishingAvailable: false })).toContain(
+      "Publikimi me pagesë nuk ka nisur ende.",
+    );
+    const opensSoon = render({ initialPriceAll: 249, paidPublishingAvailable: true, checkoutAvailable: false });
+    expect(opensSoon).toContain("Blerjet hapen së shpejti.");
+    expect(render({ initialPriceAll: 249, checkoutAvailable: true })).not.toContain("Blerjet hapen së shpejti.");
+    expect(render({ initialPriceAll: 0, checkoutAvailable: false })).not.toContain("Blerjet hapen së shpejti.");
+  });
+
+  it("the send button: Dërgo për shqyrtim, or Publiko when the approval still matches", () => {
+    expect(button(render(), "Dërgo për shqyrtim")).toContain('value="send"');
+    expect(button(render({ approvalValid: true }), "Publiko")).toContain('value="send"');
+    expect(button(render(), "Ruaj draftin")).toContain('value="save"');
+  });
+
+  it("what is missing is listed with links to its tab, and Send is disabled", () => {
+    const html = render({
+      missing: [
+        { tab: "details", label: "Përshkrimi" },
+        { tab: "content", label: "Pyetja për AI" },
+      ],
+    });
+    expect(html).toContain(`href="/dashboard/books/${BOOK_ID}/editor?tab=details"`);
+    expect(html).toContain(`href="/dashboard/books/${BOOK_ID}/editor?tab=content"`);
+    expect(html).toContain("Pyetja për AI</a> <span class=\"text-muted\">(Përmbajtja)</span>");
+    expect(button(html, "Dërgo për shqyrtim")).toContain('disabled=""');
+    expect(button(render(), "Dërgo për shqyrtim")).not.toContain('disabled=""');
+  });
+
+  it("the reader preview shows the title, the pen name and the price", () => {
+    const html = render({ initialPriceAll: 1500 });
+    expect(html).toContain("Libri im");
+    expect(html).toContain("Arben Leka");
+    expect(html).toContain('<p class="font-medium">1.500 lekë</p>');
+  });
+});

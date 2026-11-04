@@ -218,3 +218,65 @@ export async function embedCoverInLibrumEpub(
     return { ok: false, reason: "unreadable" };
   }
 }
+
+export type RestampLibrumEpubResult =
+  | { ok: true; changed: false }
+  | { ok: true; changed: true; bytes: Buffer }
+  | { ok: false; reason: "not_librum_made" | "unreadable" };
+
+// BD15 P4 (carried from P3): the title and the byline inside a
+// Librum-made ebook are written when the Word file is converted. The
+// author may change the title (or pick another pen name) on the Details
+// tab afterwards, so at "Send for review" both are written again --
+// dc:title, dc:creator, and the cover page's title when the cover page
+// is there. Only generateEpub()'s own package shape is touched (2a, as
+// above); anything else returns not_librum_made and is left as it is.
+// Blank values keep what the ebook has. `changed: false` when the ebook
+// already says exactly this, so an unchanged book is never rewritten.
+export async function restampLibrumEpubMetadata(
+  bytes: Buffer,
+  input: { title: string | null; authorName: string | null },
+): Promise<RestampLibrumEpubResult> {
+  const loaded = await loadLibrumEpub(bytes);
+  if (loaded === "not_librum_made" || loaded === "unreadable") return { ok: false, reason: loaded };
+  const { zip } = loaded;
+  let opf = loaded.opf;
+
+  const title = input.title?.trim();
+  const authorName = input.authorName?.trim();
+  const currentTitle = opf.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1];
+  const currentCreator = opf.match(/<dc:creator>([\s\S]*?)<\/dc:creator>/)?.[1];
+  const titleChanges = Boolean(title) && currentTitle !== undefined && currentTitle !== escapeXml(title!);
+  const creatorChanges =
+    Boolean(authorName) && currentCreator !== undefined && currentCreator !== escapeXml(authorName!);
+  if (!titleChanges && !creatorChanges) return { ok: true, changed: false };
+
+  if (titleChanges) {
+    opf = opf.replace(/<dc:title>[\s\S]*?<\/dc:title>/, () => `<dc:title>${escapeXml(title!)}</dc:title>`);
+  }
+  if (creatorChanges) {
+    opf = opf.replace(
+      /<dc:creator>[\s\S]*?<\/dc:creator>/,
+      () => `<dc:creator>${escapeXml(authorName!)}</dc:creator>`,
+    );
+  }
+  const modifiedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  opf = opf.replace(
+    /<meta property="dcterms:modified">[\s\S]*?<\/meta>/,
+    () => `<meta property="dcterms:modified">${modifiedAt}</meta>`,
+  );
+  zip.file(OPF_ENTRY, opf);
+
+  // The cover page W7 wrote shows the title too (its <title> and alt).
+  if (titleChanges && opf.includes(`<item id="${COVER_PAGE_ID}" `) && zip.file(EBOOK_COVER_PAGE_ENTRY)) {
+    const titleXml = opf.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1] ?? "";
+    const language = opf.match(/<dc:language>([\s\S]*?)<\/dc:language>/)?.[1]?.trim() || DEFAULT_EPUB_LANGUAGE;
+    zip.file(EBOOK_COVER_PAGE_ENTRY, renderCoverPageXhtml(titleXml, language));
+  }
+
+  try {
+    return { ok: true, changed: true, bytes: await zip.generateAsync({ type: "nodebuffer" }) };
+  } catch {
+    return { ok: false, reason: "unreadable" };
+  }
+}

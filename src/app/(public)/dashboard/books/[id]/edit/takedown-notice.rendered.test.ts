@@ -141,10 +141,8 @@ describe("Edit page: a book Librum took down", () => {
     expect(html.slice(start, html.indexOf("Dërgojeni për shqyrtim</button>"))).toContain('disabled=""');
   });
 
-  it("is unchanged without a takedown", async () => {
-    const html = await render();
-    expect(html).not.toContain("Hequr nga Libraria");
-    const start = html.lastIndexOf("<button", html.indexOf("Dërgojeni për shqyrtim</button>"));
-    expect(html.slice(start, html.indexOf("Dërgojeni për shqyrtim</button>"))).not.toContain('disabled=""');
+  // BD15 P4: without a takedown a plain draft is sent in the new editor.
+  it("without a takedown, a plain draft goes to the new editor", async () => {
+    await expect(render()).rejects.toThrow(/REDIRECT:\/dashboard\/books\/[^/]+\/editor\?tab=details/);
   });
 });
