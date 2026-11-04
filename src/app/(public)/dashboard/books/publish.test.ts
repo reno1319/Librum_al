@@ -1210,20 +1210,19 @@ describe("performPublish: In review (ADMIN-3)", () => {
     resetMocks();
     mockReviewStaffEmail.mockClear();
   });
-  const SENT = `/dashboard?success=${encodeURIComponent(
-    "U dërgua për shqyrtim. Do ta kontrollojmë librin dhe do t'ju njoftojmë kur të publikohet. Nuk është ende në Librari.",
-  )}`;
+  // BD15 P4 (audit r1, F1): a review is asked for only from the
+  // editor's Pricing tab (saveBookPricing, with both ticks recorded); its
+  // review-request outcomes are pinned in pricing-send.test.ts.
+  const EDITOR_PRICING = `/dashboard/books/${BOOK_ID}/editor?tab=pricing`;
 
-  it("a draft without a valid approval is sent for review: no publish write, no email", async () => {
+  it("a draft without a valid approval is not sent from here: off to the editor's Pricing tab", async () => {
     bookReviewsDoubleState.approvalValid = false;
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect).toHaveBeenCalledWith(SENT);
-    expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["getBookReviewState", "requestBookReview"]);
+    expect(mockRedirect).toHaveBeenCalledWith(EDITOR_PRICING);
+    expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["getBookReviewState"]);
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
-    // ADMIN-ALERTS-1: staff are told, once.
-    expect(mockReviewStaffEmail).toHaveBeenCalledTimes(1);
-    expect(mockReviewStaffEmail).toHaveBeenCalledWith({ bookId: BOOK_ID, authorId: USER_ID });
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
   });
 
   it("a draft whose approval matches its files publishes as before (3a)", async () => {
@@ -1242,47 +1241,11 @@ describe("performPublish: In review (ADMIN-3)", () => {
     expect(bookReviewsDoubleState.calls).toEqual([]);
   });
 
-  it("already waiting: says so on the Edit page", async () => {
-    bookReviewsDoubleState.approvalValid = false;
-    bookReviewsDoubleState.requestResult = { ok: false, reason: "already_pending" };
+  it("an unreadable review state fails closed with the generic sentence", async () => {
+    bookReviewsDoubleState.stateKind = "unavailable";
     await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër po pret tashmë shqyrtimin.")}`,
-    );
+    expect(String(mockRedirect.mock.calls[0][0]).startsWith("/dashboard?error=")).toBe(true);
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
-    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
-  });
-
-  it("an unreadable review state or a failed request fails closed with the generic sentence", async () => {
-    for (const arrange of [
-      () => (bookReviewsDoubleState.stateKind = "unavailable"),
-      () => {
-        bookReviewsDoubleState.approvalValid = false;
-        bookReviewsDoubleState.requestResult = { ok: false, reason: "failed" };
-      },
-    ]) {
-      resetMocks();
-      arrange();
-      await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
-      expect(String(mockRedirect.mock.calls[0][0]).startsWith("/dashboard?error=")).toBe(true);
-      expect(mockBookUpdatePayload).not.toHaveBeenCalled();
-    }
-  });
-
-  it("a takedown found by the review request is named on the Edit page", async () => {
-    bookReviewsDoubleState.approvalValid = false;
-    bookReviewsDoubleState.requestResult = { ok: false, reason: "taken_down" };
-    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
-    expect(String(mockRedirect.mock.calls[0][0])).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`,
-    );
-  });
-
-  it("an approval that landed meanwhile ('already approved') publishes", async () => {
-    bookReviewsDoubleState.approvalValid = false;
-    bookReviewsDoubleState.requestResult = { ok: false, reason: "already_approved" };
-    await expect(publishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20juaj%20u%20publikua");
   });
 
   it.each(["LB462", "LB463"])("%s on the guarded write: the book changed while editing", async (code) => {
@@ -1301,11 +1264,12 @@ describe("performPublish: In review (ADMIN-3)", () => {
     expect(bookReviewsDoubleState.calls).toEqual([]);
   });
 
-  it("createBook(intent=publish) saves the draft and sends it for review", async () => {
+  it("createBook(intent=publish) saves the draft and sends the author to the editor's Pricing tab", async () => {
     bookReviewsDoubleState.approvalValid = false;
     await expect(createBook(await buildFormData({ intent: "publish" }))).rejects.toBeInstanceOf(RedirectSignal);
     expect(mockBookInsert).toHaveBeenCalledOnce();
-    expect(mockRedirect).toHaveBeenCalledWith(SENT);
+    expect(String(mockRedirect.mock.calls[0][0])).toMatch(/^\/dashboard\/books\/[^/]+\/editor\?tab=pricing$/);
+    expect(bookReviewsDoubleState.calls.map((c) => c.fn)).not.toContain("requestBookReview");
     expect(mockBookUpdatePayload).not.toHaveBeenCalled();
     expect(mockSendNewBookEmails).not.toHaveBeenCalled();
   });

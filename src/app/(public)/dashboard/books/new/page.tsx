@@ -15,8 +15,8 @@ export const metadata: Metadata = {
 // is enough) and continues at /dashboard/books/<id>/editor.
 //
 // The old one-step wizard (./upload-wizard.tsx and createBook) is no
-// longer opened from here; it is removed with its tests in BD15 P4, when
-// the editor can send a book for review.
+// longer opened from here; it is removed with its tests in a cleanup after
+// BD15 P5 (P4 moved it there to keep that patch small).
 export default async function NewBookPage({
   searchParams,
 }: {

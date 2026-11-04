@@ -87,6 +87,9 @@ let updateRows: unknown[] = [{ id: BOOK_ID }];
 let storageCalls: { op: string; bucket: string; path: unknown; options?: unknown }[] = [];
 let stored: Record<string, { bytes: Buffer; metadata: Record<string, string> }> = {};
 let infoFails = false;
+let downloadFails = false;
+let uploadFails = false;
+let penNameRead: { data: unknown; error: unknown } = { data: { name: "Emri i Ri" }, error: null };
 const events: string[] = [];
 
 function query(table: string) {
@@ -95,8 +98,8 @@ function query(table: string) {
   let payload: unknown;
   const resolve = () => {
     if (op === "select") {
-      if (table === "books") return { data: book, error: null };
-      if (table === "pen_names") return { data: { name: "Emri i Ri" }, error: null };
+      if (table === "books") return { data: { ...book }, error: null };
+      if (table === "pen_names") return penNameRead;
       return { data: null, error: null };
     }
     dbWrites.push({ table, op, payload, filters: [...filters] });
@@ -138,6 +141,7 @@ function bucket(name: string) {
     },
     download: async (path: string) => {
       storageCalls.push({ op: "download", bucket: name, path });
+      if (downloadFails) return { data: null, error: { message: "download failed" } };
       const object = stored[`${name}:${path}`];
       return object
         ? { data: { arrayBuffer: async () => new Uint8Array(object.bytes).buffer }, error: null }
@@ -146,6 +150,7 @@ function bucket(name: string) {
     upload: async (path: string, bytes: Buffer, options: unknown) => {
       storageCalls.push({ op: "upload", bucket: name, path, options });
       events.push(`storage:upload:${name}`);
+      if (uploadFails) return { error: { message: "upload failed" } };
       stored[`${name}:${path}`] = { bytes, metadata: (options as { metadata?: Record<string, string> }).metadata ?? {} };
       return { error: null };
     },
@@ -231,6 +236,9 @@ beforeEach(async () => {
   storageCalls = [];
   stored = { [`manuscripts:${OWN_EPUB}`]: { bytes: await directEpub(), metadata: {} } };
   infoFails = false;
+  downloadFails = false;
+  uploadFails = false;
+  penNameRead = { data: { name: "Emri i Ri" }, error: null };
   events.length = 0;
   takedownKind = "none";
   rightsState = { kind: "present", declaration: { basis: "own_rights" } };
@@ -320,6 +328,19 @@ describe("saveBookPricing: Ruaj draftin", () => {
     expect(dbWrites).toEqual([]);
   });
 
+  it("an unreadable rights choice saves nothing (it decides whether the book is free only)", async () => {
+    rightsState = { kind: "unavailable" };
+    const target = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "500" })));
+    expect(target).toContain(`${EDITOR}&error=`);
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("an unreadable takedown state is not called a takedown, nothing written", async () => {
+    takedownKind = "unavailable";
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toMatch(/^\/dashboard\?error=/);
+    expect(dbWrites).toEqual([]);
+  });
+
   it("someone else's book goes to the dashboard", async () => {
     book.author_id = "ffffffff-ffff-4fff-8fff-ffffffffffff";
     expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toBe("/dashboard");
@@ -387,6 +408,38 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
       await run(saveBookPricing(BOOK_ID, form({ ...SEND, priceMode: "paid", price: "249" }))),
     ).toBe(err("Publikimi me pagesë nuk është i mundur tani"));
     expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+    // Audit r1, F3: refused before the ticks or the ebook are written.
+    expect(declarations).toEqual([]);
+    expect(storageCalls.filter((c) => c.op === "info")).toEqual([]);
+  });
+
+  // The review request's own outcomes, now reachable only from here.
+  it("already waiting: named on the edit page", async () => {
+    bookReviewsDoubleState.requestResult = { ok: false, reason: "already_pending" };
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër po pret tashmë shqyrtimin.")}`,
+    );
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("a failed request fails closed with the generic sentence", async () => {
+    bookReviewsDoubleState.requestResult = { ok: false, reason: "failed" };
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toMatch(/^\/dashboard\?error=/);
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("a takedown found by the request is named on the edit page", async () => {
+    bookReviewsDoubleState.requestResult = { ok: false, reason: "taken_down" };
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("an approval that landed meanwhile publishes", async () => {
+    bookReviewsDoubleState.requestResult = { ok: false, reason: "already_approved" };
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(
+      `/dashboard?success=${encodeURIComponent("Libri juaj u publikua")}`,
+    );
+    expect(publishWrites()).toHaveLength(1);
   });
 
   describe("the Librum-made ebook re-stamp", () => {
@@ -416,6 +469,34 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
         events.lastIndexOf("db:update:books"),
       );
       expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toHaveLength(1);
+    });
+
+    it("the superseded ebook goes through the retention rule after the write", async () => {
+      stored[`manuscripts:${OWN_EPUB}`] = { bytes: await librumEpub("Titulli i Vjetër", "Emri i Vjetër"), metadata: { librum: "made" } };
+      await run(saveBookPricing(BOOK_ID, form(SEND)));
+      expect(storageCalls).toContainEqual({ op: "remove", bucket: "manuscripts", path: [OWN_EPUB] });
+    });
+
+    it.each([
+      ["a failed download", () => (downloadFails = true)],
+      ["a failed upload", () => (uploadFails = true)],
+      ["an unread pen name", () => (penNameRead = { data: null, error: { message: "x" } })],
+    ])("%s stops the send", async (_l, setUp) => {
+      stored[`manuscripts:${OWN_EPUB}`] = { bytes: await librumEpub("Titulli i Vjetër", "Emri i Vjetër"), metadata: { librum: "made" } };
+      book.price_all = 0;
+      setUp();
+      expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err(EBOOK_RESTAMP_FAILED_MESSAGE));
+      expect(fileWrites()).toEqual([]);
+      expect(declarations).toEqual([]);
+      expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
+    });
+
+    it("a failed upload removes the new key", async () => {
+      stored[`manuscripts:${OWN_EPUB}`] = { bytes: await librumEpub("Titulli i Vjetër", "Emri i Vjetër"), metadata: { librum: "made" } };
+      uploadFails = true;
+      await run(saveBookPricing(BOOK_ID, form(SEND)));
+      const upload = storageCalls.find((c) => c.op === "upload");
+      expect(storageCalls).toContainEqual({ op: "remove", bucket: "manuscripts", path: [upload?.path] });
     });
 
     it("an ebook that already names this title and pen name is not rewritten", async () => {

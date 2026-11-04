@@ -1351,6 +1351,10 @@ export async function createBook(formData: FormData) {
   // in practice (this is the row this same request just inserted) but
   // still falls safely into the same generic branch rather than being
   // treated as exhaustive.
+  // BD15 P4 (audit r1, F1): the saved draft is sent from the editor.
+  if (publishResult.reason === "send_from_editor") {
+    redirectAfterSave(ebookCoverWarning, editorPath(bookId, "pricing"));
+  }
   if (publishResult.reason === "missing_all_price") {
     redirectAfterSave(ebookCoverWarning,
       `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
@@ -2375,7 +2379,16 @@ async function restampLibrumEbookForSend({
     return "failed";
   }
   const authorName = await readPenNameForEbook(supabase, userId, book.pen_name_id);
+  // Audit r1, F4: an unread pen name would leave the old byline inside.
+  if (book.pen_name_id !== null && authorName === null) {
+    console.error(`${caller}: pen name not read; ebook byline not rewritten`, { bookId: book.id });
+    return "failed";
+  }
   const restamped = await restampLibrumEpubMetadata(current, { title: book.title, authorName });
+  if (!restamped.ok && restamped.reason === "unreadable") {
+    console.error(`${caller}: Librum-made ebook could not be rewritten`, { bookId: book.id });
+    return "failed";
+  }
   if (!restamped.ok) {
     // Marked, but not the shape Librum writes: left as it is (as W7).
     console.error(`${caller}: marked ebook is not a Librum-made package; title not rewritten`, {
@@ -2397,6 +2410,7 @@ async function restampLibrumEbookForSend({
   });
   if (uploadError) {
     console.error(`${caller}: rewritten ebook upload failed`, { bookId: book.id });
+    await removeNewManuscriptUpload(catalogWriter, newPath, userId, book.id, caller);
     return "failed";
   }
   const { data: rows, error: updateError } = await catalogWriter
@@ -2485,9 +2499,14 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
     getRightsDeclarationState(existing.id),
   ]);
   if (review.kind !== "ok" || review.pending) toEditPage();
-  if (takedown.kind !== "none") {
+  if (takedown.kind === "active") {
     redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
   }
+  // Audit r1, F6: an unreadable takedown state is not a takedown.
+  if (takedown.kind !== "none") redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
+  // Audit r1, F2: without the rights choice it is unknown whether the
+  // book is free only, so nothing is saved.
+  if (rights.kind === "unavailable") fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
   const rightsBasis = rights.kind === "present" ? rights.declaration.basis : null;
 
   // 1. The price. A public-domain book is free only.
@@ -2522,8 +2541,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
   // 2. Both ticks, every send.
   if (!hasSendTicks(formData)) fail(SEND_TICKS_MISSING_MESSAGE);
 
-  // 3. Every tab complete. The rights choice must be readable.
-  if (rights.kind === "unavailable") redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
+  // 3. Every tab complete.
   const ai = await readAiDisclosure(existing.id);
   const detailsMissing = missingDetails({
     title: existing.title,
@@ -2543,6 +2561,11 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
     fail(SEND_INCOMPLETE_MESSAGE);
   }
 
+  // Audit r1, F3: the paid-publishing permission performPublish checks,
+  // asked before the ebook or the ticks are written, so a send that can
+  // not happen leaves no record behind.
+  if (priceAll > 0 && !canPublishPaidTitle()) fail(PAID_PUBLISHING_UNAVAILABLE_MESSAGE);
+
   // 4. The current title and byline inside a Librum-made ebook.
   const restamp = await restampLibrumEbookForSend({
     supabase,
@@ -2560,7 +2583,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
   }
 
   // 6. The one publish gate.
-  const result = await performPublish(supabase, existing.id, user.id);
+  const result = await performPublish(supabase, existing.id, user.id, { mayRequestReview: true });
   if (!result.ok) {
     switch (result.reason) {
       case "missing_files":
@@ -2731,6 +2754,10 @@ type PerformPublishResult =
         // ADMIN-3-REVIEW (S3): the write met LB462/LB463 -- the book's
         // files changed after the read above.
         | "book_changed"
+        // BD15 P4 (audit r1, F1): this caller may not ask for a review --
+        // a draft is sent for review only from the editor's Pricing tab,
+        // with the two ticks recorded. Nothing was written.
+        | "send_from_editor"
         | "paid_mode_required"
         | "update_failed";
     };
@@ -2739,6 +2766,11 @@ async function performPublish(
   supabase: Awaited<ReturnType<typeof createClient>>,
   bookId: string,
   userId: string,
+  // BD15 P4 (audit r1, F1): only saveBookPricing (the Pricing tab, after
+  // both ticks are recorded) may turn a publish into a review request.
+  // publishBook and createBook still publish a draft whose approval
+  // matches its files (3a), and refuse anything that needs a review.
+  { mayRequestReview }: { mayRequestReview: boolean } = { mayRequestReview: false },
 ): Promise<PerformPublishResult> {
   // AUTH-1C: defense-in-depth -- Proxy already blocks /dashboard/* while
   // a recovery session is active, so this is the second layer against a
@@ -2847,6 +2879,9 @@ async function performPublish(
       return { ok: false, reason: "review_unavailable" };
     }
     if (!reviewState.approvalValid) {
+      if (!mayRequestReview) {
+        return { ok: false, reason: "send_from_editor" };
+      }
       const request = await requestBookReview(supabase, bookId);
       if (request.ok) {
         // ADMIN-ALERTS-1: best effort, never throws.
@@ -3012,6 +3047,11 @@ export async function publishBook(bookId: string) {
     // and points at the one action that clears it. Unlike the paid-mode
     // denial below, it is safe to be specific: it describes the author's
     // OWN row back to them and leaks nothing about this deployment.
+    // BD15 P4 (audit r1, F1): a review is asked for only from the
+    // editor's Pricing tab, where the two ticks are given and recorded.
+    if (result.reason === "send_from_editor") {
+      redirect(editorPath(bookId, "pricing"));
+    }
     if (result.reason === "missing_files") {
       redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_FILES_MESSAGE)}`);
     }
