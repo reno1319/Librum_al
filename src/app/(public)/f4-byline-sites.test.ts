@@ -152,12 +152,15 @@ describe("BD3 patch 4: the original author", () => {
     );
   });
 
-  it("the Edit page: the box, prefilled, kept in the draft fields, and opened when a public-domain book lacks one", () => {
-    const source = readSrc("app/(public)/dashboard/books/[id]/edit/page.tsx");
-    expect(source).toContain('name="originalAuthor"');
-    expect(source).toContain('defaultValue={book.original_author ?? ""}');
-    expect(source).toContain('"originalAuthor",');
-    expect(source).toContain("!book.original_author");
+  // BD15 P5b-3a: the old edit page is retired; the original author is
+  // edited in the editor's Details tab (prefilled from the working
+  // version: a live book's waiting change, else the book).
+  it("the editor's Details tab: the box, prefilled", () => {
+    const form = readSrc("components/book-details-form.tsx");
+    expect(form).toContain('name="originalAuthor"');
+    expect(form).toContain("defaultValue={initial.originalAuthor}");
+    const page = readSrc("app/(public)/dashboard/books/[id]/editor/page.tsx");
+    expect(page).toContain('originalAuthor: working.originalAuthor ?? "",');
   });
 
   it("the Word ebook's dc:creator follows a typed original author", () => {

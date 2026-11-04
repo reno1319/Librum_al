@@ -88,14 +88,16 @@ describe("BD2: the public money pages", () => {
 });
 
 describe("BD2: the author dashboard (6a)", () => {
-  it("the price step, the edit page and the Discounts page use the royalty lines", () => {
+  it("the price step, the editor's Pricing tab and the Discounts page use the royalty lines", () => {
     const wizard = read("src/app/(public)/dashboard/books/new/upload-wizard.tsx");
-    const edit = read("src/app/(public)/dashboard/books/[id]/edit/page.tsx");
+    // BD15 P5b-3a: the old edit page is retired; prices are set in the
+    // editor's Pricing tab (its D3 rates line).
+    const edit = read("src/components/book-pricing-form.tsx");
     const discounts = read("src/app/(public)/dashboard/discounts/page.tsx");
     expect(wizard).toContain("{ROYALTY_TIERS_LINE}");
     expect(wizard).toContain("Pjesa e Librum ({100 - royaltyPercent}%)");
     expect(wizard).toContain("Honorari juaj për çdo shitje ({royaltyPercent}%)");
-    expect(edit).toContain("{ROYALTY_TIERS_LINE}");
+    expect(edit).toContain("ROYALTY_RATES_LINE");
     expect(discounts).toContain("${ROYALTY_DISCOUNT_NOTE}");
     for (const source of [wizard, edit]) {
       expect(source).not.toContain("PLATFORM_FEE_PERCENT");

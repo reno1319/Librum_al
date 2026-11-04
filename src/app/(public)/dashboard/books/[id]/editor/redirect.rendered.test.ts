@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// BD15 P5a (P4 audit, render test for the editor redirect): the editor
-// takes exactly the drafts the edit page sends it -- not waiting for
-// review, not taken down, review state readable -- and sends every other
-// book back to the edit page (the edit page's own redirect is covered in
-// edit/review-state.rendered.test.ts). The two rules are each other's
-// complement, so a book is never bounced between the pages.
+// BD15 P5a (P4 audit, render test for the editor redirect), P5b-3a: the
+// old edit page is retired, so the editor takes every book of the
+// author's -- a plain draft, a live book, a book in review (read-only),
+// a taken-down book (edited like a draft, never sent) -- and every tab
+// ends with the Veprime box. Only an unreadable state leaves it.
 
 vi.mock("next/navigation", () => ({
   notFound: () => {
@@ -21,7 +20,11 @@ vi.mock("../../../editor-actions", () => ({
   discardBookPendingChanges: { bind: () => async () => undefined },
 }));
 // BD15 P5b-2: a live book's waiting changes.
-let pendingRead: { ok: true; pending: Record<string, unknown> | null } | { ok: false } = { ok: true, pending: null };
+let pendingRead: { ok: true; pending: Record<string, unknown> | null; createdAt: string | null } | { ok: false } = {
+  ok: true,
+  pending: null,
+  createdAt: null,
+};
 vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => ({}) }));
 vi.mock("@/lib/book-pending-changes", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -30,16 +33,25 @@ vi.mock("@/lib/book-pending-changes", async (importOriginal) => ({
 vi.mock("../../../actions", () => ({
   saveBookContent: { bind: () => async () => undefined },
   saveBookPricing: { bind: () => async () => undefined },
+  cancelBookReview: { bind: () => async () => undefined },
+  deleteBook: { bind: () => async () => undefined },
+  unpublishBook: { bind: () => async () => undefined },
 }));
 
+type SentBack = { sentBackAt: string; reason: string; message: string };
 type ReviewState =
-  | { kind: "ok"; pending: boolean; approvalValid: boolean; latestSentBack: null }
+  | { kind: "ok"; pending: boolean; approvalValid: boolean; latestSentBack: SentBack | null }
   | { kind: "unavailable" };
 let reviewState: ReviewState;
 vi.mock("@/lib/book-reviews", () => ({ getBookReviewState: async () => reviewState }));
 type Takedown = { kind: "none" } | { kind: "active" } | { kind: "unavailable" };
 let takedown: Takedown;
-vi.mock("@/lib/book-takedowns", () => ({ getActiveTakedownState: async () => takedown }));
+const NOTICE = { takenDownAt: "2026-10-19T10:00:00Z", reason: "copyright", message: "Proof please", bundleTitles: [] };
+vi.mock("@/lib/book-takedowns", () => ({
+  loadAuthorTakedownNoticeForBook: async () => ({ state: takedown, notice: takedown.kind === "active" ? NOTICE : null }),
+}));
+let maintenance = false;
+vi.mock("@/lib/maintenance-mode", () => ({ resolveMaintenanceMode: () => maintenance }));
 vi.mock("@/lib/book-rights", () => ({ getRightsDeclarationState: async () => ({ kind: "none" }) }));
 vi.mock("@/lib/book-ai-disclosure", () => ({ readAiDisclosure: async () => ({ ok: true, answer: null }) }));
 
@@ -70,15 +82,16 @@ vi.mock("@/lib/supabase/server", () => ({
 
 const { default: BookEditorPage } = await import("./page");
 
-async function render(): Promise<string> {
+async function render(tab = "details"): Promise<string> {
   const element = await BookEditorPage({
     params: Promise.resolve({ id: BOOK_ID }),
-    searchParams: Promise.resolve({ tab: "details" }),
+    searchParams: Promise.resolve({ tab }),
   });
   return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
 }
 
-const TO_EDIT_PAGE = `REDIRECT:/dashboard/books/${BOOK_ID}/edit`;
+const TO_DASHBOARD_ERROR = "REDIRECT:/dashboard?error=";
+const SENT_BACK: SentBack = { sentBackAt: "2026-11-04T12:00:00Z", reason: "broken_file", message: "Fix the file" };
 
 beforeEach(() => {
   book = {
@@ -107,7 +120,8 @@ beforeEach(() => {
   };
   reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: null };
   takedown = { kind: "none" };
-  pendingRead = { ok: true, pending: null };
+  pendingRead = { ok: true, pending: null, createdAt: null };
+  maintenance = false;
 });
 
 describe("editor page: which books it takes", () => {
@@ -133,6 +147,7 @@ describe("editor page: which books it takes", () => {
     pendingRead = {
       ok: true,
       pending: { filePath: null, coverPath: null, description: "New description", isAdult: false, originalAuthor: null },
+      createdAt: "2026-11-04T10:00:00Z",
     };
     const html = await render();
     expect(html).toContain("Hidhni ndryshimet");
@@ -159,25 +174,162 @@ describe("editor page: which books it takes", () => {
     await expect(render()).rejects.toThrow("REDIRECT:/dashboard?error=");
   });
 
-  it("a live book in review goes to the edit page (read-only there)", async () => {
+  // BD15 P5b-3a: in review, read-only here -- what was sent, no forms
+  // but "Anuloni shqyrtimin" and the Veprime box.
+  it("a draft waiting for review: read-only, what was sent, Anuloni shqyrtimin, no tabs or forms", async () => {
+    reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null };
+    book.description = "Sent description";
+    book.price_all = 0;
+    const html = await render();
+    expect(html).toContain("Në shqyrtim");
+    expect(html).toContain("Çfarë dërguat");
+    expect(html).toContain("Sent description");
+    expect(html).toContain("Falas");
+    expect(html).toContain("Anuloni shqyrtimin");
+    expect(html).toContain("Librum po e kontrollon librin tuaj.");
+    expect(html).not.toContain('aria-label="Pjesët e librit"');
+    expect(html).not.toContain('name="title"');
+    expect(html).not.toContain("Hiqeni nga shitja");
+    expect(html).toContain('id="veprime"');
+    expect(html).toContain(">Fshini<");
+  });
+
+  it("a live book in review: the sent (waiting) version, still on sale, take off sale offered", async () => {
     book.status = "published";
+    book.description = "Live description";
+    book.cover_path = "11111111-1111-4111-8111-111111111111/cover.jpg";
     reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null };
-    await expect(render()).rejects.toThrow(TO_EDIT_PAGE);
+    pendingRead = {
+      ok: true,
+      pending: {
+        filePath: null,
+        coverPath: "22222222-2222-4222-8222-222222222222/cover.jpg",
+        description: "Waiting description",
+        isAdult: false,
+        originalAuthor: null,
+      },
+      createdAt: "2026-11-04T10:00:00Z",
+    };
+    const html = await render();
+    expect(html).toContain("Waiting description");
+    expect(html).not.toContain("Live description");
+    expect(html).toContain("https://cdn/22222222-2222-4222-8222-222222222222/cover.jpg");
+    expect(html).toContain("Libri mbetet në shitje siç është.");
+    expect(html).toContain("Hiqeni nga shitja");
+    expect(html).toContain("Ndryshimet që presin shqyrtim bëhen pjesë e draftit.");
   });
 
-  it("a draft waiting for review goes to the edit page (read-only there)", async () => {
+  it("a live book in review whose waiting changes can't be read: still read-only, with the live values", async () => {
+    book.status = "published";
+    book.description = "Live description";
     reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null };
-    await expect(render()).rejects.toThrow(TO_EDIT_PAGE);
+    pendingRead = { ok: false };
+    const html = await render();
+    expect(html).toContain("Çfarë dërguat");
+    expect(html).toContain("Live description");
   });
 
-  it("an unreadable review state goes to the edit page", async () => {
+  it("an unreadable review state goes to the dashboard, nothing shown", async () => {
     reviewState = { kind: "unavailable" };
-    await expect(render()).rejects.toThrow(TO_EDIT_PAGE);
+    await expect(render()).rejects.toThrow(TO_DASHBOARD_ERROR);
   });
 
-  it.each<Takedown>([{ kind: "active" }, { kind: "unavailable" }])("a takedown state %o goes to the edit page", async (state) => {
-    takedown = state;
-    await expect(render()).rejects.toThrow(TO_EDIT_PAGE);
+  it("an unreadable takedown state goes to the dashboard, nothing shown", async () => {
+    takedown = { kind: "unavailable" };
+    await expect(render()).rejects.toThrow(TO_DASHBOARD_ERROR);
+  });
+
+  // Renato 11-04, Q2 a: a taken-down book is edited like a draft.
+  it("a taken-down book: Librum's notice, the editor's tabs, no delete", async () => {
+    takedown = { kind: "active" };
+    const html = await render();
+    expect(html).toContain("Hequr nga Libraria");
+    expect(html).toContain("Proof please");
+    expect(html).toContain('aria-label="Pjesët e librit"');
+    expect(html).toContain('name="title"');
+    expect(html).not.toContain(">Fshini<");
+    expect(html).toContain("nuk mund të fshihet");
+  });
+
+  it("a taken-down book in review: the takedown wins (editable, not read-only)", async () => {
+    takedown = { kind: "active" };
+    reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null };
+    const html = await render();
+    expect(html).not.toContain("Çfarë dërguat");
+    expect(html).toContain("Hequr nga Libraria");
+  });
+
+  it("a taken-down book's Pricing tab: Send blocked with the reason", async () => {
+    takedown = { kind: "active" };
+    const html = await render("pricing");
+    expect(html).toContain("Librum e hoqi këtë libër, prandaj nuk mund ta dërgoni tani.");
+  });
+
+  it("the Veprime box: a draft gets Preview and Delete, a live book gets Hiqeni nga shitja too", async () => {
+    let html = await render();
+    expect(html).toContain('id="veprime"');
+    expect(html).toContain(`href="/libra/${BOOK_ID}"`);
+    expect(html).toContain(">Fshini<");
+    expect(html).not.toContain("Hiqeni nga shitja");
+    book.status = "published";
+    book.description = "Live description";
+    html = await render("content");
+    expect(html).toContain("Hiqeni nga shitja");
+    expect(html).toContain(">Fshini<");
+    expect(html).not.toContain(`href="/libra/${BOOK_ID}"`);
+    // The live notice's link goes down to the box, not to another page.
+    expect(html).toContain('href="#veprime"');
+  });
+
+  // P5b-3a: a live book's sent-back note belongs to the changes it was
+  // sent with -- gone once they're discarded or replaced by newer ones.
+  it("a live book's sent-back note: shown with the changes it was about, named as changes", async () => {
+    book.status = "published";
+    book.description = "Live description";
+    reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK };
+    pendingRead = {
+      ok: true,
+      pending: { filePath: null, coverPath: null, description: "Changed", isAdult: false, originalAuthor: null },
+      createdAt: "2026-11-04T09:00:00Z",
+    };
+    const html = await render();
+    expect(html).toContain("Librum jua ktheu ndryshimet");
+    expect(html).toContain("Fix the file.");
+  });
+
+  it("a live book's sent-back note is gone after the changes are discarded", async () => {
+    book.status = "published";
+    book.description = "Live description";
+    reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK };
+    const html = await render();
+    expect(html).not.toContain("Librum jua ktheu");
+  });
+
+  it("a live book's sent-back note is gone when the waiting changes were first saved after it", async () => {
+    book.status = "published";
+    book.description = "Live description";
+    reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK };
+    pendingRead = {
+      ok: true,
+      pending: { filePath: null, coverPath: null, description: "Newer", isAdult: false, originalAuthor: null },
+      createdAt: "2026-11-04T13:00:00Z",
+    };
+    const html = await render();
+    expect(html).not.toContain("Librum jua ktheu");
+  });
+
+  it("a draft's sent-back note stays until it is sent again, naming the book", async () => {
+    reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK };
+    const html = await render();
+    expect(html).toContain("Librum jua ktheu këtë libër për ndryshime");
+  });
+
+  // ALL-CUTOVER APP-A, carried over from the old edit page.
+  it("maintenance mode: the notice, before any Supabase call", async () => {
+    maintenance = true;
+    const html = await render();
+    expect(html).not.toContain("Libri im");
+    expect(html).not.toContain("REDIRECT");
   });
 
   it("another author's book is not found", async () => {

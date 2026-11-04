@@ -642,6 +642,9 @@ async function redirectOf(action: Promise<unknown>): Promise<string> {
   return "<no redirect>";
 }
 
+// BD15 P5b-3a: a successful unpublish goes back to the editor, a draft now.
+const UNPUBLISHED_TARGET = `/dashboard/books/${BOOK_ID}/editor?tab=details&success=${encodeURIComponent("Libri u hoq nga shitja. Tani është draft.")}`;
+
 function openPaidPublishing() {
   vi.stubEnv("VERCEL_ENV", "preview");
   vi.stubEnv("VERCEL_GIT_COMMIT_REF", "staging");
@@ -908,7 +911,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
 
   it("unpublishBook: the catalog writer returns the book to draft", async () => {
     seed({ book: { status: "published", price_all: 0, published_at: "2026-09-01T00:00:00Z" } });
-    await unpublishBook(BOOK_ID);
+    await redirectOf(unpublishBook(BOOK_ID));
     expect(bookRow()).toMatchObject({ status: "draft", published_at: "2026-09-01T00:00:00Z" });
     // F5 (C5): the unpublish, then the best-effort pick clear (0 rows here).
     expect(catalogWrites()).toHaveLength(2);
@@ -972,7 +975,7 @@ describe.each<AclMode>(["pre-migration", "migrated", "storage-path-migrated", "m
     await redirectOf(createBook(await createBookForm("199", "publish")));
     await redirectOf(updateBook(BOOK_ID, editBookForm("250")));
     await redirectOf(publishBook(BOOK_ID));
-    await unpublishBook(BOOK_ID);
+    await redirectOf(unpublishBook(BOOK_ID));
     await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")));
     await redirectOf(publishBundle(BUNDLE_ID));
     await unpublishBundle(BUNDLE_ID);
@@ -1114,7 +1117,7 @@ describe("privileged writes stay narrow", () => {
     openPaidPublishing();
     await redirectOf(updateBook(BOOK_ID, editBookForm("199")));
     await redirectOf(publishBook(BOOK_ID));
-    await unpublishBook(BOOK_ID);
+    await redirectOf(unpublishBook(BOOK_ID));
     await redirectOf(updateBundle(BUNDLE_ID, bundleForm("299")));
     await redirectOf(publishBundle(BUNDLE_ID));
     await unpublishBundle(BUNDLE_ID);
@@ -1268,10 +1271,9 @@ describe("the privileged client stays server-only", () => {
       .map((file) => path.relative(REPO_ROOT, file))
       .sort();
     expect(users).toEqual([
-      // BD15 P5b-2: the edit page reads a live book's waiting changes
-      // (book_pending_changes is service_role only) after the own-book read.
-      "src/app/(public)/dashboard/books/[id]/edit/page.tsx",
-      // BD15 P5b-2: the editor page, the same read, same order.
+      // BD15 P5b-2: the editor page reads a live book's waiting changes
+      // (book_pending_changes is service_role only) after the own-book
+      // read. (P5b-3a: the old edit page that did the same is retired.)
       "src/app/(public)/dashboard/books/[id]/editor/page.tsx",
       "src/app/(public)/dashboard/books/actions.ts",
       // BD15 P2: the new editor's Details save (draft insert/update).
@@ -1698,7 +1700,7 @@ describe("F5: the Librum's choice pick is cleared on unpublish and on a real pub
 
   it("unpublishing the picked book clears its pick: exact payload and the three filters", async () => {
     seed({ book: { status: "published", librum_choice_at: PICKED_AT } });
-    await unpublishBook(BOOK_ID);
+    await redirectOf(unpublishBook(BOOK_ID));
     expect(bookRow()).toMatchObject({ status: "draft", librum_choice_at: null });
     const [clear] = pickClears();
     expect(clear.payload).toEqual({ librum_choice_at: null });
@@ -1715,7 +1717,7 @@ describe("F5: the Librum's choice pick is cleared on unpublish and on a real pub
   it("unpublishing another book leaves the pick where it is", async () => {
     seed({ book: { status: "published" } });
     tables.books.push({ id: "book-picked", author_id: USER_ID, status: "published", price_all: 0, librum_choice_at: PICKED_AT });
-    await unpublishBook(BOOK_ID);
+    await redirectOf(unpublishBook(BOOK_ID));
     expect(bookRow("book-picked").librum_choice_at).toBe(PICKED_AT);
     expect(pickClears()).toHaveLength(1);
     expect(pickClears()[0].rowsChanged).toBe(0);
@@ -1742,7 +1744,7 @@ describe("F5: the Librum's choice pick is cleared on unpublish and on a real pub
   ])("%s on the clear keeps the successful unpublish and is logged", async (_label, failure) => {
     seed({ book: { status: "published", librum_choice_at: PICKED_AT } });
     forcedPickClearError = failure;
-    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("<no redirect>");
+    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe(UNPUBLISHED_TARGET);
     expect(bookRow().status).toBe("draft");
     expect(console.error).toHaveBeenCalledTimes(1);
   });
@@ -1750,10 +1752,10 @@ describe("F5: the Librum's choice pick is cleared on unpublish and on a real pub
   it.each(["42703", "PGRST204"])("before the migration (%s) the unpublish still succeeds and warns exactly once", async (code) => {
     seed({ book: { status: "published" } });
     forcedPickClearError = { code, message: "missing" };
-    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("<no redirect>");
+    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe(UNPUBLISHED_TARGET);
     bookRow().status = "published";
     forcedPickClearError = { code, message: "missing" };
-    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe("<no redirect>");
+    expect(await redirectOf(unpublishBook(BOOK_ID))).toBe(UNPUBLISHED_TARGET);
     expect(bookRow().status).toBe("draft");
     expect(console.warn).toHaveBeenCalledTimes(1);
     expect(console.error).not.toHaveBeenCalled();

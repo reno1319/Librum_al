@@ -203,9 +203,11 @@ describe("in review: labels, the approve and send-back forms, RPC errors", () =>
     for (const [k, v] of Object.entries(extra)) fd.set(k, v);
     return fd;
   }
-  const ALL = ["cover_is_fine", "file_opens", "not_someone_elses_work", "rights_declared"];
+  // BD15 P5b-3a (Renato 11-04, b): three boxes; "rights_ok" records both
+  // stored rights checks.
+  const ALL = ["cover_is_fine", "file_opens", "rights_ok"];
 
-  it("approve needs all four checks and returns the canonical checklist and the rendered paths", () => {
+  it("approve needs all three checks and returns the canonical four-key checklist and the rendered paths", () => {
     const ok = validateApproveForm(approveForm(ALL));
     expect(ok).toEqual({
       ok: true,
@@ -222,6 +224,10 @@ describe("in review: labels, the approve and send-back forms, RPC errors", () =>
       });
     }
     expect(validateApproveForm(approveForm(ALL, { reviewId: "nope" })).ok).toBe(false);
+    // The two old rights boxes alone no longer count.
+    expect(
+      validateApproveForm(approveForm(["cover_is_fine", "file_opens", "not_someone_elses_work", "rights_declared"])),
+    ).toEqual({ ok: false, error: CHECKLIST_INCOMPLETE_MESSAGE });
   });
 
   it("send back takes a send-back reason (never Author asked) and a trimmed message of at most 2000", () => {

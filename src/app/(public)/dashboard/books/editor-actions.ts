@@ -49,7 +49,6 @@ import {
   LIVE_SAVED_PENDING_MESSAGE,
   NO_CHANGES_TO_DISCARD_MESSAGE,
   DETAILS_SAVED_MESSAGE,
-  EDITOR_ONLY_DRAFTS_MESSAGE,
   RIGHTS_NOT_SAVED_MESSAGE,
   SAVE_FAILED_MESSAGE,
   SERIES_NOT_OWN_MESSAGE,
@@ -192,7 +191,7 @@ async function saveLiveBookDetails(
   formData: FormData,
 ): Promise<never> {
   const here = editorPath(existing.id, "details");
-  const inReviewPage = () => redirect(withQuery(`/dashboard/books/${existing.id}/edit`, "error", IN_REVIEW_LOCKED_MESSAGE));
+  const inReviewPage = () => redirect(withQuery(editorPath(existing.id, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
 
   // 1. The rights basis.
   const rights = await getRightsDeclarationState(existing.id);
@@ -315,7 +314,7 @@ export async function discardBookPendingChanges(bookId: string) {
   const dropped = await discardPendingChanges(catalogWriter, { authorId: user.id, bookId: existing.id });
   if (!dropped.ok) {
     if (dropped.reason === "in_review") {
-      redirect(withQuery(`/dashboard/books/${existing.id}/edit`, "error", IN_REVIEW_LOCKED_MESSAGE));
+      redirect(withQuery(editorPath(existing.id, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
     }
     redirect(withQuery(here, "error", SAVE_FAILED_MESSAGE));
   }
@@ -388,15 +387,18 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
     if (!existing) {
       redirect("/dashboard");
     }
-    // A book in review is edited on the existing edit page, which knows
-    // its review rules (and, until P5b-3, a book that is neither a draft
-    // nor live).
+    // BD15 P5b-3a: a book in review shows read-only in the editor; an
+    // unreadable review state saves nothing. (books.status is only ever
+    // draft or published.)
     if (existing.status !== "draft" && existing.status !== "published") {
-      redirect(withQuery(`/dashboard/books/${existing.id}/edit`, "error", EDITOR_ONLY_DRAFTS_MESSAGE));
+      redirect("/dashboard");
     }
     const review = await getBookReviewState(supabase, existing.id);
-    if (review.kind !== "ok" || review.pending) {
-      redirect(withQuery(`/dashboard/books/${existing.id}/edit`, "error", EDITOR_ONLY_DRAFTS_MESSAGE));
+    if (review.kind !== "ok") {
+      redirect(withQuery(editorPath(existing.id, "details"), "error", SAVE_FAILED_MESSAGE));
+    }
+    if (review.pending) {
+      redirect(withQuery(editorPath(existing.id, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
     }
   }
   if (existing && existing.status === "published") {
@@ -491,7 +493,7 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
       // BD15 P5a: sent for review from another tab after the check
       // above; the book is read-only now (LB490).
       if (isInReviewLockError(error)) {
-        redirect(withQuery(`/dashboard/books/${existing.id}/edit`, "error", IN_REVIEW_LOCKED_MESSAGE));
+        redirect(withQuery(editorPath(existing.id, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
       }
       redirect(withQuery(here, "error", penNameErrorMessage(error) ?? SAVE_FAILED_MESSAGE));
     }
@@ -510,7 +512,7 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
   if (!(await syncContributors(supabase, savedId, details.contributors))) {
     // Audit r1, F4: sent for review from another tab after the row save.
     if (await isWaitingForReview(supabase, savedId)) {
-      redirect(withQuery(`/dashboard/books/${savedId}/edit`, "error", IN_REVIEW_LOCKED_MESSAGE));
+      redirect(withQuery(editorPath(savedId, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
     }
     redirect(withQuery(editorPath(savedId, "details"), "error", CONTRIBUTORS_NOT_SAVED_MESSAGE));
   }
@@ -523,7 +525,7 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
       if (!recorded.ok) {
         console.error("saveBookDetails: rights declaration not recorded", { bookId: savedId, reason: recorded.reason });
         if (await isWaitingForReview(supabase, savedId)) {
-          redirect(withQuery(`/dashboard/books/${savedId}/edit`, "error", IN_REVIEW_LOCKED_MESSAGE));
+          redirect(withQuery(editorPath(savedId, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
         }
         redirect(withQuery(editorPath(savedId, "details"), "error", RIGHTS_NOT_SAVED_MESSAGE));
       }

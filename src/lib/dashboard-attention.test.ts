@@ -11,6 +11,27 @@ const book = (overrides: Partial<Parameters<typeof resolveDashboardAttention>[0]
 });
 
 describe("resolveDashboardAttention", () => {
+  // BD15 P5b-3a: a draft waiting for review has nothing to continue.
+  it("a draft in review is never the draft to continue; the newest other draft is", () => {
+    const books = [
+      book({ id: "older", created_at: "2026-01-01T00:00:00.000Z" }),
+      book({ id: "newest-in-review", created_at: "2026-02-01T00:00:00.000Z" }),
+    ];
+    expect(
+      resolveDashboardAttention({ books, paidPublishingAvailable: true, inReviewBookIds: new Set(["newest-in-review"]) }),
+    ).toEqual({ kind: "continue-draft", book: { id: "older", title: "Untitled" } });
+  });
+
+  it("only drafts in review: no draft card (the next slot decides)", () => {
+    const books = [book({ id: "a", price_all: 500 })];
+    expect(resolveDashboardAttention({ books, paidPublishingAvailable: true, inReviewBookIds: new Set(["a"]) })).toEqual({
+      kind: "none",
+    });
+    expect(resolveDashboardAttention({ books, paidPublishingAvailable: false, inReviewBookIds: new Set(["a"]) })).toEqual({
+      kind: "paid-publishing-unavailable",
+    });
+  });
+
   it("zero books beats everything, even unavailable paid publishing", () => {
     expect(
       resolveDashboardAttention({ books: [], paidPublishingAvailable: false }),

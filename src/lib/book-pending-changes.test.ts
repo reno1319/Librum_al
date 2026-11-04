@@ -43,19 +43,33 @@ function rpcClient(result: { data: unknown; error: unknown } | "throw") {
 describe("readPendingChanges", () => {
   it("reads the one row by book id and maps it", async () => {
     const { client, filters } = readClient({
-      data: { book_id: BOOK, file_path: "f.epub", cover_path: "c/cover.jpg", description: "D", is_adult: true, original_author: "Homeri" },
+      data: {
+        book_id: BOOK,
+        file_path: "f.epub",
+        cover_path: "c/cover.jpg",
+        description: "D",
+        is_adult: true,
+        original_author: "Homeri",
+        created_at: "2026-11-04T10:00:00Z",
+      },
       error: null,
     });
     expect(await readPendingChanges(client, BOOK)).toEqual({
       ok: true,
       pending: { filePath: "f.epub", coverPath: "c/cover.jpg", description: "D", isAdult: true, originalAuthor: "Homeri" },
+      // BD15 P5b-3a: when the changes were first saved (stale send-back note).
+      createdAt: "2026-11-04T10:00:00Z",
     });
     expect(filters).toContainEqual(["from", "book_pending_changes"]);
     expect(filters).toContainEqual(["eq", "book_id", BOOK]);
   });
 
   it("no row is no waiting changes", async () => {
-    expect(await readPendingChanges(readClient({ data: null, error: null }).client, BOOK)).toEqual({ ok: true, pending: null });
+    expect(await readPendingChanges(readClient({ data: null, error: null }).client, BOOK)).toEqual({
+      ok: true,
+      pending: null,
+      createdAt: null,
+    });
   });
 
   it("an error, a throw or another book's row is a failed read", async () => {

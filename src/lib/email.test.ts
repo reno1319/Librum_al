@@ -326,6 +326,17 @@ describe("sendBookApprovedEmail / sendBookSentBackEmail", () => {
     await sendBookSentBackEmail("ana@example.com", { title: "T", reasonLabel: "R", message: "M", live: true });
     expect(sendMock.mock.calls[0][0].html).toContain("Libri juaj mbetet në shitje siç ishte para këtyre ndryshimeve.");
   });
+
+  // BD15 P5b-3a (Renato 11-04): the email names the changes, not the book.
+  it("a live book's changes sent back: subject and heading say 'ndryshimet', title escaped", async () => {
+    await sendBookSentBackEmail("ana@example.com", { title: "T & Co", reasonLabel: "R", message: "M", live: true });
+    const args = sendMock.mock.calls[0][0];
+    expect(args.subject).toBe('Librum jua ktheu ndryshimet e "T & Co"');
+    expect(args.html).toContain("Librum jua ktheu ndryshimet e librit <strong>T &amp; Co</strong>");
+    expect(args.html).not.toContain("jua ktheu librin");
+    expect(args.html).toContain("Rregullojini dhe dërgojini përsëri për shqyrtim.");
+    expect(args.html).not.toContain("Rregullojeni");
+  });
 });
 
 // PEOPLE-2: the suspend and lift emails. No reason is ever included.

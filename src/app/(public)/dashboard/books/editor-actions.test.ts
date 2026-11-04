@@ -333,29 +333,26 @@ describe("saveBookDetails: an existing draft", () => {
     expect(catalogWrites).toEqual([]);
   });
 
-  it("a book in review (draft or live) or neither draft nor live stays on the existing edit page", async () => {
+  // BD15 P5b-3a: the old edit page is retired; a book in review (draft
+  // or live) shows read-only in the editor.
+  it("a book in review (draft or live) goes to the read-only editor; any other status to the dashboard", async () => {
+    const inReview = `/dashboard/books/${BOOK}/editor?tab=details&error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`;
     seed({ status: "archived" });
-    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toMatch(
-      new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`),
-    );
+    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toBe("/dashboard");
     seed({ status: "published", published_at: "2026-10-01T00:00:00Z" });
     reviewPending = true;
-    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toMatch(
-      new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`),
-    );
+    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toBe(inReview);
     seed();
-    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toMatch(
-      new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`),
-    );
+    expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toBe(inReview);
     expect(catalogWrites).toEqual([]);
   });
 
   // BD15 P5a (P3 audit F3): sent for review from another tab after the
   // check; the database refuses the write (LB490).
-  it("a write refused as in review (LB490) goes to the read-only edit page; contributors untouched", async () => {
+  it("a write refused as in review (LB490) goes to the read-only editor; contributors untouched", async () => {
     failBookUpdate = { code: "LB490" };
     expect(await redirectOf(saveBookDetails(BOOK, form({ title: "T" })))).toBe(
-      `/dashboard/books/${BOOK}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`,
+      `/dashboard/books/${BOOK}/editor?tab=details&error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`,
     );
     expect(sessionContributorWrites).toEqual([]);
     expect(recorded).toEqual([]);
@@ -411,7 +408,7 @@ describe("saveBookDetails: contributors and rights", () => {
     expect(bookRow()).toMatchObject({ title: "Saved" });
   });
 
-  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`;
+  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK}/editor?tab=details&error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`;
 
   it("a contributor failure on a book sent for review meanwhile goes to the read-only edit page", async () => {
     failContributorInsert = { code: "LB490" };
@@ -579,7 +576,7 @@ describe("saveBookDetails: a live book (P5b-2)", () => {
     seedLive();
     rpcError = { code: "LB490" };
     expect(await redirectOf(saveBookDetails(BOOK, liveForm({ description: "X" })))).toMatch(
-      new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`),
+      new RegExp(`^/dashboard/books/${BOOK}/editor\\?tab=details&error=`),
     );
     seedLive();
     rpcError = { code: "LB493" };
@@ -659,7 +656,9 @@ describe("discardBookPendingChanges (P5b-2)", () => {
   it("in review (LB490) goes to the read-only edit page, nothing removed", async () => {
     seedLive({ cover_path: COVER_WAITING });
     rpcError = { code: "LB490" };
-    expect(await redirectOf(discardBookPendingChanges(BOOK))).toMatch(new RegExp(`^/dashboard/books/${BOOK}/edit\\?error=`));
+    expect(await redirectOf(discardBookPendingChanges(BOOK))).toMatch(
+      new RegExp(`^/dashboard/books/${BOOK}/editor\\?tab=details&error=`),
+    );
     expect(removedCovers).toEqual([]);
   });
 

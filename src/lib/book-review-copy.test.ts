@@ -13,12 +13,18 @@ import {
   publishControlLabel,
   type AuthorReviewRow,
 } from "./book-review-copy";
+import { APPROVED_CHECKLIST } from "@/app/admin/(protected)/books/book-admin-logic";
 
 // ADMIN-3-REVIEW: the shared words, the author column list (R1) and the
 // per-book notice rule (F, P4), against the migration where they meet.
 
 const migration = readFileSync(
   path.join(__dirname, "../../supabase/migrations/20261020120000_book_reviews.sql"),
+  "utf8",
+);
+
+const latestApproveMigration = readFileSync(
+  path.join(__dirname, "../../supabase/migrations/20261104170000_bd15_live_pending_changes.sql"),
   "utf8",
 );
 
@@ -57,9 +63,18 @@ describe("AUTHOR_REVIEW_COLUMNS (R1)", () => {
     expect(Object.keys(REVIEW_STATUS_LABELS).sort()).toEqual([...BOOK_REVIEW_STATUSES].sort());
   });
 
-  it("the checklist keys are the ones admin_approve_book_review requires", () => {
-    const required = JSON.stringify(Object.fromEntries(REVIEW_CHECKLIST_ITEMS.map((item) => [item.key, true]))).replace(/,/g, ", ").replace(/:/g, ": ");
+  // BD15 P5b-3a (Renato 11-04, b): staff tick three boxes; the stored
+  // checklist keeps the four keys the RPC requires, in every migration
+  // that (re)defines it, up to the latest (20261104170000).
+  it("the stored checklist is exactly the one admin_approve_book_review requires", () => {
+    const required = JSON.stringify(APPROVED_CHECKLIST).replace(/,/g, ", ").replace(/:/g, ": ");
     expect(migration).toContain(`p_checklist is distinct from '${required}'::jsonb`);
+    expect(latestApproveMigration).toContain(`p_checklist is distinct from '${required}'::jsonb`);
+  });
+
+  it("three staff boxes; the rights box stands for both rights checks", () => {
+    expect(REVIEW_CHECKLIST_ITEMS.map((item) => item.key)).toEqual(["cover_is_fine", "file_opens", "rights_ok"]);
+    expect(REVIEW_CHECKLIST_ITEMS[2].label).toBe("The author declared their rights and it isn't someone else's work");
   });
 });
 
@@ -112,6 +127,22 @@ describe("words", () => {
       "Librum jua ktheu këtë libër për ndryshime më Oct 19, 2026. Arsyeja: Skedar i gabuar ose i dëmtuar.",
       "The file is broken.",
       "Rregullojeni dhe dërgojeni përsëri për shqyrtim.",
+      "Pyetje? Na shkruani te support@librum.al",
+    ]);
+  });
+
+  // BD15 P5b-3a (Renato 11-04): a live book's sent-back changes.
+  it("a live book's notice names the changes, not the book", () => {
+    expect(
+      buildAuthorSentBackNoticeLines(
+        { sentBackAt: "2026-10-19T10:00:00Z", reason: "broken_file", message: "The file is broken" },
+        () => "Oct 19, 2026",
+        true,
+      ),
+    ).toEqual([
+      "Librum jua ktheu ndryshimet më Oct 19, 2026. Arsyeja: Skedar i gabuar ose i dëmtuar.",
+      "The file is broken.",
+      "Rregullojini dhe dërgojini përsëri për shqyrtim.",
       "Pyetje? Na shkruani te support@librum.al",
     ]);
   });

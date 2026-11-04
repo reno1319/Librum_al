@@ -38,8 +38,12 @@ type AttentionBook = Pick<Book, "id" | "title" | "status" | "price_all" | "creat
 export function resolveDashboardAttention(params: {
   books: AttentionBook[];
   paidPublishingAvailable: boolean;
+  // BD15 P5b-3a: drafts waiting for Librum's review. There is nothing to
+  // continue in them (read-only until the author cancels the review), so
+  // "Vazhdoni draftin" never points at one.
+  inReviewBookIds?: ReadonlySet<string>;
 }): DashboardAttentionState {
-  const { books, paidPublishingAvailable } = params;
+  const { books, paidPublishingAvailable, inReviewBookIds = new Set<string>() } = params;
 
   if (books.length === 0) {
     return { kind: "zero-books" };
@@ -47,7 +51,7 @@ export function resolveDashboardAttention(params: {
 
   // An actionable prompt outranks an informational one -- see the
   // ordering note on DashboardAttentionState above.
-  const drafts = books.filter((book) => book.status === "draft");
+  const drafts = books.filter((book) => book.status === "draft" && !inReviewBookIds.has(book.id));
   if (drafts.length > 0) {
     const mostRecentDraft = drafts.reduce((latest, book) =>
       new Date(book.created_at).getTime() > new Date(latest.created_at).getTime()

@@ -184,10 +184,13 @@ describe("unpublishBook: published-bundle-membership gate (PHASE-2C)", () => {
   it("book referenced only by draft/no bundles: unpublishes successfully", async () => {
     mockMemberSelectResult.mockReturnValue(notInAnyPublishedBundle());
 
-    await unpublishBook(BOOK_ID);
+    await expect(unpublishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockBookUpdatePayload).toHaveBeenCalledWith({ status: "draft" });
-    expect(mockRedirect).not.toHaveBeenCalled();
+    // BD15 P5b-3a: back to the editor (Veprime box), now a draft, with what happened.
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&success=${encodeURIComponent("Libri u hoq nga shitja. Tani është draft.")}`,
+    );
     expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/");
   });
@@ -256,7 +259,7 @@ describe("unpublishBook: published-bundle-membership gate (PHASE-2C)", () => {
     // every other test in this file only cares about the resolved data.
     mockMemberSelectResult.mockReturnValue(notInAnyPublishedBundle());
 
-    await unpublishBook(BOOK_ID);
+    await expect(unpublishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockMemberQueryColumns).toHaveBeenCalledWith("bundle_id, bundles!inner(status)");
     expect(mockMemberQueryFilters).toHaveBeenCalledWith("book_id", BOOK_ID);

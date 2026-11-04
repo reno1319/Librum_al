@@ -8,13 +8,14 @@ import {
   PENDING_CHANGES_LEAD,
   PENDING_CHANGES_SEND_LINK,
   PENDING_FIELD_LABELS,
+  BOOK_ACTIONS_ID,
   editorPath,
 } from "@/lib/book-editor-copy";
 
 // BD15 P5b-2: the note on every tab of a live book's editor -- it stays
 // on sale as it is, which changes wait for Librum's review, the changes
-// waiting to be sent (with "Hidhni ndryshimet"), and the link to the
-// edit page that still takes it off sale or deletes it (until P5b-3).
+// waiting to be sent (with "Hidhni ndryshimet"), and (P5b-3a) a link down
+// to the Veprime box under the tab, which takes it off sale or deletes it.
 export function LiveEditNotice({
   bookId,
   changed,
@@ -29,12 +30,12 @@ export function LiveEditNotice({
       <Alert variant="info">
         <p>{LIVE_EDIT_NOTE}</p>
         <p className="mt-1.5">
-          <Link
-            href={`/dashboard/books/${bookId}/edit`}
+          <a
+            href={`#${BOOK_ACTIONS_ID}`}
             className="font-medium text-primary underline underline-offset-2 hover:decoration-2"
           >
             {LIVE_MANAGE_LINK}
-          </Link>
+          </a>
         </p>
       </Alert>
       {changed.length > 0 && (

@@ -19,16 +19,20 @@ export function BookEditorShell({
   done,
   error,
   success,
+  readOnly = false,
   children,
 }: {
   bookId: string | null;
   heading: string;
-  // The pill: "Draft", "Draft i ri".
+  // The pill: "Draft", "Draft i ri", "Në shitje", "Në shqyrtim",
+  // "Hequr nga Libraria".
   statusLabel: string;
   tab: EditorTab;
   done: Record<EditorTab, boolean>;
   error: string | null;
   success: string | null;
+  // BD15 P5b-3a: a book in review shows what was sent, not the tabs.
+  readOnly?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -50,6 +54,7 @@ export function BookEditorShell({
         <span>Libër elektronik</span>
       </p>
 
+      {!readOnly && (
       <nav aria-label="Pjesët e librit" className="mt-5">
         <ol className="grid grid-cols-3 gap-1.5 sm:gap-3">
           {EDITOR_TABS.map((t, i) => {
@@ -100,6 +105,7 @@ export function BookEditorShell({
           <p className="mt-2 text-sm text-muted">Ruajeni draftin një herë, pastaj hapen edhe pjesët e tjera.</p>
         )}
       </nav>
+      )}
 
       {error && (
         <Alert variant="error" className="mt-4">

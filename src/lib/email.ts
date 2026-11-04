@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { resolveSiteOrigin } from "@/lib/site-url";
-import { QUESTIONS_LINE } from "@/lib/book-review-copy";
+import { LIVE_SENT_BACK_FIX_LINE, QUESTIONS_LINE, SENT_BACK_FIX_LINE } from "@/lib/book-review-copy";
 import { formatTransactionMinorUnits, type TransactionCurrency } from "@/lib/transaction-money";
 
 const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
@@ -410,12 +410,18 @@ export async function sendBookSentBackEmail(
   const origin = resolveSiteOrigin();
   await sendEmail(
     to,
-    `Librum jua ktheu "${title}" për ndryshime`,
+    // BD15 P5b-3a (Renato 11-04): a live book's sent-back CHANGES -- the
+    // book stays on sale, so the email names the changes, not the book.
+    live ? `Librum jua ktheu ndryshimet e "${title}"` : `Librum jua ktheu "${title}" për ndryshime`,
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Librum jua ktheu librin <strong>${escapeEmailHtml(title)}</strong> për ndryshime</h1>
+        <h1 style="font-size: 20px;">${
+          live
+            ? `Librum jua ktheu ndryshimet e librit <strong>${escapeEmailHtml(title)}</strong>`
+            : `Librum jua ktheu librin <strong>${escapeEmailHtml(title)}</strong> për ndryshime`
+        }</h1>
         <p>Arsyeja: ${escapeEmailHtml(reasonLabel)}</p>
         <p>${escapeEmailHtmlWithBreaks(message)}</p>
-        <p>Rregullojeni dhe dërgojeni përsëri për shqyrtim.</p>${
+        <p>${live ? LIVE_SENT_BACK_FIX_LINE : SENT_BACK_FIX_LINE}</p>${
           live ? "\n        <p>Libri juaj mbetet në shitje siç ishte para këtyre ndryshimeve.</p>" : ""
         }
         <p>${QUESTIONS_LINE}</p>

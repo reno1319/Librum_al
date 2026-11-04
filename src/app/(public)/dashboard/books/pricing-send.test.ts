@@ -15,6 +15,7 @@ import {
   SEND_TICKS_MISSING_MESSAGE,
 } from "@/lib/book-pricing";
 import { IN_REVIEW_LOCKED_MESSAGE, SENT_FOR_REVIEW_MESSAGE } from "@/lib/book-review-copy";
+import { TAKEN_DOWN_PUBLISH_MESSAGE } from "@/lib/takedown-reasons";
 
 // BD15 P4: saveBookPricing -- the Pricing tab's save and "Send for
 // review" -- against one recording Supabase double. The collaborators
@@ -341,23 +342,39 @@ describe("saveBookPricing: Ruaj draftin", () => {
     expect(target).toContain(`${EDITOR}&error=`);
   });
 
-  it.each([
-    ["a book in review", () => (bookReviewsDoubleState.pending = true)],
-    ["an unreadable review state", () => (bookReviewsDoubleState.stateKind = "unavailable")],
-  ])("%s goes to the edit page, nothing written", async (_l, setUp) => {
-    setUp();
-    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toMatch(
-      new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`),
+  // BD15 P5b-3a: the editor shows a book in review read-only; an
+  // unreadable review state stays on the tab with the generic error.
+  it("a book in review goes to the read-only editor, nothing written", async () => {
+    bookReviewsDoubleState.pending = true;
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toBe(
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&error=${encodeURIComponent(IN_REVIEW_LOCKED_MESSAGE)}`,
     );
     expect(dbWrites).toEqual([]);
   });
 
-  it("a taken-down book goes to the edit page, nothing written", async () => {
-    takedownKind = "active";
-    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toMatch(
-      new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`),
+  it("an unreadable review state saves nothing", async () => {
+    bookReviewsDoubleState.stateKind = "unavailable";
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toBe(
+      `${EDITOR}&error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`,
     );
     expect(dbWrites).toEqual([]);
+  });
+
+  // BD15 P5b-3a (Renato 11-04, Q2 a): a taken-down book is edited like a
+  // draft: its price saves, but it is never sent.
+  it("a taken-down book: the price saves", async () => {
+    takedownKind = "active";
+    expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toContain(`${EDITOR}&success=`);
+    expect(priceWrites()).toHaveLength(1);
+  });
+
+  it("a taken-down book: Send saves the price, then refuses with Librum's reason, nothing recorded or sent", async () => {
+    takedownKind = "active";
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(`${EDITOR}&error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
+    expect(priceWrites()).toHaveLength(1);
+    expect(declarations).toEqual([]);
+    expect(publishWrites()).toEqual([]);
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toEqual([]);
   });
 
   it("an unreadable rights choice saves nothing (it decides whether the book is free only)", async () => {
@@ -436,7 +453,7 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
   // Audit r1, F4: the book was sent for review from another tab while
   // this send ran; the author is sent to the read-only page, not told
   // that saving failed.
-  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(IN_REVIEW_LOCKED_MESSAGE)}`;
+  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK_ID}/editor?tab=details&error=${encodeURIComponent(IN_REVIEW_LOCKED_MESSAGE)}`;
 
   it("a failed record of the ticks on a book sent meanwhile goes to the read-only page", async () => {
     recordOk = false;
@@ -468,7 +485,7 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
   it("already waiting: named on the edit page", async () => {
     bookReviewsDoubleState.requestResult = { ok: false, reason: "already_pending" };
     expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër po pret tashmë shqyrtimin.")}`,
+      `${EDITOR}&error=${encodeURIComponent("Ky libër po pret tashmë shqyrtimin.")}`,
     );
     expect(publishWrites()).toEqual([]);
   });
@@ -486,7 +503,7 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
     book.price_all = 500;
     updateError = { code: "LB490", message: "x" };
     expect(await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`,
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`,
     );
   });
 
@@ -498,7 +515,7 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
 
   it("a takedown found by the request is named on the edit page", async () => {
     bookReviewsDoubleState.requestResult = { ok: false, reason: "taken_down" };
-    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(`${EDITOR}&error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
     expect(publishWrites()).toEqual([]);
   });
 
@@ -701,8 +718,8 @@ describe("saveBookPricing: a live book", () => {
   it.each([
     ["nothing_to_send", `${EDITOR}&error=`],
     ["adult_category", `${EDITOR}&error=`],
-    ["already_pending", `/dashboard/books/${BOOK_ID}/edit?error=`],
-    ["taken_down", `/dashboard/books/${BOOK_ID}/edit?error=`],
+    ["already_pending", `${EDITOR}&error=`],
+    ["taken_down", `${EDITOR}&error=`],
   ])("the database refusing the send (%s) is mapped", async (reason, prefix) => {
     pendingRead = waiting();
     bookReviewsDoubleState.requestResult = { ok: false, reason };

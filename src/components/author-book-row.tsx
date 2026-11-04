@@ -12,7 +12,7 @@ import {
   buildAuthorSentBackNoticeLines,
   type AuthorReviewNotice,
 } from "@/lib/book-review-copy";
-import { editorPath } from "@/lib/book-editor-copy";
+import { BOOK_ACTIONS_ID, editorPath } from "@/lib/book-editor-copy";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
 
@@ -22,7 +22,7 @@ import { DismissableDetails } from "@/components/dismissable-details";
 // commerce-shaped and inappropriate for author-management UI.
 //
 // LIBRUM 2.0 CLEANUP-1 (UI-7A): Publish/Unpublish were removed from
-// this row. Publishing Studio (src/app/dashboard/books/[id]/edit/page.tsx)
+// this row. The book editor (src/app/(public)/dashboard/books/[id]/editor/page.tsx)
 // now owns those lifecycle decisions with proper context -- the
 // readiness checklist and the payout-gate explanation -- that a bare
 // row-level button can't show; duplicating them here risked a reader
@@ -47,7 +47,7 @@ import { DismissableDetails } from "@/components/dismissable-details";
 // downloads, Renato D2; null = not shown, e.g. a failed sales read) and
 // `missing` (a draft's unfinished publish-checklist items, by the
 // checklist's own labels). A draft's Edit link reads "Continue setup",
-// as on the mockup; it goes to the same Edit page.
+// as on the mockup; it goes to the same book editor.
 //
 // ADMIN-2-TAKEDOWN (G, M4): `takedown` is the book's active Librum
 // takedown, if any (read by the caller with the author's own session).
@@ -69,12 +69,12 @@ import { DismissableDetails } from "@/components/dismissable-details";
 // and a 44px "···" button. The ··· opens a floating menu that closes on
 // an outside tap, on Escape and (r2, audit N3) when focus leaves it
 // (DismissableDetails closeOnFocusOut): Edit details,
-// Change manuscript or cover, Change price (each a jump to that section
-// of the Edit page), View in Bookstore and Unpublish (published books
-// only), and Delete. Unpublish only links to the Edit page's Publishing
-// box, where the existing button and its explanation are -- the
-// CLEANUP-1 reasoning above still holds. The separate View button is
-// gone: it is in the menu.
+// Change manuscript or cover, Change price (each the editor's matching
+// tab), View in Bookstore and Unpublish (published books only), and
+// Delete. Unpublish only links to the editor's Veprime box (BD15
+// P5b-3a), where the button and its explanation are -- the CLEANUP-1
+// reasoning above still holds. The separate View button is gone: it is
+// in the menu.
 const TAG_CLASSES = "rounded-[3px] px-2 py-1 text-xs font-bold tracking-wide";
 const MENU_ITEM_BASE = "focus-ring flex min-h-11 w-full items-center px-4 text-left text-sm font-medium hover:bg-surface-hover";
 const MENU_ITEM_CLASSES = `${MENU_ITEM_BASE} text-foreground`;
@@ -208,7 +208,7 @@ export function AuthorBookRow({
           </Link>
         ) : (
           <Link
-            href={`/dashboard/books/${book.id}/edit`}
+            href={editorPath(book.id, "details")}
             className={buttonClasses("outline", "sm", "min-h-11 rounded-[3px] border-[#c9c0ae] px-4 font-semibold")}
           >
             {isInReview ? IN_REVIEW_VIEW_LABEL : "Ndryshoni"}
@@ -229,13 +229,14 @@ export function AuthorBookRow({
           <div className="absolute left-0 top-full z-10 mt-1 w-60 sm:left-auto sm:right-0 rounded-[3px] border border-border bg-surface py-1 shadow-md">
             <ul>
               {/* BD15 P5a: a book in review is read-only (no edit items);
-                  a plain draft is edited in the editor, on the matching
-                  tab (P4 audit F8). */}
+                  every other book is edited in the editor, on the
+                  matching tab (P4 audit F8; P5b-3a: the old edit page is
+                  gone). */}
               {!isInReview && (
                 <>
                   <li>
                     <Link
-                      href={isPlainDraft ? editorPath(book.id, "details") : `/dashboard/books/${book.id}/edit#details`}
+                      href={editorPath(book.id, "details")}
                       className={MENU_ITEM_CLASSES}
                     >
                       Ndryshoni të dhënat
@@ -243,7 +244,7 @@ export function AuthorBookRow({
                   </li>
                   <li>
                     <Link
-                      href={isPlainDraft ? editorPath(book.id, "content") : `/dashboard/books/${book.id}/edit#files`}
+                      href={editorPath(book.id, "content")}
                       className={MENU_ITEM_CLASSES}
                     >
                       Ndryshoni dorëshkrimin ose ballinën
@@ -251,7 +252,7 @@ export function AuthorBookRow({
                   </li>
                   <li>
                     <Link
-                      href={isPlainDraft ? editorPath(book.id, "pricing") : `/dashboard/books/${book.id}/edit#pricing`}
+                      href={editorPath(book.id, "pricing")}
                       className={MENU_ITEM_CLASSES}
                     >
                       Ndryshoni çmimin
@@ -277,8 +278,8 @@ export function AuthorBookRow({
                     </Link>
                   </li>
                   <li>
-                    <Link href={`/dashboard/books/${book.id}/edit#publishing`} className={MENU_ITEM_CLASSES}>
-                      Hiqeni nga publikimi
+                    <Link href={`${editorPath(book.id, "details")}#${BOOK_ACTIONS_ID}`} className={MENU_ITEM_CLASSES}>
+                      Hiqeni nga shitja
                     </Link>
                   </li>
                 </>

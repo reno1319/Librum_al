@@ -25,8 +25,6 @@ export const CONTRIBUTORS_NOT_SAVED_MESSAGE =
   "Të dhënat u ruajtën, por kontribuesit jo të gjithë. Kontrolloni listën dhe ruajeni përsëri.";
 export const RIGHTS_NOT_SAVED_MESSAGE =
   "Të dhënat u ruajtën, por zgjedhja e të drejtave jo. Zgjidheni përsëri dhe ruajeni.";
-export const EDITOR_ONLY_DRAFTS_MESSAGE =
-  "Ky libër është i publikuar ose në shqyrtim, prandaj ndryshohet këtu.";
 
 export const TITLE_LOCKED_NOTE =
   "🔒 Titulli nuk ndryshohet pasi libri publikohet. Për ta korrigjuar, shkruani te Ndihma.";
@@ -83,8 +81,6 @@ export const LIVE_RIGHTS_LOCKED_MESSAGE =
 export const LIVE_RIGHTS_LOCKED_NOTE =
   "🔒 Të drejtat nuk ndryshohen sa libri është në shitje. Për t'i ndryshuar, hiqeni nga shitja dhe dërgojeni përsëri.";
 export const LIVE_REVIEW_FIELD_HINT = "Pret miratimin e Librum para se ta shohin lexuesit.";
-export const LIVE_EDIT_IN_EDITOR_NOTE =
-  "Libri mbetet në shitje ndërsa e ndryshoni te redaktori. Ndryshimet në dorëshkrim, ballinë, përshkrim, etiketën 18+ ose autorin origjinal presin miratimin e Librum.";
 export const LIVE_IN_REVIEW_NOTE =
   "Libri mbetet në shitje siç është. Lexuesit shohin ndryshimet vetëm pasi Librum t'i miratojë.";
 
@@ -97,3 +93,22 @@ export const LIVE_REVIEW_CANCELLED_MESSAGE =
 // Audit r1 F5: the live fields were saved, the waiting ones were not.
 export const LIVE_PARTLY_SAVED_MESSAGE =
   "Ndryshimet e tjera u ruajtën, por përshkrimi, etiketa 18+ dhe autori origjinal nuk u ruajtën. Rifreskoni faqen dhe provoni përsëri.";
+
+// BD15 P5b-3a: the old edit page is gone; everything it did happens in
+// the editor. The "Veprime" box sits under every tab (Renato 11-04, Q3 a):
+// take a live book off sale, delete a book. A book in review shows what
+// was sent, read-only, with "Anuloni shqyrtimin"; a taken-down book is
+// edited as a draft, with Librum's notice where "Send" would be (Q2 a).
+export const BOOK_ACTIONS_ID = "veprime";
+export const BOOK_ACTIONS_HEADING = "Veprime";
+export const UNPUBLISH_BUTTON = "Hiqeni nga shitja";
+export const UNPUBLISH_NOTE = "E heq nga Libraria dhe bëhet draft. Lexuesit që e kanë tashmë e mbajnë shkarkimin e tyre.";
+export const UNPUBLISH_PENDING_NOTE = "Ndryshimet që presin shqyrtim bëhen pjesë e draftit.";
+export const UNPUBLISHED_MESSAGE = "Libri u hoq nga shitja. Tani është draft.";
+export const DELETE_NOTE = "Fshirja nuk mund të zhbëhet.";
+export const TAKEN_DOWN_STATUS_LABEL = "Hequr nga Libraria";
+export const SENT_HEADING = "Çfarë dërguat";
+export const DRAFT_IN_REVIEW_NOTE = "Librum po e kontrollon librin tuaj. Do t'ju njoftojmë kur të publikohet.";
+export const TAKEN_DOWN_SEND_NOTE = "Librum e hoqi këtë libër, prandaj nuk mund ta dërgoni tani.";
+export const PREVIEW_LINK = "Shikoni faqen e librit para botimit";
+export const PREVIEW_NOTE = "Tregon ndryshimet e ruajtura së fundmi.";

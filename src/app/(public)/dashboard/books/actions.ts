@@ -49,13 +49,13 @@ import {
   CONTENT_SAVED_MESSAGE,
   CHANGES_SENT_MESSAGE,
   DETAILS_SAVED_MESSAGE,
-  EDITOR_ONLY_DRAFTS_MESSAGE,
   LIVE_ADULT_CATEGORY_MESSAGE,
   LIVE_NOT_LIVE_MESSAGE,
   LIVE_REVIEW_CANCELLED_MESSAGE,
   LIVE_SAVED_MESSAGE,
   LIVE_SAVED_PENDING_MESSAGE,
   NO_CHANGES_TO_SEND_MESSAGE,
+  UNPUBLISHED_MESSAGE,
   editorPath,
 } from "@/lib/book-editor-copy";
 import {
@@ -2158,17 +2158,17 @@ export async function updateBook(bookId: string, formData: FormData) {
 // (Renato 11-04, Q1 a: a replaced manuscript goes at once, as today;
 // removeUnretainedManuscripts keeps the approved file buyers get).
 // BD15 P5a: a write refused because the book is waiting for review
-// (LB490) -- it was sent from another tab. The edit page shows it
-// read-only with "Anulo shqyrtimin".
+// (LB490) -- it was sent from another tab. P5b-3a: the editor shows it
+// read-only with "Anuloni shqyrtimin".
 function toInReviewEditPage(bookId: string): never {
-  redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(IN_REVIEW_LOCKED_MESSAGE)}`);
+  redirect(withQuery(editorPath(bookId, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
 }
 
 export async function saveBookContent(bookId: string, formData: FormData) {
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    // The edit page shows the maintenance notice (audit r1, F1: the
-    // editor path already carries "?tab=").
-    redirectForMaintenance(`/dashboard/books/${bookId}/edit`);
+    // The editor shows the maintenance notice (audit r1, F1: a path
+    // without "?tab=", since this helper adds "?error=").
+    redirectForMaintenance(`/dashboard/books/${bookId}/editor`);
   }
 
   const supabase = await createClient();
@@ -2206,15 +2206,14 @@ export async function saveBookContent(bookId: string, formData: FormData) {
     redirect("/dashboard");
   }
 
-  // Drafts and (P5b-2) live books, not while waiting for review (an
-  // unreadable review state counts as waiting): the edit page knows
-  // those rules.
-  const toEditPage = () =>
-    redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(EDITOR_ONLY_DRAFTS_MESSAGE)}`);
+  // Drafts and (P5b-2) live books, not while waiting for review.
+  // P5b-3a: the editor shows a book in review read-only; an unreadable
+  // review state saves nothing.
   const live = existing.status === "published";
-  if (existing.status !== "draft" && !live) toEditPage();
+  if (existing.status !== "draft" && !live) redirect("/dashboard");
   const review = await getBookReviewState(supabase, existing.id);
-  if (review.kind !== "ok" || review.pending) toEditPage();
+  if (review.kind !== "ok") return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+  if (review.pending) toInReviewEditPage(existing.id);
 
   // BD15 P5b-2: a live book's new manuscript or ballinë goes to its
   // waiting changes, never onto the live row; the working version (the
@@ -2644,10 +2643,10 @@ async function sendLiveBookChanges({
         fail(SEND_INCOMPLETE_MESSAGE);
         break;
       case "already_pending":
-        redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
+        fail(ALREADY_IN_REVIEW_MESSAGE);
         break;
       case "taken_down":
-        redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
+        fail(TAKEN_DOWN_PUBLISH_MESSAGE);
         break;
       default:
         fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
@@ -2661,8 +2660,8 @@ async function sendLiveBookChanges({
 
 // BD15 P4: the new editor's Pricing tab (PLAN-BD15-r1 §2.5). Saves the
 // price ("Ruaj draftin"), or saves it and sends the book for review
-// ("Dërgo për shqyrtim"). Drafts only, not while in review, not while
-// taken down -- the edit page knows those states.
+// ("Dërgo për shqyrtim"). Drafts and live books, not while in review;
+// a taken-down book's price saves but it is never sent (P5b-3a, Q2 a).
 //
 // Sending, in order, each step refusing before the next:
 //   1. the price is saved (so a refusal below never loses it);
@@ -2676,7 +2675,7 @@ async function sendLiveBookChanges({
 //      publish when Librum's approval still matches the files (3a).
 export async function saveBookPricing(bookId: string, formData: FormData) {
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    redirectForMaintenance(`/dashboard/books/${bookId}/edit`);
+    redirectForMaintenance(`/dashboard/books/${bookId}/editor`);
   }
 
   const supabase = await createClient();
@@ -2713,23 +2712,25 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
     redirect("/dashboard");
   }
 
-  const toEditPage = () =>
-    redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(EDITOR_ONLY_DRAFTS_MESSAGE)}`);
   // BD15 P5b-2: a live book too (its price saves at once; "send" sends
   // its waiting changes and it stays live).
   const live = existing.status === "published";
-  if (existing.status !== "draft" && !live) toEditPage();
+  if (existing.status !== "draft" && !live) redirect("/dashboard");
   const [review, takedown, rights] = await Promise.all([
     getBookReviewState(supabase, existing.id),
     getActiveTakedownState(supabase, existing.id),
     getRightsDeclarationState(existing.id),
   ]);
-  if (review.kind !== "ok" || review.pending) toEditPage();
-  if (takedown.kind === "active") {
-    redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
-  }
+  // P5b-3a: a book in review shows read-only in the editor; an
+  // unreadable review state saves nothing.
+  if (review.kind !== "ok") return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+  if (review.pending) toInReviewEditPage(existing.id);
   // Audit r1, F6: an unreadable takedown state is not a takedown.
-  if (takedown.kind !== "none") redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
+  if (takedown.kind === "unavailable") redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
+  // P5b-3a (Renato 11-04, Q2 a): a taken-down book is edited like a
+  // draft -- its price saves -- but it is never sent (checked again
+  // below, after the save, and by request_book_review, LB460).
+  const takenDown = takedown.kind === "active";
   // Audit r1, F2: without the rights choice it is unknown whether the
   // book is free only, so nothing is saved.
   if (rights.kind === "unavailable") fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
@@ -2795,6 +2796,9 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
     const savedMessage = live ? LIVE_SAVED_MESSAGE : DETAILS_SAVED_MESSAGE;
     redirect(`${intent === "back" ? back : here}&success=${encodeURIComponent(savedMessage)}`);
   }
+
+  // P5b-3a: the price above is saved; a taken-down book is not sent.
+  if (takenDown) fail(TAKEN_DOWN_PUBLISH_MESSAGE);
 
   // 2. Both ticks, every send.
   if (!hasSendTicks(formData)) fail(SEND_TICKS_MISSING_MESSAGE);
@@ -2878,10 +2882,10 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
         fail(SEND_INCOMPLETE_MESSAGE);
         break;
       case "already_in_review":
-        redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
+        fail(ALREADY_IN_REVIEW_MESSAGE);
         break;
       case "taken_down":
-        redirect(`/dashboard/books/${existing.id}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
+        fail(TAKEN_DOWN_PUBLISH_MESSAGE);
         break;
       case "book_changed":
         fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
@@ -2938,14 +2942,16 @@ export async function cancelBookReview(bookId: string) {
   const result = await withdrawBookReview(supabase, bookId);
   if (!result.ok) {
     redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
+      withQuery(
+        editorPath(bookId, "details"),
+        "error",
         result.reason === "not_pending" ? NOT_IN_REVIEW_MESSAGE : "Diçka shkoi keq. Provoni përsëri",
-      )}`,
+      ),
     );
   }
 
   revalidatePath("/dashboard");
-  revalidatePath(`/dashboard/books/${bookId}/edit`);
+  revalidatePath(`/dashboard/books/${bookId}/editor`);
   // BD15 P4: the book is a plain draft again, edited in the new editor.
   // P5b-2 (audit r1 F2): a live book stays on sale; its changes wait in
   // the editor again. An unreadable status says the draft line.
@@ -3575,6 +3581,9 @@ export async function unpublishBook(bookId: string) {
 
   revalidatePath("/dashboard");
   revalidatePath("/");
+  // BD15 P5b-3a: "Hiqeni nga shitja" sits in the editor's Veprime box;
+  // the book opens there again as a draft, with what happened.
+  redirect(withQuery(editorPath(bookId, "details"), "success", UNPUBLISHED_MESSAGE));
 }
 
 export async function deleteBook(bookId: string) {
