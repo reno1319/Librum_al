@@ -2,8 +2,15 @@ import { CoverField } from "@/components/cover-field";
 import { ManuscriptField } from "@/components/manuscript-field";
 import { CheckedBookField } from "@/components/checked-book-field";
 import { BookSampleReader } from "@/components/book-sample-reader";
-import { buttonClasses } from "@/components/ui/button";
-import { formControlClasses } from "@/lib/form-styles";
+import {
+  EDITOR_CONTROL_CLASSES,
+  EDITOR_FIELD_CLASSES,
+  EDITOR_LABEL_CLASSES,
+  EDITOR_SMALL_BUTTON,
+  EditorActionBar,
+  EditorSection,
+  Optional,
+} from "@/components/book-editor-ui";
 import { AI_QUESTION, AI_STAFF_ONLY_NOTE, DRM_FREE_NOTE } from "@/lib/book-editor-copy";
 import type { AiAnswer } from "@/lib/book-ai-disclosure";
 
@@ -20,7 +27,8 @@ import type { AiAnswer } from "@/lib/book-ai-disclosure";
 // is the existing download route, which serves an author their own
 // current file and records nothing for them.
 
-const SECTION_CLASSES = "flex flex-col gap-3 rounded-[4px] border border-border bg-surface p-5 sm:p-6";
+// D1 (mockup v5): the editor's shared section look and action bar
+// (book-editor-ui.tsx). "← Të dhënat" saves first, then goes back.
 
 export type ContentFormBook = {
   id: string;
@@ -51,119 +59,107 @@ export function BookContentForm({
   aiUnreadable: boolean;
 }) {
   return (
-    <form action={action} className="mt-8 flex flex-col gap-6">
-      <section className={SECTION_CLASSES} aria-labelledby="content-manuscript">
-        <h2 id="content-manuscript" className="font-serif text-xl font-normal">
-          Dorëshkrimi
-        </h2>
-        <p className="text-sm text-muted">
-          DOCX ose EPUB, deri në 50 MB. Skedarin Word e kthejmë ne në libër elektronik dhe ju tregojmë çfarë duhet
-          parë. Një skedar i ri zëvendëson të mëparshmin.
-        </p>
-        <p className="text-sm font-medium">{book.hasManuscript ? "Dorëshkrimi aktual: skedar EPUB" : "Nuk ka dorëshkrim ende"}</p>
+    <form action={action} className="mt-2 flex flex-col gap-2">
+      <EditorSection
+        id="content-manuscript"
+        title="Dorëshkrimi"
+        help="DOCX ose EPUB, deri në 50 MB. Skedarin Word e kthejmë ne në libër elektronik dhe ju tregojmë çfarë duhet parë. Një skedar i ri zëvendëson të mëparshmin."
+      >
+        <p className="text-sm font-semibold">{book.hasManuscript ? "Dorëshkrimi aktual: skedar EPUB" : "Nuk ka dorëshkrim ende"}</p>
         <ManuscriptField
           bookTitle={book.title}
           bookLanguage={book.language ?? undefined}
           authorName={authorName}
           authorId={authorId}
         />
-        <p className="text-sm text-muted">{DRM_FREE_NOTE}</p>
-      </section>
+        <p className="text-[13px] text-muted">{DRM_FREE_NOTE}</p>
+      </EditorSection>
 
-      <section className={SECTION_CLASSES} aria-labelledby="content-cover">
-        <h2 id="content-cover" className="font-serif text-xl font-normal">
-          Kopertina
-        </h2>
+      <EditorSection id="content-cover" title="Ballina">
         <CoverField authorId={authorId} existingCoverUrl={book.coverUrl ?? undefined} />
-      </section>
+      </EditorSection>
 
-      <section className={SECTION_CLASSES} aria-labelledby="content-preview">
-        <h2 id="content-preview" className="font-serif text-xl font-normal">
-          Pamja paraprake
-        </h2>
-        {book.hasManuscript ? (
-          <>
-            <p className="text-sm text-muted">
-              Pamja paraprake tregon pjesën që lexuesit shohin para se ta blejnë librin. Për të parë gjithë librin,
-              shkarkoni skedarin dhe hapeni në aplikacionin tuaj të leximit.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <BookSampleReader bookId={book.id} bookTitle={book.title} label="Hap pamjen paraprake" />
-              {/* A plain link: the route checks the session and that this is the author's own book. */}
-              <a href={`/api/books/${book.id}/download`} className={buttonClasses("outline", "md")}>
-                Shkarko skedarin tim
-              </a>
-            </div>
-          </>
-        ) : (
-          <p className="text-sm text-muted">Ruajeni dorëshkrimin një herë, pastaj e shihni këtu.</p>
+      <EditorSection
+        id="content-preview"
+        title="Pamja paraprake"
+        help={
+          book.hasManuscript
+            ? "Pamja paraprake tregon pjesën që lexuesit shohin para se ta blejnë librin. Për të parë gjithë librin, shkarkoni skedarin dhe hapeni në aplikacionin tuaj të leximit."
+            : "Ruajeni dorëshkrimin një herë, pastaj e shihni këtu."
+        }
+      >
+        {book.hasManuscript && (
+          <div className="flex flex-wrap gap-3">
+            <BookSampleReader bookId={book.id} bookTitle={book.title} label="Hap pamjen paraprake" />
+            {/* A plain link: the route checks the session and that this is the author's own book. */}
+            <a href={`/api/books/${book.id}/download`} className={EDITOR_SMALL_BUTTON}>
+              Shkarko skedarin tim
+            </a>
+          </div>
         )}
-      </section>
+      </EditorSection>
 
-      <section className={SECTION_CLASSES} aria-labelledby="content-ai">
-        <h2 id="content-ai" className="font-serif text-xl font-normal">
-          AI
-        </h2>
-        <fieldset className="flex flex-col gap-2">
-          <legend className="text-sm font-semibold text-foreground">{AI_QUESTION}</legend>
-          <div className="mt-2 flex gap-6">
+      <EditorSection id="content-ai" title="AI" help={AI_STAFF_ONLY_NOTE}>
+        <fieldset className="m-0 flex flex-col border-0 p-0">
+          <legend className={EDITOR_LABEL_CLASSES}>{AI_QUESTION}</legend>
+          <div className="mt-1.5 flex gap-7">
             {(
               [
                 ["no", "Jo"],
                 ["yes", "Po"],
               ] as const
             ).map(([value, label]) => (
-              <label key={value} className="flex min-h-11 items-center gap-2 text-sm">
+              <label key={value} className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm sm:min-h-6">
                 <input
                   type="radio"
                   name="aiUsed"
                   value={value}
                   defaultChecked={!aiUnreadable && aiAnswer === value}
-                  className="focus-ring h-5 w-5 accent-primary"
+                  className="focus-ring h-[18px] w-[18px] accent-primary"
                 />
                 {label}
               </label>
             ))}
           </div>
-          <p className="text-sm text-muted">{AI_STAFF_ONLY_NOTE}</p>
         </fieldset>
-      </section>
+      </EditorSection>
 
-      <section className={SECTION_CLASSES} aria-labelledby="content-isbn">
-        <h2 id="content-isbn" className="font-serif text-xl font-normal">
-          ISBN dhe botuesi
-        </h2>
-        <p className="text-sm text-muted">Opsionale. Nuk ju duhet ISBN për të botuar në Librum.</p>
-        <label className="flex flex-col gap-1 text-sm">
-          ISBN (opsional)
+      <EditorSection id="content-isbn" title="ISBN dhe botuesi" help="Nuk ju duhet ISBN për të botuar në Librum.">
+        <label className={`${EDITOR_FIELD_CLASSES} max-w-80`}>
+          <span className={EDITOR_LABEL_CLASSES}>
+            ISBN
+            <Optional />
+          </span>
           <CheckedBookField
             kind="isbn"
             id="content-isbn-input"
             name="isbn"
             defaultValue={book.isbn ?? ""}
             placeholder="p.sh. 978-3-16-148410-0"
+            className={EDITOR_CONTROL_CLASSES}
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Botuesi / shtëpia botuese (opsional)
+        <label className={EDITOR_FIELD_CLASSES}>
+          <span className={EDITOR_LABEL_CLASSES}>
+            Botuesi / shtëpia botuese
+            <Optional />
+          </span>
           <input
             name="publisher"
             type="text"
             defaultValue={book.publisher ?? ""}
             maxLength={200}
-            className={formControlClasses}
+            className={EDITOR_CONTROL_CLASSES}
           />
         </label>
-      </section>
+      </EditorSection>
 
-      <div className="flex flex-wrap justify-end gap-3">
-        <button type="submit" name="intent" value="save" className={buttonClasses("outline", "md", "min-h-11 rounded-full")}>
-          Ruaj draftin
-        </button>
-        <button type="submit" name="intent" value="next" className={buttonClasses("primary", "md", "min-h-11 rounded-full")}>
-          Ruaj dhe vazhdo →
-        </button>
-      </div>
+      <EditorActionBar
+        backLabel="Të dhënat"
+        primaryLabel="Ruaj dhe vazhdo"
+        primaryIntent="next"
+        primaryNote="Hapi tjetër: Çmimi"
+      />
     </form>
   );
 }

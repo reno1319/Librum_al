@@ -55,7 +55,10 @@ describe("BookDetailsForm", () => {
     expect(html).toContain('value="save"');
     expect(html).toContain("Ruaj draftin");
     expect(html).toContain('value="next"');
-    expect(html).toContain("Ruaj dhe vazhdo →");
+    expect(html).toContain("Ruaj dhe vazhdo</button>");
+    expect(html).toContain("Hapi tjetër: Përmbajtja");
+    // The first tab has no back link.
+    expect(html).not.toContain('value="back"');
   });
 
   it("escapes the stored description inside the editor box", () => {
@@ -80,7 +83,7 @@ describe("BookDetailsForm", () => {
   it("18+ fixes the reading age at 18 and disables the children's categories", () => {
     const html = render({ isAdult: true, categories: [] });
     expect(html).toContain('<input type="hidden" name="readingAge" value="18"/>');
-    expect(html).toMatch(/<input type="checkbox" disabled=""\/>Për fëmijë/);
+    expect(html).toMatch(/<input type="checkbox" disabled=""[^>]*\/>Për fëmijë/);
   });
 
   it("shows the title and pen name as locked once the book was published", () => {
@@ -89,6 +92,14 @@ describe("BookDetailsForm", () => {
     expect(html).toContain("🔒 Emri i autorit nuk ndryshohet pasi libri publikohet.");
     expect(html).not.toMatch(/<input[^>]*name="title"[^>]*type="text"/);
     expect(html).not.toContain('name="penNameId"');
+  });
+
+  it("D1: ballinë, bold labels with (opsional), and phone-sized fields", () => {
+    const html = render();
+    expect(html).toContain("Shkruajeni saktësisht si në ballinë.");
+    expect(html).not.toContain("si në kopertinë");
+    expect(html).toContain('Nëntitulli<span class="font-normal text-muted"> (opsional)</span>');
+    expect(html.match(/<input[^>]*name="subtitle"[^>]*>/)![0]).toMatch(/h-11 text-base sm:h-\[34px\] sm:text-sm/);
   });
 
   it("an unlocked draft can change both, and says the title will lock", () => {

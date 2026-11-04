@@ -36,9 +36,9 @@ describe("BookContentForm", () => {
     const html = render();
     for (const text of [
       "Dorëshkrimi",
-      "Kopertina",
+      ">Ballina</h2>",
       "Pamja paraprake",
-      "A ke përdorur AI për të krijuar tekstin, përkthimin ose kopertinën?",
+      "A keni përdorur AI për të krijuar tekstin, përkthimin ose ballinën?",
       "Këtë përgjigje e sheh vetëm ekipi i Librum",
       "ISBN dhe botuesi",
       "pa DRM",
@@ -55,6 +55,17 @@ describe("BookContentForm", () => {
     // Text is escaped, never markup.
     expect(html).toContain("Botime &lt;X&gt;");
     expect(html).not.toContain("<X>");
+  });
+
+  it("D1: ballinë in the editor's own words, ju form, and a back link that saves first", () => {
+    const html = render();
+    expect(html).not.toMatch(/>Kopertina<\/h2>|A ke përdorur/);
+    expect(html).toContain('value="back"');
+    expect(html).toContain("Të dhënat</button>");
+    expect(html).toContain("Hapi tjetër: Çmimi");
+    // Phone: 44px fields with 16px text; computer: 34px with 14px.
+    expect(html.match(/<input[^>]*name="publisher"[^>]*>/)![0]).toMatch(/h-11 text-base sm:h-\[34px\] sm:text-sm/);
+    expect(html.match(/<input[^>]*name="isbn"[^>]*>/)![0]).toMatch(/h-11 text-base sm:h-\[34px\] sm:text-sm/);
   });
 
   it("offers the preview and the author's own download only when a file exists", () => {

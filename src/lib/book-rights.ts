@@ -42,7 +42,10 @@ export type RecordRightsDeclarationResult =
 // author gave for THIS send, so every send has its own dated proof. The
 // version names the rights wording, this send wording and the Terms the
 // tick points at; the text is the rights sentence followed by both ticks.
-export const SEND_CONFIRMATION_VERSION = "send-v1";
+// D1: send-v2 = tick 2 reads "Pranoj Kushtet e Librum për autorët"
+// (send-v1 rows: "Konfirmoj që kam të drejtat e këtij libri dhe pranoj
+// Kushtet e Librum për autorët").
+export const SEND_CONFIRMATION_VERSION = "send-v2";
 
 export function sendConfirmationStatement(basis: keyof typeof RIGHTS_STATEMENTS): {
   version: string;

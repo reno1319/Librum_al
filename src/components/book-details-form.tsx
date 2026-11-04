@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
-import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { createSeriesFromEditor } from "@/app/(public)/dashboard/books/editor-actions";
 import { GENRES } from "@/lib/genres";
@@ -24,8 +23,18 @@ import {
   type DetailsField,
 } from "@/lib/book-details";
 import { PEN_NAME_LOCKED_NOTE, TITLE_LOCKED_NOTE, TITLE_WILL_LOCK_NOTE } from "@/lib/book-editor-copy";
-import { fieldErrorClasses, formControlClassesFor } from "@/lib/form-styles";
-import { buttonClasses } from "@/components/ui/button";
+import { fieldErrorClasses } from "@/lib/form-styles";
+import {
+  EDITOR_FIELD_CLASSES,
+  EDITOR_HINT_CLASSES,
+  EDITOR_LABEL_CLASSES,
+  EDITOR_LINK_BUTTON,
+  EDITOR_SMALL_BUTTON,
+  EditorActionBar,
+  EditorSection,
+  Optional,
+  editorControlClassesFor,
+} from "@/components/book-editor-ui";
 import { DescriptionEditor } from "@/components/description-editor";
 import type { RightsBasis } from "@/lib/types";
 
@@ -55,10 +64,11 @@ export type DetailsFormValues = {
 export type EditorPenName = { id: string; name: string; is_default: boolean };
 export type EditorSeries = { id: string; title: string; pen_name_id: string | null };
 
-const SECTION_CLASSES = "grid gap-4 border-t border-border pt-6 sm:grid-cols-[14rem_1fr]";
-const SECTION_TITLE_CLASSES = "font-serif text-xl text-foreground";
+// D1 (mockup v5): the editor's shared look (book-editor-ui.tsx).
 const TEXT_LINK_CLASSES =
   "focus-ring w-fit rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2";
+const CHOICE_LABEL_CLASSES = "flex min-h-11 cursor-pointer items-center gap-2.5 text-sm sm:min-h-6";
+const CHOICE_INPUT_CLASSES = "focus-ring h-[18px] w-[18px] shrink-0 accent-primary";
 
 function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null;
@@ -70,47 +80,15 @@ function FieldError({ id, message }: { id: string; message?: string }) {
 }
 
 function Section({ title, lead, children }: { title: string; lead?: string; children: React.ReactNode }) {
+  const id = `details-section-${title
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z]+/g, "-")
+    .toLowerCase()}`;
   return (
-    <section className={SECTION_CLASSES}>
-      <div>
-        <h2 className={SECTION_TITLE_CLASSES}>{title}</h2>
-        {lead && <p className="mt-1 text-sm text-muted">{lead}</p>}
-      </div>
-      <div className="flex min-w-0 flex-col gap-4">{children}</div>
-    </section>
-  );
-}
-
-function SaveButtons() {
-  const { pending } = useFormStatus();
-  return (
-    <div className="flex flex-col items-end gap-2">
-      {pending && (
-        <p role="status" className="text-sm text-muted">
-          Po ruhet…
-        </p>
-      )}
-      <div className="flex flex-wrap justify-end gap-3">
-        <button
-          type="submit"
-          name="intent"
-          value="save"
-          disabled={pending}
-          className={buttonClasses("outline", "md", "min-h-11 rounded-full disabled:cursor-not-allowed disabled:opacity-60")}
-        >
-          Ruaj draftin
-        </button>
-        <button
-          type="submit"
-          name="intent"
-          value="next"
-          disabled={pending}
-          className={buttonClasses("primary", "md", "min-h-11 rounded-full disabled:cursor-not-allowed disabled:opacity-60")}
-        >
-          Ruaj dhe vazhdo →
-        </button>
-      </div>
-    </div>
+    <EditorSection id={id} title={title} help={lead}>
+      {children}
+    </EditorSection>
   );
 }
 
@@ -196,16 +174,16 @@ export function BookDetailsForm({
     [errors[field] ? `details-${field}-error` : null, hint ?? null].filter(Boolean).join(" ") || undefined;
 
   return (
-    <form ref={formRef} action={action} onSubmit={onSubmit} noValidate className="mt-6 flex flex-col gap-8">
+    <form ref={formRef} action={action} onSubmit={onSubmit} noValidate className="mt-2 flex flex-col gap-2">
       <Section title="Gjuha" lead="Gjuha në të cilën është shkruar libri.">
-        <label className="flex max-w-xs flex-col gap-1 text-sm">
-          Gjuha
+        <label className={`${EDITOR_FIELD_CLASSES} max-w-80`}>
+          <span className={EDITOR_LABEL_CLASSES}>Gjuha</span>
           <select
             name="language"
             data-field="language"
             defaultValue={initial.language || "sq"}
             aria-describedby={describe("language")}
-            className={formControlClassesFor(!!err("language"))}
+            className={editorControlClassesFor(!!err("language"))}
           >
             {LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>
@@ -217,17 +195,17 @@ export function BookDetailsForm({
         </label>
       </Section>
 
-      <Section title="Titulli" lead="Shkruajeni saktësisht si në kopertinë.">
+      <Section title="Titulli" lead="Shkruajeni saktësisht si në ballinë.">
         {locked ? (
-          <div className="flex flex-col gap-1 text-sm">
-            <span>Titulli i librit</span>
-            <p className="rounded-control border border-border bg-background px-3 py-2 text-base">{initial.title}</p>
-            <span className="text-sm text-muted">{TITLE_LOCKED_NOTE}</span>
+          <div className={EDITOR_FIELD_CLASSES}>
+            <span className={EDITOR_LABEL_CLASSES}>Titulli i librit</span>
+            <p className="rounded-md border border-border bg-background px-2.5 py-2 text-base text-muted sm:py-1.5 sm:text-sm">{initial.title}</p>
+            <span className={EDITOR_HINT_CLASSES}>{TITLE_LOCKED_NOTE}</span>
             <input type="hidden" name="title" value={initial.title} />
           </div>
         ) : (
-          <label className="flex flex-col gap-1 text-sm">
-            Titulli i librit
+          <label className={EDITOR_FIELD_CLASSES}>
+            <span className={EDITOR_LABEL_CLASSES}>Titulli i librit</span>
             <input
               name="title"
               data-field="title"
@@ -237,16 +215,19 @@ export function BookDetailsForm({
               defaultValue={initial.title}
               aria-invalid={err("title") ? true : undefined}
               aria-describedby={describe("title", "details-title-hint")}
-              className={formControlClassesFor(!!err("title"))}
+              className={editorControlClassesFor(!!err("title"))}
             />
-            <span id="details-title-hint" className="text-sm text-muted">
+            <span id="details-title-hint" className={EDITOR_HINT_CLASSES}>
               {TITLE_WILL_LOCK_NOTE}
             </span>
             <FieldError id="details-title-error" message={err("title")} />
           </label>
         )}
-        <label className="flex flex-col gap-1 text-sm">
-          Nëntitulli (opsional)
+        <label className={EDITOR_FIELD_CLASSES}>
+          <span className={EDITOR_LABEL_CLASSES}>
+            Nëntitulli
+            <Optional />
+          </span>
           <input
             name="subtitle"
             data-field="subtitle"
@@ -254,7 +235,7 @@ export function BookDetailsForm({
             maxLength={SUBTITLE_MAX_LENGTH}
             defaultValue={initial.subtitle}
             aria-describedby={describe("subtitle")}
-            className={formControlClassesFor(!!err("subtitle"))}
+            className={editorControlClassesFor(!!err("subtitle"))}
           />
           <FieldError id="details-subtitle-error" message={err("subtitle")} />
         </label>
@@ -262,14 +243,14 @@ export function BookDetailsForm({
 
       <Section title="Autori" lead="Emri që shohin lexuesit vjen nga profili juaj.">
         {locked ? (
-          <div className="flex flex-col gap-1 text-sm">
-            <span>Emri i autorit</span>
-            <p className="rounded-control border border-border bg-background px-3 py-2 text-base">{lockedPenName}</p>
-            <span className="text-sm text-muted">{PEN_NAME_LOCKED_NOTE}</span>
+          <div className={`${EDITOR_FIELD_CLASSES} max-w-80`}>
+            <span className={EDITOR_LABEL_CLASSES}>Emri i autorit</span>
+            <p className="rounded-md border border-border bg-background px-2.5 py-2 text-base text-muted sm:py-1.5 sm:text-sm">{lockedPenName}</p>
+            <span className={EDITOR_HINT_CLASSES}>{PEN_NAME_LOCKED_NOTE}</span>
           </div>
         ) : (
-          <label className="flex flex-col gap-1 text-sm">
-            Emri i autorit
+          <label className={`${EDITOR_FIELD_CLASSES} max-w-80`}>
+            <span className={EDITOR_LABEL_CLASSES}>Emri i autorit</span>
             <select
               name="penNameId"
               data-field="penNameId"
@@ -280,7 +261,7 @@ export function BookDetailsForm({
                 const chosen = seriesList.find((s) => s.id === seriesId);
                 if (chosen?.pen_name_id && chosen.pen_name_id !== e.target.value) setSeriesId("");
               }}
-              className={formControlClassesFor(!!err("penNameId"))}
+              className={editorControlClassesFor(!!err("penNameId"))}
             >
               {penNames.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -288,7 +269,7 @@ export function BookDetailsForm({
                 </option>
               ))}
             </select>
-            <span className="text-sm text-muted">
+            <span className={EDITOR_HINT_CLASSES}>
               Shtoni ose ndryshoni emra te{" "}
               <Link href="/dashboard/pen-names" className={TEXT_LINK_CLASSES}>
                 Profili → Emrat e autorit
@@ -298,20 +279,23 @@ export function BookDetailsForm({
           </label>
         )}
 
-        <fieldset className="flex flex-col gap-3" data-field="contributors" tabIndex={-1} aria-describedby={describe("contributors")}>
-          <legend className="text-sm">Kontribues të tjerë (deri në {MAX_CONTRIBUTORS})</legend>
+        <fieldset className="m-0 flex flex-col gap-3 border-0 p-0" data-field="contributors" tabIndex={-1} aria-describedby={describe("contributors")}>
+          <legend className={EDITOR_LABEL_CLASSES}>
+            Kontribues të tjerë
+            <Optional>opsional, deri në {MAX_CONTRIBUTORS}</Optional>
+          </legend>
           {contributors.map((c, i) => (
-            <div key={c.id || `new-${i}`} className="flex flex-wrap items-end gap-2">
+            <div key={c.id || `new-${i}`} className="flex flex-wrap items-end gap-3">
               <input type="hidden" name="contributorId" value={c.id} />
-              <label className="flex flex-col gap-1 text-sm">
-                Roli
+              <label className={`${EDITOR_FIELD_CLASSES} w-full sm:w-48`}>
+                <span className={EDITOR_HINT_CLASSES}>Roli</span>
                 <select
                   name="contributorRole"
                   value={c.role}
                   onChange={(e) =>
                     setContributors((list) => list.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))
                   }
-                  className={formControlClassesFor(false)}
+                  className={editorControlClassesFor(false)}
                 >
                   {CONTRIBUTOR_ROLES.map((role) => (
                     <option key={role} value={role}>
@@ -320,8 +304,8 @@ export function BookDetailsForm({
                   ))}
                 </select>
               </label>
-              <label className="flex min-w-48 flex-1 flex-col gap-1 text-sm">
-                Emri
+              <label className={`${EDITOR_FIELD_CLASSES} min-w-48 flex-1`}>
+                <span className={EDITOR_HINT_CLASSES}>Emri</span>
                 <input
                   name="contributorName"
                   type="text"
@@ -330,13 +314,13 @@ export function BookDetailsForm({
                   onChange={(e) =>
                     setContributors((list) => list.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
                   }
-                  className={formControlClassesFor(false)}
+                  className={editorControlClassesFor(false)}
                 />
               </label>
               <button
                 type="button"
                 onClick={() => setContributors((list) => list.filter((_, j) => j !== i))}
-                className={buttonClasses("ghost", "sm", "min-h-10")}
+                className={EDITOR_SMALL_BUTTON}
               >
                 Hiq
               </button>
@@ -346,12 +330,12 @@ export function BookDetailsForm({
             <button
               type="button"
               onClick={() => setContributors((list) => [...list, { id: "", name: "", role: "Co-Author" }])}
-              className={buttonClasses("outline", "sm", "w-fit rounded-full")}
+              className={EDITOR_LINK_BUTTON}
             >
               + Shto kontribues
             </button>
           ) : (
-            <p className="text-sm text-muted">Keni arritur kufirin prej {MAX_CONTRIBUTORS} kontribuesish.</p>
+            <p className={EDITOR_HINT_CLASSES}>Keni arritur kufirin prej {MAX_CONTRIBUTORS} kontribuesish.</p>
           )}
           <FieldError id="details-contributors-error" message={err("contributors")} />
         </fieldset>
@@ -362,13 +346,16 @@ export function BookDetailsForm({
         lead="Nëse libri është pjesë e një serie, lidheni këtu. Të gjithë librat e një serie dalin me të njëjtin emër autori."
       >
         <div className="flex flex-wrap items-end gap-3">
-          <label className="flex min-w-56 flex-1 flex-col gap-1 text-sm">
-            Seria
+          <label className={`${EDITOR_FIELD_CLASSES} min-w-56 flex-1`}>
+            <span className={EDITOR_LABEL_CLASSES}>
+              Seria
+              <Optional>opsionale</Optional>
+            </span>
             <select
               name="seriesId"
               value={seriesId}
               onChange={(e) => setSeriesId(e.target.value)}
-              className={formControlClassesFor(false)}
+              className={editorControlClassesFor(false)}
             >
               <option value="">Nuk është pjesë e një serie</option>
               {seriesForPenName.map((s) => (
@@ -378,8 +365,8 @@ export function BookDetailsForm({
               ))}
             </select>
           </label>
-          <label className="flex w-32 flex-col gap-1 text-sm">
-            Numri në seri
+          <label className={`${EDITOR_FIELD_CLASSES} w-32`}>
+            <span className={EDITOR_LABEL_CLASSES}>Numri në seri</span>
             <input
               name="seriesPosition"
               data-field="seriesPosition"
@@ -388,25 +375,25 @@ export function BookDetailsForm({
               disabled={!seriesId}
               defaultValue={initial.seriesPosition}
               aria-describedby={describe("seriesPosition")}
-              className={formControlClassesFor(!!err("seriesPosition"))}
+              className={editorControlClassesFor(!!err("seriesPosition"))}
             />
           </label>
         </div>
         <FieldError id="details-seriesPosition-error" message={err("seriesPosition")} />
         {!locked || penNameId ? (
           newSeriesOpen ? (
-            <div className="flex flex-col gap-2 rounded-control border border-border p-3">
-              <label className="flex flex-col gap-1 text-sm">
-                Emri i serisë së re
+            <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+              <label className={EDITOR_FIELD_CLASSES}>
+                <span className={EDITOR_LABEL_CLASSES}>Emri i serisë së re</span>
                 <input
                   type="text"
                   maxLength={300}
                   value={newSeriesTitle}
                   onChange={(e) => setNewSeriesTitle(e.target.value)}
-                  className={formControlClassesFor(!!newSeriesMessage)}
+                  className={editorControlClassesFor(!!newSeriesMessage)}
                 />
               </label>
-              <p className="text-sm text-muted">
+              <p className={EDITOR_HINT_CLASSES}>
                 Të gjithë librat e serisë dalin me emrin{" "}
                 {penNames.find((p) => p.id === penNameId)?.name ?? lockedPenName ?? ""}.
               </p>
@@ -416,7 +403,7 @@ export function BookDetailsForm({
                   type="button"
                   disabled={newSeriesBusy}
                   onClick={createSeries}
-                  className={buttonClasses("primary", "sm", "rounded-full")}
+                  className={`${EDITOR_SMALL_BUTTON} border-primary bg-primary text-primary-foreground hover:bg-primary-hover`}
                 >
                   Krijo serinë
                 </button>
@@ -426,7 +413,7 @@ export function BookDetailsForm({
                     setNewSeriesOpen(false);
                     setNewSeriesMessage("");
                   }}
-                  className={buttonClasses("ghost", "sm")}
+                  className={EDITOR_LINK_BUTTON}
                 >
                   Anulo
                 </button>
@@ -436,21 +423,24 @@ export function BookDetailsForm({
             <button
               type="button"
               onClick={() => setNewSeriesOpen(true)}
-              className={buttonClasses("outline", "sm", "w-fit rounded-full")}
+              className={EDITOR_LINK_BUTTON}
             >
               + Krijo seri të re
             </button>
           )
         ) : null}
-        <p className="text-sm text-muted">
+        <p className={EDITOR_HINT_CLASSES}>
           Draftet nuk shfaqen në faqen e serisë. Nëse një libër hiqet nga shitja, vendi i tij mbetet “Nuk është në
           dispozicion” dhe numrat nuk ndryshojnë.
         </p>
       </Section>
 
-      <Section title="Botimi" lead="Opsional. Përdoreni kur del një botim i ri i të njëjtit libër.">
-        <label className="flex w-40 flex-col gap-1 text-sm">
-          Numri i botimit
+      <Section title="Botimi" lead="Përdoreni kur del një botim i ri i të njëjtit libër.">
+        <label className={`${EDITOR_FIELD_CLASSES} w-40`}>
+          <span className={EDITOR_LABEL_CLASSES}>
+            Numri i botimit
+            <Optional />
+          </span>
           <input
             name="editionNumber"
             data-field="editionNumber"
@@ -459,14 +449,14 @@ export function BookDetailsForm({
             maxLength={String(EDITION_NUMBER_MAX).length}
             defaultValue={initial.editionNumber}
             aria-describedby={describe("editionNumber")}
-            className={formControlClassesFor(!!err("editionNumber"))}
+            className={editorControlClassesFor(!!err("editionNumber"))}
           />
         </label>
         <FieldError id="details-editionNumber-error" message={err("editionNumber")} />
       </Section>
 
       <Section title="Përshkrimi" lead="Ky tekst del në faqen e librit. Shkruajeni për lexuesin.">
-        <span id="details-description-label" className="text-sm">
+        <span id="details-description-label" className={EDITOR_LABEL_CLASSES}>
           Përshkrimi
         </span>
         <div data-field="description" tabIndex={-1}>
@@ -482,25 +472,28 @@ export function BookDetailsForm({
       </Section>
 
       <Section title="Të drejtat" lead="Kush i ka të drejtat e këtij teksti?">
-        <fieldset className="flex flex-col gap-2" data-field="rightsBasis" tabIndex={-1}>
+        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0" data-field="rightsBasis" tabIndex={-1}>
           <legend className="sr-only">Të drejtat</legend>
           {RIGHTS_BASES.map((basis) => (
-            <label key={basis} className="flex items-start gap-2 text-sm">
+            <label key={basis} className="flex cursor-pointer items-start gap-2.5 text-sm">
               <input
                 type="radio"
                 name="rightsBasis"
                 value={basis}
                 checked={rightsBasis === basis}
                 onChange={() => setRightsBasis(basis)}
-                className="mt-1"
+                className={`${CHOICE_INPUT_CLASSES} mt-px`}
               />
               <span>{RIGHTS_STATEMENTS[basis].text}</span>
             </label>
           ))}
           <FieldError id="details-rightsBasis-error" message={err("rightsBasis")} />
         </fieldset>
-        <label className="flex flex-col gap-1 text-sm">
-          Autori origjinal{rightsBasis === "public_domain" || rightsBasis === "public_domain_original" ? "" : " (opsional)"}
+        <label className={EDITOR_FIELD_CLASSES}>
+          <span className={EDITOR_LABEL_CLASSES}>
+            Autori origjinal
+            {rightsBasis === "public_domain" || rightsBasis === "public_domain_original" ? null : <Optional />}
+          </span>
           <input
             name="originalAuthor"
             data-field="originalAuthor"
@@ -508,9 +501,9 @@ export function BookDetailsForm({
             maxLength={ORIGINAL_AUTHOR_MAX_LENGTH}
             defaultValue={initial.originalAuthor}
             aria-describedby={describe("originalAuthor", "details-originalAuthor-hint")}
-            className={formControlClassesFor(!!err("originalAuthor"))}
+            className={editorControlClassesFor(!!err("originalAuthor"))}
           />
-          <span id="details-originalAuthor-hint" className="text-sm text-muted">
+          <span id="details-originalAuthor-hint" className={EDITOR_HINT_CLASSES}>
             {ORIGINAL_AUTHOR_HINT}
           </span>
           <FieldError id="details-originalAuthor-error" message={err("originalAuthor")} />
@@ -518,14 +511,14 @@ export function BookDetailsForm({
       </Section>
 
       <Section title="Lexuesit" lead="Ndihmon prindërit dhe lexuesit të gjejnë librin e duhur.">
-        <fieldset className="flex flex-col gap-2">
-          <legend className="text-sm">A ka përmbajtje vetëm për të rritur (18+)?</legend>
-          <div className="flex gap-4">
+        <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
+          <legend className={EDITOR_LABEL_CLASSES}>A ka përmbajtje vetëm për të rritur (18+)?</legend>
+          <div className="mt-1.5 flex gap-7">
             {[
               { value: "no", label: "Jo" },
               { value: "yes", label: "Po" },
             ].map((o) => (
-              <label key={o.value} className="flex items-center gap-2 text-sm">
+              <label key={o.value} className={CHOICE_LABEL_CLASSES}>
                 <input
                   type="radio"
                   name="isAdult"
@@ -536,20 +529,21 @@ export function BookDetailsForm({
                     setIsAdult(adult);
                     if (adult) setReadingAge("18");
                   }}
+                  className={CHOICE_INPUT_CLASSES}
                 />
                 {o.label}
               </label>
             ))}
           </div>
           {isAdult && (
-            <p className="text-sm text-muted">
+            <p className={EDITOR_HINT_CLASSES}>
               Libri shfaqet si zakonisht, me shënimin “18+” te të dhënat e librit. Nuk mund të jetë te “Për fëmijë” ose
               “Për të rinj”.
             </p>
           )}
         </fieldset>
-        <label className="flex w-48 flex-col gap-1 text-sm">
-          Mosha e leximit nga
+        <label className={`${EDITOR_FIELD_CLASSES} w-48`}>
+          <span className={EDITOR_LABEL_CLASSES}>Mosha e leximit nga</span>
           <select
             name="readingAge"
             data-field="readingAge"
@@ -557,7 +551,7 @@ export function BookDetailsForm({
             disabled={isAdult}
             onChange={(e) => setReadingAge(e.target.value)}
             aria-describedby={describe("readingAge")}
-            className={formControlClassesFor(!!err("readingAge"))}
+            className={editorControlClassesFor(!!err("readingAge"))}
           >
             <option value="">Pa caktuar</option>
             {READING_AGES.map((age) => (
@@ -572,23 +566,33 @@ export function BookDetailsForm({
       </Section>
 
       <Section title="Kategoritë" lead={`Zgjidhni deri në ${MAX_CATEGORIES}. E para që zgjidhni është kategoria kryesore.`}>
-        <fieldset data-field="categories" tabIndex={-1} aria-describedby={describe("categories", "details-categories-count")}>
+        <fieldset className="m-0 border-0 p-0" data-field="categories" tabIndex={-1} aria-describedby={describe("categories", "details-categories-count")}>
           <legend className="sr-only">Kategoritë</legend>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="flex flex-wrap gap-2">
             {GENRES.map((genre) => {
               const on = categories.includes(genre);
               const blockedByAdult = isAdult && CHILDREN_CATEGORIES.includes(genre);
               const full = !on && categories.length >= MAX_CATEGORIES;
               return (
-                <label key={genre} className={`flex items-center gap-2 text-sm ${blockedByAdult || full ? "text-muted" : ""}`}>
+                <label
+                  key={genre}
+                  className={`flex min-h-11 items-center gap-2 rounded-full border px-3 text-sm focus-within:shadow-[var(--focus-ring)] sm:min-h-8 ${
+                    on
+                      ? "cursor-pointer border-primary bg-primary text-primary-foreground"
+                      : blockedByAdult || full
+                        ? "cursor-not-allowed border-border bg-surface text-muted"
+                        : "cursor-pointer border-control bg-surface hover:bg-surface-hover"
+                  }`}
+                >
                   <input
                     type="checkbox"
                     checked={on}
                     disabled={(blockedByAdult && !on) || full}
                     onChange={(e) => toggleCategory(genre, e.target.checked)}
+                    className="h-4 w-4 shrink-0 accent-accent"
                   />
                   {genre}
-                  {categories[0] === genre && <span className="text-xs text-muted">(kryesore)</span>}
+                  {categories[0] === genre && <span className="text-xs">(kryesore)</span>}
                 </label>
               );
             })}
@@ -597,7 +601,7 @@ export function BookDetailsForm({
           {categories.map((c) => (
             <input key={c} type="hidden" name="categories" value={c} />
           ))}
-          <p id="details-categories-count" className="mt-2 text-sm text-muted">
+          <p id="details-categories-count" className={`mt-2 ${EDITOR_HINT_CLASSES}`}>
             {categories.length} nga {MAX_CATEGORIES} të zgjedhura
           </p>
         </fieldset>
@@ -605,8 +609,11 @@ export function BookDetailsForm({
       </Section>
 
       <Section title="Fjalët kyçe" lead={`Fjalë që lexuesit mund të kërkojnë. Ndajini me presje, deri në ${MAX_KEYWORDS}.`}>
-        <label className="flex flex-col gap-1 text-sm">
-          Fjalët kyçe
+        <label className={EDITOR_FIELD_CLASSES}>
+          <span className={EDITOR_LABEL_CLASSES}>
+            Fjalët kyçe
+            <Optional>opsionale</Optional>
+          </span>
           <input
             name="keywords"
             data-field="keywords"
@@ -614,11 +621,11 @@ export function BookDetailsForm({
             value={keywords}
             onChange={(e) => setKeywords(e.target.value)}
             aria-describedby={describe("keywords", "details-keywords-count")}
-            className={formControlClassesFor(!!err("keywords") || keywordCount > MAX_KEYWORDS)}
+            className={editorControlClassesFor(!!err("keywords") || keywordCount > MAX_KEYWORDS)}
           />
           <span
             id="details-keywords-count"
-            className={`text-sm ${keywordCount > MAX_KEYWORDS ? "font-medium text-red-800" : "text-muted"}`}
+            className={`text-[13px] ${keywordCount > MAX_KEYWORDS ? "font-medium text-red-800" : "text-muted"}`}
           >
             {keywordCount > MAX_KEYWORDS
               ? `${keywordCount} fjalë kyçe: hiqni ${keywordCount - MAX_KEYWORDS}.`
@@ -634,7 +641,7 @@ export function BookDetailsForm({
             Disa fusha kanë nevojë për një ndryshim. Shikoni mesazhet më lart.
           </p>
         )}
-        <SaveButtons />
+        <EditorActionBar primaryLabel="Ruaj dhe vazhdo" primaryIntent="next" primaryNote="Hapi tjetër: Përmbajtja" />
       </div>
     </form>
   );
