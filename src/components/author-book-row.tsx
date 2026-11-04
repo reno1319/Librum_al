@@ -246,7 +246,7 @@ export function AuthorBookRow({
                       href={isPlainDraft ? editorPath(book.id, "content") : `/dashboard/books/${book.id}/edit#files`}
                       className={MENU_ITEM_CLASSES}
                     >
-                      Ndryshoni dorëshkrimin ose kopertinën
+                      Ndryshoni dorëshkrimin ose ballinën
                     </Link>
                   </li>
                   <li>

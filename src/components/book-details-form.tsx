@@ -635,7 +635,8 @@ export function BookDetailsForm({
         </label>
       </Section>
 
-      <div className="sticky bottom-0 -mx-4 border-t border-border bg-background px-4 py-3 sm:mx-0 sm:px-0">
+      {/* D1b (Renato 11-04): not pinned, like the other two tabs and the mockup. */}
+      <div>
         {Object.keys(errors).length > 0 && (
           <p role="alert" className={`${fieldErrorClasses} mb-2`}>
             Disa fusha kanë nevojë për një ndryshim. Shikoni mesazhet më lart.

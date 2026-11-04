@@ -25,6 +25,6 @@ describe("ebookCoverNotice", () => {
 
   it("is Albanian and asks the author to upload the cover again", () => {
     expect(EBOOK_COVER_NOT_INSIDE_MESSAGE).toContain("nuk u vendos dot brenda librit elektronik");
-    expect(EBOOK_COVER_NOT_INSIDE_MESSAGE).toContain("ngarkoni kopertinën");
+    expect(EBOOK_COVER_NOT_INSIDE_MESSAGE).toContain("ngarkoni ballinën");
   });
 });

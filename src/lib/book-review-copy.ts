@@ -123,12 +123,12 @@ export const NOT_IN_REVIEW_MESSAGE = "Ky libër nuk po pret shqyrtim.";
 // BD3 patch 4 (Renato 16:37Z, 2b): the original author joins the file
 // and the cover.
 export const LIVE_FILES_WARNING =
-  "Nëse ndryshoni skedarin e librit, kopertinën ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
+  "Nëse ndryshoni skedarin e librit, ballinën ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
 export const LIVE_FILES_SAVED_MESSAGE =
-  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.";
+  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose ballinën e re.";
 export const LIVE_FILES_REQUEST_FAILED_MESSAGE = "U ruajt. Shtypni \"Dërgojeni për shqyrtim\" kur të jeni gati.";
 export const LIVE_FILES_IN_BUNDLE_MESSAGE =
-  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose kopertinën.";
+  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose ballinën.";
 // BD3 patch 4 (2b): the same two, for a changed original author.
 export const LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE =
   "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë autorin origjinal të ri.";

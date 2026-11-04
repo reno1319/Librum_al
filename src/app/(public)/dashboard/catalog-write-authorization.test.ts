@@ -1801,7 +1801,7 @@ describe("BD15 P2: drafts without files, and the locks after first publish", () 
     openPaidPublishing();
     seed({ book: missing });
     expect(await redirectOf(publishBook(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Shtoni dorëshkrimin dhe kopertinën para se ta dërgoni për shqyrtim.")}`,
+      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Shtoni dorëshkrimin dhe ballinën para se ta dërgoni për shqyrtim.")}`,
     );
     expect(writes).toEqual([]);
     expect(bookRow()).toMatchObject({ status: "draft" });
@@ -1833,7 +1833,7 @@ describe("BD15 P2 audit r1 (F2): an older book that was live once", () => {
     openPaidPublishing();
     seed({ book: { cover_path: null, published_at: "2026-09-01T00:00:00Z" } });
     expect(await redirectOf(publishBook(BOOK_ID))).not.toContain(
-      encodeURIComponent("Shtoni dorëshkrimin dhe kopertinën para se ta dërgoni për shqyrtim."),
+      encodeURIComponent("Shtoni dorëshkrimin dhe ballinën para se ta dërgoni për shqyrtim."),
     );
   });
 });

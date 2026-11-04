@@ -31,7 +31,7 @@ export const PRICE_CHECKLIST_LABEL = "Vendosni çmimin në lekë (0 për libër 
 // a reader will ever see.
 export function getPublishChecklist(book: ChecklistBook): ChecklistItem[] {
   return [
-    { label: "Shtoni një kopertinë", done: !!book.cover_path },
+    { label: "Shtoni një ballinë", done: !!book.cover_path },
     {
       label: DESCRIPTION_CHECKLIST_LABEL,
       done: book.description.trim().length >= 50,

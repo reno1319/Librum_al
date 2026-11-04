@@ -18,7 +18,7 @@ export const CONTRIBUTOR_ROLE_VERB: Record<ContributorRole, string> = {
   Narrator: "Lexuar nga",
   Editor: "Redaktimi:",
   Foreword: "Parathënia:",
-  "Cover Designer": "Kopertina:",
+  "Cover Designer": "Ballina:",
 };
 
 // ALBANIAN-9: the role names an author sees. The stored value stays the
@@ -31,7 +31,7 @@ export const CONTRIBUTOR_ROLE_LABELS: Record<ContributorRole, string> = {
   Narrator: "Lexues (audio)",
   Editor: "Redaktor",
   Foreword: "Autor i parathënies",
-  "Cover Designer": "Dizajner i kopertinës",
+  "Cover Designer": "Dizajner i ballinës",
 };
 
 export function contributorRoleLabel(role: string): string {

@@ -35,13 +35,13 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
     faqs: [
       {
         q: "Çfarë skedarësh mund të ngarkoj?",
-        a: "EPUB, ose DOCX (Librum e kthen në EPUB për ju), deri në 50 MB, si dhe një kopertinë JPG ose PNG deri në 5 MB.",
+        a: "EPUB, ose DOCX (Librum e kthen në EPUB për ju), deri në 50 MB, si dhe një ballinë JPG ose PNG deri në 5 MB.",
         // BD6 (answer 1a): the Word guide and template.
         link: { href: "/ndihme/word", label: "Si ta përgatitni dorëshkrimin në Word, me shabllonin e Librum" },
       },
       {
         q: "A mund ta ndryshoj një libër pasi e kam publikuar?",
-        a: "Po. Te Paneli i autorit, shtypni \"Ndryshoni\" te libri për të ndryshuar titullin, përshkrimin, zhanrin, çmimin, kopertinën ose dorëshkrimin. Kopertina dhe dorëshkrimi i ri janë opsionalë: lërini bosh ato fusha për të mbajtur skedarët e tanishëm. Nëse ndryshoni kopertinën, skedarin e librit ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.",
+        a: "Po. Te Paneli i autorit, shtypni \"Ndryshoni\" te libri për të ndryshuar titullin, përshkrimin, zhanrin, çmimin, ballinën ose dorëshkrimin. Ballina dhe dorëshkrimi i ri janë opsionalë: lërini bosh ato fusha për të mbajtur skedarët e tanishëm. Nëse ndryshoni ballinën, skedarin e librit ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.",
       },
       {
         q: "A mund të botoj me pseudonim?",

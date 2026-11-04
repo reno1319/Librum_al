@@ -114,7 +114,7 @@ beforeEach(() => {
 });
 
 const WARNING =
-  "Nëse ndryshoni skedarin e librit, kopertinën ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
+  "Nëse ndryshoni skedarin e librit, ballinën ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
 const SENT_BACK = { reason: "broken_file", message: "The cover is blurry", sentBackAt: "2026-10-19T10:00:00Z" };
 function button(html: string, label: string): string {
   const end = html.indexOf(`${label}</button>`);
@@ -220,7 +220,7 @@ describe("Edit page: a live book (C)", () => {
     const html = await render();
     const warning = html.indexOf(WARNING);
     expect(warning).toBeGreaterThan(html.indexOf(">Skedarët</h2>"));
-    expect(warning).toBeLessThan(html.indexOf("Imazhi i kopertinës"));
+    expect(warning).toBeLessThan(html.indexOf("Imazhi i ballinës"));
     expect(html).toContain("Hiqeni nga publikimi</button>");
   });
 

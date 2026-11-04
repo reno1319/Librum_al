@@ -28,6 +28,11 @@ export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDA
 // this Terms text goes live on Production: the release that ships it
 // (BD7) sets the final value.
 // BD7 (Renato 1 Nov, card "b"): release day Monday 2 November 2026.
+// D2 (Renato 11-04, "ballinë" word change, TERMS_VERSION "terms-sq-3"):
+// the Terms and the Privacy Policy text changed again. RELEASE STEP: the
+// release that ships D2 to Production (BD15) sets TERMS_LAST_UPDATED
+// and PRIVACY_LAST_UPDATED to its own day. Until then they keep the
+// dates of the text that is live on Production.
 export const TERMS_LAST_UPDATED = "2 nëntor 2026";
 
 export const TERMS_LAST_UPDATED_LINE = `Përditësuar më: ${TERMS_LAST_UPDATED}`;

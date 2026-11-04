@@ -59,6 +59,8 @@ describe("BookDetailsForm", () => {
     expect(html).toContain("Hapi tjetër: Përmbajtja");
     // The first tab has no back link.
     expect(html).not.toContain('value="back"');
+    // D1b: the bar is not pinned to the screen (no tab pins it).
+    expect(html).not.toContain("sticky");
   });
 
   it("escapes the stored description inside the editor box", () => {

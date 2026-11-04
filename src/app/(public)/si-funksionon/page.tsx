@@ -29,7 +29,7 @@ const steps: { title: string; body: string; rights?: boolean }[] = [
   },
   {
     title: "Ngarkoni librin tuaj",
-    body: "Te Paneli i autorit, shtoni titullin, përshkrimin, zhanrin, çmimin, një kopertinë (JPG ose PNG, deri në 5 MB) dhe dorëshkrimin: një skedar EPUB, ose një skedar DOCX që Librum e kthen në EPUB për ju (në të dyja rastet, deri në 50 MB). Libri ruhet si draft.",
+    body: "Te Paneli i autorit, shtoni titullin, përshkrimin, zhanrin, çmimin, një ballinë (JPG ose PNG, deri në 5 MB) dhe dorëshkrimin: një skedar EPUB, ose një skedar DOCX që Librum e kthen në EPUB për ju (në të dyja rastet, deri në 50 MB). Libri ruhet si draft.",
   },
   {
     title: "Zgjidhni deklaratën e të drejtave",
@@ -58,7 +58,7 @@ const FILE_GUIDELINES: { heading: string; rows: [string, string][] }[] = [
     ],
   },
   {
-    heading: "Kopertina",
+    heading: "Ballina",
     rows: [
       ["Formati", "JPG ose PNG"],
       ["Madhësia", "Deri në 5 MB"],

@@ -780,7 +780,7 @@ export default async function BookDetailPage({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={coverUrl}
-              alt={`Kopertina e librit ${book.title}`}
+              alt={`Ballina e librit ${book.title}`}
               fetchPriority="high"
               className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
             />

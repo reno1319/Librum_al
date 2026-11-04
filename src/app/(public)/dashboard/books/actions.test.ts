@@ -1083,7 +1083,7 @@ describe("createBook: create atomicity when the final manuscript write fails (CB
 // ADMIN-3-REVIEW (C): the book in these doubles is live, so a new file
 // or cover takes it out of the Bookstore until Librum approves it.
 const LIVE_FILES_SAVED_REDIRECT = `/dashboard?success=${encodeURIComponent(
-  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
+  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose ballinën e re.",
 )}`;
 
 describe("updateBook: manuscriptStoragePath reference (CB-1)", () => {
@@ -1295,7 +1295,7 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
     const formData = await buildFormDataWithCoverPath(tempPath);
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/books/new?error=Imazhi%20i%20kopertin%C3%ABs%20duhet%20t%C3%AB%20jet%C3%AB%20n%C3%ABn%205%20MB");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/books/new?error=Imazhi%20i%20ballin%C3%ABs%20duhet%20t%C3%AB%20jet%C3%AB%20n%C3%ABn%205%20MB");
     expect(mockInsert).not.toHaveBeenCalled();
     expect(mockUploadCover).not.toHaveBeenCalled();
   });
@@ -1325,7 +1325,7 @@ describe("createBook: coverStoragePath reference (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Kopertina%20e%20ngarkuar%20nuk%20u%20lexua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
+      "/dashboard/books/new?error=Ballina%20e%20ngarkuar%20nuk%20u%20lexua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
     expect(mockUploadCover).not.toHaveBeenCalled();
@@ -1345,7 +1345,7 @@ describe("createBook: create atomicity when the final cover write fails (COVER-1
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Imazhi%20i%20kopertin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
+      "/dashboard/books/new?error=Imazhi%20i%20ballin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
     // Deliberately NOT cleaned up on failure -- same retry-friendly
@@ -1410,7 +1410,7 @@ describe("updateBook: update atomicity when the final cover write fails (COVER-1
     await expect(updateBook(BOOK_ID, formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      `/dashboard/books/${BOOK_ID}/edit?error=Imazhi%20i%20kopertin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri`,
+      `/dashboard/books/${BOOK_ID}/edit?error=Imazhi%20i%20ballin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri`,
     );
     expect(mockUpdate).not.toHaveBeenCalled();
     // The staged temp cover is kept for a retry.
@@ -1426,7 +1426,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Kopertina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
+      "/dashboard/books/new?error=Ballina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
     expect(mockDownloadManuscript).not.toHaveBeenCalled();
   });
@@ -1436,7 +1436,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Kopertina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
+      "/dashboard/books/new?error=Ballina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
   });
 
@@ -1445,7 +1445,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Kopertina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
+      "/dashboard/books/new?error=Ballina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
   });
 
@@ -1454,7 +1454,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Kopertina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
+      "/dashboard/books/new?error=Ballina%20e%20zgjedhur%20nuk%20vlen%20m%C3%AB.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
   });
 
@@ -1465,7 +1465,7 @@ describe("resolveCoverInput: temp-path authorization (COVER-1)", () => {
     await expect(createBook(formData)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockRedirect).toHaveBeenCalledWith(
-      "/dashboard/books/new?error=Kopertina%20e%20ngarkuar%20ka%20skaduar%20ose%20nuk%20u%20lexua%20dot.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
+      "/dashboard/books/new?error=Ballina%20e%20ngarkuar%20ka%20skaduar%20ose%20nuk%20u%20lexua%20dot.%20Zgjidhni%20skedarin%20p%C3%ABrs%C3%ABri",
     );
     expect(mockInsert).not.toHaveBeenCalled();
   });
