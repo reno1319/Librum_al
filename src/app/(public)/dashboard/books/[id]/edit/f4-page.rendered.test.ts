@@ -27,8 +27,12 @@ vi.mock("../../../actions", () => ({
 // ADMIN-3-REVIEW: a draft with no approval and nothing pending -- the
 // Publish control reads "Dërgojeni për shqyrtim" (its own states are in
 // review-state.rendered.test.ts).
+// BD15 P5b-2: a live book now opens the new editor too, so the field
+// checks below render the one draft this page still edits: one whose
+// review state could not be read.
+let reviewState: Record<string, unknown> = { kind: "unavailable" };
 vi.mock("@/lib/book-reviews", () => ({
-  getBookReviewState: async () => ({ kind: "ok", pending: false, approvalValid: false, latestSentBack: null }),
+  getBookReviewState: async () => reviewState,
 }));
 
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
@@ -101,10 +105,10 @@ beforeEach(() => {
     series_position: null,
     price_all: 0,
     price_cents: 0,
-    // BD15 P4: a plain draft now opens the new editor (see "a plain
-    // draft" below), so these field checks render a live book, which
-    // this page still edits until P5. No published_at: nothing locked.
-    status: "published",
+    // BD15 P4/P5b-2: a plain draft and a live book open the new editor
+    // (see "a plain draft" below); these field checks render a draft
+    // whose review state is unavailable. No published_at: nothing locked.
+    status: "draft",
     cover_path: null,
     file_path: null,
     // PEN-NAMES-2 (D4): books.pen_name is gone; the page embeds the
@@ -120,6 +124,7 @@ beforeEach(() => {
   tableData.profiles = { display_name: "Renato Kalemi", public_author_name: "Arben Leka" };
   features = { penName: true, rights: true };
   rightsState = { kind: "none" };
+  reviewState = { kind: "unavailable" };
 });
 
 describe("Edit page: Pen name (P1)", () => {
@@ -203,7 +208,7 @@ describe("Edit page: Rights (P3)", () => {
 // pricing-send.test.ts). A plain draft never renders here any more.
 describe("Edit page: a plain draft (BD15 P4)", () => {
   it("is sent to the new editor", async () => {
-    book.status = "draft";
+    reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: null };
     await expect(render()).rejects.toThrow(`REDIRECT:/dashboard/books/${BOOK_ID}/editor?tab=details`);
   });
 });

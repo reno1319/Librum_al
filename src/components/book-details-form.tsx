@@ -22,7 +22,14 @@ import {
   splitKeywords,
   type DetailsField,
 } from "@/lib/book-details";
-import { PEN_NAME_LOCKED_NOTE, TITLE_LOCKED_NOTE, TITLE_WILL_LOCK_NOTE } from "@/lib/book-editor-copy";
+import {
+  LIVE_REVIEW_FIELD_HINT,
+  LIVE_RIGHTS_LOCKED_NOTE,
+  LIVE_SAVE_BUTTON,
+  PEN_NAME_LOCKED_NOTE,
+  TITLE_LOCKED_NOTE,
+  TITLE_WILL_LOCK_NOTE,
+} from "@/lib/book-editor-copy";
 import { fieldErrorClasses } from "@/lib/form-styles";
 import {
   EDITOR_FIELD_CLASSES,
@@ -96,6 +103,8 @@ export function BookDetailsForm({
   action,
   initial,
   locked,
+  rightsLocked = false,
+  live = false,
   lockedPenName,
   penNames,
   series: initialSeries,
@@ -104,6 +113,11 @@ export function BookDetailsForm({
   initial: DetailsFormValues;
   // The book has been published once: title and pen name are fixed.
   locked: boolean;
+  // BD15 P5b-2 (Renato 11-04, Q4 a): a live book's rights basis is fixed.
+  rightsLocked?: boolean;
+  // BD15 P5b-2: a live book -- the description, 18+ label and original
+  // author wait for Librum's review; the save button says so.
+  live?: boolean;
   lockedPenName: string | null;
   penNames: EditorPenName[];
   series: EditorSeries[];
@@ -469,6 +483,7 @@ export function BookDetailsForm({
           />
         </div>
         <FieldError id="details-description-error" message={err("description")} />
+        {live && <p className={EDITOR_HINT_CLASSES}>{LIVE_REVIEW_FIELD_HINT}</p>}
       </Section>
 
       <Section title="Të drejtat" lead="Kush i ka të drejtat e këtij teksti?">
@@ -478,15 +493,22 @@ export function BookDetailsForm({
             <label key={basis} className="flex cursor-pointer items-start gap-2.5 text-sm">
               <input
                 type="radio"
-                name="rightsBasis"
+                name={rightsLocked ? undefined : "rightsBasis"}
                 value={basis}
                 checked={rightsBasis === basis}
+                disabled={rightsLocked}
                 onChange={() => setRightsBasis(basis)}
                 className={`${CHOICE_INPUT_CLASSES} mt-px`}
               />
               <span>{RIGHTS_STATEMENTS[basis].text}</span>
             </label>
           ))}
+          {rightsLocked && (
+            <>
+              {rightsBasis && <input type="hidden" name="rightsBasis" value={rightsBasis} />}
+              <p className={EDITOR_HINT_CLASSES}>{LIVE_RIGHTS_LOCKED_NOTE}</p>
+            </>
+          )}
           <FieldError id="details-rightsBasis-error" message={err("rightsBasis")} />
         </fieldset>
         <label className={EDITOR_FIELD_CLASSES}>
@@ -505,6 +527,7 @@ export function BookDetailsForm({
           />
           <span id="details-originalAuthor-hint" className={EDITOR_HINT_CLASSES}>
             {ORIGINAL_AUTHOR_HINT}
+            {live && ` ${LIVE_REVIEW_FIELD_HINT}`}
           </span>
           <FieldError id="details-originalAuthor-error" message={err("originalAuthor")} />
         </label>
@@ -541,6 +564,7 @@ export function BookDetailsForm({
               “Për të rinj”.
             </p>
           )}
+          {live && <p className={EDITOR_HINT_CLASSES}>{LIVE_REVIEW_FIELD_HINT}</p>}
         </fieldset>
         <label className={`${EDITOR_FIELD_CLASSES} w-48`}>
           <span className={EDITOR_LABEL_CLASSES}>Mosha e leximit nga</span>
@@ -642,7 +666,12 @@ export function BookDetailsForm({
             Disa fusha kanë nevojë për një ndryshim. Shikoni mesazhet më lart.
           </p>
         )}
-        <EditorActionBar primaryLabel="Ruaj dhe vazhdo" primaryIntent="next" primaryNote="Hapi tjetër: Përmbajtja" />
+        <EditorActionBar
+          primaryLabel="Ruaj dhe vazhdo"
+          primaryIntent="next"
+          primaryNote="Hapi tjetër: Përmbajtja"
+          saveLabel={live ? LIVE_SAVE_BUTTON : undefined}
+        />
       </div>
     </form>
   );

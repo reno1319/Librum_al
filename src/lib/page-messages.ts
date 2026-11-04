@@ -300,6 +300,12 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Libri nuk është gati për shqyrtim. Plotësoni të gjitha pjesët që mungojnë dhe provoni përsëri.",
   "Konfirmimi juaj nuk u ruajt, ndaj libri nuk u dërgua. Provoni përsëri.",
   "Titulli brenda librit elektronik nuk u përditësua dot, ndaj libri nuk u dërgua. Provoni përsëri.",
+  // BD15 P5b-2: a live book's changes (src/lib/book-editor-copy.ts).
+  "Ndryshimet e tjera u ruajtën, por përshkrimi, etiketa 18+ dhe autori origjinal nuk u ruajtën. Rifreskoni faqen dhe provoni përsëri.",
+  "Libri nuk është më në shitje, prandaj ndryshimet nuk u ruajtën. Hapeni përsëri dhe provoni.",
+  "Një libër 18+ nuk mund të jetë te Për fëmijë ose Për të rinj. Hiqni ato kategori ose etiketën 18+.",
+  "Të drejtat e një libri në shitje nuk ndryshohen. Për t'i ndryshuar, hiqeni librin nga shitja dhe dërgojeni përsëri.",
+  "Nuk keni ndryshime që presin shqyrtim. Ndryshoni dorëshkrimin, ballinën, përshkrimin, etiketën 18+ ose autorin origjinal dhe ruajini.",
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
@@ -349,6 +355,13 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose ballinën e re.",
   "U ruajt. Shtypni \"Dërgojeni për shqyrtim\" kur të jeni gati.",
   "U ruajt. Librum e ka miratuar tashmë këtë autor origjinal. Shtypni \"Publikoni\" kur të jeni gati.",
+  // BD15 P5b-2: a live book's changes (src/lib/book-editor-copy.ts).
+  "Ndryshimet u ruajtën",
+  "Ndryshimet u ruajtën. Ato që kërkojnë shqyrtim nuk dalin te lexuesit pa i dërguar dhe pa i miratuar Librum.",
+  "Ndryshimet që prisnin u hodhën. Libri mbetet siç është në shitje.",
+  "Nuk kishte ndryshime për të hedhur.",
+  "Ndryshimet u dërguan për shqyrtim. Libri mbetet në shitje siç është derisa Librum t'i miratojë.",
+  "Shqyrtimi u anulua. Libri mbetet në shitje; ndryshimet tuaja presin përsëri te redaktori.",
 ]);
 
 type QueryValue = string | string[] | undefined;

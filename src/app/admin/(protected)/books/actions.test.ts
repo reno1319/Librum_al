@@ -25,27 +25,40 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: () => Promise.resolve({ 
 
 type Result = { data: unknown; error: unknown };
 let adminRows: Record<string, Result> = {};
+// BD15 P5b-2: later reads of a table (the book re-read after a live
+// approval), taken in order before adminRows.
+let adminRowQueue: Record<string, Result[]> = {};
+const mockCoverRemove = vi.fn(async (_paths: string[]) => ({ data: [], error: null }));
 const mockGetUserById = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: (table: string) => {
-      const done = () => Promise.resolve(adminRows[table] ?? { data: null, error: null });
+      const done = () => {
+        const queued = adminRowQueue[table];
+        if (queued && queued.length > 0 && adminRowsRead[table]) return Promise.resolve(queued.shift() as Result);
+        adminRowsRead[table] = true;
+        return Promise.resolve(adminRows[table] ?? { data: null, error: null });
+      };
       const chain = { select: () => chain, eq: () => chain, in: () => chain, maybeSingle: done, returns: done };
       return chain;
     },
+    storage: { from: (bucket: string) => ({ remove: (paths: string[]) => mockCoverRemove([bucket, ...paths]) }) },
     auth: { admin: { getUserById: (id: string) => mockGetUserById(id) } },
   }),
 }));
+let adminRowsRead: Record<string, boolean> = {};
 
 const mockSendEmail = vi.fn();
 // ADMIN-3-REVIEW: the review emails, the followers email, the rights
 // read, the paid permission and the retention cleanup.
 const mockApprovedEmail = vi.fn();
+const mockChangesApprovedEmail = vi.fn();
 const mockSentBackEmail = vi.fn();
 const mockNewBookEmails = vi.fn();
 vi.mock("@/lib/email", () => ({
   sendBookTakedownEmail: (to: string, args: unknown) => mockSendEmail(to, args),
   sendBookApprovedEmail: (to: string, args: unknown) => mockApprovedEmail(to, args),
+  sendBookChangesApprovedEmail: (to: string, args: unknown) => mockChangesApprovedEmail(to, args),
   sendBookSentBackEmail: (to: string, args: unknown) => mockSentBackEmail(to, args),
   sendNewBookEmails: (admin: unknown, args: unknown) => mockNewBookEmails(admin, args),
 }));
@@ -257,6 +270,10 @@ function resetReviewMocks(): void {
   mockRpc.mockReset().mockResolvedValue({ data: true, error: null });
   mockGetUserById.mockReset().mockResolvedValue({ data: { user: { email: "ana@example.com" } } });
   mockApprovedEmail.mockReset().mockResolvedValue(undefined);
+  mockChangesApprovedEmail.mockReset().mockResolvedValue(undefined);
+  mockCoverRemove.mockClear();
+  adminRowQueue = {};
+  adminRowsRead = {};
   mockSentBackEmail.mockReset().mockResolvedValue(undefined);
   mockNewBookEmails.mockReset().mockResolvedValue(undefined);
   mockAfterRuns.length = 0;
@@ -395,6 +412,39 @@ describe("approveBookReviewAsStaff", () => {
     expect(mockRetention).not.toHaveBeenCalled();
   });
 
+  // BD15 P5b-2: a live book's approved changes.
+  const OLD_COVER = "0a0a0a0a-0b0b-4c0c-8d0d-0e0e0e0e0e0e/cover.jpg";
+  const liveBook = () => {
+    adminRows.books = { data: { ...(adminRows.books.data as object), status: "published", cover_path: OLD_COVER }, error: null };
+  };
+  it("a live book: the changes email, no followers email, and the replaced ballinë removed once the book names the new one", async () => {
+    liveBook();
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    adminRowQueue.books = [{ data: { cover_path: COVER }, error: null }];
+    const target = await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    await settleAfterTasks();
+    expect(target).toContain("?success=");
+    expect(mockChangesApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID });
+    expect(mockApprovedEmail).not.toHaveBeenCalled();
+    expect(mockNewBookEmails).not.toHaveBeenCalled();
+    expect(mockCoverRemove).toHaveBeenCalledWith(["covers", OLD_COVER]);
+  });
+
+  it("a live book whose re-read does not name the new ballinë keeps the old one", async () => {
+    liveBook();
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    adminRowQueue.books = [{ data: { cover_path: OLD_COVER }, error: null }];
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(mockCoverRemove).not.toHaveBeenCalled();
+  });
+
+  it("a live book with an unchanged ballinë removes nothing", async () => {
+    liveBook();
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    await redirectOf(() => approveBookReviewAsStaff(approveForm({ coverPath: OLD_COVER })));
+    expect(mockCoverRemove).not.toHaveBeenCalled();
+  });
+
   it("still reports success when the emails fail afterwards", async () => {
     mockNewBookEmails.mockRejectedValue(new Error("smtp"));
     mockApprovedEmail.mockRejectedValue(new Error("smtp"));
@@ -404,6 +454,13 @@ describe("approveBookReviewAsStaff", () => {
 
 describe("sendBackBookReviewAsStaff", () => {
   beforeEach(resetReviewMocks);
+  it("BD15 P5b-2: a live book's email says it stays on sale", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    adminRows.books = { data: { ...(adminRows.books.data as object), status: "published" }, error: null };
+    await redirectOf(() => sendBackBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, reason: "broken_file", message: "x" })));
+    expect(mockSentBackEmail).toHaveBeenCalledWith("ana@example.com", expect.objectContaining({ live: true }));
+  });
+
   const sendBackForm = (extra: Record<string, string> = {}) =>
     form({ reviewId: REVIEW_ID, bookId: BOOK_ID, reason: "broken_file", message: " Fix the file. ", ...extra });
 
@@ -430,6 +487,7 @@ describe("sendBackBookReviewAsStaff", () => {
       title: "Kënga e fundit",
       reasonLabel: "Skedar i gabuar ose i dëmtuar",
       message: "Fix the file.",
+      live: false,
     });
     expect(mockRetention).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
       authorId: AUTHOR_ID,

@@ -27,6 +27,7 @@ import {
 import { UnpublishForm } from "./unpublish-form";
 import { SendBackForm } from "./send-back-form";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { descriptionPlainText } from "@/lib/book-description";
 
 export const metadata: Metadata = {
   title: "Book",
@@ -49,6 +50,12 @@ export const dynamic = "force-dynamic";
 // four checks, Approve and publish, and Send back -- for books.review
 // staff only (owner, admin); other staff see that it is in review,
 // read-only. The left column adds the review history (newest first).
+//
+// BD15 P5b-2: a LIVE book can be waiting for review too -- its changes
+// (book_pending_changes), while it stays on sale. Staff see only what
+// changed, the live version beside the new one (Renato 11-04, Q2 a), and
+// Approve applies the changes ("Approve changes"). The review is
+// approvable only while the waiting row is exactly what was sent.
 
 type AdminBook = {
   id: string;
@@ -64,7 +71,22 @@ type AdminBook = {
   // BD3 patch 4 (audit r1, M1): the "Autori origjinal", which readers
   // see as the book's byline. null = none.
   original_author: string | null;
+  description: string;
+  is_adult: boolean;
 };
+
+type PendingChangeRow = {
+  file_path: string | null;
+  cover_path: string | null;
+  description: string;
+  is_adult: boolean;
+  original_author: string | null;
+};
+
+type LiveChange =
+  | { key: "cover"; label: string; before: string | null; after: string | null }
+  | { key: "file"; label: string }
+  | { key: "text"; label: string; before: string; after: string };
 
 type OpenReport = { id: string; reason: string; details: string; created_at: string };
 
@@ -87,6 +109,9 @@ type ReviewRow = {
   file_path: string | null;
   cover_path: string | null;
   original_author: string | null;
+  // P5b-1: the snapshot binds these too (null on old rows).
+  description: string | null;
+  is_adult: boolean | null;
 };
 
 type ActiveTakedown = {
@@ -120,7 +145,7 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names(name), original_author")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names(name), original_author, description, is_adult")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();
@@ -158,7 +183,7 @@ export default async function AdminBookPage({
       .returns<{ bundle_id: string; bundles: { title: string; status: string } }[]>(),
     admin
       .from("book_reviews")
-      .select("id, status, grandfathered, buyer_file_only, submitted_at, decided_at, decided_by, reason, file_path, cover_path, original_author")
+      .select("id, status, grandfathered, buyer_file_only, submitted_at, decided_at, decided_by, reason, file_path, cover_path, original_author, description, is_adult")
       .eq("book_id", book.id)
       .order("submitted_at", { ascending: false })
       .returns<ReviewRow[]>(),
@@ -184,15 +209,77 @@ export default async function AdminBookPage({
   const takedownUnknown = Boolean(takedownResult.error);
   const publishedBundleTitles = (bundlesResult.data ?? []).map((row) => row.bundles.title);
   const reviews = reviewsResult.data ?? [];
-  const pendingReview = book.status === "draft" ? (reviews.find((r) => r.status === "pending") ?? null) : null;
+  const liveUpdate = book.status === "published";
+  const pendingReview =
+    book.status === "draft" || liveUpdate ? (reviews.find((r) => r.status === "pending") ?? null) : null;
+  // P5b-2: a live book's waiting changes. Unreadable: not approvable.
+  let pendingChange: PendingChangeRow | null = null;
+  let pendingChangeUnreadable = false;
+  if (liveUpdate && pendingReview) {
+    const { data, error: pendingChangeError } = await admin
+      .from("book_pending_changes")
+      .select("file_path, cover_path, description, is_adult, original_author")
+      .eq("book_id", book.id)
+      .maybeSingle<PendingChangeRow>();
+    pendingChange = data ?? null;
+    pendingChangeUnreadable = Boolean(pendingChangeError);
+  }
   // S6 / 6: the pending snapshot must still be the book's current files
   // -- and (BD3 patch 4, 2b) its current original author, which the
-  // approval binds to as well.
+  // approval binds to as well. P5b-2: for a live book, its waiting row
+  // in all five values (admin_approve_book_review checks the same).
   const pendingIsCurrent =
     pendingReview !== null &&
-    pendingReview.file_path === book.file_path &&
-    pendingReview.cover_path === book.cover_path &&
-    (pendingReview.original_author ?? null) === (book.original_author ?? null);
+    (liveUpdate
+      ? pendingChange !== null &&
+        !pendingChangeUnreadable &&
+        pendingReview.file_path === pendingChange.file_path &&
+        pendingReview.cover_path === pendingChange.cover_path &&
+        (pendingReview.original_author ?? null) === (pendingChange.original_author ?? null) &&
+        pendingReview.description === pendingChange.description &&
+        pendingReview.is_adult === pendingChange.is_adult
+      : pendingReview.file_path === book.file_path &&
+        pendingReview.cover_path === book.cover_path &&
+        (pendingReview.original_author ?? null) === (book.original_author ?? null));
+  // Only what changed, live beside new (Q2 a).
+  const coverUrlOf = (path: string | null) =>
+    path ? admin.storage.from("covers").getPublicUrl(path).data.publicUrl : null;
+  const liveChanges: LiveChange[] = [];
+  if (liveUpdate && pendingReview) {
+    if (pendingReview.cover_path !== book.cover_path) {
+      liveChanges.push({
+        key: "cover",
+        label: "Cover",
+        before: coverUrlOf(book.cover_path),
+        after: coverUrlOf(pendingReview.cover_path),
+      });
+    }
+    if (pendingReview.file_path !== book.file_path) liveChanges.push({ key: "file", label: "Book file" });
+    if (pendingReview.description !== null && pendingReview.description !== book.description) {
+      liveChanges.push({
+        key: "text",
+        label: "Description",
+        before: descriptionPlainText(book.description),
+        after: descriptionPlainText(pendingReview.description),
+      });
+    }
+    if (pendingReview.is_adult !== null && pendingReview.is_adult !== book.is_adult) {
+      liveChanges.push({
+        key: "text",
+        label: "18+ label",
+        before: book.is_adult ? "Yes" : "No",
+        after: pendingReview.is_adult ? "Yes" : "No",
+      });
+    }
+    if ((pendingReview.original_author ?? null) !== (book.original_author ?? null)) {
+      liveChanges.push({
+        key: "text",
+        label: "Original author",
+        before: book.original_author ?? "None",
+        after: pendingReview.original_author ?? "None",
+      });
+    }
+  }
   const deciderIds = Array.from(new Set(reviews.map((r) => r.decided_by).filter((v): v is string => !!v)));
   const decidersResult =
     deciderIds.length > 0
@@ -384,6 +471,11 @@ export default async function AdminBookPage({
             <p className="text-[0.9375rem]">
               Sent {formatRelativeTime(pendingReview.submitted_at, now)} by {publicName}.
             </p>
+            {liveUpdate && (
+              <p className="text-sm text-muted">
+                This book is live. These are changes to it; readers keep the current version until you approve them.
+              </p>
+            )}
             {authorSuspended && (
               <p className="text-sm text-red-700">
                 This author&apos;s account is suspended. Approving is refused until the suspension is lifted. Send back
@@ -399,6 +491,54 @@ export default async function AdminBookPage({
               </p>
             ) : (
               <>
+                {liveUpdate ? (
+                  <div className="flex flex-col gap-3">
+                    <h3 className="text-[0.9375rem] font-semibold">What changed</h3>
+                    <ul className="flex flex-col gap-4">
+                      {liveChanges.map((change) => (
+                        <li key={change.label} className="flex flex-col gap-1.5">
+                          <p className="text-sm font-semibold">{change.label}</p>
+                          {change.key === "cover" ? (
+                            <div className="flex flex-wrap gap-4 text-xs text-muted">
+                              {[
+                                { caption: "Live now", url: change.before },
+                                { caption: "New", url: change.after },
+                              ].map((side) => (
+                                <figure key={side.caption} className="flex flex-col gap-1">
+                                  {side.url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={side.url} alt={`Cover: ${side.caption}`} className="h-24 w-16 rounded-[3px] object-cover" />
+                                  ) : (
+                                    <CoverPlaceholder title={book.title} authorName={publicName} className="h-24 w-16 rounded-[3px]" />
+                                  )}
+                                  <figcaption>{side.caption}</figcaption>
+                                </figure>
+                              ))}
+                            </div>
+                          ) : change.key === "file" ? (
+                            <a
+                              href={`/admin/books/${book.id}/file?review=${pendingReview.id}`}
+                              className="focus-ring inline-flex min-h-11 items-center self-start text-[0.9375rem] font-semibold text-primary underline underline-offset-2 hover:decoration-2"
+                            >
+                              Open the new book file
+                            </a>
+                          ) : (
+                            <div className="grid gap-2 text-sm sm:grid-cols-2">
+                              <div className="rounded-[3px] border border-border p-2">
+                                <p className="text-xs text-muted">Live now</p>
+                                <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words">{change.before}</p>
+                              </div>
+                              <div className="rounded-[3px] border-2 border-primary p-2">
+                                <p className="text-xs text-muted">New</p>
+                                <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words">{change.after}</p>
+                              </div>
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
                 <div className="flex items-start gap-4">
                   {coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -413,6 +553,7 @@ export default async function AdminBookPage({
                     Open the book file
                   </a>
                 </div>
+                )}
                 <form action={approveBookReviewAsStaff} className="flex flex-col gap-3">
                   <input type="hidden" name="bookId" value={book.id} />
                   <input type="hidden" name="reviewId" value={pendingReview.id} />
@@ -431,7 +572,7 @@ export default async function AdminBookPage({
                     type="submit"
                     className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground hover:opacity-90"
                   >
-                    Approve and publish
+                    {liveUpdate ? "Approve changes" : "Approve and publish"}
                   </button>
                 </form>
                 <SendBackForm action={sendBackBookReviewAsStaff} bookId={book.id} reviewId={pendingReview.id} />

@@ -10,9 +10,14 @@ const { BookDetailsForm } = await import("./book-details-form");
 const PEN = "d4444444-4444-4444-8444-444444444444";
 const OTHER_PEN = "d5555555-5555-4555-8555-555555555555";
 
-function render(overrides: Partial<Parameters<typeof BookDetailsForm>[0]["initial"]> = {}, locked = false) {
+function render(
+  overrides: Partial<Parameters<typeof BookDetailsForm>[0]["initial"]> = {},
+  locked = false,
+  liveProps: { rightsLocked?: boolean; live?: boolean } = {},
+) {
   return renderToStaticMarkup(
     createElement(BookDetailsForm, {
+      ...liveProps,
       action: async () => undefined,
       initial: {
         title: "Dimri në <Valbonë>",
@@ -109,5 +114,29 @@ describe("BookDetailsForm", () => {
     expect(html).toMatch(/<input[^>]*name="title"/);
     expect(html).toContain('name="penNameId"');
     expect(html).toContain("Pas publikimit titulli nuk mund të ndryshohet më.");
+  });
+
+  // BD15 P5b-2 (Renato 11-04, Q4 a): a live book's rights basis is fixed;
+  // the fields that wait for review say so; the save button says what it does.
+  it("a live book: the rights choice is shown but fixed, sent as stored; review hints; Ruani ndryshimet", () => {
+    const html = render({ rightsBasis: "own_rights" }, true, { rightsLocked: true, live: true });
+    const radios = html.match(/<input[^>]*type="radio"[^>]*value="(own_rights|public_domain)[^"]*"[^>]*>/g) ?? [];
+    expect(radios.length).toBeGreaterThan(0);
+    for (const radio of radios) {
+      expect(radio).toContain("disabled");
+      expect(radio).not.toContain('name="rightsBasis"');
+    }
+    expect(html).toContain('<input type="hidden" name="rightsBasis" value="own_rights"/>');
+    expect(html).toContain("Të drejtat nuk ndryshohen sa libri është në shitje.");
+    expect(html.split("Pret miratimin e Librum para se ta shohin lexuesit.").length - 1).toBe(3);
+    expect(html).toContain("Ruani ndryshimet");
+    expect(html).not.toContain("Ruaj draftin");
+  });
+
+  it("a draft: the rights choice is free, no review hints", () => {
+    const html = render();
+    expect(html).toContain('name="rightsBasis"');
+    expect(html).not.toContain("Pret miratimin e Librum");
+    expect(html).not.toContain("Të drejtat nuk ndryshohen sa libri është në shitje.");
   });
 });

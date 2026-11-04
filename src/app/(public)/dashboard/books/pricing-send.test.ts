@@ -92,6 +92,8 @@ let downloadFails = false;
 let uploadFails = false;
 let penNameRead: { data: unknown; error: unknown } = { data: { name: "Emri i Ri" }, error: null };
 const events: string[] = [];
+// BD15 P5b-2: a live book's waiting changes (none by default).
+let pendingRead: { data: unknown; error: unknown } = { data: null, error: null };
 
 function query(table: string) {
   const filters: Filter[] = [];
@@ -101,6 +103,7 @@ function query(table: string) {
     if (op === "select") {
       if (table === "books") return { data: { ...book }, error: null };
       if (table === "pen_names") return penNameRead;
+      if (table === "book_pending_changes") return pendingRead;
       return { data: null, error: null };
     }
     dbWrites.push({ table, op, payload, filters: [...filters] });
@@ -250,6 +253,7 @@ beforeEach(async () => {
   aiRead = { ok: true, answer: "no" };
   paidPublishing = true;
   staffEmails.length = 0;
+  pendingRead = { data: null, error: null };
 });
 
 describe("saveBookPricing: Ruaj draftin", () => {
@@ -338,7 +342,6 @@ describe("saveBookPricing: Ruaj draftin", () => {
   });
 
   it.each([
-    ["a live book", () => (book.status = "published")],
     ["a book in review", () => (bookReviewsDoubleState.pending = true)],
     ["an unreadable review state", () => (bookReviewsDoubleState.stateKind = "unavailable")],
   ])("%s goes to the edit page, nothing written", async (_l, setUp) => {
@@ -587,5 +590,131 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
       expect(storageCalls).toContainEqual({ op: "remove", bucket: "manuscripts", path: [upload?.path] });
       expect(declarations).toEqual([]);
     });
+  });
+});
+
+// BD15 P5b-2: a live book on the Pricing tab. Its price is live at once
+// (with the confirm tick under a changed price); "send" sends its waiting
+// changes and the book stays on sale.
+describe("saveBookPricing: a live book", () => {
+  const LIVE_SAVED = "Ndryshimet u ruajtën";
+  const NEW_COVER = "1a2b3c4d-2222-4222-8222-1a2b3c4d5e6f/cover.jpg";
+  const waiting = (o: Record<string, unknown> = {}) => ({
+    data: {
+      book_id: BOOK_ID,
+      file_path: OWN_EPUB,
+      cover_path: NEW_COVER,
+      description: "Një përshkrim.",
+      is_adult: false,
+      original_author: null,
+      ...o,
+    },
+    error: null,
+  });
+  beforeEach(() => {
+    book.status = "published";
+    book.published_at = "2026-10-01T00:00:00Z";
+    book.price_all = 0;
+    book.is_adult = false;
+  });
+
+  it("an unchanged price saves nothing and says the changes were saved (not 'draft')", async () => {
+    const target = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })));
+    expect(target).toBe(`${EDITOR}&success=${encodeURIComponent(LIVE_SAVED)}`);
+    expect(priceWrites()).toEqual([]);
+  });
+
+  it("a new price needs the tick carrying exactly that price, then saves it on the live row", async () => {
+    const refused = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "300" })));
+    expect(refused).toContain(`${EDITOR}&error=`);
+    expect(priceWrites()).toEqual([]);
+    const wrong = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "300", confirmPriceChange: "299" })));
+    expect(wrong).toContain(`${EDITOR}&error=`);
+    expect(priceWrites()).toEqual([]);
+    const target = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "300", confirmPriceChange: "300" })));
+    expect(target).toBe(`${EDITOR}&success=${encodeURIComponent(LIVE_SAVED)}`);
+    expect(priceWrites()).toHaveLength(1);
+    expect(priceWrites()[0].payload).toEqual({ price_all: 300 });
+    expect(priceWrites()[0].filters).toContainEqual({ kind: "eq", column: "status", value: "published" });
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("a new paid price is refused while paid publishing is off", async () => {
+    paidPublishing = false;
+    const target = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "300", confirmPriceChange: "300" })));
+    expect(target).toContain(`${EDITOR}&error=`);
+    expect(priceWrites()).toEqual([]);
+  });
+
+  it("send with nothing waiting is refused, and nothing is requested", async () => {
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target).toBe(err("Nuk keni ndryshime që presin shqyrtim. Ndryshoni dorëshkrimin, ballinën, përshkrimin, etiketën 18+ ose autorin origjinal dhe ruajini."));
+    expect(bookReviewsDoubleState.calls.some((c) => c.fn === "requestBookReview")).toBe(false);
+    expect(declarations).toEqual([]);
+  });
+
+  it("audit r1 F6: a paid live book's changes are not sent while paid publishing is off", async () => {
+    pendingRead = waiting();
+    book.price_all = 300;
+    paidPublishing = false;
+    const target = await run(saveBookPricing(BOOK_ID, form({ ...SEND, priceMode: "paid", price: "300" })));
+    expect(target).toBe(err("Publikimi me pagesë nuk është i mundur tani"));
+    expect(bookReviewsDoubleState.calls.some((c) => c.fn === "requestBookReview")).toBe(false);
+    expect(declarations).toEqual([]);
+  });
+
+  it("send needs both ticks", async () => {
+    pendingRead = waiting();
+    const target = await run(saveBookPricing(BOOK_ID, form({ intent: "send", priceMode: "free" })));
+    expect(target).toContain(`${EDITOR}&error=`);
+    expect(bookReviewsDoubleState.calls.some((c) => c.fn === "requestBookReview")).toBe(false);
+  });
+
+  it("send with waiting changes: records the ticks, requests the review, emails staff; the live book is untouched", async () => {
+    pendingRead = waiting();
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target).toBe(`/dashboard?success=${encodeURIComponent("Ndryshimet u dërguan për shqyrtim. Libri mbetet në shitje siç është derisa Librum t'i miratojë.")}`);
+    expect(declarations).toEqual([{ bookId: BOOK_ID, basis: "own_rights", options: { atSend: true } }]);
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toHaveLength(1);
+    expect(staffEmails).toHaveLength(1);
+    expect(fileWrites()).toEqual([]);
+    expect(dbWrites.filter((w) => w.table === "books" && (w.payload as Record<string, unknown>)?.status !== undefined)).toEqual([]);
+  });
+
+  it("audit r1 F1: a live book with no rights record sends as own rights, recorded with the ticks", async () => {
+    pendingRead = waiting();
+    rightsState = { kind: "none" };
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target.startsWith("/dashboard?success=")).toBe(true);
+    expect(declarations).toEqual([{ bookId: BOOK_ID, basis: "own_rights", options: { atSend: true } }]);
+  });
+
+  it("send with an incomplete waiting version (no AI answer) is refused before the ticks are recorded", async () => {
+    pendingRead = waiting();
+    aiRead = { ok: true, answer: null };
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target).toContain(`${EDITOR}&error=`);
+    expect(declarations).toEqual([]);
+    expect(bookReviewsDoubleState.calls.some((c) => c.fn === "requestBookReview")).toBe(false);
+  });
+
+  it.each([
+    ["nothing_to_send", `${EDITOR}&error=`],
+    ["adult_category", `${EDITOR}&error=`],
+    ["already_pending", `/dashboard/books/${BOOK_ID}/edit?error=`],
+    ["taken_down", `/dashboard/books/${BOOK_ID}/edit?error=`],
+  ])("the database refusing the send (%s) is mapped", async (reason, prefix) => {
+    pendingRead = waiting();
+    bookReviewsDoubleState.requestResult = { ok: false, reason };
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target.startsWith(prefix)).toBe(true);
+    expect(staffEmails).toEqual([]);
+  });
+
+  it("an unreadable waiting row sends nothing", async () => {
+    pendingRead = { data: null, error: { code: "XX000", message: "x" } };
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target).toContain(`${EDITOR}&error=`);
+    expect(bookReviewsDoubleState.calls.some((c) => c.fn === "requestBookReview")).toBe(false);
   });
 });

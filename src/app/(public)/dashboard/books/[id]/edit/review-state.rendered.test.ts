@@ -71,6 +71,12 @@ type TakedownResult = {
 let takedown: TakedownResult = { state: { kind: "none" }, notice: null };
 vi.mock("@/lib/book-takedowns", () => ({ loadAuthorTakedownNoticeForBook: async () => takedown }));
 
+// BD15 P5b-2: a live book in review shows what it sent (its waiting
+// changes, read with the catalog writer).
+let pendingRead: { ok: true; pending: Record<string, unknown> | null } | { ok: false } = { ok: true, pending: null };
+vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => ({}) }));
+vi.mock("@/lib/book-pending-changes", () => ({ readPendingChanges: async () => pendingRead }));
+
 const { default: EditBookPage } = await import("./page");
 
 async function render(): Promise<string> {
@@ -111,6 +117,7 @@ beforeEach(() => {
   rightsState = { kind: "present", declaration: { basis: "own_rights" } };
   takedown = { state: { kind: "none" }, notice: null };
   reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: null };
+  pendingRead = { ok: true, pending: null };
 });
 
 const WARNING =
@@ -216,18 +223,48 @@ describe("Edit page: a live book (C)", () => {
     book.status = "published";
   });
 
-  it("warns near the file and cover fields, before the pickers", async () => {
+  // BD15 P5b-2: a live book is edited in the new editor and stays on
+  // sale; this page keeps only taking it off sale and deleting it.
+  it("links to the editor instead of the old form, and keeps Hiqeni nga publikimi", async () => {
     const html = await render();
-    const warning = html.indexOf(WARNING);
-    expect(warning).toBeGreaterThan(html.indexOf(">Skedarët</h2>"));
-    expect(warning).toBeLessThan(html.indexOf("Imazhi i ballinës"));
+    expect(html).toContain('id="live-editor"');
+    expect(html).toContain(`href="/dashboard/books/${BOOK_ID}/editor?tab=details"`);
+    expect(html).not.toContain('name="title"');
+    expect(html).not.toContain(WARNING);
     expect(html).toContain("Hiqeni nga publikimi</button>");
   });
 
-  it("never promises existing readers the new file on their next download", async () => {
+  it("in review: read-only, showing the sent ballinë, file and description, not the live ones", async () => {
+    book.cover_path = "live-cover/cover.jpg";
+    reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null };
+    pendingRead = {
+      ok: true,
+      pending: {
+        filePath: "a/b.epub",
+        coverPath: "sent-cover/cover.jpg",
+        description: "The sent description.",
+        isAdult: false,
+        originalAuthor: null,
+      },
+    };
     const html = await render();
-    expect(html).not.toContain("updates the file existing readers receive");
-    expect(html).toContain("kontrollohet nga Librum para se ta marrin lexuesit.");
+    expect(html).toContain('id="in-review"');
+    expect(html).toContain("https://cdn/sent-cover/cover.jpg");
+    expect(html).not.toContain("https://cdn/live-cover/cover.jpg");
+    expect(html).toContain("The sent description.");
+    expect(html).not.toContain("A real description.");
+    expect(html).not.toContain('id="live-editor"');
+    // Audit r1 F2: never "when it is published" for a book already on sale.
+    expect(html).toContain("Libri mbetet në shitje siç është derisa t&#x27;i miratojmë.");
+    expect(html).not.toContain("kur të publikohet");
+  });
+
+  it("in review with the waiting changes unreadable: still read-only, showing the live values", async () => {
+    reviewState = { kind: "ok", pending: true, approvalValid: false, latestSentBack: null };
+    pendingRead = { ok: false };
+    const html = await render();
+    expect(html).toContain('id="in-review"');
+    expect(html).toContain("A real description.");
   });
 
   it("a draft shows no live-book warning", async () => {

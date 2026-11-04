@@ -90,9 +90,12 @@ export function EditorActionBar({
   primaryBlocked = false,
   primaryNote,
   extra,
+  saveLabel = "Ruaj draftin",
 }: {
   // The previous tab's name; no back link on the first tab.
   backLabel?: string;
+  // BD15 P5b-2: a live book's save button reads "Ruani ndryshimet".
+  saveLabel?: string;
   primaryLabel: string;
   primaryIntent: string;
   // Something is still missing: the main button cannot be pressed.
@@ -114,7 +117,7 @@ export function EditorActionBar({
           the left with CSS order only. */}
       <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-[1fr_auto_auto]">
         <button type="submit" name="intent" value="save" disabled={pending} className={EDITOR_SECONDARY_BUTTON}>
-          Ruaj draftin
+          {saveLabel}
         </button>
         <div className="flex flex-col items-center gap-1.5">
           <button

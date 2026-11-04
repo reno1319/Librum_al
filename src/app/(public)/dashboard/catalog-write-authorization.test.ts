@@ -1268,6 +1268,11 @@ describe("the privileged client stays server-only", () => {
       .map((file) => path.relative(REPO_ROOT, file))
       .sort();
     expect(users).toEqual([
+      // BD15 P5b-2: the edit page reads a live book's waiting changes
+      // (book_pending_changes is service_role only) after the own-book read.
+      "src/app/(public)/dashboard/books/[id]/edit/page.tsx",
+      // BD15 P5b-2: the editor page, the same read, same order.
+      "src/app/(public)/dashboard/books/[id]/editor/page.tsx",
       "src/app/(public)/dashboard/books/actions.ts",
       // BD15 P2: the new editor's Details save (draft insert/update).
       "src/app/(public)/dashboard/books/editor-actions.ts",
@@ -1276,6 +1281,8 @@ describe("the privileged client stays server-only", () => {
       // no authenticated grant); a server-only module, called by the
       // Content save and the editor page only after the own-draft check.
       "src/lib/book-ai-disclosure.ts",
+      // BD15 P5b-2: a type import only (the caller passes the writer).
+      "src/lib/book-pending-changes.ts",
     ]);
   });
 });

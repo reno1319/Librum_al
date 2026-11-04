@@ -1,8 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { saveBookDetails } from "../../editor-actions";
+import { discardBookPendingChanges, saveBookDetails } from "../../editor-actions";
 import { saveBookContent, saveBookPricing } from "../../actions";
+import { createCatalogWriteClient } from "@/lib/catalog-write-client";
+import { changedPendingFields, readPendingChanges, type PendingChanges } from "@/lib/book-pending-changes";
+import { LiveEditNotice } from "@/components/live-edit-notice";
 import { BookPricingForm, type PricingMissing } from "@/components/book-pricing-form";
 import { isFreeOnlyRightsBasis } from "@/lib/book-pricing";
 import { canPublishPaidTitle, canStartPaidCheckout } from "@/lib/paid-readiness";
@@ -55,11 +58,18 @@ type EditorBook = {
 };
 
 // BD15 P2: the new book editor for a draft (PLAN-BD15-r1 §2.2): Details
-// (P2), Content (P3) and Pricing with "Send for review" (P4). A live
-// book, a book in review and a taken-down book keep the existing edit
-// page until P5b (a book in review shows there read-only, P5a); the
-// edit page sends every other draft here (P4), so the editor's Pricing
-// tab is the one way a draft is sent.
+// (P2), Content (P3) and Pricing with "Send for review" (P4). A book in
+// review and a taken-down book keep the existing edit page (a book in
+// review shows there read-only, P5a); the edit page sends every other
+// draft here (P4), so the editor's Pricing tab is the one way a draft is
+// sent.
+//
+// BD15 P5b-2: a LIVE book not waiting for review is edited here too and
+// stays live. Its manuscript, ballinë, description, 18+ label and
+// original author are shown from its waiting changes when it has any
+// (book_pending_changes) and are saved there; the Pricing tab sends
+// them for review. Everything else saves straight onto the live book.
+// Taking it off sale and deleting it stay on the edit page until P5b-3.
 export default async function BookEditorPage({
   params,
   searchParams,
@@ -91,9 +101,11 @@ export default async function BookEditorPage({
     .maybeSingle<EditorBook>();
   if (!book || book.author_id !== user.id) notFound();
 
-  if (book.status !== "draft") redirect(`/dashboard/books/${book.id}/edit`);
+  const live = book.status === "published";
+  if (book.status !== "draft" && !live) redirect(`/dashboard/books/${book.id}/edit`);
   // BD15 P4: exactly the complement of the edit page's redirect here
   // (editorOwnsDraft), so the two pages never send a book back and forth.
+  // P5b-2: a live book in review shows read-only on the edit page too.
   const [review, takedown] = await Promise.all([
     getBookReviewState(supabase, book.id),
     getActiveTakedownState(supabase, book.id),
@@ -101,6 +113,26 @@ export default async function BookEditorPage({
   if (review.kind !== "ok" || review.pending || takedown.kind !== "none") {
     redirect(`/dashboard/books/${book.id}/edit`);
   }
+
+  // P5b-2: the live book's waiting changes, read by the trusted writer
+  // now that the book is proven the caller's own. Unreadable: nothing
+  // is shown that could be saved over them.
+  let pending: PendingChanges | null = null;
+  if (live) {
+    const read = await readPendingChanges(createCatalogWriteClient(), book.id);
+    if (!read.ok) redirect(`/dashboard?error=${encodeURIComponent("Diçka shkoi keq. Provoni përsëri")}`);
+    pending = read.pending;
+  }
+  const liveValues: PendingChanges = {
+    filePath: book.file_path,
+    coverPath: book.cover_path,
+    description: book.description,
+    isAdult: book.is_adult,
+    originalAuthor: book.original_author,
+  };
+  // What the editor shows and checks: the waiting version when there is one.
+  const working: PendingChanges = pending ?? liveValues;
+  const changed = pending ? changedPendingFields(liveValues, pending) : [];
 
   const [{ data: penNames }, { data: series }, { data: contributors }, rights, ai] = await Promise.all([
     supabase
@@ -127,7 +159,11 @@ export default async function BookEditorPage({
     readAiDisclosure(book.id),
   ]);
 
-  const rightsBasis = rights.kind === "present" ? rights.declaration.basis : null;
+  // P5b-2 (audit r1 F1): an older live book with no rights record keeps
+  // own rights -- the only basis the database allows it (LB492) -- so the
+  // locked choice shows and sends exactly that.
+  const rightsBasis =
+    rights.kind === "present" ? rights.declaration.basis : live && rights.kind === "none" ? "own_rights" : null;
   const locked = book.published_at !== null;
   const penNameList = penNames ?? [];
   const lockedPenName = penNameList.find((p) => p.id === book.pen_name_id)?.name ?? null;
@@ -135,14 +171,14 @@ export default async function BookEditorPage({
   const detailsMissing = missingDetails({
     title: book.title,
     categories: book.categories,
-    description: book.description,
+    description: working.description,
     rightsBasis,
-    originalAuthor: book.original_author,
+    originalAuthor: working.originalAuthor,
   });
   // BD15 P3 (mockup): the manuscript, the cover and the AI answer.
   const contentMissing = [
-    ...(book.file_path === null ? ["Dorëshkrimi"] : []),
-    ...(book.cover_path === null ? ["Ballina"] : []),
+    ...(working.filePath === null ? ["Dorëshkrimi"] : []),
+    ...(working.coverPath === null ? ["Ballina"] : []),
     ...(!ai.ok || ai.answer === null ? ["Pyetja për AI"] : []),
   ];
   const done: Record<EditorTab, boolean> = {
@@ -165,21 +201,21 @@ export default async function BookEditorPage({
     seriesPosition: book.series_position !== null ? String(book.series_position) : "",
     editionNumber: book.edition_number !== null ? String(book.edition_number) : "",
     penNameId: book.pen_name_id,
-    description: book.description ?? "",
-    isAdult: book.is_adult,
+    description: working.description ?? "",
+    isAdult: working.isAdult,
     readingAge: book.reading_age_min !== null ? String(book.reading_age_min) : "",
     categories: book.categories ?? [],
     keywords: book.keywords ?? "",
     contributors: (contributors ?? []).map((c) => ({ id: c.id, name: c.name, role: c.role })),
     rightsBasis: rightsBasis ?? "",
-    originalAuthor: book.original_author ?? "",
+    originalAuthor: working.originalAuthor ?? "",
   };
 
   return (
     <BookEditorShell
       bookId={book.id}
       heading={book.title}
-      statusLabel="Draft"
+      statusLabel={live ? "Në shitje" : "Draft"}
       tab={tab}
       done={done}
       error={pageErrorMessage(rawError)}
@@ -187,6 +223,13 @@ export default async function BookEditorPage({
     >
       {/* BD15 P4: a book Librum sent back is fixed here now, so the
           staff note shows on every tab until it is sent again. */}
+      {live && (
+        <LiveEditNotice
+          bookId={book.id}
+          changed={changed}
+          discardAction={discardBookPendingChanges.bind(null, book.id)}
+        />
+      )}
       {sentBack && (
         <Alert variant="warning" className="mt-4">
           {buildAuthorSentBackNoticeLines(sentBack, formatTimestampAsDate).map((line, index) => (
@@ -201,6 +244,8 @@ export default async function BookEditorPage({
           action={saveBookDetails.bind(null, book.id)}
           initial={initial}
           locked={locked}
+          rightsLocked={live}
+          live={live}
           lockedPenName={lockedPenName}
           penNames={penNameList}
           series={series ?? []}
@@ -220,11 +265,12 @@ export default async function BookEditorPage({
               language: book.language,
               isbn: book.isbn,
               publisher: book.publisher,
-              hasManuscript: book.file_path !== null,
-              coverUrl: book.cover_path
-                ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
+              hasManuscript: working.filePath !== null,
+              coverUrl: working.coverPath
+                ? supabase.storage.from("covers").getPublicUrl(working.coverPath).data.publicUrl
                 : null,
             }}
+            live={live}
             authorId={user.id}
             authorName={penNameList.find((p) => p.id === book.pen_name_id)?.name ?? ""}
             aiAnswer={ai.ok ? ai.answer : null}
@@ -239,7 +285,8 @@ export default async function BookEditorPage({
           freeOnly={isFreeOnlyRightsBasis(rightsBasis)}
           paidPublishingAvailable={canPublishPaidTitle()}
           checkoutAvailable={canStartPaidCheckout()}
-          approvalValid={review.approvalValid}
+          approvalValid={!live && review.approvalValid}
+          live={live ? { currentPriceAll: book.price_all, hasChanges: changed.length > 0 } : null}
           title={book.title}
           penName={lockedPenName ?? ""}
           missing={sendMissing}

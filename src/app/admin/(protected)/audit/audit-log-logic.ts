@@ -407,6 +407,8 @@ export function formatAuditDetails(action: string, metadata: unknown): string | 
     // publication; a send back shows its reason's label, never the
     // message (the RPC does not store it here).
     case "book.review_approved":
+      // BD15 P5b-2: changes to a book that stayed live.
+      if (data.live_update === true) return "Live update";
       return data.first_publication === true ? "First publication" : data.first_publication === false ? "Live again" : null;
     case "book.review_sent_back":
       return typeof data.reason === "string" ? takedownReasonLabel(data.reason) : null;

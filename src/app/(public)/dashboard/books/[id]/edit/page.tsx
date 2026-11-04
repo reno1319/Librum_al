@@ -56,7 +56,16 @@ import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 import { ebookCoverNotice } from "@/lib/ebook-cover-notice";
-import { PEN_NAME_LOCKED_NOTE, TITLE_LOCKED_NOTE, editorPath } from "@/lib/book-editor-copy";
+import {
+  LIVE_EDIT_IN_EDITOR_NOTE,
+  LIVE_IN_REVIEW_NOTE,
+  LIVE_IN_REVIEW_PUBLISHING_NOTE,
+  PEN_NAME_LOCKED_NOTE,
+  TITLE_LOCKED_NOTE,
+  editorPath,
+} from "@/lib/book-editor-copy";
+import { createCatalogWriteClient } from "@/lib/catalog-write-client";
+import { readPendingChanges } from "@/lib/book-pending-changes";
 
 // LIBRUM 2.0 SEO-1: a static title, not "Edit <book title>" -- getting
 // the real title would mean a second query inside generateMetadata()
@@ -257,7 +266,23 @@ export default async function EditBookPage({
     redirect(editorPath(book.id, "details"));
   }
   const isLive = book.status === "published";
-  const inReview = !takedown.notice && book.status === "draft" && reviewState.kind === "ok" && reviewState.pending;
+  // BD15 P5b-2: a live book with changes in review is read-only too
+  // (Renato 11-04, Q2 a), shown with the changes it sent.
+  const inReview =
+    !takedown.notice && (book.status === "draft" || isLive) && reviewState.kind === "ok" && reviewState.pending;
+  let sentCoverUrl = coverUrl;
+  let sentManuscriptLabel = manuscriptLabel;
+  let sentDescription = book.description;
+  if (inReview && isLive) {
+    const read = await readPendingChanges(createCatalogWriteClient(), book.id);
+    if (read.ok && read.pending) {
+      sentCoverUrl = read.pending.coverPath
+        ? supabase.storage.from("covers").getPublicUrl(read.pending.coverPath).data.publicUrl
+        : null;
+      sentManuscriptLabel = getManuscriptLabel(read.pending.filePath);
+      sentDescription = read.pending.description;
+    }
+  }
   const sentBack =
     !takedown.notice && book.status === "draft" && !inReview && reviewState.kind === "ok"
       ? reviewState.latestSentBack
@@ -320,10 +345,11 @@ export default async function EditBookPage({
           <section id="in-review" className="rounded-card border border-border bg-surface p-4 shadow-sm">
             <h2 className="font-serif text-xl font-normal">Çfarë dërguat</h2>
             <p className="mt-2 text-sm text-muted">{IN_REVIEW_READ_ONLY_NOTE}</p>
+            {isLive && <p className="mt-2 text-sm text-muted">{LIVE_IN_REVIEW_NOTE}</p>}
             <div className="mt-4 flex gap-4">
-              {coverUrl ? (
+              {sentCoverUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={coverUrl} alt="" className="h-36 w-24 shrink-0 rounded-sm object-cover" />
+                <img src={sentCoverUrl} alt="" className="h-36 w-24 shrink-0 rounded-sm object-cover" />
               ) : null}
               <dl className="flex flex-col gap-2 text-sm">
                 <div>
@@ -338,7 +364,7 @@ export default async function EditBookPage({
                 ) : null}
                 <div>
                   <dt className="text-muted">Dorëshkrimi</dt>
-                  <dd>{manuscriptLabel ?? "Mungon"}</dd>
+                  <dd>{sentManuscriptLabel ?? "Mungon"}</dd>
                 </div>
                 <div>
                   <dt className="text-muted">Çmimi</dt>
@@ -348,9 +374,20 @@ export default async function EditBookPage({
                 </div>
               </dl>
             </div>
-            {book.description ? (
-              <p className="mt-4 whitespace-pre-wrap break-words text-sm">{descriptionPlainText(book.description)}</p>
+            {sentDescription ? (
+              <p className="mt-4 whitespace-pre-wrap break-words text-sm">{descriptionPlainText(sentDescription)}</p>
             ) : null}
+          </section>
+        ) : isLive ? (
+          // BD15 P5b-2: a live book is edited in the new editor and stays
+          // on sale; this page keeps taking it off sale and deleting it
+          // until P5b-3.
+          <section id="live-editor" className="rounded-card border border-border bg-surface p-4 shadow-sm">
+            <h2 className="font-serif text-xl font-normal">Ndryshoni librin</h2>
+            <p className="mt-2 text-sm text-muted">{LIVE_EDIT_IN_EDITOR_NOTE}</p>
+            <Link href={editorPath(book.id, "details")} className={buttonClasses("primary", "md", "mt-4 w-fit")}>
+              Hapni redaktorin
+            </Link>
           </section>
         ) : (
         <div className="flex flex-col gap-10">
@@ -857,7 +894,9 @@ export default async function EditBookPage({
               // promise; the author may take it back to a draft.
               <>
                 <p className="mt-4 text-sm text-muted">
-                  Librum po e kontrollon librin tuaj. Do t&apos;ju njoftojmë kur të publikohet.
+                  {isLive
+                    ? LIVE_IN_REVIEW_PUBLISHING_NOTE
+                    : "Librum po e kontrollon librin tuaj. Do t'ju njoftojmë kur të publikohet."}
                 </p>
                 <form action={cancelBookReview.bind(null, book.id)} className="mt-4">
                   <button type="submit" className={buttonClasses("outline", "md", "w-full")}>

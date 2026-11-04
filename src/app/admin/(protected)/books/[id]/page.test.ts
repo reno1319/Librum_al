@@ -336,11 +336,66 @@ describe("AdminBookPage", () => {
       expect(selects.some((s) => s.table === "book_reviews" && s.columns.includes("original_author"))).toBe(true);
     });
 
-    it("a live book shows no review panel, whatever its history", async () => {
+    it("a live book with nothing waiting shows no review panel, whatever its history", async () => {
       rows.books.data = { ...(rows.books.data as object), status: "published" };
+      rows.book_reviews = { data: [{ ...pending, status: "approved", decided_at: "2026-10-18T10:00:00Z" }], error: null };
       const html = await render("admin");
       expect(html).not.toContain("Approve and publish");
+      expect(html).not.toContain("Approve changes");
       expect(html).not.toContain("Review this book");
+    });
+
+    // BD15 P5b-2 (Renato 11-04, Q2 a): a live book's changes in review,
+    // only what changed, live beside new.
+    describe("a live book's changes", () => {
+      const NEW_COVER = "1a2b3c4d-5e6f-4a0b-9c1d-2e3f4a5b6c7d/cover.png";
+      const NEW_FILE = "author-1/22222222-2222-4222-8222-222222222222/1a2b3c4d-5e6f-4a0b-9c1d-2e3f4a5b6c7d.epub";
+      const sent = { ...pending, file_path: NEW_FILE, cover_path: NEW_COVER, description: "New text", is_adult: false };
+      beforeEach(() => {
+        rows.books.data = {
+          ...(rows.books.data as object),
+          status: "published",
+          file_path: FILE,
+          cover_path: COVER,
+          description: "Live text",
+          is_adult: false,
+          original_author: null,
+        };
+        rows.book_reviews = { data: [sent], error: null };
+        rows.book_pending_changes = {
+          data: { file_path: NEW_FILE, cover_path: NEW_COVER, description: "New text", is_adult: false, original_author: null },
+          error: null,
+        };
+      });
+
+      it("shows only what changed, live beside new, and Approve changes", async () => {
+        const html = await render("admin");
+        expect(html).toContain("What changed");
+        expect(html).toContain(`src="https://cdn.test/${COVER}"`);
+        expect(html).toContain(`src="https://cdn.test/${NEW_COVER}"`);
+        expect(html).toContain("Open the new book file");
+        expect(html).toContain("Live text");
+        expect(html).toContain("New text");
+        expect(html).not.toContain("18+ label");
+        expect(html).not.toContain("Original author</p>");
+        expect(html).toContain("Approve changes");
+        expect(html).toContain(`name="filePath" value="${NEW_FILE}"`);
+        expect(html).toContain(`name="coverPath" value="${NEW_COVER}"`);
+        expect(selects.some((s) => s.table === "book_pending_changes")).toBe(true);
+      });
+
+      it.each<[string, () => void]>([
+        ["the waiting row changed since it was sent", () => {
+          (rows.book_pending_changes.data as Record<string, unknown>).description = "Edited again";
+        }],
+        ["there is no waiting row", () => (rows.book_pending_changes = { data: null, error: null })],
+        ["the waiting row is unreadable", () => (rows.book_pending_changes = { data: null, error: { message: "boom" } })],
+      ])("no Approve when %s", async (_label, arrange) => {
+        arrange();
+        const html = await render("admin");
+        expect(html).not.toContain("Approve changes");
+        expect(html).not.toContain("boom");
+      });
     });
 
     it("an unreadable review state says so, offers nothing", async () => {
