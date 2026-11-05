@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import {
@@ -14,7 +16,7 @@ import {
   SEND_INCOMPLETE_MESSAGE,
   SEND_TICKS_MISSING_MESSAGE,
 } from "@/lib/book-pricing";
-import { IN_REVIEW_LOCKED_MESSAGE, SENT_FOR_REVIEW_MESSAGE } from "@/lib/book-review-copy";
+import { BOOK_CHANGED_WHILE_EDITING_MESSAGE, IN_REVIEW_LOCKED_MESSAGE, SENT_FOR_REVIEW_MESSAGE } from "@/lib/book-review-copy";
 import { TAKEN_DOWN_PUBLISH_MESSAGE } from "@/lib/takedown-reasons";
 
 // BD15 P4: saveBookPricing -- the Pricing tab's save and "Send for
@@ -33,9 +35,16 @@ vi.mock("next/navigation", () => ({
     throw new RedirectSignal(url);
   },
 }));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("next/server", () => ({ after: vi.fn() }));
-vi.mock("@/lib/recovery-guard", () => ({ redirectIfRecoverySessionActive: vi.fn() }));
+const mockRevalidatePath = vi.fn();
+vi.mock("next/cache", () => ({ revalidatePath: (...args: unknown[]) => mockRevalidatePath(...args) }));
+const afterCalls: unknown[] = [];
+vi.mock("next/server", () => ({ after: (task: unknown) => void afterCalls.push(task) }));
+let recoveryActive = false;
+vi.mock("@/lib/recovery-guard", () => ({
+  redirectIfRecoverySessionActive: async () => {
+    if (recoveryActive) throw new RedirectSignal("/reset-password");
+  },
+}));
 vi.mock("@/lib/book-reviews", async (importOriginal) => {
   const { bookReviewsDouble } = await import("@/lib/book-reviews-test-double");
   return bookReviewsDouble(await importOriginal<object>());
@@ -46,7 +55,9 @@ vi.mock("@/lib/staff-alerts", () => ({
     staffEmails.push(args);
   },
 }));
-vi.mock("@/lib/email", () => ({ sendNewBookEmails: vi.fn(async () => undefined) }));
+const mockSendNewBookEmails = vi.fn(async () => undefined);
+vi.mock("@/lib/email", () => ({ sendNewBookEmails: () => mockSendNewBookEmails() }));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({}) }));
 
 let takedownKind: "none" | "active" | "unavailable" = "none";
 vi.mock("@/lib/book-takedowns", () => ({
@@ -80,7 +91,7 @@ vi.mock("@/lib/paid-readiness", async (importOriginal) => ({
 // ---- the recording Supabase double ----
 
 type Filter = { kind: string; column: string; value: unknown };
-type DbWrite = { table: string; op: string; payload: unknown; filters: Filter[] };
+type DbWrite = { table: string; op: string; payload: unknown; filters: Filter[]; via: "session" | "writer" };
 
 let book: Record<string, unknown>;
 let dbWrites: DbWrite[] = [];
@@ -93,10 +104,15 @@ let downloadFails = false;
 let uploadFails = false;
 let penNameRead: { data: unknown; error: unknown } = { data: { name: "Emri i Ri" }, error: null };
 const events: string[] = [];
+// BD15 cleanup r2: runs when performPublish reads the book (its own
+// select list), so a test can change what the publish sees after
+// saveBookPricing's own checks passed -- another tab, or staff, in between.
+let onPublishRead: (() => void) | null = null;
+const PUBLISH_READ = "status, price_all, published_at, description, file_path, cover_path";
 // BD15 P5b-2: a live book's waiting changes (none by default).
 let pendingRead: { data: unknown; error: unknown } = { data: null, error: null };
 
-function query(table: string) {
+function query(table: string, via: "session" | "writer" = "session") {
   const filters: Filter[] = [];
   let op = "select";
   let payload: unknown;
@@ -107,7 +123,7 @@ function query(table: string) {
       if (table === "book_pending_changes") return pendingRead;
       return { data: null, error: null };
     }
-    dbWrites.push({ table, op, payload, filters: [...filters] });
+    dbWrites.push({ table, op, payload, filters: [...filters], via });
     events.push(`db:${op}:${table}`);
     // A write that matched applies to the one row, as the database would.
     if (table === "books" && op === "update" && updateError) return { data: null, error: updateError };
@@ -123,6 +139,11 @@ function query(table: string) {
         }
         if (prop === "single" || prop === "maybeSingle") return () => Promise.resolve(resolve());
         return (...args: unknown[]) => {
+          if (prop === "select" && args[0] === PUBLISH_READ && onPublishRead) {
+            const hook = onPublishRead;
+            onPublishRead = null;
+            hook();
+          }
           if (prop === "update" || prop === "insert" || prop === "delete") {
             op = prop;
             payload = args[0];
@@ -174,7 +195,9 @@ const sessionClient = {
   storage: { from: (name: string) => bucket(name) },
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
-vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => sessionClient }));
+// The catalog writer: the same double, its writes marked as the writer's.
+const writerClient = { ...sessionClient, from: (table: string) => query(table, "writer") };
+vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => writerClient }));
 
 const { saveBookPricing } = await import("./actions");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
@@ -255,6 +278,11 @@ beforeEach(async () => {
   paidPublishing = true;
   staffEmails.length = 0;
   pendingRead = { data: null, error: null };
+  recoveryActive = false;
+  onPublishRead = null;
+  afterCalls.length = 0;
+  mockRevalidatePath.mockReset();
+  mockSendNewBookEmails.mockReset().mockResolvedValue(undefined);
 });
 
 describe("saveBookPricing: Ruaj draftin", () => {
@@ -735,4 +763,181 @@ describe("saveBookPricing: a live book", () => {
     expect(target).toContain(`${EDITOR}&error=`);
     expect(bookReviewsDoubleState.calls.some((c) => c.fn === "requestBookReview")).toBe(false);
   });
+});
+
+// ============================================================
+// BD15 cleanup: performPublish's own write, through Send -- its one
+// caller left. Ported from the removed publishBook/createBook tests
+// (publish.test.ts, catalog-write-authorization.test.ts,
+// paid-repricing-guards.test.ts, recovery-guard.test.ts). A free draft
+// whose approval still matches its files publishes at once; its price is
+// already saved, so the only books write is the publish.
+// ============================================================
+describe("saveBookPricing Send: the publish write", () => {
+  const PUBLISHED = `/dashboard?success=${encodeURIComponent("Libri juaj u publikua")}`;
+  const pickClears = () => dbWrites.filter((w) => w.table === "books" && (w.payload as Record<string, unknown>)?.librum_choice_at === null);
+
+  beforeEach(() => {
+    bookReviewsDoubleState.approvalValid = true;
+    book.price_all = 0;
+  });
+
+  it("first publish: the catalog writer sets status and published_at, scoped and compare-and-set", async () => {
+    const before = Date.now();
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(PUBLISHED);
+    expect(priceWrites()).toEqual([]);
+    const [write] = publishWrites();
+    expect(publishWrites()).toHaveLength(1);
+    expect(write.via).toBe("writer");
+    const payload = write.payload as { status: string; published_at: string };
+    expect(Object.keys(payload).sort()).toEqual(["published_at", "status"]);
+    expect(Date.parse(payload.published_at)).toBeGreaterThanOrEqual(before - 1000);
+    expect(write.filters).toEqual(
+      expect.arrayContaining([
+        { kind: "eq", column: "id", value: BOOK_ID },
+        { kind: "eq", column: "author_id", value: USER_ID },
+        { kind: "eq", column: "status", value: "draft" },
+        { kind: "eq", column: "price_all", value: 0 },
+      ]),
+    );
+    // The new-book emails are scheduled for after the page has answered.
+    expect(afterCalls).toHaveLength(1);
+  });
+
+  it("no write of status, published_at or price goes through the author's session", async () => {
+    book.price_all = null;
+    await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(publishWrites()).toHaveLength(1);
+    for (const w of dbWrites.filter((x) => x.table === "books")) expect(w.via).toBe("writer");
+  });
+
+  it("a republish keeps the original published_at and sends no new-book emails", async () => {
+    book.published_at = "2026-01-02T03:04:05.000Z";
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(PUBLISHED);
+    expect(publishWrites()[0].payload).toEqual({ status: "published" });
+    expect(afterCalls).toEqual([]);
+  });
+
+  it.each([0, 2])("a %i-row publish result is not reported as live", async (count) => {
+    updateRows = Array.from({ length: count }, (_, i) => ({ id: i === 0 ? BOOK_ID : "other" }));
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target).toBe("/dashboard");
+    expect(afterCalls).toEqual([]);
+    expect(pickClears()).toEqual([]);
+  });
+
+  it("a database error on the publish write is not reported as live", async () => {
+    updateError = { code: "XX000", message: "boom" };
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe("/dashboard");
+    expect(afterCalls).toEqual([]);
+  });
+
+  it("the lock trigger (LB460) on the publish write names the takedown", async () => {
+    updateError = { code: "LB460", message: "taken down" };
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err(TAKEN_DOWN_PUBLISH_MESSAGE));
+  });
+
+  it.each(["LB462", "LB463"])("%s on the publish write: the book changed while editing", async (code) => {
+    updateError = { code, message: "changed" };
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err(BOOK_CHANGED_WHILE_EDITING_MESSAGE));
+  });
+
+  it("a real publish clears a leftover Librum's choice pick of this book only, after the publish", async () => {
+    await run(saveBookPricing(BOOK_ID, form(SEND)));
+    const [clear] = pickClears();
+    expect(clear.via).toBe("writer");
+    expect(clear.filters).toEqual(
+      expect.arrayContaining([
+        { kind: "eq", column: "id", value: BOOK_ID },
+        { kind: "eq", column: "author_id", value: USER_ID },
+      ]),
+    );
+    expect(clear.filters.some((f) => f.column === "status")).toBe(false);
+    expect(dbWrites.indexOf(publishWrites()[0])).toBeLessThan(dbWrites.indexOf(clear));
+  });
+
+  it("a failing new-book email after the publish is only logged", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockSendNewBookEmails.mockRejectedValue(new Error("smtp down"));
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(PUBLISHED);
+    await expect((afterCalls[0] as () => Promise<void>)()).resolves.toBeUndefined();
+    expect(mockSendNewBookEmails).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("a failing revalidatePath after the publish still reports the publish", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Only once the publish has landed: the revalidations after it.
+    mockRevalidatePath.mockImplementation(() => {
+      if (publishWrites().length > 0) throw new Error("cache down");
+    });
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(PUBLISHED);
+    expect(publishWrites()).toHaveLength(1);
+    error.mockRestore();
+  });
+
+  // BD15 cleanup r2 (audit r1, M07/M08/M27/M29/M30): performPublish's own
+  // checks are the second line behind saveBookPricing's. Each test changes
+  // the state only at the publish read, so only performPublish can refuse.
+  const GENERIC = `/dashboard?error=${encodeURIComponent("Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj")}`;
+
+  it("a takedown that lands before the publish read: refused with Librum's reason, no publish", async () => {
+    onPublishRead = () => (takedownKind = "active");
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err(TAKEN_DOWN_PUBLISH_MESSAGE));
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("a takedown state unreadable at the publish read fails closed, no publish", async () => {
+    onPublishRead = () => (takedownKind = "unavailable");
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(GENERIC);
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("a review state unreadable at the publish read fails closed, no publish", async () => {
+    onPublishRead = () => (bookReviewsDoubleState.stateKind = "unavailable");
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(GENERIC);
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("the publish gate: paid publishing closed by the publish read refuses a paid book, no publish", async () => {
+    book.price_all = 199;
+    onPublishRead = () => (paidPublishing = false);
+    const target = await run(saveBookPricing(BOOK_ID, form({ ...SEND, priceMode: "paid", price: "199" })));
+    expect(target).toBe(err("Publikimi me pagesë nuk është i mundur tani"));
+    expect(priceWrites()).toEqual([]);
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("the publish gate: a description cleared before the publish read refuses, no publish", async () => {
+    onPublishRead = () => (book.description = "");
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err("Shtoni një përshkrim para publikimit."));
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("the publish write itself requires a non-null, non-empty description (a clear after the read matches no row)", async () => {
+    await run(saveBookPricing(BOOK_ID, form(SEND)));
+    const [write] = publishWrites();
+    expect(write.filters).toEqual(
+      expect.arrayContaining([
+        { kind: "not", column: "description", value: null },
+        { kind: "neq", column: "description", value: "" },
+      ]),
+    );
+  });
+
+  it("an active recovery session stops the send before the publish write", async () => {
+    recoveryActive = true;
+    expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe("/reset-password");
+    expect(publishWrites()).toEqual([]);
+  });
+});
+
+// Moved from the removed publish.test.ts (ALL-WIRING-2): the row
+// performPublish reads carries no legacy price_cents, so a legacy value
+// can never decide free or paid.
+it("performPublish's book read does not include price_cents at all", () => {
+  const source = readFileSync(fileURLToPath(new URL("./actions.ts", import.meta.url)), "utf8");
+  const selectList = source.match(/\.select\("status, [^"]*"\)/)?.[0];
+  expect(selectList).toBe('.select("status, price_all, published_at, description, file_path, cover_path")');
 });

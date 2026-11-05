@@ -275,6 +275,42 @@ describe("saveBookDetails: the first save creates the draft", () => {
     expect(target).toBe(`/dashboard/books/${insert.payload.id}/editor?tab=details&success=U%20ruajt%20si%20draft`);
   });
 
+  // BD15 cleanup (ported from the removed createBook's Patch 8 test): the
+  // one trusted books insert takes its identity from the server only.
+  it("client-supplied id, author, status, path and price fields cannot control the inserted row", async () => {
+    const hostile = form({ title: "Libri im", intent: "save" });
+    for (const [key, value] of [
+      ["id", "00000000-0000-4000-8000-000000000bad"],
+      ["bookId", "00000000-0000-4000-8000-000000000bad"],
+      ["author_id", "00000000-0000-4000-8000-0000000000aa"],
+      ["authorId", "00000000-0000-4000-8000-0000000000aa"],
+      ["status", "published"],
+      ["published_at", "2020-01-01T00:00:00Z"],
+      ["cover_path", "x/cover.png"],
+      ["file_path", "x/book.epub"],
+      ["price_all", "199"],
+    ]) {
+      hostile.set(key, value);
+    }
+    await redirectOf(saveBookDetails(null, hostile));
+    expect(catalogWrites).toHaveLength(1);
+    const { payload } = catalogWrites[0];
+    expect(payload.author_id).toBe(USER);
+    expect(payload.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(payload.id).not.toBe("00000000-0000-4000-8000-000000000bad");
+    for (const key of ["status", "published_at", "cover_path", "file_path", "price_all"]) {
+      expect(payload).not.toHaveProperty(key);
+    }
+  });
+
+  it("every book id is freshly generated per request", async () => {
+    await redirectOf(saveBookDetails(null, form({ title: "Libri im", intent: "save" })));
+    await redirectOf(saveBookDetails(null, form({ title: "Libri im", intent: "save" })));
+    const ids = catalogWrites.filter((w) => w.op === "insert").map((w) => w.payload.id);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
   it("\"Ruaj dhe vazhdo\" lands on the Content tab", async () => {
     const target = await redirectOf(saveBookDetails(null, form({ title: "Libri im", intent: "next" })));
     expect(target).toMatch(/\/editor\?tab=content&success=/);
