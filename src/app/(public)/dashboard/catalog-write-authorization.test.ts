@@ -1126,6 +1126,9 @@ describe("the privileged client stays server-only", () => {
       // BD15 P2: the new editor's Details save (draft insert/update).
       "src/app/(public)/dashboard/books/editor-actions.ts",
       "src/app/(public)/dashboard/bundles/actions.ts",
+      // BD15 P6: the Dashboard bookshelf reads the waiting changes of the
+      // author's own live books (ids from its own-session read), after auth.
+      "src/app/(public)/dashboard/page.tsx",
       // BD15 P3: the staff-only "AI used" answer (book_ai_disclosures has
       // no authenticated grant); a server-only module, called by the
       // Content save and the editor page only after the own-draft check.

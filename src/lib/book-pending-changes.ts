@@ -125,6 +125,48 @@ export async function readPendingChangesForBooks(service: CatalogWriter, bookIds
   }
 }
 
+// BD15 P6: the bookshelf's one read of the waiting changes of the
+// author's live books (the caller passes only ids it read as its own,
+// with the session's own client, and runs this after auth). Display
+// only; the caller shows a visible line when it fails (F1 lesson).
+export type ShelfPendingRead =
+  | { ok: true; byBook: Map<string, { pending: PendingChanges; createdAt: string }> }
+  | { ok: false };
+
+export async function readShelfPendingChanges(service: CatalogWriter, bookIds: readonly string[]): Promise<ShelfPendingRead> {
+  const byBook = new Map<string, { pending: PendingChanges; createdAt: string }>();
+  const ids = Array.from(new Set(bookIds));
+  if (ids.length === 0) return { ok: true, byBook };
+  try {
+    const { data, error } = await service
+      .from("book_pending_changes")
+      .select("book_id, file_path, cover_path, description, is_adult, original_author, created_at")
+      .in("book_id", ids)
+      .returns<Omit<PendingRow, "version">[]>();
+    if (error || !Array.isArray(data)) {
+      console.error("readShelfPendingChanges: read failed", { bookCount: ids.length, code: error?.code ?? null });
+      return { ok: false };
+    }
+    for (const row of data) {
+      if (!ids.includes(row.book_id)) return { ok: false };
+      byBook.set(row.book_id, {
+        pending: {
+          filePath: row.file_path,
+          coverPath: row.cover_path,
+          description: row.description,
+          isAdult: row.is_adult,
+          originalAuthor: row.original_author,
+        },
+        createdAt: row.created_at,
+      });
+    }
+    return { ok: true, byBook };
+  } catch {
+    console.error("readShelfPendingChanges: read failed", { bookCount: ids.length });
+    return { ok: false };
+  }
+}
+
 /** Which of the five differ between the live book and its waiting changes. */
 export function changedPendingFields(live: LiveReviewValues, pending: PendingChanges): PendingChangeField[] {
   return PENDING_CHANGE_FIELDS.filter((field) => (live[field] ?? null) !== (pending[field] ?? null));

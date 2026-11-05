@@ -2,7 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { changedPendingFields, discardPendingChanges, readPendingChanges, readPendingChangesForBooks, savePendingChanges } = await import(
+const {
+  changedPendingFields,
+  discardPendingChanges,
+  readPendingChanges,
+  readPendingChangesForBooks,
+  readShelfPendingChanges,
+  savePendingChanges,
+} = await import(
   "./book-pending-changes"
 );
 
@@ -252,5 +259,73 @@ describe("readPendingChangesForBooks", () => {
       expect(await readPendingChangesForBooks(listClient(result).client, [BOOK])).toEqual({ ok: false });
     }
     vi.restoreAllMocks();
+  });
+});
+
+// BD15 P6: the bookshelf's read of the author's live books' waiting
+// changes. Fails as a whole (the shelf shows a visible line).
+describe("readShelfPendingChanges", () => {
+  const OTHER = "d4e5f6a7-3333-4333-8333-abcdef333333";
+  function listClient(result: { data: unknown; error: unknown } | "throw") {
+    const filters: unknown[] = [];
+    const chain = {
+      select: (columns: string) => (filters.push(["select", columns]), chain),
+      in: (column: string, values: unknown) => (filters.push(["in", column, values]), chain),
+      returns: async () => {
+        if (result === "throw") throw new Error("boom");
+        return result;
+      },
+    };
+    const client = { from: (table: string) => (filters.push(["from", table]), chain) };
+    return { client: client as never, filters };
+  }
+  const row = (book_id: string) => ({
+    book_id,
+    file_path: null,
+    cover_path: null,
+    description: "New",
+    is_adult: true,
+    original_author: null,
+    created_at: "2026-11-01T10:00:00Z",
+  });
+
+  it("reads only the named books, de-duplicated, and maps each row with its first-save time", async () => {
+    const { client, filters } = listClient({ data: [row(BOOK)], error: null });
+    const read = await readShelfPendingChanges(client, [BOOK, BOOK, OTHER]);
+    expect(filters).toEqual([
+      ["from", "book_pending_changes"],
+      ["select", "book_id, file_path, cover_path, description, is_adult, original_author, created_at"],
+      ["in", "book_id", [BOOK, OTHER]],
+    ]);
+    expect(read).toEqual({
+      ok: true,
+      byBook: new Map([
+        [
+          BOOK,
+          {
+            pending: { filePath: null, coverPath: null, description: "New", isAdult: true, originalAuthor: null },
+            createdAt: "2026-11-01T10:00:00Z",
+          },
+        ],
+      ]),
+    });
+  });
+
+  it("no ids: no read at all", async () => {
+    const { client, filters } = listClient({ data: [], error: null });
+    expect(await readShelfPendingChanges(client, [])).toEqual({ ok: true, byBook: new Map() });
+    expect(filters).toEqual([]);
+  });
+
+  it("an error, a non-array, a throw or a row for another book fails the whole read", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const result of [
+      { data: null, error: { code: "42501" } },
+      { data: {}, error: null },
+      "throw" as const,
+      { data: [row("e5f6a7b8-4444-4444-8444-abcdef444444")], error: null },
+    ]) {
+      expect(await readShelfPendingChanges(listClient(result).client, [BOOK])).toEqual({ ok: false });
+    }
   });
 });
