@@ -128,16 +128,22 @@ create function pg_temp.request(p_sub text, p_book uuid) returns text language s
   select pg_temp.value_as('authenticated', p_sub, format('select public.request_book_review(%L)::text', p_book))
 $$;
 
--- The catalog writer's two writes (service_role).
+-- The catalog writer's two writes (service_role). BD15 P5b-3b
+-- (migration 20261105120000) added the version the caller read; these
+-- helpers pass the row's current one (null: no row), as a writer that
+-- read just before would. 093 tests the compare itself.
+create function pg_temp.current_version(p_book text) returns bigint language sql as $$
+  select c.version from public.book_pending_changes c where c.book_id = p_book::uuid
+$$;
 create function pg_temp.save(p_author text, p_book text, p_file text, p_cover text, p_desc text, p_adult boolean,
                              p_original_author text default null) returns text language sql as $$
   select pg_temp.run_as('service_role', null,
-    format('select public.save_book_pending_changes(%L, %L, %L, %L, %L, %L, %L)',
-      p_author, p_book, p_file, p_cover, p_desc, p_adult, p_original_author))
+    format('select public.save_book_pending_changes(%L, %L, %L, %L, %L, %L, %L, %L)',
+      p_author, p_book, pg_temp.current_version(p_book), p_file, p_cover, p_desc, p_adult, p_original_author))
 $$;
 create function pg_temp.discard(p_author text, p_book text) returns text language sql as $$
   select pg_temp.value_as('service_role', null,
-    format('select public.discard_book_pending_changes(%L, %L)::text', p_author, p_book))
+    format('select public.discard_book_pending_changes(%L, %L, %L)::text', p_author, p_book, pg_temp.current_version(p_book)))
 $$;
 
 -- ============================================================
@@ -202,11 +208,11 @@ select pg_temp.assert(pg_temp.run_as('service_role', null,
      values ('e0920001-0000-4000-8000-000000000001', 'x', 'y', 'z', false)$q$) like '42501:%',
   'part1: the catalog writer writes only through the two functions (audit r1, F1)');
 select pg_temp.assert(pg_temp.run_as('authenticated', 'e0920000-0000-4000-8000-00000000000a',
-  format('select public.save_book_pending_changes(%L, %L, %L, %L, %L, false, null)',
+  format('select public.save_book_pending_changes(%L, %L, null, %L, %L, %L, false, null)',
     'e0920000-0000-4000-8000-00000000000a', 'e0920001-0000-4000-8000-000000000001', 'x', 'e092000c-0000-4000-8000-000000000099/cover.jpg', 'z'))
   like '42501:%', 'part1: the author''s session can''t call the save function');
 select pg_temp.assert(pg_temp.run_as('anon', null,
-  $q$select public.discard_book_pending_changes('e0920000-0000-4000-8000-00000000000a', 'e0920001-0000-4000-8000-000000000001')$q$)
+  $q$select public.discard_book_pending_changes('e0920000-0000-4000-8000-00000000000a', 'e0920001-0000-4000-8000-000000000001', null)$q$)
   like '42501:%', 'part1: nor anon the discard function');
 select pg_temp.assert(pg_temp.save('e0920000-0000-4000-8000-00000000000a', 'e0920001-0000-4000-8000-0000000000d1', 'a/d1/v2.epub', 'e092000c-0000-4000-8000-000000000001/cover.jpg', 'Draft.', false) like 'LB491:%',
   'part1: a draft keeps no pending changes (it changes the book itself)');

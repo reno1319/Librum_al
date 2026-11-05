@@ -15,6 +15,7 @@ import {
   isOwnBookManuscriptPath,
 } from "@/lib/book-storage-path";
 import { deletedBookManuscriptKeys, readReviewSnapshots } from "@/lib/book-reviews";
+import { readPendingChangesForBooks } from "@/lib/book-pending-changes";
 
 const PREPARE_FAILED_PATH = `/account?error=${encodeURIComponent(
   "Nuk mundëm ta përgatisim fshirjen e llogarisë. Provoni përsëri.",
@@ -283,6 +284,29 @@ export async function deleteAccount(formData: FormData) {
         reviews: snapshots.byBook.get(book.id) ?? [],
       })) {
         manuscriptPaths.add(path);
+      }
+    }
+
+    // BD15 P5b-3b (Renato 11-05, Q2 a): a live book's waiting changes
+    // may name a manuscript and a ballinë nothing above does (never sent
+    // for review). Read now, before deleteUser (the rows go with the
+    // books); a failed read stops the deletion. The manuscript must be
+    // this user's own key for that book; the ballinë a new random-folder
+    // key, trusted because it came from this account's own book's row
+    // (the same rule as the books' own covers above and deleteBook).
+    const pending = await readPendingChangesForBooks(admin, bookIds);
+    if (!pending.ok) {
+      console.error("deleteAccount: waiting changes read failed; nothing was deleted");
+      redirect(PREPARE_FAILED_PATH);
+    }
+    for (const book of authoredBooks) {
+      const waiting = pending.byBook.get(book.id);
+      if (!waiting) continue;
+      if (waiting.filePath !== null && isOwnBookManuscriptPath(waiting.filePath, user.id, book.id)) {
+        manuscriptPaths.add(waiting.filePath);
+      }
+      if (waiting.coverPath !== null && isNewBookCoverPath(waiting.coverPath)) {
+        coverPaths.add(waiting.coverPath);
       }
     }
   }

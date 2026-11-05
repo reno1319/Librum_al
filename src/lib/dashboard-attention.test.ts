@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveDashboardAttention } from "./dashboard-attention";
+import { inReviewIdsFrom, resolveDashboardAttention } from "./dashboard-attention";
 
 const book = (overrides: Partial<Parameters<typeof resolveDashboardAttention>[0]["books"][number]>) => ({
   id: "book-1",
@@ -162,5 +162,31 @@ describe("resolveDashboardAttention: unpriced books are not paid books", () => {
         paidPublishingAvailable: false,
       }),
     ).toEqual({ kind: "paid-publishing-unavailable" });
+  });
+});
+
+// BD15 P5b-3b (audit P5b-3a r1, F2): the page's in-review set.
+describe("inReviewIdsFrom", () => {
+  const sentBack = { sentBackAt: "2026-11-04T10:00:00Z", reason: "other", message: "Fix." };
+  it("keeps only books in review; a sent-back draft stays offered", () => {
+    const notices = new Map([
+      ["in-review", { inReview: true, sentBack: null }],
+      ["sent-back", { inReview: false, sentBack }],
+      ["quiet", { inReview: false, sentBack: null }],
+    ]);
+    const ids = inReviewIdsFrom(notices);
+    expect([...ids]).toEqual(["in-review"]);
+    const attention = resolveDashboardAttention({
+      books: [book({ id: "in-review", created_at: "2026-03-01T00:00:00.000Z" }), book({ id: "sent-back", title: "Fix me" })],
+      paidPublishingAvailable: true,
+      inReviewBookIds: ids,
+    });
+    expect(attention).toMatchObject({ kind: "continue-draft" });
+    expect(JSON.stringify(attention)).toContain("sent-back");
+    expect(JSON.stringify(attention)).not.toContain("in-review");
+  });
+
+  it("no notices: nothing is in review", () => {
+    expect(inReviewIdsFrom(new Map()).size).toBe(0);
   });
 });

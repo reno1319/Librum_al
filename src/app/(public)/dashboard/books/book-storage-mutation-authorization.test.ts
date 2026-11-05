@@ -251,6 +251,7 @@ vi.mock("@/lib/catalog-write-client", async () => {
 
 const { createBook, updateBook, deleteBook, cancelBookReview, saveBookContent } = await import("./actions");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+const { BOOK_CHANGED_WHILE_EDITING_MESSAGE } = await import("@/lib/book-review-copy");
 
 // COVERS-1: a real 1x1 PNG and JPEG, since every cover is now decoded and re-encoded.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWMwTgsFAAG+AO/TH36BAAAAAElFTkSuQmCC", "base64");
@@ -328,6 +329,9 @@ async function withManuscript(f: FormData): Promise<FormData> {
   f.set("manuscript", new File([new Uint8Array(await validEpub())], "book.epub"));
   return f;
 }
+
+// BD15 P5b-3b: a successful delete lands on the Dashboard.
+const DELETED_URL = "/dashboard?success=Libri%20u%20fshi.";
 
 async function run(action: Promise<unknown>): Promise<string> {
   try {
@@ -786,6 +790,7 @@ describe("deleteBook", () => {
     description: "D",
     is_adult: false,
     original_author: null,
+    version: 1,
     ...o,
   });
   it("removes a live book's waiting manuscript and ballinë after the delete", async () => {
@@ -952,7 +957,7 @@ describe("legacy cover: every ASCII spelling of jpeg, bound to the exact author 
   it.each(JPEG_SPELLINGS)("deleteBook removes .%s exactly as stored", async (ext) => {
     const stored = `${USER_ID}/${BOOK_ID}-cover.${ext}`;
     bookReadResult = { data: row({ cover_path: stored }), error: null };
-    expect(await run(deleteBook(BOOK_ID))).toBe("(no redirect)");
+    expect(await run(deleteBook(BOOK_ID))).toBe(DELETED_URL);
     expect(removals()).toEqual([
       { op: "remove", bucket: "covers", paths: [stored] },
       { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] },
@@ -1030,7 +1035,7 @@ describe("a failed removal is logged without any key and never reverses the comp
 
   it("deleteBook: the deletion stands, the log carries no key", async () => {
     removeError = hostileStorageError(OWN_EPUB);
-    expect(await run(deleteBook(BOOK_ID))).toBe("(no redirect)");
+    expect(await run(deleteBook(BOOK_ID))).toBe(DELETED_URL);
     expect(bookDeletes()).toHaveLength(1);
     expect(removals()).toHaveLength(2);
     const text = loggedText();
@@ -1756,6 +1761,7 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
   });
 
   // BD15 P5b-2: a live book stays as it is; the new ballinë waits.
+  const WAITING_COVER_F4 = "3c4d5e6f-4444-4444-8444-3c4d5e6f7081/cover.jpg";
   const LIVE_ROW = { status: "published", description: "Përshkrimi", is_adult: false, original_author: null };
   it("a live book: the new ballinë goes to the waiting changes, the live book keeps its own", async () => {
     bookReadResult = { data: contentRow(LIVE_ROW), error: null };
@@ -1770,6 +1776,31 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
     expect(removals().flatMap((c) => c.paths)).not.toContain(OWN_PNG);
   });
 
+  // BD15 P5b-3b (audit P5b-2 r1 F4; Renato 11-05, Q1 a): the save passes
+  // the version read; refused because another save came in, the new
+  // upload is removed and nothing the other save named is touched.
+  it("a live book: a save that came in meanwhile wins; this upload is removed, the waiting ballinë kept", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    pendingReadResult = {
+      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER_F4, description: "Përshkrimi", is_adult: false, original_author: null, version: 4 },
+      error: null,
+    };
+    rpcError = { code: "LB496", message: "The waiting changes changed since they were read." };
+    const target = await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(rpcCalls.find((c) => c.fn === "save_book_pending_changes")?.args).toMatchObject({ p_expected_version: 4, p_cover_path: NEW_JPG });
+    expect(decodeURIComponent(target)).toContain(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).toEqual(expect.arrayContaining([NEW_JPG]));
+    expect(removed).not.toContain(WAITING_COVER_F4);
+    expect(removed).not.toContain(OWN_PNG);
+  });
+
+  it("a live book with no waiting row passes null (it read none)", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(rpcCalls.find((c) => c.fn === "save_book_pending_changes")?.args).toMatchObject({ p_expected_version: null });
+  });
+
   it("audit r1 F7: a live book's new manuscript goes to the waiting changes, never onto the live row", async () => {
     bookReadResult = { data: contentRow(LIVE_ROW), error: null };
     await run(saveBookContent(BOOK_ID, await withManuscript(form())));
@@ -1782,7 +1813,7 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
   it("audit r1 F7: the replaced waiting ballinë is removed when the live book still has its own", async () => {
     bookReadResult = { data: contentRow(LIVE_ROW), error: null };
     pendingReadResult = {
-      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER, description: "Përshkrimi", is_adult: false, original_author: null },
+      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER, description: "Përshkrimi", is_adult: false, original_author: null, version: 1 },
       error: null,
     };
     await run(saveBookContent(BOOK_ID, withCover(form())));
@@ -1793,7 +1824,7 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
     bookReadResult = { data: contentRow(LIVE_ROW), error: null };
     bookReadAfterFirst = { data: contentRow({ ...LIVE_ROW, cover_path: WAITING_COVER }), error: null };
     pendingReadResult = {
-      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER, description: "Përshkrimi", is_adult: false, original_author: null },
+      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER, description: "Përshkrimi", is_adult: false, original_author: null, version: 1 },
       error: null,
     };
     await run(saveBookContent(BOOK_ID, withCover(form())));

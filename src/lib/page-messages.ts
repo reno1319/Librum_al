@@ -363,6 +363,8 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Shqyrtimi u anulua. Libri mbetet në shitje; ndryshimet tuaja presin përsëri te redaktori.",
   // BD15 P5b-3a: "Hiqeni nga shitja" in the editor's Veprime box.
   "Libri u hoq nga shitja. Tani është draft.",
+  // BD15 P5b-3b: deleteBook (from the editor or the Dashboard menu).
+  "Libri u fshi.",
 ]);
 
 type QueryValue = string | string[] | undefined;

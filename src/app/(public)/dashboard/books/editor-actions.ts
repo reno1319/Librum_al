@@ -25,7 +25,7 @@ import { resolveOwnPenNameId } from "@/lib/pen-name-write-client";
 import { penNameErrorMessage } from "@/lib/pen-names";
 import { getRightsDeclarationState, recordRightsDeclaration } from "@/lib/book-rights";
 import { getBookReviewState, isInReviewLockError, isWaitingForReview } from "@/lib/book-reviews";
-import { IN_REVIEW_LOCKED_MESSAGE } from "@/lib/book-review-copy";
+import { BOOK_CHANGED_WHILE_EDITING_MESSAGE, IN_REVIEW_LOCKED_MESSAGE } from "@/lib/book-review-copy";
 import { removeUnretainedManuscripts } from "@/lib/book-reviews";
 import { BOOK_COVERS_BUCKET, isNewBookCoverPath } from "@/lib/book-storage-path";
 import {
@@ -252,14 +252,27 @@ async function saveLiveBookDetails(
   const waiting = changedPendingFields(live, wanted).length > 0;
   if (!waiting) {
     if (read.pending) {
-      const dropped = await discardPendingChanges(catalogWriter, { authorId: userId, bookId: existing.id });
+      const dropped = await discardPendingChanges(catalogWriter, {
+        authorId: userId,
+        bookId: existing.id,
+        expectedVersion: read.version,
+      });
       if (!dropped.ok) {
         if (dropped.reason === "in_review") inReviewPage();
-        redirect(withQuery(here, "error", SAVE_FAILED_MESSAGE));
+        // Audit P5b-2 r2, R2-4: step 3 is already live. P5b-3b: so is a
+        // refusal because another save came in between (LB496).
+        redirect(withQuery(here, "error", LIVE_PARTLY_SAVED_MESSAGE));
       }
     }
   } else if (!read.pending || changedPendingFields(read.pending, wanted).length > 0) {
-    const saved = await savePendingChanges(catalogWriter, { authorId: userId, bookId: existing.id, changes: wanted });
+    // P5b-3b: refused (LB496) when another save came in after the read
+    // above; the author reloads and saves again (Renato 11-05, Q1 a).
+    const saved = await savePendingChanges(catalogWriter, {
+      authorId: userId,
+      bookId: existing.id,
+      expectedVersion: read.version,
+      changes: wanted,
+    });
     if (!saved.ok) {
       if (saved.reason === "in_review") inReviewPage();
       if (saved.reason === "adult_category") redirect(withQuery(here, "error", LIVE_ADULT_CATEGORY_MESSAGE));
@@ -311,11 +324,18 @@ export async function discardBookPendingChanges(bookId: string) {
   const catalogWriter = createCatalogWriteClient();
   const read = await readPendingChanges(catalogWriter, existing.id);
   if (!read.ok) redirect(withQuery(here, "error", SAVE_FAILED_MESSAGE));
-  const dropped = await discardPendingChanges(catalogWriter, { authorId: user.id, bookId: existing.id });
+  // P5b-3b: only the waiting changes read above are discarded; a newer
+  // save from another tab is refused here (LB496) and its files stay.
+  const dropped = await discardPendingChanges(catalogWriter, {
+    authorId: user.id,
+    bookId: existing.id,
+    expectedVersion: read.version,
+  });
   if (!dropped.ok) {
     if (dropped.reason === "in_review") {
       redirect(withQuery(editorPath(existing.id, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
     }
+    if (dropped.reason === "conflict") redirect(withQuery(here, "error", BOOK_CHANGED_WHILE_EDITING_MESSAGE));
     redirect(withQuery(here, "error", SAVE_FAILED_MESSAGE));
   }
   if (!dropped.discarded || !read.pending) {

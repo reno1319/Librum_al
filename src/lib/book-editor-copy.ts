@@ -106,6 +106,9 @@ export const UNPUBLISH_NOTE = "E heq nga Libraria dhe bëhet draft. Lexuesit që
 export const UNPUBLISH_PENDING_NOTE = "Ndryshimet që presin shqyrtim bëhen pjesë e draftit.";
 export const UNPUBLISHED_MESSAGE = "Libri u hoq nga shitja. Tani është draft.";
 export const DELETE_NOTE = "Fshirja nuk mund të zhbëhet.";
+// BD15 P5b-3b: a deleted book has no editor to come back to (the 11-05
+// click test landed on a 404), so the author lands on the Dashboard.
+export const BOOK_DELETED_MESSAGE = "Libri u fshi.";
 export const TAKEN_DOWN_STATUS_LABEL = "Hequr nga Libraria";
 export const SENT_HEADING = "Çfarë dërguat";
 export const DRAFT_IN_REVIEW_NOTE = "Librum po e kontrollon librin tuaj. Do t'ju njoftojmë kur të publikohet.";
