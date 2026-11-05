@@ -123,7 +123,7 @@ async function ownsSeries(supabase: SessionClient, userId: string, seriesId: str
 // the database refuses a fourth, LB486). Rows are matched by id: a kept
 // row is left as it is, a removed one is deleted, a new one inserted.
 // Ids the book doesn't have are ignored, never inserted. Written with the
-// author's own session, the same RLS path addContributor uses.
+// author's own session (RLS: own books only).
 async function syncContributors(
   supabase: SessionClient,
   bookId: string,
@@ -472,8 +472,7 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
     original_author: details.originalAuthor,
   };
 
-  // The row is written with the trusted catalog writer, as createBook
-  // and updateBook do; every identifying value is the server's own (the
+  // The row is written with the trusted catalog writer; every identifying value is the server's own (the
   // id is generated here or was proven above, the author is the session
   // user), and the update is bound to the caller's own draft.
   const catalogWriter = createCatalogWriteClient();

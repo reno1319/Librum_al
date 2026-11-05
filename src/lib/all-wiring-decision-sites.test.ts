@@ -9,20 +9,21 @@ import { getPublishChecklist } from "./publish-checklist";
 import { resolvePublishReadiness } from "./publish-readiness";
 import { resolveDashboardAttention } from "./dashboard-attention";
 import { calculateAuthorEarnings } from "./earnings-calculator";
-import { resolveWizardPriceSummary } from "@/app/(public)/dashboard/books/new/wizard-validation";
 
 // ALL-WIRING-2: ONE table, walked by every free/paid decision that this
 // patch was required to move atomically.
 //
 // The authorization for Patch 2 lists thirteen mandatory decision sites
 // and forbids a tree in which any of them still reads `price_cents`.
-// Ten of the thirteen are pure functions and are driven directly below.
+// Ten of the thirteen were pure functions; nine are driven directly
+// below. Site 10, the old upload wizard's price summary, went with the
+// wizard (BD15 cleanup): the editor's Pricing tab replaced it.
 // The remaining three are server actions with database side effects and
 // are driven, with a Supabase double, in their own files:
 //
 //   buyBook          -> src/app/(public)/libra/[id]/actions.test.ts
 //   getFreeBook      -> src/app/(public)/libra/[id]/actions.test.ts
-//   performPublish   -> src/app/(public)/dashboard/books/publish.test.ts
+//   performPublish   -> src/app/(public)/dashboard/books/pricing-send.test.ts
 //
 // This file exists as a single place where the SAME two rows are put to
 // every pure decision at once, because the failure this patch guards
@@ -289,52 +290,6 @@ describe("decision sites 8-9 of 13: the earnings calculator, logic and its compo
       expect(e.librumShareMinor + e.authorEarningsMinor).toBe(e.grossMinor);
       expect(Number.isSafeInteger(e.librumShareMinor)).toBe(true);
       expect(Number.isSafeInteger(e.authorEarningsMinor)).toBe(true);
-    }
-  });
-});
-
-describe("decision site 10 of 13: the upload wizard's price summary", () => {
-  it("199 typed by an author is a PAID book worth 19900 minor units", () => {
-    const summary = resolveWizardPriceSummary("199");
-    expect(summary.priceValid).toBe(true);
-    expect(summary.isFreeBook).toBe(false);
-    expect(summary.priceAll).toBe(199);
-    expect(summary.grossMinor).toBe(19900);
-  });
-
-  it("accepts the Albanian comma form as the same price", () => {
-    expect(resolveWizardPriceSummary("199,00")).toEqual(resolveWizardPriceSummary("199"));
-    expect(resolveWizardPriceSummary("199.00")).toEqual(resolveWizardPriceSummary("199"));
-  });
-
-  it("0 is a free book, not an invalid one", () => {
-    const summary = resolveWizardPriceSummary("0");
-    expect(summary.priceValid).toBe(true);
-    expect(summary.isFreeBook).toBe(true);
-    expect(summary.grossMinor).toBe(0);
-  });
-
-  it("an unenterable price is invalid and quotes nothing", () => {
-    for (const input of ["", "  ", "42", "99,50", "1e3", "-99", "100001"]) {
-      const summary = resolveWizardPriceSummary(input);
-      expect(summary.priceValid).toBe(false);
-      expect(summary.grossMinor).toBe(0);
-      expect(summary.earningsMinor).toBe(0);
-    }
-  });
-
-  it("never scales the typed value by 100 into the catalog field", () => {
-    expect(resolveWizardPriceSummary("99").priceAll).toBe(99);
-    expect(resolveWizardPriceSummary("99").priceAll).not.toBe(9900);
-  });
-
-  it("agrees with calculateAuthorEarnings exactly -- one rounding, one owner", () => {
-    for (const priceAll of [99, 199, 500, 12345, 100000]) {
-      const summary = resolveWizardPriceSummary(String(priceAll));
-      const estimate = calculateAuthorEarnings(priceAll, 1);
-      expect(summary.grossMinor).toBe(estimate.grossMinor);
-      expect(summary.librumShareMinor).toBe(estimate.librumShareMinor);
-      expect(summary.earningsMinor).toBe(estimate.authorEarningsMinor);
     }
   });
 });

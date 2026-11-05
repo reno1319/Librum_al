@@ -35,7 +35,6 @@ const BYLINE_SITES: [file: string, expected: string[]][] = [
   ["app/api/books/[id]/sample/route.ts", ["author: resolveBookByline(book),"]],
   // BD3 patch 4 r2 (audit r1, M1/L6): staff see both names.
   ["app/admin/(protected)/librum-choice/page.tsx", ["resolveStaffByline(pick)", "resolveStaffByline(book)"]],
-  ["app/(public)/dashboard/books/new/upload-wizard.tsx", ["authorName={byline}"]],
 ];
 
 describe("F4 / PEN-NAMES-1: book bylines", () => {
@@ -138,18 +137,6 @@ describe("BD3 patch 4: the original author", () => {
     expect(choice).toContain('"id, title, cover_path, original_author, pen:public_pen_names(id, name)"');
     expect(choice).toContain('"id, title, cover_path, price_all, original_author, pen:public_pen_names(id, name)"');
     expect(readSrc("lib/librum-download-pages.ts")).toContain("original_author, published_at");
-  });
-
-  it("the wizard: the box, required with a public-domain choice on either button, back to step 1", () => {
-    const source = readSrc("app/(public)/dashboard/books/new/upload-wizard.tsx");
-    expect(source).toContain('name="originalAuthor"');
-    expect(source).toContain('const originalAuthorRequired = rightsBasis === "public_domain" || rightsBasis === "public_domain_original";');
-    expect(source).toMatch(/if \(originalAuthorRequired && !originalAuthor\.trim\(\)\) \{\s*event\.preventDefault\(\);\s*setOriginalAuthorError\(MISSING_ORIGINAL_AUTHOR_MESSAGE\);\s*setStep\(1\);/);
-    expect(source).toContain("{ORIGINAL_AUTHOR_HINT}");
-    // Before the rights check, so a public-domain draft is caught too.
-    expect(source.indexOf("if (originalAuthorRequired && !originalAuthor.trim())")).toBeLessThan(
-      source.indexOf("const rightsMissing = publishing"),
-    );
   });
 
   // BD15 P5b-3a: the old edit page is retired; the original author is

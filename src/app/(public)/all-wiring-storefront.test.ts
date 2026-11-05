@@ -151,7 +151,6 @@ describe("no active book surface renders a dollar sign or a legacy USD formatter
     "dashboard/page.tsx",
     "dashboard/books/page.tsx",
     "dashboard/books/[id]/edit/page.tsx",
-    "dashboard/books/new/upload-wizard.tsx",
     "../../components/book-card.tsx",
     "../../components/author-book-row.tsx",
     "../../components/earnings-calculator.tsx",
