@@ -51,8 +51,10 @@ describe("Book Detail: metadata dl row order and conditional rendering", () => {
     expect(formatIndex).toBeLessThan(firstConditionalIndex);
   });
 
-  it("renders rows in the exact order: Formati, Gjuha, Zhanri, Seria, Botuesi, Botimi, Botuar për herë të parë, Botuar në Librum, ISBN", () => {
-    const labels = ["Formati", "Gjuha", "Zhanri", "Seria", "Botuesi", "Botimi", "Botuar për herë të parë", "Botuar në Librum", "ISBN"];
+  // BD15 P8 (Q3 a): Zhanri/Zhanret, then Përmbajtja (18+) and Mosha,
+  // after Gjuha; Botimi reads EDITION_LABEL.
+  it("renders rows in the exact order: Formati, Gjuha, Zhanri/Zhanret, Përmbajtja, Mosha, Seria, Botuesi, Botimi, Botuar për herë të parë, Botuar në Librum, ISBN", () => {
+    const labels = ["Formati", "Gjuha", "categoriesLabel(", "ADULT_DETAIL_LABEL", "READING_AGE_LABEL", "Seria", "Botuesi", "EDITION_LABEL", "Botuar për herë të parë", "Botuar në Librum", "ISBN"];
     const positions = labels.map((label) => {
       const idx = dlBlock.indexOf(label);
       expect(idx, `expected to find label "${label}"`).toBeGreaterThan(-1);
@@ -80,9 +82,20 @@ describe("Book Detail: metadata dl row order and conditional rendering", () => {
     expect(publisherRow).not.toContain("profiles?.display_name");
   });
 
-  it("Edition renders only when present", () => {
-    const editionRow = dlBlock.match(/\{book\.edition && \([\s\S]*?\)\)?\}/)![0];
-    expect(editionRow).toContain("{book.edition}");
+  it("Edition renders only when present (BD15 P8: number, else the old text)", () => {
+    const editionRow = dlBlock.match(/\{editionValue\(book\) && \([\s\S]*?\)\)?\}/)![0];
+    expect(editionRow).toContain("{editionValue(book)}");
+  });
+
+  it("BD15 P8: every category is a link to that category in Libraria", () => {
+    const row = dlBlock.match(/\{bookCategories\(book\)\.length > 0 && \([\s\S]*?<\/div>/)![0];
+    expect(row).toContain("bookCategories(book).map(");
+    expect(row).toContain("buildBookstoreHref({}, { genre: category })");
+  });
+
+  it("BD15 P8: 18+ shows only for an adult book, the reading age only through readingAgeValue", () => {
+    expect(dlBlock).toMatch(/\{book\.is_adult && \([\s\S]*?\{ADULT_DETAIL_VALUE\}/);
+    expect(dlBlock).toMatch(/\{readingAgeValue\(book\) && \([\s\S]*?\{readingAgeValue\(book\)\}/);
   });
 
   it("Botuar për herë të parë uses formatDateOnly() (date-only, no timezone noise) and renders only when present", () => {

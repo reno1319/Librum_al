@@ -4,6 +4,7 @@ import type { Book } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { authorPagePath } from "@/lib/pen-names";
 import { resolveOriginalAuthor } from "@/lib/book-byline";
+import { AdultTag } from "@/components/adult-tag";
 
 // LIBRUM 2.0 UI-4: the shared reader-commerce card, used by the
 // Bookstore grid, the author profile page, the wishlist page, and
@@ -36,7 +37,9 @@ export function BookCard({
   // uploader's pen name page.
   // Required (audit r1, L7): a caller whose select drops the column
   // fails to type-check instead of linking an original author's name.
-  book: Pick<Book, "id" | "title" | "genre" | "price_all" | "pen_name_id" | "original_author">;
+  // BD15 P8 (Q1 a): is_adult drives the 18+ tag. Every caller selects
+  // "*" from public_books (book-card.test.ts pins the tag).
+  book: Pick<Book, "id" | "title" | "genre" | "price_all" | "pen_name_id" | "original_author" | "is_adult">;
   coverUrl: string | null;
   authorName?: string | null;
 }) {
@@ -63,9 +66,14 @@ export function BookCard({
           />
         )}
         <div>
-          {book.genre && (
-            <span className="text-xs uppercase tracking-wide text-muted">
-              {book.genre}
+          {(book.genre || book.is_adult) && (
+            <span className="flex flex-wrap items-center gap-x-2">
+              {book.genre && (
+                <span className="text-xs uppercase tracking-wide text-muted">
+                  {book.genre}
+                </span>
+              )}
+              {book.is_adult && <AdultTag />}
             </span>
           )}
           <p className="font-serif text-[1.0625rem] leading-snug text-foreground group-hover:underline">
