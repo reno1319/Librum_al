@@ -400,6 +400,85 @@ describe("AdminBookPage", () => {
       });
     });
 
+    // BD15 F1 (Renato 11-05, D1 b): a book in a published bundle may
+    // change; the review box names the bundle(s), read at page load.
+    describe("a book in a published bundle", () => {
+      const NOTE = "This book is in a published bundle:";
+      const BUNDLE_2 = "44444444-4444-4444-8444-444444444444";
+      beforeEach(() => {
+        rows.books.data = { ...(rows.books.data as object), status: "published", description: null, is_adult: false };
+        rows.book_reviews = { data: [{ ...pending, description: null, is_adult: false }], error: null };
+        rows.book_pending_changes = {
+          data: { file_path: FILE, cover_path: COVER, description: null, is_adult: false, original_author: null },
+          error: null,
+        };
+      });
+
+      it("a live book's changes: names the bundle with a link, Approve still offered", async () => {
+        const html = await render("admin");
+        expect(html).toContain(NOTE);
+        expect(html).toMatch(/href="\/paketa\/bundle-1"[^>]*>Set A<\/a>/);
+        expect(html).toContain("Approved changes reach its buyers too.");
+        expect(html).toContain("Approve changes");
+        expect(
+          selects.some((s) => s.table === "bundle_books" && s.columns.includes("bundle_id") && s.columns.includes("bundles!inner(title, status)")),
+        ).toBe(true);
+      });
+
+      it("names every published bundle", async () => {
+        rows.bundle_books = {
+          data: [
+            { bundle_id: "bundle-1", bundles: { title: "Set A", status: "published" } },
+            { bundle_id: BUNDLE_2, bundles: { title: "Set B", status: "published" } },
+          ],
+          error: null,
+        };
+        const html = await render("admin");
+        expect(html).toMatch(/>Set A<\/a><\/span><span>, <a[^>]*href="\/paketa\/44444444-4444-4444-8444-444444444444"[^>]*>Set B<\/a>/);
+      });
+
+      it("staff without books.review see the note too", async () => {
+        const html = await render("moderator");
+        expect(html).toContain(NOTE);
+        expect(html).not.toContain("Approve changes");
+      });
+
+      it("a first review (draft) in a published bundle shows it as well", async () => {
+        rows.books.data = { ...(rows.books.data as object), status: "draft" };
+        rows.book_reviews = { data: [pending], error: null };
+        const html = await render("admin");
+        expect(html).toContain(NOTE);
+        expect(html).toContain("Approve and publish");
+      });
+
+      it.each<[string, Result]>([
+        ["in no bundle", { data: [], error: null }],
+        ["only in a draft bundle", { data: [{ bundle_id: "bundle-1", bundles: { title: "Set A", status: "draft" } }], error: null }],
+      ])("no note when the book is %s", async (_label, result) => {
+        rows.bundle_books = result;
+        const html = await render("admin");
+        expect(html).not.toContain(NOTE);
+        expect(html).not.toContain("Couldn’t check whether this book is in a published bundle.");
+        expect(html).toContain("Approve changes");
+      });
+
+      it("no note without a waiting review", async () => {
+        rows.book_reviews = { data: [], error: null };
+        expect(await render("admin")).not.toContain(NOTE);
+      });
+
+      it("an unreadable membership says so, never shows as no bundle", async () => {
+        rows.bundle_books = { data: null, error: { message: "boom" } };
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const html = await render("admin");
+        expect(html).toContain("Couldn’t check whether this book is in a published bundle. Please reload the page.");
+        expect(html).not.toContain(NOTE);
+        expect(html).not.toContain("boom");
+        expect(errorSpy).toHaveBeenCalledWith("admin book: the published bundles read failed", expect.anything());
+        errorSpy.mockRestore();
+      });
+    });
+
     it("an unreadable review state says so, offers nothing", async () => {
       rows.book_reviews = { data: null, error: { message: "boom" } };
       const html = await render("admin");

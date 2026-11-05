@@ -134,9 +134,7 @@ export const LIVE_FILES_WARNING =
 export const LIVE_FILES_SAVED_MESSAGE =
   "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose ballinën e re.";
 export const LIVE_FILES_REQUEST_FAILED_MESSAGE = "U ruajt. Shtypni \"Dërgojeni për shqyrtim\" kur të jeni gati.";
-export const LIVE_FILES_IN_BUNDLE_MESSAGE =
-  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose ballinën.";
-// BD3 patch 4 (2b): the same two, for a changed original author.
+// BD3 patch 4 (2b): the same, for a changed original author.
 export const LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE =
   "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë autorin origjinal të ri.";
 // Audit r2 (M1): the author put back the original author Librum had
@@ -144,8 +142,6 @@ export const LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE =
 // review is withdrawn; the book can be published again as it is.
 export const ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE =
   "U ruajt. Librum e ka miratuar tashmë këtë autor origjinal. Shtypni \"Publikoni\" kur të jeni gati.";
-export const LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE =
-  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni autorin origjinal.";
 
 // S3: LB462 / LB463 caught at the write (the book changed after it was
 // read).
