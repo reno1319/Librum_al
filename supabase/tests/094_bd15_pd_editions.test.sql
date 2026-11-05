@@ -292,11 +292,11 @@ select pg_temp.assert(pg_temp.value_as('authenticated', 'e0940000-0000-4000-8000
   $q$select coalesce(pen_name_id::text, 'null') from public.public_books where id = 'e0940001-0000-4000-8000-0000000000d1'$q$) = 'null',
   'part4: and its uploader');
 select pg_temp.assert(pg_temp.value_as('anon', null,
-  format('select string_agg(title, '','' order by title) from public.public_books where pen_name_id = %L',
+  format('select string_agg(title, '','' order by title collate "C") from public.public_books where pen_name_id = %L',
     (select pen_name_id from public.books where id = 'e0940001-0000-4000-8000-0000000000a1'))) = 'P094 Own,P094 n1',
   'part4: the pen name''s own book list (its author page) has its normal books only');
 select pg_temp.assert(pg_temp.value_as('anon', null,
-  $q$select string_agg(pb.title, ',' order by pb.title) from public.search_books(search_term => 'P094 Ana') s join public.public_books pb on pb.id = s.book_id$q$) = 'P094 Own,P094 n1',
+  $q$select string_agg(pb.title, ',' order by pb.title collate "C") from public.search_books(search_term => 'P094 Ana') s join public.public_books pb on pb.id = s.book_id$q$) = 'P094 Own,P094 n1',
   'part4: a search for the pen name finds its normal books, not the edition');
 select pg_temp.assert(pg_temp.set_edition('e0940000-0000-4000-8000-0000000000c1', 'e0940001-0000-4000-8000-0000000000d1',
   (select pd_work_id::text from public.books where id = 'e0940001-0000-4000-8000-0000000000d1'), null, null, true)
