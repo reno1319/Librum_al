@@ -1393,6 +1393,16 @@ export default async function BookDetailPage({
                       {AUTHOR_REVIEWER_LABEL}
                     </span>
                   )}
+                  {/* REVIEW-DATE: the day the reader first wrote it
+                      (created_at, already in public_reviews), in Tirana,
+                      same Albanian format as "Botuar në Librum". An edit
+                      keeps this date. */}
+                  <time
+                    dateTime={review.created_at}
+                    className="text-xs text-muted"
+                  >
+                    {formatTimestampAsDate(review.created_at)}
+                  </time>
                 </div>
                 {review.body && (
                   <p className="mt-1 text-sm text-foreground/90">
