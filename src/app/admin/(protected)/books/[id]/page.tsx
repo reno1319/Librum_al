@@ -208,6 +208,18 @@ export default async function AdminBookPage({
   // is offered (the RPCs would decide on their own anyway).
   const takedownUnknown = Boolean(takedownResult.error);
   const publishedBundleTitles = (bundlesResult.data ?? []).map((row) => row.bundles.title);
+  // BD15 F1 (Renato 11-05, D1 b): a book in a published bundle may change
+  // like any live book; the review box names the bundle(s). Read live at
+  // page load (not when the author sent), published only -- the query's
+  // own filter, repeated here. An unreadable membership is said, never
+  // shown as "no bundle".
+  const reviewBundles = (bundlesResult.data ?? [])
+    .filter((row) => row.bundles.status === "published")
+    .map((row) => ({ id: row.bundle_id, title: row.bundles.title }));
+  const reviewBundlesUnknown = Boolean(bundlesResult.error);
+  if (bundlesResult.error) {
+    console.error("admin book: the published bundles read failed", { error: bundlesResult.error });
+  }
   const reviews = reviewsResult.data ?? [];
   const liveUpdate = book.status === "published";
   const pendingReview =
@@ -476,6 +488,27 @@ export default async function AdminBookPage({
                 This book is live. These are changes to it; readers keep the current version until you approve them.
               </p>
             )}
+            {reviewBundlesUnknown ? (
+              <p className="text-sm text-red-700">
+                Couldn’t check whether this book is in a published bundle. Please reload the page.
+              </p>
+            ) : reviewBundles.length > 0 ? (
+              <p className="text-sm font-semibold">
+                This book is in a published bundle:{" "}
+                {reviewBundles.map((bundle, index) => (
+                  <span key={bundle.id}>
+                    {index > 0 && ", "}
+                    <Link
+                      href={`/paketa/${bundle.id}`}
+                      className="focus-ring rounded-sm text-primary underline underline-offset-2 hover:decoration-2"
+                    >
+                      {bundle.title}
+                    </Link>
+                  </span>
+                ))}
+                . Approved changes reach its buyers too.
+              </p>
+            ) : null}
             {authorSuspended && (
               <p className="text-sm text-red-700">
                 This author&apos;s account is suspended. Approving is refused until the suspension is lifted. Send back
