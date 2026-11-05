@@ -10,6 +10,8 @@ import {
 } from "@/lib/takedown-reasons";
 import { REVIEW_CHECKLIST_ITEMS } from "@/lib/book-review-copy";
 import type { PublishGateRefusal } from "@/lib/publish-readiness";
+import { splitKeywords } from "@/lib/book-details";
+import { bookCategories, editionValue } from "@/lib/book-reader-details";
 
 // ADMIN-2-TAKEDOWN: pure helpers for /admin/books and /admin/books/[id]
 // (list filters and search, the book page's eyebrow, the Unpublish form
@@ -394,4 +396,77 @@ export function validatePdEditionForm(formData: FormData): PdEditionFormValidati
     return { ok: true, bookId, workId: null, workTitle, workOriginalAuthor, editorCredit };
   }
   return { ok: false, error: PD_EDITION_FORM_ERROR_MESSAGE };
+}
+
+// Walkthrough F1+F2 (11-05): the read-only "Book details" box on the
+// staff book page -- what the author entered on the Details and Content
+// tabs, and their AI answer (book_ai_disclosures, staff only). A value
+// that could not be read says so; it is never shown as "None".
+export type BookDetailsSource = {
+  categories?: string[] | null;
+  genre?: string | null;
+  is_adult: boolean;
+  reading_age_min?: number | null;
+  edition_number?: number | null;
+  edition?: string | null;
+  series_id?: string | null;
+  series_position?: number | null;
+  keywords?: string | null;
+  publisher?: string | null;
+  isbn?: string | null;
+};
+
+export type BookDetailRow = { label: string; value: string; unreadable?: boolean };
+
+export const AI_ANSWER_LABELS = {
+  yes: "Yes, AI was used",
+  no: "No",
+  none: "Not answered",
+} as const;
+
+const NOT_SET = "Not set";
+
+function textOrNotSet(value: string | null | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : NOT_SET;
+}
+
+export function adminBookDetailRows(input: {
+  book: BookDetailsSource;
+  // undefined = the answer could not be read; null = never answered.
+  aiUsed: boolean | null | undefined;
+  // undefined = the series could not be read; null = no series.
+  seriesTitle: string | null | undefined;
+  // undefined = the contributors could not be read.
+  contributors: readonly { name: string; role: string }[] | undefined;
+}): BookDetailRow[] {
+  const { book, aiUsed, seriesTitle, contributors } = input;
+  const categories = bookCategories(book);
+  const keywords = splitKeywords(book.keywords ?? "");
+  const age = book.reading_age_min;
+  const series =
+    seriesTitle === undefined
+      ? { value: "Couldn’t load the series.", unreadable: true }
+      : !book.series_id || seriesTitle === null
+        ? { value: "None" }
+        : { value: book.series_position ? `${seriesTitle}, book ${book.series_position}` : seriesTitle };
+  return [
+    aiUsed === undefined
+      ? { label: "AI used", value: "Couldn’t load the AI answer.", unreadable: true }
+      : { label: "AI used", value: aiUsed === null ? AI_ANSWER_LABELS.none : aiUsed ? AI_ANSWER_LABELS.yes : AI_ANSWER_LABELS.no },
+    { label: categories.length > 1 ? "Categories" : "Category", value: categories.length > 0 ? categories.join(", ") : NOT_SET },
+    { label: "18+", value: book.is_adult ? "Yes" : "No" },
+    { label: "Reading age", value: typeof age === "number" && age > 0 ? `${age}+` : NOT_SET },
+    { label: "Series", ...series },
+    { label: "Edition", value: editionValue(book) ?? NOT_SET },
+    contributors === undefined
+      ? { label: "Contributors", value: "Couldn’t load the contributors.", unreadable: true }
+      : {
+          label: "Contributors",
+          value: contributors.length > 0 ? contributors.map((c) => `${c.name} (${c.role})`).join(", ") : "None",
+        },
+    { label: "Keywords", value: keywords.length > 0 ? keywords.join(", ") : "None" },
+    { label: "Publisher", value: textOrNotSet(book.publisher) },
+    { label: "ISBN", value: textOrNotSet(book.isbn) },
+  ];
 }
