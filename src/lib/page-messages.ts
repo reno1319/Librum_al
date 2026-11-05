@@ -96,6 +96,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose hiqeni librin nga paketa fillimisht",
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose ndryshojeni atë fillimisht",
   "Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.",
+  "Ky libër është në shitje dhe nuk mund të fshihet. Hiqeni fillimisht nga shitja.",
   "Ky nuk duket si IBAN i vlefshëm shqiptar (duhet të fillojë me AL dhe të vazhdojë me 26 shifra ose shkronja).",
   "Ky nuk duket si imazh i vlefshëm JPEG ose PNG",
   "Ky nuk duket si imazh i vlefshëm JPEG ose PNG.",
