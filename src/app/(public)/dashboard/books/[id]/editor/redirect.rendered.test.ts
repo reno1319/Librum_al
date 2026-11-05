@@ -52,7 +52,9 @@ vi.mock("@/lib/book-takedowns", () => ({
 }));
 let maintenance = false;
 vi.mock("@/lib/maintenance-mode", () => ({ resolveMaintenanceMode: () => maintenance }));
-vi.mock("@/lib/book-rights", () => ({ getRightsDeclarationState: async () => ({ kind: "none" }) }));
+// P5b-3b (audit P5b-2 r2, R2-1 N8/N9): settable.
+let rightsState: { kind: string };
+vi.mock("@/lib/book-rights", () => ({ getRightsDeclarationState: async () => rightsState }));
 vi.mock("@/lib/book-ai-disclosure", () => ({ readAiDisclosure: async () => ({ ok: true, answer: null }) }));
 
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
@@ -91,6 +93,8 @@ async function render(tab = "details"): Promise<string> {
 }
 
 const TO_DASHBOARD_ERROR = "REDIRECT:/dashboard?error=";
+// A rights radio rendered as chosen, whichever attribute order.
+const CHECKED_RIGHTS_RADIO = /<input(?=[^>]*name="rightsBasis")(?=[^>]*type="radio")[^>]*checked=""[^>]*>/;
 const SENT_BACK: SentBack = { sentBackAt: "2026-11-04T12:00:00Z", reason: "broken_file", message: "Fix the file" };
 
 beforeEach(() => {
@@ -120,6 +124,7 @@ beforeEach(() => {
   };
   reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: null };
   takedown = { kind: "none" };
+  rightsState = { kind: "none" };
   pendingRead = { ok: true, pending: null, createdAt: null };
   maintenance = false;
 });
@@ -166,6 +171,18 @@ describe("editor page: which books it takes", () => {
   it("a draft with no rights record still asks for it", async () => {
     const html = await render();
     expect(html).not.toContain('<input type="hidden" name="rightsBasis"');
+    // Audit P5b-2 r2, R2-1 N8: nothing pre-chosen, and still missing.
+    expect(html).not.toMatch(CHECKED_RIGHTS_RADIO);
+    expect(html).toMatch(/Të drejtat|rights/i);
+  });
+
+  it("audit P5b-2 r2, R2-1 N9: a live book whose rights can't be read gets no own-rights default", async () => {
+    book.status = "published";
+    book.description = "Live description";
+    rightsState = { kind: "unavailable" };
+    const html = await render();
+    expect(html).not.toContain('<input type="hidden" name="rightsBasis" value="own_rights"/>');
+    expect(html).not.toMatch(CHECKED_RIGHTS_RADIO);
   });
 
   it("a live book whose waiting changes cannot be read goes to the dashboard, nothing shown", async () => {
@@ -249,6 +266,17 @@ describe("editor page: which books it takes", () => {
     expect(html).toContain('name="title"');
     expect(html).not.toContain(">Fshini<");
     expect(html).toContain("nuk mund të fshihet");
+  });
+
+  // Audit P5b-3a r1, F1: Librum's "send it again" note never sits beside
+  // a takedown (a send is refused, LB460).
+  it("a taken-down book with a send-back on record shows no sent-back note", async () => {
+    takedown = { kind: "active" };
+    reviewState = { kind: "ok", pending: false, approvalValid: false, latestSentBack: SENT_BACK };
+    const html = await render();
+    expect(html).toContain("Hequr nga Libraria");
+    expect(html).not.toContain("jua ktheu");
+    expect(html).not.toContain("Fix the file");
   });
 
   it("a taken-down book in review: the takedown wins (editable, not read-only)", async () => {

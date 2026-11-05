@@ -273,9 +273,12 @@ describe("deleteBook: published-bundle-membership gate (PHASE-2C)", () => {
   it("book referenced only by draft/no bundles, never purchased: deletes successfully", async () => {
     mockMemberSelectResult.mockReturnValue(notInAnyPublishedBundle());
 
-    await deleteBook(BOOK_ID);
+    // BD15 P5b-3b: success lands on the Dashboard with "Libri u fshi."
+    // (from the editor the page of a deleted book would answer 404).
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).not.toHaveBeenCalled();
+    expect(mockRedirect).toHaveBeenCalledTimes(1);
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20u%20fshi.");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
@@ -340,7 +343,7 @@ describe("deleteBook: published-bundle-membership gate (PHASE-2C)", () => {
   it("queries bundle_books->bundles(status) with the exact columns and filters, scoped to this book and published only", async () => {
     mockMemberSelectResult.mockReturnValue(notInAnyPublishedBundle());
 
-    await deleteBook(BOOK_ID);
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockMemberQueryColumns).toHaveBeenCalledWith("bundle_id, bundles!inner(status)");
     expect(mockMemberQueryFilters).toHaveBeenCalledWith("book_id", BOOK_ID);

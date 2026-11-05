@@ -1,5 +1,6 @@
 import { resolveCatalogPriceState } from "@/lib/catalog-price";
 import type { Book } from "@/lib/types";
+import type { AuthorReviewNotice } from "@/lib/book-review-copy";
 
 // LIBRUM 2.0 UI-6: the Dashboard's single prioritized "what should I do
 // next" decision, extracted as a pure function -- same "extract a pure
@@ -79,4 +80,15 @@ export function resolveDashboardAttention(params: {
   }
 
   return { kind: "none" };
+}
+
+// BD15 P5b-3a / P5b-3b (audit P5b-3a r1, F2): the books whose review is
+// pending right now. A sent-back draft is NOT in it: it is exactly the
+// draft "Vazhdoni draftin" must offer.
+export function inReviewIdsFrom(notices: ReadonlyMap<string, AuthorReviewNotice>): Set<string> {
+  return new Set(
+    Array.from(notices.entries())
+      .filter(([, notice]) => notice.inReview)
+      .map(([bookId]) => bookId),
+  );
 }

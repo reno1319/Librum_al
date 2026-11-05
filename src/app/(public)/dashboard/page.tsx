@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getPublishChecklist } from "@/lib/publish-checklist";
-import { resolveDashboardAttention } from "@/lib/dashboard-attention";
+import { inReviewIdsFrom, resolveDashboardAttention } from "@/lib/dashboard-attention";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { isSchedulerEnabled } from "@/lib/payout-scheduler";
 import { computeNextPayoutCycleDate, formatPayoutCycleDate } from "@/lib/payout-cycle";
@@ -134,11 +134,7 @@ export default async function DashboardPage({
   const attention = resolveDashboardAttention({
     books: allBooks,
     paidPublishingAvailable: canPublishPaidTitle(),
-    inReviewBookIds: new Set(
-      Array.from(reviewNotices.entries())
-        .filter(([, notice]) => notice.inReview)
-        .map(([bookId]) => bookId),
-    ),
+    inReviewBookIds: inReviewIdsFrom(reviewNotices),
   });
 
   const heading = (

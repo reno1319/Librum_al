@@ -16340,6 +16340,10 @@ create table public.book_pending_changes (
                and original_author !~ '[[:cntrl:]]')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  -- BD15 P5b-3b (audit P5b-2 r1 F4, P5b-3b r1 F1): a fresh number from
+  -- book_pending_changes_version_seq on every insert and update, set by
+  -- book_pending_changes_set_version; the two writes below compare it.
+  version bigint not null default 1,
   -- books.cover_path is unique too: going offline copies this value
   -- onto the book (audit r1, F2).
   constraint book_pending_changes_cover_path_key unique (cover_path)
@@ -16453,22 +16457,57 @@ create trigger books_keep_pending_rules
 revoke all on function public.books_keep_pending_rules()
   from public, anon, authenticated, service_role;
 
+-- BD15 P5b-3b (Renato 11-05, Q1 a): the version the caller read is
+-- compared; a save or discard that did not see the latest row is
+-- refused (LB496), never merged. Migration 20261105120000.
+-- Only the trigger function (as its owner) draws from it.
+create sequence public.book_pending_changes_version_seq as bigint start with 2;
+revoke all on sequence public.book_pending_changes_version_seq
+  from public, anon, authenticated, service_role;
+
+-- SECURITY DEFINER so it draws from the sequence as its owner; nobody
+-- else holds a privilege on the sequence.
+create function public.book_pending_changes_set_version()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  new.version := pg_catalog.nextval('public.book_pending_changes_version_seq');
+  return new;
+end;
+$$;
+
+create trigger book_pending_changes_set_version
+  before insert or update on public.book_pending_changes
+  for each row
+  execute function public.book_pending_changes_set_version();
+
+revoke all on function public.book_pending_changes_set_version()
+  from public, anon, authenticated, service_role;
+
 -- The catalog writer's two writes. p_author_id is the session's verified
--- user: a book of another account is answered as missing.
+-- user: a book of another account is answered as missing. The book is
+-- locked first (the order of an unpublish, a takedown or an approval),
+-- then the waiting row.
 create function public.save_book_pending_changes(
   p_author_id uuid,
   p_book_id uuid,
+  p_expected_version bigint,
   p_file_path text,
   p_cover_path text,
   p_description text,
   p_is_adult boolean,
   p_original_author text
 )
-returns void
+returns bigint
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_version bigint;
 begin
   perform 1 from public.books bo
    where bo.id = p_book_id and bo.author_id = p_author_id
@@ -16476,32 +16515,62 @@ begin
   if not found or p_author_id is null then
     raise exception 'no book found for this id';
   end if;
-  insert into public.book_pending_changes as c
-         (book_id, file_path, cover_path, description, is_adult, original_author)
-  values (p_book_id, p_file_path, p_cover_path, p_description, p_is_adult, p_original_author)
-  on conflict (book_id) do update
-     set file_path = excluded.file_path,
-         cover_path = excluded.cover_path,
-         description = excluded.description,
-         is_adult = excluded.is_adult,
-         original_author = excluded.original_author;
+  select c.version into v_version
+    from public.book_pending_changes c
+   where c.book_id = p_book_id
+     for update;
+  if not found then
+    if p_expected_version is not null then
+      raise exception 'The waiting changes changed since they were read.'
+        using errcode = 'LB496';
+    end if;
+    insert into public.book_pending_changes
+           (book_id, file_path, cover_path, description, is_adult, original_author)
+    values (p_book_id, p_file_path, p_cover_path, p_description, p_is_adult, p_original_author)
+    on conflict (book_id) do nothing
+    returning version into v_version;
+    -- Another first save inserted the row after our read.
+    if v_version is null then
+      raise exception 'The waiting changes changed since they were read.'
+        using errcode = 'LB496';
+    end if;
+    return v_version;
+  end if;
+  if p_expected_version is null or v_version <> p_expected_version then
+    raise exception 'The waiting changes changed since they were read.'
+      using errcode = 'LB496';
+  end if;
+  update public.book_pending_changes c
+     set file_path = p_file_path,
+         cover_path = p_cover_path,
+         description = p_description,
+         is_adult = p_is_adult,
+         original_author = p_original_author
+   where c.book_id = p_book_id
+  returning c.version into v_version;
+  return v_version;
 end;
 $$;
 
-revoke all on function public.save_book_pending_changes(uuid, uuid, text, text, text, boolean, text)
+revoke all on function public.save_book_pending_changes(uuid, uuid, bigint, text, text, text, boolean, text)
   from public, anon, authenticated, service_role;
-grant execute on function public.save_book_pending_changes(uuid, uuid, text, text, text, boolean, text)
+grant execute on function public.save_book_pending_changes(uuid, uuid, bigint, text, text, text, boolean, text)
   to service_role;
 
--- "Hidh poshtë ndryshimet". True when there was something to discard.
-create function public.discard_book_pending_changes(p_author_id uuid, p_book_id uuid)
+-- "Hidh poshtë ndryshimet". True when the row the caller read was
+-- discarded; false when it read none and there is still none.
+create function public.discard_book_pending_changes(
+  p_author_id uuid,
+  p_book_id uuid,
+  p_expected_version bigint
+)
 returns boolean
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
-  v_rows integer;
+  v_version bigint;
 begin
   perform 1 from public.books bo
    where bo.id = p_book_id and bo.author_id = p_author_id
@@ -16509,15 +16578,29 @@ begin
   if not found or p_author_id is null then
     raise exception 'no book found for this id';
   end if;
+  select c.version into v_version
+    from public.book_pending_changes c
+   where c.book_id = p_book_id
+     for update;
+  if not found then
+    if p_expected_version is not null then
+      raise exception 'The waiting changes changed since they were read.'
+        using errcode = 'LB496';
+    end if;
+    return false;
+  end if;
+  if p_expected_version is null or v_version <> p_expected_version then
+    raise exception 'The waiting changes changed since they were read.'
+      using errcode = 'LB496';
+  end if;
   delete from public.book_pending_changes where book_id = p_book_id;
-  get diagnostics v_rows = row_count;
-  return v_rows > 0;
+  return true;
 end;
 $$;
 
-revoke all on function public.discard_book_pending_changes(uuid, uuid)
+revoke all on function public.discard_book_pending_changes(uuid, uuid, bigint)
   from public, anon, authenticated, service_role;
-grant execute on function public.discard_book_pending_changes(uuid, uuid)
+grant execute on function public.discard_book_pending_changes(uuid, uuid, bigint)
   to service_role;
 
 

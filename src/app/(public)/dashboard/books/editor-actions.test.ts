@@ -44,6 +44,9 @@ let removedCovers: string[];
 // Audit r1 F3/M5: what the discard RPC answers, and what happens meanwhile.
 let discardAnswer: boolean | null;
 let afterRpc: (() => void) | null;
+// P5b-3b: another tab's write landing between the action's read and its RPC.
+let beforeCompare: (() => void) | null;
+let failWriterReadAfterRpc: string | null;
 
 function query(table: string, scope: "session" | "writer") {
   const filters: [string, unknown][] = [];
@@ -82,6 +85,12 @@ function query(table: string, scope: "session" | "writer") {
       tables[table] = (tables[table] ?? []).filter((r) => !rows.includes(r));
       return { data: null, error: null };
     }
+    // Audit P5b-2 r2, R2-1 N3/N4: a writer read of this table after the
+    // RPC (the discard's re-read) fails -- with the rows still beside the
+    // error, so only the error check can keep the ballinë.
+    if (scope === "writer" && failWriterReadAfterRpc === table && rpcCalls.length > 0) {
+      return { data: visible(), error: { code: "XX000", message: "read failed" } };
+    }
     return { data: visible(), error: null };
   };
   const chain: Record<string, unknown> = {
@@ -116,12 +125,19 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("@/lib/catalog-write-client", () => ({
   createCatalogWriteClient: () => ({
     from: (table: string) => query(table, "writer"),
-    // save/discard_book_pending_changes, as the database would.
+    // save/discard_book_pending_changes, as the database would, with
+    // P5b-3b's compare of the version read (LB496).
     rpc: async (fn: string, args: Row) => {
       rpcCalls.push({ fn, args });
       if (rpcError) return { data: null, error: rpcError };
+      const current = (tables.book_pending_changes ?? []).find((r) => r.book_id === args.p_book_id);
       const others = (tables.book_pending_changes ?? []).filter((r) => r.book_id !== args.p_book_id);
-      const had = (tables.book_pending_changes ?? []).length !== others.length;
+      const had = current !== undefined;
+      beforeCompare?.();
+      const now = (tables.book_pending_changes ?? []).find((r) => r.book_id === args.p_book_id);
+      if ((now?.version ?? null) !== args.p_expected_version) {
+        return { data: null, error: { code: "LB496", message: "The waiting changes changed since they were read." } };
+      }
       if (fn === "discard_book_pending_changes") {
         tables.book_pending_changes = others;
         afterRpc?.();
@@ -136,9 +152,10 @@ vi.mock("@/lib/catalog-write-client", () => ({
           description: args.p_description,
           is_adult: args.p_is_adult,
           original_author: args.p_original_author,
+          version: ((current?.version as number | undefined) ?? 0) + 1,
         },
       ];
-      return { data: null, error: null };
+      return { data: ((current?.version as number | undefined) ?? 0) + 1, error: null };
     },
     storage: {
       from: () => ({
@@ -173,6 +190,9 @@ vi.mock("@/lib/book-rights", () => ({
 }));
 
 const { saveBookDetails, createSeriesFromEditor, discardBookPendingChanges } = await import("./editor-actions");
+const { LIVE_PARTLY_SAVED_MESSAGE } = await import("@/lib/book-editor-copy");
+const { BOOK_CHANGED_WHILE_EDITING_MESSAGE } = await import("@/lib/book-review-copy");
+const { pageErrorMessage } = await import("@/lib/page-messages");
 
 function seed(book: Row = {}) {
   tables = {
@@ -237,6 +257,8 @@ beforeEach(() => {
   retentionCalls.length = 0;
   discardAnswer = null;
   afterRpc = null;
+  beforeCompare = null;
+  failWriterReadAfterRpc = null;
 });
 
 describe("saveBookDetails: the first save creates the draft", () => {
@@ -483,6 +505,7 @@ function seedLive(pending: Row | null = null) {
         description: "Live text",
         is_adult: false,
         original_author: null,
+        version: 1,
         ...pending,
       },
     ];
@@ -518,6 +541,7 @@ describe("saveBookDetails: a live book (P5b-2)", () => {
       args: {
         p_author_id: USER,
         p_book_id: BOOK,
+        p_expected_version: null,
         p_file_path: FILE_LIVE,
         p_cover_path: COVER_LIVE,
         p_description: "New text",
@@ -532,6 +556,30 @@ describe("saveBookDetails: a live book (P5b-2)", () => {
     seedLive({ file_path: FILE_WAITING, cover_path: COVER_WAITING, description: "Waiting text" });
     await redirectOf(saveBookDetails(BOOK, liveForm({ description: "Newer text" })));
     expect(rpcCalls[0].args).toMatchObject({ p_file_path: FILE_WAITING, p_cover_path: COVER_WAITING, p_description: "Newer text" });
+  });
+
+  // BD15 P5b-3b (audit P5b-2 r1 F4; Renato 11-05, Q1 a).
+  it("passes the version it read; a save that came in meanwhile wins and this one is refused", async () => {
+    seedLive({ file_path: FILE_WAITING, cover_path: COVER_WAITING, description: "Waiting text" });
+    const other = { ...tables.book_pending_changes[0], cover_path: "9f9f9f9f-0000-4000-8000-000000000001/cover.jpg", version: 2 };
+    beforeCompare = () => (tables.book_pending_changes = [other]);
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm({ description: "Edited text" })));
+    expect(rpcCalls[0].args).toMatchObject({ p_expected_version: 1, p_cover_path: COVER_WAITING });
+    // The other tab's row stands: never the stale ballinë back.
+    expect(tables.book_pending_changes).toEqual([other]);
+    expect(decodeURIComponent(target)).toContain(LIVE_PARTLY_SAVED_MESSAGE);
+  });
+
+  it("dropping the waiting row is refused too when another save came in meanwhile", async () => {
+    seedLive({ description: "Waiting text" });
+    const other = { ...tables.book_pending_changes[0], description: "Other tab", version: 2 };
+    beforeCompare = () => (tables.book_pending_changes = [other]);
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm()));
+    expect(rpcCalls).toEqual([
+      { fn: "discard_book_pending_changes", args: { p_author_id: USER, p_book_id: BOOK, p_expected_version: 1 } },
+    ]);
+    expect(tables.book_pending_changes).toEqual([other]);
+    expect(decodeURIComponent(target)).toContain(LIVE_PARTLY_SAVED_MESSAGE);
   });
 
   it("putting everything back as it is live drops the waiting row instead", async () => {
@@ -611,12 +659,28 @@ describe("discardBookPendingChanges (P5b-2)", () => {
   it("drops the waiting row and removes only the files only it named", async () => {
     seedLive({ file_path: FILE_WAITING, cover_path: COVER_WAITING, description: "Waiting" });
     const target = await redirectOf(discardBookPendingChanges(BOOK));
-    expect(rpcCalls).toEqual([{ fn: "discard_book_pending_changes", args: { p_author_id: USER, p_book_id: BOOK } }]);
+    expect(rpcCalls).toEqual([
+      { fn: "discard_book_pending_changes", args: { p_author_id: USER, p_book_id: BOOK, p_expected_version: 1 } },
+    ]);
     expect(removedCovers).toEqual([COVER_WAITING]);
     expect(retentionCalls).toEqual([
       expect.objectContaining({ authorId: USER, bookId: BOOK, superseded: [FILE_WAITING] }),
     ]);
     expect(decodeURIComponent(target)).toContain("Ndryshimet që prisnin u hodhën");
+  });
+
+  it("P5b-3b: a newer save from another tab is not discarded and none of its files are removed", async () => {
+    seedLive({ file_path: FILE_WAITING, cover_path: COVER_WAITING, description: "Waiting" });
+    const other = { ...tables.book_pending_changes[0], description: "Other tab", version: 2 };
+    beforeCompare = () => (tables.book_pending_changes = [other]);
+    const target = await redirectOf(discardBookPendingChanges(BOOK));
+    expect(tables.book_pending_changes).toEqual([other]);
+    expect(removedCovers).toEqual([]);
+    expect(retentionCalls).toEqual([]);
+    expect(decodeURIComponent(target)).toContain(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+    expect(pageErrorMessage(new URL(target, "http://x").searchParams.get("error") ?? undefined)).toBe(
+      BOOK_CHANGED_WHILE_EDITING_MESSAGE,
+    );
   });
 
   it("never removes the live ballinë or manuscript", async () => {
@@ -635,6 +699,19 @@ describe("discardBookPendingChanges (P5b-2)", () => {
     expect(decodeURIComponent(target)).toContain("Nuk kishte ndryshime për të hedhur.");
   });
 
+  it.each(["books", "book_pending_changes"])(
+    "audit P5b-2 r2, R2-1 N3/N4: the re-read of %s fails after the discard: the ballinë is kept",
+    async (table) => {
+      seedLive({ cover_path: COVER_WAITING });
+      failWriterReadAfterRpc = table;
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      await redirectOf(discardBookPendingChanges(BOOK));
+      expect(tables.book_pending_changes).toEqual([]);
+      expect(removedCovers).toEqual([]);
+      vi.restoreAllMocks();
+    },
+  );
+
   it("audit r1 F3: a waiting ballinë that became the live one meanwhile is kept", async () => {
     seedLive({ cover_path: COVER_WAITING });
     // A new row object, so the action's own earlier read is not changed.
@@ -647,7 +724,7 @@ describe("discardBookPendingChanges (P5b-2)", () => {
     seedLive({ cover_path: COVER_WAITING });
     afterRpc = () =>
       (tables.book_pending_changes = [
-        { book_id: BOOK, file_path: FILE_LIVE, cover_path: COVER_WAITING, description: "X", is_adult: false, original_author: null },
+        { book_id: BOOK, file_path: FILE_LIVE, cover_path: COVER_WAITING, description: "X", is_adult: false, original_author: null, version: 1 },
       ]);
     await redirectOf(discardBookPendingChanges(BOOK));
     expect(removedCovers).toEqual([]);

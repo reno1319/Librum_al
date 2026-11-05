@@ -134,6 +134,12 @@ vi.mock("@/lib/supabase/admin", () => ({
   },
 }));
 
+// BD15 P5b-3b: no live book here has waiting changes (that read is
+// covered in book-storage-deletion.test.ts).
+vi.mock("@/lib/book-pending-changes", () => ({
+  readPendingChangesForBooks: async () => ({ ok: true, byBook: new Map() }),
+}));
+
 const { deleteAccount } = await import("./actions");
 
 async function run(confirmation = "FSHI"): Promise<string> {

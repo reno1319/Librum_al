@@ -56,6 +56,7 @@ import {
   LIVE_SAVED_PENDING_MESSAGE,
   NO_CHANGES_TO_SEND_MESSAGE,
   UNPUBLISHED_MESSAGE,
+  BOOK_DELETED_MESSAGE,
   editorPath,
 } from "@/lib/book-editor-copy";
 import {
@@ -2220,10 +2221,14 @@ export async function saveBookContent(bookId: string, formData: FormData) {
   // waiting one, else the live one) is what a new file replaces and what
   // the Librum-made ebook's cover is taken from.
   let pendingRead: PendingChanges | null = null;
+  // P5b-3b (audit P5b-2 r1 F4): the version read here; the save below is
+  // refused (LB496) if another save came in meanwhile.
+  let pendingVersion: number | null = null;
   if (live) {
     const read = await readPendingChanges(createCatalogWriteClient(), existing.id);
     if (!read.ok) return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
     pendingRead = read.pending;
+    pendingVersion = read.version;
   }
   const liveValues: PendingChanges = {
     filePath: existing.file_path,
@@ -2390,6 +2395,7 @@ export async function saveBookContent(bookId: string, formData: FormData) {
     const saved = await savePendingChanges(catalogWriter, {
       authorId: user.id,
       bookId: existing.id,
+      expectedVersion: pendingVersion,
       changes: {
         ...working,
         filePath: newManuscriptPath ?? working.filePath,
@@ -2401,6 +2407,9 @@ export async function saveBookContent(bookId: string, formData: FormData) {
       await removeNewUploads();
       if (saved.reason === "in_review") toInReviewEditPage(existing.id);
       if (saved.reason === "not_live") fail(LIVE_NOT_LIVE_MESSAGE);
+      // Renato 11-05 (Q1 a): the later save is refused; its new upload is
+      // removed above and nothing the other save named is touched.
+      if (saved.reason === "conflict") fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
       fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
     }
   }
@@ -3819,6 +3828,8 @@ export async function deleteBook(bookId: string) {
 
   revalidatePath("/dashboard");
   revalidatePath("/");
+  // BD15 P5b-3b: the editor of a deleted book would answer 404.
+  redirect(withQuery("/dashboard", "success", BOOK_DELETED_MESSAGE));
 }
 
 export async function addContributor(bookId: string, formData: FormData) {

@@ -624,6 +624,7 @@ describe("saveBookPricing: a live book", () => {
       description: "Një përshkrim.",
       is_adult: false,
       original_author: null,
+      version: 1,
       ...o,
     },
     error: null,
