@@ -293,7 +293,7 @@ describe("editor page: which books it takes", () => {
     expect(html).toContain("Librum e hoqi këtë libër, prandaj nuk mund ta dërgoni tani.");
   });
 
-  it("the Veprime box: a draft gets Preview and Delete, a live book gets Hiqeni nga shitja too", async () => {
+  it("the Veprime box: a draft gets Preview and Delete, a live book gets Hiqeni nga shitja and no Delete", async () => {
     let html = await render();
     expect(html).toContain('id="veprime"');
     expect(html).toContain(`href="/libra/${BOOK_ID}"`);
@@ -303,7 +303,9 @@ describe("editor page: which books it takes", () => {
     book.description = "Live description";
     html = await render("content");
     expect(html).toContain("Hiqeni nga shitja");
-    expect(html).toContain(">Fshini<");
+    // P6 Q4 a (Renato 11-05): no Delete on a live book, a note instead.
+    expect(html).not.toContain(">Fshini<");
+    expect(html).toContain("Për ta fshirë, hiqeni fillimisht nga shitja.");
     expect(html).not.toContain(`href="/libra/${BOOK_ID}"`);
     // The live notice's link goes down to the box, not to another page.
     expect(html).toContain('href="#veprime"');

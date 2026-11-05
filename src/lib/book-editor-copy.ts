@@ -106,6 +106,11 @@ export const UNPUBLISH_NOTE = "E heq nga Libraria dhe bëhet draft. Lexuesit që
 export const UNPUBLISH_PENDING_NOTE = "Ndryshimet që presin shqyrtim bëhen pjesë e draftit.";
 export const UNPUBLISHED_MESSAGE = "Libri u hoq nga shitja. Tani është draft.";
 export const DELETE_NOTE = "Fshirja nuk mund të zhbëhet.";
+// Renato 11-05 (P6 Q4 a): a live book is never deleted; it is taken off
+// sale first and deleted as a draft. The note replaces Delete on a live
+// book; deleteBook refuses one sent directly with the message below.
+export const LIVE_DELETE_NOTE = "Për ta fshirë, hiqeni fillimisht nga shitja.";
+export const LIVE_DELETE_REFUSED_MESSAGE = "Ky libër është në shitje dhe nuk mund të fshihet. Hiqeni fillimisht nga shitja.";
 // BD15 P5b-3b: a deleted book has no editor to come back to (the 11-05
 // click test landed on a 404), so the author lands on the Dashboard.
 export const BOOK_DELETED_MESSAGE = "Libri u fshi.";
