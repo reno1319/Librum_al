@@ -138,10 +138,13 @@ export type Book = {
   // Whole edition number from 1; `edition` (free text) stays read-only.
   edition_number?: number | null;
   // The public-domain work this book is an edition of (set by staff),
-  // and whether staff credited the uploader as its editor. Without the
-  // credit, public_books hides this pen name from everyone but the
-  // uploader. The "AI used" answer is never on this type: it lives in
-  // the staff-only book_ai_disclosures table.
+  // and whether staff credited the uploader as its editor. The "AI
+  // used" answer is never on this type: it lives in the staff-only
+  // book_ai_disclosures table.
+  // BD15 P7 (migration 20261105180000): without the credit public_books
+  // shows pen_name_id as null to everyone, the uploader too (it is
+  // books.public_pen_name_id there). On the books table pen_name_id is
+  // always the book's own.
   pd_work_id?: string | null;
   pd_editor_credit?: boolean;
 };

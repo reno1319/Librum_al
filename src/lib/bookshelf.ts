@@ -141,6 +141,8 @@ export function shelfMenuItems(params: {
   state: ShelfState;
   status: string;
   hasFile: boolean;
+  /** BD15 P7 (Q1 a): the book is its public-domain work's picked edition. */
+  pdPicked?: boolean;
 }): ShelfMenuItem[] {
   const { state } = params;
   const live = params.status === "published";
@@ -151,11 +153,14 @@ export function shelfMenuItems(params: {
   if (!live) items.push("preview_page");
   // A book waiting for review is read-only (BD15 P5a).
   if (!isInReviewState(state)) {
-    items.push("edit_details", "edit_content", "edit_price", "series");
+    items.push("edit_details", "edit_content", "edit_price");
+    // A picked edition's series is frozen (LB497).
+    if (!params.pdPicked) items.push("series");
   }
   if (params.hasFile) items.push("download_file");
   if (state === "live_changes" || state === "live_sent_back") items.push("discard_changes");
-  if (live) items.push("unpublish");
+  // A picked edition can't be unpublished by its author (LB483).
+  if (live && !params.pdPicked) items.push("unpublish");
   // Q3 a: never on a live book -- unpublish first, then it is a draft.
   // Audit P6 r1 N2: never on a taken-down book either -- the editor hides
   // it and deleteBook refuses it.

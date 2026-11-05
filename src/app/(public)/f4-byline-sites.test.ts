@@ -161,10 +161,10 @@ describe("BD3 patch 4: the original author", () => {
 describe("BD3 patch 4 r2: staff see the original author (audit r1, M1)", () => {
   it("the admin book page and the books list read and show original_author", () => {
     const page = readSrc("app/admin/(protected)/books/[id]/page.tsx");
-    expect(page).toContain("pen:pen_names(name), original_author");
+    expect(page).toContain("pen:pen_names!books_pen_name_id_fkey(name), original_author");
     expect(page).toContain("Original author (readers see this as the byline):");
     const list = readSrc("app/admin/(protected)/books/page.tsx");
-    expect(list).toContain("pen:pen_names(name), original_author");
+    expect(list).toContain("pen:pen_names!books_pen_name_id_fkey(name), original_author");
     expect(list).toContain("original author: ${book.original_author}");
   });
 

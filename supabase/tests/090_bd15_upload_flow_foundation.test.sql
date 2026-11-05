@@ -329,7 +329,9 @@ insert into public.series (id, author_id, title, pen_name_id)
     from public.books b where b.id = 'e0900001-0000-4000-8000-0000000000f1';
 select pg_temp.assert(pg_temp.run_as('service_role', null,
   $q$update public.books set series_id = 'e0900003-0000-4000-8000-0000000000a1', series_position = 1 where id = 'e0900001-0000-4000-8000-0000000000f1'$q$)
-  like '23514:%books_pd_series_check%',
+  -- BD15 P7 (migration 20261105180000): f1 is its work's picked
+  -- edition, so its series is frozen first (LB497).
+  similar to '(23514:%books_pd_series_check|LB497:)%',
   'part3: a public-domain edition without an editor mention cannot join a series');
 insert into public.bundles (id, author_id, title, status, pen_name_id)
   select 'e0900004-0000-4000-8000-0000000000a1', 'e0900000-0000-4000-8000-0000000000a1', 'P090 BU', 'draft', b.pen_name_id
@@ -451,7 +453,9 @@ select pg_temp.assert(pg_temp.value_as('authenticated', 'e0900000-0000-4000-8000
 select pg_temp.assert(
   pg_catalog.pg_get_viewdef('public.public_books'::regclass) !~* '\mcase\M'
   and pg_catalog.pg_get_viewdef('public.public_bundles'::regclass) !~* '\mcase\M'
-  and pg_catalog.pg_get_viewdef('public.public_books'::regclass) ~ '\n\s+pen_name_id,\n'
+  -- BD15 P7 (migration 20261105180000): still a plain column, now from
+  -- books.public_pen_name_id (094 checks its source and its key).
+  and pg_catalog.pg_get_viewdef('public.public_books'::regclass) ~ '\n\s+(public_pen_name_id AS )?pen_name_id,\n'
   and pg_catalog.pg_get_viewdef('public.public_bundles'::regclass) ~ '\n\s+pen_name_id\n\s+FROM ',
   'part5 (r2): pen_name_id is a plain column in public_books and public_bundles');
 

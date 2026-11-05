@@ -40,7 +40,7 @@ const {
 // PEN-NAMES-1 (4a): the email goes to the followers of the BOOK'S pen
 // name and names that pen name; the account's names are never read.
 function makeFakeAdmin(overrides: {
-  book?: { title: string; author_id: string; pen_name_id: string | null } | null;
+  book?: { title: string; author_id: string; pen_name_id: string | null; pd_work_id?: string | null; pd_editor_credit?: boolean } | null;
   penName?: { name: string } | null;
   follows?: { follower_id: string }[];
 }) {
@@ -130,6 +130,21 @@ describe("sendNewBookEmails", () => {
     expect(html).not.toContain("<b>B</b>");
     expect(html).toContain("E morët këtë email sepse ndiqni A &amp; &lt;b&gt;B&lt;/b&gt; në Librum.");
     expect(html).toMatch(/<a href="[^"]*\/following">Autorët që ndiqni<\/a> dhe shtypni "Mos ndiqni më"/);
+  });
+
+  it("BD15 P7: a public-domain edition without the editor mention sends nothing; with it, it sends", async () => {
+    const hidden = makeFakeAdmin({
+      book: { title: "Lahuta", author_id: "author-1", pen_name_id: "pen-1", pd_work_id: "work-1", pd_editor_credit: false },
+      follows: [{ follower_id: "follower-1" }],
+    });
+    await sendNewBookEmails(hidden, { bookId: "book-1", authorId: "author-1" });
+    expect(batchMock).not.toHaveBeenCalled();
+    const credited = makeFakeAdmin({
+      book: { title: "Lahuta", author_id: "author-1", pen_name_id: "pen-1", pd_work_id: "work-1", pd_editor_credit: true },
+      follows: [{ follower_id: "follower-1" }],
+    });
+    await sendNewBookEmails(credited, { bookId: "book-1", authorId: "author-1" });
+    expect(batchMock).toHaveBeenCalledTimes(1);
   });
 
   it("a book of another account, or with no pen name, sends nothing", async () => {

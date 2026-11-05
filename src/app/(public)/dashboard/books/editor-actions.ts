@@ -16,6 +16,7 @@
 // everything else straight onto the live book. Its rights basis is
 // fixed while it is live (Renato 11-04, Q4 a; LB492).
 
+import { PD_FROZEN_MESSAGE, isPickedPdEdition, pdFrozenDetailsUnchanged, type PdFrozenDetails } from "@/lib/pd-editions";
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -73,6 +74,8 @@ type ExistingBook = {
   description: string;
   is_adult: boolean;
   original_author: string | null;
+  // BD15 P7: set when it is a public-domain work's edition.
+  pd_work_id: string | null;
 };
 
 function liveValuesOf(book: ExistingBook): PendingChanges {
@@ -89,7 +92,7 @@ async function readOwnBook(supabase: SessionClient, userId: string, bookId: stri
   if (!UUID.test(bookId)) return null;
   const { data, error } = await supabase
     .from("books")
-    .select("id, author_id, status, published_at, title, pen_name_id, file_path, cover_path, description, is_adult, original_author")
+    .select("id, author_id, status, published_at, title, pen_name_id, file_path, cover_path, description, is_adult, original_author, pd_work_id")
     .eq("id", bookId)
     .eq("author_id", userId)
     .maybeSingle<ExistingBook>();
@@ -224,17 +227,39 @@ async function saveLiveBookDetails(
     categories: details.categories.length > 0 ? details.categories : null,
     keywords: details.keywords.join(", "),
   };
-  const { data, error } = await catalogWriter
-    .from("books")
-    .update(direct)
-    .eq("id", existing.id)
-    .eq("author_id", userId)
-    .eq("status", "published")
-    .select("id");
+  // BD15 P7 (Q1 a; audit r1 N2): a picked edition's details are frozen.
+  // A save that changes none of them skips this write (an older book's
+  // stored values may be spelled differently from the form's); a save
+  // that changes one is refused here, before anything is written.
+  let skipDirect = false;
+  if (isPickedPdEdition(existing)) {
+    const { data: stored, error: storedError } = await catalogWriter
+      .from("books")
+      .select("subtitle, language, series_id, series_position, edition_number, reading_age_min, categories, keywords")
+      .eq("id", existing.id)
+      .eq("author_id", userId)
+      .eq("status", "published")
+      .maybeSingle<PdFrozenDetails>();
+    if (storedError) redirect(withQuery(here, "error", SAVE_FAILED_MESSAGE));
+    if (!stored) redirect(withQuery(here, "error", LIVE_NOT_LIVE_MESSAGE));
+    if (!pdFrozenDetailsUnchanged(stored, direct)) redirect(withQuery(here, "error", PD_FROZEN_MESSAGE));
+    skipDirect = true;
+  }
+  const { data, error } = skipDirect
+    ? { data: [{ id: existing.id }], error: null }
+    : await catalogWriter
+        .from("books")
+        .update(direct)
+        .eq("id", existing.id)
+        .eq("author_id", userId)
+        .eq("status", "published")
+        .select("id");
   if (error) {
     console.error("saveBookDetails: live update failed", { bookId: existing.id, code: error.code ?? null });
     if (isInReviewLockError(error)) inReviewPage();
     if (error.code === "LB493") redirect(withQuery(here, "error", LIVE_ADULT_CATEGORY_MESSAGE));
+    // BD15 P7 (Q1 a): a picked public-domain edition's details are frozen.
+    if (error.code === "LB497") redirect(withQuery(here, "error", PD_FROZEN_MESSAGE));
     redirect(withQuery(here, "error", penNameErrorMessage(error) ?? SAVE_FAILED_MESSAGE));
   }
   if (!isExactlyOneRowWritten(data) || data?.[0]?.id !== existing.id) {
@@ -288,6 +313,8 @@ async function saveLiveBookDetails(
   // 5. Contributors.
   if (!(await syncContributors(supabase, existing.id, details.contributors))) {
     if (await isWaitingForReview(supabase, existing.id)) inReviewPage();
+    // BD15 P7 (Q1 a): a picked edition's contributors are frozen (LB497).
+    if (isPickedPdEdition(existing)) redirect(withQuery(here, "error", PD_FROZEN_MESSAGE));
     redirect(withQuery(here, "error", CONTRIBUTORS_NOT_SAVED_MESSAGE));
   }
   // An older live book with no rights record keeps own rights (the only
@@ -514,6 +541,8 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
       if (isInReviewLockError(error)) {
         redirect(withQuery(editorPath(existing.id, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
       }
+      // BD15 P7: a taken-down picked edition is a draft and still frozen.
+      if (error.code === "LB497") redirect(withQuery(here, "error", PD_FROZEN_MESSAGE));
       redirect(withQuery(here, "error", penNameErrorMessage(error) ?? SAVE_FAILED_MESSAGE));
     }
     if (!isExactlyOneRowWritten(data) || data?.[0]?.id !== existing.id) {

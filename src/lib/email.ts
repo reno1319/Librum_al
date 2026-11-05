@@ -276,11 +276,20 @@ export async function sendNewBookEmails(
   // names that pen name -- never the account, never its other pen names.
   const { data: book } = await admin
     .from("books")
-    .select("title, author_id, pen_name_id")
+    .select("title, author_id, pen_name_id, pd_work_id, pd_editor_credit")
     .eq("id", bookId)
-    .single<{ title: string; author_id: string; pen_name_id: string | null }>();
+    .single<{
+      title: string;
+      author_id: string;
+      pen_name_id: string | null;
+      pd_work_id?: string | null;
+      pd_editor_credit?: boolean | null;
+    }>();
 
   if (!book || book.author_id !== authorId || !book.pen_name_id) return;
+  // BD15 P7: a public-domain edition without the editor mention never
+  // names its uploader, so its pen name's followers get no email.
+  if (book.pd_work_id && !book.pd_editor_credit) return;
 
   const [{ data: penName }, { data: follows }] = await Promise.all([
     admin

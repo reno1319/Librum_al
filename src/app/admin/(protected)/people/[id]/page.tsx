@@ -154,7 +154,7 @@ export default async function AdminPersonPage({
       .returns<PenNameRow[]>(),
     admin
       .from("books")
-      .select("id, title, status, pen:pen_names(name)")
+      .select("id, title, status, pen:pen_names!books_pen_name_id_fkey(name)")
       .eq("author_id", id)
       .order("created_at", { ascending: false })
       .limit(BOOKS_SHOWN)

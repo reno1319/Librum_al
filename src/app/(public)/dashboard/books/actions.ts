@@ -1,5 +1,6 @@
 "use server";
 
+import { PD_FROZEN_MESSAGE } from "@/lib/pd-editions";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
@@ -964,6 +965,8 @@ export async function saveBookContent(bookId: string, formData: FormData) {
       // check above; the book is read-only now.
       if (isInReviewLockError(updateError)) toInReviewEditPage(existing.id);
       if (["LB462", "LB463"].includes(updateError.code ?? "")) fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+      // BD15 P7 (Q1 a): a picked public-domain edition's ISBN and publisher.
+      if (updateError.code === "LB497") fail(PD_FROZEN_MESSAGE);
       fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
     }
     if (!isExactlyOneRowWritten(updatedRows) || updatedRows?.[0]?.id !== existing.id) {

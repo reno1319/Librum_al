@@ -22,8 +22,10 @@ import {
   allowBookAgainAsStaff,
   approveBookReviewAsStaff,
   sendBackBookReviewAsStaff,
+  setPdEditionAsStaff,
   unpublishBookAsStaff,
 } from "../actions";
+import { PD_ALREADY_HAVE_NOTE, PD_PREPARED_BY } from "@/lib/pd-editions";
 import { UnpublishForm } from "./unpublish-form";
 import { SendBackForm } from "./send-back-form";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
@@ -56,7 +58,13 @@ export const dynamic = "force-dynamic";
 // changed, the live version beside the new one (Renato 11-04, Q2 a), and
 // Approve applies the changes ("Approve changes"). The review is
 // approvable only while the waiting row is exactly what was sent.
-
+//
+// BD15 P7 (Renato 11-05, Q1-Q4 a): a public-domain book gets the
+// "Public-domain edition" box: link it to a work (one from the list, or
+// a new one), and the editor mention. Approving a linked draft picks it
+// as the work's one public edition; the previous edition goes back to
+// its uploader as a draft. A submission staff don't pick is sent back
+// with the ready-made note. Staff with books.review only.
 type AdminBook = {
   id: string;
   title: string;
@@ -73,7 +81,12 @@ type AdminBook = {
   original_author: string | null;
   description: string;
   is_adult: boolean;
+  pd_work_id: string | null;
+  pd_editor_credit: boolean;
 };
+
+type PdWork = { id: string; title: string; original_author: string; picked_book_id: string | null };
+type PickedEdition = { id: string; title: string; status: string; pen: { name: string } | null };
 
 type PendingChangeRow = {
   file_path: string | null;
@@ -92,6 +105,7 @@ type OpenReport = { id: string; reason: string; details: string; created_at: str
 
 type RightsRow = {
   declared_at: string;
+  basis: string;
   author_public_name: string;
   pen_name: string | null;
   statement_text: string;
@@ -145,7 +159,7 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names(name), original_author, description, is_adult")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();
@@ -165,7 +179,7 @@ export default async function AdminBookPage({
       .returns<OpenReport[]>(),
     admin
       .from("book_rights_declarations")
-      .select("declared_at, author_public_name, pen_name, statement_text")
+      .select("declared_at, basis, author_public_name, pen_name, statement_text")
       .eq("book_id", book.id)
       .order("declared_at", { ascending: false })
       .returns<RightsRow[]>(),
@@ -292,6 +306,49 @@ export default async function AdminBookPage({
       });
     }
   }
+  // BD15 P7: the public-domain edition box. The latest rights choice says
+  // whether the book is public domain; the work, its picked edition and
+  // (for a draft) the works to link to are read only for such a book.
+  const isPdBook = Boolean(book.pd_work_id) || (!rightsResult.error && rights[0]?.basis === "public_domain");
+  let pdWork: PdWork | null = null;
+  let pickedEdition: PickedEdition | null = null;
+  let pdWorks: PdWork[] = [];
+  let pdUnreadable = false;
+  if (isPdBook) {
+    const [workResult, worksResult] = await Promise.all([
+      book.pd_work_id
+        ? admin
+            .from("pd_works")
+            .select("id, title, original_author, picked_book_id")
+            .eq("id", book.pd_work_id)
+            .maybeSingle<PdWork>()
+        : Promise.resolve({ data: null, error: null }),
+      book.status === "draft"
+        ? admin
+            .from("pd_works")
+            .select("id, title, original_author, picked_book_id")
+            .order("title", { ascending: true })
+            .limit(500)
+            .returns<PdWork[]>()
+        : Promise.resolve({ data: [] as PdWork[], error: null }),
+    ]);
+    pdWork = workResult.data ?? null;
+    pdWorks = worksResult.data ?? [];
+    pdUnreadable = Boolean(workResult.error || worksResult.error || (book.pd_work_id && !pdWork));
+    if (pdWork?.picked_book_id && pdWork.picked_book_id !== book.id) {
+      const { data, error: pickedError } = await admin
+        .from("books")
+        .select("id, title, status, pen:pen_names!books_pen_name_id_fkey(name)")
+        .eq("id", pdWork.picked_book_id)
+        .maybeSingle<PickedEdition>();
+      pickedEdition = data ?? null;
+      if (pickedError) pdUnreadable = true;
+    }
+  }
+  const isPickedHere = pdWork !== null && pdWork.picked_book_id === book.id;
+  // Q3 a: the work already has another live edition.
+  const otherLiveEdition = pickedEdition !== null && pickedEdition.status === "published" ? pickedEdition : null;
+
   const deciderIds = Array.from(new Set(reviews.map((r) => r.decided_by).filter((v): v is string => !!v)));
   const decidersResult =
     deciderIds.length > 0
@@ -601,19 +658,190 @@ export default async function AdminBookPage({
                       </label>
                     ))}
                   </fieldset>
+                  {!liveUpdate && isPdBook && !book.pd_work_id && (
+                    <p className="text-sm text-red-700">
+                      This is a public-domain book. Link it to a work in the Public-domain edition box first.
+                    </p>
+                  )}
+                  {!liveUpdate && book.pd_work_id && otherLiveEdition && (
+                    <p className="text-sm">
+                      Approving picks this book and replaces the current edition, “{otherLiveEdition.title}”. That
+                      one goes back to its uploader as a draft, and its page sends readers here. Readers who already
+                      have it keep it. To keep the current edition, send this one back instead.
+                    </p>
+                  )}
                   <button
                     type="submit"
                     className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground hover:opacity-90"
                   >
-                    {liveUpdate ? "Approve changes" : "Approve and publish"}
+                    {liveUpdate ? "Approve changes" : book.pd_work_id ? "Approve and pick this edition" : "Approve and publish"}
                   </button>
                 </form>
-                <SendBackForm action={sendBackBookReviewAsStaff} bookId={book.id} reviewId={pendingReview.id} />
+                <SendBackForm
+                  action={sendBackBookReviewAsStaff}
+                  bookId={book.id}
+                  reviewId={pendingReview.id}
+                  defaultMessage={!liveUpdate && otherLiveEdition ? PD_ALREADY_HAVE_NOTE : null}
+                />
                 <p className="text-[0.8125rem] text-muted">Saved in the Audit log with your name, the time and the reason.</p>
               </>
             )}
           </section>
         ) : null}
+
+        {isPdBook && (
+          <section aria-labelledby="book-pd-edition" className={SECTION_CLASSES}>
+            <h2 id="book-pd-edition" className={SECTION_HEADING_CLASSES}>
+              Public-domain edition
+            </h2>
+            {pdUnreadable ? (
+              <p className="text-sm text-red-700">Couldn’t load the public-domain work. Please reload the page.</p>
+            ) : (
+              <div className="flex flex-col gap-3 text-[0.9375rem]">
+                <p>
+                  {pdWork ? (
+                    <>
+                      Work: <strong>{pdWork.title}</strong>, by {pdWork.original_author}.{" "}
+                      {isPickedHere
+                        ? "This book is its picked edition."
+                        : otherLiveEdition
+                          ? `Its picked edition now: “${otherLiveEdition.title}”${otherLiveEdition.pen ? ` (uploaded as ${otherLiveEdition.pen.name})` : ""}.`
+                          : "It has no live edition now."}
+                    </>
+                  ) : (
+                    "Not linked to a work yet. Every public-domain work has one public edition, which you pick when you approve it."
+                  )}
+                </p>
+                {isPickedHere && book.status === "published" && (
+                  <p className="text-sm text-muted">
+                    The author can&apos;t unpublish or delete it, and only the file, cover, description, 18+ label and
+                    original author can still change (through review). Taking it down still works.
+                  </p>
+                )}
+                <p className="text-sm text-muted">
+                  Without the editor mention, readers never see who uploaded it. With it, the book page shows “
+                  {PD_PREPARED_BY} {publicName}”. Give it only when the uploader added real work (notes, a foreword,
+                  careful editing).
+                </p>
+                {!canReview ? (
+                  <p className="text-sm text-muted">Only owners and admins can change this.</p>
+                ) : book.status === "published" ? (
+                  pdWork && (
+                    <form action={setPdEditionAsStaff} className="flex flex-col gap-3">
+                      <input type="hidden" name="bookId" value={book.id} />
+                      <input type="hidden" name="mode" value="credit" />
+                      <input type="hidden" name="workId" value={pdWork.id} />
+                      <label className="flex min-h-11 items-center gap-3">
+                        <input
+                          type="checkbox"
+                          name="editorCredit"
+                          defaultChecked={book.pd_editor_credit}
+                          className="size-5 shrink-0 accent-primary"
+                        />
+                        Editor mention: “{PD_PREPARED_BY} {publicName}”
+                      </label>
+                      <button
+                        type="submit"
+                        className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] border border-primary bg-surface px-[1.125rem] font-semibold text-primary hover:bg-surface-hover"
+                      >
+                        Save the mention
+                      </button>
+                    </form>
+                  )
+                ) : (
+                  <form action={setPdEditionAsStaff} className="flex flex-col gap-3">
+                    <input type="hidden" name="bookId" value={book.id} />
+                    <fieldset className="flex flex-col gap-2">
+                      <legend className="mb-1 font-semibold">Work</legend>
+                      {pdWorks.length > 0 && (
+                        <label className="flex flex-col gap-1.5">
+                          <span className="flex min-h-11 items-center gap-3">
+                            <input
+                              type="radio"
+                              name="mode"
+                              value="existing"
+                              defaultChecked={Boolean(book.pd_work_id)}
+                              className="size-5 shrink-0 accent-primary"
+                            />
+                            An existing work
+                          </span>
+                          <select
+                            name="workId"
+                            defaultValue={book.pd_work_id ?? ""}
+                            className="focus-ring min-h-11 w-full rounded-control border border-control bg-surface px-3 py-2 text-base"
+                          >
+                            <option value="">Choose a work</option>
+                            {pdWorks.map((work) => (
+                              <option key={work.id} value={work.id}>
+                                {work.title} — {work.original_author}
+                                {work.picked_book_id ? "" : " (no live edition)"}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      <label className="flex min-h-11 items-center gap-3">
+                        <input
+                          type="radio"
+                          name="mode"
+                          value="new"
+                          defaultChecked={!book.pd_work_id}
+                          className="size-5 shrink-0 accent-primary"
+                        />
+                        A new work
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-sm">
+                        Title of the work
+                        <input
+                          name="workTitle"
+                          defaultValue={book.title}
+                          maxLength={300}
+                          className="focus-ring min-h-11 w-full rounded-control border border-control bg-surface px-3 py-2 text-base"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-sm">
+                        Original author
+                        <input
+                          name="workOriginalAuthor"
+                          defaultValue={book.original_author ?? ""}
+                          maxLength={200}
+                          className="focus-ring min-h-11 w-full rounded-control border border-control bg-surface px-3 py-2 text-base"
+                        />
+                      </label>
+                      {book.pd_work_id && (
+                        <label className="flex min-h-11 items-center gap-3">
+                          <input type="radio" name="mode" value="unlink" className="size-5 shrink-0 accent-primary" />
+                          Not a public-domain edition (unlink)
+                        </label>
+                      )}
+                    </fieldset>
+                    <label className="flex min-h-11 items-center gap-3">
+                      <input
+                        type="checkbox"
+                        name="editorCredit"
+                        defaultChecked={book.pd_editor_credit}
+                        className="size-5 shrink-0 accent-primary"
+                      />
+                      Editor mention: “{PD_PREPARED_BY} {publicName}”
+                    </label>
+                    <button
+                      type="submit"
+                      className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] border border-primary bg-surface px-[1.125rem] font-semibold text-primary hover:bg-surface-hover"
+                    >
+                      Save
+                    </button>
+                  </form>
+                )}
+                <Link
+                  href="/admin/books/public-domain"
+                  className="focus-ring inline-flex min-h-11 items-center self-start text-sm text-primary underline underline-offset-2"
+                >
+                  All public-domain works
+                </Link>
+              </div>
+            )}
+          </section>
+        )}
 
         <section
           aria-labelledby="book-unpublish"

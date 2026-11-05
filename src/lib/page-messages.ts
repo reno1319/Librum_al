@@ -283,6 +283,18 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Një libër 18+ nuk mund të jetë te Për fëmijë ose Për të rinj. Hiqni ato kategori ose etiketën 18+.",
   "Të drejtat e një libri në shitje nuk ndryshohen. Për t'i ndryshuar, hiqeni librin nga shitja dhe dërgojeni përsëri.",
   "Nuk keni ndryshime që presin shqyrtim. Ndryshoni dorëshkrimin, ballinën, përshkrimin, etiketën 18+ ose autorin origjinal dhe ruajini.",
+  // BD15 P7: public-domain editions (admin book page; LB497 in the editor).
+  "This is a public-domain book. Link it to a work in the Public-domain edition box before you approve it.",
+  "This book is linked to a public-domain work, so it can only go live as that work's edition. Approve it from this page again.",
+  "A public-domain edition without the editor mention can't be in a series or a bundle. Ask the author to take it out, or give the mention.",
+  "Choose a work, or give the new work's title and original author.",
+  "This book has a price. A public-domain edition is free, so send it back and ask the author to make it free first.",
+  "This live book is not a public-domain edition.",
+  "A live edition stays with its work. Only its editor mention can change.",
+  "That public-domain work no longer exists.",
+  "A new work needs its title and its original author.",
+  "Only a book whose rights choice is \"public domain\" can be a work's edition.",
+  "Ky botim është zgjedhur nga Librum, prandaj kjo fushë nuk ndryshon. Nëse diçka duhet korrigjuar, ngarkoni një botim të ri dhe Librum mund ta zgjedhë atë.",
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
@@ -337,6 +349,8 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Libri u hoq nga shitja. Tani është draft.",
   // BD15 P5b-3b: deleteBook (from the editor or the Dashboard menu).
   "Libri u fshi.",
+  // BD15 P7: the admin book page's Public-domain edition box.
+  "Public-domain edition saved.",
 ]);
 
 type QueryValue = string | string[] | undefined;
