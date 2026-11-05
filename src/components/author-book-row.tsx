@@ -15,6 +15,7 @@ import {
   type ShelfMenuItem,
   type ShelfState,
 } from "@/lib/bookshelf";
+import { isPickedPdEdition, pdShelfLine } from "@/lib/pd-editions";
 import { BOOK_ACTIONS_ID, editorPath } from "@/lib/book-editor-copy";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
@@ -152,7 +153,7 @@ export function AuthorBookRow({
   seriesTitle = null,
 }: {
   book: Pick<Book, "id" | "title" | "status" | "price_all" | "genre" | "published_at"> &
-    Partial<Pick<Book, "series_position" | "file_path">>;
+    Partial<Pick<Book, "series_position" | "file_path" | "pd_work_id">>;
   coverUrl: string | null;
   recentCopies?: number | null;
   missing?: string[];
@@ -171,7 +172,14 @@ export function AuthorBookRow({
   const sentBack = state === "sent_back" || state === "live_sent_back" ? (review?.sentBack ?? null) : null;
   const priceLabel = book.price_all === null ? "Pa çmim ende" : formatCatalogPriceLabel(book.price_all);
   const isFree = resolveCatalogPriceState(book.price_all) === "free";
-  const menu = shelfMenuItems({ state, status: book.status, hasFile: Boolean(book.file_path) });
+  // BD15 P7: a public-domain edition Librum picked, or replaced (Q1/Q2 a).
+  const pdLine = pdShelfLine(book, takedown !== null);
+  const menu = shelfMenuItems({
+    state,
+    status: book.status,
+    hasFile: Boolean(book.file_path),
+    pdPicked: isPickedPdEdition(book),
+  });
 
   const facts = [
     "E-libër",
@@ -220,6 +228,7 @@ export function AuthorBookRow({
           <span>{copy.label}</span>
         </p>
         {copy.line && <p className="text-[0.8125rem] text-muted">{copy.line}</p>}
+        {pdLine && <p className="text-[0.8125rem] text-muted">{pdLine}</p>}
         <p className="text-sm text-muted">{facts}</p>
         {/* Phone: price and the 30-day figure share one line, as on the
             phone mockup; from sm up they are their own columns. */}

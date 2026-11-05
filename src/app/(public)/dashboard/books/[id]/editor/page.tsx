@@ -25,6 +25,7 @@ import { BookEditorShell } from "@/components/book-editor-shell";
 import { BookDetailsForm, type DetailsFormValues } from "@/components/book-details-form";
 import { getRightsDeclarationState } from "@/lib/book-rights";
 import { getBookReviewState } from "@/lib/book-reviews";
+import { PD_PICKED_EDITOR_NOTE, isPickedPdEdition } from "@/lib/pd-editions";
 import { missingDetails } from "@/lib/book-details";
 import {
   LIVE_STATUS_LABEL,
@@ -66,6 +67,8 @@ type EditorBook = {
   price_all: number | null;
   isbn: string | null;
   publisher: string | null;
+  // BD15 P7: set by staff when it is a public-domain work's edition.
+  pd_work_id: string | null;
 };
 
 // BD15 P2: the new book editor for a draft (PLAN-BD15-r1 §2.2): Details
@@ -117,7 +120,7 @@ export default async function BookEditorPage({
   const { data: book } = await supabase
     .from("books")
     .select(
-      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, categories, keywords, original_author, status, published_at, file_path, cover_path, price_all, isbn, publisher",
+      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, categories, keywords, original_author, status, published_at, file_path, cover_path, price_all, isbn, publisher, pd_work_id",
     )
     .eq("id", id)
     .eq("author_id", user.id)
@@ -180,6 +183,7 @@ export default async function BookEditorPage({
       bookId={book.id}
       unpublishAction={unpublishBook.bind(null, book.id)}
       deleteAction={deleteBook.bind(null, book.id)}
+      pdPicked={isPickedPdEdition(book)}
     />
   );
 
@@ -317,6 +321,12 @@ export default async function BookEditorPage({
           changed={changed}
           discardAction={discardBookPendingChanges.bind(null, book.id)}
         />
+      )}
+      {/* BD15 P7 (Q1 a): what still changes on a picked edition. */}
+      {isPickedPdEdition(book) && (
+        <Alert variant="warning" className="mt-4">
+          {PD_PICKED_EDITOR_NOTE}
+        </Alert>
       )}
       {takedownNotice && (
         <Alert variant="error" className="mt-4">

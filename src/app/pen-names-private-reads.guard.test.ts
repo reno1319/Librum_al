@@ -137,6 +137,9 @@ describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
     // PEOPLE-1 (10a): a person's page lists their books, after
     // requireStaff("people.view").
     "app/admin/(protected)/people/[id]/page.tsx",
+    // BD15 P7: the public-domain works list, after
+    // requireStaff("reports.view").
+    "app/admin/(protected)/books/public-domain/page.tsx",
   ];
   // The shared helper is gated by its callers; each caller is listed.
   const BOOK_READ_HELPER = "app/admin/(protected)/books/admin-book-reads.ts";

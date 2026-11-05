@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
@@ -39,6 +39,7 @@ import {
   resolveTranslatorLine,
   TRANSLATED_BY,
 } from "@/lib/book-byline";
+import { PD_PREPARED_BY, readPdEditionRedirect, showsPreparedBy } from "@/lib/pd-editions";
 import { readRightsBasisForPages } from "@/lib/librum-download-rights";
 import {
   authorPagePath,
@@ -323,8 +324,17 @@ export default async function BookDetailPage({
     book,
   ] = await Promise.all([supabase.auth.getUser(), getBookForDetail(id)]);
 
-  if (!book) {
+  // BD15 P7 (Q2 a): a public-domain edition Librum replaced with another
+  // sends readers to the picked one (only when the page would otherwise
+  // be "not found": its author and earlier readers still see it).
+  const notFoundOrPickedEdition = async (): Promise<never> => {
+    const picked = await readPdEditionRedirect(supabase, id);
+    if (picked) redirect(`/libra/${picked}`);
     notFound();
+  };
+
+  if (!book) {
+    return notFoundOrPickedEdition();
   }
 
   // PEN-NAMES-2: an own-row query, so the page never needs the book's
@@ -381,7 +391,7 @@ export default async function BookDetailPage({
   // point of view, and keeps this page's behavior legible without
   // having to reason about the RLS policy to know what it does.
   if (book.status !== "published" && !isAuthor && !owned) {
-    notFound();
+    return notFoundOrPickedEdition();
   }
 
   const coverUrl = book.cover_path
@@ -469,29 +479,36 @@ export default async function BookDetailPage({
           .order("series_position", { ascending: true, nullsFirst: false })
           .returns<SeriesEntry[]>()
       : Promise.resolve({ data: null }),
-    // 3a: "More by" = only books under this book's pen name.
-    supabase
-      .from("public_books")
-      .select("*, pen:public_pen_names(id, name)")
-      .eq("status", "published")
-      .not("price_all", "is", null)
-      .eq("pen_name_id", book.pen_name_id)
-      .neq("id", id)
-      .order("created_at", { ascending: false })
-      .limit(8)
-      .returns<BookWithAuthor[]>(),
-    book.genre
+    // 3a: "More by" = only books under this book's pen name. BD15 P7: a
+    // public-domain edition without the editor mention has none here.
+    book.pen_name_id
       ? supabase
           .from("public_books")
           .select("*, pen:public_pen_names(id, name)")
           .eq("status", "published")
           .not("price_all", "is", null)
-          .eq("genre", book.genre)
+          .eq("pen_name_id", book.pen_name_id)
           .neq("id", id)
+          .order("created_at", { ascending: false })
+          .limit(8)
+          .returns<BookWithAuthor[]>()
+      : Promise.resolve({ data: null }),
+    book.genre
+      ? (() => {
+          const sameGenre = supabase
+            .from("public_books")
+            .select("*, pen:public_pen_names(id, name)")
+            .eq("status", "published")
+            .not("price_all", "is", null)
+            .eq("genre", book.genre)
+            .neq("id", id);
           // PEN-NAMES-2 (L15): leave out the same pen name only. Leaving
           // out the whole account would let two shelves be compared to
-          // tell which pen names share an account.
-          .neq("pen_name_id", book.pen_name_id)
+          // tell which pen names share an account. BD15 P7: a
+          // public-domain edition without the editor mention shows no pen
+          // name, so there is none to leave out.
+          return book.pen_name_id ? sameGenre.neq("pen_name_id", book.pen_name_id) : sameGenre;
+        })()
           .order("created_at", { ascending: false })
           .limit(8)
           .returns<BookWithAuthor[]>()
@@ -860,6 +877,22 @@ export default async function BookDetailPage({
             </p>
           )}
 
+          {/* BD15 P7 (Q4 a): the uploader of a public-domain edition, only
+              when Librum gave the editor mention (otherwise no pen name
+              reaches this page at all). */}
+          {showsPreparedBy(book) && authorName && (
+            <p className="mt-1 text-foreground">
+              {PD_PREPARED_BY}{" "}
+              {penNamePath ? (
+                <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
+                  {authorName}
+                </Link>
+              ) : (
+                <span className="font-semibold">{authorName}</span>
+              )}
+            </p>
+          )}
+
           {otherContributors.length > 0 && (
             <p className="mt-1 text-sm text-muted">
               {otherContributors
@@ -1189,6 +1222,9 @@ export default async function BookDetailPage({
           the photo, name, bio and the Follow button from the author's
           own page.
           ============================================================ */}
+      {/* BD15 P7: not on a public-domain edition without the editor
+          mention -- the page has no pen name for it. */}
+      {book.pen && (
       <section className="mt-14">
         <h2 className={SECTION_HEADING}>Rreth autorit</h2>
         <div className="mt-4 flex flex-wrap items-center gap-6 rounded-[4px] border border-border bg-surface p-6 sm:p-7">
@@ -1275,6 +1311,7 @@ export default async function BookDetailPage({
             ))}
         </div>
       </section>
+      )}
 
       {/* ============================================================
           Reviews

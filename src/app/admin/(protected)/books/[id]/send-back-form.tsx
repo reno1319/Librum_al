@@ -15,6 +15,8 @@ import {
 // the first reason's text). With JavaScript, choosing another reason
 // swaps in that reason's text -- only while the staff member has not
 // edited it, as the Unpublish form does. "Other" starts empty.
+// BD15 P7 (Q3 a): for a public-domain edition Librum already has, the
+// form opens on "Other" with the ready-made note (defaultMessage).
 
 const CONTROL_CLASSES = "focus-ring rounded-control border border-control bg-surface px-3 py-2 text-base font-normal";
 const DEFAULT_REASON: SendBackReason = "copyright";
@@ -24,14 +26,18 @@ export function SendBackForm({
   bookId,
   reviewId,
   defaultOpen = false,
+  defaultMessage = null,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   bookId: string;
   reviewId: string;
   defaultOpen?: boolean;
+  defaultMessage?: string | null;
 }) {
+  const startReason: SendBackReason = defaultMessage ? "other" : DEFAULT_REASON;
+  const startMessage = defaultMessage ?? SEND_BACK_PREFILL_MESSAGES[DEFAULT_REASON];
   const messageRef = useRef<HTMLTextAreaElement>(null);
-  const lastPrefill = useRef(SEND_BACK_PREFILL_MESSAGES[DEFAULT_REASON]);
+  const lastPrefill = useRef(startMessage);
 
   function onReasonChange(event: React.ChangeEvent<HTMLSelectElement>) {
     const box = messageRef.current;
@@ -55,7 +61,7 @@ export function SendBackForm({
           Reason
           <select
             name="reason"
-            defaultValue={DEFAULT_REASON}
+            defaultValue={startReason}
             onChange={onReasonChange}
             className={`${CONTROL_CLASSES} min-h-11 w-full`}
           >
@@ -74,7 +80,7 @@ export function SendBackForm({
             rows={5}
             required
             maxLength={SEND_BACK_MESSAGE_MAX_LENGTH}
-            defaultValue={SEND_BACK_PREFILL_MESSAGES[DEFAULT_REASON]}
+            defaultValue={startMessage}
             className={`${CONTROL_CLASSES} w-full`}
           />
         </label>

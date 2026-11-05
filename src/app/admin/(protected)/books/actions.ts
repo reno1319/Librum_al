@@ -29,6 +29,8 @@ import {
   mapReviewRpcError,
   validateApproveForm,
   validateSendBackForm,
+  validatePdEditionForm,
+  PD_EDITION_SAVED_MESSAGE,
   ALLOWED_AGAIN_SUCCESS_MESSAGE,
   GENERIC_TAKEDOWN_ERROR_MESSAGE,
   TAKEDOWN_RPC_NOT_AUTHENTICATED_MESSAGE,
@@ -248,6 +250,9 @@ type ReviewedBook = {
   description: string | null;
   pen_name_id: string | null;
   cover_path: string | null;
+  // BD15 P7: a linked book is approved as its work's edition.
+  pd_work_id: string | null;
+  pd_editor_credit: boolean;
 };
 
 export async function approveBookReviewAsStaff(formData: FormData) {
@@ -267,7 +272,7 @@ export async function approveBookReviewAsStaff(formData: FormData) {
   const admin = createAdminClient();
   const { data: book, error: bookError } = await admin
     .from("books")
-    .select("id, title, author_id, status, price_all, description, pen_name_id, cover_path")
+    .select("id, title, author_id, status, price_all, description, pen_name_id, cover_path, pd_work_id, pd_editor_credit")
     .eq("id", validation.bookId)
     .maybeSingle<ReviewedBook>();
   if (bookError || !book) {
@@ -285,7 +290,12 @@ export async function approveBookReviewAsStaff(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: firstPublication, error } = await supabase.rpc("admin_approve_book_review", {
+  // BD15 P7 (Q3 a): a book linked to a public-domain work is approved
+  // as that work's edition -- picked, and the previous edition back to
+  // draft (a swap) -- in one transaction. Otherwise the plain approval,
+  // which the database refuses for an unlinked public-domain book (LB498).
+  const approveRpc = book.pd_work_id ? "admin_approve_pd_edition" : "admin_approve_book_review";
+  const { data: firstPublication, error } = await supabase.rpc(approveRpc, {
     p_review_id: validation.reviewId,
     p_file_path: validation.filePath,
     p_cover_path: validation.coverPath,
@@ -298,7 +308,7 @@ export async function approveBookReviewAsStaff(formData: FormData) {
       redirect(`/login?next=${encodeURIComponent(bookPath)}`);
     }
     if (error.code !== "40P01") {
-      console.error("approveBookReviewAsStaff: admin_approve_book_review failed", {
+      console.error(`approveBookReviewAsStaff: ${approveRpc} failed`, {
         bookId: book.id,
         code: error.code,
       });
@@ -326,7 +336,10 @@ export async function approveBookReviewAsStaff(formData: FormData) {
   // B6: their emails go out after the page has answered (Next's after()),
   // so a long follower list can't slow down or time out Approve. Logged,
   // never rethrown, whether scheduling or sending fails.
-  if (firstPublication === true) {
+  // BD15 P7: never for a public-domain edition without the editor
+  // mention -- its uploader's followers would learn whose it is.
+  const uploaderHidden = Boolean(book.pd_work_id) && !book.pd_editor_credit;
+  if (firstPublication === true && !uploaderHidden) {
     const logFollowersFailure = (followUpError: unknown) =>
       console.error("approveBookReviewAsStaff: the followers email failed after a successful approval", {
         bookId: book.id,
@@ -382,6 +395,7 @@ export async function approveBookReviewAsStaff(formData: FormData) {
       ...(book.pen_name_id ? [`/autore/${book.pen_name_id}`] : []),
       "/admin",
       "/admin/books",
+      "/admin/books/public-domain",
       bookPath,
       "/dashboard",
     ],
@@ -477,4 +491,50 @@ function revalidateAll(paths: string[], caller: string): void {
       console.error(`${caller}: revalidatePath failed`, { path, error: revalidateError });
     }
   }
+}
+
+// BD15 P7: the Public-domain edition box -- link the book to a work
+// (existing or new), unlink a draft, or change the editor mention.
+// staff_set_pd_edition is the authority (books.review, the rights
+// choice, a live edition keeping its work); errors are mapped.
+export async function setPdEditionAsStaff(formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/admin/books");
+  }
+
+  await requireStaff("books.review");
+
+  const validation = validatePdEditionForm(formData);
+  if (!validation.ok) {
+    const rawBook = formData.get("bookId");
+    redirect(withQuery(isUuid(rawBook) ? `/admin/books/${rawBook}` : "/admin/books", "error", validation.error));
+  }
+  const bookPath = `/admin/books/${validation.bookId}`;
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("staff_set_pd_edition", {
+    p_book_id: validation.bookId,
+    p_work_id: validation.workId,
+    p_work_title: validation.workTitle,
+    p_work_original_author: validation.workOriginalAuthor,
+    p_editor_credit: validation.editorCredit,
+  });
+
+  if (error) {
+    if (error.message === TAKEDOWN_RPC_NOT_AUTHENTICATED_MESSAGE) {
+      redirect(`/login?next=${encodeURIComponent(bookPath)}`);
+    }
+    if (error.code !== "40P01") {
+      console.error("setPdEditionAsStaff: staff_set_pd_edition failed", { bookId: validation.bookId, code: error.code });
+    }
+    redirect(withQuery(bookPath, "error", mapReviewRpcError(error)));
+  }
+
+  // The mention changes what a live edition's page shows.
+  revalidateAll(
+    ["/", "/librari", `/libra/${validation.bookId}`, "/admin/books/public-domain", bookPath, "/dashboard"],
+    "setPdEditionAsStaff",
+  );
+
+  redirect(withQuery(bookPath, "success", PD_EDITION_SAVED_MESSAGE));
 }

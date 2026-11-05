@@ -1,3 +1,4 @@
+import { PD_FROZEN_MESSAGE } from "@/lib/pd-editions";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // BD15 P2: the new editor's Details save. A small in-memory double of
@@ -565,6 +566,25 @@ describe("saveBookDetails: a live book (P5b-2)", () => {
     expect(rpcCalls).toEqual([]);
     expect(target).toMatch(/editor\?tab=details&success=/);
     expect(decodeURIComponent(target)).toContain("Ndryshimet u ruajtën");
+  });
+
+  // BD15 P7 (audit r1 N2): a picked public-domain edition.
+  it("a picked edition: a save that changes no frozen detail skips that write (older 'a,b' keywords) and still sends the description", async () => {
+    seedLive();
+    Object.assign(tables.books[0], { pd_work_id: "55555555-5555-4555-8555-555555555555", keywords: "a,b" });
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm({ keywords: "a, b", description: "New text" })));
+    expect(catalogWrites.filter((w) => w.op === "update")).toEqual([]);
+    expect(rpcCalls.length).toBeGreaterThan(0);
+    expect(target).toMatch(/editor\?tab=details&success=/);
+  });
+
+  it("a picked edition: a changed frozen detail is refused before anything is written", async () => {
+    seedLive();
+    Object.assign(tables.books[0], { pd_work_id: "55555555-5555-4555-8555-555555555555" });
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm({ subtitle: "Nën", description: "New text" })));
+    expect(catalogWrites).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+    expect(decodeURIComponent(target)).toContain(PD_FROZEN_MESSAGE);
   });
 
   it("a new description waits for review with the live files; the live row keeps its text", async () => {

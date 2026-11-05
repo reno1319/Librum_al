@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PD_PICKED_ACTIONS_NOTE } from "@/lib/pd-editions";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { DeleteBookButton } from "@/app/(public)/dashboard/delete-book-button";
@@ -104,10 +105,14 @@ export function BookActionsBox({
   takenDown,
   unpublishAction,
   deleteAction,
+  pdPicked = false,
 }: {
   bookId: string;
   title: string;
   live: boolean;
+  // BD15 P7 (Q1 a): a public-domain work's picked edition -- its author
+  // can neither take it off sale (LB483) nor delete it (LB484).
+  pdPicked?: boolean;
   // A live book's changes waiting (saved or in review): taking it off
   // sale makes them part of the draft (P5b Q3 a).
   hasPendingChanges: boolean;
@@ -141,7 +146,11 @@ export function BookActionsBox({
           . {PREVIEW_NOTE}
         </p>
       )}
-      {live && (
+      {pdPicked ? (
+        <Alert variant="warning" className="mt-3">
+          {PD_PICKED_ACTIONS_NOTE}
+        </Alert>
+      ) : live && (
         <div className="mt-3">
           <p className="text-sm text-muted">
             {UNPUBLISH_NOTE}
@@ -154,6 +163,7 @@ export function BookActionsBox({
           </form>
         </div>
       )}
+      {!pdPicked && (
       <div className="mt-4 border-t border-border pt-4">
         {takenDown ? (
           <Alert variant="warning">{TAKEN_DOWN_DELETE_MESSAGE}</Alert>
@@ -166,6 +176,7 @@ export function BookActionsBox({
           </>
         )}
       </div>
+      )}
     </section>
   );
 }

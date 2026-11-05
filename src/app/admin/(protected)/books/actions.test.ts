@@ -87,9 +87,8 @@ vi.mock("@/lib/book-reviews", () => ({
   removeUnretainedManuscripts: (...args: unknown[]) => mockRetention(...args),
 }));
 
-const { unpublishBookAsStaff, allowBookAgainAsStaff, approveBookReviewAsStaff, sendBackBookReviewAsStaff } = await import(
-  "./actions"
-);
+const { unpublishBookAsStaff, allowBookAgainAsStaff, approveBookReviewAsStaff, sendBackBookReviewAsStaff, setPdEditionAsStaff } =
+  await import("./actions");
 
 const BOOK_ID = "22222222-2222-4222-8222-222222222222";
 const REPORT_ID = "11111111-1111-4111-8111-111111111111";
@@ -514,5 +513,141 @@ describe("sendBackBookReviewAsStaff", () => {
     expect(await redirectOf(() => sendBackBookReviewAsStaff(sendBackForm()))).toBe(
       `/login?next=${encodeURIComponent(`/admin/books/${BOOK_ID}`)}`,
     );
+  });
+});
+
+// BD15 P7 (Renato 11-05, Q1-Q4 a): public-domain editions.
+describe("BD15 P7: approving a public-domain edition", () => {
+  beforeEach(resetReviewMocks);
+  const approveForm = () => form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: FILE, coverPath: COVER, ...ALL_CHECKS });
+  const WORK_ID = "55555555-5555-4555-8555-555555555555";
+  const withEdition = (credit: boolean) => {
+    const row = adminRows.books.data as Record<string, unknown>;
+    adminRows.books = { data: { ...row, pd_work_id: WORK_ID, pd_editor_credit: credit }, error: null };
+  };
+
+  it("a linked book goes through admin_approve_pd_edition (pick + swap), with the same arguments", async () => {
+    withEdition(false);
+    expect(await redirectOf(() => approveBookReviewAsStaff(approveForm()))).toContain("?success=");
+    expect(mockRpc).toHaveBeenCalledWith("admin_approve_pd_edition", {
+      p_review_id: REVIEW_ID,
+      p_file_path: FILE,
+      p_cover_path: COVER,
+      p_price_all: 0,
+      p_checklist: { cover_is_fine: true, file_opens: true, not_someone_elses_work: true, rights_declared: true },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/books/public-domain");
+  });
+
+  it("an uncredited edition's first publication emails no follower of its uploader", async () => {
+    withEdition(false);
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    await settleAfterTasks();
+    expect(mockNewBookEmails).not.toHaveBeenCalled();
+    expect(mockApprovedEmail).toHaveBeenCalledOnce();
+  });
+
+  it("a credited edition's first publication emails followers as usual", async () => {
+    withEdition(true);
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    await settleAfterTasks();
+    expect(mockNewBookEmails).toHaveBeenCalledOnce();
+  });
+
+  it("an unlinked book still uses the plain approval", async () => {
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(mockRpc).toHaveBeenCalledWith("admin_approve_book_review", expect.anything());
+  });
+
+  it.each([
+    [{ code: "LB498", message: "x" }, "Link it to a work in the Public-domain edition box"],
+    [{ code: "LB485", message: "x" }, "can only go live as that work's edition"],
+    [{ code: "LB499", message: "Link this book to a public-domain work first." }, "Link it to a work"],
+    [{ code: "LB499", message: "<script>raw</script>" }, "Something went wrong"],
+    // Audit r1 N4.
+    [{ code: "23514", message: 'new row for relation "books" violates check constraint "books_pd_price_check"' }, "This book has a price."],
+    [{ code: "23514", message: 'new row for relation "books" violates check constraint "books_pd_series_check"' }, "can't be in a series"],
+  ])("maps %o", async (error, text) => {
+    withEdition(false);
+    mockRpc.mockResolvedValue({ data: null, error });
+    const target = decodeURIComponent(await redirectOf(() => approveBookReviewAsStaff(approveForm())));
+    expect(target).toContain("?error=");
+    if (text === "Something went wrong") expect(target).not.toContain("<script>");
+    else expect(target).toContain(text);
+    expect(mockApprovedEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("BD15 P7: setPdEditionAsStaff", () => {
+  beforeEach(resetReviewMocks);
+  const WORK_ID = "55555555-5555-4555-8555-555555555555";
+
+  it("requires books.review and calls staff_set_pd_edition for a new work, trimmed", async () => {
+    const target = await redirectOf(() =>
+      setPdEditionAsStaff(
+        form({ bookId: BOOK_ID, mode: "new", workTitle: "  Lahuta  e Malcís ", workOriginalAuthor: " Gjergj Fishta ", editorCredit: "on" }),
+      ),
+    );
+    expect(mockRequireStaff).toHaveBeenCalledWith("books.review");
+    expect(mockRpc).toHaveBeenCalledWith("staff_set_pd_edition", {
+      p_book_id: BOOK_ID,
+      p_work_id: null,
+      p_work_title: "Lahuta e Malcís",
+      p_work_original_author: "Gjergj Fishta",
+      p_editor_credit: true,
+    });
+    expect(target).toBe(`/admin/books/${BOOK_ID}?success=${encodeURIComponent("Public-domain edition saved.")}`);
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/libra/${BOOK_ID}`);
+  });
+
+  it("links to an existing work; an unticked box is no mention", async () => {
+    await redirectOf(() => setPdEditionAsStaff(form({ bookId: BOOK_ID, mode: "existing", workId: WORK_ID })));
+    expect(mockRpc).toHaveBeenCalledWith("staff_set_pd_edition", {
+      p_book_id: BOOK_ID,
+      p_work_id: WORK_ID,
+      p_work_title: null,
+      p_work_original_author: null,
+      p_editor_credit: false,
+    });
+  });
+
+  it("unlinks with no work and no mention, whatever the box says", async () => {
+    await redirectOf(() => setPdEditionAsStaff(form({ bookId: BOOK_ID, mode: "unlink", workId: WORK_ID, editorCredit: "on" })));
+    expect(mockRpc).toHaveBeenCalledWith("staff_set_pd_edition", {
+      p_book_id: BOOK_ID,
+      p_work_id: null,
+      p_work_title: null,
+      p_work_original_author: null,
+      p_editor_credit: false,
+    });
+  });
+
+  it.each([
+    [{ bookId: BOOK_ID, mode: "existing", workId: "nope" }],
+    [{ bookId: BOOK_ID, mode: "new", workTitle: "  ", workOriginalAuthor: "A" }],
+    [{ bookId: BOOK_ID, mode: "new", workTitle: "T", workOriginalAuthor: "" }],
+    [{ bookId: BOOK_ID, mode: "whatever" }],
+  ])("refuses a form it can't use, before the RPC: %o", async (fields) => {
+    const target = decodeURIComponent(await redirectOf(() => setPdEditionAsStaff(form(fields))));
+    expect(target).toContain("Choose a work, or give the new work's title and original author.");
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("maps the RPC's refusal", async () => {
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: "LB499", message: "A live edition stays with its work. Only its editor mention can change." },
+    });
+    const target = decodeURIComponent(
+      await redirectOf(() => setPdEditionAsStaff(form({ bookId: BOOK_ID, mode: "existing", workId: WORK_ID }))),
+    );
+    expect(target).toContain("?error=A live edition stays with its work.");
+  });
+
+  it("is refused in maintenance before requireStaff", async () => {
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+    expect((await redirectOf(() => setPdEditionAsStaff(form({ bookId: BOOK_ID, mode: "unlink" })))).startsWith("/admin/books?error=")).toBe(true);
+    expect(mockRequireStaff).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
   });
 });

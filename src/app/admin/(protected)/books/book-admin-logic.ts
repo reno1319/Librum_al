@@ -283,9 +283,44 @@ const KNOWN_REVIEW_RPC_ERRORS: Record<string, string> = {
 export const AUTHOR_SUSPENDED_APPROVE_MESSAGE =
   "This author's account is suspended. Lift the suspension before approving.";
 
+// BD15 P7 (migration 20261105180000): public-domain editions. LB499 is
+// the staff functions' own refusal, written for staff, so its text is
+// shown as it is; the others are matched by code.
+export const PD_NOT_LINKED_APPROVE_MESSAGE =
+  "This is a public-domain book. Link it to a work in the Public-domain edition box before you approve it.";
+export const PD_NOT_PICKED_APPROVE_MESSAGE =
+  "This book is linked to a public-domain work, so it can only go live as that work's edition. Approve it from this page again.";
+// Audit r1 N4: linking a priced book (books_pd_price_check).
+export const PD_PRICE_MESSAGE =
+  "This book has a price. A public-domain edition is free, so send it back and ask the author to make it free first.";
+export const PD_EDITION_INVALID_MESSAGE = "Choose a work, or give the new work's title and original author.";
+export const PD_SERIES_MESSAGE =
+  "A public-domain edition without the editor mention can't be in a series or a bundle. Ask the author to take it out, or give the mention.";
+
+// staff_set_pd_edition / admin_approve_pd_edition's own refusals (LB499),
+// already written for staff; any other text is the generic error.
+const KNOWN_PD_RPC_ERRORS: Record<string, string> = {
+  "This live book is not a public-domain edition.": "This live book is not a public-domain edition.",
+  "A live edition stays with its work. Only its editor mention can change.":
+    "A live edition stays with its work. Only its editor mention can change.",
+  "That public-domain work no longer exists.": "That public-domain work no longer exists.",
+  "A new work needs its title and its original author.": "A new work needs its title and its original author.",
+  'Only a book whose rights choice is "public domain" can be a work\'s edition.':
+    'Only a book whose rights choice is "public domain" can be a work\'s edition.',
+  "Link this book to a public-domain work first.": PD_NOT_LINKED_APPROVE_MESSAGE,
+  "invalid public-domain edition": PD_EDITION_INVALID_MESSAGE,
+};
+
 export function mapReviewRpcError(error: { code?: string | null; message?: string | null } | null | undefined): string {
   if (error?.code === "40P01") return "Please try again.";
   if (error?.code === "LB464") return AUTHOR_SUSPENDED_APPROVE_MESSAGE;
+  if (error?.code === "LB498") return PD_NOT_LINKED_APPROVE_MESSAGE;
+  if (error?.code === "LB485") return PD_NOT_PICKED_APPROVE_MESSAGE;
+  if (error?.code === "LB487" || (error?.code === "23514" && error.message?.includes("books_pd_series_check"))) {
+    return PD_SERIES_MESSAGE;
+  }
+  if (error?.code === "23514" && error.message?.includes("books_pd_price_check")) return PD_PRICE_MESSAGE;
+  if (error?.code === "LB499") return KNOWN_PD_RPC_ERRORS[error.message?.trim() ?? ""] ?? GENERIC_REVIEW_ERROR_MESSAGE;
   const message = error?.message?.trim();
   if (!message) return GENERIC_REVIEW_ERROR_MESSAGE;
   return KNOWN_REVIEW_RPC_ERRORS[message] ?? GENERIC_REVIEW_ERROR_MESSAGE;
@@ -306,4 +341,57 @@ export function approveReadinessMessage(reason: PublishGateRefusal): string {
     case "paid_mode_required":
       return "Paid publishing isn't available right now, so this paid book can't go live.";
   }
+}
+
+// BD15 P7: the Public-domain edition box. "existing" links the book to
+// a work picked from the list, "new" creates the work, "unlink" undoes a
+// draft's link, "credit" changes only the editor mention (a live
+// edition). The RPC (staff_set_pd_edition) re-checks all of it.
+export const PD_EDITION_SAVED_MESSAGE = "Public-domain edition saved.";
+export const PD_EDITION_FORM_ERROR_MESSAGE = PD_EDITION_INVALID_MESSAGE;
+const PD_WORK_TITLE_MAX_LENGTH = 300;
+const PD_WORK_AUTHOR_MAX_LENGTH = 200;
+
+export type PdEditionFormValidation =
+  | {
+      ok: true;
+      bookId: string;
+      workId: string | null;
+      workTitle: string | null;
+      workOriginalAuthor: string | null;
+      editorCredit: boolean;
+    }
+  | { ok: false; error: string };
+
+function trimmedText(value: FormDataEntryValue | null): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
+
+export function validatePdEditionForm(formData: FormData): PdEditionFormValidation {
+  const bookId = formData.get("bookId");
+  if (!isUuid(bookId)) return { ok: false, error: GENERIC_REVIEW_ERROR_MESSAGE };
+  const editorCredit = formData.get("editorCredit") === "on";
+  const mode = formData.get("mode");
+  if (mode === "unlink") {
+    return { ok: true, bookId, workId: null, workTitle: null, workOriginalAuthor: null, editorCredit: false };
+  }
+  if (mode === "existing" || mode === "credit") {
+    const workId = formData.get("workId");
+    if (!isUuid(workId)) return { ok: false, error: PD_EDITION_FORM_ERROR_MESSAGE };
+    return { ok: true, bookId, workId, workTitle: null, workOriginalAuthor: null, editorCredit };
+  }
+  if (mode === "new") {
+    const workTitle = trimmedText(formData.get("workTitle"));
+    const workOriginalAuthor = trimmedText(formData.get("workOriginalAuthor"));
+    if (
+      !workTitle ||
+      !workOriginalAuthor ||
+      workTitle.length > PD_WORK_TITLE_MAX_LENGTH ||
+      workOriginalAuthor.length > PD_WORK_AUTHOR_MAX_LENGTH
+    ) {
+      return { ok: false, error: PD_EDITION_FORM_ERROR_MESSAGE };
+    }
+    return { ok: true, bookId, workId: null, workTitle, workOriginalAuthor, editorCredit };
+  }
+  return { ok: false, error: PD_EDITION_FORM_ERROR_MESSAGE };
 }

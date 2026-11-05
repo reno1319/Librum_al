@@ -130,7 +130,7 @@ describe("recordRightsDeclaration", () => {
   it("16a: the book's pen name is read with the session client through its own pen_names row", async () => {
     await recordRightsDeclaration(BOOK, "own_rights");
     const bookSelect = sessionCalls.find((c) => c.table === "books" && c.method === "select");
-    expect(bookSelect?.args[0]).toBe("id, title, pen:pen_names(name)");
+    expect(bookSelect?.args[0]).toBe("id, title, pen:pen_names!books_pen_name_id_fkey(name)");
   });
 
   it("16a: no pen name embed -> null, still recorded", async () => {

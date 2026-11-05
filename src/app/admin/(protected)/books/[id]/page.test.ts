@@ -56,6 +56,7 @@ const mockAdminFrom = vi.fn((table: string) => {
     is: () => chain,
     in: () => ((key = `${table}:in`), chain),
     order: () => chain,
+    limit: () => chain,
     maybeSingle: done,
     returns: done,
   };
@@ -73,6 +74,7 @@ vi.mock("../actions", () => ({
   allowBookAgainAsStaff: vi.fn(),
   approveBookReviewAsStaff: vi.fn(),
   sendBackBookReviewAsStaff: vi.fn(),
+  setPdEditionAsStaff: vi.fn(),
 }));
 
 const { default: AdminBookPage } = await import("./page");
@@ -258,6 +260,26 @@ describe("AdminBookPage", () => {
     beforeEach(() => {
       rows.books.data = { ...(rows.books.data as object), status: "draft", file_path: FILE, cover_path: COVER };
       rows.book_reviews = { data: [pending], error: null };
+    });
+
+    // BD15 P7: the Public-domain edition box shows only for a PD book.
+    it("BD15 P7: no public-domain box or pd_works read for an ordinary book", async () => {
+      const html = await render("admin");
+      expect(html).not.toContain("Public-domain edition");
+      expect(mockAdminFrom.mock.calls.some(([table]) => table === "pd_works")).toBe(false);
+    });
+
+    it("BD15 P7: an unlinked public-domain draft gets the box and a note by Approve (the database refuses LB498)", async () => {
+      rows.book_rights_declarations = {
+        data: [{ declared_at: "2026-09-01T09:00:00Z", author_public_name: "Ana Kola", pen_name: "Ana Pena", statement_text: "x", basis: "public_domain" }],
+        error: null,
+      };
+      rows.pd_works = { data: [{ id: OTHER_ID, title: "Lahuta", original_author: "Gjergj Fishta", picked_book_id: null }], error: null };
+      const html = await render("admin");
+      expect(html).toContain("Public-domain edition");
+      expect(html).toContain("Link it to a work in the Public-domain edition box first.");
+      expect(html).toContain(`value="${OTHER_ID}"`);
+      expect(html).toContain('name="editorCredit"');
     });
 
     it("books.review staff get the panel: file link, cover, three checks, Approve and Send back", async () => {

@@ -113,7 +113,7 @@ async function loadBooks(filter: ReturnType<typeof parseBooksFilter>, q: string,
 
   let query = admin
     .from("books")
-    .select("id, title, status, author_id, published_at, created_at, pen:pen_names(name), original_author", {
+    .select("id, title, status, author_id, published_at, created_at, pen:pen_names!books_pen_name_id_fkey(name), original_author", {
       count: "exact",
     });
   if (filter === "live") query = query.eq("status", "published");
@@ -162,6 +162,13 @@ export default async function AdminBooksPage({
         <p className="mt-1 text-sm text-muted">
           Every book, drafts included. Open a book to review it, see its reports and rights history, or unpublish it.
         </p>
+        {/* BD15 P7: the public-domain works and their picked editions. */}
+        <Link
+          href="/admin/books/public-domain"
+          className="focus-ring mt-1 inline-flex min-h-11 items-center text-sm text-primary underline underline-offset-2"
+        >
+          Public-domain works
+        </Link>
       </div>
 
       <form action="/admin/books" method="get" role="search" className="flex flex-col gap-2 sm:flex-row sm:items-end">

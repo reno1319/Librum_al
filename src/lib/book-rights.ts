@@ -74,7 +74,7 @@ export async function recordRightsDeclaration(
     .from("books")
     // PEN-NAMES-1 (16a): the book's pen name too, through the author's
     // own pen_names rows (RLS).
-    .select("id, title, pen:pen_names(name)")
+    .select("id, title, pen:pen_names!books_pen_name_id_fkey(name)")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .maybeSingle<{ id: string; title: string; pen: { name: string } | null }>();
