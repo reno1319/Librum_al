@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { AdultTag } from "@/components/adult-tag";
+import { descriptionSnippet } from "@/lib/book-reader-details";
 import { createClient } from "@/lib/supabase/server";
 import { ROYALTY_HEADLINE_CAPTION, ROYALTY_RULE_SENTENCE, STANDARD_ROYALTY_FROM_ALL } from "@/lib/royalty";
 import { resolveHomepageCta, computeAuthorSharePercent, type HomepageCta } from "@/lib/homepage";
@@ -89,8 +91,11 @@ const MAX_HOMEPAGE_COVERS = 8;
 
 // HOME-PICKS-1: one select and one mapping for the newest list and the
 // staff-picked fan books, so both carry the same fields and byline.
-const COVER_SELECT = "id, title, cover_path, genre, description, original_author, pen:public_pen_names(id, name)";
-type CoverRow = Pick<PublicBook, "id" | "title" | "cover_path" | "genre" | "description" | "original_author"> & {
+// BD15 P8: is_adult for the showcase's 18+ tag (Q1 a).
+const COVER_SELECT =
+  "id, title, cover_path, genre, description, original_author, is_adult, pen:public_pen_names(id, name)";
+type CoverRow = Pick<PublicBook, "id" | "title" | "cover_path" | "genre" | "description" | "original_author"> &
+  Required<Pick<PublicBook, "is_adult">> & {
   pen: PenNameRef | null;
 };
 
@@ -100,7 +105,9 @@ function toCover(supabase: SupabaseClient, b: CoverRow): Cover {
     title: b.title,
     author: resolveBookByline(b),
     genre: b.genre,
-    description: b.description,
+    isAdult: b.is_adult === true,
+    // BD15 P8: the plain text of the rich description, never its marks.
+    description: descriptionSnippet(b.description) || null,
     url: supabase.storage.from("covers").getPublicUrl(b.cover_path!).data.publicUrl,
   };
 }
@@ -159,6 +166,7 @@ type Cover = {
   title: string;
   author: string | null;
   genre: string | null;
+  isAdult: boolean;
   description: string | null;
   url: string;
 };
@@ -551,9 +559,10 @@ function PublishedWithLibrumSection({ books }: { books: Cover[] }) {
                   className="aspect-[2/3] w-28 shrink-0 self-start rounded-[3px] object-cover shadow-[0_8px_16px_-8px_rgba(0,0,0,0.45)] transition-transform duration-150 group-hover/book:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover/book:translate-y-0 sm:w-32 xl:w-36"
                 />
                 <div className="min-w-0">
-                  {book.genre && (
-                    <p className="text-xs font-semibold tracking-[0.08em] text-primary uppercase">
-                      {book.genre}
+                  {(book.genre || book.isAdult) && (
+                    <p className="flex flex-wrap items-center gap-x-2 text-xs font-semibold tracking-[0.08em] text-primary uppercase">
+                      {book.genre && <span>{book.genre}</span>}
+                      {book.isAdult && <AdultTag />}
                     </p>
                   )}
                   <h3

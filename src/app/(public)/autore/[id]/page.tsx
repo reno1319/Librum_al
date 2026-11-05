@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { AdultTag } from "@/components/adult-tag";
+import { bundleIsAdult } from "@/lib/book-reader-details";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import type { Metadata } from "next";
@@ -180,12 +182,17 @@ export default async function AuthorProfilePage({
       // columns are selected; the legacy `price_cents` is not.
       supabase
         .from("public_bundles")
-        .select("id, title, price_all")
+        // BD15 P8 (F1 Q1 b): member books' status and 18+, for the tag.
+        .select("id, title, price_all, bundle_books(books:public_books(status, is_adult))")
         .eq("pen_name_id", id)
         .eq("status", "published")
         .not("price_all", "is", null)
         .order("created_at", { ascending: false })
-        .returns<Pick<PublicBundle, "id" | "title" | "price_all">[]>(),
+        .returns<
+          (Pick<PublicBundle, "id" | "title" | "price_all"> & {
+            bundle_books: { books: Pick<PublicBook, "status" | "is_adult"> | null }[] | null;
+          })[]
+        >(),
       // PEN-NAMES-1: followers of THIS pen name (4a). pen_name_follows
       // has no public SELECT policy, so the count stays admin-only.
       admin
@@ -516,7 +523,10 @@ export default async function AuthorProfilePage({
                   href={`/paketa/${bundle.id}`}
                   className="focus-ring flex flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-surface p-4 shadow-sm hover:bg-surface-hover"
                 >
-                  <span className="font-serif font-medium">{bundle.title}</span>
+                  <span className="flex flex-wrap items-center gap-x-2">
+                    <span className="font-serif font-medium">{bundle.title}</span>
+                    {bundleIsAdult(bundle.bundle_books) && <AdultTag />}
+                  </span>
                   <span className="text-sm font-semibold text-primary">
                     {formatCatalogPriceLabel(bundle.price_all)}
                   </span>

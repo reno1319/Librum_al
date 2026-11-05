@@ -2,6 +2,7 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 import { isSupportedLanguage } from "@/lib/languages";
 import { isValidIsbn } from "@/lib/book-identifiers";
 import { authorPagePath } from "@/lib/pen-names";
+import { bookCategories, descriptionSnippet } from "@/lib/book-reader-details";
 import type { PublicBook } from "@/lib/types";
 
 // P2 (Renato 10-29): canonical links, the sitemap's per-item entries and
@@ -52,7 +53,8 @@ type BookJsonLdInput = Pick<
   | "genre"
   | "published_at"
   | "price_all"
->;
+> &
+  Partial<Pick<PublicBook, "categories">>;
 
 // schema.org Book data for a PUBLISHED book's public page. The author is
 // the book's pen name and links to its /autore/<pen name id> page --
@@ -94,7 +96,9 @@ export function buildBookJsonLd(
     bookFormat: "https://schema.org/EBook",
   };
   if (book.subtitle) data.alternativeHeadline = book.subtitle;
-  if (book.description) data.description = book.description;
+  // BD15 P8: the plain text of the rich description, never its marks.
+  const description = descriptionSnippet(book.description);
+  if (description) data.description = description;
   if (coverUrl) data.image = coverUrl;
   const penPerson = pen ? { "@type": "Person", name: pen.name, url: `${origin}${authorPagePath(pen.id)}` } : null;
   const original = originalAuthor && originalAuthor.trim() ? originalAuthor.trim() : null;
@@ -109,7 +113,10 @@ export function buildBookJsonLd(
   if (book.language && isSupportedLanguage(book.language)) data.inLanguage = book.language;
   if (book.isbn && isValidIsbn(book.isbn)) data.isbn = book.isbn.replace(/[\s-]/g, "");
   if (book.publisher) data.publisher = { "@type": "Organization", name: book.publisher };
-  if (book.genre) data.genre = book.genre;
+  // BD15 P8: every category (one stays a plain string, as before).
+  const categories = bookCategories(book);
+  if (categories.length === 1) data.genre = categories[0];
+  else if (categories.length > 1) data.genre = categories;
   if (book.published_at) data.datePublished = book.published_at.slice(0, 10);
   if (paidCheckoutOn && book.price_all !== null && book.price_all > 0) {
     data.offers = {

@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { AdultTag } from "@/components/adult-tag";
+import { bundleIsAdult, descriptionSnippet } from "@/lib/book-reader-details";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { GENRES } from "@/lib/genres";
@@ -61,7 +63,10 @@ type BookWithAuthor = PublicBook & {
 type BundleWithAuthor = Pick<PublicBundle, "id" | "title" | "price_all"> & {
   pen: PenNameRef | null;
   // REDESIGN STEP 3: member rows, for the stacked covers and the count.
-  bundle_books?: { books: Pick<PublicBook, "cover_path"> | null }[] | null;
+  // BD15 P8: is_adult and status for the bundle's 18+ tag (bundleIsAdult).
+  bundle_books?:
+    | { books: (Pick<PublicBook, "cover_path" | "status"> & Pick<PublicBook, "is_adult">) | null }[]
+    | null;
 };
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -123,7 +128,9 @@ async function fetchSearchResults(
       .select("*, pen:public_pen_names(id, name)")
       .eq("status", "published")
       .not("price_all", "is", null);
-    if (genre) query = query.eq("genre", genre);
+    // BD15 P8: a category matches a book in ANY of its (up to 3)
+    // categories, not only its primary one.
+    if (genre) query = query.contains("categories", [genre]);
     if (minPriceAll != null) query = query.gte("price_all", minPriceAll);
     if (maxPriceAll != null) query = query.lte("price_all", maxPriceAll);
     return query;
@@ -163,7 +170,11 @@ async function fetchSearchResults(
       "search_books",
       {
         search_term: term,
-        genre_filter: genre ?? null,
+        // BD15 P8: search_books() still compares the primary genre only,
+        // so the category is applied in the id re-fetch below instead
+        // (any of the 3 categories), with no database change. Known
+        // limit: the 500 candidate cap applies before the category.
+        genre_filter: null,
         min_price_cents: minPriceAll ?? null,
         max_price_cents: maxPriceAll ?? null,
         result_limit: SEARCH_CANDIDATE_LIMIT,
@@ -184,12 +195,14 @@ async function fetchSearchResults(
         // Re-fetch full rows for the matched ids the same normal way
         // every other book listing on this page already does -- the
         // RPC only ever hands back ids, never book/profile data itself.
-        const { data: fetchedBooks, error: fetchError } = await supabase
+        let matchedQuery = supabase
           .from("public_books")
           .select("*, pen:public_pen_names(id, name)")
           .eq("status", "published")
           .not("price_all", "is", null)
-          .in("id", matchedIds)
+          .in("id", matchedIds);
+        if (genre) matchedQuery = matchedQuery.contains("categories", [genre]);
+        const { data: fetchedBooks, error: fetchError } = await matchedQuery
           .returns<BookWithAuthor[]>();
 
         if (fetchError) {
@@ -285,7 +298,7 @@ async function fetchPublishedBundles(
   const { data, error } = await supabase
     .from("public_bundles")
     .select(
-      "id, title, price_all, pen:public_pen_names(id, name), bundle_books(books:public_books(cover_path))",
+      "id, title, price_all, pen:public_pen_names(id, name), bundle_books(books:public_books(cover_path, status, is_adult))",
     )
     .eq("status", "published")
     .not("price_all", "is", null)
@@ -749,10 +762,17 @@ function FeaturedBook({
           {authorName && resolveOriginalAuthor(book) && <>nga {authorName}</>}
           {authorName && book.genre && " · "}
           {book.genre}
+          {book.is_adult && (
+            <>
+              {" "}
+              <AdultTag />
+            </>
+          )}
         </p>
-        {book.description && (
+        {/* BD15 P8: the plain text of the rich description. */}
+        {descriptionSnippet(book.description) && (
           <p className="line-clamp-3 max-w-xl leading-relaxed text-muted">
-            {book.description}
+            {descriptionSnippet(book.description)}
           </p>
         )}
         <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-3">
@@ -974,8 +994,10 @@ function BundlesSection({
                   <span className="font-serif text-lg leading-snug group-hover:underline">
                     {bundle.title}
                   </span>
-                  <span className="text-[0.8125rem] text-muted">
-                    {authorName ? `${countLabel} · ${authorName}` : countLabel}
+                  <span className="flex flex-wrap items-center gap-x-2 text-[0.8125rem] text-muted">
+                    <span>{authorName ? `${countLabel} · ${authorName}` : countLabel}</span>
+                    {/* BD15 P8 (F1 Q1 b): 18+ when any published book in it is. */}
+                    {bundleIsAdult(members) && <AdultTag />}
                   </span>
                   <span className={`font-bold ${bundle.price_all === 0 ? "text-[#2f6b4f]" : "text-primary"}`}>
                     {formatCatalogPriceLabel(bundle.price_all)}

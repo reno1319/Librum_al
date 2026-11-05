@@ -73,6 +73,19 @@ beforeEach(() => {
 });
 
 describe("home cover fan", () => {
+  // BD15 P8: the showcase reads the plain text of the rich description,
+  // and an 18+ book carries the 18+ tag (Q1 a).
+  it("BD15 P8: showcase text has no formatting marks; an 18+ book is tagged", async () => {
+    rows = Array.from({ length: 9 }, (_, i) =>
+      i + 1 === 6 ? book(6, { description: "Një **roman**.\n\n- pika", is_adult: true }) : book(i + 1),
+    );
+    const html = await render();
+    const showcase = html.slice(html.indexOf(">Botuar me Librum</h2>"));
+    expect(showcase).toContain("Një roman. • pika");
+    expect(showcase).not.toContain("**");
+    expect(showcase.match(/aria-hidden="true">18\+<\/span>/g)?.length).toBe(1);
+  });
+
   it("no slots filled: the three newest (newest in the middle), showcase = the next three", async () => {
     expect(await fanAndShowcase()).toEqual({
       fan: ["Book 08", "Book 09", "Book 07"],

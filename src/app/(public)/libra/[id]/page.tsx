@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { cache } from "react";
+import { cache, Fragment } from "react";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -58,6 +58,19 @@ import { bookWhatsappShareHref } from "@/lib/contact";
 import { bookPagePath, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
 import { pageErrorMessage } from "@/lib/page-messages";
 import { editorPath } from "@/lib/book-editor-copy";
+import {
+  ADULT_DETAIL_LABEL,
+  ADULT_DETAIL_VALUE,
+  EDITION_LABEL,
+  READING_AGE_LABEL,
+  bookCategories,
+  categoriesLabel,
+  descriptionSnippet,
+  editionValue,
+  isYoungReaderBook,
+  readingAgeValue,
+} from "@/lib/book-reader-details";
+import { BookDescriptionView } from "@/components/book-description-view";
 import {
   ANONYMOUS_REVIEWER_NAME,
   AUTHOR_REVIEWER_LABEL,
@@ -222,8 +235,10 @@ export async function generateMetadata({
   // "<title> — Librum" form unchanged (no Open Graph format change).
   const title = book.title;
   const ogTitle = `${book.title} — Librum`;
-  const description = book.description
-    ? truncateForMetadata(book.description, METADATA_DESCRIPTION_MAX)
+  // BD15 P8: the plain text of the rich description, never its marks.
+  const plainDescription = descriptionSnippet(book.description);
+  const description = plainDescription
+    ? truncateForMetadata(plainDescription, METADATA_DESCRIPTION_MAX)
     : undefined;
   // Local URL construction only -- getPublicUrl() makes no network call,
   // so creating a client here purely for this doesn't reintroduce a
@@ -493,15 +508,18 @@ export default async function BookDetailPage({
           .limit(8)
           .returns<BookWithAuthor[]>()
       : Promise.resolve({ data: null }),
-    book.genre
+    // BD15 P8 (Q2 a): books sharing ANY of this book's categories; on a
+    // book for children or teens, never an 18+ book.
+    bookCategories(book).length > 0
       ? (() => {
-          const sameGenre = supabase
+          let sameGenre = supabase
             .from("public_books")
             .select("*, pen:public_pen_names(id, name)")
             .eq("status", "published")
             .not("price_all", "is", null)
-            .eq("genre", book.genre)
+            .overlaps("categories", bookCategories(book))
             .neq("id", id);
+          if (isYoungReaderBook(book)) sameGenre = sameGenre.eq("is_adult", false);
           // PEN-NAMES-2 (L15): leave out the same pen name only. Leaving
           // out the whole account would let two shelves be compared to
           // tell which pen names share an account. BD15 P7: a
@@ -1113,9 +1131,12 @@ export default async function BookDetailPage({
           {book.description && (
             <section className="mt-10">
               <h2 className={SECTION_HEADING}>Rreth librit</h2>
-              <p className="mt-4 max-w-[42.5rem] leading-relaxed whitespace-pre-line text-foreground/90">
-                {book.description}
-              </p>
+              {/* BD15 P8: the rich description (bold, italic, lists),
+                  parsed -- never rendered as HTML. */}
+              <BookDescriptionView
+                stored={book.description}
+                className="mt-4 max-w-[42.5rem] leading-relaxed text-foreground/90"
+              />
               {showSample && (
                 <div className="mt-4">
                   <BookSampleReader bookId={book.id} bookTitle={book.title} variant="text" />
@@ -1151,10 +1172,36 @@ export default async function BookDetailPage({
                   <dd className={DETAIL_VALUE_CLASSES}>{getLanguageLabel(book.language)}</dd>
                 </div>
               )}
-              {book.genre && (
+              {/* BD15 P8 (Q3 a): every category, each a link to that
+                  category in Libraria; then 18+ or the reading age. */}
+              {bookCategories(book).length > 0 && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Zhanri</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{book.genre}</dd>
+                  <dt className={DETAIL_LABEL_CLASSES}>{categoriesLabel(bookCategories(book).length)}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>
+                    {bookCategories(book).map((category, index) => (
+                      <Fragment key={category}>
+                        {index > 0 && ", "}
+                        <Link
+                          href={buildBookstoreHref({}, { genre: category })}
+                          className={INLINE_LINK_CLASSES}
+                        >
+                          {category}
+                        </Link>
+                      </Fragment>
+                    ))}
+                  </dd>
+                </div>
+              )}
+              {book.is_adult && (
+                <div>
+                  <dt className={DETAIL_LABEL_CLASSES}>{ADULT_DETAIL_LABEL}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{ADULT_DETAIL_VALUE}</dd>
+                </div>
+              )}
+              {readingAgeValue(book) && (
+                <div>
+                  <dt className={DETAIL_LABEL_CLASSES}>{READING_AGE_LABEL}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{readingAgeValue(book)}</dd>
                 </div>
               )}
               {seriesInfo && (
@@ -1174,10 +1221,11 @@ export default async function BookDetailPage({
                   <dd className={DETAIL_VALUE_CLASSES}>{book.publisher}</dd>
                 </div>
               )}
-              {book.edition && (
+              {/* BD15 P8: the edition number, else the old free text. */}
+              {editionValue(book) && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Botimi</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{book.edition}</dd>
+                  <dt className={DETAIL_LABEL_CLASSES}>{EDITION_LABEL}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{editionValue(book)}</dd>
                 </div>
               )}
               {book.original_publication_date && (
