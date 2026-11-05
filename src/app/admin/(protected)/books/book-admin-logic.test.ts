@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AI_ANSWER_LABELS,
+  adminBookDetailRows,
   ALLOWED_AGAIN_SUCCESS_MESSAGE,
   BOOKS_FILTERS,
   CHOOSE_REASON_MESSAGE,
@@ -272,5 +274,65 @@ describe("in review: labels, the approve and send-back forms, RPC errors", () =>
     for (const reason of ["missing_all_price", "missing_description", "missing_rights", "rights_unavailable", "paid_mode_required"] as const) {
       expect(approveReadinessMessage(reason).length).toBeGreaterThan(10);
     }
+  });
+});
+
+describe("adminBookDetailRows (walkthrough F1+F2)", () => {
+  const base = { is_adult: false };
+  const value = (rows: { label: string; value: string }[], label: string) => rows.find((r) => r.label === label)?.value;
+
+  it("maps the AI answer: yes, no, never answered, unreadable", () => {
+    const of = (aiUsed: boolean | null | undefined) =>
+      adminBookDetailRows({ book: base, aiUsed, seriesTitle: null, contributors: [] })[0];
+    expect(of(true)).toEqual({ label: "AI used", value: AI_ANSWER_LABELS.yes });
+    expect(of(false)).toEqual({ label: "AI used", value: "No" });
+    expect(of(null)).toEqual({ label: "AI used", value: "Not answered" });
+    expect(of(undefined)).toEqual({ label: "AI used", value: "Couldn’t load the AI answer.", unreadable: true });
+  });
+
+  it("falls back to genre, the legacy edition, and says Not set / None when empty", () => {
+    const rows = adminBookDetailRows({
+      book: { ...base, categories: [], genre: "Poezi", edition: " Botimi i dytë ", keywords: " , ", publisher: "  ", isbn: null },
+      aiUsed: null,
+      seriesTitle: null,
+      contributors: [],
+    });
+    expect(value(rows, "Category")).toBe("Poezi");
+    expect(value(rows, "Edition")).toBe("Botimi i dytë");
+    expect(value(rows, "Keywords")).toBe("None");
+    expect(value(rows, "Publisher")).toBe("Not set");
+    expect(value(rows, "ISBN")).toBe("Not set");
+    expect(value(rows, "Reading age")).toBe("Not set");
+    expect(value(rows, "18+")).toBe("No");
+    expect(value(rows, "Series")).toBe("None");
+  });
+
+  it("names the series with its number, or alone; a gone series is None; unreadable says so", () => {
+    const series = (book: object, seriesTitle: string | null | undefined) =>
+      adminBookDetailRows({ book: { ...base, ...book }, aiUsed: null, seriesTitle, contributors: [] }).find((r) => r.label === "Series");
+    expect(series({ series_id: "s1", series_position: 2 }, "Trilogjia")?.value).toBe("Trilogjia, book 2");
+    expect(series({ series_id: "s1", series_position: null }, "Trilogjia")?.value).toBe("Trilogjia");
+    expect(series({ series_id: "s1" }, null)?.value).toBe("None");
+    expect(series({ series_id: null }, "Trilogjia")?.value).toBe("None");
+    expect(series({ series_id: "s1" }, undefined)).toEqual({ label: "Series", value: "Couldn’t load the series.", unreadable: true });
+  });
+
+  it("lists contributors with their role, or says they couldn't be read", () => {
+    const of = (contributors: { name: string; role: string }[] | undefined) =>
+      adminBookDetailRows({ book: base, aiUsed: null, seriesTitle: null, contributors }).find((r) => r.label === "Contributors");
+    expect(of([{ name: "A", role: "Editor" }, { name: "B", role: "Co-Author" }])?.value).toBe("A (Editor), B (Co-Author)");
+    expect(of([])?.value).toBe("None");
+    expect(of(undefined)?.unreadable).toBe(true);
+  });
+
+  it("uses Categories for more than one, and shows the reading age with a plus", () => {
+    const rows = adminBookDetailRows({
+      book: { ...base, categories: ["Romancë", "Thriller", "Romancë"], reading_age_min: 12 },
+      aiUsed: null,
+      seriesTitle: null,
+      contributors: [],
+    });
+    expect(value(rows, "Categories")).toBe("Romancë, Thriller");
+    expect(value(rows, "Reading age")).toBe("12+");
   });
 });

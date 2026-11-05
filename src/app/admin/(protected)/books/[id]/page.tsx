@@ -17,7 +17,7 @@ import { Alert } from "@/components/ui/alert";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import type { Metadata } from "next";
 import { formatActivityTime, formatRelativeTime, formatTodayDate } from "../../../admin-landing-logic";
-import { describeBookEyebrow, isUuid, resolveTakedownReport } from "../book-admin-logic";
+import { adminBookDetailRows, describeBookEyebrow, isUuid, resolveTakedownReport } from "../book-admin-logic";
 import {
   allowBookAgainAsStaff,
   approveBookReviewAsStaff,
@@ -83,6 +83,17 @@ type AdminBook = {
   is_adult: boolean;
   pd_work_id: string | null;
   pd_editor_credit: boolean;
+  // Walkthrough F2: the details staff check (read-only box).
+  categories: string[] | null;
+  genre: string | null;
+  reading_age_min: number | null;
+  edition_number: number | null;
+  edition: string | null;
+  series_id: string | null;
+  series_position: number | null;
+  keywords: string | null;
+  publisher: string | null;
+  isbn: string | null;
 };
 
 type PdWork = { id: string; title: string; original_author: string; picked_book_id: string | null };
@@ -159,12 +170,12 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();
 
-  const [profileResult, reportsResult, rightsResult, takedownResult, bundlesResult, reviewsResult, suspensionResult] = await Promise.all([
+  const [profileResult, reportsResult, rightsResult, takedownResult, bundlesResult, reviewsResult, suspensionResult, aiResult, seriesResult, contributorsResult] = await Promise.all([
     admin
       .from("profiles")
       .select("display_name, public_author_name")
@@ -209,7 +220,38 @@ export default async function AdminBookPage({
       .eq("user_id", book.author_id)
       .is("lifted_at", null)
       .maybeSingle<{ id: string }>(),
+    // Walkthrough F1: the author's AI answer (staff only, service role).
+    admin
+      .from("book_ai_disclosures")
+      .select("ai_used")
+      .eq("book_id", book.id)
+      .maybeSingle<{ ai_used: boolean }>(),
+    // Walkthrough F2: the series title and the contributors.
+    book.series_id
+      ? admin.from("series").select("title").eq("id", book.series_id).maybeSingle<{ title: string }>()
+      : Promise.resolve({ data: null, error: null }),
+    admin
+      .from("book_contributors")
+      .select("name, role")
+      .eq("book_id", book.id)
+      .order("created_at", { ascending: true })
+      .returns<{ name: string; role: string }[]>(),
   ]);
+  for (const [what, result] of [
+    ["AI answer", aiResult],
+    ["series", seriesResult],
+    ["contributors", contributorsResult],
+  ] as const) {
+    if (result.error) console.error(`admin book: the ${what} read failed`, { error: result.error });
+  }
+  const detailRows = adminBookDetailRows({
+    book,
+    aiUsed: aiResult.error ? undefined : (aiResult.data?.ai_used ?? null),
+    // A series id with no row reads as "None" (on delete set null).
+    seriesTitle: seriesResult.error ? undefined : (seriesResult.data?.title ?? null),
+    contributors: contributorsResult.error ? undefined : (contributorsResult.data ?? []),
+  });
+  const detailDescription = descriptionPlainText(book.description ?? "").trim();
   if (suspensionResult.error) {
     console.error("admin book: the author suspension read failed", { error: suspensionResult.error });
   }
@@ -448,6 +490,31 @@ export default async function AdminBookPage({
             )}
           </div>
         </div>
+
+        <section aria-labelledby="book-details" className={SECTION_CLASSES}>
+          <h2 id="book-details" className={SECTION_HEADING_CLASSES}>
+            Book details
+          </h2>
+          {liveUpdate && pendingReview && (
+            <p className="mb-2.5 text-sm text-muted">
+              What readers see now. The waiting changes are under What changed.
+            </p>
+          )}
+          <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[max-content_1fr]">
+            {detailRows.map((row) => (
+              <div key={row.label} className="contents">
+                <dt className="font-semibold">{row.label}</dt>
+                <dd className={row.unreadable ? "break-words text-red-700" : "break-words"}>{row.value}</dd>
+              </div>
+            ))}
+            <div className="contents">
+              <dt className="font-semibold">Description</dt>
+              <dd className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words">
+                {detailDescription || "None"}
+              </dd>
+            </div>
+          </dl>
+        </section>
 
         <section aria-labelledby="book-open-reports" className={SECTION_CLASSES}>
           <h2 id="book-open-reports" className={SECTION_HEADING_CLASSES}>

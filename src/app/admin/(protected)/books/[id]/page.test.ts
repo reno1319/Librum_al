@@ -45,6 +45,8 @@ type Result = { data: unknown; error: { message: string } | null };
 let rows: Record<string, Result> = {};
 // ADMIN-3 r2: the columns each read names.
 const selects: { table: string; columns: string }[] = [];
+// Walkthrough F1+F2: the .eq() filters each read names.
+const eqs: { table: string; column: string; value: unknown }[] = [];
 const mockAdminFrom = vi.fn((table: string) => {
   // ADMIN-3-REVIEW: a `.in()` read (the review deciders' names) answers
   // from "<table>:in" when a test sets one.
@@ -52,7 +54,7 @@ const mockAdminFrom = vi.fn((table: string) => {
   const done = () => Promise.resolve(rows[key] ?? rows[table] ?? { data: null, error: null });
   const chain = {
     select: (columns?: string) => (selects.push({ table, columns: columns ?? "" }), chain),
-    eq: () => chain,
+    eq: (column: string, value: unknown) => (eqs.push({ table, column, value }), chain),
     is: () => chain,
     in: () => ((key = `${table}:in`), chain),
     order: () => chain,
@@ -567,6 +569,106 @@ describe("AdminBookPage", () => {
     it("a book never sent for review says so", async () => {
       rows.book_reviews = { data: [], error: null };
       expect(await render("admin")).toContain("Never sent for review.");
+    });
+  });
+
+  // ============================================================
+  // Walkthrough F1+F2 (Renato 11-05, a): the read-only Book details box,
+  // on every staff book page, for every staff role.
+  // ============================================================
+  describe("book details (walkthrough F1+F2)", () => {
+    const SERIES_ID = "44444444-4444-4444-8444-444444444444";
+    beforeEach(() => {
+      selects.length = 0;
+      eqs.length = 0;
+    });
+    const full = () => {
+      rows.books.data = {
+        ...(rows.books.data as object),
+        description: "**Një** histori e gjatë.",
+        is_adult: true,
+        categories: ["Romancë", "Thriller"],
+        genre: "Romancë",
+        reading_age_min: 18,
+        edition_number: 2,
+        edition: null,
+        series_id: SERIES_ID,
+        series_position: 3,
+        keywords: "dashuri, Tiranë, dashuri",
+        publisher: "Shtëpia Test",
+        isbn: "9780000000002",
+      };
+      rows.series = { data: { title: "Trilogjia" }, error: null };
+      rows.book_contributors = {
+        data: [
+          { name: "Bora Test", role: "Illustrator" },
+          { name: "Dritë Test", role: "Translator" },
+        ],
+        error: null,
+      };
+      rows.book_ai_disclosures = { data: { ai_used: true }, error: null };
+    };
+
+    it("shows every detail and the AI answer, even to a role that may only look", async () => {
+      full();
+      for (const role of ["moderator", "viewer"]) {
+        const html = await render(role);
+        expect(html).toContain(">Book details<");
+        expect(html).toContain("<dt class=\"font-semibold\">AI used</dt><dd class=\"break-words\">Yes, AI was used</dd>");
+        expect(html).toContain("Romancë, Thriller");
+        expect(html).toContain("<dt class=\"font-semibold\">18+</dt><dd class=\"break-words\">Yes</dd>");
+        expect(html).toContain("<dt class=\"font-semibold\">Reading age</dt><dd class=\"break-words\">18+</dd>");
+        expect(html).toContain("Trilogjia, book 3");
+        expect(html).toContain("<dt class=\"font-semibold\">Edition</dt><dd class=\"break-words\">2</dd>");
+        expect(html).toContain("Bora Test (Illustrator), Dritë Test (Translator)");
+        expect(html).toContain("dashuri, Tiranë</dd>");
+        expect(html).toContain("Shtëpia Test");
+        expect(html).toContain("9780000000002");
+        // Plain text: no "**" marks.
+        expect(html).toContain("Një histori e gjatë.");
+        expect(html).not.toContain("**Një**");
+      }
+      // The AI answer is read by book id from the staff-only table.
+      expect(selects).toContainEqual({ table: "book_ai_disclosures", columns: "ai_used" });
+      expect(selects).toContainEqual({ table: "book_contributors", columns: "name, role" });
+      expect(selects).toContainEqual({ table: "series", columns: "title" });
+      expect(eqs).toContainEqual({ table: "book_ai_disclosures", column: "book_id", value: BOOK_ID });
+      expect(eqs).toContainEqual({ table: "book_contributors", column: "book_id", value: BOOK_ID });
+      expect(eqs).toContainEqual({ table: "series", column: "id", value: SERIES_ID });
+      const bookRead = selects.find((s) => s.table === "books")?.columns ?? "";
+      for (const column of ["categories", "genre", "reading_age_min", "edition_number", "edition", "series_id", "series_position", "keywords", "publisher", "isbn"]) {
+        expect(bookRead.split(", ")).toContain(column);
+      }
+      // Not waiting for review: no "waiting changes" note.
+      expect(await render("moderator")).not.toContain("The waiting changes are under What changed.");
+    });
+
+    it("says No and Not answered, and None / Not set for empty values", async () => {
+      rows.book_ai_disclosures = { data: { ai_used: false }, error: null };
+      let html = await render("moderator");
+      expect(html).toContain("AI used</dt><dd class=\"break-words\">No</dd>");
+      rows.book_ai_disclosures = { data: null, error: null };
+      html = await render("moderator");
+      expect(html).toContain("AI used</dt><dd class=\"break-words\">Not answered</dd>");
+      expect(html).toContain("Series</dt><dd class=\"break-words\">None</dd>");
+      expect(html).toContain("Contributors</dt><dd class=\"break-words\">None</dd>");
+      expect(html).toContain("ISBN</dt><dd class=\"break-words\">Not set</dd>");
+      expect(html).toContain("Description</dt><dd class=\"max-h-48 overflow-y-auto whitespace-pre-wrap break-words\">None</dd>");
+      // No series id: the series is never read.
+      expect(selects.some((s) => s.table === "series")).toBe(false);
+    });
+
+    it("says when the AI answer, series or contributors can't be read, never None", async () => {
+      full();
+      rows.book_ai_disclosures = { data: null, error: { message: "boom" } };
+      rows.series = { data: null, error: { message: "boom" } };
+      rows.book_contributors = { data: null, error: { message: "boom" } };
+      const html = await render("moderator");
+      expect(html).toContain("<dd class=\"break-words text-red-700\">Couldn’t load the AI answer.</dd>");
+      expect(html).toContain("<dd class=\"break-words text-red-700\">Couldn’t load the series.</dd>");
+      expect(html).toContain("<dd class=\"break-words text-red-700\">Couldn’t load the contributors.</dd>");
+      expect(html).not.toContain("Not answered");
+      expect(html).not.toContain("boom");
     });
   });
 });
