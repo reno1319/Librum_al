@@ -117,3 +117,25 @@ describe("Book Detail: no exposure of internal/private fields", () => {
     expect(dlBlock2).not.toContain("cover_path");
   });
 });
+
+// REVIEW-DATE (Renato 11-05): each public review shows the day it was
+// first written, from public_reviews.created_at, via the shared Tirana
+// date helper -- never a raw ISO string or the runtime's own locale.
+describe("Book Detail: review date", () => {
+  const reviewItem = block("{allReviews.map((review) => (", "</li>");
+
+  it("renders the review's created_at through formatTimestampAsDate inside a <time>", () => {
+    expect(reviewItem).toContain("<time");
+    expect(reviewItem).toContain("dateTime={review.created_at}");
+    expect(reviewItem).toContain("{formatTimestampAsDate(review.created_at)}");
+    expect(reviewItem).not.toContain("toLocaleDateString");
+    // never the raw ISO string as visible text
+    expect(reviewItem).not.toMatch(/>\s*\{review\.created_at\}/);
+  });
+
+  it("the public reviews read still selects created_at from public_reviews", () => {
+    expect(source).toMatch(
+      /from\("public_reviews"\)\s*\.select\("[^"]*\bcreated_at\b[^"]*"\)/,
+    );
+  });
+});
