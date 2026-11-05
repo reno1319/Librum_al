@@ -9,6 +9,7 @@ import {
   BOOK_ACTIONS_HEADING,
   BOOK_ACTIONS_ID,
   DELETE_NOTE,
+  LIVE_DELETE_NOTE,
   DRAFT_IN_REVIEW_NOTE,
   LIVE_IN_REVIEW_NOTE,
   LIVE_IN_REVIEW_PUBLISHING_NOTE,
@@ -167,6 +168,9 @@ export function BookActionsBox({
       <div className="mt-4 border-t border-border pt-4">
         {takenDown ? (
           <Alert variant="warning">{TAKEN_DOWN_DELETE_MESSAGE}</Alert>
+        ) : live ? (
+          // P6 Q4 a: no Delete on a live book; deleteBook refuses it too.
+          <p className="text-sm text-muted">{LIVE_DELETE_NOTE}</p>
         ) : (
           <>
             <p className="text-sm text-muted">{DELETE_NOTE}</p>

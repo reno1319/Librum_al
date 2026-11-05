@@ -54,6 +54,7 @@ import {
   NO_CHANGES_TO_SEND_MESSAGE,
   UNPUBLISHED_MESSAGE,
   BOOK_DELETED_MESSAGE,
+  LIVE_DELETE_REFUSED_MESSAGE,
   editorPath,
 } from "@/lib/book-editor-copy";
 import {
@@ -2075,13 +2076,22 @@ export async function deleteBook(bookId: string) {
   // mismatch stops here, before any write.
   const { data: book, error: bookError } = await supabase
     .from("books")
-    .select("id, author_id, cover_path, file_path")
+    .select("id, author_id, status, cover_path, file_path")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .single();
 
   if (bookError || !book || book.id !== bookId || book.author_id !== user.id) {
     redirect("/dashboard");
+  }
+
+  // Renato 11-05 (P6 Q4 a): only a draft is ever deleted. A live book is
+  // taken off sale first ("Hiqeni nga shitja"); the editor and the
+  // Dashboard menu hide Delete on one, and this refuses a direct POST.
+  // The delete below also filters on status = draft, so a book Librum
+  // approves after this read is not deleted either.
+  if (book.status !== "draft") {
+    redirect(`/dashboard?error=${encodeURIComponent(LIVE_DELETE_REFUSED_MESSAGE)}`);
   }
 
   // ADMIN-2-TAKEDOWN (M5, Renato's Q8 = a): a taken-down book can't be
@@ -2182,6 +2192,7 @@ export async function deleteBook(bookId: string) {
     .delete()
     .eq("id", book.id)
     .eq("author_id", user.id)
+    .eq("status", "draft")
     .select("id");
 
   if (deleteError) {
