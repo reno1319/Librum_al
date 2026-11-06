@@ -25,27 +25,40 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: () => Promise.resolve({ 
 
 type Result = { data: unknown; error: unknown };
 let adminRows: Record<string, Result> = {};
+// BD15 P5b-2: later reads of a table (the book re-read after a live
+// approval), taken in order before adminRows.
+let adminRowQueue: Record<string, Result[]> = {};
+const mockCoverRemove = vi.fn(async (_paths: string[]) => ({ data: [], error: null }));
 const mockGetUserById = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: (table: string) => {
-      const done = () => Promise.resolve(adminRows[table] ?? { data: null, error: null });
+      const done = () => {
+        const queued = adminRowQueue[table];
+        if (queued && queued.length > 0 && adminRowsRead[table]) return Promise.resolve(queued.shift() as Result);
+        adminRowsRead[table] = true;
+        return Promise.resolve(adminRows[table] ?? { data: null, error: null });
+      };
       const chain = { select: () => chain, eq: () => chain, in: () => chain, maybeSingle: done, returns: done };
       return chain;
     },
+    storage: { from: (bucket: string) => ({ remove: (paths: string[]) => mockCoverRemove([bucket, ...paths]) }) },
     auth: { admin: { getUserById: (id: string) => mockGetUserById(id) } },
   }),
 }));
+let adminRowsRead: Record<string, boolean> = {};
 
 const mockSendEmail = vi.fn();
 // ADMIN-3-REVIEW: the review emails, the followers email, the rights
 // read, the paid permission and the retention cleanup.
 const mockApprovedEmail = vi.fn();
+const mockChangesApprovedEmail = vi.fn();
 const mockSentBackEmail = vi.fn();
 const mockNewBookEmails = vi.fn();
 vi.mock("@/lib/email", () => ({
   sendBookTakedownEmail: (to: string, args: unknown) => mockSendEmail(to, args),
   sendBookApprovedEmail: (to: string, args: unknown) => mockApprovedEmail(to, args),
+  sendBookChangesApprovedEmail: (to: string, args: unknown) => mockChangesApprovedEmail(to, args),
   sendBookSentBackEmail: (to: string, args: unknown) => mockSentBackEmail(to, args),
   sendNewBookEmails: (admin: unknown, args: unknown) => mockNewBookEmails(admin, args),
 }));
@@ -74,9 +87,8 @@ vi.mock("@/lib/book-reviews", () => ({
   removeUnretainedManuscripts: (...args: unknown[]) => mockRetention(...args),
 }));
 
-const { unpublishBookAsStaff, allowBookAgainAsStaff, approveBookReviewAsStaff, sendBackBookReviewAsStaff } = await import(
-  "./actions"
-);
+const { unpublishBookAsStaff, allowBookAgainAsStaff, approveBookReviewAsStaff, sendBackBookReviewAsStaff, setPdEditionAsStaff } =
+  await import("./actions");
 
 const BOOK_ID = "22222222-2222-4222-8222-222222222222";
 const REPORT_ID = "11111111-1111-4111-8111-111111111111";
@@ -248,7 +260,8 @@ const REVIEW_ID = "55555555-5555-4555-8555-555555555555";
 const AUTHOR_ID = "66666666-6666-4666-8666-666666666666";
 const FILE = `${AUTHOR_ID}/${BOOK_ID}/0f0e0d0c-0b0a-4908-8706-050403020100.epub`;
 const COVER = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
-const ALL_CHECKS = { cover_is_fine: "on", file_opens: "on", not_someone_elses_work: "on", rights_declared: "on" };
+// BD15 P5b-3a (Renato 11-04, b): three staff boxes.
+const ALL_CHECKS = { cover_is_fine: "on", file_opens: "on", rights_ok: "on" };
 
 function resetReviewMocks(): void {
   mockRedirect.mockClear();
@@ -257,6 +270,10 @@ function resetReviewMocks(): void {
   mockRpc.mockReset().mockResolvedValue({ data: true, error: null });
   mockGetUserById.mockReset().mockResolvedValue({ data: { user: { email: "ana@example.com" } } });
   mockApprovedEmail.mockReset().mockResolvedValue(undefined);
+  mockChangesApprovedEmail.mockReset().mockResolvedValue(undefined);
+  mockCoverRemove.mockClear();
+  adminRowQueue = {};
+  adminRowsRead = {};
   mockSentBackEmail.mockReset().mockResolvedValue(undefined);
   mockNewBookEmails.mockReset().mockResolvedValue(undefined);
   mockAfterRuns.length = 0;
@@ -302,7 +319,7 @@ describe("approveBookReviewAsStaff", () => {
     f.delete("file_opens");
     const target = await redirectOf(() => approveBookReviewAsStaff(f));
     expect(mockRequireStaff).toHaveBeenCalledWith("books.review");
-    expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent("Tick all four checks before you approve.")}`);
+    expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent("Tick all three checks before you approve.")}`);
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
@@ -395,6 +412,39 @@ describe("approveBookReviewAsStaff", () => {
     expect(mockRetention).not.toHaveBeenCalled();
   });
 
+  // BD15 P5b-2: a live book's approved changes.
+  const OLD_COVER = "0a0a0a0a-0b0b-4c0c-8d0d-0e0e0e0e0e0e/cover.jpg";
+  const liveBook = () => {
+    adminRows.books = { data: { ...(adminRows.books.data as object), status: "published", cover_path: OLD_COVER }, error: null };
+  };
+  it("a live book: the changes email, no followers email, and the replaced ballinë removed once the book names the new one", async () => {
+    liveBook();
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    adminRowQueue.books = [{ data: { cover_path: COVER }, error: null }];
+    const target = await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    await settleAfterTasks();
+    expect(target).toContain("?success=");
+    expect(mockChangesApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID });
+    expect(mockApprovedEmail).not.toHaveBeenCalled();
+    expect(mockNewBookEmails).not.toHaveBeenCalled();
+    expect(mockCoverRemove).toHaveBeenCalledWith(["covers", OLD_COVER]);
+  });
+
+  it("a live book whose re-read does not name the new ballinë keeps the old one", async () => {
+    liveBook();
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    adminRowQueue.books = [{ data: { cover_path: OLD_COVER }, error: null }];
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(mockCoverRemove).not.toHaveBeenCalled();
+  });
+
+  it("a live book with an unchanged ballinë removes nothing", async () => {
+    liveBook();
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    await redirectOf(() => approveBookReviewAsStaff(approveForm({ coverPath: OLD_COVER })));
+    expect(mockCoverRemove).not.toHaveBeenCalled();
+  });
+
   it("still reports success when the emails fail afterwards", async () => {
     mockNewBookEmails.mockRejectedValue(new Error("smtp"));
     mockApprovedEmail.mockRejectedValue(new Error("smtp"));
@@ -404,6 +454,13 @@ describe("approveBookReviewAsStaff", () => {
 
 describe("sendBackBookReviewAsStaff", () => {
   beforeEach(resetReviewMocks);
+  it("BD15 P5b-2: a live book's email says it stays on sale", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    adminRows.books = { data: { ...(adminRows.books.data as object), status: "published" }, error: null };
+    await redirectOf(() => sendBackBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, reason: "broken_file", message: "x" })));
+    expect(mockSentBackEmail).toHaveBeenCalledWith("ana@example.com", expect.objectContaining({ live: true }));
+  });
+
   const sendBackForm = (extra: Record<string, string> = {}) =>
     form({ reviewId: REVIEW_ID, bookId: BOOK_ID, reason: "broken_file", message: " Fix the file. ", ...extra });
 
@@ -430,6 +487,7 @@ describe("sendBackBookReviewAsStaff", () => {
       title: "Kënga e fundit",
       reasonLabel: "Skedar i gabuar ose i dëmtuar",
       message: "Fix the file.",
+      live: false,
     });
     expect(mockRetention).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
       authorId: AUTHOR_ID,
@@ -455,5 +513,141 @@ describe("sendBackBookReviewAsStaff", () => {
     expect(await redirectOf(() => sendBackBookReviewAsStaff(sendBackForm()))).toBe(
       `/login?next=${encodeURIComponent(`/admin/books/${BOOK_ID}`)}`,
     );
+  });
+});
+
+// BD15 P7 (Renato 11-05, Q1-Q4 a): public-domain editions.
+describe("BD15 P7: approving a public-domain edition", () => {
+  beforeEach(resetReviewMocks);
+  const approveForm = () => form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: FILE, coverPath: COVER, ...ALL_CHECKS });
+  const WORK_ID = "55555555-5555-4555-8555-555555555555";
+  const withEdition = (credit: boolean) => {
+    const row = adminRows.books.data as Record<string, unknown>;
+    adminRows.books = { data: { ...row, pd_work_id: WORK_ID, pd_editor_credit: credit }, error: null };
+  };
+
+  it("a linked book goes through admin_approve_pd_edition (pick + swap), with the same arguments", async () => {
+    withEdition(false);
+    expect(await redirectOf(() => approveBookReviewAsStaff(approveForm()))).toContain("?success=");
+    expect(mockRpc).toHaveBeenCalledWith("admin_approve_pd_edition", {
+      p_review_id: REVIEW_ID,
+      p_file_path: FILE,
+      p_cover_path: COVER,
+      p_price_all: 0,
+      p_checklist: { cover_is_fine: true, file_opens: true, not_someone_elses_work: true, rights_declared: true },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/books/public-domain");
+  });
+
+  it("an uncredited edition's first publication emails no follower of its uploader", async () => {
+    withEdition(false);
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    await settleAfterTasks();
+    expect(mockNewBookEmails).not.toHaveBeenCalled();
+    expect(mockApprovedEmail).toHaveBeenCalledOnce();
+  });
+
+  it("a credited edition's first publication emails followers as usual", async () => {
+    withEdition(true);
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    await settleAfterTasks();
+    expect(mockNewBookEmails).toHaveBeenCalledOnce();
+  });
+
+  it("an unlinked book still uses the plain approval", async () => {
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(mockRpc).toHaveBeenCalledWith("admin_approve_book_review", expect.anything());
+  });
+
+  it.each([
+    [{ code: "LB498", message: "x" }, "Link it to a work in the Public-domain edition box"],
+    [{ code: "LB485", message: "x" }, "can only go live as that work's edition"],
+    [{ code: "LB499", message: "Link this book to a public-domain work first." }, "Link it to a work"],
+    [{ code: "LB499", message: "<script>raw</script>" }, "Something went wrong"],
+    // Audit r1 N4.
+    [{ code: "23514", message: 'new row for relation "books" violates check constraint "books_pd_price_check"' }, "This book has a price."],
+    [{ code: "23514", message: 'new row for relation "books" violates check constraint "books_pd_series_check"' }, "can't be in a series"],
+  ])("maps %o", async (error, text) => {
+    withEdition(false);
+    mockRpc.mockResolvedValue({ data: null, error });
+    const target = decodeURIComponent(await redirectOf(() => approveBookReviewAsStaff(approveForm())));
+    expect(target).toContain("?error=");
+    if (text === "Something went wrong") expect(target).not.toContain("<script>");
+    else expect(target).toContain(text);
+    expect(mockApprovedEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("BD15 P7: setPdEditionAsStaff", () => {
+  beforeEach(resetReviewMocks);
+  const WORK_ID = "55555555-5555-4555-8555-555555555555";
+
+  it("requires books.review and calls staff_set_pd_edition for a new work, trimmed", async () => {
+    const target = await redirectOf(() =>
+      setPdEditionAsStaff(
+        form({ bookId: BOOK_ID, mode: "new", workTitle: "  Lahuta  e Malcís ", workOriginalAuthor: " Gjergj Fishta ", editorCredit: "on" }),
+      ),
+    );
+    expect(mockRequireStaff).toHaveBeenCalledWith("books.review");
+    expect(mockRpc).toHaveBeenCalledWith("staff_set_pd_edition", {
+      p_book_id: BOOK_ID,
+      p_work_id: null,
+      p_work_title: "Lahuta e Malcís",
+      p_work_original_author: "Gjergj Fishta",
+      p_editor_credit: true,
+    });
+    expect(target).toBe(`/admin/books/${BOOK_ID}?success=${encodeURIComponent("Public-domain edition saved.")}`);
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/libra/${BOOK_ID}`);
+  });
+
+  it("links to an existing work; an unticked box is no mention", async () => {
+    await redirectOf(() => setPdEditionAsStaff(form({ bookId: BOOK_ID, mode: "existing", workId: WORK_ID })));
+    expect(mockRpc).toHaveBeenCalledWith("staff_set_pd_edition", {
+      p_book_id: BOOK_ID,
+      p_work_id: WORK_ID,
+      p_work_title: null,
+      p_work_original_author: null,
+      p_editor_credit: false,
+    });
+  });
+
+  it("unlinks with no work and no mention, whatever the box says", async () => {
+    await redirectOf(() => setPdEditionAsStaff(form({ bookId: BOOK_ID, mode: "unlink", workId: WORK_ID, editorCredit: "on" })));
+    expect(mockRpc).toHaveBeenCalledWith("staff_set_pd_edition", {
+      p_book_id: BOOK_ID,
+      p_work_id: null,
+      p_work_title: null,
+      p_work_original_author: null,
+      p_editor_credit: false,
+    });
+  });
+
+  it.each([
+    [{ bookId: BOOK_ID, mode: "existing", workId: "nope" }],
+    [{ bookId: BOOK_ID, mode: "new", workTitle: "  ", workOriginalAuthor: "A" }],
+    [{ bookId: BOOK_ID, mode: "new", workTitle: "T", workOriginalAuthor: "" }],
+    [{ bookId: BOOK_ID, mode: "whatever" }],
+  ])("refuses a form it can't use, before the RPC: %o", async (fields) => {
+    const target = decodeURIComponent(await redirectOf(() => setPdEditionAsStaff(form(fields))));
+    expect(target).toContain("Choose a work, or give the new work's title and original author.");
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("maps the RPC's refusal", async () => {
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: "LB499", message: "A live edition stays with its work. Only its editor mention can change." },
+    });
+    const target = decodeURIComponent(
+      await redirectOf(() => setPdEditionAsStaff(form({ bookId: BOOK_ID, mode: "existing", workId: WORK_ID }))),
+    );
+    expect(target).toContain("?error=A live edition stays with its work.");
+  });
+
+  it("is refused in maintenance before requireStaff", async () => {
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+    expect((await redirectOf(() => setPdEditionAsStaff(form({ bookId: BOOK_ID, mode: "unlink" })))).startsWith("/admin/books?error=")).toBe(true);
+    expect(mockRequireStaff).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
   });
 });

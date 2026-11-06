@@ -61,11 +61,31 @@ export async function getBookReviewState(supabase: SessionClient, bookId: string
   return { kind: "ok", pending: raw.pending, approvalValid: raw.approval_valid, latestSentBack };
 }
 
+// BD15 P5a (audit r1, F4): a step that failed without a database code
+// of its own (a storage rewrite, a helper that only reports "error")
+// asks this afterwards: a book now waiting for review was sent from
+// another tab, and the author is told so instead of a generic failure.
+export async function isWaitingForReview(supabase: SessionClient, bookId: string): Promise<boolean> {
+  const state = await getBookReviewState(supabase, bookId);
+  return state.kind === "ok" && state.pending;
+}
+
 export type RequestBookReviewResult =
   | { ok: true }
   | {
       ok: false;
-      reason: "already_pending" | "already_approved" | "already_published" | "taken_down" | "not_found" | "failed";
+      reason:
+        | "already_pending"
+        | "already_approved"
+        | "already_published"
+        | "taken_down"
+        | "incomplete"
+        // BD15 P5b-2: a live book with no waiting changes (LB494), or a
+        // waiting 18+ label beside a children/teen category (LB493).
+        | "nothing_to_send"
+        | "adult_category"
+        | "not_found"
+        | "failed";
     };
 
 // request_book_review()'s own refusals, by message (P0001) or SQLSTATE.
@@ -73,6 +93,10 @@ export async function requestBookReview(supabase: SessionClient, bookId: string)
   const { error } = await supabase.rpc("request_book_review", { p_book_id: bookId });
   if (!error) return { ok: true };
   if (error.code === "LB460") return { ok: false, reason: "taken_down" };
+  // BD15 P5a: no manuscript, no cover or no "AI used" answer (LB489).
+  if (error.code === "LB489") return { ok: false, reason: "incomplete" };
+  if (error.code === "LB494") return { ok: false, reason: "nothing_to_send" };
+  if (error.code === "LB493") return { ok: false, reason: "adult_category" };
   const message = typeof error.message === "string" ? error.message : "";
   if (message === "this book is already waiting for review") return { ok: false, reason: "already_pending" };
   if (message === "this book is already approved") return { ok: false, reason: "already_approved" };
@@ -80,6 +104,15 @@ export async function requestBookReview(supabase: SessionClient, bookId: string)
   if (message === "no book found for this id") return { ok: false, reason: "not_found" };
   console.error("requestBookReview: request failed", { bookId, code: error.code ?? null });
   return { ok: false, reason: "failed" };
+}
+
+// BD15 P5a: a book waiting for review is read-only (LB490): its content
+// columns, contributors and "AI used" answer refuse every write until
+// the author cancels the review.
+export const IN_REVIEW_LOCK_SQLSTATE = "LB490";
+
+export function isInReviewLockError(error: { code?: string | null } | null | undefined): boolean {
+  return error?.code === IN_REVIEW_LOCK_SQLSTATE;
 }
 
 export type WithdrawBookReviewResult = { ok: true } | { ok: false; reason: "not_pending" | "failed" };
@@ -223,7 +256,9 @@ export async function readDownloadFilePath(
 // ------------------------------------------------------------
 //
 // KEEP the book's current file_path, its latest approved review's
-// file_path and its pending review's file_path. Every other key of this
+// file_path, its pending review's file_path and (BD15 P5b-2) the
+// manuscript of a live book's waiting changes (book_pending_changes,
+// sent or not). Every other key of this
 // book's own (own-key classifier: canonical or versioned, for exactly
 // this author and book) among the key the caller just superseded and
 // every review snapshot may be removed. Race-free because keys only move
@@ -235,9 +270,11 @@ export function planManuscriptRemovals(params: {
   currentFilePath: string | null;
   reviews: readonly ReviewSnapshot[];
   superseded?: readonly (string | null)[];
+  pendingChangeFilePath?: string | null;
 }): string[] {
   const keep = new Set<string>();
   if (params.currentFilePath) keep.add(params.currentFilePath);
+  if (params.pendingChangeFilePath) keep.add(params.pendingChangeFilePath);
   const approved = latestApprovedReview(params.reviews);
   if (approved?.file_path) keep.add(approved.file_path);
   const pending = pendingReview(params.reviews);
@@ -303,12 +340,25 @@ export async function removeUnretainedManuscripts(
       console.error(`${params.caller}: retention read failed; nothing removed`, { bookId: params.bookId });
       return;
     }
+    // BD15 P5b-2: a live book's waiting manuscript is kept too, also
+    // after a send back (its review snapshot is then no longer pending).
+    // An unreadable row removes nothing.
+    const { data: pending, error: pendingError } = await service
+      .from("book_pending_changes")
+      .select("file_path")
+      .eq("book_id", params.bookId)
+      .maybeSingle<{ file_path: string | null }>();
+    if (pendingError) {
+      console.error(`${params.caller}: retention read failed; nothing removed`, { bookId: params.bookId });
+      return;
+    }
     const removals = planManuscriptRemovals({
       authorId: params.authorId,
       bookId: params.bookId,
       currentFilePath: book.file_path,
       reviews: read.byBook.get(params.bookId) ?? [],
       superseded: params.superseded,
+      pendingChangeFilePath: pending?.file_path ?? null,
     });
     if (removals.length === 0) return;
     const { error: removeError } = await remover.storage.from(BOOK_MANUSCRIPTS_BUCKET).remove(removals);

@@ -133,7 +133,7 @@ describe("isOwnCanonicalBookManuscriptPath", () => {
 });
 
 // BOOK-STORAGE-MUTATION-AUTH-1: the writers no longer build these keys
-// inline -- createBook and updateBook call the constructors above, so
+// inline -- saveBookContent calls the constructors above, so
 // the rule and the writers cannot drift apart. This pins that no inline
 // book-key template survives anywhere in the book actions.
 describe("writers use the shared constructors, never an inline key template", () => {
@@ -149,13 +149,14 @@ describe("writers use the shared constructors, never an inline key template", ()
   // no longer used by any writer. ADMIN-3-REVIEW (M5): a manuscript gets a
   // fresh versioned key on every create and replace too
   // (newBookManuscriptPath); the canonical constructor writes nothing.
-  it("createBook and updateBook build the cover with newBookCoverPath and the manuscript with newBookManuscriptPath", () => {
-    const create = source.slice(source.indexOf("export async function createBook("), source.indexOf("export async function updateBook("));
-    const update = source.slice(source.indexOf("export async function updateBook("), source.indexOf("async function performPublish("));
-    expect(create).toMatch(/newBookCoverPath\(coverResult\.extension\)/);
-    expect(create).toMatch(/newBookManuscriptPath\(user\.id, bookId\)/);
-    expect(update).toMatch(/newBookCoverPath\(coverResult\.extension\)/);
-    expect(update).toMatch(/newBookManuscriptPath\(user\.id, existing\.id\)/);
+  // BD15 cleanup: createBook and updateBook are gone; saveBookContent
+  // (the editor's Content tab) is the one writer of a book's files.
+  it("saveBookContent builds the cover with newBookCoverPath and the manuscript with newBookManuscriptPath", () => {
+    const start = source.indexOf("export async function saveBookContent(");
+    expect(start).toBeGreaterThan(-1);
+    const content = source.slice(start, source.indexOf("\nexport async function ", start + 1));
+    expect(content).toMatch(/newBookCoverPath\(coverResult\.extension\)/);
+    expect(content).toMatch(/newBookManuscriptPath\(user\.id, existing\.id\)/);
     expect(source).not.toMatch(/canonicalBookCoverPath\(/);
     expect(source).not.toMatch(/canonicalBookManuscriptPath\(/);
   });

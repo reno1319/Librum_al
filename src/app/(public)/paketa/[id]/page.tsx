@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { AdultTag } from "@/components/adult-tag";
+import { bundleIsAdult } from "@/lib/book-reader-details";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
@@ -159,8 +161,13 @@ export default async function BundleDetailPage({
 
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
-      <span className="text-xs uppercase tracking-wide text-muted">
-        Paketë
+      {/* BD15 P8 (F1 D2 a): 18+ when any PUBLISHED book in the bundle is,
+          read live from the books, so it follows staff approvals. */}
+      <span className="flex flex-wrap items-center gap-x-2">
+        <span className="text-xs uppercase tracking-wide text-muted">
+          Paketë
+        </span>
+        {bundleIsAdult(bundleBookRows) && <AdultTag />}
       </span>
       <h1 className="font-serif text-3xl font-normal">{bundle.title}</h1>
       {bundle.pen && (

@@ -175,6 +175,26 @@ describe("PEN-NAMES-1 Author Page", () => {
     expect(log.some((q) => q.filters.includes("eq:author_id") && q.table !== "pen_names")).toBe(false);
   });
 
+  // BD15 P8 (F1 Q1 b): a bundle card says 18+ when a published book in
+  // it is 18+; a draft 18+ member does not count.
+  it("BD15 P8: the bundle card carries 18+ only for a published 18+ member", async () => {
+    install();
+    tables.public_bundles[0].bundle_books = [
+      { books: { status: "published", is_adult: false } },
+      { books: { status: "published", is_adult: true } },
+    ];
+    const html = await render();
+    const card = html.slice(html.indexOf("Pako A") - 300, html.indexOf("Pako A") + 400);
+    expect(card).toContain('aria-hidden="true">18+</span>');
+    expect(log.find((q) => q.table === "public_bundles")?.select).toBe(
+      "id, title, price_all, bundle_books(books:public_books(status, is_adult))",
+    );
+
+    install();
+    tables.public_bundles[0].bundle_books = [{ books: { status: "draft", is_adult: true } }, { books: null }];
+    expect(await render()).not.toContain("18+");
+  });
+
   it("never links to the account or the author's other pen names", async () => {
     install();
     const html = await render();

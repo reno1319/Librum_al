@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { randomBytes } from "crypto";
 import JSZip from "jszip";
 import {
   BOOK_FIXTURE_AUTHOR_ID as USER_ID,
@@ -13,8 +14,11 @@ import sharp from "sharp";
 import { generateEpub } from "@/lib/epub-generator";
 import { embedCoverInLibrumEpub, readLibrumEbookCover } from "@/lib/epub-cover";
 
-// BOOK-STORAGE-MUTATION-AUTH-1 (F5): the real createBook/updateBook/
-// deleteBook actions against one recording Supabase double. Every
+// BOOK-STORAGE-MUTATION-AUTH-1 (F5): the real book actions that touch
+// Storage (saveBookContent, deleteBook, cancelBookReview) against one
+// recording Supabase double. BD15 cleanup: the tests written for the
+// removed createBook/updateBook now drive saveBookContent, the editor's
+// Content tab, which took over their file handling unchanged. Every
 // Storage call (upload, download, remove, move, copy, signed URL) and
 // every database write is recorded in order, so each test can prove
 // which keys reach Storage, when, and what each write carried.
@@ -49,6 +53,19 @@ vi.mock("@/lib/staff-alerts", () => ({
   sendReviewRequestedStaffEmail: (args: unknown) => mockReviewStaffEmail(args),
 }));
 
+// BD15 P3: the staff-only AI answer, recorded here (its own module and
+// grants are covered in book-ai-disclosure.test.ts and the SQL tests).
+const aiWrites: { bookId: string; answer: string }[] = [];
+let aiWriteOk = true;
+let aiWriteResult: "ok" | "in_review" | "failed" | null = null;
+vi.mock("@/lib/book-ai-disclosure", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  writeAiDisclosure: async (bookId: string, answer: string) => {
+    aiWrites.push({ bookId, answer });
+    return aiWriteResult ?? (aiWriteOk ? "ok" : "failed");
+  },
+}));
+
 type Filter = { kind: string; column: string; value: unknown };
 type DbWrite = { table: string; op: string; payload: unknown; filters: Filter[] };
 type StorageCall = { op: string; bucket: string; paths: unknown[] };
@@ -79,6 +96,13 @@ let penNameReadResult: Result = { data: { name: "Emri i Penës" }, error: null }
 // PEN-2 (L10): every Storage call made through the catalog writer
 // (service role), as "<op>:<bucket>".
 let writerStorageOps: string[] = [];
+// BD15 P5b-2: a live book's waiting changes (none by default).
+let pendingReadResult: Result = { data: null, error: null };
+let rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
+// Audit r1 F7: what later reads of books return (a change in between).
+let bookReads = 0;
+let bookReadAfterFirst: Result | null = null;
+let rpcError: { code?: string; message?: string } | null = null;
 
 function query(table: string) {
   const filters: Filter[] = [];
@@ -87,9 +111,13 @@ function query(table: string) {
   let returning = false;
   const resolve = (): Result => {
     if (op === "select") {
-      if (table === "books") return bookReadResult;
+      if (table === "books") {
+        bookReads += 1;
+        return bookReads > 1 && bookReadAfterFirst ? bookReadAfterFirst : bookReadResult;
+      }
       if (table === "bundle_books") return bundleBooksResult;
       if (table === "pen_names") return penNameReadResult;
+      if (table === "book_pending_changes") return pendingReadResult;
       if (table === "purchases" || table === "author_book_purchases") return { data: null, error: null, count: 0 } as Result;
       throw new Error(`unexpected read of ${table}`);
     }
@@ -201,6 +229,12 @@ const sessionClient = {
   },
   from: (table: string) => query(table),
   storage: { from: (bucket: string) => storageBucket(bucket) },
+  // BD15 P5b-2: save_book_pending_changes for a live book's files.
+  rpc: async (fn: string, args: Record<string, unknown>) => {
+    rpcCalls.push({ fn, args });
+    events.push(`rpc:${fn}`);
+    return { data: null, error: rpcError };
+  },
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
 // PEN-NAMES-1: the pen name box resolves through the server-only pen
@@ -219,8 +253,9 @@ vi.mock("@/lib/catalog-write-client", async () => {
   };
 });
 
-const { createBook, updateBook, deleteBook, cancelBookReview } = await import("./actions");
+const { deleteBook, cancelBookReview, saveBookContent } = await import("./actions");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+const { BOOK_CHANGED_WHILE_EDITING_MESSAGE } = await import("@/lib/book-review-copy");
 
 // COVERS-1: a real 1x1 PNG and JPEG, since every cover is now decoded and re-encoded.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWMwTgsFAAG+AO/TH36BAAAAAElFTkSuQmCC", "base64");
@@ -274,20 +309,24 @@ function row(overrides: Record<string, unknown> = {}) {
     language: "sq",
     status: "draft",
     price_all: 0,
+    title: "Title",
+    pen_name_id: null,
+    isbn: null,
     ...overrides,
   };
 }
 
+// BD15 cleanup: the Content tab's own fields (saveBookContent), which
+// replaced the old edit page's updateBook as the writer of a book's files.
 function editForm(): FormData {
   const f = new FormData();
-  f.set("title", "Title");
-  f.set("description", "Description");
-  f.set("keywords", "");
   f.set("isbn", "");
-  f.set("genre", "Letërsi artistike");
-  f.set("price", "0");
+  f.set("publisher", "");
   return f;
 }
+
+// saveBookContent on a draft, saved with no intent: back on the Content tab.
+const CONTENT_SAVED = `/dashboard/books/${BOOK_ID}/editor?tab=content&success=${encodeURIComponent("U ruajt si draft")}`;
 
 function withCover(f: FormData, bytes: Buffer = PNG): FormData {
   f.set("cover", new File([new Uint8Array(bytes)], "anything.gif"));
@@ -298,6 +337,9 @@ async function withManuscript(f: FormData): Promise<FormData> {
   f.set("manuscript", new File([new Uint8Array(await validEpub())], "book.epub"));
   return f;
 }
+
+// BD15 P5b-3b: a successful delete lands on the Dashboard.
+const DELETED_URL = "/dashboard?success=Libri%20u%20fshi.";
 
 async function run(action: Promise<unknown>): Promise<string> {
   try {
@@ -325,6 +367,11 @@ beforeEach(() => {
   updateResult = null;
   deleteResult = null;
   removeError = null;
+  pendingReadResult = { data: null, error: null };
+  rpcCalls = [];
+  rpcError = null;
+  bookReads = 0;
+  bookReadAfterFirst = null;
   failUploadsTo = new Set();
   // W7: a cover change reads the book's own stored ebook to see whether
   // Librum made it; by default it is a directly uploaded one (untouched).
@@ -339,6 +386,9 @@ beforeEach(() => {
   consoleOutput = [];
   bundleBooksResult = { data: [], error: null };
   resetBookReviewsDouble();
+  aiWrites.length = 0;
+  aiWriteOk = true;
+  aiWriteResult = null;
   for (const level of ["log", "info", "warn", "error"] as const) {
     vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
       consoleOutput.push(args);
@@ -357,9 +407,9 @@ function loggedText(): string {
 }
 
 // ============================================================
-describe("updateBook without an upload", () => {
+describe("saveBookContent without an upload", () => {
   it("omits both path keys, leaves the stored values untouched, and makes no Storage call", async () => {
-    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, editForm()))).toBe(CONTENT_SAVED);
     const [update] = bookUpdates();
     expect(update.payload).not.toHaveProperty("cover_path");
     expect(update.payload).not.toHaveProperty("file_path");
@@ -373,7 +423,7 @@ describe("updateBook without an upload", () => {
     ["null paths", { cover_path: null, file_path: null }],
   ])("keeps working for %s without touching it", async (_label, overrides) => {
     bookReadResult = { data: row(overrides), error: null };
-    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, editForm()))).toBe(CONTENT_SAVED);
     expect(bookUpdates()[0].payload).not.toHaveProperty("cover_path");
     expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
     expect(storageCalls).toEqual([]);
@@ -386,18 +436,18 @@ describe("updateBook without an upload", () => {
     f.set("coverPath", `${OTHER_AUTHOR}/x.png`);
     f.set("id", OTHER_BOOK);
     f.set("author_id", OTHER_AUTHOR);
-    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(CONTENT_SAVED);
     expect(JSON.stringify(bookUpdates()[0].payload)).not.toContain(OTHER_AUTHOR);
     expect(JSON.stringify(bookUpdates()[0].payload)).not.toContain(OTHER_BOOK);
   });
 });
 
 // ============================================================
-describe("updateBook with a replacement", () => {
+describe("saveBookContent with a replacement", () => {
   it("manuscript only: writes only file_path, never re-persists or removes the cover", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
-    expect(await run(updateBook(BOOK_ID, await withManuscript(editForm())))).toBe(
-      "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua",
+    expect(await run(saveBookContent(BOOK_ID, await withManuscript(editForm())))).toBe(
+      CONTENT_SAVED,
     );
     const payload = bookUpdates()[0].payload as Record<string, unknown>;
     expect(payload.file_path).toEqual(NEW_EPUB);
@@ -410,7 +460,7 @@ describe("updateBook with a replacement", () => {
   });
 
   it("cover only: writes only cover_path, never re-persists or removes the manuscript", async () => {
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(CONTENT_SAVED);
     const payload = bookUpdates()[0].payload as Record<string, unknown>;
     expect(payload.cover_path).toEqual(NEW_JPG);
     expect(payload).not.toHaveProperty("file_path");
@@ -425,7 +475,7 @@ describe("updateBook with a replacement", () => {
   // book or the file name. COVERS-1: a PNG upload is stored as the
   // shrunk JPEG, so the extension is always .jpg.
   it("the key is a fresh random folder and always .jpg -- not the file name, account or book", async () => {
-    await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
+    await run(saveBookContent(BOOK_ID, withCover(editForm(), PNG)));
     expect(storageCalls[0]).toEqual(OWN_EPUB_INFO);
     expect(storageCalls[1]).toEqual({ op: "upload", bucket: "covers", paths: [NEW_JPG] });
     expect(uploadedCoverKey()).not.toContain(USER_ID);
@@ -434,7 +484,7 @@ describe("updateBook with a replacement", () => {
   });
 
   it("covers are uploaded and removed with the catalog writer (service role, C9), never the session", async () => {
-    await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
+    await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)));
     expect(writerStorageOps).toEqual(["info:manuscripts", "upload:covers", "remove:covers"]);
   });
 
@@ -442,7 +492,7 @@ describe("updateBook with a replacement", () => {
   // replace never overwrites the live object; the previous one is removed
   // after the proven write.
   it("a same-extension replace gets a new key and removes the previous object after the write", async () => {
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), PNG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), PNG)))).toBe(CONTENT_SAVED);
     expect(uploadedCoverKey()).not.toBe(OWN_PNG);
     expect(events).toEqual([
       "storage:info:manuscripts",
@@ -455,23 +505,23 @@ describe("updateBook with a replacement", () => {
 
   it("a new-shape stored cover (read from the author's own row) is replaced and removed after the write", async () => {
     bookReadResult = { data: row({ cover_path: RANDOM_STORED }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(CONTENT_SAVED);
     expect(bookUpdates()[0].filters).toContainEqual({ kind: "eq", column: "cover_path", value: RANDOM_STORED });
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [RANDOM_STORED] }]);
   });
 
   it("two replaces never reuse a key", async () => {
-    await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
+    await run(saveBookContent(BOOK_ID, withCover(editForm(), PNG)));
     const first = uploadedCoverKey();
     storageCalls = [];
-    await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
+    await run(saveBookContent(BOOK_ID, withCover(editForm(), PNG)));
     expect(isNewBookCoverPath(first)).toBe(true);
     expect(uploadedCoverKey()).not.toBe(first);
   });
 
   it("the exact own-book legacy .jpeg cover is removed only after the write, and never re-created", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(CONTENT_SAVED);
     expect(events).toEqual([
       "storage:info:manuscripts",
       "storage:upload:covers",
@@ -485,7 +535,7 @@ describe("updateBook with a replacement", () => {
 
   it("filters the write by id, author_id and the cover_path it read (compare-and-set)", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
-    await run(updateBook(BOOK_ID, withCover(editForm())));
+    await run(saveBookContent(BOOK_ID, withCover(editForm())));
     const { filters } = bookUpdates()[0];
     expect(filters).toContainEqual({ kind: "eq", column: "id", value: BOOK_ID });
     expect(filters).toContainEqual({ kind: "eq", column: "author_id", value: USER_ID });
@@ -494,13 +544,13 @@ describe("updateBook with a replacement", () => {
 
   it("a null stored cover compares with IS NULL", async () => {
     bookReadResult = { data: row({ cover_path: null }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm())))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm())))).toBe(CONTENT_SAVED);
     expect(bookUpdates()[0].filters).toContainEqual({ kind: "is", column: "cover_path", value: null });
     expect(removals()).toEqual([]);
   });
 
   it("a write without a cover replacement keeps the id and author_id filters and no cover filter", async () => {
-    await run(updateBook(BOOK_ID, editForm()));
+    await run(saveBookContent(BOOK_ID, editForm()));
     const { filters } = bookUpdates()[0];
     expect(filters).toContainEqual({ kind: "eq", column: "id", value: BOOK_ID });
     expect(filters).toContainEqual({ kind: "eq", column: "author_id", value: USER_ID });
@@ -514,7 +564,7 @@ describe("updateBook with a replacement", () => {
     const f = editForm();
     f.set("manuscriptStoragePath", TEMP_EPUB);
     f.set("coverStoragePath", TEMP_COVER);
-    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(CONTENT_SAVED);
     // ADMIN-3-REVIEW (N3): the superseded own manuscript key goes first
     // (retention cleanup), then the old cover, then the temporary keys.
     expect(removals()).toEqual([
@@ -530,13 +580,13 @@ describe("updateBook with a replacement", () => {
 });
 
 // ============================================================
-describe("updateBook never hands an unsafe stored path to Storage", () => {
+describe("saveBookContent never hands an unsafe stored path to Storage", () => {
   const coverCases = UNSAFE_COVER_PATHS.filter(([, v]) => typeof v === "string" && v !== LEGACY_JPEG) as [string, string][];
   const manuscriptCases = UNSAFE_MANUSCRIPT_PATHS.filter(([, v]) => typeof v === "string") as [string, string][];
 
   it.each(coverCases)("stored cover %s: replacement succeeds, the old value is left untouched", async (_label, value) => {
     bookReadResult = { data: row({ cover_path: value }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(CONTENT_SAVED);
     expect(storageCalls).toEqual([OWN_EPUB_INFO, { op: "upload", bucket: "covers", paths: [NEW_JPG] }]);
     expect((bookUpdates()[0].payload as Record<string, unknown>).cover_path).toEqual(NEW_JPG);
     if (value.trim().length > 8) expect(loggedText()).not.toContain(value);
@@ -544,8 +594,8 @@ describe("updateBook never hands an unsafe stored path to Storage", () => {
 
   it.each(manuscriptCases)("stored manuscript %s: replacement succeeds, the old value is left untouched", async (_label, value) => {
     bookReadResult = { data: row({ file_path: value }), error: null };
-    expect(await run(updateBook(BOOK_ID, await withManuscript(editForm())))).toBe(
-      "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua",
+    expect(await run(saveBookContent(BOOK_ID, await withManuscript(editForm())))).toBe(
+      CONTENT_SAVED,
     );
     expect(storageCalls).toEqual([{ op: "upload", bucket: "manuscripts", paths: [NEW_EPUB] }]);
     if (value.trim().length > 8) expect(loggedText()).not.toContain(value);
@@ -553,7 +603,7 @@ describe("updateBook never hands an unsafe stored path to Storage", () => {
 
   it("another author's canonical-looking cover is never removed", async () => {
     bookReadResult = { data: row({ cover_path: `${OTHER_AUTHOR}/${BOOK_ID}-cover.png` }), error: null };
-    await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
+    await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)));
     expect(removals()).toEqual([]);
   });
 
@@ -561,14 +611,14 @@ describe("updateBook never hands an unsafe stored path to Storage", () => {
     for (const other of [`${USER_ID}/${OTHER_BOOK}-cover.png`, `${USER_ID}/${OTHER_BOOK}-cover.jpeg`]) {
       storageCalls = [];
       bookReadResult = { data: row({ cover_path: other }), error: null };
-      await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
+      await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)));
       expect(removals()).toEqual([]);
     }
   });
 });
 
 // ============================================================
-describe("updateBook fails closed on identity, read and write failures", () => {
+describe("saveBookContent fails closed on identity, read and write failures", () => {
   it.each([
     ["a read error", { data: null, error: { message: "boom" } }],
     ["no row", { data: null, error: null }],
@@ -576,13 +626,13 @@ describe("updateBook fails closed on identity, read and write failures", () => {
     ["a different row id", { data: row({ id: OTHER_BOOK }), error: null }],
   ])("%s: redirects away before any upload or write", async (_label, result) => {
     bookReadResult = result as Result;
-    expect(await run(updateBook(BOOK_ID, withCover(editForm())))).toBe("/dashboard");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm())))).toBe("/dashboard");
     expect(storageCalls).toEqual([]);
     expect(dbWrites).toEqual([]);
   });
 
   it("an upper-case spelling of the book id is refused before any upload", async () => {
-    expect(await run(updateBook(BOOK_ID.toUpperCase(), withCover(editForm())))).toBe("/dashboard");
+    expect(await run(saveBookContent(BOOK_ID.toUpperCase(), withCover(editForm())))).toBe("/dashboard");
     expect(storageCalls).toEqual([]);
   });
 
@@ -595,8 +645,8 @@ describe("updateBook fails closed on identity, read and write failures", () => {
   ])("%s returned: no success, the stored cover is kept and only the new upload is removed", async (_label, result) => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
     updateResult = result as Result;
-    const target = await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
-    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    const target = await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)));
+    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/editor\\?tab=content&error=`));
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [uploadedCoverKey()] }]);
     expect(removals().flatMap((c) => c.paths)).not.toContain(LEGACY_JPEG);
   });
@@ -604,8 +654,8 @@ describe("updateBook fails closed on identity, read and write failures", () => {
   it("a write error: no success, the stored cover is kept and only the new upload is removed", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
     updateResult = { data: null, error: { message: "db exploded" } };
-    const target = await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
-    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    const target = await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)));
+    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/editor\\?tab=content&error=`));
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [uploadedCoverKey()] }]);
   });
 
@@ -614,10 +664,109 @@ describe("updateBook fails closed on identity, read and write failures", () => {
   it("a concurrent cover change (compare-and-set matches no row): the old cover stays, the new upload is removed", async () => {
     bookReadResult = { data: row({ cover_path: OWN_JPG }), error: null };
     updateResult = { data: [], error: null };
-    await run(updateBook(BOOK_ID, withCover(editForm(), PNG)));
+    await run(saveBookContent(BOOK_ID, withCover(editForm(), PNG)));
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [uploadedCoverKey()] }]);
     expect(isNewBookCoverPath(uploadedCoverKey())).toBe(true);
     expect(writerStorageOps).toEqual(["info:manuscripts", "upload:covers", "remove:covers"]);
+  });
+});
+
+// ============================================================
+// BD15 cleanup: the checks the removed createBook tests made of an
+// uploaded file's CONTENTS, now made through saveBookContent, the one
+// caller left of resolveManuscriptInput/resolveCoverInput. Every refusal
+// comes back to the Content tab with nothing uploaded and nothing written.
+describe("temporary upload contents (saveBookContent)", () => {
+  const contentError = (message: string) =>
+    `/dashboard/books/${BOOK_ID}/editor?tab=content&error=${encodeURIComponent(message)}`;
+  const withTempEpub = (bytes?: Buffer) => {
+    if (bytes) storedObjects[`manuscripts:${TEMP_EPUB}`] = bytes;
+    const f = editForm();
+    f.set("manuscriptStoragePath", TEMP_EPUB);
+    return f;
+  };
+  const withTempCover = (bytes?: Buffer) => {
+    if (bytes) storedObjects[`manuscripts:${TEMP_COVER}`] = bytes;
+    const f = editForm();
+    f.set("coverStoragePath", TEMP_COVER);
+    return f;
+  };
+  const nothingStored = () => {
+    expect(storageCalls.filter((c) => c.op === "upload")).toEqual([]);
+    expect(dbWrites).toEqual([]);
+  };
+
+  it("a missing temp manuscript gets a controlled message", async () => {
+    expect(await run(saveBookContent(BOOK_ID, withTempEpub()))).toBe(
+      contentError("Dorëshkrimi i ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri"),
+    );
+    nothingStored();
+  });
+
+  it("an invalid EPUB at a valid temp path is still validated and refused", async () => {
+    expect(await run(saveBookContent(BOOK_ID, withTempEpub(Buffer.from("not a zip"))))).toBe(
+      contentError("Ky skedar nuk duket si EPUB i vlefshëm"),
+    );
+    nothingStored();
+  });
+
+  it("an EPUB with META-INF/encryption.xml gets the DRM message", async () => {
+    const zip = await JSZip.loadAsync(await validEpub());
+    zip.file("META-INF/encryption.xml", "<encryption/>");
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+    expect(await run(saveBookContent(BOOK_ID, withTempEpub(bytes)))).toBe(
+      contentError("Ky EPUB përdor enkriptim/DRM që Librum nuk e mbështet."),
+    );
+    nothingStored();
+  });
+
+  it("a real EPUB well over Vercel's ~4.5MB body limit is accepted via a temp reference", async () => {
+    const zip = await JSZip.loadAsync(await validEpub());
+    zip.file("OEBPS/images/big.bin", randomBytes(6 * 1024 * 1024));
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+    expect(bytes.length).toBeGreaterThan(4.5 * 1024 * 1024);
+    expect(await run(saveBookContent(BOOK_ID, withTempEpub(bytes)))).toBe(CONTENT_SAVED);
+    const uploaded = uploadedBytes[`manuscripts:${String(storageCalls.find((c) => c.op === "upload")?.paths[0])}`];
+    // Buffer.equals: a deep toEqual over 6MB is far too slow.
+    expect(Buffer.from(uploaded).equals(bytes)).toBe(true);
+    }, 30_000);
+
+  it("a missing temp cover gets a controlled message", async () => {
+    expect(await run(saveBookContent(BOOK_ID, withTempCover()))).toBe(
+      contentError("Ballina e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri"),
+    );
+    nothingStored();
+  });
+
+  it("a temp cover over 5MB is refused, whatever the browser checked", async () => {
+    const big = Buffer.concat([PNG, Buffer.alloc(5 * 1024 * 1024, 1)]);
+    expect(await run(saveBookContent(BOOK_ID, withTempCover(big)))).toBe(contentError("Imazhi i ballinës duhet të jetë nën 5 MB"));
+    nothingStored();
+  });
+
+  it("a temp cover without a JPEG or PNG signature is refused", async () => {
+    expect(await run(saveBookContent(BOOK_ID, withTempCover(Buffer.from("GIF89a not an image"))))).toBe(
+      contentError("Ky nuk duket si imazh i vlefshëm JPEG ose PNG"),
+    );
+    nothingStored();
+  });
+
+  it("a temp cover with a PNG signature that cannot be decoded is refused", async () => {
+    const broken = Buffer.concat([PNG.subarray(0, 8), Buffer.alloc(64, 1)]);
+    expect(await run(saveBookContent(BOOK_ID, withTempCover(broken)))).toBe(
+      contentError("Ballina e ngarkuar nuk u lexua dot. Provoni përsëri"),
+    );
+    nothingStored();
+  });
+
+  it("a real cover between ~4.5MB and 5MB is accepted via a temp reference", async () => {
+    const big = await sharp(randomBytes(1300 * 1250 * 3), { raw: { width: 1300, height: 1250, channels: 3 } })
+      .png({ compressionLevel: 0 })
+      .toBuffer();
+    expect(big.length).toBeGreaterThan(4.5 * 1024 * 1024);
+    expect(big.length).toBeLessThan(5 * 1024 * 1024);
+    expect(await run(saveBookContent(BOOK_ID, withTempCover(big)))).toBe(CONTENT_SAVED);
+    expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG });
   });
 });
 
@@ -638,7 +787,7 @@ describe("temporary upload references", () => {
   it.each(hostile)("a manuscript reference with %s is refused before any Storage call", async (_label, value) => {
     const f = editForm();
     f.set("manuscriptStoragePath", value);
-    expect(await run(updateBook(BOOK_ID, f))).toContain(`error=${encodeURIComponent("Dorëshkrimi i zgjedhur nuk vlen më.")}`);
+    expect(await run(saveBookContent(BOOK_ID, f))).toContain(`error=${encodeURIComponent("Dorëshkrimi i zgjedhur nuk vlen më.")}`);
     expect(storageCalls).toEqual([]);
     expect(dbWrites).toEqual([]);
   });
@@ -648,78 +797,10 @@ describe("temporary upload references", () => {
     async (_label, value) => {
       const f = editForm();
       f.set("coverStoragePath", value);
-      expect(await run(updateBook(BOOK_ID, f))).toContain(`error=${encodeURIComponent("Kopertina e zgjedhur nuk vlen më.")}`);
+      expect(await run(saveBookContent(BOOK_ID, f))).toContain(`error=${encodeURIComponent("Ballina e zgjedhur nuk vlen më.")}`);
       expect(storageCalls).toEqual([]);
     },
   );
-});
-
-// ============================================================
-describe("createBook", () => {
-  async function createForm(): Promise<FormData> {
-    const f = await withManuscript(withCover(editForm(), PNG));
-    f.set("price", "0");
-    return f;
-  }
-
-  // PEN-2 (L10): the cover gets a fresh random key, uploaded with the
-  // catalog writer. ADMIN-3-REVIEW (M5): so does the manuscript, under a
-  // versioned key in the new book's own folder (authors may write only
-  // under <uid>/tmp/).
-  it("writes a random cover key and a versioned manuscript key for the new id, both with the catalog writer", async () => {
-    expect(await run(createBook(await createForm()))).toBe("/dashboard");
-    const insert = dbWrites.find((w) => w.op === "insert")!;
-    const id = (insert.payload as { id: string }).id;
-    const versioned = expect.stringMatching(
-      new RegExp(`^${USER_ID}/${id}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.epub$`),
-    );
-    expect(insert.payload).toMatchObject({ author_id: USER_ID, cover_path: NEW_JPG, file_path: versioned });
-    expect(everyStorageKey()).toEqual([NEW_JPG, versioned]);
-    expect(everyStorageKey()).not.toContain(canonicalBookManuscriptPath(USER_ID, id));
-    expect(uploadedCoverKey()).not.toContain(USER_ID);
-    expect(uploadedCoverKey()).not.toContain(id);
-    expect(uploadedCoverKey()).not.toBe(canonicalBookCoverPath(USER_ID, id, "png"));
-    expect(writerStorageOps).toEqual(["upload:covers", "upload:manuscripts"]);
-  });
-
-  it("an insert failure removes the new cover and manuscript uploads", async () => {
-    sessionClient.from = ((table: string) => {
-      const q = query(table) as Record<string, unknown>;
-      if (table === "books") {
-        q.insert = () => ({ select: async () => ({ data: null, error: { message: "boom" } }) });
-      }
-      return q;
-    }) as typeof sessionClient.from;
-    try {
-      expect(await run(createBook(await createForm()))).toMatch(/^\/dashboard\/books\/new\?error=/);
-    } finally {
-      sessionClient.from = (table: string) => query(table);
-    }
-    const newManuscript = String(storageCalls.find((c) => c.op === "upload" && c.bucket === "manuscripts")?.paths[0]);
-    expect(removals()).toEqual([
-      { op: "remove", bucket: "covers", paths: [uploadedCoverKey()] },
-      { op: "remove", bucket: "manuscripts", paths: [newManuscript] },
-    ]);
-    expect(writerStorageOps).toEqual(["upload:covers", "upload:manuscripts", "remove:covers", "remove:manuscripts"]);
-  });
-
-  it("temporary uploads are removed only after the insert, in one de-duplicated call", async () => {
-    storedObjects[`manuscripts:${TEMP_EPUB}`] = await validEpub();
-    storedObjects[`manuscripts:${TEMP_COVER}`] = PNG;
-    const f = editForm();
-    f.set("manuscriptStoragePath", TEMP_EPUB);
-    f.set("coverStoragePath", TEMP_COVER);
-    expect(await run(createBook(f))).toBe("/dashboard");
-    expect(removals()).toEqual([{ op: "remove", bucket: "manuscripts", paths: [TEMP_EPUB, TEMP_COVER] }]);
-    expect(events.indexOf("db:insert:books")).toBeLessThan(events.indexOf("storage:remove:manuscripts"));
-  });
-
-  it("a non-UUID session identity cannot produce a key", async () => {
-    signedInUserId = "author-1";
-    await expect(createBook(await createForm())).rejects.toThrow(/lowercase UUID/);
-    expect(storageCalls).toEqual([]);
-    expect(dbWrites).toEqual([]);
-  });
 });
 
 // ============================================================
@@ -734,6 +815,53 @@ describe("deleteBook", () => {
       { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] },
     ]);
     expect(events.indexOf("db:delete:books")).toBeLessThan(events.indexOf("storage:remove:covers"));
+  });
+
+  // BD15 P5b-2: a live book's waiting manuscript and ballinë go with it;
+  // a waiting value that is not this book's own key is left alone; a
+  // failed read of the waiting changes stops the delete.
+  const PENDING_EPUB = `${USER_ID}/${BOOK_ID}/0a0b0c0d-1111-4111-8111-0a0b0c0d0e0f.epub`;
+  const PENDING_COVER = "1a2b3c4d-2222-4222-8222-1a2b3c4d5e6f/cover.jpg";
+  const pendingRow = (o: Record<string, unknown> = {}) => ({
+    book_id: BOOK_ID,
+    file_path: PENDING_EPUB,
+    cover_path: PENDING_COVER,
+    description: "D",
+    is_adult: false,
+    original_author: null,
+    version: 1,
+    ...o,
+  });
+  it("removes a live book's waiting manuscript and ballinë after the delete", async () => {
+    pendingReadResult = { data: pendingRow(), error: null };
+    await run(deleteBook(BOOK_ID));
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).toEqual(expect.arrayContaining([OWN_PNG, OWN_EPUB, PENDING_EPUB, PENDING_COVER]));
+    expect(events.indexOf("db:delete:books")).toBeLessThan(events.indexOf("storage:remove:covers"));
+  });
+
+  it("never removes a waiting manuscript of another author or book, nor the live cover twice", async () => {
+    const OTHER_EPUB = `${OTHER_AUTHOR}/${BOOK_ID}/0a0b0c0d-1111-4111-8111-0a0b0c0d0e0f.epub`;
+    pendingReadResult = { data: pendingRow({ file_path: OTHER_EPUB, cover_path: OWN_PNG }), error: null };
+    await run(deleteBook(BOOK_ID));
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).not.toContain(OTHER_EPUB);
+    expect(removed.filter((p) => p === OWN_PNG)).toHaveLength(1);
+  });
+
+  it("audit r1 F7: a waiting ballinë that is also the live new-shape cover is removed once", async () => {
+    bookReadResult = { data: row({ cover_path: RANDOM_STORED }), error: null };
+    pendingReadResult = { data: pendingRow({ cover_path: RANDOM_STORED }), error: null };
+    await run(deleteBook(BOOK_ID));
+    expect(removals().flatMap((c) => c.paths).filter((p) => p === RANDOM_STORED)).toHaveLength(1);
+  });
+
+  it("a failed read of the waiting changes stops the delete before any write", async () => {
+    pendingReadResult = { data: null, error: { code: "XX000", message: "x" } } as Result;
+    const target = await run(deleteBook(BOOK_ID));
+    expect(target).toContain("/dashboard?error=");
+    expect(bookDeletes()).toEqual([]);
+    expect(removals()).toEqual([]);
   });
 
   // PEN-2 (L10): a new-shape cover read from the author's own row is
@@ -836,14 +964,14 @@ const JPEG_SPELLINGS = Array.from({ length: 16 }, (_, mask) =>
 describe("legacy cover: every ASCII spelling of jpeg, bound to the exact author and book", () => {
   it.each(JPEG_SPELLINGS)("no-upload edit keeps .%s untouched", async (ext) => {
     bookReadResult = { data: row({ cover_path: `${USER_ID}/${BOOK_ID}-cover.${ext}` }), error: null };
-    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, editForm()))).toBe(CONTENT_SAVED);
     expect(bookUpdates()[0].payload).not.toHaveProperty("cover_path");
     expect(storageCalls).toEqual([]);
   });
 
   it.each(JPEG_SPELLINGS)("manuscript-only replacement never touches .%s", async (ext) => {
     bookReadResult = { data: row({ cover_path: `${USER_ID}/${BOOK_ID}-cover.${ext}` }), error: null };
-    expect(await run(updateBook(BOOK_ID, await withManuscript(editForm())))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, await withManuscript(editForm())))).toBe(CONTENT_SAVED);
     expect(storageCalls).toEqual([
       { op: "upload", bucket: "manuscripts", paths: [NEW_EPUB] },
       { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] },
@@ -854,7 +982,7 @@ describe("legacy cover: every ASCII spelling of jpeg, bound to the exact author 
   it.each(JPEG_SPELLINGS)("cover replacement removes .%s exactly as stored, after the write", async (ext) => {
     const stored = `${USER_ID}/${BOOK_ID}-cover.${ext}`;
     bookReadResult = { data: row({ cover_path: stored }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(CONTENT_SAVED);
     expect(events).toEqual([
       "storage:info:manuscripts",
       "storage:upload:covers",
@@ -868,7 +996,7 @@ describe("legacy cover: every ASCII spelling of jpeg, bound to the exact author 
   it.each(JPEG_SPELLINGS)("deleteBook removes .%s exactly as stored", async (ext) => {
     const stored = `${USER_ID}/${BOOK_ID}-cover.${ext}`;
     bookReadResult = { data: row({ cover_path: stored }), error: null };
-    expect(await run(deleteBook(BOOK_ID))).toBe("(no redirect)");
+    expect(await run(deleteBook(BOOK_ID))).toBe(DELETED_URL);
     expect(removals()).toEqual([
       { op: "remove", bucket: "covers", paths: [stored] },
       { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] },
@@ -887,7 +1015,7 @@ describe("legacy cover: every ASCII spelling of jpeg, bound to the exact author 
     ]) {
       storageCalls = [];
       bookReadResult = { data: row({ cover_path: other }), error: null };
-      await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
+      await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)));
       expect(removals()).toEqual([]);
       storageCalls = [];
       await run(deleteBook(BOOK_ID));
@@ -898,10 +1026,10 @@ describe("legacy cover: every ASCII spelling of jpeg, bound to the exact author 
 
 // ============================================================
 describe("a read error with a valid-looking row fails closed", () => {
-  it("updateBook: no upload, no write, no removal", async () => {
+  it("saveBookContent: no upload, no write, no removal", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: { message: "read failed" } };
     const f = await withManuscript(withCover(editForm(), JPG));
-    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard");
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe("/dashboard");
     expect(storageCalls).toEqual([]);
     expect(dbWrites).toEqual([]);
   });
@@ -930,15 +1058,15 @@ describe("a failed removal is logged without any key and never reverses the comp
     return error;
   }
 
-  it("updateBook: success redirect, the write stands, the log carries no key", async () => {
+  it("saveBookContent: success redirect, the write stands, the log carries no key", async () => {
     const stored = `${USER_ID}/${BOOK_ID}-cover.JPEG`;
     bookReadResult = { data: row({ cover_path: stored }), error: null };
     removeError = hostileStorageError(stored);
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(CONTENT_SAVED);
     expect(bookUpdates()).toHaveLength(1);
     expect(removals()).toEqual([{ op: "remove", bucket: "covers", paths: [stored] }]);
     const text = loggedText();
-    expect(text).toContain("updateBook: failed to remove superseded storage objects");
+    expect(text).toContain("saveBookContent: failed to remove superseded storage objects");
     for (const secret of [stored, HOSTILE, USER_ID, BOOK_ID, "Object not found", "StorageApiError"]) {
       expect(text).not.toContain(secret);
     }
@@ -946,26 +1074,12 @@ describe("a failed removal is logged without any key and never reverses the comp
 
   it("deleteBook: the deletion stands, the log carries no key", async () => {
     removeError = hostileStorageError(OWN_EPUB);
-    expect(await run(deleteBook(BOOK_ID))).toBe("(no redirect)");
+    expect(await run(deleteBook(BOOK_ID))).toBe(DELETED_URL);
     expect(bookDeletes()).toHaveLength(1);
     expect(removals()).toHaveLength(2);
     const text = loggedText();
     expect(text).toContain("deleteBook: failed to remove superseded storage objects");
     for (const secret of [OWN_EPUB, OWN_PNG, HOSTILE, USER_ID, "Object not found"]) {
-      expect(text).not.toContain(secret);
-    }
-  });
-
-  it("createBook: the new book stands, the log carries no key", async () => {
-    storedObjects[`manuscripts:${TEMP_EPUB}`] = await validEpub();
-    removeError = hostileStorageError(TEMP_EPUB);
-    const f = withCover(editForm(), PNG);
-    f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(createBook(f))).toBe("/dashboard");
-    expect(dbWrites.filter((w) => w.op === "insert")).toHaveLength(1);
-    const text = loggedText();
-    expect(text).toContain("createBook: failed to remove superseded storage objects");
-    for (const secret of [TEMP_EPUB, HOSTILE, USER_ID]) {
       expect(text).not.toContain(secret);
     }
   });
@@ -975,9 +1089,9 @@ describe("a failed removal is logged without any key and never reverses the comp
 describe("no book action ever moves, copies, signs or downloads a stored key it does not need", () => {
   it("across update and delete flows, Storage sees only uploads of new keys, temp downloads, proven removals and (W7) one info() on the own stored ebook", async () => {
     bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
-    await run(updateBook(BOOK_ID, editForm()));
-    await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
-    await run(updateBook(BOOK_ID, await withManuscript(editForm())));
+    await run(saveBookContent(BOOK_ID, editForm()));
+    await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)));
+    await run(saveBookContent(BOOK_ID, await withManuscript(editForm())));
     await run(deleteBook(BOOK_ID));
     const others = storageCalls.filter((c) => !["upload", "remove"].includes(c.op));
     // W7 r2: exactly one info() -- the cover change asking whether Librum
@@ -991,7 +1105,7 @@ describe("no book action ever moves, copies, signs or downloads a stored key it 
     for (const [, value] of UNSAFE_MANUSCRIPT_PATHS) {
       storageCalls = [];
       bookReadResult = { data: row({ file_path: value }), error: null };
-      await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
+      await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)));
       expect(storageCalls.filter((c) => c.op === "download" || c.op === "info")).toEqual([]);
     }
   });
@@ -999,12 +1113,12 @@ describe("no book action ever moves, copies, signs or downloads a stored key it 
 
 // ============================================================
 // QA-FIX-3: a failed save never changes the live cover or manuscript.
-describe("updateBook never overwrites a live file before the save is proven", () => {
+describe("saveBookContent never overwrites a live file before the save is proven", () => {
   it("a rejected manuscript uploads nothing, not even a valid new cover", async () => {
     const f = withCover(editForm(), JPG);
     f.set("manuscript", new File([new Uint8Array(Buffer.from("not a zip"))], "book.epub"));
-    const target = await run(updateBook(BOOK_ID, f));
-    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    const target = await run(saveBookContent(BOOK_ID, f));
+    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/editor\\?tab=content&error=`));
     expect(storageCalls).toEqual([]);
     expect(dbWrites).toEqual([]);
   });
@@ -1015,7 +1129,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   // and the superseded own key removed only after it.
   it("the new cover and the new manuscript go before the row update; old keys are removed after it", async () => {
     const f = await withManuscript(withCover(editForm(), PNG));
-    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(CONTENT_SAVED);
     expect(events).toEqual([
       "storage:upload:covers",
       "storage:upload:manuscripts",
@@ -1028,7 +1142,7 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   it("a new-key cover is still uploaded before the row update, so the row never points at a missing file", async () => {
     bookReadResult = { data: row({ cover_path: OWN_PNG, file_path: null }), error: null };
     const f = await withManuscript(withCover(editForm(), JPG));
-    expect(await run(updateBook(BOOK_ID, f))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(CONTENT_SAVED);
     expect(events).toEqual([
       "storage:upload:covers",
       "storage:upload:manuscripts",
@@ -1043,8 +1157,8 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   ])("%s: the live files are never touched and the new uploads are removed", async (_label, result) => {
     updateResult = result as Result;
     const f = await withManuscript(withCover(editForm(), PNG));
-    const target = await run(updateBook(BOOK_ID, f));
-    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    const target = await run(saveBookContent(BOOK_ID, f));
+    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/editor\\?tab=content&error=`));
     expect(storageCalls.filter((c) => c.op === "upload")).toEqual([
       { op: "upload", bucket: "covers", paths: [NEW_JPG] },
       { op: "upload", bucket: "manuscripts", paths: [NEW_EPUB] },
@@ -1062,132 +1176,48 @@ describe("updateBook never overwrites a live file before the save is proven", ()
   // more; a failed new-key manuscript upload stops before the write.
   it("a new manuscript upload that fails stops before the row update and touches nothing else", async () => {
     failUploadsTo = new Set(["manuscripts:*"]);
-    const target = await run(updateBook(BOOK_ID, await withManuscript(editForm())));
-    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/edit\\?error=`));
+    const target = await run(saveBookContent(BOOK_ID, await withManuscript(editForm())));
+    expect(target).toMatch(new RegExp(`^/dashboard/books/${BOOK_ID}/editor\\?tab=content&error=`));
     expect(dbWrites).toEqual([]);
-    expect(removals()).toEqual([]);
+    // saveBookContent removes the new key it tried to write (best effort),
+    // never a stored one.
+    expect(removals().flatMap((c) => c.paths)).toEqual([NEW_EPUB]);
     expect(everyStorageKey()).not.toContain(OWN_EPUB);
   });
 
   it("a new-key upload that fails stops before the row update", async () => {
     failUploadsTo = new Set(["covers:*"]);
-    const target = await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
-    expect(target).toBe(`/dashboard/books/${BOOK_ID}/edit?error=Imazhi%20i%20kopertin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri`);
+    const target = await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)));
+    expect(target).toBe(`/dashboard/books/${BOOK_ID}/editor?tab=content&error=Imazhi%20i%20ballin%C3%ABs%20nuk%20u%20ngarkua%20dot.%20Provoni%20p%C3%ABrs%C3%ABri`);
     expect(dbWrites).toEqual([]);
-    expect(removals()).toEqual([]);
-  });
-});
-
-// ============================================================
-// ADMIN-3-REVIEW (C, D, S3, S5, E): a new file or cover takes a LIVE book
-// out of the Bookstore until Librum approves it; a book waiting for
-// review gets its snapshot replaced; text-only edits are unchanged.
-describe("updateBook and review (ADMIN-3)", () => {
-  const SAVED_LIVE = `/dashboard?success=${encodeURIComponent(
-    "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
-  )}`;
-  const fns = () => bookReviewsDoubleState.calls.map((c) => c.fn);
-
-  beforeEach(() => {
-    bookReadResult = { data: row({ status: "published" }), error: null };
-    mockReviewStaffEmail.mockClear();
-  });
-
-  it("a live book's new cover: one write back to draft, then a review request", async () => {
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED_LIVE);
-    const [update] = bookUpdates();
-    expect(update.payload).toMatchObject({ cover_path: NEW_JPG, status: "draft", librum_choice_at: null });
-    expect(fns()).toEqual(["requestBookReview"]);
-    expect(events.indexOf("db:update:books")).toBeLessThan(events.indexOf("storage:remove:covers"));
-    expect(mockReviewStaffEmail).toHaveBeenCalledWith({ bookId: BOOK_ID, authorId: USER_ID });
-  });
-
-  it("a live book's new manuscript: draft, review request, then retention cleanup of the superseded key", async () => {
-    expect(await run(updateBook(BOOK_ID, await withManuscript(editForm())))).toBe(SAVED_LIVE);
-    expect(bookUpdates()[0].payload).toMatchObject({ file_path: NEW_EPUB, status: "draft", librum_choice_at: null });
-    expect(fns()).toEqual(["requestBookReview", "removeUnretainedManuscripts"]);
-    expect(removals()).toEqual([{ op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] }]);
-  });
-
-  it("a failed review request keeps the draft and tells the author to press Dërgojeni për shqyrtim", async () => {
-    bookReviewsDoubleState.requestResult = { ok: false, reason: "failed" };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?success=${encodeURIComponent('U ruajt. Shtypni "Dërgojeni për shqyrtim" kur të jeni gati.')}`,
-    );
-    expect(bookUpdates()).toHaveLength(1);
-    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
-  });
-
-  it("a live book in a published bundle cannot change its files: refused before any upload", async () => {
-    bundleBooksResult = { data: [{ bundle_id: "b1" }], error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(
-        "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose kopertinën.",
-      )}`,
-    );
-    expect(storageCalls).toEqual([]);
-    expect(dbWrites).toEqual([]);
-  });
-
-  it("an unreadable bundle membership fails closed", async () => {
-    bundleBooksResult = { data: null, error: { message: "down" } };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toContain(`/edit?error=${encodeURIComponent("Diçka shkoi keq")}`);
-    expect(storageCalls).toEqual([]);
-    expect(dbWrites).toEqual([]);
-  });
-
-  it("a text-only edit of a live book stays live: no status, no review", async () => {
-    expect(await run(updateBook(BOOK_ID, editForm()))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
-    expect(bookUpdates()[0].payload).not.toHaveProperty("status");
-    expect(bookReviewsDoubleState.calls).toEqual([]);
-    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
-  });
-
-  it("a draft waiting for review: its snapshot is replaced with the new files", async () => {
-    bookReadResult = { data: row({ status: "draft" }), error: null };
-    bookReviewsDoubleState.pending = true;
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
-    expect(fns()).toEqual(["getBookReviewState", "requestBookReview"]);
-    expect(bookUpdates()[0].payload).toMatchObject({ status: "draft" });
-    expect(mockReviewStaffEmail).toHaveBeenCalledTimes(1);
-  });
-
-  it("a draft not waiting for review is not sent for review by a file change", async () => {
-    bookReadResult = { data: row({ status: "draft" }), error: null };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe("/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua");
-    expect(fns()).toEqual(["getBookReviewState"]);
-  });
-
-  it.each(["LB462", "LB463"])("%s on the write: 'changed while editing', the new uploads removed", async (code) => {
-    updateResult = { data: null, error: { code, message: "x" } };
-    expect(await run(updateBook(BOOK_ID, await withManuscript(withCover(editForm(), PNG))))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Libri juaj ndryshoi ndërsa po e redaktonit. Rifreskoni faqen dhe provoni përsëri.")}`,
-    );
-    expect(removals().map((c) => c.bucket)).toEqual(["covers", "manuscripts"]);
-    expect(everyStorageKey()).not.toContain(OWN_EPUB);
-    expect(bookReviewsDoubleState.calls).toEqual([]);
-  });
-
-  it("the write is a compare-and-set on the file_path it read", async () => {
-    await run(updateBook(BOOK_ID, await withManuscript(editForm())));
-    expect(bookUpdates()[0].filters).toContainEqual({ kind: "eq", column: "file_path", value: OWN_EPUB });
+    expect(removals().flatMap((c) => c.paths)).toEqual([NEW_JPG]);
   });
 });
 
 describe("cancelBookReview (ADMIN-3, E)", () => {
   it("withdraws the pending review on the author's session and says so", async () => {
     expect(await run(cancelBookReview(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?success=${encodeURIComponent("Shqyrtimi u anulua. Libri juaj është përsëri draft.")}`,
+      // BD15 P4: a plain draft again, so the new editor.
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&success=${encodeURIComponent("Shqyrtimi u anulua. Libri juaj është përsëri draft.")}`,
     );
     expect(bookReviewsDoubleState.calls).toEqual([{ fn: "withdrawBookReview", bookId: BOOK_ID }]);
     expect(dbWrites).toEqual([]);
     expect(storageCalls).toEqual([]);
   });
 
+  it("audit r1 F2: a live book's changes: it stays on sale, and the message says so", async () => {
+    bookReadResult = { data: row({ status: "published" }), error: null };
+    expect(await run(cancelBookReview(BOOK_ID))).toBe(
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&success=${encodeURIComponent("Shqyrtimi u anulua. Libri mbetet në shitje; ndryshimet tuaja presin përsëri te redaktori.")}`,
+    );
+    expect(dbWrites).toEqual([]);
+  });
+
   it("not waiting: says so", async () => {
     bookReviewsDoubleState.withdrawResult = { ok: false, reason: "not_pending" };
     expect(await run(cancelBookReview(BOOK_ID))).toBe(
-      `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent("Ky libër nuk po pret shqyrtim.")}`,
+      // BD15 P5b-3a: back to the editor (the old edit page is retired).
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&error=${encodeURIComponent("Ky libër nuk po pret shqyrtim.")}`,
     );
   });
 
@@ -1233,7 +1263,7 @@ describe("deleteBook and review snapshots (ADMIN-3)", () => {
 // touched, and a failed swap never fails the save (one more line in the
 // success message instead).
 describe("W7: the cover inside a Librum-made ebook", () => {
-  const SAVED = "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua";
+  const SAVED = CONTENT_SAVED;
   // Q1 b-lite: a fixed flag; the page shows the one sentence for it.
   const WARNING = "&ebook_cover=0";
   const SAVED_WITH_WARNING = `${SAVED}${WARNING}`;
@@ -1266,51 +1296,10 @@ describe("W7: the cover inside a Librum-made ebook", () => {
     String(storageCalls.find((c) => c.op === "upload" && c.bucket === "manuscripts")?.paths[0]);
   const uploadedEbook = () => uploadedBytes[`manuscripts:${uploadedEbookKey()}`];
   const uploadedEbookMetadata = () => uploadedMetadata[`manuscripts:${uploadedEbookKey()}`];
-  const uploadedCover = () => uploadedBytes[`covers:${uploadedCoverKey()}`];
 
-  it("createBook: a Word-made ebook is saved with the cover (1600px) as first page, the saved title, the pen name and the marker", async () => {
-    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
-    const f = withCover(editForm(), await bigPng());
-    f.set("title", "Titulli i ri");
-    f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(createBook(f))).toBe("/dashboard");
-
-    const ebook = uploadedEbook()!;
-    const opf = await opfOf(ebook);
-    expect(opf).toContain('properties="cover-image"');
-    expect(opf).toMatch(/<spine>\n<itemref idref="librum-cover-page"\/>/);
-    expect(opf).toContain("<dc:title>Titulli i ri</dc:title>");
-    expect(opf).toContain("<dc:creator>Emri i Penës</dc:creator>");
-    const inside = (await readLibrumEbookCover(ebook))!;
-    expect((await sharp(inside).metadata()).width).toBe(1600);
-    expect((await sharp(inside).metadata()).format).toBe("jpeg");
-    // The site keeps its 800px cover.
-    expect((await sharp(uploadedCover()).metadata()).width).toBe(800);
-    expect(uploadedEbookMetadata()).toEqual(MARKER);
-  });
-
-  it("createBook: 2a -- a directly uploaded ebook is stored byte-for-byte as uploaded, with no marker", async () => {
-    const direct = await validEpub();
-    storedObjects[`manuscripts:${TEMP_EPUB}`] = direct;
-    const f = withCover(editForm(), PNG);
-    f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(createBook(f))).toBe("/dashboard");
-    expect(uploadedEbook()).toEqual(direct);
-    expect(uploadedEbookMetadata()).toBeUndefined();
-  });
-
-  it("createBook: an unreadable pen name keeps the name already inside the ebook", async () => {
-    penNameReadResult = { data: null, error: { message: "boom" } };
-    storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
-    const f = withCover(editForm(), PNG);
-    f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(createBook(f))).toBe("/dashboard");
-    expect(await opfOf(uploadedEbook()!)).toContain("<dc:creator>Emri i vjetër</dc:creator>");
-  });
-
-  it("updateBook, cover only: a marked Word-made ebook is rewritten to a fresh versioned key, compare-and-set on file_path", async () => {
+  it("cover only: a marked Word-made ebook is rewritten to a fresh versioned key, compare-and-set on file_path", async () => {
     await storeOwnLibrumEbook();
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), await bigPng())))).toBe(SAVED);
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), await bigPng())))).toBe(SAVED);
 
     expect(storageCalls.slice(0, 4)).toEqual([
       OWN_EPUB_INFO,
@@ -1319,7 +1308,8 @@ describe("W7: the cover inside a Librum-made ebook", () => {
       { op: "upload", bucket: "manuscripts", paths: [NEW_EPUB] },
     ]);
     const [update] = bookUpdates();
-    expect(update.payload).toMatchObject({ cover_path: NEW_JPG, file_path: NEW_EPUB, status: "draft" });
+    expect(update.payload).toMatchObject({ cover_path: NEW_JPG, file_path: NEW_EPUB });
+    expect(update.filters).toContainEqual({ kind: "eq", column: "status", value: "draft" });
     expect(update.filters).toContainEqual({ kind: "eq", column: "file_path", value: OWN_EPUB });
     expect(update.filters).toContainEqual({ kind: "eq", column: "cover_path", value: OWN_PNG });
     const inside = (await readLibrumEbookCover(uploadedEbook()!))!;
@@ -1332,66 +1322,46 @@ describe("W7: the cover inside a Librum-made ebook", () => {
     expect(events.indexOf("db:update:books")).toBeLessThan(events.indexOf("storage:remove:manuscripts"));
   });
 
-  it("updateBook, cover only on a live Word-made book: one draft write with both new keys, then a review request", async () => {
-    bookReadResult = { data: row({ status: "published" }), error: null };
-    await storeOwnLibrumEbook();
-    await run(updateBook(BOOK_ID, withCover(editForm(), JPG)));
-    expect(bookUpdates()).toHaveLength(1);
-    expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG, file_path: NEW_EPUB, status: "draft", librum_choice_at: null });
-    expect(bookReviewsDoubleState.calls.map((c) => c.fn)).toEqual(["requestBookReview", "removeUnretainedManuscripts"]);
-  });
-
-  it("updateBook, cover only: R2 -- a direct-upload stored ebook is only asked about (info), never downloaded or rewritten", async () => {
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
+  it("cover only: R2 -- a direct-upload stored ebook is only asked about (info), never downloaded or rewritten", async () => {
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
     expect(storageCalls.filter((c) => c.bucket === "manuscripts")).toEqual([OWN_EPUB_INFO]);
     expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
   });
 
-  it("updateBook, cover only: R2 -- a Word-made ebook stored before W7 (no marker) is not downloaded and not rewritten (5a)", async () => {
+  it("cover only: R2 -- a Word-made ebook stored before W7 (no marker) is not downloaded and not rewritten (5a)", async () => {
     await storeOwnLibrumEbook(undefined, false);
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
     expect(storageCalls.filter((c) => c.bucket === "manuscripts")).toEqual([OWN_EPUB_INFO]);
     expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
   });
 
-  it("updateBook, cover only: a failed info() keeps the cover change, skips the swap and logs it", async () => {
+  it("cover only: a failed info() keeps the cover change, skips the swap and logs it", async () => {
     await storeOwnLibrumEbook();
     infoError = { message: "info failed" };
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
     expect(storageCalls.filter((c) => c.bucket === "manuscripts")).toEqual([OWN_EPUB_INFO]);
     expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG });
     expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
-    expect(loggedText()).toContain("updateBook: could not check whether Librum made the current ebook");
+    expect(loggedText()).toContain("saveBookContent: could not check whether Librum made the current ebook");
   });
 
-  it("updateBook, cover only: a marked ebook whose download fails keeps the cover change, logs, and tells the author (Q1)", async () => {
+  it("cover only: a marked ebook whose download fails keeps the cover change, logs, and tells the author (Q1)", async () => {
     await storeOwnLibrumEbook();
     failDownloadsOf = new Set([`manuscripts:${OWN_EPUB}`]);
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED_WITH_WARNING);
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED_WITH_WARNING);
     expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG });
     expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
-    expect(loggedText()).toContain("updateBook: current ebook not read; cover not put inside it");
+    expect(loggedText()).toContain("saveBookContent: current ebook not read; cover not put inside it");
   });
 
-  it("updateBook, cover only: a marked ebook that is not Librum's shape after download is left untouched (second gate)", async () => {
+  it("cover only: a marked ebook that is not Librum's shape after download is left untouched (second gate)", async () => {
     await storeOwnLibrumEbook(await validEpub());
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
-    expect(loggedText()).toContain("updateBook: marked ebook is not a Librum-made package");
+    expect(await run(saveBookContent(BOOK_ID, withCover(editForm(), JPG)))).toBe(SAVED);
+    expect(loggedText()).toContain("saveBookContent: marked ebook is not a Librum-made package");
     expect(bookUpdates()[0].payload).not.toHaveProperty("file_path");
   });
 
-  it("updateBook, cover only on a live book whose swap fails: the Q1 line follows the live-book message", async () => {
-    bookReadResult = { data: row({ status: "published" }), error: null };
-    await storeOwnLibrumEbook();
-    failDownloadsOf = new Set([`manuscripts:${OWN_EPUB}`]);
-    const liveSaved = `/dashboard?success=${encodeURIComponent(
-      "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.",
-    )}`;
-    expect(await run(updateBook(BOOK_ID, withCover(editForm(), JPG)))).toBe(`${liveSaved}${WARNING}`);
-    expect(bookUpdates()[0].payload).toMatchObject({ cover_path: NEW_JPG, status: "draft" });
-  });
-
-  it("updateBook, new Word file only: the sharp cover inside the marked current ebook is carried over (4b)", async () => {
+  it("new Word file only: the sharp cover inside the marked current ebook is carried over (4b)", async () => {
     const carried = Buffer.from(await sharp(await bigPng()).resize({ width: 1600 }).jpeg().toBuffer());
     const current = await embedCoverInLibrumEpub(await librumEpub(), { coverJpeg: carried });
     if (!current.ok) throw new Error("fixture embed failed");
@@ -1399,14 +1369,14 @@ describe("W7: the cover inside a Librum-made ebook", () => {
     storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
     const f = editForm();
     f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(SAVED);
     expect(await readLibrumEbookCover(uploadedEbook()!)).toEqual(carried);
     expect(uploadedEbookMetadata()).toEqual(MARKER);
     expect(storageCalls.some((c) => c.bucket === "covers" && c.op !== "remove")).toBe(false);
     expect(bookUpdates()[0].payload).not.toHaveProperty("cover_path");
   });
 
-  it("updateBook, new Word file only: an unmarked current ebook is never downloaded; the stored site cover is used", async () => {
+  it("new Word file only: an unmarked current ebook is never downloaded; the stored site cover is used", async () => {
     const carried = Buffer.from(await sharp(await bigPng()).resize({ width: 1600 }).jpeg().toBuffer());
     const current = await embedCoverInLibrumEpub(await librumEpub(), { coverJpeg: carried });
     if (!current.ok) throw new Error("fixture embed failed");
@@ -1415,71 +1385,356 @@ describe("W7: the cover inside a Librum-made ebook", () => {
     storedObjects[`covers:${OWN_PNG}`] = JPG;
     const f = editForm();
     f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(SAVED);
     expect(storageCalls).not.toContainEqual(OWN_EPUB_READ);
     expect(storageCalls).toContainEqual({ op: "download", bucket: "covers", paths: [OWN_PNG] });
     expect(await readLibrumEbookCover(uploadedEbook()!)).not.toEqual(carried);
   });
 
-  it("updateBook, new Word file and new cover together: the new cover goes in at 1600px, nothing old is read", async () => {
+  it("new Word file and new cover together: the new cover goes in at 1600px, nothing old is read", async () => {
     storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
     const f = withCover(editForm(), await bigPng());
     f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(SAVED);
     const inside = (await readLibrumEbookCover(uploadedEbook()!))!;
     expect((await sharp(inside).metadata()).width).toBe(1600);
     expect(storageCalls.filter((c) => (c.op === "download" || c.op === "info") && c.paths[0] !== TEMP_EPUB)).toEqual([]);
   });
 
-  it("updateBook, new Word file only, current ebook has no cover: the stored site cover is used, as a JPEG", async () => {
+  it("new Word file only, current ebook has no cover: the stored site cover is used, as a JPEG", async () => {
     storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
     storedObjects[`covers:${OWN_PNG}`] = JPG;
     const f = editForm();
     f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(SAVED);
     expect(storageCalls).toContainEqual({ op: "download", bucket: "covers", paths: [OWN_PNG] });
     expect((await sharp((await readLibrumEbookCover(uploadedEbook()!))!).metadata()).format).toBe("jpeg");
   });
 
-  it("updateBook, new Word file only: R1 -- a stored PNG site cover is re-encoded as a JPEG inside the ebook", async () => {
+  it("new Word file only: R1 -- a stored PNG site cover is re-encoded as a JPEG inside the ebook", async () => {
     storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
     storedObjects[`covers:${OWN_PNG}`] = await bigPng();
     const f = editForm();
     f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(SAVED);
     const inside = (await readLibrumEbookCover(uploadedEbook()!))!;
     expect([...inside.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
     expect(await sharp(inside).metadata()).toMatchObject({ format: "jpeg", width: 1600 });
   });
 
-  it("updateBook, new Word file only, no cover anywhere: saved without one, logged, and the author is told (Q1)", async () => {
+  it("new Word file only, no cover anywhere: saved without one, logged, and the author is told (Q1)", async () => {
     const fresh = await librumEpub();
     storedObjects[`manuscripts:${TEMP_EPUB}`] = fresh;
     const f = editForm();
     f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED_WITH_WARNING);
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(SAVED_WITH_WARNING);
     expect(uploadedEbook()).toEqual(fresh);
     // Still Librum-made, so still marked.
     expect(uploadedEbookMetadata()).toEqual(MARKER);
-    expect(loggedText()).toContain("updateBook: cover not put inside the Librum-made ebook; ebook kept as it was");
+    expect(loggedText()).toContain("saveBookContent: cover not put inside the Librum-made ebook; ebook kept as it was");
     expect(loggedText()).toContain("cover_unavailable");
   });
 
-  it("updateBook, new Word file only: an unsafe stored cover key is never read", async () => {
+  it("new Word file only: an unsafe stored cover key is never read", async () => {
     bookReadResult = { data: row({ cover_path: `${OTHER_AUTHOR}/${OTHER_BOOK}-cover.png`, file_path: null }), error: null };
     storedObjects[`manuscripts:${TEMP_EPUB}`] = await librumEpub();
     const f = editForm();
     f.set("manuscriptStoragePath", TEMP_EPUB);
-    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED_WITH_WARNING);
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(SAVED_WITH_WARNING);
     expect(storageCalls.filter((c) => c.op === "download" && c.bucket === "covers")).toEqual([]);
   });
 
-  it("updateBook, new direct EPUB and new cover: the ebook is stored byte-for-byte, with no marker (2a)", async () => {
+  it("new direct EPUB and new cover: the ebook is stored byte-for-byte, with no marker (2a)", async () => {
     const direct = await validEpub();
     const f = withCover(editForm(), JPG);
     f.set("manuscript", new File([new Uint8Array(direct)], "book.epub"));
-    expect(await run(updateBook(BOOK_ID, f))).toBe(SAVED);
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(SAVED);
     expect(uploadedEbook()).toEqual(direct);
     expect(uploadedEbookMetadata()).toBeUndefined();
+  });
+});
+
+// ============================================================
+// BD15 P3: the new editor's Content tab save (saveBookContent).
+// ============================================================
+describe("saveBookContent (BD15 P3, the Content tab)", () => {
+  const CONTENT = `/dashboard/books/${BOOK_ID}/editor?tab=content`;
+  const contentRow = (o: Record<string, unknown> = {}) =>
+    row({ title: "Title", pen_name_id: null, isbn: null, ...o });
+  const form = (o: Record<string, string> = {}) => {
+    const f = new FormData();
+    f.set("isbn", "");
+    f.set("publisher", "");
+    for (const [k, v] of Object.entries(o)) f.set(k, v);
+    return f;
+  };
+
+  beforeEach(() => {
+    bookReadResult = { data: contentRow(), error: null };
+    mockReviewStaffEmail.mockClear();
+  });
+
+  it("a new manuscript and cover: fresh keys uploaded before one guarded draft-only write", async () => {
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(`${CONTENT}&success=${encodeURIComponent("U ruajt si draft")}`);
+    const [write] = bookUpdates();
+    expect(write.payload).toEqual({ isbn: null, publisher: null, cover_path: NEW_JPG, file_path: NEW_EPUB });
+    expect(write.filters).toEqual(
+      expect.arrayContaining([
+        { kind: "eq", column: "id", value: BOOK_ID },
+        { kind: "eq", column: "author_id", value: USER_ID },
+        { kind: "eq", column: "status", value: "draft" },
+        { kind: "eq", column: "cover_path", value: OWN_PNG },
+        { kind: "eq", column: "file_path", value: OWN_EPUB },
+      ]),
+    );
+    // Uploads strictly before the row write; superseded objects after it.
+    const firstUpload = events.findIndex((e) => e.startsWith("storage:upload"));
+    const write0 = events.indexOf("db:update:books");
+    expect(firstUpload).toBeGreaterThanOrEqual(0);
+    expect(firstUpload).toBeLessThan(write0);
+    expect(removals().flatMap((c) => c.paths)).toEqual(expect.arrayContaining([OWN_PNG]));
+    // No review state is touched by a draft's Content save.
+    expect(dbWrites.some((w) => w.table === "book_reviews")).toBe(false);
+    expect(mockReviewStaffEmail).not.toHaveBeenCalled();
+  });
+
+  it("a draft with no files yet compares both paths with IS NULL", async () => {
+    bookReadResult = { data: contentRow({ cover_path: null, file_path: null }), error: null };
+    await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    const [write] = bookUpdates();
+    expect(write.filters).toEqual(
+      expect.arrayContaining([
+        { kind: "is", column: "cover_path", value: null },
+        { kind: "is", column: "file_path", value: null },
+      ]),
+    );
+  });
+
+  it("no upload: no path key is written and no Storage call is made", async () => {
+    await run(saveBookContent(BOOK_ID, form({ publisher: "Botime X" })));
+    const [write] = bookUpdates();
+    expect(write.payload).toEqual({ isbn: null, publisher: "Botime X" });
+    expect(storageCalls).toEqual([]);
+  });
+
+  it("records the AI answer after the files are saved, and goes on to Pricing on 'next'", async () => {
+    const target = await run(saveBookContent(BOOK_ID, form({ aiUsed: "yes", intent: "next" })));
+    expect(aiWrites).toEqual([{ bookId: BOOK_ID, answer: "yes" }]);
+    expect(target).toBe(
+      `/dashboard/books/${BOOK_ID}/editor?tab=pricing&success=${encodeURIComponent("U ruajt si draft")}`,
+    );
+  });
+
+  it("D1: '← Të dhënat' saves first, then goes back to Details", async () => {
+    const target = await run(saveBookContent(BOOK_ID, form({ aiUsed: "no", publisher: "Botime X", intent: "back" })));
+    expect(aiWrites).toEqual([{ bookId: BOOK_ID, answer: "no" }]);
+    expect(bookUpdates()[0].payload).toMatchObject({ publisher: "Botime X" });
+    expect(target).toBe(
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&success=${encodeURIComponent("U ruajt si draft")}`,
+    );
+  });
+
+  it("D1: a back press whose save fails stays on Content with the message", async () => {
+    const target = await run(saveBookContent(BOOK_ID, form({ isbn: "123", intent: "back" })));
+    expect(target).toMatch(new RegExp(`^${CONTENT.replace(/[?]/g, "\\?")}&error=`));
+  });
+
+  it("no answer ticked records nothing; any other value is refused before any write", async () => {
+    await run(saveBookContent(BOOK_ID, form()));
+    expect(aiWrites).toEqual([]);
+    const target = await run(saveBookContent(BOOK_ID, form({ aiUsed: "maybe" })));
+    expect(target).toBe(`${CONTENT}&error=${encodeURIComponent("Përgjigja për AI nuk u ruajt. Zgjidheni përsëri dhe ruajeni.")}`);
+    expect(bookUpdates()).toHaveLength(1);
+  });
+
+  it("a failed AI write keeps the saved files and says so on the tab", async () => {
+    aiWriteOk = false;
+    const target = await run(saveBookContent(BOOK_ID, form({ aiUsed: "no" })));
+    expect(bookUpdates()).toHaveLength(1);
+    expect(target).toBe(`${CONTENT}&error=${encodeURIComponent("Përgjigja për AI nuk u ruajt. Zgjidheni përsëri dhe ruajeni.")}`);
+  });
+
+  // BD15 P5a (P3 audit F3): "Send for review" from another tab landed
+  // between the check and the write; the database refuses (LB490).
+  // BD15 P5b-3a: the editor shows a book in review read-only.
+  const IN_REVIEW_EDIT = `/dashboard/books/${BOOK_ID}/editor?tab=details&error=${encodeURIComponent("Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.")}`;
+  it("LB490 on the write: the new uploads removed, the old files kept, sent to the read-only editor", async () => {
+    updateResult = { data: null, error: { code: "LB490", message: "x" } };
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(IN_REVIEW_EDIT);
+    expect(removals().flatMap((c) => c.paths)).not.toContain(OWN_PNG);
+    expect(removals().flatMap((c) => c.paths)).not.toContain(OWN_EPUB);
+    expect(removals().map((c) => c.bucket)).toEqual(expect.arrayContaining(["covers", "manuscripts"]));
+    expect(aiWrites).toEqual([]);
+  });
+
+  it("an AI answer refused because the book went into review: sent to the read-only editor", async () => {
+    aiWriteResult = "in_review";
+    expect(await run(saveBookContent(BOOK_ID, form({ aiUsed: "yes" })))).toBe(IN_REVIEW_EDIT);
+  });
+
+  it("an invalid new ISBN is refused before any upload; an unchanged stored one is kept", async () => {
+    const bad = await run(saveBookContent(BOOK_ID, withCover(form({ isbn: "123" }))));
+    expect(bad.startsWith(`${CONTENT}&error=`)).toBe(true);
+    expect(storageCalls).toEqual([]);
+    expect(bookUpdates()).toEqual([]);
+    bookReadResult = { data: contentRow({ isbn: "legacy-123" }), error: null };
+    await run(saveBookContent(BOOK_ID, form({ isbn: "legacy-123" })));
+    expect(bookUpdates()[0].payload).toEqual(expect.objectContaining({ isbn: "legacy-123" }));
+  });
+
+  it("a rejected file comes back to the Content tab (the message is joined with &)", async () => {
+    const f = form();
+    f.set("manuscript", new File([new Uint8Array(Buffer.from("not a zip"))], "book.epub"));
+    const target = await run(saveBookContent(BOOK_ID, f));
+    expect(target.startsWith(`${CONTENT}&error=`)).toBe(true);
+    expect(storageCalls).toEqual([]);
+    expect(bookUpdates()).toEqual([]);
+  });
+
+  it("a draft waiting for review is sent to the read-only editor untouched", async () => {
+    const editError = IN_REVIEW_EDIT;
+    bookReviewsDoubleState.pending = true;
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(editError);
+    bookReviewsDoubleState.pending = false;
+    bookReviewsDoubleState.stateKind = "unavailable";
+    // An unreadable review state saves nothing and stays on the tab.
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe(
+      `/dashboard/books/${BOOK_ID}/editor?tab=content&error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`,
+    );
+    expect(storageCalls).toEqual([]);
+    expect(dbWrites).toEqual([]);
+  });
+
+  // BD15 P5b-2: a live book stays as it is; the new ballinë waits.
+  const WAITING_COVER_F4 = "3c4d5e6f-4444-4444-8444-3c4d5e6f7081/cover.jpg";
+  const LIVE_ROW = { status: "published", description: "Përshkrimi", is_adult: false, original_author: null };
+  it("a live book: the new ballinë goes to the waiting changes, the live book keeps its own", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    const target = await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(target).toContain("success=");
+    const save = rpcCalls.find((c) => c.fn === "save_book_pending_changes");
+    expect(save?.args).toMatchObject({ p_author_id: USER_ID, p_book_id: BOOK_ID, p_cover_path: NEW_JPG, p_file_path: OWN_EPUB });
+    for (const u of bookUpdates()) {
+      expect(u.payload).not.toHaveProperty("cover_path");
+      expect(u.payload).not.toHaveProperty("file_path");
+    }
+    expect(removals().flatMap((c) => c.paths)).not.toContain(OWN_PNG);
+  });
+
+  // BD15 P5b-3b (audit P5b-2 r1 F4; Renato 11-05, Q1 a): the save passes
+  // the version read; refused because another save came in, the new
+  // upload is removed and nothing the other save named is touched.
+  it("a live book: a save that came in meanwhile wins; this upload is removed, the waiting ballinë kept", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    pendingReadResult = {
+      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER_F4, description: "Përshkrimi", is_adult: false, original_author: null, version: 4 },
+      error: null,
+    };
+    rpcError = { code: "LB496", message: "The waiting changes changed since they were read." };
+    const target = await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(rpcCalls.find((c) => c.fn === "save_book_pending_changes")?.args).toMatchObject({ p_expected_version: 4, p_cover_path: NEW_JPG });
+    expect(decodeURIComponent(target)).toContain(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).toEqual(expect.arrayContaining([NEW_JPG]));
+    expect(removed).not.toContain(WAITING_COVER_F4);
+    expect(removed).not.toContain(OWN_PNG);
+  });
+
+  it("a live book with no waiting row passes null (it read none)", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(rpcCalls.find((c) => c.fn === "save_book_pending_changes")?.args).toMatchObject({ p_expected_version: null });
+  });
+
+  it("audit r1 F7: a live book's new manuscript goes to the waiting changes, never onto the live row", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    await run(saveBookContent(BOOK_ID, await withManuscript(form())));
+    const save = rpcCalls.find((c) => c.fn === "save_book_pending_changes");
+    expect(save?.args).toMatchObject({ p_file_path: NEW_EPUB });
+    for (const u of bookUpdates()) expect(u.payload).not.toHaveProperty("file_path");
+  });
+
+  const WAITING_COVER = "2b3c4d5e-3333-4333-8333-2b3c4d5e6f70/cover.jpg";
+  it("audit r1 F7: the replaced waiting ballinë is removed when the live book still has its own", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    pendingReadResult = {
+      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER, description: "Përshkrimi", is_adult: false, original_author: null, version: 1 },
+      error: null,
+    };
+    await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(removals().flatMap((c) => c.paths)).toContain(WAITING_COVER);
+  });
+
+  it("audit r1 F7: the replaced waiting ballinë is kept when it became the live one meanwhile", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    bookReadAfterFirst = { data: contentRow({ ...LIVE_ROW, cover_path: WAITING_COVER }), error: null };
+    pendingReadResult = {
+      data: { book_id: BOOK_ID, file_path: OWN_EPUB, cover_path: WAITING_COVER, description: "Përshkrimi", is_adult: false, original_author: null, version: 1 },
+      error: null,
+    };
+    await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(removals().flatMap((c) => c.paths)).not.toContain(WAITING_COVER);
+  });
+
+  it("a live book whose waiting save is refused removes the new upload and keeps the live files", async () => {
+    bookReadResult = { data: contentRow(LIVE_ROW), error: null };
+    rpcError = { code: "LB491", message: "x" };
+    const target = await run(saveBookContent(BOOK_ID, withCover(form())));
+    expect(target).toContain("error=");
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).toContainEqual(NEW_JPG);
+    expect(removed).not.toContain(OWN_PNG);
+  });
+
+  it("another author's book, a row with another id, or no session never reaches Storage", async () => {
+    bookReadResult = { data: contentRow({ author_id: OTHER_AUTHOR }), error: null };
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe("/dashboard");
+    bookReadResult = { data: contentRow({ id: OTHER_BOOK }), error: null };
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe("/dashboard");
+    signedInUserId = null;
+    expect(await run(saveBookContent(BOOK_ID, withCover(form())))).toBe("/login");
+    expect(storageCalls).toEqual([]);
+    expect(dbWrites).toEqual([]);
+  });
+
+  it("a write error removes the new uploads; a concurrent publish (LB463) gets its own message", async () => {
+    updateResult = { data: null, error: { code: "LB463", message: "x" } };
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(
+      `${CONTENT}&error=${encodeURIComponent("Libri juaj ndryshoi ndërsa po e redaktonit. Rifreskoni faqen dhe provoni përsëri.")}`,
+    );
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).toEqual(expect.arrayContaining([NEW_JPG, NEW_EPUB]));
+    expect(removed).not.toContain(OWN_PNG);
+    expect(removed).not.toContain(OWN_EPUB);
+    expect(aiWrites).toEqual([]);
+  });
+
+  it("a failed upload removes the other new upload and writes nothing", async () => {
+    failUploadsTo = new Set(["manuscripts:*"]);
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target).toBe(`${CONTENT}&error=${encodeURIComponent("Dorëshkrimi nuk u ngarkua dot. Provoni përsëri")}`);
+    expect(bookUpdates()).toEqual([]);
+    expect(removals().flatMap((c) => c.paths)).toEqual(expect.arrayContaining([NEW_JPG]));
+  });
+
+  it("a form with nothing to write saves only the AI answer", async () => {
+    const f = new FormData();
+    f.set("aiUsed", "no");
+    await run(saveBookContent(BOOK_ID, f));
+    expect(bookUpdates()).toEqual([]);
+    expect(aiWrites).toEqual([{ bookId: BOOK_ID, answer: "no" }]);
+  });
+
+  it("a write that matched no row removes the new uploads and keeps the old objects", async () => {
+    updateResult = { data: [], error: null };
+    const target = await run(saveBookContent(BOOK_ID, withCover(await withManuscript(form()))));
+    expect(target.startsWith(`${CONTENT}&error=`)).toBe(true);
+    const removed = removals().flatMap((c) => c.paths);
+    expect(removed).not.toContain(OWN_PNG);
+    expect(removed).not.toContain(OWN_EPUB);
+    expect(removed).toEqual(expect.arrayContaining([NEW_JPG, NEW_EPUB]));
   });
 });

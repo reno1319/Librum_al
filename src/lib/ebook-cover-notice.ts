@@ -9,7 +9,7 @@
 const EBOOK_COVER_NOTICE_VALUE = "0";
 
 export const EBOOK_COVER_NOT_INSIDE_MESSAGE =
-  "Kopertina u ruajt, por nuk u vendos dot brenda librit elektronik. Provoni ta ngarkoni kopertinën edhe një herë.";
+  "Ballina u ruajt, por nuk u vendos dot brenda librit elektronik. Provoni ta ngarkoni ballinën edhe një herë.";
 
 // Adds the flag to a post-save redirect when the swap failed; otherwise
 // the URL is returned unchanged.

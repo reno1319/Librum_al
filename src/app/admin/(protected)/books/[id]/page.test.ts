@@ -45,6 +45,8 @@ type Result = { data: unknown; error: { message: string } | null };
 let rows: Record<string, Result> = {};
 // ADMIN-3 r2: the columns each read names.
 const selects: { table: string; columns: string }[] = [];
+// Walkthrough F1+F2: the .eq() filters each read names.
+const eqs: { table: string; column: string; value: unknown }[] = [];
 const mockAdminFrom = vi.fn((table: string) => {
   // ADMIN-3-REVIEW: a `.in()` read (the review deciders' names) answers
   // from "<table>:in" when a test sets one.
@@ -52,10 +54,11 @@ const mockAdminFrom = vi.fn((table: string) => {
   const done = () => Promise.resolve(rows[key] ?? rows[table] ?? { data: null, error: null });
   const chain = {
     select: (columns?: string) => (selects.push({ table, columns: columns ?? "" }), chain),
-    eq: () => chain,
+    eq: (column: string, value: unknown) => (eqs.push({ table, column, value }), chain),
     is: () => chain,
     in: () => ((key = `${table}:in`), chain),
     order: () => chain,
+    limit: () => chain,
     maybeSingle: done,
     returns: done,
   };
@@ -73,6 +76,7 @@ vi.mock("../actions", () => ({
   allowBookAgainAsStaff: vi.fn(),
   approveBookReviewAsStaff: vi.fn(),
   sendBackBookReviewAsStaff: vi.fn(),
+  setPdEditionAsStaff: vi.fn(),
 }));
 
 const { default: AdminBookPage } = await import("./page");
@@ -260,7 +264,27 @@ describe("AdminBookPage", () => {
       rows.book_reviews = { data: [pending], error: null };
     });
 
-    it("books.review staff get the panel: file link, cover, four checks, Approve and Send back", async () => {
+    // BD15 P7: the Public-domain edition box shows only for a PD book.
+    it("BD15 P7: no public-domain box or pd_works read for an ordinary book", async () => {
+      const html = await render("admin");
+      expect(html).not.toContain("Public-domain edition");
+      expect(mockAdminFrom.mock.calls.some(([table]) => table === "pd_works")).toBe(false);
+    });
+
+    it("BD15 P7: an unlinked public-domain draft gets the box and a note by Approve (the database refuses LB498)", async () => {
+      rows.book_rights_declarations = {
+        data: [{ declared_at: "2026-09-01T09:00:00Z", author_public_name: "Ana Kola", pen_name: "Ana Pena", statement_text: "x", basis: "public_domain" }],
+        error: null,
+      };
+      rows.pd_works = { data: [{ id: OTHER_ID, title: "Lahuta", original_author: "Gjergj Fishta", picked_book_id: null }], error: null };
+      const html = await render("admin");
+      expect(html).toContain("Public-domain edition");
+      expect(html).toContain("Link it to a work in the Public-domain edition box first.");
+      expect(html).toContain(`value="${OTHER_ID}"`);
+      expect(html).toContain('name="editorCredit"');
+    });
+
+    it("books.review staff get the panel: file link, cover, three checks, Approve and Send back", async () => {
       const html = await render("admin");
       expect(html).toContain("Review this book");
       expect(html).toContain("In review");
@@ -270,12 +294,14 @@ describe("AdminBookPage", () => {
       for (const label of [
         "The cover is fine",
         "The book file opens",
-        "It isn't someone else's work",
-        "The author declared their rights",
+        // BD15 P5b-3a (Renato 11-04, b): one box for the rights.
+        "The author declared their rights and it isn't someone else's work",
       ]) {
         expect(html.replace(/&#x27;/g, "'")).toContain(label);
       }
-      expect(html.match(/type="checkbox"[^>]*required=""/g) ?? []).toHaveLength(4);
+      expect(html.match(/type="checkbox"[^>]*required=""/g) ?? []).toHaveLength(3);
+      expect(html).toContain('name="rights_ok"');
+      expect(html).not.toContain('name="not_someone_elses_work"');
       expect(html).toContain(`name="reviewId" value="${REVIEW_ID}"`);
       expect(html).toContain(`name="filePath" value="${FILE}"`);
       expect(html).toContain(`name="coverPath" value="${COVER}"`);
@@ -336,11 +362,145 @@ describe("AdminBookPage", () => {
       expect(selects.some((s) => s.table === "book_reviews" && s.columns.includes("original_author"))).toBe(true);
     });
 
-    it("a live book shows no review panel, whatever its history", async () => {
+    it("a live book with nothing waiting shows no review panel, whatever its history", async () => {
       rows.books.data = { ...(rows.books.data as object), status: "published" };
+      rows.book_reviews = { data: [{ ...pending, status: "approved", decided_at: "2026-10-18T10:00:00Z" }], error: null };
       const html = await render("admin");
       expect(html).not.toContain("Approve and publish");
+      expect(html).not.toContain("Approve changes");
       expect(html).not.toContain("Review this book");
+    });
+
+    // BD15 P5b-2 (Renato 11-04, Q2 a): a live book's changes in review,
+    // only what changed, live beside new.
+    describe("a live book's changes", () => {
+      const NEW_COVER = "1a2b3c4d-5e6f-4a0b-9c1d-2e3f4a5b6c7d/cover.png";
+      const NEW_FILE = "author-1/22222222-2222-4222-8222-222222222222/1a2b3c4d-5e6f-4a0b-9c1d-2e3f4a5b6c7d.epub";
+      const sent = { ...pending, file_path: NEW_FILE, cover_path: NEW_COVER, description: "New text", is_adult: false };
+      beforeEach(() => {
+        rows.books.data = {
+          ...(rows.books.data as object),
+          status: "published",
+          file_path: FILE,
+          cover_path: COVER,
+          description: "Live text",
+          is_adult: false,
+          original_author: null,
+        };
+        rows.book_reviews = { data: [sent], error: null };
+        rows.book_pending_changes = {
+          data: { file_path: NEW_FILE, cover_path: NEW_COVER, description: "New text", is_adult: false, original_author: null },
+          error: null,
+        };
+      });
+
+      it("shows only what changed, live beside new, and Approve changes", async () => {
+        const html = await render("admin");
+        expect(html).toContain("What changed");
+        expect(html).toContain(`src="https://cdn.test/${COVER}"`);
+        expect(html).toContain(`src="https://cdn.test/${NEW_COVER}"`);
+        expect(html).toContain("Open the new book file");
+        expect(html).toContain("Live text");
+        expect(html).toContain("New text");
+        expect(html).not.toContain("18+ label");
+        expect(html).not.toContain("Original author</p>");
+        expect(html).toContain("Approve changes");
+        expect(html).toContain(`name="filePath" value="${NEW_FILE}"`);
+        expect(html).toContain(`name="coverPath" value="${NEW_COVER}"`);
+        expect(selects.some((s) => s.table === "book_pending_changes")).toBe(true);
+      });
+
+      it.each<[string, () => void]>([
+        ["the waiting row changed since it was sent", () => {
+          (rows.book_pending_changes.data as Record<string, unknown>).description = "Edited again";
+        }],
+        ["there is no waiting row", () => (rows.book_pending_changes = { data: null, error: null })],
+        ["the waiting row is unreadable", () => (rows.book_pending_changes = { data: null, error: { message: "boom" } })],
+      ])("no Approve when %s", async (_label, arrange) => {
+        arrange();
+        const html = await render("admin");
+        expect(html).not.toContain("Approve changes");
+        expect(html).not.toContain("boom");
+      });
+    });
+
+    // BD15 F1 (Renato 11-05, D1 b): a book in a published bundle may
+    // change; the review box names the bundle(s), read at page load.
+    describe("a book in a published bundle", () => {
+      const NOTE = "This book is in a published bundle:";
+      const BUNDLE_2 = "44444444-4444-4444-8444-444444444444";
+      beforeEach(() => {
+        rows.books.data = { ...(rows.books.data as object), status: "published", description: null, is_adult: false };
+        rows.book_reviews = { data: [{ ...pending, description: null, is_adult: false }], error: null };
+        rows.book_pending_changes = {
+          data: { file_path: FILE, cover_path: COVER, description: null, is_adult: false, original_author: null },
+          error: null,
+        };
+      });
+
+      it("a live book's changes: names the bundle with a link, Approve still offered", async () => {
+        const html = await render("admin");
+        expect(html).toContain(NOTE);
+        expect(html).toMatch(/href="\/paketa\/bundle-1"[^>]*>Set A<\/a>/);
+        expect(html).toContain("Approved changes reach its buyers too.");
+        expect(html).toContain("Approve changes");
+        expect(
+          selects.some((s) => s.table === "bundle_books" && s.columns.includes("bundle_id") && s.columns.includes("bundles!inner(title, status)")),
+        ).toBe(true);
+      });
+
+      it("names every published bundle", async () => {
+        rows.bundle_books = {
+          data: [
+            { bundle_id: "bundle-1", bundles: { title: "Set A", status: "published" } },
+            { bundle_id: BUNDLE_2, bundles: { title: "Set B", status: "published" } },
+          ],
+          error: null,
+        };
+        const html = await render("admin");
+        expect(html).toMatch(/>Set A<\/a><\/span><span>, <a[^>]*href="\/paketa\/44444444-4444-4444-8444-444444444444"[^>]*>Set B<\/a>/);
+      });
+
+      it("staff without books.review see the note too", async () => {
+        const html = await render("moderator");
+        expect(html).toContain(NOTE);
+        expect(html).not.toContain("Approve changes");
+      });
+
+      it("a first review (draft) in a published bundle shows it as well", async () => {
+        rows.books.data = { ...(rows.books.data as object), status: "draft" };
+        rows.book_reviews = { data: [pending], error: null };
+        const html = await render("admin");
+        expect(html).toContain(NOTE);
+        expect(html).toContain("Approve and publish");
+      });
+
+      it.each<[string, Result]>([
+        ["in no bundle", { data: [], error: null }],
+        ["only in a draft bundle", { data: [{ bundle_id: "bundle-1", bundles: { title: "Set A", status: "draft" } }], error: null }],
+      ])("no note when the book is %s", async (_label, result) => {
+        rows.bundle_books = result;
+        const html = await render("admin");
+        expect(html).not.toContain(NOTE);
+        expect(html).not.toContain("Couldn’t check whether this book is in a published bundle.");
+        expect(html).toContain("Approve changes");
+      });
+
+      it("no note without a waiting review", async () => {
+        rows.book_reviews = { data: [], error: null };
+        expect(await render("admin")).not.toContain(NOTE);
+      });
+
+      it("an unreadable membership says so, never shows as no bundle", async () => {
+        rows.bundle_books = { data: null, error: { message: "boom" } };
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const html = await render("admin");
+        expect(html).toContain("Couldn’t check whether this book is in a published bundle. Please reload the page.");
+        expect(html).not.toContain(NOTE);
+        expect(html).not.toContain("boom");
+        expect(errorSpy).toHaveBeenCalledWith("admin book: the published bundles read failed", expect.anything());
+        errorSpy.mockRestore();
+      });
     });
 
     it("an unreadable review state says so, offers nothing", async () => {
@@ -409,6 +569,106 @@ describe("AdminBookPage", () => {
     it("a book never sent for review says so", async () => {
       rows.book_reviews = { data: [], error: null };
       expect(await render("admin")).toContain("Never sent for review.");
+    });
+  });
+
+  // ============================================================
+  // Walkthrough F1+F2 (Renato 11-05, a): the read-only Book details box,
+  // on every staff book page, for every staff role.
+  // ============================================================
+  describe("book details (walkthrough F1+F2)", () => {
+    const SERIES_ID = "44444444-4444-4444-8444-444444444444";
+    beforeEach(() => {
+      selects.length = 0;
+      eqs.length = 0;
+    });
+    const full = () => {
+      rows.books.data = {
+        ...(rows.books.data as object),
+        description: "**Një** histori e gjatë.",
+        is_adult: true,
+        categories: ["Romancë", "Thriller"],
+        genre: "Romancë",
+        reading_age_min: 18,
+        edition_number: 2,
+        edition: null,
+        series_id: SERIES_ID,
+        series_position: 3,
+        keywords: "dashuri, Tiranë, dashuri",
+        publisher: "Shtëpia Test",
+        isbn: "9780000000002",
+      };
+      rows.series = { data: { title: "Trilogjia" }, error: null };
+      rows.book_contributors = {
+        data: [
+          { name: "Bora Test", role: "Illustrator" },
+          { name: "Dritë Test", role: "Translator" },
+        ],
+        error: null,
+      };
+      rows.book_ai_disclosures = { data: { ai_used: true }, error: null };
+    };
+
+    it("shows every detail and the AI answer, even to a role that may only look", async () => {
+      full();
+      for (const role of ["moderator", "viewer"]) {
+        const html = await render(role);
+        expect(html).toContain(">Book details<");
+        expect(html).toContain("<dt class=\"font-semibold\">AI used</dt><dd class=\"break-words\">Yes, AI was used</dd>");
+        expect(html).toContain("Romancë, Thriller");
+        expect(html).toContain("<dt class=\"font-semibold\">18+</dt><dd class=\"break-words\">Yes</dd>");
+        expect(html).toContain("<dt class=\"font-semibold\">Reading age</dt><dd class=\"break-words\">18+</dd>");
+        expect(html).toContain("Trilogjia, book 3");
+        expect(html).toContain("<dt class=\"font-semibold\">Edition</dt><dd class=\"break-words\">2</dd>");
+        expect(html).toContain("Bora Test (Illustrator), Dritë Test (Translator)");
+        expect(html).toContain("dashuri, Tiranë</dd>");
+        expect(html).toContain("Shtëpia Test");
+        expect(html).toContain("9780000000002");
+        // Plain text: no "**" marks.
+        expect(html).toContain("Një histori e gjatë.");
+        expect(html).not.toContain("**Një**");
+      }
+      // The AI answer is read by book id from the staff-only table.
+      expect(selects).toContainEqual({ table: "book_ai_disclosures", columns: "ai_used" });
+      expect(selects).toContainEqual({ table: "book_contributors", columns: "name, role" });
+      expect(selects).toContainEqual({ table: "series", columns: "title" });
+      expect(eqs).toContainEqual({ table: "book_ai_disclosures", column: "book_id", value: BOOK_ID });
+      expect(eqs).toContainEqual({ table: "book_contributors", column: "book_id", value: BOOK_ID });
+      expect(eqs).toContainEqual({ table: "series", column: "id", value: SERIES_ID });
+      const bookRead = selects.find((s) => s.table === "books")?.columns ?? "";
+      for (const column of ["categories", "genre", "reading_age_min", "edition_number", "edition", "series_id", "series_position", "keywords", "publisher", "isbn"]) {
+        expect(bookRead.split(", ")).toContain(column);
+      }
+      // Not waiting for review: no "waiting changes" note.
+      expect(await render("moderator")).not.toContain("The waiting changes are under What changed.");
+    });
+
+    it("says No and Not answered, and None / Not set for empty values", async () => {
+      rows.book_ai_disclosures = { data: { ai_used: false }, error: null };
+      let html = await render("moderator");
+      expect(html).toContain("AI used</dt><dd class=\"break-words\">No</dd>");
+      rows.book_ai_disclosures = { data: null, error: null };
+      html = await render("moderator");
+      expect(html).toContain("AI used</dt><dd class=\"break-words\">Not answered</dd>");
+      expect(html).toContain("Series</dt><dd class=\"break-words\">None</dd>");
+      expect(html).toContain("Contributors</dt><dd class=\"break-words\">None</dd>");
+      expect(html).toContain("ISBN</dt><dd class=\"break-words\">Not set</dd>");
+      expect(html).toContain("Description</dt><dd class=\"max-h-48 overflow-y-auto whitespace-pre-wrap break-words\">None</dd>");
+      // No series id: the series is never read.
+      expect(selects.some((s) => s.table === "series")).toBe(false);
+    });
+
+    it("says when the AI answer, series or contributors can't be read, never None", async () => {
+      full();
+      rows.book_ai_disclosures = { data: null, error: { message: "boom" } };
+      rows.series = { data: null, error: { message: "boom" } };
+      rows.book_contributors = { data: null, error: { message: "boom" } };
+      const html = await render("moderator");
+      expect(html).toContain("<dd class=\"break-words text-red-700\">Couldn’t load the AI answer.</dd>");
+      expect(html).toContain("<dd class=\"break-words text-red-700\">Couldn’t load the series.</dd>");
+      expect(html).toContain("<dd class=\"break-words text-red-700\">Couldn’t load the contributors.</dd>");
+      expect(html).not.toContain("Not answered");
+      expect(html).not.toContain("boom");
     });
   });
 });

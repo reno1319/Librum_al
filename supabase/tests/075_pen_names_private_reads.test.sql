@@ -270,9 +270,10 @@ begin
     'part1: no SELECT policy is left on bundle_checkout_snapshots (C7, [23b])');
 
   -- exact view columns and options (BD3-P4, migration 20261101170000:
-  -- original_author appended last)
+  -- original_author appended last; BD15 P1, migration 20261103200000:
+  -- six more appended after it, never ai_used)
   perform pg_temp.assert(pg_temp.cols('public.public_books') =
-    'id,title,subtitle,description,preview_text,keywords,isbn,language,publisher,edition,original_publication_date,genre,series_id,series_position,price_cents,cover_path,status,published_at,created_at,updated_at,price_all,librum_choice_at,pen_name_id,original_author',
+    'id,title,subtitle,description,preview_text,keywords,isbn,language,publisher,edition,original_publication_date,genre,series_id,series_position,price_cents,cover_path,status,published_at,created_at,updated_at,price_all,librum_choice_at,pen_name_id,original_author,categories,is_adult,reading_age_min,edition_number,pd_work_id,pd_editor_credit',
     'part1: public_books columns (no author_id, file_path, pen_name)');
   perform pg_temp.assert(pg_temp.cols('public.public_series') = 'id,title,pen_name_id,created_at', 'part1: public_series columns');
   perform pg_temp.assert(pg_temp.cols('public.public_bundles') =

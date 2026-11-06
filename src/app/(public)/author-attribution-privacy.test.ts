@@ -197,18 +197,23 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
 });
 
 describe("AUTHOR-1B privacy contract: EPUB dc:creator is sourced from the resolved public name, not display_name", () => {
-  const dashboardFiles = [
-    "app/(public)/dashboard/books/new/page.tsx",
-    "app/(public)/dashboard/books/[id]/edit/page.tsx",
-  ];
+  // BD15 P2: books/new/page.tsx no longer builds an EPUB (it opens the
+  // new editor's Details tab); the manuscript comes back to the editor
+  // in P3, which takes this check with it.
+  // BD15 P5b-3a: the old edit page (the last dashboard page that built an
+  // EPUB from the account name) is retired -- it only redirects to the
+  // editor, whose Content tab names the book's pen name, never the
+  // private account name.
+  it("the retired edit page builds no EPUB and reads no profile", () => {
+    const source = readSrc("app/(public)/dashboard/books/[id]/edit/page.tsx");
+    expect(source).not.toContain("authorName=");
+    expect(source).not.toContain("profiles");
+  });
 
-  it.each(dashboardFiles)("%s selects public_author_name alongside display_name and resolves authorName via resolvePublicAuthorName", (file) => {
-    const source = readSrc(file);
-    expect(source).toContain('from "@/lib/author-name"');
-    expect(source).toMatch(/public_author_name/);
-    expect(source).toContain("authorName={resolvePublicAuthorName(profile)");
-    // Never the pre-AUTHOR-1B raw read as the prop value.
-    expect(source).not.toContain("authorName={profile?.display_name");
+  it("the editor's Content tab passes the book's pen name, never the account name", () => {
+    const source = readSrc("app/(public)/dashboard/books/[id]/editor/page.tsx");
+    expect(source).toContain('authorName={penNameList.find((p) => p.id === book.pen_name_id)?.name ?? ""}');
+    expect(source).not.toContain("display_name");
   });
 
   it("epub-generator.ts documents the durable-artifact / snapshot-at-generation-time contract at both dc:creator write sites", () => {

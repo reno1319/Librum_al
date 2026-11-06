@@ -64,10 +64,13 @@ export function BookSampleReader({
   bookId,
   bookTitle,
   variant = "button",
+  label = "Lexoni një pjesë",
 }: {
   bookId: string;
   bookTitle: string;
   variant?: "button" | "text";
+  // BD15 P3: the editor's Content tab names it "Hap pamjen paraprake".
+  label?: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -137,7 +140,7 @@ export function BookSampleReader({
             : "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
         }
       >
-        Lexoni një pjesë
+        {label}
       </button>
 
       <dialog

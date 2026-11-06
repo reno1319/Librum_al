@@ -68,6 +68,10 @@ function tableStub(rows: Row[]) {
     select: () => builder,
     eq: (col: string, value: unknown) => ((result = result.filter((r) => r[col] === value)), builder),
     not: (col: string) => ((result = result.filter((r) => r[col] != null)), builder),
+    // BD15 P8: array "contains" (categories) and the id re-fetch.
+    contains: (col: string, values: unknown[]) =>
+      ((result = result.filter((r) => values.every((v) => ((r[col] as unknown[]) ?? []).includes(v)))), builder),
+    in: (col: string, values: unknown[]) => ((result = result.filter((r) => values.includes(r[col]))), builder),
     gte: (col: string, v: number) => ((result = result.filter((r) => (r[col] as number) >= v)), builder),
     lte: (col: string, v: number) => ((result = result.filter((r) => (r[col] as number) <= v)), builder),
     order: (col: string) =>
@@ -86,7 +90,8 @@ function book(n: number, priceAll: number): Row {
   const day = String(n).padStart(2, "0");
   return {
     id: `book-${day}`, title: `Book ${day}`, author_id: "author", status: "published",
-    price_all: priceAll, genre: "Letërsi artistike", cover_path: null, description: `About ${day}.`,
+    price_all: priceAll, genre: "Letërsi artistike", categories: ["Letërsi artistike"], cover_path: null,
+    description: `About ${day}.`,
     created_at: `2026-10-${day}T00:00:00Z`, pen: { id: "pen-an-author", name: "An Author" },
   };
 }
@@ -98,6 +103,8 @@ const BOOKS = Array.from({ length: 10 }, (_, i) => book(i + 1, i + 1 === 3 || i 
 let bookRows: Row[] = BOOKS;
 
 let signedInUser: { id: string } | null = null;
+let rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
+let bundleRows: Row[] = [];
 
 describe("BookstorePage: redesign step 3 layout", () => {
   beforeEach(() => {
@@ -108,9 +115,26 @@ describe("BookstorePage: redesign step 3 layout", () => {
     mockCreateClient.mockReset();
     mockCreateClient.mockImplementation(() => ({
       auth: { getUser: () => Promise.resolve({ data: { user: signedInUser } }) },
-      from: (table: string) => tableStub(table === "public_books" ? bookRows : []),
+      from: (table: string) =>
+        tableStub(table === "public_books" ? bookRows : table === "public_bundles" ? bundleRows : []),
+      // BD15 P8: search_books returns every published, priced title match;
+      // the page must pass no genre to it (the category is applied in the
+      // id re-fetch).
+      rpc: (name: string, args: Record<string, unknown>) => {
+        rpcCalls.push({ name, args });
+        const term = String(args.search_term ?? "").toLowerCase();
+        return Promise.resolve({
+          data: bookRows
+            .filter((r) => r.status === "published" && r.price_all != null)
+            .filter((r) => String(r.title).toLowerCase().includes(term))
+            .map((r) => ({ book_id: r.id })),
+          error: null,
+        });
+      },
       storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/c.png" } }) }) },
     }));
+    rpcCalls = [];
+    bundleRows = [];
   });
 
   async function render(params: Record<string, string> = {}) {
@@ -123,6 +147,57 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(start).toBeGreaterThan(-1);
     return html.slice(start, html.indexOf("</section>", start));
   }
+
+  // BD15 P8: a category matches any of a book's (up to 3) categories,
+  // with or without a search term.
+  function withSecondCategory(n: number, extra: Row = {}): Row[] {
+    return BOOKS.map((b) =>
+      b.id === `book-${String(n).padStart(2, "0")}`
+        ? { ...b, categories: ["Letërsi artistike", "Fantazi"], ...extra }
+        : b,
+    );
+  }
+
+  it("BD15 P8: a category view lists a book whose SECOND category matches", async () => {
+    bookRows = withSecondCategory(5);
+    const html = await render({ genre: "Fantazi" });
+    expect(html).toContain("Book 05");
+    expect(html).not.toContain("Book 04");
+  });
+
+  it("BD15 P8: a search inside a category matches any category, and search_books gets no genre", async () => {
+    bookRows = withSecondCategory(5);
+    const html = await render({ genre: "Fantazi", q: "Book" });
+    expect(html).toContain("Book 05");
+    expect(html).not.toContain("Book 06");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].args.genre_filter).toBeNull();
+  });
+
+  it("BD15 P8: an 18+ book's card in the grid carries the 18+ tag; others don't", async () => {
+    bookRows = withSecondCategory(5, { is_adult: true });
+    const html = await render({ genre: "Fantazi" });
+    expect(html).toContain("18+");
+    const other = await render({ genre: "Letërsi artistike", q: "Book 04" });
+    expect(other).toContain("Book 04");
+    expect(other).not.toContain("18+");
+  });
+
+  it("BD15 P8: a bundle card says 18+ only when a published book in it is 18+", async () => {
+    const bundle = (id: string, members: Row[]) => ({
+      id, title: `Pako ${id}`, price_all: 299, status: "published", created_at: "2026-10-20T00:00:00Z",
+      pen: { id: "pen-an-author", name: "An Author" }, bundle_books: members.map((books) => ({ books })),
+    });
+    bundleRows = [
+      bundle("x", [{ cover_path: null, status: "published", is_adult: true }]),
+      bundle("y", [{ cover_path: null, status: "draft", is_adult: true }, { cover_path: null, status: "published", is_adult: false }]),
+    ];
+    const paketat = section(await render(), "Paketat");
+    const cardX = paketat.slice(paketat.indexOf("Pako x"), paketat.indexOf("Pako y"));
+    const cardY = paketat.slice(paketat.indexOf("Pako y"));
+    expect(cardX).toContain('aria-hidden="true">18+</span>');
+    expect(cardY).not.toContain("18+");
+  });
 
   it("features the newest book under the one label, with its Buy link and the sample reader", async () => {
     const html = await render();

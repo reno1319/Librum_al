@@ -3,9 +3,11 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { BOOK_FIXTURE_AUTHOR_ID as AUTHOR, BOOK_FIXTURE_BOOK_ID as BOOK, BOOK_FIXTURE_OTHER_AUTHOR_ID as OTHER_AUTHOR, BOOK_FIXTURE_OTHER_BOOK_ID as OTHER_BOOK } from "./book-storage-path-test-fixtures";
 import {
+  isInReviewLockError,
   REVIEW_SNAPSHOT_COLUMNS,
   deletedBookManuscriptKeys,
   getBookReviewState,
+  isWaitingForReview,
   latestApprovedReview,
   loadAuthorReviewNotices,
   pendingReview,
@@ -122,6 +124,14 @@ describe("planManuscriptRemovals (N3 / P1)", () => {
       V2,
       CANONICAL,
     ]);
+  });
+
+  it("BD15 P5b-2: keeps a live book's waiting manuscript", () => {
+    const reviews = [snap("cancelled", V2, "2026-10-03T00:00:00Z")];
+    expect(
+      planManuscriptRemovals({ authorId: AUTHOR, bookId: BOOK, currentFilePath: V3, reviews, superseded: [V1, V2], pendingChangeFilePath: V2 }),
+    ).toEqual([V1]);
+    expect(planManuscriptRemovals({ authorId: AUTHOR, bookId: BOOK, currentFilePath: V3, reviews, superseded: [V1, V2] })).toEqual([V1, V2]);
   });
 
   it("removes a superseded key the history does not keep, once", () => {
@@ -253,6 +263,16 @@ function rpcClient(result: { data?: unknown; error?: unknown }) {
   return { client: { rpc } as never, rpc };
 }
 
+// Audit r2 (N5): the real helper, which the action suites replace.
+describe("isWaitingForReview", () => {
+  it("is true only for a readable state with a pending review", async () => {
+    const state = (pending: unknown) => rpcClient({ data: { pending, approval_valid: false, latest_sent_back: null } }).client;
+    expect(await isWaitingForReview(state(true), BOOK)).toBe(true);
+    expect(await isWaitingForReview(state(false), BOOK)).toBe(false);
+    expect(await isWaitingForReview(rpcClient({ error: { code: "XX000" } }).client, BOOK)).toBe(false);
+  });
+});
+
 describe("getBookReviewState", () => {
   it("maps book_review_state()", async () => {
     const { client, rpc } = rpcClient({
@@ -300,6 +320,16 @@ describe("requestBookReview / withdrawBookReview", () => {
     expect(await requestBookReview(rpcClient({ error: { code: "LB460", message: "x" } }).client, BOOK)).toEqual({ ok: false, reason: "taken_down" });
     expect(await requestBookReview(rpcClient({ error: { code: "XX000", message: "x" } }).client, BOOK)).toEqual({ ok: false, reason: "failed" });
     vi.restoreAllMocks();
+  });
+
+  it("BD15 P5a: LB489 (no manuscript, cover or AI answer) is 'incomplete'; LB490 is the in-review lock", async () => {
+    expect(
+      await requestBookReview(rpcClient({ error: { code: "LB489", message: "x" } }).client, BOOK),
+    ).toEqual({ ok: false, reason: "incomplete" });
+    expect(isInReviewLockError({ code: "LB490" })).toBe(true);
+    for (const e of [{ code: "LB489" }, { code: "LB463" }, { code: null }, null, undefined]) {
+      expect(isInReviewLockError(e)).toBe(false);
+    }
   });
 
   it("calls the RPCs with the book id only", async () => {
@@ -427,6 +457,7 @@ describe("removeUnretainedManuscripts", () => {
     const service = tableClient({
       books: { data: { file_path: V3 }, error: null },
       book_reviews: { data: [snap("approved", V1, "2026-10-02T00:00:00Z"), snap("cancelled", V2, "2026-10-03T00:00:00Z")], error: null },
+      book_pending_changes: { data: null, error: null },
     });
     const remover = tableClient({});
     await removeUnretainedManuscripts(service.client, remover.client, { authorId: AUTHOR, bookId: BOOK, superseded: [CANONICAL], caller: "test" });
@@ -441,6 +472,12 @@ describe("removeUnretainedManuscripts", () => {
       { books: { data: null, error: { code: "57014" } } },
       { books: { data: null, error: null } },
       { books: { data: { file_path: V3 }, error: null }, book_reviews: { data: null, error: { code: "42501" } } },
+      // BD15 P5b-2: the waiting changes unreadable.
+      {
+        books: { data: { file_path: V3 }, error: null },
+        book_reviews: { data: [snap("cancelled", V2, "2026-10-03T00:00:00Z")], error: null },
+        book_pending_changes: { data: null, error: { code: "42501" } },
+      },
     ];
     for (const results of cases) {
       const remover = tableClient({});
@@ -448,6 +485,23 @@ describe("removeUnretainedManuscripts", () => {
       expect(remover.removed).toEqual([]);
     }
     vi.restoreAllMocks();
+  });
+
+  // BD15 P5b-2: a live book's waiting manuscript stays, sent or not.
+  it("keeps the manuscript of a live book's waiting changes, read by book id", async () => {
+    const service = tableClient({
+      books: { data: { file_path: V3 }, error: null },
+      book_reviews: { data: [snap("cancelled", V2, "2026-10-03T00:00:00Z")], error: null },
+      book_pending_changes: { data: { file_path: V2 }, error: null },
+    });
+    const remover = tableClient({});
+    await removeUnretainedManuscripts(service.client, remover.client, { authorId: AUTHOR, bookId: BOOK, superseded: [V1, V2], caller: "test" });
+    expect(service.recorded.find((r) => r.table === "book_pending_changes")).toEqual({
+      table: "book_pending_changes",
+      columns: "file_path",
+      filters: [["eq", "book_id", BOOK]],
+    });
+    expect(remover.removed).toEqual([{ bucket: "manuscripts", paths: [V1] }]);
   });
 
   it("never throws, and logs no key", async () => {

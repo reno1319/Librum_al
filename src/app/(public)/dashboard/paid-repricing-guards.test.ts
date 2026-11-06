@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import JSZip from "jszip";
 
 // PAID-REPRICING-1: the published-repricing gate and the publish/update
-// compare-and-set, for books AND bundles, driven through the real Server
-// Actions against a small in-memory table that applies `.eq()` / `.is()`
-// filters with SQL semantics and returns the rows an UPDATE changed.
+// compare-and-set, for bundles (BD15 cleanup: the book half went with
+// updateBook/publishBook; saveBookPricing's own are in
+// pricing-send.test.ts), driven through the real Server Actions against
+// a small in-memory table that applies `.eq()` / `.is()` filters with SQL
+// semantics and returns the rows an UPDATE changed.
 //
 // That table is the point. A double that answers every update with
 // "success" can prove a filter was REQUESTED, not that it WORKED: the
@@ -241,15 +242,11 @@ const catalogWriter = {
 };
 vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => catalogWriter }));
 
-const { updateBook, publishBook } = await import("./books/actions");
 const { updateBundle, publishBundle } = await import("./bundles/actions");
 const { PAID_REPRICING_UNAVAILABLE_MESSAGE, CATALOG_ROW_CHANGED_MESSAGE } = await import(
   "@/lib/paid-repricing"
 );
 
-const BOOK_DENIED = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`;
-const BOOK_CHANGED = `/dashboard/books/${BOOK_ID}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`;
-const BOOK_SAVED = "/dashboard?success=Libri%20u%20p%C3%ABrdit%C3%ABsua";
 const BUNDLE_DENIED = `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`;
 const BUNDLE_CHANGED = `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`;
 const BUNDLE_SAVED = "/dashboard/bundles?success=Paketa%20u%20p%C3%ABrdit%C3%ABsua";
@@ -278,25 +275,12 @@ function seedBundle(overrides: Row) {
     { bundle_id: BUNDLE_ID, book_id: "book-b" },
   ];
 }
-const book = () => tables.books.find((b) => b.id === BOOK_ID)!;
 const bundle = () => tables.bundles.find((b) => b.id === BUNDLE_ID)!;
 
-// LIVE-PRICE-CONFIRM-1: both forms carry the live-price tick for the
+// LIVE-PRICE-CONFIRM-1: the form carries the live-price tick for the
 // price they submit (as an author who ticked it would), so the tables
 // below keep testing the paid-repricing rule; the tick rule itself is
 // tested on its own further down, with `noTick`.
-function bookForm(price: string, extra: Record<string, string | File> = {}): FormData {
-  const fd = new FormData();
-  fd.set("title", "Book, edited");
-  fd.set("description", "New description");
-  fd.set("keywords", "");
-  fd.set("isbn", "");
-  fd.set("genre", "Letërsi artistike");
-  fd.set("price", price);
-  fd.set("confirmPriceChange", price);
-  for (const [k, v] of Object.entries(extra)) fd.set(k, v);
-  return fd;
-}
 function bundleForm(price: string): FormData {
   const fd = new FormData();
   fd.set("title", "Bundle, edited");
@@ -345,132 +329,12 @@ afterEach(() => vi.unstubAllEnvs());
 // ============================================================
 // B. The table, for books, with paid publishing CLOSED.
 // ============================================================
-describe("updateBook while paid publishing is closed", () => {
-  it.each([
-    ["published, null -> paid", { status: "published", price_all: null }, "199"],
-    ["published, free -> paid", { status: "published", price_all: 0 }, "199"],
-    ["published, paid -> different paid", { status: "published", price_all: 199 }, "250"],
-  ])("%s is refused with no write of any kind", async (_label, row, price) => {
-    seedBook(row);
-    const before = { ...book() };
-
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm(price)))).toBe(BOOK_DENIED);
-
-    expect(writes).toEqual([]);
-    expect(uploads).toEqual([]);
-    expect(book()).toEqual(before);
-  });
-
-  it("published, paid -> the SAME paid price allows a metadata-only edit", async () => {
-    seedBook({ status: "published", price_all: 199 });
-
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("199")))).toBe(BOOK_SAVED);
-    expect(book()).toMatchObject({ status: "published", price_all: 199, title: "Book, edited" });
-  });
-
-  it("published, paid -> free is allowed", async () => {
-    seedBook({ status: "published", price_all: 199 });
-
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("0")))).toBe(BOOK_SAVED);
-    expect(book()).toMatchObject({ status: "published", price_all: 0 });
-  });
-
-  it("published, free -> free is allowed", async () => {
-    seedBook({ status: "published", price_all: 0 });
-
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("0")))).toBe(BOOK_SAVED);
-    expect(book()).toMatchObject({ status: "published", price_all: 0, title: "Book, edited" });
-  });
-
-  it("published, null -> free is allowed", async () => {
-    seedBook({ status: "published", price_all: null });
-
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("0")))).toBe(BOOK_SAVED);
-    expect(book()).toMatchObject({ status: "published", price_all: 0 });
-  });
-
-  it("a draft may save a paid price, and publishing it stays gated", async () => {
-    seedBook({ status: "draft", price_all: 0, published_at: null });
-
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("199")))).toBe(BOOK_SAVED);
-    expect(book()).toMatchObject({ status: "draft", price_all: 199 });
-
-    expect(await redirectOf(publishBook(BOOK_ID))).toBe(
-      "/dashboard?error=Publikimi%20me%20pages%C3%AB%20nuk%20%C3%ABsht%C3%AB%20i%20mundur%20tani",
-    );
-    expect(book()).toMatchObject({ status: "draft", price_all: 199 });
-  });
-
-  it("an invalid price keeps its existing validation refusal, at every status", async () => {
-    for (const status of ["draft", "published"]) {
-      seedBook({ status, price_all: 199 });
-      writes = [];
-      const target = await redirectOf(updateBook(BOOK_ID, bookForm("98")));
-      expect(target).toContain(`/dashboard/books/${BOOK_ID}/edit?error=`);
-      expect(target).not.toBe(BOOK_DENIED);
-      expect(writes).toEqual([]);
-    }
-  });
-
-  it("the refusal happens before any cover or manuscript upload", async () => {
-    seedBook({ status: "published", price_all: 0 });
-    const png = new File(
-      [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])],
-      "cover.png",
-      { type: "image/png" },
-    );
-    const zip = new JSZip();
-    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
-    const epub = new File([new Uint8Array(await zip.generateAsync({ type: "uint8array" }))], "b.epub", {
-      type: "application/epub+zip",
-    });
-
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("199", { cover: png, manuscript: epub })))).toBe(
-      BOOK_DENIED,
-    );
-    expect(uploads).toEqual([]);
-    expect(writes).toEqual([]);
-  });
-
-  it("the refusal names no environment variable, value, deployment or provider", () => {
-    const decoded = decodeURIComponent(BOOK_DENIED);
+describe("the paid-repricing refusal", () => {
+  it("names no environment variable, value, deployment or provider", () => {
+    const decoded = PAID_REPRICING_UNAVAILABLE_MESSAGE;
     for (const leak of ["PAID_", "controlled_staging", "preview", "staging", "POK", "Stripe", "VERCEL"]) {
       expect(decoded).not.toContain(leak);
     }
-  });
-
-  it("decides from price_all only: a legacy paid price_cents never makes a free row paid", async () => {
-    // price_all 0 (free) with price_cents 799: a free -> free edit. If
-    // price_cents were consulted this would look like a paid row.
-    seedBook({ status: "published", price_all: 0, price_cents: 799 });
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("0")))).toBe(BOOK_SAVED);
-    // And null price_all with a paid price_cents is still "unpriced":
-    // same-price reasoning cannot borrow 799 from the legacy column.
-    seedBook({ status: "published", price_all: null, price_cents: 199 });
-    writes = [];
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("199")))).toBe(BOOK_DENIED);
-    expect(writes).toEqual([]);
-  });
-
-  it("no update payload ever carries price_cents", async () => {
-    seedBook({ status: "published", price_all: 199 });
-    await redirectOf(updateBook(BOOK_ID, bookForm("199")));
-    const update = writes.find((w) => w.table === "books" && w.op === "update")!;
-    expect(update.payload).not.toHaveProperty("price_cents");
-  });
-});
-
-describe("updateBook while paid publishing is OPEN on protected staging", () => {
-  beforeEach(openPaidPublishing);
-
-  it.each([
-    ["published, null -> paid", { status: "published", price_all: null }, "199", 199],
-    ["published, free -> paid", { status: "published", price_all: 0 }, "199", 199],
-    ["published, paid -> different paid", { status: "published", price_all: 199 }, "250", 250],
-  ])("%s proceeds normally", async (_label, row, price, stored) => {
-    seedBook(row);
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm(price)))).toBe(BOOK_SAVED);
-    expect(book()).toMatchObject({ status: "published", price_all: stored });
   });
 });
 
@@ -553,71 +417,7 @@ describe("updateBundle while paid publishing is OPEN on protected staging", () =
 // LIVE book or bundle needs the tick carrying exactly that new price.
 // ============================================================
 const PRICE_CONFIRM = encodeURIComponent("Lexuesit e shohin tashmë këtë çmim, ndaj shënoni kutinë nën çmim për të konfirmuar çmimin e ri.");
-const BOOK_CONFIRM = `/dashboard/books/${BOOK_ID}/edit?error=${PRICE_CONFIRM}`;
 const BUNDLE_CONFIRM = `/dashboard/bundles/${BUNDLE_ID}/edit?error=${PRICE_CONFIRM}`;
-
-describe("live price change needs the tick: books", () => {
-  beforeEach(openPaidPublishing);
-
-  it.each([
-    ["paid -> other paid", 199, "299"],
-    ["paid -> free", 199, "0"],
-    ["free -> paid", 0, "199"],
-    ["no price -> free", null, "0"],
-  ])("published, %s without the tick: refused, nothing written", async (_label, current, price) => {
-    seedBook({ status: "published", price_all: current });
-    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm(price))))).toBe(BOOK_CONFIRM);
-    expect(writes).toEqual([]);
-    expect(book().price_all).toBe(current);
-  });
-
-  it("a tick for another price does not confirm this one", async () => {
-    seedBook({ status: "published", price_all: 199 });
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("299", { confirmPriceChange: "250" })))).toBe(BOOK_CONFIRM);
-    expect(writes).toEqual([]);
-  });
-
-  it("the tick carries the price as parsed: '990,00' is confirmed by 990", async () => {
-    seedBook({ status: "published", price_all: 199 });
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("990,00", { confirmPriceChange: "990" })))).toBe(BOOK_SAVED);
-    expect(book().price_all).toBe(990);
-  });
-
-  it("with the tick the new price is saved", async () => {
-    seedBook({ status: "published", price_all: 199 });
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("299")))).toBe(BOOK_SAVED);
-    expect(book().price_all).toBe(299);
-  });
-
-  it("keeping the price needs no tick", async () => {
-    seedBook({ status: "published", price_all: 199 });
-    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm("199"))))).toBe(BOOK_SAVED);
-  });
-
-  it("a draft needs no tick", async () => {
-    seedBook({ status: "draft", price_all: 199 });
-    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm("299"))))).toBe(BOOK_SAVED);
-    expect(book().price_all).toBe(299);
-  });
-
-  it("the refusal happens before any cover or manuscript upload", async () => {
-    seedBook({ status: "published", price_all: 199 });
-    const png = new File(
-      [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])],
-      "cover.png",
-      { type: "image/png" },
-    );
-    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm("299", { cover: png }))))).toBe(BOOK_CONFIRM);
-    expect(uploads).toEqual([]);
-    expect(writes).toEqual([]);
-  });
-
-  it("while paid publishing is closed, the permission refusal still comes first", async () => {
-    vi.unstubAllEnvs();
-    seedBook({ status: "published", price_all: 0 });
-    expect(await redirectOf(updateBook(BOOK_ID, noTick(bookForm("199"))))).toBe(BOOK_DENIED);
-  });
-});
 
 describe("live price change needs the tick: bundles", () => {
   beforeEach(openPaidPublishing);
@@ -657,16 +457,6 @@ describe("live price change needs the tick: bundles", () => {
 // orderings both fail closed.
 // ============================================================
 describe("guarded writes report zero rows honestly", () => {
-  it("updateBook: a guarded write that matches no row is a controlled failure, not success", async () => {
-    seedBook({ status: "draft", price_all: 0 });
-    // Between updateBook's read and its write, the row is published
-    // (by anything). The draft-only guard then matches nothing.
-    interceptor = { table: "books", op: "update", run: async () => void (book().status = "published") };
-
-    expect(await redirectOf(updateBook(BOOK_ID, bookForm("199")))).toBe(BOOK_CHANGED);
-    expect(book()).toMatchObject({ status: "published", price_all: 0 });
-  });
-
   it("updateBundle: a refused compare-and-set leaves details and membership untouched", async () => {
     seedBundle({ status: "draft", price_all: 0 });
     const membersBefore = tables.bundle_books.map((r) => ({ ...r }));
@@ -676,78 +466,6 @@ describe("guarded writes report zero rows honestly", () => {
     expect(bundle()).toMatchObject({ status: "published", price_all: 0, title: "Bundle" });
     expect(tables.bundle_books).toEqual(membersBefore);
     expect(writes.filter((w) => w.table === "bundle_books")).toEqual([]);
-  });
-
-  it("publishBook: a compare-and-set that matches no row is not reported as live", async () => {
-    seedBook({ status: "draft", price_all: 0, published_at: null });
-    interceptor = { table: "books", op: "update", run: async () => void (book().price_all = 199) };
-
-    const target = await redirectOf(publishBook(BOOK_ID));
-    expect(target).not.toContain("success");
-    expect(book()).toMatchObject({ status: "draft", price_all: 199 });
-  });
-});
-
-describe("the publish/update race, books", () => {
-  it("price update wins first -> the stale publish fails", async () => {
-    // publishBook reads draft + free (0) and decides no paid permission
-    // is needed. Before its write lands, a real updateBook makes the
-    // draft paid (allowed: it is a draft).
-    seedBook({ status: "draft", price_all: 0, published_at: null });
-    let concurrent = "";
-    interceptor = {
-      table: "books",
-      op: "update",
-      run: async () => {
-        concurrent = await redirectOf(updateBook(BOOK_ID, bookForm("199")));
-      },
-    };
-
-    const target = await redirectOf(publishBook(BOOK_ID));
-
-    expect(concurrent).toBe(BOOK_SAVED);
-    expect(target).not.toContain("success");
-    // Never a published paid title while paid publishing is closed.
-    expect(book()).toMatchObject({ status: "draft", price_all: 199 });
-  });
-
-  it("publish wins first -> the stale paid-price update fails", async () => {
-    // updateBook reads draft + free and allows a paid price because the
-    // row is a draft. Before its write lands, a real publishBook
-    // publishes the (still free) draft.
-    seedBook({ status: "draft", price_all: 0, published_at: null });
-    let concurrent = "";
-    interceptor = {
-      table: "books",
-      op: "update",
-      run: async () => {
-        concurrent = await redirectOf(publishBook(BOOK_ID));
-      },
-    };
-
-    const target = await redirectOf(updateBook(BOOK_ID, bookForm("199")));
-
-    expect(concurrent).toBe("/dashboard?success=Libri%20juaj%20u%20publikua");
-    expect(target).toBe(BOOK_CHANGED);
-    expect(book()).toMatchObject({ status: "published", price_all: 0 });
-  });
-
-  it("a stale same-price edit cannot put a paid price back after a concurrent change to free", async () => {
-    seedBook({ status: "published", price_all: 199 });
-    let concurrent = "";
-    interceptor = {
-      table: "books",
-      op: "update",
-      run: async () => {
-        concurrent = await redirectOf(updateBook(BOOK_ID, bookForm("0")));
-      },
-    };
-
-    const target = await redirectOf(updateBook(BOOK_ID, bookForm("199")));
-
-    expect(concurrent).toBe(BOOK_SAVED);
-    expect(target).toBe(BOOK_CHANGED);
-    expect(book()).toMatchObject({ status: "published", price_all: 0 });
   });
 });
 
@@ -787,45 +505,5 @@ describe("the publish/update race, bundles", () => {
     expect(target).toBe(BUNDLE_CHANGED);
     expect(bundle()).toMatchObject({ status: "published", price_all: 0, title: "Bundle" });
     expect(writes.filter((w) => w.table === "bundle_books")).toEqual([]);
-  });
-});
-
-describe("the writes keep their ownership filters", () => {
-  it("every books/bundles update is filtered by id and author_id", async () => {
-    seedBook({ status: "draft", price_all: 0, published_at: null });
-    seedBundle({ status: "draft", price_all: 0 });
-    await redirectOf(updateBook(BOOK_ID, bookForm("0")));
-    await redirectOf(publishBook(BOOK_ID));
-    await redirectOf(updateBundle(BUNDLE_ID, bundleForm("0")));
-    await redirectOf(publishBundle(BUNDLE_ID));
-
-    // updateBundle's write is the update_bundle_with_membership RPC,
-    // bound to the bundle id and the authenticated author.
-    // F5 (C5): publishBook's draft -> published also clears a leftover
-    // Librum's choice pick of this book (one more update, same filters).
-    const updates = writes.filter((w) => w.op === "update" || (w.op === "rpc" && w.table === "bundles"));
-    expect(updates).toHaveLength(5);
-    for (const u of updates) {
-      expect(u.filters).toContainEqual({ kind: "eq", column: "author_id", value: USER_ID });
-      expect(u.filters.some((f) => f.kind === "eq" && f.column === "id")).toBe(true);
-    }
-  });
-
-  it("both publish writes compare-and-set on the status and price_all they read", async () => {
-    seedBook({ status: "draft", price_all: 0, published_at: null });
-    seedBundle({ status: "draft", price_all: 0 });
-    await redirectOf(publishBook(BOOK_ID));
-    await redirectOf(publishBundle(BUNDLE_ID));
-
-    // F5 (C5): only the status writes; the pick clear that follows the
-    // book publish must not carry this compare-and-set (it would match no
-    // row after the publish).
-    const [bookPublish, bundlePublish] = writes.filter(
-      (w) => w.op === "update" && Object.prototype.hasOwnProperty.call(w.payload, "status"),
-    );
-    for (const w of [bookPublish, bundlePublish]) {
-      expect(w.filters).toContainEqual({ kind: "eq", column: "status", value: "draft" });
-      expect(w.filters).toContainEqual({ kind: "eq", column: "price_all", value: 0 });
-    }
   });
 });

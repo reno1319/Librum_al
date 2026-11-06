@@ -704,7 +704,8 @@ create index series_pen_name_id_idx on public.series(pen_name_id);
 -- books: owned by an author, visible to everyone once published
 -- ============================================================
 
--- Keep this list in sync with GENRES in src/lib/genres.ts.
+-- Keep this list in sync with GENRES in src/lib/genres.ts, and with
+-- books_categories_check (BD15 P1, at the end of this file).
 create table public.books (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references public.profiles(id) on delete cascade,
@@ -718,10 +719,8 @@ create table public.books (
   preview_text text not null default '',
   keywords text not null default '',
   isbn text,
-  -- language is deliberately NOT constrained by a DB CHECK -- the
-  -- launch language set (sq/en/it -- see src/lib/languages.ts) is
-  -- product configuration, validated in TypeScript at every write path
-  -- (createBook()/updateBook()), not a permanent database invariant.
+  -- BD15 P1 (migration 20261103200000): books_language_check, added at
+  -- the end of this file, allows sq and en only (src/lib/languages.ts).
   language text,
   publisher text check (publisher is null or char_length(publisher) <= 200),
   edition text check (edition is null or char_length(edition) <= 100),
@@ -13385,6 +13384,10 @@ create table public.book_reviews (
   -- the book showed when it was sent; an approval binds to it as to the
   -- file and cover. Declared last (migration 20261101170000 adds it).
   original_author text,
+  -- BD15 P5b-1: the description and 18+ label the book was sent with;
+  -- an approval binds to them too (migration 20261104170000 adds them).
+  description text,
+  is_adult boolean,
   constraint book_reviews_sent_back_check
     check ((status = 'sent_back') = (reason is not null)
            and (status = 'sent_back') = (message_to_author is not null)),
@@ -13431,7 +13434,9 @@ create function public.book_review_approval_valid(
   p_book_id uuid,
   p_file_path text,
   p_cover_path text,
-  p_original_author text
+  p_original_author text,
+  p_description text,
+  p_is_adult boolean
 )
 returns boolean
 language sql
@@ -13448,13 +13453,17 @@ as $$
        and r.file_path is not distinct from p_file_path
        and r.cover_path is not distinct from p_cover_path
        and r.original_author is not distinct from p_original_author
+       -- A row from before this migration that the backfill could not
+       -- match keeps a null snapshot; it binds the files only.
+       and (r.description is null or r.description = p_description)
+       and (r.is_adult is null or r.is_adult = p_is_adult)
        and r.decided_at > coalesce(
              (select max(t.taken_down_at) from public.book_takedowns t where t.book_id = p_book_id),
              '-infinity'::timestamptz)
   );
 $$;
 
-revoke all on function public.book_review_approval_valid(uuid, text, text, text)
+revoke all on function public.book_review_approval_valid(uuid, text, text, text, text, boolean)
   from public, anon, authenticated, service_role;
 
 -- ------------------------------------------------------------
@@ -13469,7 +13478,8 @@ as $$
 begin
   if new.status = 'published'
      and old.status is distinct from 'published'
-     and not public.book_review_approval_valid(new.id, new.file_path, new.cover_path, new.original_author)
+     and not public.book_review_approval_valid(new.id, new.file_path, new.cover_path, new.original_author,
+                                               new.description, new.is_adult)
   then
     raise exception 'This book needs Librum''s approval before it can be published.'
       using errcode = 'LB462';
@@ -13500,9 +13510,26 @@ begin
      and new.status = 'published'
      and (new.file_path is distinct from old.file_path
           or new.cover_path is distinct from old.cover_path
-          or new.original_author is distinct from old.original_author)
+          or new.original_author is distinct from old.original_author
+          or new.description is distinct from old.description
+          or new.is_adult is distinct from old.is_adult)
+     -- The one write that may: admin_approve_book_review applying an
+     -- approved review whose snapshot is exactly the new values.
+     and not exists (
+       select 1 from public.book_reviews r
+        where r.id::text = pg_catalog.current_setting('librum.applying_review', true)
+          and r.book_id = new.id
+          and r.status = 'approved'
+          -- approved in this very transaction (audit r1, F4)
+          and r.decided_at = pg_catalog.now()
+          and r.file_path is not distinct from new.file_path
+          and r.cover_path is not distinct from new.cover_path
+          and r.original_author is not distinct from new.original_author
+          and r.description is not distinct from new.description
+          and r.is_adult is not distinct from new.is_adult
+     )
   then
-    raise exception 'A live book''s file, cover or original author can only change when the book goes back to draft in the same write.'
+    raise exception 'A live book''s manuscript, cover, description, 18+ label or original author changes only through Librum''s review.'
       using errcode = 'LB463';
   end if;
   return new;
@@ -13573,15 +13600,22 @@ as $$
 declare
   v_actor_id uuid;
   v_book record;
+  v_change record;
   v_pending record;
   v_review_id uuid;
+  v_file_path text;
+  v_cover_path text;
+  v_original_author text;
+  v_description text;
+  v_is_adult boolean;
 begin
   v_actor_id := auth.uid();
   if v_actor_id is null then
     raise exception 'not authenticated';
   end if;
 
-  select bo.id, bo.title, bo.author_id, bo.status, bo.file_path, bo.cover_path, bo.original_author
+  select bo.id, bo.title, bo.author_id, bo.status, bo.file_path, bo.cover_path, bo.original_author,
+         bo.description, bo.is_adult, bo.categories
     into v_book
     from public.books bo
    where bo.id = p_book_id
@@ -13591,7 +13625,7 @@ begin
     raise exception 'no book found for this id';
   end if;
 
-  if v_book.status <> 'draft' then
+  if v_book.status not in ('draft', 'published') then
     raise exception 'this book is already published';
   end if;
 
@@ -13603,11 +13637,53 @@ begin
       using errcode = 'LB460';
   end if;
 
-  if public.book_review_approval_valid(p_book_id, v_book.file_path, v_book.cover_path, v_book.original_author) then
-    raise exception 'this book is already approved';
+  if v_book.status = 'published' then
+    -- BD15 P5b-1: a live book sends its pending changes; it stays live.
+    select c.file_path, c.cover_path, c.original_author, c.description, c.is_adult
+      into v_change
+      from public.book_pending_changes c
+     where c.book_id = p_book_id;
+    if not found
+       or (v_change.file_path, v_change.cover_path, v_change.original_author, v_change.description, v_change.is_adult)
+          is not distinct from
+          (v_book.file_path, v_book.cover_path, v_book.original_author, v_book.description, v_book.is_adult)
+    then
+      raise exception 'this live book has no changes to send'
+        using errcode = 'LB494';
+    end if;
+    v_file_path := v_change.file_path;
+    v_cover_path := v_change.cover_path;
+    v_original_author := v_change.original_author;
+    v_description := v_change.description;
+    v_is_adult := v_change.is_adult;
+    if v_is_adult and v_book.categories && array['Për fëmijë', 'Për të rinj']::text[] then
+      raise exception 'An 18+ book can''t be in the children''s or teen categories.'
+        using errcode = 'LB493';
+    end if;
+  else
+    v_file_path := v_book.file_path;
+    v_cover_path := v_book.cover_path;
+    v_original_author := v_book.original_author;
+    v_description := v_book.description;
+    v_is_adult := v_book.is_adult;
+    if public.book_review_approval_valid(p_book_id, v_file_path, v_cover_path, v_original_author,
+                                         v_description, v_is_adult) then
+      raise exception 'this book is already approved';
+    end if;
   end if;
 
-  select r.id, r.file_path, r.cover_path, r.original_author
+  -- BD15 P5a: the Content tab's three answers (manuscript, cover, "AI
+  -- used") are required before Librum is asked to look at the book. An
+  -- already approved draft is answered above (it needs no new review).
+  if v_file_path is null
+     or v_cover_path is null
+     or not exists (select 1 from public.book_ai_disclosures d where d.book_id = p_book_id)
+  then
+    raise exception 'this book needs a manuscript, a cover and the AI answer before review'
+      using errcode = 'LB489';
+  end if;
+
+  select r.id, r.file_path, r.cover_path, r.original_author, r.description, r.is_adult
     into v_pending
     from public.book_reviews r
    where r.book_id = p_book_id
@@ -13615,9 +13691,9 @@ begin
      for update;
 
   if found then
-    if v_pending.file_path is not distinct from v_book.file_path
-       and v_pending.cover_path is not distinct from v_book.cover_path
-       and v_pending.original_author is not distinct from v_book.original_author then
+    if (v_pending.file_path, v_pending.cover_path, v_pending.original_author, v_pending.description, v_pending.is_adult)
+       is not distinct from
+       (v_file_path, v_cover_path, v_original_author, v_description, v_is_adult) then
       raise exception 'this book is already waiting for review';
     end if;
     update public.book_reviews
@@ -13626,8 +13702,10 @@ begin
      where id = v_pending.id;
   end if;
 
-  insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, original_author, status)
-  values (p_book_id, v_book.title, v_book.author_id, v_book.file_path, v_book.cover_path, v_book.original_author, 'pending')
+  insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, original_author,
+                                   description, is_adult, status)
+  values (p_book_id, v_book.title, v_book.author_id, v_file_path, v_cover_path, v_original_author,
+          v_description, v_is_adult, 'pending')
   returning id into v_review_id;
 
   return v_review_id;
@@ -13701,7 +13779,7 @@ begin
     raise exception 'not authenticated';
   end if;
 
-  select bo.id, bo.author_id, bo.file_path, bo.cover_path, bo.original_author
+  select bo.id, bo.author_id, bo.file_path, bo.cover_path, bo.original_author, bo.description, bo.is_adult
     into v_book
     from public.books bo
    where bo.id = p_book_id;
@@ -13722,7 +13800,8 @@ begin
       select 1 from public.book_reviews r
        where r.book_id = p_book_id and r.status = 'pending'
     ),
-    'approval_valid', public.book_review_approval_valid(p_book_id, v_book.file_path, v_book.cover_path, v_book.original_author),
+    'approval_valid', public.book_review_approval_valid(p_book_id, v_book.file_path, v_book.cover_path,
+                                                        v_book.original_author, v_book.description, v_book.is_adult),
     'latest_sent_back', case
       when v_latest.status = 'sent_back' then pg_catalog.jsonb_build_object(
         'reason', v_latest.reason,
@@ -13766,7 +13845,9 @@ declare
   v_book_id uuid;
   v_book record;
   v_review record;
+  v_change record;
   v_first boolean;
+  v_live boolean;
 begin
   v_actor_id := auth.uid();
   if v_actor_id is null then
@@ -13786,7 +13867,7 @@ begin
 
   -- The book first, then the review (request_book_review's order).
   select bo.id, bo.status, bo.file_path, bo.cover_path, bo.price_all, bo.description, bo.published_at,
-         bo.original_author
+         bo.original_author, bo.is_adult
     into v_book
     from public.books bo
    where bo.id = v_book_id
@@ -13795,7 +13876,7 @@ begin
     raise exception 'no review found for this id';
   end if;
 
-  select r.id, r.status, r.file_path, r.cover_path, r.original_author
+  select r.id, r.status, r.file_path, r.cover_path, r.original_author, r.description, r.is_adult
     into v_review
     from public.book_reviews r
    where r.id = p_review_id
@@ -13805,9 +13886,10 @@ begin
     raise exception 'this review is no longer waiting';
   end if;
 
-  if v_book.status <> 'draft' then
+  if v_book.status not in ('draft', 'published') then
     raise exception 'this book is already published';
   end if;
+  v_live := v_book.status = 'published';
 
   if exists (
     select 1 from public.book_takedowns t
@@ -13816,17 +13898,41 @@ begin
     raise exception 'this book is taken down';
   end if;
 
-  if v_book.file_path is distinct from v_review.file_path
-     or v_book.cover_path is distinct from v_review.cover_path
-     or p_file_path is distinct from v_review.file_path
+  if p_file_path is distinct from v_review.file_path
      or p_cover_path is distinct from v_review.cover_path then
     raise exception 'the author changed the file or cover';
   end if;
 
+  if v_live then
+    -- BD15 P5b-1: the live book's pending changes are exactly what was
+    -- sent.
+    select c.file_path, c.cover_path, c.original_author, c.description, c.is_adult
+      into v_change
+      from public.book_pending_changes c
+     where c.book_id = v_book_id
+       for update;
+    if not found
+       or (v_change.file_path, v_change.cover_path) is distinct from (v_review.file_path, v_review.cover_path) then
+      raise exception 'the author changed the file or cover';
+    end if;
+    if (v_change.original_author, v_change.description, v_change.is_adult)
+       is distinct from (v_review.original_author, v_review.description, v_review.is_adult) then
+      raise exception 'the author changed the book';
+    end if;
+  else
+    if v_book.file_path is distinct from v_review.file_path
+       or v_book.cover_path is distinct from v_review.cover_path then
+      raise exception 'the author changed the file or cover';
+    end if;
+    if (v_book.original_author, v_book.description, v_book.is_adult)
+       is distinct from (v_review.original_author, v_review.description, v_review.is_adult) then
+      raise exception 'the author changed the book';
+    end if;
+  end if;
+
   if v_book.price_all is null
      or v_book.price_all is distinct from p_price_all
-     or pg_catalog.btrim(coalesce(v_book.description, '')) = ''
-     or v_book.original_author is distinct from v_review.original_author then
+     or pg_catalog.btrim(coalesce(v_review.description, '')) = '' then
     raise exception 'the author changed the book';
   end if;
 
@@ -13843,15 +13949,33 @@ begin
 
   v_first := v_book.published_at is null;
 
-  update public.books
-     set status = 'published',
-         published_at = coalesce(published_at, pg_catalog.now()),
-         librum_choice_at = null
-   where id = v_book_id;
+  if v_live then
+    -- The live book takes the approved version; it never goes offline.
+    -- Librum's choice stays.
+    perform pg_catalog.set_config('librum.applying_review', p_review_id::text, true);
+    update public.books
+       set file_path = v_review.file_path,
+           cover_path = v_review.cover_path,
+           original_author = v_review.original_author,
+           description = v_review.description,
+           is_adult = v_review.is_adult
+     where id = v_book_id;
+    perform pg_catalog.set_config('librum.applying_review', '', true);
+    delete from public.book_pending_changes where book_id = v_book_id;
+  else
+    update public.books
+       set status = 'published',
+           published_at = coalesce(published_at, pg_catalog.now()),
+           librum_choice_at = null
+     where id = v_book_id;
+  end if;
 
   insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
   values (v_actor_id, 'book.review_approved', 'books', v_book_id,
-          pg_catalog.jsonb_build_object('first_publication', v_first));
+          case when v_live
+               then pg_catalog.jsonb_build_object('first_publication', v_first, 'live_update', true)
+               else pg_catalog.jsonb_build_object('first_publication', v_first)
+          end);
 
   return v_first;
 end;
@@ -15510,3 +15634,1497 @@ as
       select 1 from public.account_suspensions sus
        where sus.user_id = s.author_id and sus.lifted_at is null
     );
+
+-- ============================================================
+-- BD15 P1 (migration 20261103200000_bd15_upload_flow_foundation.sql):
+-- the database foundation of the new upload flow. Same statements as
+-- the migration, without its language pre-check and its backfill
+-- (no rows in a fresh build). See the migration for the reasons.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 1. pd_works: one public-domain work. Staff write it through the
+--    service role; nobody else reads it (the public sees a work only
+--    through its picked book in public_books).
+-- ------------------------------------------------------------
+create table public.pd_works (
+  id uuid primary key default gen_random_uuid(),
+  title text not null
+    constraint pd_works_title_check
+    check (char_length(title) between 1 and 300
+           and title = btrim(title)
+           and title !~ '[[:cntrl:]]'),
+  -- The same rules as books.original_author.
+  original_author text not null
+    constraint pd_works_original_author_check
+    check (char_length(original_author) between 1 and 200
+           and original_author = btrim(original_author)
+           and original_author !~ '[[:cntrl:]]'),
+  -- The one public edition. Its foreign key (added after the books
+  -- columns, below) also requires that book to belong to this work.
+  picked_book_id uuid
+    constraint pd_works_picked_book_id_key unique,
+  created_at timestamptz not null default now()
+);
+
+alter table public.pd_works enable row level security;
+
+revoke all on public.pd_works from public, anon, authenticated, service_role;
+grant select, insert, update, delete on public.pd_works to service_role;
+
+-- ------------------------------------------------------------
+-- 2. New books columns, appended in this order.
+-- ------------------------------------------------------------
+alter table public.books
+  -- Up to three of the eighteen genres (books_genre_check's list), no
+  -- repeats; the first is the primary one and is kept in books.genre by
+  -- books_sync_categories below, so search and filters keep working.
+  add column categories text[]
+    constraint books_categories_check
+    check (categories is null
+           or (pg_catalog.array_ndims(categories) = 1
+               and pg_catalog.array_lower(categories, 1) = 1
+               and pg_catalog.cardinality(categories) between 1 and 3
+               and pg_catalog.array_position(categories, null) is null
+               and categories <@ array[
+                 'Biografi & kujtime', 'Biznes & ekonomi', 'Drama & teatër',
+                 'Fantashkencë', 'Fantazi', 'Filozofi', 'Histori', 'Horror',
+                 'Letërsi artistike', 'Për fëmijë', 'Për të rinj', 'Poezi',
+                 'Policor & triler', 'Psikologji', 'Publicistikë & ese', 'Romancë',
+                 'Shkencë', 'Zhvillim personal'
+               ]::text[]
+               and (pg_catalog.cardinality(categories) < 2
+                    or categories[1] <> categories[2])
+               and (pg_catalog.cardinality(categories) < 3
+                    or (categories[1] <> categories[3]
+                        and categories[2] <> categories[3])))),
+  -- Q5 (Renato, 3 Nov): a label only. It shows in the book's details;
+  -- the book is listed normally everywhere.
+  add column is_adult boolean not null default false,
+  add column reading_age_min smallint
+    constraint books_reading_age_min_check
+    check (reading_age_min is null
+           or reading_age_min in (3, 6, 9, 12, 14, 16, 18)),
+  add column edition_number integer
+    constraint books_edition_number_check
+    check (edition_number is null or edition_number between 1 and 999),
+  -- The public-domain work this book is an edition of; set by staff at
+  -- review. A new translation of a public-domain work is its own work
+  -- (basis public_domain_original) and is never linked here.
+  add column pd_work_id uuid
+    constraint books_pd_work_id_fkey references public.pd_works(id),
+  -- Staff only: the uploader added value, so their pen name shows as an
+  -- editor line. Without it a public-domain edition never makes the
+  -- uploader's pen name public.
+  add column pd_editor_credit boolean not null default false;
+
+alter table public.books
+  add constraint books_language_check
+    check (language is null or language in ('sq', 'en')),
+  add constraint books_adult_categories_check
+    check (not (is_adult and categories && array['Për fëmijë', 'Për të rinj']::text[])),
+  add constraint books_adult_reading_age_check
+    check (not is_adult or reading_age_min = 18),
+  add constraint books_pd_editor_credit_check
+    check (not pd_editor_credit or pd_work_id is not null),
+  -- Every public-domain edition is free.
+  add constraint books_pd_price_check
+    check (pd_work_id is null or price_all = 0),
+  -- A series carries a pen name, so a public-domain edition without an
+  -- editor mention cannot be in one (bundles: books_pd_edition_rules
+  -- and bundle_books_refuse_hidden_pd_edition below).
+  add constraint books_pd_series_check
+    check (pd_work_id is null or pd_editor_credit or series_id is null),
+  -- The target of pd_works' picked-edition foreign key.
+  add constraint books_pd_work_id_id_key unique (pd_work_id, id);
+
+-- The picked book must be an edition of this work; deleting the book
+-- (an account deletion) clears the pick, and moving a picked book to
+-- another work is refused until staff pick another edition.
+alter table public.pd_works
+  add constraint pd_works_picked_book_fkey
+    foreign key (id, picked_book_id)
+    references public.books (pd_work_id, id)
+    on delete set null (picked_book_id);
+
+-- ------------------------------------------------------------
+-- 3. The "AI used" answer: staff only, never in a public view.
+--    The author writes and reads it through the service-role catalog
+--    writer. No row = not answered.
+-- ------------------------------------------------------------
+create table public.book_ai_disclosures (
+  book_id uuid primary key references public.books(id) on delete cascade,
+  ai_used boolean not null,
+  answered_at timestamptz not null default now()
+);
+
+alter table public.book_ai_disclosures enable row level security;
+
+revoke all on public.book_ai_disclosures from public, anon, authenticated, service_role;
+grant select, insert, update on public.book_ai_disclosures to service_role;
+
+-- ------------------------------------------------------------
+-- 4. categories <-> genre, and 18+ forces reading age 18.
+--    The app before P2 writes genre only: a new genre becomes the first
+--    category and the others stay. The new editor writes categories:
+--    genre follows its first entry.
+-- ------------------------------------------------------------
+create function public.books_sync_categories()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.categories is not null then
+      new.genre := new.categories[1];
+    elsif new.genre is not null then
+      new.categories := array[new.genre];
+    end if;
+  elsif new.categories is distinct from old.categories then
+    new.genre := new.categories[1];
+  elsif new.genre is distinct from old.genre then
+    if new.genre is null then
+      new.categories := null;
+    else
+      new.categories := (array[new.genre] || coalesce(array(
+        select c.v
+          from pg_catalog.unnest(old.categories) with ordinality as c(v, n)
+         where c.v operator(pg_catalog.<>) new.genre
+         order by c.n
+      ), '{}'::text[]))[1:3];
+    end if;
+  end if;
+
+  if new.is_adult then
+    new.reading_age_min := 18;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger books_sync_categories
+  before insert or update of genre, categories, is_adult, reading_age_min on public.books
+  for each row
+  execute function public.books_sync_categories();
+
+revoke all on function public.books_sync_categories()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 5. Locked once published (N1, N3, title). The app's roles (anon,
+--    authenticated -- also inside staff functions -- and service_role,
+--    the catalog writer) are refused; a migration or Librum's own SQL
+--    session (role none) can still correct a title through support.
+-- ------------------------------------------------------------
+create function public.books_lock_after_first_publish()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if old.published_at is not null
+     and pg_catalog.current_setting('role') in ('anon', 'authenticated', 'service_role')
+  then
+    if new.published_at is distinct from old.published_at then
+      raise exception 'A book''s first publication date never changes.'
+        using errcode = 'LB482';
+    end if;
+    if new.title is distinct from old.title then
+      raise exception 'The title of a published book can''t be changed. Write to Librum''s support to correct it.'
+        using errcode = 'LB480';
+    end if;
+    if new.pen_name_id is distinct from old.pen_name_id then
+      raise exception 'The pen name of a published book can''t be changed.'
+        using errcode = 'LB481';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_lock_after_first_publish
+  before update of title, pen_name_id, published_at on public.books
+  for each row
+  execute function public.books_lock_after_first_publish();
+
+revoke all on function public.books_lock_after_first_publish()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 6. Public-domain editions.
+-- ------------------------------------------------------------
+-- 6a. Q1 (Renato, 3 Nov): while a book is its work's picked edition,
+--     its author cannot unpublish it (the author's path is the
+--     service-role catalog writer) or delete it. Staff takedowns and
+--     suspensions (staff functions, role authenticated) still unpublish
+--     it, and deleting the account (a cascade, trigger depth > 1) still
+--     deletes it and clears the pick.
+create function public.books_lock_picked_pd_edition()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE' then
+    if old.status = 'published'
+       and new.status is distinct from 'published'
+       and pg_catalog.current_setting('role') in ('anon', 'service_role')
+       and exists (select 1 from public.pd_works w where w.picked_book_id = old.id)
+    then
+      raise exception 'Librum picked this book as the edition of a public-domain work, so it can''t be unpublished.'
+        using errcode = 'LB483';
+    end if;
+    return new;
+  end if;
+
+  if pg_catalog.pg_trigger_depth() <= 1
+     and pg_catalog.current_setting('role') in ('anon', 'authenticated', 'service_role')
+     and exists (select 1 from public.pd_works w where w.picked_book_id = old.id)
+  then
+    raise exception 'Librum picked this book as the edition of a public-domain work, so it can''t be deleted.'
+      using errcode = 'LB484';
+  end if;
+  return old;
+end;
+$$;
+
+create trigger books_lock_picked_pd_edition
+  before update of status or delete on public.books
+  for each row
+  execute function public.books_lock_picked_pd_edition();
+
+revoke all on function public.books_lock_picked_pd_edition()
+  from public, anon, authenticated, service_role;
+
+-- 6b. One public edition per work: at commit, a published book linked
+--     to a work is that work's picked edition. Staff swap by picking the
+--     new edition and unpublishing the old one in one transaction; a
+--     submission left as a candidate stays a draft.
+create function public.books_check_published_pd_edition()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_book_id uuid;
+begin
+  if tg_table_name = 'pd_works' then
+    v_book_id := old.picked_book_id;
+  else
+    v_book_id := new.id;
+  end if;
+
+  if v_book_id is not null and exists (
+    select 1
+      from public.books b
+     where b.id = v_book_id
+       and b.status = 'published'
+       and b.pd_work_id is not null
+       and not exists (
+         select 1 from public.pd_works w
+          where w.id = b.pd_work_id and w.picked_book_id = b.id
+       )
+  ) then
+    raise exception 'A public-domain work has one public edition: this book is not the one Librum picked.'
+      using errcode = 'LB485';
+  end if;
+  return null;
+end;
+$$;
+
+create constraint trigger books_check_published_pd_edition
+  after insert or update of status, pd_work_id on public.books
+  deferrable initially deferred
+  for each row
+  execute function public.books_check_published_pd_edition();
+
+create constraint trigger pd_works_check_published_pd_edition
+  after update of picked_book_id on public.pd_works
+  deferrable initially deferred
+  for each row
+  execute function public.books_check_published_pd_edition();
+
+revoke all on function public.books_check_published_pd_edition()
+  from public, anon, authenticated, service_role;
+
+-- 6c. A bundle carries a pen name: a public-domain edition without an
+--     editor mention is never in one (the series rule is a CHECK).
+create function public.books_pd_edition_rules()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.pd_work_id is not null
+     and not new.pd_editor_credit
+     and exists (select 1 from public.bundle_books bb where bb.book_id = new.id)
+  then
+    raise exception 'A public-domain edition without an editor mention can''t be in a bundle. Take it out first.'
+      using errcode = 'LB487';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_pd_edition_rules
+  before update of pd_work_id, pd_editor_credit on public.books
+  for each row
+  execute function public.books_pd_edition_rules();
+
+revoke all on function public.books_pd_edition_rules()
+  from public, anon, authenticated, service_role;
+
+create function public.bundle_books_refuse_hidden_pd_edition()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- A data-API caller adding another account's book is refused by RLS
+  -- anyway; answer nothing about that book first (no error oracle).
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated')
+     and not exists (select 1 from public.books b
+                      where b.id = new.book_id and b.author_id = auth.uid())
+  then
+    return new;
+  end if;
+
+  if exists (select 1 from public.books b
+              where b.id = new.book_id
+                and b.pd_work_id is not null
+                and not b.pd_editor_credit)
+  then
+    raise exception 'A public-domain edition without an editor mention can''t be in a bundle.'
+      using errcode = 'LB487';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger bundle_books_refuse_hidden_pd_edition
+  before insert or update of bundle_id, book_id on public.bundle_books
+  for each row
+  execute function public.bundle_books_refuse_hidden_pd_edition();
+
+revoke all on function public.bundle_books_refuse_hidden_pd_edition()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 7. Contributors: at most three per book.
+-- ------------------------------------------------------------
+create function public.book_contributors_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- No error oracle for another account's book (RLS refuses the row).
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated')
+     and not exists (select 1 from public.books b
+                      where b.id = new.book_id and b.author_id = auth.uid())
+  then
+    return new;
+  end if;
+
+  -- Two concurrent inserts for one book queue on the book row.
+  perform 1 from public.books b where b.id = new.book_id for update;
+
+  if (select pg_catalog.count(*) from public.book_contributors c
+       where c.book_id = new.book_id
+         and c.id is distinct from new.id) >= 3
+  then
+    raise exception 'A book can list at most 3 contributors.'
+      using errcode = 'LB486';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger book_contributors_limit
+  before insert or update of book_id on public.book_contributors
+  for each row
+  execute function public.book_contributors_limit();
+
+revoke all on function public.book_contributors_limit()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 8. The "is this book public" rules, each in one place.
+--    BD16 (pre-order) changes only these two functions. A version that
+--    reads now() or another table must become STABLE (N5), and then it
+--    is no longer inlined into the views.
+-- ------------------------------------------------------------
+create or replace function public.book_makes_pen_name_public(b public.books)
+returns boolean
+language sql
+immutable
+parallel safe
+as $$
+  select (b.status operator(pg_catalog.=) 'published'
+          or b.published_at is not null)
+     -- BD15 Q1: a public-domain edition shows its uploader only as an
+     -- editor, and only when staff gave that mention.
+     and (b.pd_work_id is null or b.pd_editor_credit)
+$$;
+
+create function public.book_is_publicly_listed(b public.books)
+returns boolean
+language sql
+immutable
+parallel safe
+as $$
+  -- A published public-domain edition is always its work's picked one
+  -- (books_check_published_pd_edition), so status alone decides.
+  select b.status operator(pg_catalog.=) 'published'
+$$;
+
+revoke all on function public.book_is_publicly_listed(public.books)
+  from public, anon, authenticated, service_role;
+grant execute on function public.book_is_publicly_listed(public.books)
+  to anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 9. public_books: the new columns appended, never ai_used (it is not
+--    on books). Same leading columns, so CREATE OR REPLACE keeps every
+--    grant and the policies that read it. Every column stays a plain
+--    reference to a books column: the Data API (PostgREST) finds the
+--    view's relationships (pen:public_pen_names, series, contributors)
+--    only through plain columns, never through an expression.
+--    P7 hides a non-credited uploader's pen name on a public-domain
+--    edition without breaking that (BD15 P1 audit N1 and r2).
+-- ------------------------------------------------------------
+create or replace view public.public_books
+  with (security_barrier)
+as
+  select b.id, b.title, b.subtitle, b.description, b.preview_text, b.keywords,
+         b.isbn, b.language, b.publisher, b.edition, b.original_publication_date,
+         b.genre, b.series_id, b.series_position, b.price_cents, b.cover_path,
+         b.status, b.published_at, b.created_at, b.updated_at, b.price_all,
+         b.librum_choice_at, b.pen_name_id,
+         b.original_author,
+         -- BD15 P1 (migration 20261103200000): appended last.
+         b.categories, b.is_adult, b.reading_age_min, b.edition_number,
+         b.pd_work_id, b.pd_editor_credit
+  from public.books b
+  where public.book_is_publicly_listed(b)
+     or b.author_id = auth.uid()
+     or public.user_owns_book(b.id);
+
+-- ------------------------------------------------------------
+-- 10. N2: a published bundle is listed only while its pen name is
+--     public by the book rule (its author always sees it), and a bundle
+--     cannot be published under a pen name that is not public.
+--     pen_name_id stays a plain column (see 9).
+-- ------------------------------------------------------------
+create or replace view public.public_bundles
+  with (security_barrier)
+as
+  select bu.id, bu.title, bu.description, bu.price_cents, bu.status,
+         bu.created_at, bu.updated_at, bu.price_all, bu.pen_name_id
+  from public.bundles bu
+  where (bu.status = 'published'
+         and exists (select 1 from public.books b
+                      where b.pen_name_id = bu.pen_name_id
+                        and public.book_makes_pen_name_public(b)))
+     or bu.author_id = auth.uid();
+
+create function public.bundles_require_public_pen_name()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- The app's roles only (staff functions run as authenticated); a row
+  -- written by Librum's own SQL session or a migration is not checked.
+  if new.status = 'published'
+     and (tg_op = 'INSERT' or old.status is distinct from 'published')
+     and pg_catalog.current_setting('role') in ('anon', 'authenticated', 'service_role')
+     and not exists (select 1 from public.books b
+                      where b.pen_name_id = new.pen_name_id
+                        and public.book_makes_pen_name_public(b))
+  then
+    raise exception 'A bundle can be published only under a pen name with a published book.'
+      using errcode = 'LB488';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger bundles_require_public_pen_name
+  before insert or update of status on public.bundles
+  for each row
+  execute function public.bundles_require_public_pen_name();
+
+revoke all on function public.bundles_require_public_pen_name()
+  from public, anon, authenticated, service_role;
+
+-- ============================================================
+-- BD15 P5a (migration 20261104120000): the review guard.
+-- request_book_review() (restated in place above) refuses a book with
+-- no manuscript, no cover or no "AI used" answer (LB489); a book
+-- waiting for review is read-only for the app's roles (LB490). Same
+-- statements and reasoning as
+-- migrations/20261104120000_bd15_review_guard.sql.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 2. A book waiting for review is read-only
+-- ------------------------------------------------------------
+-- The one place the rule lives: the app's roles, and a pending review.
+create function public.book_is_locked_for_review(p_book_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select pg_catalog.current_setting('role') in ('anon', 'authenticated', 'service_role')
+     and exists (
+       select 1 from public.book_reviews r
+        where r.book_id = p_book_id
+          and r.status = 'pending'
+     );
+$$;
+
+revoke all on function public.book_is_locked_for_review(uuid)
+  from public, anon, authenticated, service_role;
+
+create function public.books_refuse_change_while_in_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if ((new.title, new.subtitle, new.description, new.keywords, new.isbn, new.language,
+       new.publisher, new.edition, new.original_publication_date, new.genre, new.categories,
+       new.cover_path, new.file_path, new.price_all, new.original_author, new.is_adult,
+       new.reading_age_min, new.edition_number, new.pen_name_id)
+      is distinct from
+      (old.title, old.subtitle, old.description, old.keywords, old.isbn, old.language,
+       old.publisher, old.edition, old.original_publication_date, old.genre, old.categories,
+       old.cover_path, old.file_path, old.price_all, old.original_author, old.is_adult,
+       old.reading_age_min, old.edition_number, old.pen_name_id)
+      -- A deleted series clears series_id through its foreign key (ON
+      -- DELETE SET NULL, run by a trigger, so depth > 1): allowed.
+      or ((new.series_id, new.series_position) is distinct from (old.series_id, old.series_position)
+          and not (pg_catalog.pg_trigger_depth() > 1 and new.series_id is null)))
+     and public.book_is_locked_for_review(old.id)
+  then
+    raise exception 'This book is waiting for review. Cancel the review to change it.'
+      using errcode = 'LB490';
+  end if;
+  -- Audit r2 (N2): a deleted series clears series_id through its foreign
+  -- key; its position goes with it, on every book of the series, so no
+  -- book keeps a position without a series (the app's own unlink before
+  -- the delete fails as a whole when one book is in review).
+  if pg_catalog.pg_trigger_depth() > 1 and new.series_id is null and old.series_id is not null then
+    new.series_position := null;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_refuse_change_while_in_review
+  before update of title, subtitle, description, keywords, isbn, language, publisher, edition,
+    original_publication_date, genre, categories, cover_path, file_path, price_all,
+    original_author, is_adult, reading_age_min, edition_number, pen_name_id, series_id,
+    series_position
+  on public.books
+  for each row
+  execute function public.books_refuse_change_while_in_review();
+
+revoke all on function public.books_refuse_change_while_in_review()
+  from public, anon, authenticated, service_role;
+
+-- Contributors, the "AI used" answer and the rights choice belong to
+-- the book's content too. A delete that cascades from the book itself is not refused: the
+-- book's own delete trigger cancels its pending review first.
+create function public.book_children_refuse_change_while_in_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- Audit r2 (N3): no error oracle for another account's book. A caller
+  -- who owns neither book is answered by RLS, as book_contributors_limit
+  -- does; nothing is locked or read for them.
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated')
+     and not exists (
+       select 1 from public.books b
+        where b.id in (case when tg_op = 'DELETE' then old.book_id else new.book_id end,
+                       case when tg_op = 'UPDATE' then old.book_id end)
+          and b.author_id = auth.uid()
+     )
+  then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+  -- Audit r1 (F2): wait for a "Send for review" in flight on the book
+  -- (request_book_review holds the book row FOR UPDATE), so the check
+  -- below sees the pending review it creates. Both books of an UPDATE
+  -- that moves the row, in id order.
+  perform 1 from public.books bo
+   where bo.id in (case when tg_op = 'DELETE' then old.book_id else new.book_id end,
+                   case when tg_op = 'UPDATE' then old.book_id end)
+   order by bo.id
+     for key share;
+  if public.book_is_locked_for_review(case when tg_op = 'DELETE' then old.book_id else new.book_id end)
+     or (tg_op = 'UPDATE' and public.book_is_locked_for_review(old.book_id))
+  then
+    raise exception 'This book is waiting for review. Cancel the review to change it.'
+      using errcode = 'LB490';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+create trigger book_contributors_refuse_change_while_in_review
+  before insert or update or delete on public.book_contributors
+  for each row
+  execute function public.book_children_refuse_change_while_in_review();
+
+create trigger book_ai_disclosures_refuse_change_while_in_review
+  before insert or update or delete on public.book_ai_disclosures
+  for each row
+  execute function public.book_children_refuse_change_while_in_review();
+
+-- A new rights choice is a change too (the declarations are append-only,
+-- so only an insert can change it).
+create trigger book_rights_declarations_refuse_while_in_review
+  before insert on public.book_rights_declarations
+  for each row
+  execute function public.book_children_refuse_change_while_in_review();
+
+revoke all on function public.book_children_refuse_change_while_in_review()
+  from public, anon, authenticated, service_role;
+
+-- ============================================================
+-- BD15 P5b-1 (migration 20261104170000): live books stay live.
+-- A live book's changes that need review wait in book_pending_changes;
+-- approval applies them (admin_approve_book_review, above), going
+-- offline makes them the draft (Renato Q3 a, 4 Nov), and a live book
+-- keeps its rights basis (Q4 a). The review snapshot, the approval rule,
+-- the live guard and request_book_review are restated above.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 2. Pending changes of a live book
+-- ------------------------------------------------------------
+create table public.book_pending_changes (
+  book_id uuid primary key references public.books(id) on delete cascade,
+  file_path text not null,
+  -- books_cover_path_check's rule.
+  cover_path text not null
+    constraint book_pending_changes_cover_path_check
+    check (cover_path ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/cover\.(jpg|png)$'),
+  -- A live book always has a description; an empty one could be sent
+  -- but never approved (audit r1, F5).
+  description text not null
+    constraint book_pending_changes_description_check
+    check (pg_catalog.btrim(description) <> ''),
+  is_adult boolean not null,
+  original_author text
+    constraint book_pending_changes_original_author_check
+    check (original_author is null
+           or (char_length(original_author) between 1 and 200
+               and original_author = btrim(original_author)
+               and original_author !~ '[[:cntrl:]]')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  -- BD15 P5b-3b (audit P5b-2 r1 F4, P5b-3b r1 F1): a fresh number from
+  -- book_pending_changes_version_seq on every insert and update, set by
+  -- book_pending_changes_set_version; the two writes below compare it.
+  version bigint not null default 1,
+  -- books.cover_path is unique too: going offline copies this value
+  -- onto the book (audit r1, F2).
+  constraint book_pending_changes_cover_path_key unique (cover_path)
+);
+
+alter table public.book_pending_changes enable row level security;
+
+-- The catalog writer (service_role) reads it, and writes it only through
+-- save_book_pending_changes() / discard_book_pending_changes() below,
+-- which lock the book first: the same order as an unpublish, a takedown
+-- or an approval, so a save never deadlocks with them (audit r1, F1).
+-- Staff functions and triggers write it as its owner.
+revoke all on public.book_pending_changes from public, anon, authenticated, service_role;
+grant select on public.book_pending_changes to service_role;
+
+create function public.book_pending_changes_require_live_book()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+  v_categories text[];
+begin
+  if tg_op = 'UPDATE' and new.book_id is distinct from old.book_id then
+    raise exception 'Pending changes belong to one book.'
+      using errcode = 'LB491';
+  end if;
+  -- FOR SHARE waits for a book update in flight (an unpublish), so a
+  -- pending row is never left behind by a book that just went offline.
+  select bo.status, bo.categories
+    into v_status, v_categories
+    from public.books bo
+   where bo.id = new.book_id
+     for share;
+  if v_status is distinct from 'published' then
+    raise exception 'Only a live book keeps pending changes.'
+      using errcode = 'LB491';
+  end if;
+  if new.is_adult and v_categories && array['Për fëmijë', 'Për të rinj']::text[] then
+    raise exception 'An 18+ book can''t be in the children''s or teen categories.'
+      using errcode = 'LB493';
+  end if;
+  if exists (
+    select 1 from public.books bo
+     where bo.cover_path = new.cover_path and bo.id <> new.book_id
+  ) then
+    raise exception 'This cover belongs to another book.'
+      using errcode = 'LB495';
+  end if;
+  new.updated_at := pg_catalog.now();
+  return new;
+end;
+$$;
+
+create trigger book_pending_changes_require_live_book
+  before insert or update on public.book_pending_changes
+  for each row
+  execute function public.book_pending_changes_require_live_book();
+
+revoke all on function public.book_pending_changes_require_live_book()
+  from public, anon, authenticated, service_role;
+
+-- P5a's rule: read-only while a review is pending.
+create trigger book_pending_changes_refuse_change_while_in_review
+  before insert or update or delete on public.book_pending_changes
+  for each row
+  execute function public.book_children_refuse_change_while_in_review();
+
+-- The other side of LB493 (a children/teen category while an 18+
+-- change waits) and of LB495 (a book taking a cover that another book's
+-- pending change holds).
+create function public.books_keep_pending_rules()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- genre too: books_sync_categories (which copies a new genre into
+  -- categories) runs after this trigger.
+  if (new.categories && array['Për fëmijë', 'Për të rinj']::text[]
+      or new.genre in ('Për fëmijë', 'Për të rinj'))
+     and exists (
+       select 1 from public.book_pending_changes c
+        where c.book_id = new.id and c.is_adult
+     )
+  then
+    raise exception 'An 18+ book can''t be in the children''s or teen categories.'
+      using errcode = 'LB493';
+  end if;
+  if new.cover_path is not null
+     and exists (
+       select 1 from public.book_pending_changes c
+        where c.cover_path = new.cover_path and c.book_id <> new.id
+     )
+  then
+    raise exception 'This cover belongs to another book.'
+      using errcode = 'LB495';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_keep_pending_rules
+  before insert or update of genre, categories, cover_path on public.books
+  for each row
+  execute function public.books_keep_pending_rules();
+
+revoke all on function public.books_keep_pending_rules()
+  from public, anon, authenticated, service_role;
+
+-- BD15 P5b-3b (Renato 11-05, Q1 a): the version the caller read is
+-- compared; a save or discard that did not see the latest row is
+-- refused (LB496), never merged. Migration 20261105120000.
+-- Only the trigger function (as its owner) draws from it.
+create sequence public.book_pending_changes_version_seq as bigint start with 2;
+revoke all on sequence public.book_pending_changes_version_seq
+  from public, anon, authenticated, service_role;
+
+-- SECURITY DEFINER so it draws from the sequence as its owner; nobody
+-- else holds a privilege on the sequence.
+create function public.book_pending_changes_set_version()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  new.version := pg_catalog.nextval('public.book_pending_changes_version_seq');
+  return new;
+end;
+$$;
+
+create trigger book_pending_changes_set_version
+  before insert or update on public.book_pending_changes
+  for each row
+  execute function public.book_pending_changes_set_version();
+
+revoke all on function public.book_pending_changes_set_version()
+  from public, anon, authenticated, service_role;
+
+-- The catalog writer's two writes. p_author_id is the session's verified
+-- user: a book of another account is answered as missing. The book is
+-- locked first (the order of an unpublish, a takedown or an approval),
+-- then the waiting row.
+create function public.save_book_pending_changes(
+  p_author_id uuid,
+  p_book_id uuid,
+  p_expected_version bigint,
+  p_file_path text,
+  p_cover_path text,
+  p_description text,
+  p_is_adult boolean,
+  p_original_author text
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_version bigint;
+begin
+  perform 1 from public.books bo
+   where bo.id = p_book_id and bo.author_id = p_author_id
+     for share;
+  if not found or p_author_id is null then
+    raise exception 'no book found for this id';
+  end if;
+  select c.version into v_version
+    from public.book_pending_changes c
+   where c.book_id = p_book_id
+     for update;
+  if not found then
+    if p_expected_version is not null then
+      raise exception 'The waiting changes changed since they were read.'
+        using errcode = 'LB496';
+    end if;
+    insert into public.book_pending_changes
+           (book_id, file_path, cover_path, description, is_adult, original_author)
+    values (p_book_id, p_file_path, p_cover_path, p_description, p_is_adult, p_original_author)
+    on conflict (book_id) do nothing
+    returning version into v_version;
+    -- Another first save inserted the row after our read.
+    if v_version is null then
+      raise exception 'The waiting changes changed since they were read.'
+        using errcode = 'LB496';
+    end if;
+    return v_version;
+  end if;
+  if p_expected_version is null or v_version <> p_expected_version then
+    raise exception 'The waiting changes changed since they were read.'
+      using errcode = 'LB496';
+  end if;
+  update public.book_pending_changes c
+     set file_path = p_file_path,
+         cover_path = p_cover_path,
+         description = p_description,
+         is_adult = p_is_adult,
+         original_author = p_original_author
+   where c.book_id = p_book_id
+  returning c.version into v_version;
+  return v_version;
+end;
+$$;
+
+revoke all on function public.save_book_pending_changes(uuid, uuid, bigint, text, text, text, boolean, text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.save_book_pending_changes(uuid, uuid, bigint, text, text, text, boolean, text)
+  to service_role;
+
+-- "Hidh poshtë ndryshimet". True when the row the caller read was
+-- discarded; false when it read none and there is still none.
+create function public.discard_book_pending_changes(
+  p_author_id uuid,
+  p_book_id uuid,
+  p_expected_version bigint
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_version bigint;
+begin
+  perform 1 from public.books bo
+   where bo.id = p_book_id and bo.author_id = p_author_id
+     for share;
+  if not found or p_author_id is null then
+    raise exception 'no book found for this id';
+  end if;
+  select c.version into v_version
+    from public.book_pending_changes c
+   where c.book_id = p_book_id
+     for update;
+  if not found then
+    if p_expected_version is not null then
+      raise exception 'The waiting changes changed since they were read.'
+        using errcode = 'LB496';
+    end if;
+    return false;
+  end if;
+  if p_expected_version is null or v_version <> p_expected_version then
+    raise exception 'The waiting changes changed since they were read.'
+      using errcode = 'LB496';
+  end if;
+  delete from public.book_pending_changes where book_id = p_book_id;
+  return true;
+end;
+$$;
+
+revoke all on function public.discard_book_pending_changes(uuid, uuid, bigint)
+  from public, anon, authenticated, service_role;
+grant execute on function public.discard_book_pending_changes(uuid, uuid, bigint)
+  to service_role;
+
+
+-- ------------------------------------------------------------
+-- 3. The live-book guard covers description and the 18+ label (both
+--    added by BD15 P1, after section 5 of the review flow above, where
+--    the function itself is restated).
+-- ------------------------------------------------------------
+drop trigger books_refuse_live_file_change on public.books;
+
+create trigger books_refuse_live_file_change
+  before update of file_path, cover_path, original_author, description, is_adult on public.books
+  for each row
+  execute function public.books_refuse_live_file_change();
+
+-- ------------------------------------------------------------
+-- 4. Going offline: the pending changes become the draft (Q3 a)
+-- ------------------------------------------------------------
+-- Changes made here to NEW are not in the UPDATE's column list, so the
+-- column triggers (the live guard, P5a's lock) do not see them; the
+-- table's CHECK constraints do. The pending review is cancelled first,
+-- so the pending row is no longer locked when it is deleted.
+create function public.books_take_pending_changes_offline()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_change record;
+begin
+  if old.status = 'published' and new.status is distinct from 'published' then
+    update public.book_reviews
+       set status = 'cancelled',
+           decided_at = pg_catalog.now()
+     where book_id = old.id
+       and status = 'pending';
+
+    select c.file_path, c.cover_path, c.description, c.is_adult, c.original_author
+      into v_change
+      from public.book_pending_changes c
+     where c.book_id = old.id
+       for update;
+    if found then
+      new.file_path := v_change.file_path;
+      new.cover_path := v_change.cover_path;
+      new.description := v_change.description;
+      new.is_adult := v_change.is_adult;
+      new.original_author := v_change.original_author;
+      -- books_sync_categories' rule, which does not run for this.
+      if new.is_adult then
+        new.reading_age_min := 18;
+      end if;
+      delete from public.book_pending_changes where book_id = old.id;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_take_pending_changes_offline
+  before update of status on public.books
+  for each row
+  execute function public.books_take_pending_changes_offline();
+
+revoke all on function public.books_take_pending_changes_offline()
+  from public, anon, authenticated, service_role;
+
+
+-- ------------------------------------------------------------
+-- 5. A live book keeps its rights basis (Q4 a)
+-- ------------------------------------------------------------
+create function public.book_rights_declarations_keep_live_basis()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+  v_previous text;
+begin
+  if pg_catalog.current_setting('role') not in ('anon', 'authenticated', 'service_role') then
+    return null;
+  end if;
+  select bo.status into v_status
+    from public.books bo
+   where bo.id = new.book_id
+     for share;
+  if v_status is distinct from 'published' then
+    return null;
+  end if;
+  select d.basis into v_previous
+    from public.book_rights_declarations d
+   where d.book_id = new.book_id
+     and d.id <> new.id
+   order by d.declared_at desc, d.id desc
+   limit 1;
+  if new.basis is distinct from coalesce(v_previous, 'own_rights') then
+    raise exception 'A live book''s rights basis can''t change. Take the book off sale first.'
+      using errcode = 'LB492';
+  end if;
+  return null;
+end;
+$$;
+
+-- AFTER, so the basis CHECK answers an unknown value first.
+create trigger book_rights_declarations_keep_live_basis
+  after insert on public.book_rights_declarations
+  for each row
+  execute function public.book_rights_declarations_keep_live_basis();
+
+revoke all on function public.book_rights_declarations_keep_live_basis()
+  from public, anon, authenticated, service_role;
+
+
+-- ============================================================
+-- BD15 P7 (migration 20261105180000_bd15_pd_editions.sql): public-domain
+-- editions. Same statements and reasoning as the migration.
+-- ============================================================
+-- ------------------------------------------------------------
+-- 1. The pen name readers may see.
+-- ------------------------------------------------------------
+alter table public.books
+  add column public_pen_name_id uuid
+    generated always as (
+      case when pd_work_id is null or pd_editor_credit then pen_name_id end
+    ) stored
+    constraint books_public_pen_name_id_fkey references public.pen_names(id);
+
+-- Same columns, same order, same types: CREATE OR REPLACE keeps every
+-- grant and the policies that read the view. Only pen_name_id's source
+-- changes, and it stays a plain column.
+create or replace view public.public_books
+  with (security_barrier)
+as
+  select b.id, b.title, b.subtitle, b.description, b.preview_text, b.keywords,
+         b.isbn, b.language, b.publisher, b.edition, b.original_publication_date,
+         b.genre, b.series_id, b.series_position, b.price_cents, b.cover_path,
+         b.status, b.published_at, b.created_at, b.updated_at, b.price_all,
+         b.librum_choice_at,
+         -- BD15 P7: null on a public-domain edition without an editor
+         -- mention, for every reader (its author too).
+         b.public_pen_name_id as pen_name_id,
+         b.original_author,
+         b.categories, b.is_adult, b.reading_age_min, b.edition_number,
+         b.pd_work_id, b.pd_editor_credit
+  from public.books b
+  where public.book_is_publicly_listed(b)
+     or b.author_id = auth.uid()
+     or public.user_owns_book(b.id);
+
+-- BD15 P7 audit r1 (B1): a reader who owns a book sees its pen name
+-- (BD14 Q1a), but not through a public-domain edition without an editor
+-- mention: a free claim would otherwise name the hidden uploader. Same
+-- columns, so CREATE OR REPLACE keeps every grant (078/082).
+create or replace view public.public_pen_names
+  with (security_barrier)
+as
+  select pn.id, pn.name, pn.bio, pn.avatar_path, pn.links
+  from public.pen_names pn
+  where (
+    -- A series or bundle holds books of its own pen name only (LB451
+    -- triggers), so the book carries the rule for them too.
+       exists (select 1 from public.books b
+                where b.pen_name_id = pn.id
+                  and public.book_makes_pen_name_public(b))
+    -- Q1a: the author, and a reader who owns one of its books.
+    or pn.author_id = auth.uid()
+    or (auth.uid() is not null
+        and exists (select 1 from public.books b
+                     where b.pen_name_id = pn.id
+                       and (b.pd_work_id is null or b.pd_editor_credit)
+                       and public.user_owns_book(b.id)))
+  )
+    and not exists (
+      select 1 from public.account_suspensions sus
+       where sus.user_id = pn.author_id and sus.lifted_at is null
+    );
+
+-- ------------------------------------------------------------
+-- 2. Q1 a: a picked edition's no-review details are frozen.
+-- ------------------------------------------------------------
+create function public.books_freeze_picked_pd_edition()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated', 'service_role')
+     and ((new.subtitle, new.language, new.keywords, new.isbn, new.publisher, new.edition,
+           new.original_publication_date, new.genre, new.categories, new.reading_age_min,
+           new.edition_number, new.price_all)
+          is distinct from
+          (old.subtitle, old.language, old.keywords, old.isbn, old.publisher, old.edition,
+           old.original_publication_date, old.genre, old.categories, old.reading_age_min,
+           old.edition_number, old.price_all)
+          -- A deleted series clears series_id through its foreign key
+          -- (a trigger, so depth > 1): allowed, as in LB490.
+          or ((new.series_id, new.series_position) is distinct from (old.series_id, old.series_position)
+              and not (pg_catalog.pg_trigger_depth() > 1 and new.series_id is null)))
+     and exists (select 1 from public.pd_works w where w.picked_book_id = old.id)
+  then
+    raise exception 'Librum picked this book as the edition of a public-domain work, so this detail can''t change.'
+      using errcode = 'LB497';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_freeze_picked_pd_edition
+  before update of subtitle, language, keywords, isbn, publisher, edition, original_publication_date,
+    genre, categories, reading_age_min, edition_number, price_all, series_id, series_position
+  on public.books
+  for each row
+  execute function public.books_freeze_picked_pd_edition();
+
+revoke all on function public.books_freeze_picked_pd_edition()
+  from public, anon, authenticated, service_role;
+
+create function public.book_contributors_freeze_picked_pd_edition()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- No error oracle for another account's book (RLS refuses the row).
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated')
+     and not exists (
+       select 1 from public.books b
+        where b.id in (case when tg_op = 'DELETE' then old.book_id else new.book_id end,
+                       case when tg_op = 'UPDATE' then old.book_id end)
+          and b.author_id = auth.uid()
+     )
+  then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+  -- A delete that cascades from the book (an account deletion) is not
+  -- refused.
+  if pg_catalog.current_setting('role') in ('anon', 'authenticated', 'service_role')
+     and pg_catalog.pg_trigger_depth() <= 1
+     and exists (
+       select 1 from public.pd_works w
+        where w.picked_book_id in (case when tg_op = 'DELETE' then old.book_id else new.book_id end,
+                                   case when tg_op = 'UPDATE' then old.book_id end)
+     )
+  then
+    raise exception 'Librum picked this book as the edition of a public-domain work, so this detail can''t change.'
+      using errcode = 'LB497';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+create trigger book_contributors_freeze_picked_pd_edition
+  before insert or update or delete on public.book_contributors
+  for each row
+  execute function public.book_contributors_freeze_picked_pd_edition();
+
+revoke all on function public.book_contributors_freeze_picked_pd_edition()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 3. A "public domain" book is published only as a work's edition.
+--    Before this, approving one left it a normal book, with its
+--    uploader's pen name public.
+-- ------------------------------------------------------------
+create function public.books_require_pd_work_link()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.status = 'published'
+     and old.status is distinct from 'published'
+     and new.pd_work_id is null
+     and pg_catalog.current_setting('role') in ('anon', 'authenticated', 'service_role')
+     and (select d.basis
+            from public.book_rights_declarations d
+           where d.book_id = new.id
+           order by d.declared_at desc, d.id desc
+           limit 1) = 'public_domain'
+  then
+    raise exception 'A public-domain book is published only as the edition of a work. Link it to a work first.'
+      using errcode = 'LB498';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger books_require_pd_work_link
+  before update of status on public.books
+  for each row
+  execute function public.books_require_pd_work_link();
+
+revoke all on function public.books_require_pd_work_link()
+  from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 4. Staff link a book to a work and set the editor mention.
+--    p_work_id: an existing work. Or p_work_title + p_work_original_author:
+--    a new one. Neither: the draft is unlinked (its mention goes too).
+--    A live edition keeps its work; only its mention can change.
+-- ------------------------------------------------------------
+create function public.staff_set_pd_edition(
+  p_book_id uuid,
+  p_work_id uuid,
+  p_work_title text,
+  p_work_original_author text,
+  p_editor_credit boolean
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_book record;
+  v_work_id uuid;
+  v_credit boolean;
+  v_basis text;
+  v_title text;
+  v_original text;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('books.review') then
+    raise exception 'not authorized';
+  end if;
+  if p_book_id is null or p_editor_credit is null then
+    raise exception 'invalid public-domain edition'
+      using errcode = 'LB499';
+  end if;
+
+  select bo.id, bo.status, bo.pd_work_id, bo.pd_editor_credit
+    into v_book
+    from public.books bo
+   where bo.id = p_book_id
+     for update;
+  if not found then
+    raise exception 'no book found for this id';
+  end if;
+
+  v_credit := p_editor_credit;
+  if v_book.status = 'published' then
+    if v_book.pd_work_id is null then
+      raise exception 'This live book is not a public-domain edition.'
+        using errcode = 'LB499';
+    end if;
+    if p_work_id is distinct from v_book.pd_work_id or p_work_title is not null then
+      raise exception 'A live edition stays with its work. Only its editor mention can change.'
+        using errcode = 'LB499';
+    end if;
+    v_work_id := v_book.pd_work_id;
+  elsif p_work_id is not null then
+    if p_work_title is not null or p_work_original_author is not null then
+      raise exception 'invalid public-domain edition'
+        using errcode = 'LB499';
+    end if;
+    select w.id into v_work_id from public.pd_works w where w.id = p_work_id;
+    if not found then
+      raise exception 'That public-domain work no longer exists.'
+        using errcode = 'LB499';
+    end if;
+  elsif p_work_title is not null or p_work_original_author is not null then
+    v_title := pg_catalog.btrim(coalesce(p_work_title, ''));
+    v_original := pg_catalog.btrim(coalesce(p_work_original_author, ''));
+    if v_title = '' or v_original = '' then
+      raise exception 'A new work needs its title and its original author.'
+        using errcode = 'LB499';
+    end if;
+    insert into public.pd_works (title, original_author)
+    values (v_title, v_original)
+    returning id into v_work_id;
+  else
+    v_work_id := null;
+    v_credit := false;
+  end if;
+
+  if v_work_id is not null then
+    select d.basis into v_basis
+      from public.book_rights_declarations d
+     where d.book_id = p_book_id
+     order by d.declared_at desc, d.id desc
+     limit 1;
+    if v_basis is distinct from 'public_domain' then
+      raise exception 'Only a book whose rights choice is "public domain" can be a work''s edition.'
+        using errcode = 'LB499';
+    end if;
+  end if;
+
+  update public.books
+     set pd_work_id = v_work_id,
+         pd_editor_credit = v_credit
+   where id = p_book_id;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'book.pd_edition_set', 'books', p_book_id,
+          pg_catalog.jsonb_build_object('pd_work_id', v_work_id, 'editor_credit', v_credit));
+
+  return v_work_id;
+end;
+$$;
+
+revoke all on function public.staff_set_pd_edition(uuid, uuid, text, text, boolean)
+  from public, anon, authenticated, service_role;
+grant execute on function public.staff_set_pd_edition(uuid, uuid, text, text, boolean) to authenticated;
+
+-- ------------------------------------------------------------
+-- 5. Approve a public-domain edition. A linked draft becomes the work's
+--    picked edition; the previous one goes back to draft (its waiting
+--    review is cancelled and its waiting changes applied by
+--    books_take_pending_changes_offline, as for any book going
+--    offline). admin_approve_book_review then checks and publishes as
+--    for every book; any refusal rolls back the pick and the swap.
+-- ------------------------------------------------------------
+create function public.admin_approve_pd_edition(
+  p_review_id uuid,
+  p_file_path text,
+  p_cover_path text,
+  p_price_all integer,
+  p_checklist jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_book_id uuid;
+  v_book record;
+  v_previous uuid;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('books.review') then
+    raise exception 'not authorized';
+  end if;
+
+  select r.book_id into v_book_id
+    from public.book_reviews r
+   where r.id = p_review_id;
+  if not found or v_book_id is null then
+    raise exception 'no review found for this id';
+  end if;
+
+  -- The book first (admin_approve_book_review's order), then the work.
+  select bo.id, bo.status, bo.pd_work_id
+    into v_book
+    from public.books bo
+   where bo.id = v_book_id
+     for update;
+  if not found then
+    raise exception 'no review found for this id';
+  end if;
+  if v_book.pd_work_id is null then
+    raise exception 'Link this book to a public-domain work first.'
+      using errcode = 'LB499';
+  end if;
+
+  if v_book.status = 'draft' then
+    select w.picked_book_id into v_previous
+      from public.pd_works w
+     where w.id = v_book.pd_work_id
+       for update;
+
+    if v_previous is distinct from v_book_id then
+      update public.pd_works
+         set picked_book_id = v_book_id
+       where id = v_book.pd_work_id;
+
+      if v_previous is not null then
+        update public.books
+           set status = 'draft'
+         where id = v_previous
+           and status = 'published';
+        insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+        values (v_actor_id, 'book.pd_edition_replaced', 'books', v_previous,
+                pg_catalog.jsonb_build_object('pd_work_id', v_book.pd_work_id, 'replaced_by', v_book_id));
+      end if;
+    end if;
+  end if;
+
+  return public.admin_approve_book_review(p_review_id, p_file_path, p_cover_path, p_price_all, p_checklist);
+end;
+$$;
+
+revoke all on function public.admin_approve_pd_edition(uuid, text, text, integer, jsonb)
+  from public, anon, authenticated, service_role;
+grant execute on function public.admin_approve_pd_edition(uuid, text, text, integer, jsonb) to authenticated;
+
+-- ------------------------------------------------------------
+-- 6. A swapped-out edition's page: the work's picked edition, when it
+--    is listed. Only for a book that was public once (published_at set)
+--    and is not listed now, so it says nothing about a draft that was
+--    never public.
+-- ------------------------------------------------------------
+create function public.pd_edition_redirect(p_book_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p.id
+    from public.books b
+    join public.pd_works w on w.id = b.pd_work_id
+    join public.books p on p.id = w.picked_book_id
+   where b.id = p_book_id
+     and b.published_at is not null
+     and not public.book_is_publicly_listed(b)
+     and p.id <> b.id
+     and public.book_is_publicly_listed(p)
+$$;
+
+revoke all on function public.pd_edition_redirect(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.pd_edition_redirect(uuid) to anon, authenticated;

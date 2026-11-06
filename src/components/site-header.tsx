@@ -74,8 +74,9 @@ export function buildSiteHeaderNav(params: {
   // LIBRUM 2.0 BLOG-1D: Blog added directly after Bookstore, per the
   // BLOG-1 design report's own preferred ordering -- every other entry
   // and their relative order is unchanged.
+  // D2 (Renato 11-04): the "Kryefaqja" (Home) link is removed; the logo
+  // already links home.
   const primaryLinks: NavItem[] = [
-    { href: "/", label: "Kryefaqja" },
     { href: "/rreth-nesh", label: "Rreth nesh" },
     { href: "/si-funksionon", label: "Si funksionon" },
     { href: "/fitimet", label: "Fitimet" },

@@ -50,6 +50,11 @@ export const metadata: Metadata = {
 // are gone. New TERMS_VERSION "terms-sq-2" (src/lib/agreement-records.ts);
 // nobody is asked to accept again. Its own date is TERMS_LAST_UPDATED,
 // set to the Production release day (BD7). Lawyer check: R4.
+//
+// D2 (Renato 11-04): "kopertinën" -> "ballinën" in section 5 (twice);
+// nothing else changes. New TERMS_VERSION "terms-sq-3"; nobody is asked
+// to accept again. TERMS_LAST_UPDATED moves to the day this text goes
+// live on Production (the BD15 release sets it).
 const SECTION_TITLES = [
   "Pranimi i Kushteve",
   "Kush jemi",
@@ -172,7 +177,7 @@ export default function TermsPage() {
               <p className="mt-2">
                 Duke publikuar një libër në Librum, ju i jepni Librum një
                 licencë joekskluzive, në mbarë botën, për ta ruajtur veprën,
-                për të shfaqur faqen e saj, kopertinën dhe të dhënat e saj,
+                për të shfaqur faqen e saj, ballinën dhe të dhënat e saj,
                 për ta promovuar brenda Librum, dhe për ta shitur, shpërndarë
                 dhe dorëzuar te lexuesit që e blejnë. Kjo përfshin
                 shkarkimet dhe aksesin e vazhdueshëm për blerësit
@@ -198,7 +203,7 @@ export default function TermsPage() {
                 <li>
                   i keni të drejtat për ta publikuar dhe për ta shitur si
                   libër elektronik, ose keni lejen e mbajtësit të të
-                  drejtave, për tekstin, kopertinën dhe çdo gjë tjetër që
+                  drejtave, për tekstin, ballinën dhe çdo gjë tjetër që
                   përmban;
                 </li>
                 <li>

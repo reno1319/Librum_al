@@ -79,6 +79,8 @@ function withFinalStop(text: string): string {
 }
 
 export const QUESTIONS_LINE = `Pyetje? Na shkruani te ${SUPPORT_EMAIL}`;
+export const SENT_BACK_FIX_LINE = "Rregullojeni dhe dërgojeni përsëri për shqyrtim.";
+export const LIVE_SENT_BACK_FIX_LINE = "Rregullojini dhe dërgojini përsëri për shqyrtim.";
 
 /**
  * F: "Librum sent this book back on <date>. Reason: <label>. <message>
@@ -88,11 +90,16 @@ export const QUESTIONS_LINE = `Pyetje? Na shkruani te ${SUPPORT_EMAIL}`;
 export function buildAuthorSentBackNoticeLines(
   notice: AuthorSentBackNotice,
   formatDate: (iso: string) => string,
+  // BD15 P5b-3a (Renato 11-04): a live book's sent-back CHANGES -- the
+  // book itself stays on sale, so the note names the changes.
+  live = false,
 ): string[] {
   return [
-    `Librum jua ktheu këtë libër për ndryshime më ${formatDate(notice.sentBackAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`,
+    live
+      ? `Librum jua ktheu ndryshimet më ${formatDate(notice.sentBackAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`
+      : `Librum jua ktheu këtë libër për ndryshime më ${formatDate(notice.sentBackAt)}. Arsyeja: ${authorTakedownReasonLabel(notice.reason)}.`,
     withFinalStop(notice.message),
-    "Rregullojeni dhe dërgojeni përsëri për shqyrtim.",
+    live ? LIVE_SENT_BACK_FIX_LINE : SENT_BACK_FIX_LINE,
     QUESTIONS_LINE,
   ];
 }
@@ -123,13 +130,11 @@ export const NOT_IN_REVIEW_MESSAGE = "Ky libër nuk po pret shqyrtim.";
 // BD3 patch 4 (Renato 16:37Z, 2b): the original author joins the file
 // and the cover.
 export const LIVE_FILES_WARNING =
-  "Nëse ndryshoni skedarin e librit, kopertinën ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
+  "Nëse ndryshoni skedarin e librit, ballinën ose autorin origjinal, libri del nga Libraria derisa Librum ta miratojë. Ndryshimet e tjera dalin menjëherë.";
 export const LIVE_FILES_SAVED_MESSAGE =
-  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose kopertinën e re.";
+  "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë skedarin ose ballinën e re.";
 export const LIVE_FILES_REQUEST_FAILED_MESSAGE = "U ruajt. Shtypni \"Dërgojeni për shqyrtim\" kur të jeni gati.";
-export const LIVE_FILES_IN_BUNDLE_MESSAGE =
-  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni skedarin ose kopertinën.";
-// BD3 patch 4 (2b): the same two, for a changed original author.
+// BD3 patch 4 (2b): the same, for a changed original author.
 export const LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE =
   "U ruajt. Libri juaj nuk është në Librari derisa Librum të miratojë autorin origjinal të ri.";
 // Audit r2 (M1): the author put back the original author Librum had
@@ -137,19 +142,28 @@ export const LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE =
 // review is withdrawn; the book can be published again as it is.
 export const ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE =
   "U ruajt. Librum e ka miratuar tashmë këtë autor origjinal. Shtypni \"Publikoni\" kur të jeni gati.";
-export const LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE =
-  "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi, pastaj ndryshoni autorin origjinal.";
 
 // S3: LB462 / LB463 caught at the write (the book changed after it was
 // read).
 export const BOOK_CHANGED_WHILE_EDITING_MESSAGE = "Libri juaj ndryshoi ndërsa po e redaktonit. Rifreskoni faqen dhe provoni përsëri.";
 
+// BD15 P5a (Renato 11-04, Q2 a and Q3 a): a book waiting for review is
+// read-only; the author cancels the review to change anything.
+export const IN_REVIEW_LOCKED_MESSAGE =
+  "Ky libër është në shqyrtim, prandaj nuk ndryshohet. Anuloni shqyrtimin për ta ndryshuar.";
+export const IN_REVIEW_VIEW_LABEL = "Shikoni çfarë dërguat";
+export const IN_REVIEW_READ_ONLY_NOTE =
+  "Gjatë shqyrtimit libri nuk ndryshohet. Nëse doni të ndryshoni diçka, anuloni shqyrtimin, bëni ndryshimet dhe dërgojeni përsëri.";
+
 // H: the staff side.
 export const REVIEW_CHECKLIST_ITEMS = [
   { key: "cover_is_fine", label: "The cover is fine" },
   { key: "file_opens", label: "The book file opens" },
-  { key: "not_someone_elses_work", label: "It isn't someone else's work" },
-  { key: "rights_declared", label: "The author declared their rights" },
+  // BD15 P5b-3a (Renato 11-04, b): one box for the rights. Ticking it
+  // records both stored checks (not_someone_elses_work, rights_declared),
+  // which admin_approve_book_review still requires -- see
+  // APPROVED_CHECKLIST in book-admin-logic.ts.
+  { key: "rights_ok", label: "The author declared their rights and it isn't someone else's work" },
 ] as const;
 export type ReviewChecklistKey = (typeof REVIEW_CHECKLIST_ITEMS)[number]["key"];
 

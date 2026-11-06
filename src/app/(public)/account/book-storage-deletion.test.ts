@@ -162,6 +162,26 @@ vi.mock("@/lib/supabase/admin", () => ({
   },
 }));
 
+// BD15 P5b-3b: a live book's waiting changes, read through the service
+// role before deleteUser (the module's own read is unit-tested in
+// src/lib/book-pending-changes.test.ts).
+type Waiting = { book_id: string; file_path: string | null; cover_path: string | null };
+let pendingRows: Waiting[];
+let pendingReadOk: boolean;
+let pendingReadIds: string[][];
+vi.mock("@/lib/book-pending-changes", () => ({
+  readPendingChangesForBooks: async (_service: unknown, ids: readonly string[]) => {
+    pendingReadIds.push([...ids]);
+    events.push("read:pending");
+    if (!pendingReadOk) return { ok: false };
+    const byBook = new Map();
+    for (const r of pendingRows) {
+      byBook.set(r.book_id, { filePath: r.file_path, coverPath: r.cover_path, description: "D", isAdult: false, originalAuthor: null });
+    }
+    return { ok: true, byBook };
+  },
+}));
+
 const { deleteAccount } = await import("./actions");
 
 async function run(extra: Record<string, string> = {}, confirmation = "FSHI"): Promise<string> {
@@ -215,6 +235,9 @@ beforeEach(() => {
   };
   cookieStore.get.mockReset().mockImplementation(() => undefined);
   resetBookReviewsDouble();
+  pendingRows = [];
+  pendingReadOk = true;
+  pendingReadIds = [];
   for (const m of ["error", "warn", "log", "info", "debug"] as const) vi.spyOn(console, m).mockImplementation(() => {});
 });
 
@@ -576,6 +599,7 @@ describe("destructive ordering (13-16)", () => {
       `read:books:id, cover_path, file_path:author_id=${USER_ID}`,
       "read:purchases",
       "admin:create",
+      "read:pending",
       `deleteUser:${USER_ID}`,
       "remove:covers",
       "remove:manuscripts",
@@ -700,5 +724,58 @@ describe("review snapshots (ADMIN-3, N3/P5)", () => {
     setBooks([]);
     expect(await run()).toBe("/?account=deleted");
     expect(bookReviewsDoubleState.calls).toEqual([]);
+  });
+});
+
+// ============================================================
+// BD15 P5b-3b (Renato 11-05, Q2 a): a live book's waiting manuscript and
+// ballinë, never sent for review, go with the account; the same own-key
+// rules apply, and a failed read stops everything.
+describe("waiting changes of a live book (P5b-3b)", () => {
+  const WAITING_EPUB = `${USER_ID}/${BOOK_ID}/2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f.epub`;
+  const WAITING_COVER = "4d5e6f70-5555-4555-8555-4d5e6f708192/cover.jpg";
+
+  it("the waiting manuscript and ballinë are removed with the book's own files, after deleteUser", async () => {
+    objects.manuscripts.add(WAITING_EPUB);
+    objects.covers.add(WAITING_COVER);
+    setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
+    pendingRows = [{ book_id: BOOK_ID, file_path: WAITING_EPUB, cover_path: WAITING_COVER }];
+    expect(await run()).toBe("/?account=deleted");
+    expect(pendingReadIds).toEqual([[BOOK_ID]]);
+    expect(removalsFor("covers")).toEqual([{ via: "service", bucket: "covers", paths: [OWN_COVER, WAITING_COVER] }]);
+    expect(removalsFor("manuscripts")).toEqual([{ via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT, WAITING_EPUB] }]);
+    expect(events.indexOf("read:pending")).toBeLessThan(events.indexOf(`deleteUser:${USER_ID}`));
+    expect(events.indexOf(`deleteUser:${USER_ID}`)).toBeLessThan(events.indexOf("remove:covers"));
+  });
+
+  it("a waiting value that is not this account's own key for that book is never removed", async () => {
+    setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
+    pendingRows = [{ book_id: BOOK_ID, file_path: VICTIM_MANUSCRIPT, cover_path: VICTIM_COVER }];
+    expect(await run()).toBe("/?account=deleted");
+    expect(removalsFor("covers")).toEqual([{ via: "service", bucket: "covers", paths: [OWN_COVER] }]);
+    expect(removalsFor("manuscripts")).toEqual([{ via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] }]);
+  });
+
+  it("a waiting ballinë that is also the live one is removed once", async () => {
+    objects.covers.add(WAITING_COVER);
+    setBooks([{ id: BOOK_ID, cover_path: WAITING_COVER, file_path: OWN_MANUSCRIPT }]);
+    pendingRows = [{ book_id: BOOK_ID, file_path: null, cover_path: WAITING_COVER }];
+    expect(await run()).toBe("/?account=deleted");
+    expect(removalsFor("covers")).toEqual([{ via: "service", bucket: "covers", paths: [WAITING_COVER] }]);
+  });
+
+  it("a failed read stops before deleteUser and before any removal", async () => {
+    setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
+    pendingReadOk = false;
+    expect(await run()).toBe(PREPARE_ERROR);
+    expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
+    expect(storageCalls).toEqual([]);
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("no authored books: no read", async () => {
+    setBooks([]);
+    expect(await run()).toBe("/?account=deleted");
+    expect(pendingReadIds).toEqual([]);
   });
 });

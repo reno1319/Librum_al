@@ -9,7 +9,6 @@ const fields = {
   manuscript: read("./manuscript-field.tsx"),
   cover: read("./cover-field.tsx"),
 };
-const wizard = read("../app/(public)/dashboard/books/new/upload-wizard.tsx");
 
 function submitHandler(source: string): string {
   const start = source.indexOf("function handleSubmit(e: Event)");
@@ -61,10 +60,4 @@ it("the manuscript field also drops the Word preview copy on expiry", () => {
   const expire = source.slice(source.indexOf("function expireUpload()"), source.indexOf("function checkUploadAge()"));
   expect(expire).toContain("clearDocxBuild();");
   expect(source.match(/key=\{pickerKey\}/g)).toHaveLength(2);
-});
-
-it("the Add a book wizard goes back to the Files step when a Save is stopped", () => {
-  expect(wizard).toContain("onUploadExpired={goToFilesStep}");
-  expect(wizard.match(/onUploadExpired=\{goToFilesStep\}/g)).toHaveLength(2);
-  expect(wizard).toMatch(/function goToFilesStep\(\) \{\s+setStep\(2\);\s+\}/);
 });

@@ -10,6 +10,8 @@ import {
 } from "@/lib/takedown-reasons";
 import { REVIEW_CHECKLIST_ITEMS } from "@/lib/book-review-copy";
 import type { PublishGateRefusal } from "@/lib/publish-readiness";
+import { splitKeywords } from "@/lib/book-details";
+import { bookCategories, editionValue } from "@/lib/book-reader-details";
 
 // ADMIN-2-TAKEDOWN: pure helpers for /admin/books and /admin/books/[id]
 // (list filters and search, the book page's eyebrow, the Unpublish form
@@ -191,7 +193,7 @@ export const ALLOWED_AGAIN_SUCCESS_MESSAGE = "The author can publish this book a
 // ADMIN-3-REVIEW (H): Approve and Send back
 // ------------------------------------------------------------
 
-export const CHECKLIST_INCOMPLETE_MESSAGE = "Tick all four checks before you approve.";
+export const CHECKLIST_INCOMPLETE_MESSAGE = "Tick all three checks before you approve.";
 export const SEND_BACK_MESSAGE_TOO_LONG_MESSAGE = `Please keep the message under ${SEND_BACK_MESSAGE_MAX_LENGTH} characters.`;
 export const GENERIC_REVIEW_ERROR_MESSAGE = "Something went wrong. Please try again.";
 export const APPROVED_SUCCESS_MESSAGE = "Book approved. It's live in the Bookstore now.";
@@ -199,11 +201,18 @@ export const SENT_BACK_SUCCESS_MESSAGE = "Book sent back. The author sees your m
 export const AUTHOR_CHANGED_FILES_MESSAGE = "The author changed the file or cover. Reload and check again.";
 export const AUTHOR_CHANGED_BOOK_MESSAGE = "The author changed the book. Reload and check again.";
 
-/** The canonical checklist the RPC and the table's check require. */
-export const APPROVED_CHECKLIST = Object.fromEntries(REVIEW_CHECKLIST_ITEMS.map((item) => [item.key, true])) as Record<
-  (typeof REVIEW_CHECKLIST_ITEMS)[number]["key"],
-  true
->;
+/**
+ * The canonical checklist the RPC and the table's check require: its four
+ * stored keys, exactly. BD15 P5b-3a (Renato 11-04, b): staff tick three
+ * boxes; the one rights box ("rights_ok") stands for both
+ * not_someone_elses_work and rights_declared, so no migration.
+ */
+export const APPROVED_CHECKLIST = {
+  cover_is_fine: true,
+  file_opens: true,
+  not_someone_elses_work: true,
+  rights_declared: true,
+} as const;
 
 export type ApproveFormValidation =
   | {
@@ -276,9 +285,44 @@ const KNOWN_REVIEW_RPC_ERRORS: Record<string, string> = {
 export const AUTHOR_SUSPENDED_APPROVE_MESSAGE =
   "This author's account is suspended. Lift the suspension before approving.";
 
+// BD15 P7 (migration 20261105180000): public-domain editions. LB499 is
+// the staff functions' own refusal, written for staff, so its text is
+// shown as it is; the others are matched by code.
+export const PD_NOT_LINKED_APPROVE_MESSAGE =
+  "This is a public-domain book. Link it to a work in the Public-domain edition box before you approve it.";
+export const PD_NOT_PICKED_APPROVE_MESSAGE =
+  "This book is linked to a public-domain work, so it can only go live as that work's edition. Approve it from this page again.";
+// Audit r1 N4: linking a priced book (books_pd_price_check).
+export const PD_PRICE_MESSAGE =
+  "This book has a price. A public-domain edition is free, so send it back and ask the author to make it free first.";
+export const PD_EDITION_INVALID_MESSAGE = "Choose a work, or give the new work's title and original author.";
+export const PD_SERIES_MESSAGE =
+  "A public-domain edition without the editor mention can't be in a series or a bundle. Ask the author to take it out, or give the mention.";
+
+// staff_set_pd_edition / admin_approve_pd_edition's own refusals (LB499),
+// already written for staff; any other text is the generic error.
+const KNOWN_PD_RPC_ERRORS: Record<string, string> = {
+  "This live book is not a public-domain edition.": "This live book is not a public-domain edition.",
+  "A live edition stays with its work. Only its editor mention can change.":
+    "A live edition stays with its work. Only its editor mention can change.",
+  "That public-domain work no longer exists.": "That public-domain work no longer exists.",
+  "A new work needs its title and its original author.": "A new work needs its title and its original author.",
+  'Only a book whose rights choice is "public domain" can be a work\'s edition.':
+    'Only a book whose rights choice is "public domain" can be a work\'s edition.',
+  "Link this book to a public-domain work first.": PD_NOT_LINKED_APPROVE_MESSAGE,
+  "invalid public-domain edition": PD_EDITION_INVALID_MESSAGE,
+};
+
 export function mapReviewRpcError(error: { code?: string | null; message?: string | null } | null | undefined): string {
   if (error?.code === "40P01") return "Please try again.";
   if (error?.code === "LB464") return AUTHOR_SUSPENDED_APPROVE_MESSAGE;
+  if (error?.code === "LB498") return PD_NOT_LINKED_APPROVE_MESSAGE;
+  if (error?.code === "LB485") return PD_NOT_PICKED_APPROVE_MESSAGE;
+  if (error?.code === "LB487" || (error?.code === "23514" && error.message?.includes("books_pd_series_check"))) {
+    return PD_SERIES_MESSAGE;
+  }
+  if (error?.code === "23514" && error.message?.includes("books_pd_price_check")) return PD_PRICE_MESSAGE;
+  if (error?.code === "LB499") return KNOWN_PD_RPC_ERRORS[error.message?.trim() ?? ""] ?? GENERIC_REVIEW_ERROR_MESSAGE;
   const message = error?.message?.trim();
   if (!message) return GENERIC_REVIEW_ERROR_MESSAGE;
   return KNOWN_REVIEW_RPC_ERRORS[message] ?? GENERIC_REVIEW_ERROR_MESSAGE;
@@ -299,4 +343,130 @@ export function approveReadinessMessage(reason: PublishGateRefusal): string {
     case "paid_mode_required":
       return "Paid publishing isn't available right now, so this paid book can't go live.";
   }
+}
+
+// BD15 P7: the Public-domain edition box. "existing" links the book to
+// a work picked from the list, "new" creates the work, "unlink" undoes a
+// draft's link, "credit" changes only the editor mention (a live
+// edition). The RPC (staff_set_pd_edition) re-checks all of it.
+export const PD_EDITION_SAVED_MESSAGE = "Public-domain edition saved.";
+export const PD_EDITION_FORM_ERROR_MESSAGE = PD_EDITION_INVALID_MESSAGE;
+const PD_WORK_TITLE_MAX_LENGTH = 300;
+const PD_WORK_AUTHOR_MAX_LENGTH = 200;
+
+export type PdEditionFormValidation =
+  | {
+      ok: true;
+      bookId: string;
+      workId: string | null;
+      workTitle: string | null;
+      workOriginalAuthor: string | null;
+      editorCredit: boolean;
+    }
+  | { ok: false; error: string };
+
+function trimmedText(value: FormDataEntryValue | null): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
+
+export function validatePdEditionForm(formData: FormData): PdEditionFormValidation {
+  const bookId = formData.get("bookId");
+  if (!isUuid(bookId)) return { ok: false, error: GENERIC_REVIEW_ERROR_MESSAGE };
+  const editorCredit = formData.get("editorCredit") === "on";
+  const mode = formData.get("mode");
+  if (mode === "unlink") {
+    return { ok: true, bookId, workId: null, workTitle: null, workOriginalAuthor: null, editorCredit: false };
+  }
+  if (mode === "existing" || mode === "credit") {
+    const workId = formData.get("workId");
+    if (!isUuid(workId)) return { ok: false, error: PD_EDITION_FORM_ERROR_MESSAGE };
+    return { ok: true, bookId, workId, workTitle: null, workOriginalAuthor: null, editorCredit };
+  }
+  if (mode === "new") {
+    const workTitle = trimmedText(formData.get("workTitle"));
+    const workOriginalAuthor = trimmedText(formData.get("workOriginalAuthor"));
+    if (
+      !workTitle ||
+      !workOriginalAuthor ||
+      workTitle.length > PD_WORK_TITLE_MAX_LENGTH ||
+      workOriginalAuthor.length > PD_WORK_AUTHOR_MAX_LENGTH
+    ) {
+      return { ok: false, error: PD_EDITION_FORM_ERROR_MESSAGE };
+    }
+    return { ok: true, bookId, workId: null, workTitle, workOriginalAuthor, editorCredit };
+  }
+  return { ok: false, error: PD_EDITION_FORM_ERROR_MESSAGE };
+}
+
+// Walkthrough F1+F2 (11-05): the read-only "Book details" box on the
+// staff book page -- what the author entered on the Details and Content
+// tabs, and their AI answer (book_ai_disclosures, staff only). A value
+// that could not be read says so; it is never shown as "None".
+export type BookDetailsSource = {
+  categories?: string[] | null;
+  genre?: string | null;
+  is_adult: boolean;
+  reading_age_min?: number | null;
+  edition_number?: number | null;
+  edition?: string | null;
+  series_id?: string | null;
+  series_position?: number | null;
+  keywords?: string | null;
+  publisher?: string | null;
+  isbn?: string | null;
+};
+
+export type BookDetailRow = { label: string; value: string; unreadable?: boolean };
+
+export const AI_ANSWER_LABELS = {
+  yes: "Yes, AI was used",
+  no: "No",
+  none: "Not answered",
+} as const;
+
+const NOT_SET = "Not set";
+
+function textOrNotSet(value: string | null | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : NOT_SET;
+}
+
+export function adminBookDetailRows(input: {
+  book: BookDetailsSource;
+  // undefined = the answer could not be read; null = never answered.
+  aiUsed: boolean | null | undefined;
+  // undefined = the series could not be read; null = no series.
+  seriesTitle: string | null | undefined;
+  // undefined = the contributors could not be read.
+  contributors: readonly { name: string; role: string }[] | undefined;
+}): BookDetailRow[] {
+  const { book, aiUsed, seriesTitle, contributors } = input;
+  const categories = bookCategories(book);
+  const keywords = splitKeywords(book.keywords ?? "");
+  const age = book.reading_age_min;
+  const series =
+    seriesTitle === undefined
+      ? { value: "Couldn’t load the series.", unreadable: true }
+      : !book.series_id || seriesTitle === null
+        ? { value: "None" }
+        : { value: book.series_position ? `${seriesTitle}, book ${book.series_position}` : seriesTitle };
+  return [
+    aiUsed === undefined
+      ? { label: "AI used", value: "Couldn’t load the AI answer.", unreadable: true }
+      : { label: "AI used", value: aiUsed === null ? AI_ANSWER_LABELS.none : aiUsed ? AI_ANSWER_LABELS.yes : AI_ANSWER_LABELS.no },
+    { label: categories.length > 1 ? "Categories" : "Category", value: categories.length > 0 ? categories.join(", ") : NOT_SET },
+    { label: "18+", value: book.is_adult ? "Yes" : "No" },
+    { label: "Reading age", value: typeof age === "number" && age > 0 ? `${age}+` : NOT_SET },
+    { label: "Series", ...series },
+    { label: "Edition", value: editionValue(book) ?? NOT_SET },
+    contributors === undefined
+      ? { label: "Contributors", value: "Couldn’t load the contributors.", unreadable: true }
+      : {
+          label: "Contributors",
+          value: contributors.length > 0 ? contributors.map((c) => `${c.name} (${c.role})`).join(", ") : "None",
+        },
+    { label: "Keywords", value: keywords.length > 0 ? keywords.join(", ") : "None" },
+    { label: "Publisher", value: textOrNotSet(book.publisher) },
+    { label: "ISBN", value: textOrNotSet(book.isbn) },
+  ];
 }

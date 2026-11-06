@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { resolveSiteOrigin } from "@/lib/site-url";
-import { QUESTIONS_LINE } from "@/lib/book-review-copy";
+import { LIVE_SENT_BACK_FIX_LINE, QUESTIONS_LINE, SENT_BACK_FIX_LINE } from "@/lib/book-review-copy";
 import { formatTransactionMinorUnits, type TransactionCurrency } from "@/lib/transaction-money";
 
 const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
@@ -276,11 +276,20 @@ export async function sendNewBookEmails(
   // names that pen name -- never the account, never its other pen names.
   const { data: book } = await admin
     .from("books")
-    .select("title, author_id, pen_name_id")
+    .select("title, author_id, pen_name_id, pd_work_id, pd_editor_credit")
     .eq("id", bookId)
-    .single<{ title: string; author_id: string; pen_name_id: string | null }>();
+    .single<{
+      title: string;
+      author_id: string;
+      pen_name_id: string | null;
+      pd_work_id?: string | null;
+      pd_editor_credit?: boolean | null;
+    }>();
 
   if (!book || book.author_id !== authorId || !book.pen_name_id) return;
+  // BD15 P7: a public-domain edition without the editor mention never
+  // names its uploader, so its pen name's followers get no email.
+  if (book.pd_work_id && !book.pd_editor_credit) return;
 
   const [{ data: penName }, { data: follows }] = await Promise.all([
     admin
@@ -384,19 +393,46 @@ export async function sendBookApprovedEmail(to: string, { title, bookId }: { tit
   );
 }
 
+// BD15 P5b-2: the changes a live book sent were approved; it stayed live.
+export async function sendBookChangesApprovedEmail(to: string, { title, bookId }: { title: string; bookId: string }) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    `Ndryshimet e librit "${title}" u miratuan`,
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Ndryshimet e librit <strong>${escapeEmailHtml(title)}</strong> u miratuan</h1>
+        <p>I kontrolluam dhe tani lexuesit shohin versionin e ri.</p>
+        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
+      </div>`,
+  );
+}
+
 export async function sendBookSentBackEmail(
   to: string,
-  { title, reasonLabel, message }: { title: string; reasonLabel: string; message: string },
+  {
+    title,
+    reasonLabel,
+    message,
+    live = false,
+  }: { title: string; reasonLabel: string; message: string; live?: boolean },
 ) {
   const origin = resolveSiteOrigin();
   await sendEmail(
     to,
-    `Librum jua ktheu "${title}" për ndryshime`,
+    // BD15 P5b-3a (Renato 11-04): a live book's sent-back CHANGES -- the
+    // book stays on sale, so the email names the changes, not the book.
+    live ? `Librum jua ktheu ndryshimet e "${title}"` : `Librum jua ktheu "${title}" për ndryshime`,
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Librum jua ktheu librin <strong>${escapeEmailHtml(title)}</strong> për ndryshime</h1>
+        <h1 style="font-size: 20px;">${
+          live
+            ? `Librum jua ktheu ndryshimet e librit <strong>${escapeEmailHtml(title)}</strong>`
+            : `Librum jua ktheu librin <strong>${escapeEmailHtml(title)}</strong> për ndryshime`
+        }</h1>
         <p>Arsyeja: ${escapeEmailHtml(reasonLabel)}</p>
         <p>${escapeEmailHtmlWithBreaks(message)}</p>
-        <p>Rregullojeni dhe dërgojeni përsëri për shqyrtim.</p>
+        <p>${live ? LIVE_SENT_BACK_FIX_LINE : SENT_BACK_FIX_LINE}</p>${
+          live ? "\n        <p>Libri juaj mbetet në shitje siç ishte para këtyre ndryshimeve.</p>" : ""
+        }
         <p>${QUESTIONS_LINE}</p>
         <p><a href="${origin}/dashboard">Hapni panelin e autorit</a></p>
       </div>`,

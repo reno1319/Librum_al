@@ -88,26 +88,21 @@ describe("BD2: the public money pages", () => {
 });
 
 describe("BD2: the author dashboard (6a)", () => {
-  it("the price step, the edit page and the Discounts page use the royalty lines", () => {
-    const wizard = read("src/app/(public)/dashboard/books/new/upload-wizard.tsx");
-    const edit = read("src/app/(public)/dashboard/books/[id]/edit/page.tsx");
+  it("the editor's Pricing tab and the Discounts page use the royalty lines", () => {
+    // BD15 P5b-3a: the old edit page is retired; prices are set in the
+    // editor's Pricing tab (its D3 rates line).
+    const edit = read("src/components/book-pricing-form.tsx");
     const discounts = read("src/app/(public)/dashboard/discounts/page.tsx");
-    expect(wizard).toContain("{ROYALTY_TIERS_LINE}");
-    expect(wizard).toContain("Pjesa e Librum ({100 - royaltyPercent}%)");
-    expect(wizard).toContain("Honorari juaj për çdo shitje ({royaltyPercent}%)");
-    expect(edit).toContain("{ROYALTY_TIERS_LINE}");
+    expect(edit).toContain("ROYALTY_RATES_LINE");
     expect(discounts).toContain("${ROYALTY_DISCOUNT_NOTE}");
-    for (const source of [wizard, edit]) {
-      expect(source).not.toContain("PLATFORM_FEE_PERCENT");
-      expect(source).not.toMatch(/tarif[ëa] (e )?platform/);
-    }
+    expect(edit).not.toContain("PLATFORM_FEE_PERCENT");
+    expect(edit).not.toMatch(/tarif[ëa] (e )?platform/);
     expect(ROYALTY_DISCOUNT_NOTE).toContain("50%");
   });
 
   // 7b keeps the CONDITIONAL state messages: they show only while paid
   // publishing is switched off and explain why a paid book can't publish.
   it("keeps the conditional 'paid publishing is off' messages", () => {
-    expect(read("src/app/(public)/dashboard/books/new/upload-wizard.tsx")).toContain("readiness.paidPublishingBlocked && (");
     expect(read("src/app/(public)/dashboard/page.tsx")).toContain('attention.kind === "paid-publishing-unavailable" && (');
   });
 });

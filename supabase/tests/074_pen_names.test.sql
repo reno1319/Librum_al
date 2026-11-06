@@ -452,12 +452,22 @@ begin
   v := pg_temp.run_as('service_role', null,
     format('update public.books set pen_name_id = %L where id = %L', pg_temp.dflt('e0740000-0000-4000-8000-00000000000a'), 'e0740001-0000-4000-8000-0000000000a2'));
   perform pg_temp.assert(v like 'LB452:This book is in a series or bundle.%', format('part4 (14a): refused while in a series -- got %s', v));
-  -- ...but leaving the series in the same write is allowed.
+  -- BD15 P1 (N1, migration 20261103200000): a published book's pen name
+  -- never changes, even when it leaves the series in the same write.
+  v := pg_temp.run_as('service_role', null,
+    format('update public.books set series_id = null, series_position = null, pen_name_id = %L where id = %L',
+           pg_temp.dflt('e0740000-0000-4000-8000-00000000000a'), 'e0740001-0000-4000-8000-0000000000a2'));
+  perform pg_temp.assert(v like 'LB481:%', format('part4 (BD15 N1): a published book keeps its pen name -- got %s', v));
+  -- ...but a never-published book leaving the series in the same write
+  -- may change it (shown on the same row with its publication date
+  -- cleared by the table owner, then put back).
+  update public.books set published_at = null where id = 'e0740001-0000-4000-8000-0000000000a2';
   v := pg_temp.run_as('service_role', null,
     format('update public.books set series_id = null, series_position = null, pen_name_id = %L where id = %L',
            pg_temp.dflt('e0740000-0000-4000-8000-00000000000a'), 'e0740001-0000-4000-8000-0000000000a2'));
   perform pg_temp.assert(v = 'OK:1', format('part4 (14a): leaving the series and changing the pen name together is allowed -- got %s', v));
-  update public.books set pen_name_id = 'e0740002-0000-4000-8000-000000000001', series_id = 'e0740003-0000-4000-8000-000000000001'
+  update public.books set pen_name_id = 'e0740002-0000-4000-8000-000000000001', series_id = 'e0740003-0000-4000-8000-000000000001',
+                          published_at = now()
    where id = 'e0740001-0000-4000-8000-0000000000a2';
 
   -- A series cannot change pen name while it holds books of the old one.

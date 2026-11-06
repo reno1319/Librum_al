@@ -39,12 +39,16 @@ export function CheckedBookField({
   defaultValue,
   placeholder,
   id,
+  className,
 }: {
   kind: "isbn" | "pastDate";
   name: string;
   defaultValue: string;
   placeholder?: string;
   id: string;
+  // D1: the book editor's compact control look; it swaps its own
+  // border colour while a message shows.
+  className?: string;
 }) {
   const [error, setError] = useState("");
 
@@ -74,7 +78,13 @@ export function CheckedBookField({
         onInvalid={(e) => check(e.currentTarget, true)}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? errorId : undefined}
-        className={formControlClassesFor(!!error)}
+        className={
+          className
+            ? error
+              ? className.replace("border-control", "border-red-700")
+              : className
+            : formControlClassesFor(!!error)
+        }
       />
       {error && (
         <span id={errorId} className={fieldErrorClasses}>

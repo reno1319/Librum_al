@@ -41,6 +41,7 @@ const mockBookUpdatePayload = vi.fn();
 const mockBookUpdateResult = vi.fn();
 const mockPurchaseCountResult = vi.fn();
 const mockBookDeleteResult = vi.fn();
+const mockBookDeleteFilters = vi.fn();
 const mockRemove = vi.fn();
 
 // Records the EXACT arguments bookBelongsToPublishedBundle() (actions.ts)
@@ -89,7 +90,18 @@ const mockCreateClient = vi.fn(() =>
             mockBookUpdatePayload(payload);
             return makeChain(() => mockBookUpdateResult());
           },
-          delete: () => makeChain(() => mockBookDeleteResult()),
+          delete: () => {
+            // P6 Q4 a: the delete's own filters are recorded so a test
+            // can prove it only ever matches a draft.
+            const chain = {
+              eq: (column: string, value: unknown) => {
+                mockBookDeleteFilters(column, value);
+                return chain;
+              },
+              select: () => Promise.resolve(mockBookDeleteResult()),
+            };
+            return chain;
+          },
         };
       }
       if (table === "bundle_books") {
@@ -110,6 +122,10 @@ const mockCreateClient = vi.fn(() =>
       }
       if (table === "purchases" || table === "author_book_purchases") {
         return { select: () => makeChain(() => mockPurchaseCountResult()) };
+      }
+      // BD15 P5b-2: deleteBook reads a live book's waiting changes (none).
+      if (table === "book_pending_changes") {
+        return { select: () => makeChain(() => ({ data: null, error: null })) };
       }
       throw new Error(`unexpected table in this focused test: ${table}`);
     },
@@ -157,7 +173,7 @@ function resetMocks() {
   mockRedirect.mockClear();
   mockGetUser.mockReset().mockResolvedValue({ data: { user: { id: USER_ID } } });
   mockBookSelectResult.mockReset().mockReturnValue({
-    data: { id: BOOK_ID, author_id: USER_ID, cover_path: null, file_path: null },
+    data: { id: BOOK_ID, author_id: USER_ID, status: "draft", cover_path: null, file_path: null },
     error: null,
   });
   mockMemberSelectResult.mockReset().mockReturnValue(notInAnyPublishedBundle());
@@ -168,6 +184,7 @@ function resetMocks() {
   mockPurchaseCountResult.mockReset().mockReturnValue({ count: 0, error: null });
   // BOOK-STORAGE-MUTATION-AUTH-1: the delete now proves its one row.
   mockBookDeleteResult.mockReset().mockReturnValue({ data: [{ id: BOOK_ID }], error: null });
+  mockBookDeleteFilters.mockClear();
   mockRemove.mockReset().mockResolvedValue({ error: null });
   mockCookieStore.get.mockReset().mockImplementation(() => undefined);
   mockRevalidatePath.mockReset();
@@ -180,10 +197,13 @@ describe("unpublishBook: published-bundle-membership gate (PHASE-2C)", () => {
   it("book referenced only by draft/no bundles: unpublishes successfully", async () => {
     mockMemberSelectResult.mockReturnValue(notInAnyPublishedBundle());
 
-    await unpublishBook(BOOK_ID);
+    await expect(unpublishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockBookUpdatePayload).toHaveBeenCalledWith({ status: "draft" });
-    expect(mockRedirect).not.toHaveBeenCalled();
+    // BD15 P5b-3a: back to the editor (Veprime box), now a draft, with what happened.
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/books/${BOOK_ID}/editor?tab=details&success=${encodeURIComponent("Libri u hoq nga shitja. Tani është draft.")}`,
+    );
     expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/");
   });
@@ -252,7 +272,7 @@ describe("unpublishBook: published-bundle-membership gate (PHASE-2C)", () => {
     // every other test in this file only cares about the resolved data.
     mockMemberSelectResult.mockReturnValue(notInAnyPublishedBundle());
 
-    await unpublishBook(BOOK_ID);
+    await expect(unpublishBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockMemberQueryColumns).toHaveBeenCalledWith("bundle_id, bundles!inner(status)");
     expect(mockMemberQueryFilters).toHaveBeenCalledWith("book_id", BOOK_ID);
@@ -266,9 +286,12 @@ describe("deleteBook: published-bundle-membership gate (PHASE-2C)", () => {
   it("book referenced only by draft/no bundles, never purchased: deletes successfully", async () => {
     mockMemberSelectResult.mockReturnValue(notInAnyPublishedBundle());
 
-    await deleteBook(BOOK_ID);
+    // BD15 P5b-3b: success lands on the Dashboard with "Libri u fshi."
+    // (from the editor the page of a deleted book would answer 404).
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
-    expect(mockRedirect).not.toHaveBeenCalled();
+    expect(mockRedirect).toHaveBeenCalledTimes(1);
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?success=Libri%20u%20fshi.");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
@@ -333,7 +356,7 @@ describe("deleteBook: published-bundle-membership gate (PHASE-2C)", () => {
   it("queries bundle_books->bundles(status) with the exact columns and filters, scoped to this book and published only", async () => {
     mockMemberSelectResult.mockReturnValue(notInAnyPublishedBundle());
 
-    await deleteBook(BOOK_ID);
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockMemberQueryColumns).toHaveBeenCalledWith("bundle_id, bundles!inner(status)");
     expect(mockMemberQueryFilters).toHaveBeenCalledWith("book_id", BOOK_ID);
@@ -382,5 +405,61 @@ describe("deleteBook: a book Librum took down (ADMIN-2)", () => {
     await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
 
     expect(mockTakedownState).not.toHaveBeenCalled();
+  });
+});
+
+// P6 Q4 a (Renato 11-05): a live book is never deleted -- it is taken off
+// sale first. A direct POST is refused before anything else is read or
+// written, and the delete itself only matches a draft, so a book Librum
+// approves after the read is not deleted either.
+describe("deleteBook: a live book (P6 Q4 a)", () => {
+  beforeEach(resetMocks);
+
+  it("refuses a live book with its own message; nothing is checked, deleted or removed", async () => {
+    mockBookSelectResult.mockReturnValue({
+      data: { id: BOOK_ID, author_id: USER_ID, status: "published", cover_path: null, file_path: null },
+      error: null,
+    });
+
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledTimes(1);
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard?error=${encodeURIComponent("Ky libër është në shitje dhe nuk mund të fshihet. Hiqeni fillimisht nga shitja.")}`,
+    );
+    expect(mockTakedownState).not.toHaveBeenCalled();
+    expect(mockMemberQueryColumns).not.toHaveBeenCalled();
+    expect(mockPurchaseCountResult).not.toHaveBeenCalled();
+    expect(mockBookDeleteResult).not.toHaveBeenCalled();
+    expect(mockRemove).not.toHaveBeenCalled();
+  });
+
+  it("the refusal message is one the Dashboard shows (not the generic one)", async () => {
+    const { pageErrorMessage } = await import("@/lib/page-messages");
+    const { LIVE_DELETE_REFUSED_MESSAGE } = await import("@/lib/book-editor-copy");
+    expect(pageErrorMessage(LIVE_DELETE_REFUSED_MESSAGE)).toBe(LIVE_DELETE_REFUSED_MESSAGE);
+  });
+
+  it("the delete only matches this author's own draft", async () => {
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockBookDeleteFilters.mock.calls).toEqual([
+      ["id", BOOK_ID],
+      ["author_id", USER_ID],
+      ["status", "draft"],
+    ]);
+  });
+
+  it("a book approved after the read (delete matches no row): a failure, nothing removed", async () => {
+    mockBookSelectResult.mockReturnValue({
+      data: { id: BOOK_ID, author_id: USER_ID, status: "draft", cover_path: null, file_path: `${USER_ID}/${BOOK_ID}.epub` },
+      error: null,
+    });
+    mockBookDeleteResult.mockReturnValue({ data: [], error: null });
+
+    await expect(deleteBook(BOOK_ID)).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20fshihet%20tani");
+    expect(mockRemove).not.toHaveBeenCalled();
   });
 });

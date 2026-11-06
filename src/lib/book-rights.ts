@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolvePublicAuthorName } from "@/lib/author-name";
 import { RIGHTS_STATEMENT_VERSION, RIGHTS_STATEMENTS, isRightsBasis } from "@/lib/rights-statements";
 import { isSchemaFeatureOffError, logSchemaFeatureOffOnce } from "@/lib/schema-feature-off";
+import { TERMS_VERSION } from "@/lib/agreement-records";
+import { ACCEPT_TERMS_TEXT, WORLDWIDE_RIGHTS_TEXT } from "@/lib/book-pricing";
 import type { BookRightsDeclaration } from "@/lib/types";
 
 // BOOK-PEN-NAME-RIGHTS-CHOICE-1: recording and reading an author's rights
@@ -35,9 +37,30 @@ export type RecordRightsDeclarationResult =
   | { ok: true; declaration: BookRightsDeclaration }
   | { ok: false; reason: RecordRightsDeclarationRefusal };
 
+// BD15 P4 (Renato 11-04, Q2 a): "Send for review" records one more row
+// with the book's current basis, carrying the two Pricing ticks the
+// author gave for THIS send, so every send has its own dated proof. The
+// version names the rights wording, this send wording and the Terms the
+// tick points at; the text is the rights sentence followed by both ticks.
+// D1: send-v2 = tick 2 reads "Pranoj Kushtet e Librum për autorët"
+// (send-v1 rows: "Konfirmoj që kam të drejtat e këtij libri dhe pranoj
+// Kushtet e Librum për autorët").
+export const SEND_CONFIRMATION_VERSION = "send-v2";
+
+export function sendConfirmationStatement(basis: keyof typeof RIGHTS_STATEMENTS): {
+  version: string;
+  text: string;
+} {
+  return {
+    version: `${RIGHTS_STATEMENT_VERSION}+${SEND_CONFIRMATION_VERSION}+${TERMS_VERSION}`,
+    text: `${RIGHTS_STATEMENTS[basis].text}. ${WORLDWIDE_RIGHTS_TEXT}. ${ACCEPT_TERMS_TEXT}`,
+  };
+}
+
 export async function recordRightsDeclaration(
   bookId: string,
   basis: unknown,
+  options: { atSend?: boolean } = {},
 ): Promise<RecordRightsDeclarationResult> {
   if (!isRightsBasis(basis)) return { ok: false, reason: "invalid_basis" };
 
@@ -51,7 +74,7 @@ export async function recordRightsDeclaration(
     .from("books")
     // PEN-NAMES-1 (16a): the book's pen name too, through the author's
     // own pen_names rows (RLS).
-    .select("id, title, pen:pen_names(name)")
+    .select("id, title, pen:pen_names!books_pen_name_id_fkey(name)")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .maybeSingle<{ id: string; title: string; pen: { name: string } | null }>();
@@ -75,6 +98,9 @@ export async function recordRightsDeclaration(
   const authorPublicName = resolvePublicAuthorName(profile);
   if (!authorPublicName || !authorPublicName.trim()) return { ok: false, reason: "no_author_name" };
 
+  const statement = options.atSend
+    ? sendConfirmationStatement(basis)
+    : { version: RIGHTS_STATEMENT_VERSION, text: RIGHTS_STATEMENTS[basis].text };
   const { data: declaration, error: insertError } = await createAdminClient()
     .from("book_rights_declarations")
     .insert({
@@ -86,8 +112,8 @@ export async function recordRightsDeclaration(
       // account's author name (as today).
       pen_name: book.pen?.name ?? null,
       basis,
-      statement_version: RIGHTS_STATEMENT_VERSION,
-      statement_text: RIGHTS_STATEMENTS[basis].text,
+      statement_version: statement.version,
+      statement_text: statement.text,
     })
     .select("*")
     .single();

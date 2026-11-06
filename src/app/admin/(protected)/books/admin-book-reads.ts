@@ -108,7 +108,7 @@ export async function readPendingReviewsForStaff(limit: number): Promise<{ items
   if (rows.length > 0) {
     const { data: books, error: booksError } = await admin
       .from("books")
-      .select("id, title, pen:pen_names(name)")
+      .select("id, title, pen:pen_names!books_pen_name_id_fkey(name)")
       .in("id", rows.map((row) => row.book_id))
       .returns<{ id: string; title: string; pen: { name: string } | null }[]>();
     if (booksError) {

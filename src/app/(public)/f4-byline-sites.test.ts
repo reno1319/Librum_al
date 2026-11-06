@@ -35,7 +35,6 @@ const BYLINE_SITES: [file: string, expected: string[]][] = [
   ["app/api/books/[id]/sample/route.ts", ["author: resolveBookByline(book),"]],
   // BD3 patch 4 r2 (audit r1, M1/L6): staff see both names.
   ["app/admin/(protected)/librum-choice/page.tsx", ["resolveStaffByline(pick)", "resolveStaffByline(book)"]],
-  ["app/(public)/dashboard/books/new/upload-wizard.tsx", ["authorName={byline}"]],
 ];
 
 describe("F4 / PEN-NAMES-1: book bylines", () => {
@@ -132,7 +131,7 @@ describe("BD3 patch 4: the original author", () => {
   });
 
   it("every explicit book select that feeds a byline reads original_author", () => {
-    expect(readSrc("app/(public)/page.tsx")).toContain("description, original_author, pen:public_pen_names(id, name)");
+    expect(readSrc("app/(public)/page.tsx")).toContain("description, original_author, is_adult, pen:public_pen_names(id, name)");
     expect(readSrc("app/api/books/[id]/sample/route.ts")).toContain("status, original_author, pen:public_pen_names");
     const choice = readSrc("app/admin/(protected)/librum-choice/page.tsx");
     expect(choice).toContain('"id, title, cover_path, original_author, pen:public_pen_names(id, name)"');
@@ -140,24 +139,15 @@ describe("BD3 patch 4: the original author", () => {
     expect(readSrc("lib/librum-download-pages.ts")).toContain("original_author, published_at");
   });
 
-  it("the wizard: the box, required with a public-domain choice on either button, back to step 1", () => {
-    const source = readSrc("app/(public)/dashboard/books/new/upload-wizard.tsx");
-    expect(source).toContain('name="originalAuthor"');
-    expect(source).toContain('const originalAuthorRequired = rightsBasis === "public_domain" || rightsBasis === "public_domain_original";');
-    expect(source).toMatch(/if \(originalAuthorRequired && !originalAuthor\.trim\(\)\) \{\s*event\.preventDefault\(\);\s*setOriginalAuthorError\(MISSING_ORIGINAL_AUTHOR_MESSAGE\);\s*setStep\(1\);/);
-    expect(source).toContain("{ORIGINAL_AUTHOR_HINT}");
-    // Before the rights check, so a public-domain draft is caught too.
-    expect(source.indexOf("if (originalAuthorRequired && !originalAuthor.trim())")).toBeLessThan(
-      source.indexOf("const rightsMissing = publishing"),
-    );
-  });
-
-  it("the Edit page: the box, prefilled, kept in the draft fields, and opened when a public-domain book lacks one", () => {
-    const source = readSrc("app/(public)/dashboard/books/[id]/edit/page.tsx");
-    expect(source).toContain('name="originalAuthor"');
-    expect(source).toContain('defaultValue={book.original_author ?? ""}');
-    expect(source).toContain('"originalAuthor",');
-    expect(source).toContain("!book.original_author");
+  // BD15 P5b-3a: the old edit page is retired; the original author is
+  // edited in the editor's Details tab (prefilled from the working
+  // version: a live book's waiting change, else the book).
+  it("the editor's Details tab: the box, prefilled", () => {
+    const form = readSrc("components/book-details-form.tsx");
+    expect(form).toContain('name="originalAuthor"');
+    expect(form).toContain("defaultValue={initial.originalAuthor}");
+    const page = readSrc("app/(public)/dashboard/books/[id]/editor/page.tsx");
+    expect(page).toContain('originalAuthor: working.originalAuthor ?? "",');
   });
 
   it("the Word ebook's dc:creator follows a typed original author", () => {
@@ -171,10 +161,10 @@ describe("BD3 patch 4: the original author", () => {
 describe("BD3 patch 4 r2: staff see the original author (audit r1, M1)", () => {
   it("the admin book page and the books list read and show original_author", () => {
     const page = readSrc("app/admin/(protected)/books/[id]/page.tsx");
-    expect(page).toContain("pen:pen_names(name), original_author");
+    expect(page).toContain("pen:pen_names!books_pen_name_id_fkey(name), original_author");
     expect(page).toContain("Original author (readers see this as the byline):");
     const list = readSrc("app/admin/(protected)/books/page.tsx");
-    expect(list).toContain("pen:pen_names(name), original_author");
+    expect(list).toContain("pen:pen_names!books_pen_name_id_fkey(name), original_author");
     expect(list).toContain("original author: ${book.original_author}");
   });
 

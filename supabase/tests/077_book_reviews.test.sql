@@ -182,6 +182,10 @@ insert into public.books (id, author_id, title, description, status, price_all, 
    'e0770000-0000-4000-8000-00000000000b/e0770001-0000-4000-8000-0000000000b1.epub', 'e077c0de-0000-4000-8000-0000000000b1/cover.jpg');
 
 update public.books set librum_choice_at = now() where id = 'e0770001-0000-4000-8000-0000000000a2';
+-- BD15 P5a (migration 20261104120000): request_book_review() refuses a
+-- book with no "AI used" answer (LB489), so each fixture book has one.
+insert into public.book_ai_disclosures (book_id, ai_used)
+select id, false from public.books where title like 'P077%';
 
 -- What the migration's backfill writes for a book that is live (1a).
 insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, status, grandfathered, decided_at)
@@ -234,8 +238,9 @@ begin
   end loop;
   foreach c in array array[
     -- BD3 patch 4 (migration 20261101170000): the approval also binds
-    -- the original author, so the internal function takes four arguments.
-    'public.book_review_approval_valid(uuid,text,text,text)', 'public.books_require_review_approval()',
+    -- the original author; BD15 P5b-1 (migration 20261104170000) the
+    -- description and 18+ label, so the internal function takes six.
+    'public.book_review_approval_valid(uuid,text,text,text,text,boolean)', 'public.books_require_review_approval()',
     'public.books_refuse_live_file_change()', 'public.books_cancel_pending_review_on_delete()'] loop
     perform pg_temp.assert(not has_function_privilege('anon', c, 'EXECUTE')
       and not has_function_privilege('authenticated', c, 'EXECUTE')
@@ -249,8 +254,9 @@ begin
       like '%BEFORE UPDATE OF status ON public.books FOR EACH ROW%',
     'part1: the gate is BEFORE UPDATE OF status only (no INSERT trigger)');
   perform pg_temp.assert((select pg_get_triggerdef(oid) from pg_trigger where tgname = 'books_refuse_live_file_change')
-      -- BD3 patch 4 (migration 20261101170000): and original_author.
-      like '%BEFORE UPDATE OF file_path, cover_path, original_author ON public.books FOR EACH ROW%',
+      -- BD3 patch 4 (migration 20261101170000): and original_author;
+      -- BD15 P5b-1 (migration 20261104170000): description, is_adult.
+      like '%BEFORE UPDATE OF file_path, cover_path, original_author, description, is_adult ON public.books FOR EACH ROW%',
     'part1: the live-files guard is BEFORE UPDATE OF file_path, cover_path, original_author');
   perform pg_temp.assert((select pg_get_triggerdef(oid) from pg_trigger where tgname = 'books_cancel_pending_review_on_delete')
       like '%BEFORE DELETE ON public.books FOR EACH ROW%',
@@ -361,7 +367,9 @@ begin
   v := pg_temp.run_as('authenticated', 'e0770000-0000-4000-8000-0000000000c1', format('select public.request_book_review(%L)', d));
   perform pg_temp.assert(v = 'P0001:no book found for this id', format('part4: staff cannot request for an author -- got %s', v));
   v := pg_temp.run_as('authenticated', a, $q$select public.request_book_review('e0770001-0000-4000-8000-0000000000a1')$q$);
-  perform pg_temp.assert(v = 'P0001:this book is already published', format('part4: a live book is refused -- got %s', v));
+  -- BD15 P5b-1 (migration 20261104170000): a live book sends only its
+  -- pending changes, and this one has none.
+  perform pg_temp.assert(v = 'LB494:this live book has no changes to send', format('part4: a live book with no pending changes is refused -- got %s', v));
   v := pg_temp.run_as('authenticated', a, $q$select public.request_book_review('e0770001-0000-4000-8000-0000000000ff')$q$);
   perform pg_temp.assert(v = 'P0001:no book found for this id', format('part4: a missing book -- got %s', v));
 
@@ -686,7 +694,8 @@ begin
     format('part11: state after withdraw -- got %s', v));
   -- An approved, still-valid book cannot be sent again.
   v := pg_temp.run_as('authenticated', a, $q$select public.request_book_review('e0770001-0000-4000-8000-0000000000a1')$q$);
-  perform pg_temp.assert(v = 'P0001:this book is already published', format('part11: live book -- got %s', v));
+  -- BD15 P5b-1: a live book sends only pending changes; it has none.
+  perform pg_temp.assert(v = 'LB494:this live book has no changes to send', format('part11: live book -- got %s', v));
 end $$;
 
 -- ============================================================
@@ -702,8 +711,15 @@ declare
 begin
   v := pg_temp.run_as('authenticated', a, format('select public.request_book_review(%L)', d));
   old_id := pg_temp.pending_id(d);
+  -- BD15 P5a (migration 20261104120000): the app's roles can no longer
+  -- change the file of a book waiting for review (LB490) ...
   v := pg_temp.run_as('service_role', null, format('update public.books set file_path = %L where id = %L', f3, d));
-  perform pg_temp.assert(v = 'OK:1', format('part12: a draft''s file may change while pending -- got %s', v));
+  perform pg_temp.assert(v like 'LB490:%', format('part12: a draft''s file is locked while pending (P5a) -- got %s', v));
+  -- ... so a stale snapshot can only come from Librum's own SQL session;
+  -- request_book_review still replaces it, never rewrites it.
+  execute format('update public.books set file_path = %L where id = %L', f3, d);
+  perform pg_temp.assert((select file_path from public.books where id = d) = f3,
+    'part12: the table owner may still change it');
   v := pg_temp.run_as('authenticated', a, format('select public.request_book_review(%L)', d));
   perform pg_temp.assert(v = 'OK:1', format('part12: the request with the new file is accepted -- got %s', v));
   perform pg_temp.assert((select status = 'cancelled' and decided_at is not null and file_path <> f3
@@ -901,6 +917,9 @@ insert into public.books (id, author_id, title, description, status, price_all, 
 insert into public.book_reviews (book_id, book_title, author_id, file_path, cover_path, status, grandfathered, decided_at, buyer_file_only)
 select id, title, author_id, file_path, cover_path, 'approved', true, now(), true
   from public.books where id = 'e0770001-0000-4000-8000-0000000000a7';
+-- BD15 P5a (migration 20261104120000): request_book_review() refuses a
+-- book with no "AI used" answer (LB489), so each fixture book has one.
+insert into public.book_ai_disclosures (book_id, ai_used) values ('e0770001-0000-4000-8000-0000000000a7', false);
 
 do $$
 declare
@@ -924,7 +943,8 @@ begin
   end;
   perform pg_temp.assert(not public.book_review_approval_valid(h,
       (select file_path from public.books where id = h), (select cover_path from public.books where id = h),
-      (select original_author from public.books where id = h)),
+      (select original_author from public.books where id = h),
+      (select description from public.books where id = h), (select is_adult from public.books where id = h)),
     'part17: the validity function ignores a buyer_file_only row with matching paths');
   v := pg_temp.run_as('service_role', null,
     $q$update public.books set status = 'published' where id = 'e0770001-0000-4000-8000-0000000000a7'$q$);

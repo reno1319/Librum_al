@@ -120,7 +120,6 @@ describe("FIX1 X14: the cover placeholder", () => {
       "src/app/(public)/libra/[id]/page.tsx",
       "src/app/(public)/librari/page.tsx",
       "src/app/(public)/autore/[id]/page.tsx",
-      "src/app/(public)/dashboard/books/new/upload-wizard.tsx",
     ]) {
       const source = read(file);
       expect(source).toContain("<CoverPlaceholder");

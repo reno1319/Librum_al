@@ -12,6 +12,10 @@ import { isUuid } from "../../book-admin-logic";
 // current file_path, so staff always open exactly the file they are
 // approving. The key is classified against the book's own author and id
 // (canonical or versioned) before any Storage call. Never cached.
+//
+// BD15 P5b-2: for a LIVE book in review the snapshot is its waiting
+// manuscript (book_pending_changes), so that is the file it must still
+// match; the live file is what buyers keep until the approval.
 
 const SIGNED_URL_SECONDS = 300;
 const AUTHOR_CHANGED_FILE_MESSAGE = "The author changed the file. Reload.";
@@ -44,14 +48,25 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       .maybeSingle<{ id: string; book_id: string | null; status: string; file_path: string | null }>(),
     admin
       .from("books")
-      .select("id, author_id, file_path")
+      .select("id, author_id, status, file_path")
       .eq("id", id)
-      .maybeSingle<{ id: string; author_id: string; file_path: string | null }>(),
+      .maybeSingle<{ id: string; author_id: string; status: string; file_path: string | null }>(),
   ]);
   if (reviewError || bookError || !review || !book || review.book_id !== book.id || review.status !== "pending") {
     return backToBook(request, id, FILE_UNAVAILABLE_MESSAGE);
   }
-  if (review.file_path !== book.file_path) {
+  let currentFilePath = book.file_path;
+  if (book.status === "published") {
+    const { data: pending, error: pendingError } = await admin
+      .from("book_pending_changes")
+      .select("file_path")
+      .eq("book_id", book.id)
+      .maybeSingle<{ file_path: string | null }>();
+    if (pendingError) return backToBook(request, id, FILE_UNAVAILABLE_MESSAGE);
+    if (!pending) return backToBook(request, id, AUTHOR_CHANGED_FILE_MESSAGE);
+    currentFilePath = pending.file_path;
+  }
+  if (review.file_path !== currentFilePath) {
     return backToBook(request, id, AUTHOR_CHANGED_FILE_MESSAGE);
   }
   const filePath = review.file_path;

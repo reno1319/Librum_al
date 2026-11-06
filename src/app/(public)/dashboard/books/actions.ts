@@ -1,15 +1,12 @@
 "use server";
 
-import { randomUUID } from "crypto";
+import { PD_FROZEN_MESSAGE } from "@/lib/pd-editions";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createCatalogWriteClient } from "@/lib/catalog-write-client";
-import { GENRES } from "@/lib/genres";
-import { isSupportedLanguage } from "@/lib/languages";
-import { CONTRIBUTOR_ROLES } from "@/lib/contributor-roles";
 import { sendNewBookEmails } from "@/lib/email";
 import { sendReviewRequestedStaffEmail } from "@/lib/staff-alerts";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
@@ -21,25 +18,59 @@ import {
 } from "@/lib/cover-resize";
 import { LIBRUM_MADE_EBOOK_METADATA, readLibrumMadeMarker, syncCoverIntoLibrumEbook } from "@/lib/ebook-cover-sync";
 import { withEbookCoverWarning } from "@/lib/ebook-cover-notice";
-import { readLibrumEbookCover } from "@/lib/epub-cover";
+import { readLibrumEbookCover, restampLibrumEpubMetadata } from "@/lib/epub-cover";
 import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { checkPublishGate } from "@/lib/publish-readiness";
 import { INVALID_ISBN_MESSAGE, isValidIsbn } from "@/lib/book-identifiers";
+import { parseAiAnswer, readAiDisclosure, writeAiDisclosure } from "@/lib/book-ai-disclosure";
+import { missingDetails } from "@/lib/book-details";
+import {
+  EBOOK_RESTAMP_FAILED_MESSAGE,
+  PRICE_FIELD,
+  PRICE_INVALID_MESSAGE,
+  PRICE_MODE_FIELD,
+  PRICE_MODE_MISSING_MESSAGE,
+  SEND_CONFIRMATION_NOT_SAVED_MESSAGE,
+  SEND_INCOMPLETE_MESSAGE,
+  SEND_TICKS_MISSING_MESSAGE,
+  hasSendTicks,
+  isFreeOnlyRightsBasis,
+  parsePriceMode,
+  resolvePricingSubmission,
+} from "@/lib/book-pricing";
+import {
+  AI_NOT_SAVED_MESSAGE,
+  CONTENT_SAVED_MESSAGE,
+  CHANGES_SENT_MESSAGE,
+  DETAILS_SAVED_MESSAGE,
+  LIVE_ADULT_CATEGORY_MESSAGE,
+  LIVE_NOT_LIVE_MESSAGE,
+  LIVE_REVIEW_CANCELLED_MESSAGE,
+  LIVE_SAVED_MESSAGE,
+  LIVE_SAVED_PENDING_MESSAGE,
+  NO_CHANGES_TO_SEND_MESSAGE,
+  UNPUBLISHED_MESSAGE,
+  BOOK_DELETED_MESSAGE,
+  LIVE_DELETE_REFUSED_MESSAGE,
+  editorPath,
+} from "@/lib/book-editor-copy";
+import {
+  changedPendingFields,
+  readPendingChanges,
+  savePendingChanges,
+  type PendingChanges,
+} from "@/lib/book-pending-changes";
 import { getRightsDeclarationState, recordRightsDeclaration } from "@/lib/book-rights";
-import { resolveOwnPenNameId } from "@/lib/pen-name-write-client";
-import { penNameErrorMessage } from "@/lib/pen-names";
-import { isRightsBasis } from "@/lib/rights-statements";
-import { MISSING_ORIGINAL_AUTHOR_MESSAGE, normalizeOriginalAuthor, ORIGINAL_AUTHOR_MAX_LENGTH } from "@/lib/book-byline";
+import type { RightsBasis } from "@/lib/types";
 import { getActiveTakedownState } from "@/lib/book-takedowns";
 import { TAKEN_DOWN_DELETE_MESSAGE, TAKEN_DOWN_PUBLISH_MESSAGE } from "@/lib/takedown-reasons";
 import {
   CATALOG_ROW_CHANGED_MESSAGE,
   PAID_REPRICING_UNAVAILABLE_MESSAGE,
   applyCatalogRowGuard,
-  catalogRowGuard,
   isExactlyOneRowWritten,
   resolvePriceUpdateAuthorization,
 } from "@/lib/paid-repricing";
@@ -62,6 +93,8 @@ import {
 import {
   deletedBookManuscriptKeys,
   getBookReviewState,
+  isInReviewLockError,
+  isWaitingForReview,
   readReviewSnapshots,
   removeUnretainedManuscripts,
   requestBookReview,
@@ -70,21 +103,12 @@ import {
 import {
   ALREADY_IN_REVIEW_MESSAGE,
   BOOK_CHANGED_WHILE_EDITING_MESSAGE,
-  LIVE_FILES_IN_BUNDLE_MESSAGE,
-  LIVE_FILES_REQUEST_FAILED_MESSAGE,
-  LIVE_FILES_SAVED_MESSAGE,
-  LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE,
-  LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE,
-  ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE,
+  IN_REVIEW_LOCKED_MESSAGE,
   NOT_IN_REVIEW_MESSAGE,
   REVIEW_CANCELLED_MESSAGE,
   SENT_FOR_REVIEW_MESSAGE,
 } from "@/lib/book-review-copy";
 import {
-  MAXIMUM_CATALOG_PRICE_ALL,
-  MINIMUM_PAID_CATALOG_PRICE_ALL,
-  groupAllDigits,
-  parseCatalogPriceAll,
 } from "@/lib/catalog-price";
 import {
   isLivePriceChange,
@@ -123,18 +147,12 @@ function sendNewBookEmailsAfterResponse(caller: string, ids: { bookId: string; a
 const MISSING_ALL_PRICE_MESSAGE =
   "Vendosni çmimin e librit në lekë para se ta publikoni.";
 
-// FIX1 (X16): Renato's W-B wording. True on the one path that shows it
-// (createBook's intent=publish), because that path inserts the draft
-// before performPublish refuses; publishBook's own refusal names only
-// the first sentence, since there the book already is a draft.
-const MISSING_DESCRIPTION_MESSAGE =
-  "Shtoni një përshkrim para publikimit. Libri juaj ruhet gjithsesi si draft.";
 const MISSING_DESCRIPTION_SHORT_MESSAGE = "Shtoni një përshkrim para publikimit.";
 
-// F4 (P4): Renato's rule, a rights choice before Publish. The same
-// sentence on both publish paths; createBook adds "Saved as draft" as
-// its success line, as for the missing description.
+// F4 (P4): Renato's rule, a rights choice before Publish.
 const MISSING_RIGHTS_MESSAGE = "Zgjidhni të drejtat para publikimit.";
+// BD15 P2: a draft from the new editor without its manuscript or cover.
+const MISSING_FILES_MESSAGE = "Shtoni dorëshkrimin dhe ballinën para se ta dërgoni për shqyrtim.";
 
 // F4 (D3): the existing generic refusal, also used when the rights
 // choice cannot be read at all (before the migration, or a read error).
@@ -143,59 +161,36 @@ const PUBLISH_NOT_POSSIBLE_YET_QUERY =
     "Libri juaj nuk u publikua dot ende. Provoni përsëri nga paneli juaj",
   );
 
-// F4 (P6): a published book cannot have its description cleared.
-const PUBLISHED_NEEDS_DESCRIPTION_MESSAGE = "Një libër i publikuar duhet të ketë përshkrim.";
-
-// The existing contributor failure sentence, shared by addContributor and
-// Add a book's Translator field (F4, P2).
-const ADD_CONTRIBUTOR_ERROR_MESSAGE = "Bashkëpunëtori nuk u shtua dot. Provoni përsëri.";
-
-// F4 (P2): the Translator field's bound (its input's maxLength). Over it,
-// nothing is inserted and the contributor message applies.
-const TRANSLATOR_MAX_LENGTH = 120;
-
-const CATALOG_PRICE_ERROR_MESSAGE =
-  `Shkruani çmimin në lekë: 0 për e-libër falas, ose një numër të plotë nga ` +
-  `${MINIMUM_PAID_CATALOG_PRICE_ALL} deri në ${groupAllDigits(MAXIMUM_CATALOG_PRICE_ALL)}`;
+// BD15 P4: the two existing publish sentences, named for saveBookPricing.
+const BOOK_PUBLISHED_MESSAGE = "Libri juaj u publikua";
+const PAID_PUBLISHING_UNAVAILABLE_MESSAGE = "Publikimi me pagesë nuk është i mundur tani";
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const MAX_MANUSCRIPT_BYTES = 50 * 1024 * 1024;
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART B: mirrors migration 044's own CHECK
-// constraints exactly (see that migration's comment) -- a value that
+// constraint exactly (see that migration's comment) -- a value that
 // passes this can never fail at the database layer.
-const SUBTITLE_MAX_LENGTH = 300;
 const PUBLISHER_MAX_LENGTH = 200;
-const EDITION_MAX_LENGTH = 100;
-
-// Stored as a single comma-separated string (searched the same way as
-// title/description) rather than a Postgres array — simpler to search
-// and edit, and tags don't need to be a distinct type for this MVP.
-function normalizeKeywords(raw: FormDataEntryValue | null): string {
-  return String(raw ?? "")
-    .split(",")
-    .map((k) => k.trim())
-    .filter(Boolean)
-    .slice(0, 15)
-    .join(", ");
-}
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART B FINAL PRE-COMMIT ROLLOUT-
 // COMPATIBILITY CORRECTION: every one of the three resolvers below now
 // reports `present` (formData.has(fieldName), never inferred from
 // formData.get()'s own result) alongside the normalized `value` --
 // same shape as this file's own pre-existing ResolvedManuscript/
-// ResolvedCover types. createBook() only ever reads `.value` (absent
-// and empty both legitimately mean "no value yet" for a brand-new
-// row); updateBook() reads BOTH, since PUBLISHING-UX-1 is staged
-// across three parts (Part B: server persistence, Part C: wizard UI
-// for new books, Part D: Edit UI parity) -- an old Edit form that
-// doesn't submit these fields yet must never wipe a value the Part-C
-// wizard already saved, which formData.get()-only absent/empty
-// conflation would have silently done the moment ANY existing field
-// was edited through the old form. See updateBook()'s own comment at
-// its update-payload call site for how `present` is actually used.
+// ResolvedCover types: a form that doesn't submit a field must never
+// wipe a value already saved, which formData.get()-only absent/empty
+// conflation would silently do. BD15 cleanup: saveBookContent (the
+// publisher field) is the one caller left.
 type ResolvedOptionalText = { present: boolean; value: string | null };
+
+// BD15 P3: a message joined onto a path. The new editor's paths already
+// carry "?tab=...", so the message is joined with "&" there; every older
+// path (no "?") gets exactly "?error=" as before. The same helper as
+// editor-actions.ts (page-messages.sources.test.ts reads its calls).
+function withQuery(path: string, key: "error" | "success", message: string): string {
+  return `${path}${path.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(message)}`;
+}
 
 // Shared trim/empty-becomes-null/length-bound normalization for
 // subtitle, publisher, and edition -- all three are optional free text
@@ -219,132 +214,10 @@ function resolveBoundedOptionalText(
     // file now; fieldLabel is always one of this file's own hardcoded
     // call-site labels ("Nëntitulli"/"Botuesi"/"Botimi"), never user input.
     redirect(
-      `${errorPath}?error=${encodeURIComponent(`${fieldLabel} mund të ketë deri në ${maxLength} karaktere`)}`,
+      withQuery(errorPath, "error", `${fieldLabel} mund të ketë deri në ${maxLength} karaktere`),
     );
   }
   return { present, value };
-}
-
-// Empty/absent is always valid -- this is the current wizard's own
-// transitional-compatibility requirement (it doesn't submit a
-// "language" field at all yet, and must keep working exactly as before
-// until Part C adds one). A non-empty value must match the current
-// LANGUAGES vocabulary (src/lib/languages.ts) -- never silently stored
-// unrecognized. books.language itself carries no DB CHECK (see
-// migration 044's own comment for why); this is the one real
-// enforcement point.
-function resolveLanguage(formData: FormData, errorPath: string): ResolvedOptionalText {
-  const present = formData.has("language");
-  const value = String(formData.get("language") ?? "").trim();
-  if (!value) return { present, value: null };
-  if (!isSupportedLanguage(value)) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Zgjidhni një gjuhë të pranuar")}`);
-  }
-  return { present, value };
-}
-
-// LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT SERVER-SIDE
-// UNCHANGED-LANGUAGE PRESERVATION CORRECTION: updateBook()-ONLY
-// exception to resolveLanguage()'s own strict "must be in LANGUAGES"
-// rule -- createBook() keeps calling resolveLanguage() directly, with
-// no knowledge of this function, and can never accept an unsupported
-// value for a brand-new row.
-//
-// books.language carries no DB CHECK (a book may already legitimately
-// hold a code this deployed LANGUAGES doesn't recognize -- see
-// migration 044's own comment), so an unrelated Edit save (e.g. fixing
-// a typo in Description) must not force the author to either "fix" or
-// silently lose that value merely by resubmitting the Edit form's own
-// pre-populated select. This encodes ONLY "the author resubmitted the
-// exact value already on this row, untouched" -- never "any
-// unsupported value is now acceptable." A submitted value that differs
-// from the existing row's own value is still rejected exactly as
-// resolveLanguage() already does, whether it's unsupported OUTRIGHT
-// (stored "sq", submitted "de") or unsupported and merely DIFFERENT
-// from another already-unsupported stored value (stored "fr",
-// submitted "de") -- preservation is never confused with "unsupported
-// values are now validated."
-//
-// `existingLanguage` MUST come from the authoritative DB row already
-// read for this update's own ownership check (see updateBook()'s own
-// comment at that query) -- never from a hidden form field, client
-// state, or query parameter, none of which a client could be trusted
-// to report honestly.
-type LanguageUpdateResolution =
-  | { action: "omit" } // formData has no "language" key -- column untouched
-  | { action: "clear" } // present, empty -- intentional clear to null
-  | { action: "set"; value: string } // present, currently supported
-  | { action: "preserve" }; // present, unsupported, === existing row's own value -- no-op
-
-function resolveLanguageForUpdate(
-  formData: FormData,
-  existingLanguage: string | null,
-  errorPath: string,
-): LanguageUpdateResolution {
-  if (!formData.has("language")) return { action: "omit" };
-
-  const value = String(formData.get("language") ?? "").trim();
-  if (!value) return { action: "clear" };
-  if (isSupportedLanguage(value)) return { action: "set", value };
-
-  if (value === existingLanguage) return { action: "preserve" };
-
-  redirect(`${errorPath}?error=${encodeURIComponent("Zgjidhni një gjuhë të pranuar")}`);
-}
-
-// The author-supplied "originally published" date -- a genuinely
-// different fact from published_at (Librum's own system-authoritative
-// first-publish timestamp, set only by performPublish(), never read
-// from form data at all -- see that function's own comment). Empty is
-// always valid; a non-empty value must be a real calendar date,
-// matching a native <input type="date">'s own "YYYY-MM-DD" shape, and
-// may not be in the future -- "originally published" has no
-// meaningful future value, and this field is explicitly not a
-// scheduled-release mechanism (out of scope for PUBLISHING-UX-1
-// entirely).
-function resolveOriginalPublicationDate(formData: FormData, errorPath: string): ResolvedOptionalText {
-  const present = formData.has("originalPublicationDate");
-  const raw = String(formData.get("originalPublicationDate") ?? "").trim();
-  if (!raw) return { present, value: null };
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Shkruani një datë të vlefshme të botimit të parë")}`);
-  }
-
-  const parsed = new Date(`${raw}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Shkruani një datë të vlefshme të botimit të parë")}`);
-  }
-
-  if (parsed.getTime() > Date.now()) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Data e botimit të parë nuk mund të jetë në të ardhmen")}`);
-  }
-
-  return { present, value: raw };
-}
-
-// BD3 patch 4 (Renato 1 Nov, 1a 2a 5a): the "Autori origjinal" box.
-// Optional for every book; required when the rights choice submitted
-// with it is one of the two public-domain bases. Control characters are
-// dropped and the value trimmed (the database CHECK wants exactly that);
-// empty means none. Absent from the form (an older page) changes
-// nothing on an edit.
-const ORIGINAL_AUTHOR_TOO_LONG_MESSAGE = `Autori origjinal mund të ketë deri në ${ORIGINAL_AUTHOR_MAX_LENGTH} karaktere`;
-
-function rightsBasisNeedsOriginalAuthor(basis: unknown): boolean {
-  return basis === "public_domain" || basis === "public_domain_original";
-}
-
-function resolveOriginalAuthorInput(formData: FormData, errorPath: string, required: boolean): ResolvedOptionalText {
-  const present = formData.has("originalAuthor");
-  const raw = normalizeOriginalAuthor(String(formData.get("originalAuthor") ?? ""));
-  if (raw.length > ORIGINAL_AUTHOR_MAX_LENGTH) {
-    redirect(`${errorPath}?error=${encodeURIComponent(ORIGINAL_AUTHOR_TOO_LONG_MESSAGE)}`);
-  }
-  if (!raw && required) {
-    redirect(`${errorPath}?error=${encodeURIComponent(MISSING_ORIGINAL_AUTHOR_MESSAGE)}`);
-  }
-  return { present, value: raw || null };
 }
 
 // LIBRUM 2.0 PRODUCT-5 CB-1: a manuscript can arrive two ways --
@@ -358,8 +231,7 @@ function resolveOriginalAuthorInput(formData: FormData, errorPath: string, requi
 //      EPUB alike, so neither can ever need to cross this Server
 //      Action's own request body (Vercel's ~4.5MB ceiling) again.
 // Both are normalized into the same validated bytes here, once, before
-// createBook()/updateBook()'s own business rules ever see a
-// difference -- neither function duplicates this logic.
+// saveBookContent()'s own business rules ever see a difference.
 //
 // The temp-path branch never trusts the path's OWNERSHIP OR its own
 // ".epub" extension as proof of anything: ownership is re-checked
@@ -382,21 +254,20 @@ type ResolvedManuscript =
 // already had before EPUB-VALIDATION-1B still falls through to it
 // unchanged. The two genuinely new, more specific messages use
 // encodeURIComponent() instead, matching this file's own existing
-// precedent for a dynamic-content message (see addContributor()'s own
-// redirect further below) -- never exposing a ZIP-parser error, a
+// precedent for a dynamic-content message -- never exposing a ZIP-parser error, a
 // stack trace, or an archive path either way.
-function epubValidationErrorQuery(
+function epubValidationErrorMessage(
   reason: Extract<EpubValidationResult, { valid: false }>["reason"],
 ): string {
   switch (reason) {
     case "too_many_entries":
     case "too_large_uncompressed":
     case "entry_too_large":
-      return encodeURIComponent("EPUB-i është shumë i madh ose ka shumë skedarë.");
+      return "EPUB-i është shumë i madh ose ka shumë skedarë.";
     case "encrypted_or_drm":
-      return encodeURIComponent("Ky EPUB përdor enkriptim/DRM që Librum nuk e mbështet.");
+      return "Ky EPUB përdor enkriptim/DRM që Librum nuk e mbështet.";
     default:
-      return encodeURIComponent("Ky skedar nuk duket si EPUB i vlefshëm");
+      return "Ky skedar nuk duket si EPUB i vlefshëm";
   }
 }
 
@@ -405,11 +276,9 @@ async function resolveManuscriptInput(
   userId: string,
   formData: FormData,
   errorPath: string,
-  // LIBRUM 2.0 EPUB-VALIDATION-1B: optional -- known and passed by
-  // updateBook() (its own bookId parameter, available before this is
-  // ever called), omitted by createBook() (bookId isn't generated
-  // until after this resolves). Used only for the safe diagnostic log
-  // below on a rejection; never affects validation or storage
+  // LIBRUM 2.0 EPUB-VALIDATION-1B: optional -- the caller's own bookId
+  // when it has one (saveBookContent passes it). Used only for the safe
+  // diagnostic log below on a rejection; never affects validation or storage
   // behavior.
   bookId?: string,
 ): Promise<ResolvedManuscript> {
@@ -424,7 +293,7 @@ async function resolveManuscriptInput(
     // this same value is later handed to remove().
     if (!isOwnTemporaryManuscriptUploadPath(tempPath, userId)) {
       redirect(
-        `${errorPath}?error=${encodeURIComponent("Dorëshkrimi i zgjedhur nuk vlen më. Zgjidhni skedarin përsëri")}`,
+        withQuery(errorPath, "error", "Dorëshkrimi i zgjedhur nuk vlen më. Zgjidhni skedarin përsëri"),
       );
     }
 
@@ -433,7 +302,7 @@ async function resolveManuscriptInput(
       .download(tempPath);
     if (downloadError || !data) {
       console.error("resolveManuscriptInput: temp manuscript download failed:", downloadError);
-      redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi i ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri")}`);
+      redirect(withQuery(errorPath, "error", "Dorëshkrimi i ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri"));
     }
 
     bytes = Buffer.from(await data!.arrayBuffer());
@@ -444,7 +313,7 @@ async function resolveManuscriptInput(
       return { present: false };
     }
     if (!manuscript.name.toLowerCase().endsWith(".epub")) {
-      redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi duhet të jetë skedar EPUB")}`);
+      redirect(withQuery(errorPath, "error", "Dorëshkrimi duhet të jetë skedar EPUB"));
     }
     bytes = Buffer.from(await manuscript.arrayBuffer());
   }
@@ -453,7 +322,7 @@ async function resolveManuscriptInput(
   // browser's own pre-upload check) alone for bytes that came back
   // from a temp Storage download.
   if (bytes.length > MAX_MANUSCRIPT_BYTES) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Dorëshkrimi duhet të jetë nën 50 MB")}`);
+    redirect(withQuery(errorPath, "error", "Dorëshkrimi duhet të jetë nën 50 MB"));
   }
 
   const manuscriptValidation = await validateEpubStructure(bytes);
@@ -471,7 +340,7 @@ async function resolveManuscriptInput(
       reason: manuscriptValidation.reason,
       compressedBytes: bytes.length,
     });
-    redirect(`${errorPath}?error=${epubValidationErrorQuery(manuscriptValidation.reason)}`);
+    redirect(withQuery(errorPath, "error", epubValidationErrorMessage(manuscriptValidation.reason)));
   }
 
   return { present: true, bytes, tempPathToCleanup };
@@ -525,7 +394,7 @@ async function resolveCoverInput(
     // BOOK-STORAGE-MUTATION-AUTH-1: exact temporary-key shape, as for
     // the manuscript above.
     if (!isOwnTemporaryCoverUploadPath(tempPath, userId)) {
-      redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri")}`);
+      redirect(withQuery(errorPath, "error", "Ballina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri"));
     }
 
     const { data, error: downloadError } = await supabase.storage
@@ -533,7 +402,7 @@ async function resolveCoverInput(
       .download(tempPath);
     if (downloadError || !data) {
       console.error("resolveCoverInput: temp cover download failed:", downloadError);
-      redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri")}`);
+      redirect(withQuery(errorPath, "error", "Ballina e ngarkuar ka skaduar ose nuk u lexua dot. Zgjidhni skedarin përsëri"));
     }
 
     bytes = Buffer.from(await data!.arrayBuffer());
@@ -550,7 +419,7 @@ async function resolveCoverInput(
   // browser's own pre-upload check) alone for bytes that came back
   // from a temp Storage download.
   if (bytes.length > MAX_COVER_BYTES) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Imazhi i kopertinës duhet të jetë nën 5 MB")}`);
+    redirect(withQuery(errorPath, "error", "Imazhi i ballinës duhet të jetë nën 5 MB"));
   }
 
   // The SAME authoritative byte-signature check every cover has always
@@ -562,13 +431,13 @@ async function resolveCoverInput(
   const coverFile = new File([new Uint8Array(bytes)], "cover", { type: "application/octet-stream" });
   const coverKind = await detectCoverImageKind(coverFile);
   if (!coverKind) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Ky nuk duket si imazh i vlefshëm JPEG ose PNG")}`);
+    redirect(withQuery(errorPath, "error", "Ky nuk duket si imazh i vlefshëm JPEG ose PNG"));
   }
   // COVERS-1: the signature check above still gates what gets decoded;
   // the stored cover is always the shrunk JPEG, never the raw upload.
   const shrunk = await shrinkImageToJpeg(bytes, BOOK_COVER_SIZE);
   if (!shrunk) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Kopertina e ngarkuar nuk u lexua dot. Provoni përsëri")}`);
+    redirect(withQuery(errorPath, "error", "Ballina e ngarkuar nuk u lexua dot. Provoni përsëri"));
   }
   const { extension, contentType } = resolveVerifiedCoverStorageDetails("jpeg");
 
@@ -624,43 +493,8 @@ async function downloadStoredBytes(
   }
 }
 
-// Confirms the chosen series actually belongs to this author (an empty
-// selection is always valid — a book doesn't have to be in a series).
-// Redirects back with an error rather than returning one, matching the
-// other field validations in this file.
-async function resolveSeriesSelection(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-  formData: FormData,
-  errorPath: string,
-) {
-  const seriesId = String(formData.get("seriesId") ?? "").trim() || null;
-  if (!seriesId) {
-    return { seriesId: null, seriesPosition: null };
-  }
-
-  const { data: series } = await supabase
-    .from("series")
-    .select("id")
-    .eq("id", seriesId)
-    .eq("author_id", userId)
-    .maybeSingle();
-
-  if (!series) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Zgjidhni një nga seritë tuaja")}`);
-  }
-
-  const rawPosition = String(formData.get("seriesPosition") ?? "").trim();
-  const seriesPosition = rawPosition ? Number(rawPosition) : null;
-  if (seriesPosition != null && (!Number.isInteger(seriesPosition) || seriesPosition < 1)) {
-    redirect(`${errorPath}?error=${encodeURIComponent("Vendi në seri duhet të jetë numër i plotë pozitiv")}`);
-  }
-
-  return { seriesId, seriesPosition };
-}
-
-// BOOK-STORAGE-MUTATION-AUTH-1: the one place createBook, updateBook
-// and deleteBook hand stored or temporary keys to Storage for removal.
+// BOOK-STORAGE-MUTATION-AUTH-1: the one place saveBookContent and
+// deleteBook hand stored or temporary keys to Storage for removal.
 // Every candidate must already be proven by src/lib/book-storage-path.ts
 // for the signed-in author (and, for a permanent key, the exact book);
 // the candidates are de-duplicated and removed with at most one call per
@@ -762,897 +596,43 @@ function temporaryUploadRemovals(
   return removals;
 }
 
-export async function createBook(formData: FormData) {
-  // ALL-CUTOVER APP-A: catalog price is written by this action --
-  // gated before any Supabase call.
-  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    redirectForMaintenance("/dashboard/books/new");
-  }
+// W7: a Librum-made (Word) ebook carries the cover inside it (1a), with
+// the saved title and pen name (3a); used by saveBookContent (BD15 P3,
+// moved here unchanged from the old edit page's updateBook). Adds to or
+// rewrites uploadsBeforeWrite; returns whether the one-line warning is due and
+// the fresh manuscript key it added for a cover-only change (else null).
+type PendingUpload = {
+  bucket: typeof BOOK_COVERS_BUCKET | typeof BOOK_MANUSCRIPTS_BUCKET;
+  path: string;
+  bytes: Buffer;
+  contentType: string;
+  kind: "cover" | "manuscript";
+  // W7 r2 (R2): the Librum-made marker on a Librum-made ebook.
+  metadata?: Record<string, string>;
+};
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const title = String(formData.get("title") ?? "").trim();
-  const description = String(formData.get("description") ?? "").trim();
-  const keywords = normalizeKeywords(formData.get("keywords"));
-  const isbn = String(formData.get("isbn") ?? "").trim() || null;
-  const genre = String(formData.get("genre") ?? "");
-  // ALL-WIRING-2: the ONLY accepted parse of an author's catalog price.
-  // `Math.round(Number(raw) * 100)` is gone -- it silently accepted
-  // "1e3", " 7 ", 0.5 and every value in the unsellable 1..98 band, ran
-  // the author's typed string through binary floating point, and wrote
-  // the result into the legacy USD column. parseCatalogPriceAll is
-  // string-based, admits exactly the binding forms ("99", "99.00",
-  // "99,00", leading zeros, and the free forms "0"/"0.00"/"0,00"), and
-  // rejects everything else with no partial value at all.
-  const parsedPrice = parseCatalogPriceAll(formData.get("price"));
-  const coverStoragePath = String(formData.get("coverStoragePath") ?? "").trim();
-  const cover = formData.get("cover") as File | null;
-  const coverProvided = coverStoragePath !== "" || (!!cover && cover.size > 0);
-  const manuscriptStoragePath = String(formData.get("manuscriptStoragePath") ?? "").trim();
-  const manuscript = formData.get("manuscript") as File | null;
-  const manuscriptProvided = manuscriptStoragePath !== "" || (!!manuscript && manuscript.size > 0);
-
-  if (!title || !coverProvided || !manuscriptProvided) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
-  }
-
-  // A parse failure performs NO insert and NO update. This redirect is
-  // above every Supabase mutation in this function, and the maintenance
-  // gate is above it in turn, so a rejected price costs no row and no
-  // storage object.
-  if (!parsedPrice.ok) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent(CATALOG_PRICE_ERROR_MESSAGE)}`);
-  }
-
-  if (!GENRES.includes(genre as (typeof GENRES)[number])) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent("Zgjidhni një zhanër")}`);
-  }
-
-  // FIX1 (X9): empty stays allowed; a filled ISBN must be a real one.
-  if (isbn !== null && !isValidIsbn(isbn)) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent(INVALID_ISBN_MESSAGE)}`);
-  }
-
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART B: every one of these five is
-  // optional and absent entirely from the current (pre-Part-C) wizard's
-  // own FormData -- formData.get() simply returns null for a field the
-  // form never submits. Unlike updateBook() below, createBook() only
-  // ever reads `.value` here, never `.present`: a brand-new row has no
-  // prior value to preserve, so absent and empty both legitimately mean
-  // "no value yet," collapsing to `null` either way -- exactly the
-  // pre-correction behavior, unchanged.
-  const subtitle = resolveBoundedOptionalText(
-    formData,
-    "subtitle",
-    SUBTITLE_MAX_LENGTH,
-    "Nëntitulli",
-    "/dashboard/books/new",
-  ).value;
-  const language = resolveLanguage(formData, "/dashboard/books/new").value;
-  const publisher = resolveBoundedOptionalText(
-    formData,
-    "publisher",
-    PUBLISHER_MAX_LENGTH,
-    "Botuesi",
-    "/dashboard/books/new",
-  ).value;
-  const edition = resolveBoundedOptionalText(
-    formData,
-    "edition",
-    EDITION_MAX_LENGTH,
-    "Botimi",
-    "/dashboard/books/new",
-  ).value;
-  const originalPublicationDate = resolveOriginalPublicationDate(formData, "/dashboard/books/new").value;
-  const originalAuthor = resolveOriginalAuthorInput(
-    formData,
-    "/dashboard/books/new",
-    rightsBasisNeedsOriginalAuthor(formData.get("rightsBasis")),
-  ).value;
-  // F4 (P1) / PEN-NAMES-1 (10a): the pen name box, trimmed; empty means
-  // the author's default pen name.
-  const penName = String(formData.get("penName") ?? "").trim() || null;
-
-  const { seriesId, seriesPosition } = await resolveSeriesSelection(
-    supabase,
-    user.id,
-    formData,
-    "/dashboard/books/new",
-  );
-
-  // PEN-NAMES-1 (10a, N1): the box resolves to one of the author's own pen
-  // names -- found by name (any case) or created -- through the
-  // server-only pen name writer, with the session user as the author.
-  // Only pen_name_id is written below; the database keeps the legacy
-  // books.pen_name text in step. Resolved before any upload, so a
-  // refused name costs no storage object.
-  const penNameResolution = await resolveOwnPenNameId(user.id, penName);
-  if (!penNameResolution.ok) {
-    redirect(
-      `/dashboard/books/new?error=${encodeURIComponent(
-        penNameResolution.reason === "invalid"
-          ? penNameResolution.message
-          : "Diçka shkoi keq gjatë ruajtjes së librit. Provoni përsëri",
-      )}`,
-    );
-  }
-
-  // Normalizes EITHER a direct File OR a coverStoragePath/
-  // manuscriptStoragePath reference into the same validated bytes --
-  // see resolveCoverInput's/resolveManuscriptInput's own comments
-  // above. coverProvided/manuscriptProvided already guarantee
-  // `present: true` here; the checks below only keep each helper's
-  // return type honest.
-  const coverResult = await resolveCoverInput(supabase, user.id, formData, "/dashboard/books/new");
-  if (!coverResult.present) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
-  }
-
-  const manuscriptResult = await resolveManuscriptInput(
-    supabase,
-    user.id,
-    formData,
-    "/dashboard/books/new",
-  );
-  if (!manuscriptResult.present) {
-    redirect(`/dashboard/books/new?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
-  }
-
-  const bookId = randomUUID();
-  // LAUNCH-1 P3-1: coverExtension is derived exclusively from the
-  // verified byte signature above -- cover.name never reaches this key.
-  // BOOK-STORAGE-MUTATION-AUTH-1: both keys come from the shared
-  // constructors (src/lib/book-storage-path.ts), from the verified
-  // session user id and this server-generated book id only.
-  // PEN-2 (L10): the cover key is a fresh random folder
-  // (newBookCoverPath), never the account or book id, and it is uploaded
-  // with the trusted catalog writer: the contract migration drops every
-  // user write policy on the covers bucket (C9), so covers are written by
-  // the server only. Every input gate has already run above.
-  //
-  // ADMIN-3-REVIEW (M1): the manuscript, too, gets a fresh versioned key
-  // (newBookManuscriptPath) and is uploaded with the trusted catalog
-  // writer: authors may write only under their own "<uid>/tmp/" folder.
-  const coverPath = newBookCoverPath(coverResult.extension);
-  const manuscriptPath = newBookManuscriptPath(user.id, bookId);
-  const catalogWriter = createCatalogWriteClient();
-
-  // W7: a Librum-made (Word) ebook gets the cover inside it, and the saved
-  // title and pen name (1a, 3a). A directly uploaded ebook, or one the
-  // cover could not be put into, is stored exactly as uploaded (2a).
-  // r2: a Librum-made ebook is stored with the Librum-made marker (R2),
-  // and a failed swap adds the Q1 line to the success message.
-  const ebookSync = await syncCoverIntoLibrumEbook(manuscriptResult.bytes, {
-    getCoverJpeg: () => ebookCoverJpeg(coverResult),
-    title,
-    getAuthorName: () => readPenNameForEbook(supabase, user.id, penNameResolution.penNameId),
-    maxBytes: MAX_MANUSCRIPT_BYTES,
-    caller: "createBook",
-    bookId,
-  });
-  const manuscriptBytes = ebookSync.kind === "embedded" ? ebookSync.bytes : manuscriptResult.bytes;
-  const ebookCoverWarning = ebookSync.kind === "skipped";
-
-  const { error: coverError } = await catalogWriter.storage
-    .from(BOOK_COVERS_BUCKET)
-    .upload(coverPath, coverResult.bytes, {
-      contentType: coverResult.contentType,
-      cacheControl: IMAGE_CACHE_CONTROL_SECONDS,
-    });
-
-  if (coverError) {
-    console.error("createBook: cover upload failed:", coverError);
-    redirect(
-      `/dashboard/books/new?error=${encodeURIComponent("Imazhi i kopertinës nuk u ngarkua dot. Provoni përsëri")}`,
-    );
-  }
-
-  const { error: manuscriptError } = await catalogWriter.storage
-    .from(BOOK_MANUSCRIPTS_BUCKET)
-    .upload(manuscriptPath, manuscriptBytes, {
-      contentType: "application/epub+zip",
-      ...(ebookSync.kind !== "not_librum_made" ? { metadata: { ...LIBRUM_MADE_EBOOK_METADATA } } : {}),
-    });
-
-  if (manuscriptError) {
-    console.error("createBook: manuscript upload failed:", manuscriptError);
-    await removeNewCoverUpload(catalogWriter, coverPath, "createBook");
-    redirect(
-      `/dashboard/books/new?error=${encodeURIComponent("Dorëshkrimi nuk u ngarkua dot. Provoni përsëri")}`,
-    );
-  }
-
-  // LIBRUM 2.0 PRODUCT-1 PRE-COMMIT LEGACY RETIREMENT: preview_text is
-  // deliberately NOT set here -- the Studio no longer collects it (Read
-  // Sample is generated automatically, no author input required), so
-  // this simply lets the column's own `not null default ''` apply, the
-  // same as any other new-row default this insert doesn't override.
-  //
-  // CATALOG-STORAGE-PATH-AUTH-1: this insert names `cover_path` and
-  // `file_path`, and since migration 20260924141734 `authenticated` may
-  // not insert either one -- a storage path names an object the
-  // service-role download and account-deletion paths later act on, so an
-  // author must never be able to choose it. The row is therefore written
-  // through the trusted catalog-write client, created only HERE: after
-  // authentication, every input gate, the series ownership read, both
-  // upload validations and both permanent uploads above. Every value that
-  // identifies the row or a stored object is the server's own: `id` is
-  // the randomUUID() above, `author_id` is the authenticated `user.id`,
-  // and both paths were built above from those two and the verified cover
-  // extension. No FormData id, author or path is ever read for them.
-  // `.select("id")` must prove exactly this one new row, or the request
-  // fails closed with the same author-facing error as an insert error.
-  const { data: insertedRows, error: insertError } = await catalogWriter.from("books").insert({
-    id: bookId,
-    author_id: user.id,
-    title,
-    subtitle,
-    description,
-    keywords,
-    isbn,
-    language,
-    publisher,
-    edition,
-    original_publication_date: originalPublicationDate,
-    original_author: originalAuthor,
-    genre,
-    series_id: seriesId,
-    series_position: seriesPosition,
-    // ALL-WIRING-2: `price_all` ONLY. `price_cents` is deliberately
-    // absent from this payload -- not written, not scaled, not copied,
-    // not calculated. It keeps its column default of 0, which is a
-    // legacy USD artefact and is never read as a price again; a new
-    // book priced at 199 ALL is therefore a paid book whose
-    // `price_cents` is 0, and every decision site classifies it as
-    // paid because none of them looks at that column.
-    price_all: parsedPrice.priceAll,
-    cover_path: coverPath,
-    file_path: manuscriptPath,
-    // PEN-NAMES-1: the resolved pen name (the author's own, above). The
-    // books trigger re-checks it belongs to author_id and that it
-    // matches the chosen series' pen name (11a, LB451).
-    pen_name_id: penNameResolution.penNameId,
-    // Always inserted as a draft, regardless of the submitted intent
-    // (see below) -- the draft-first transition is intentional
-    // (PUBLISHING-UX-1 Part B's own brief): a book is never inserted
-    // directly as status='published', so a subsequent publish failure
-    // always has an already-safely-saved draft to fall back to.
-    //
-    // CATALOG-WRITE-AUTH-1: `status` is deliberately ABSENT from this
-    // payload. The row takes the column default, which is exactly
-    // 'draft', and since migration 20260924101853 `authenticated` holds
-    // no INSERT privilege on `status` at all -- naming it, even as
-    // "draft", is refused by the database. The trusted writer could name
-    // it, and deliberately does not: the default is the only way a new
-    // row gets its status. Every column named here is one a draft may
-    // carry, `price_all` included, because pricing a draft is not
-    // publishing it.
-  }).select("id");
-
-  if (insertError) {
-    console.error("createBook: book insert failed:", insertError);
-    await removeNewCoverUpload(catalogWriter, coverPath, "createBook");
-    await removeNewManuscriptUpload(catalogWriter, manuscriptPath, user.id, bookId, "createBook");
-    const penNameMessage = penNameErrorMessage(insertError);
-    if (penNameMessage) {
-      redirect(`/dashboard/books/new?error=${encodeURIComponent(penNameMessage)}`);
-    }
-    redirect(
-      `/dashboard/books/new?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së librit. Provoni përsëri")}`,
-    );
-  }
-  if (!isExactlyOneRowWritten(insertedRows) || insertedRows?.[0]?.id !== bookId) {
-    console.error("createBook: trusted insert did not create exactly this one row", {
-      bookId,
-      rowCount: Array.isArray(insertedRows) ? insertedRows.length : null,
-    });
-    redirect(
-      `/dashboard/books/new?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së librit. Provoni përsëri")}`,
-    );
-  }
-
-  // Only now, after the book row is fully saved pointing at the
-  // permanent manuscriptPath above, is the temporary upload safe to
-  // remove -- a failure here is an orphaned-object cleanup problem,
-  // never a failed save (logged, not surfaced). Deliberately NOT
-  // removed on any earlier failure path above: keeping it lets a retry
-  // reuse the same already-uploaded/already-converted temp EPUB
-  // instead of forcing the author to re-upload or re-convert from
-  // scratch after e.g. a transient insert failure. The temp cover lives
-  // in the "manuscripts" bucket's private staging area too (see
-  // resolveCoverInput's own comment), so both go in one de-duplicated
-  // removal from that bucket.
-  await removeProvenBookStorageObjects(
-    supabase,
-    temporaryUploadRemovals(user.id, manuscriptResult.tempPathToCleanup, coverResult.tempPathToCleanup),
-    "createBook",
-  );
-
-  revalidatePath("/dashboard");
-
-  // F4 (P2): the Translator field becomes one book_contributors row,
-  // inserted with the author's own session (the RLS path addContributor
-  // uses) now that the book row exists. Its failure never costs the
-  // book: it is logged, and the existing contributor message is shown
-  // only when no publish refusal needs the one error slot.
-  let translatorFailed = false;
-  const translator = String(formData.get("translator") ?? "").trim();
-  if (translator) {
-    if (translator.length > TRANSLATOR_MAX_LENGTH) {
-      console.error("createBook: translator name too long; not added", {
-        bookId,
-        length: translator.length,
-      });
-      translatorFailed = true;
-    } else {
-      const { error: translatorError } = await supabase
-        .from("book_contributors")
-        .insert({ book_id: bookId, name: translator, role: "Translator" });
-      if (translatorError) {
-        console.error("createBook: translator insert failed:", translatorError);
-        translatorFailed = true;
-      }
-    }
-  }
-  const translatorErrorQuery = translatorFailed
-    ? `error=${encodeURIComponent(ADD_CONTRIBUTOR_ERROR_MESSAGE)}`
-    : null;
-
-  // F4 (P3): the rights choice, recorded only when one of the two bases
-  // was submitted. recordRightsDeclaration takes nothing else from the
-  // client: the book, title, author and sentence all come from the
-  // server. A failure is logged and never loses the saved draft; with
-  // intent=publish the publish gate below then refuses.
-  const rightsBasis = formData.get("rightsBasis");
-  if (isRightsBasis(rightsBasis)) {
-    const recorded = await recordRightsDeclaration(bookId, rightsBasis);
-    if (!recorded.ok) {
-      console.error("createBook: rights declaration not recorded", { bookId, reason: recorded.reason });
-    }
-  }
-
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART B: prepares createBook() for Part
-  // C's eventual two final-step buttons (Save as draft / Publish book)
-  // without changing anything about today's wizard, which never
-  // submits an "intent" field at all -- formData.get("intent") is then
-  // simply null, String(null ?? "draft") is "draft", and every branch
-  // below behaves EXACTLY as before this change: redirect("/dashboard")
-  // with the book already safely saved as a draft.
-  const intent = String(formData.get("intent") ?? "draft");
-  if (intent !== "publish") {
-    redirectAfterSave(ebookCoverWarning, translatorErrorQuery ? `/dashboard?${translatorErrorQuery}` : "/dashboard");
-  }
-
-  // The book row above is already a fully-saved, permanent draft at
-  // this point -- performPublish() only ever ADVANCES its status, and
-  // its own failure paths never touch the row at all, so every branch
-  // below leaves a real, safe Draft behind even when publishing itself
-  // doesn't succeed (see performPublish()'s own comment).
-  const publishResult = await performPublish(supabase, bookId, user.id);
-
-  // ADMIN-3-REVIEW (A): a new book always goes to review first -- it has
-  // no approval yet. The draft is saved and waiting; nothing else to do.
-  if (publishResult.ok && publishResult.outcome === "sent_for_review") {
-    redirectAfterSave(ebookCoverWarning,
-      translatorErrorQuery
-        ? `/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}&${translatorErrorQuery}`
-        : `/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`,
-    );
-  }
-
-  if (publishResult.ok) {
-    // Same reasoning as publishBook()'s own post-mutation block -- the
-    // status="published" mutation above already committed inside
-    // performPublish(), so nothing below may report that as a failure.
-    // Each step is isolated and logged, never rethrown; redirect() stays
-    // outside every try/catch so its NEXT_REDIRECT signal is never
-    // swallowed. See publishBook() for the full rationale.
-    if (publishResult.wasNewlyPublished) {
-      sendNewBookEmailsAfterResponse("createBook", { bookId, authorId: user.id });
-    }
-
-    try {
-      revalidatePath("/");
-    } catch (error) {
-      console.error("createBook: revalidatePath failed after a successful publish", {
-        bookId,
-        error,
-      });
-    }
-
-    redirectAfterSave(ebookCoverWarning,
-      translatorErrorQuery
-        ? `/dashboard?success=${encodeURIComponent("Libri juaj u publikua")}&${translatorErrorQuery}`
-        : `/dashboard?success=${encodeURIComponent("Libri juaj u publikua")}`,
-    );
-  }
-
-  // Publish failed -- the draft inserted above remains exactly as
-  // saved. Only controlled, non-leaking reasons exist here (see
-  // performPublish()'s own result type); "not_found" is not reachable
-  // in practice (this is the row this same request just inserted) but
-  // still falls safely into the same generic branch rather than being
-  // treated as exhaustive.
-  if (publishResult.reason === "missing_all_price") {
-    redirectAfterSave(ebookCoverWarning,
-      `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
-    );
-  }
-  if (publishResult.reason === "missing_description") {
-    redirectAfterSave(ebookCoverWarning,
-      `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(MISSING_DESCRIPTION_MESSAGE)}`,
-    );
-  }
-  // ADMIN-2-TAKEDOWN: not reachable for a book this request just
-  // inserted (no takedown can exist yet); handled for completeness.
-  if (publishResult.reason === "taken_down") {
-    redirectAfterSave(ebookCoverWarning, `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
-  }
-  // F4 (P4): a publish refusal always takes the one error slot; a
-  // translator failure is then only logged (above).
-  if (publishResult.reason === "missing_rights") {
-    redirectAfterSave(ebookCoverWarning, `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(MISSING_RIGHTS_MESSAGE)}`);
-  }
-  if (publishResult.reason === "paid_mode_required") {
-    redirectAfterSave(ebookCoverWarning,
-      `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent("Publikimi me pagesë nuk është i mundur tani")}`,
-    );
-  }
-  // ADMIN-3-REVIEW: not reachable for a book this request just inserted
-  // (no review can exist yet); handled for completeness.
-  if (publishResult.reason === "already_in_review") {
-    redirectAfterSave(ebookCoverWarning, `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
-  }
-  if (publishResult.reason === "book_changed") {
-    redirectAfterSave(ebookCoverWarning, `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
-  }
-  // "rights_unavailable" (F4, D3), "takedown_unavailable" (ADMIN-2) and
-  // "review_unavailable" (ADMIN-3) land here too: the existing sentence.
-  redirectAfterSave(ebookCoverWarning, `/dashboard?success=${encodeURIComponent("U ruajt si draft")}&error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
-}
-
-export async function updateBook(bookId: string, formData: FormData) {
-  // ALL-CUTOVER APP-A: catalog price is written by this action --
-  // gated before any Supabase call.
-  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    redirectForMaintenance(`/dashboard/books/${bookId}/edit`);
-  }
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT SERVER-SIDE
-  // UNCHANGED-LANGUAGE PRESERVATION CORRECTION: `language` added to
-  // this existing, already-ownership-scoped read -- no second query --
-  // so resolveLanguageForUpdate() below has an authoritative source for
-  // "what does this row already have" that a client can never spoof
-  // (unlike a hidden form field or query parameter).
-  //
-  // PAID-REPRICING-1: `status` and `price_all` join the same read, so
-  // the paid-repricing decision below is made from the server's own row,
-  // never from anything the form submits.
-  //
-  // BOOK-STORAGE-MUTATION-AUTH-1: `id` joins the read so every key this
-  // action builds, keeps or removes is bound to the row's own id, which
-  // must be exactly the id the caller named (the uuid column compares
-  // case-insensitively; a key never does). A read error, no row, another
-  // author's row or any id mismatch stops here, before any upload.
-  const { data: existing, error: existingError } = await supabase
-    .from("books")
-    .select("id, cover_path, file_path, author_id, language, status, price_all, isbn, pen_name_id, original_author")
-    .eq("id", bookId)
-    .eq("author_id", user.id)
-    .single();
-
-  if (existingError || !existing || existing.id !== bookId || existing.author_id !== user.id) {
-    redirect("/dashboard");
-  }
-
-  const title = String(formData.get("title") ?? "").trim();
-  const description = String(formData.get("description") ?? "").trim();
-  const keywords = normalizeKeywords(formData.get("keywords"));
-  const isbn = String(formData.get("isbn") ?? "").trim() || null;
-  const genre = String(formData.get("genre") ?? "");
-  // ALL-WIRING-2: same single parser as createBook -- see its comment.
-  const parsedPrice = parseCatalogPriceAll(formData.get("price"));
-
-  if (!title) {
-    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
-  }
-
-  // A parse failure performs no update. Above every Supabase mutation
-  // in this function, and below the ownership check already made above,
-  // so a rejected price can neither write a row nor probe someone
-  // else's.
-  if (!parsedPrice.ok) {
-    redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(CATALOG_PRICE_ERROR_MESSAGE)}`,
-    );
-  }
-
-  if (!GENRES.includes(genre as (typeof GENRES)[number])) {
-    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Zgjidhni një zhanër")}`);
-  }
-
-  // FIX1 (X9): same rule as createBook. An ISBN resubmitted exactly as
-  // the row already holds it is kept, so a book saved before this check
-  // existed can still have an unrelated field edited (the same
-  // preserve-unchanged rule as resolveLanguageForUpdate).
-  if (isbn !== null && isbn !== existing.isbn && !isValidIsbn(isbn)) {
-    redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(INVALID_ISBN_MESSAGE)}`,
-    );
-  }
-
-  // PAID-REPRICING-1: an edit that would make a PUBLISHED book paid, or
-  // change its paid price, is a paid publication and needs the same
-  // permission performPublish() requires. Decided by the one shared rule
-  // (src/lib/paid-repricing.ts), from the row read above, and refused
-  // HERE -- before any storage upload and before any database write.
-  // Keeping the current paid price, making the book free, and saving a
-  // paid price on a draft all stay open.
-  const priceAuthorization = resolvePriceUpdateAuthorization({
-    currentStatus: existing.status,
-    currentPriceAll: existing.price_all,
-    submittedPriceAll: parsedPrice.priceAll,
-  });
-  if (
-    priceAuthorization.kind === "paid_publishing_permission_required" &&
-    !canPublishPaidTitle()
-  ) {
-    redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`,
-    );
-  }
-  // LIVE-PRICE-CONFIRM-1 (Renato 10-24): a new price on a LIVE book
-  // needs the tick under the price, carrying exactly this new price.
-  // Decided from the row read above and refused before any write. A
-  // publish or price change landing between that read and the save is
-  // not re-checked for the tick: priceGuard below conditions only the
-  // paid-repricing cases (a confirm step, not an authorization).
-  if (
-    isLivePriceChange({
-      status: existing.status,
-      currentPriceAll: existing.price_all,
-      submittedPriceAll: parsedPrice.priceAll,
-    }) &&
-    !isPriceChangeConfirmed(formData, parsedPrice.priceAll)
-  ) {
-    redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(PRICE_CHANGE_CONFIRM_MESSAGE)}`,
-    );
-  }
-  // The row state the write below must still find. A read-then-check
-  // alone would let a concurrent publish slip between the two: see
-  // catalogRowGuard's own comment.
-  const priceGuard = catalogRowGuard(priceAuthorization, {
-    status: existing.status,
-    priceAll: existing.price_all,
-  });
-
-  // F4 (P6, FIX1 advisory A5): a published book keeps a description,
-  // Renato's publish rule, so clearing it is refused here -- before any
-  // upload and any write. Drafts may still clear it. The write below
-  // also requires the row to still be a draft whenever the description
-  // is empty, so a publish that lands in between cannot be followed by
-  // this clear (zero rows -> CATALOG_ROW_CHANGED_MESSAGE).
-  const clearsDescription = description === "";
-  if (clearsDescription && existing.status === "published") {
-    redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(PUBLISHED_NEEDS_DESCRIPTION_MESSAGE)}`,
-    );
-  }
-
-  // BD3 patch 4 (3a, 5a): an older public-domain book without one must
-  // get it on its next save. Checked against the basis the book will
-  // have after this save -- the one submitted, else the stored one
-  // (audit r1, L2: leaving rightsBasis out must not skip it) -- and
-  // before the pen name below can be created (audit r1, L3). Read only
-  // when the box was submitted without a basis; an unreadable basis
-  // fails closed when a stored value is being cleared.
-  let originalAuthorRequired = false;
-  if (formData.has("originalAuthor")) {
-    const submittedBasis = formData.get("rightsBasis");
-    if (isRightsBasis(submittedBasis)) {
-      originalAuthorRequired = rightsBasisNeedsOriginalAuthor(submittedBasis);
-    } else {
-      const stored = await getRightsDeclarationState(existing.id);
-      // Audit r2 (L1): an unreadable basis fails closed only for a box
-      // that held a value and is being cleared; a book that never had
-      // one (most own-rights books) can still be edited.
-      originalAuthorRequired =
-        stored.kind === "present"
-          ? rightsBasisNeedsOriginalAuthor(stored.declaration.basis)
-          : stored.kind === "unavailable" && Boolean(existing.original_author);
-    }
-  }
-  const originalAuthorResolved = resolveOriginalAuthorInput(
-    formData,
-    `/dashboard/books/${bookId}/edit`,
-    originalAuthorRequired,
-  );
-  // Renato 16:37Z (2b): a new or changed original author on a LIVE book
-  // takes it out of the Bookstore until Librum approves it, exactly like
-  // a new file or cover -- a false author credit must not reach buyers
-  // before staff see it.
-  const originalAuthorChanged =
-    originalAuthorResolved.present && (originalAuthorResolved.value ?? null) !== (existing.original_author ?? null);
-
-  // F4 (P1): the same present/absent rule as the metadata below: a form
-  // without the Pen name field leaves the book's pen name untouched; a
-  // present, empty field means the author's default pen name
-  // (PEN-NAMES-1).
-  const penNamePresent = formData.has("penName");
-  const penName = String(formData.get("penName") ?? "").trim() || null;
-  // PEN-NAMES-1 (10a): resolved through the server-only pen name writer
-  // (found by name or created), before any upload. 14a -- a book in a
-  // series or bundle keeps its pen name -- is the database's refusal
-  // (LB452), shown below as its own message.
-  let penNameId: string | null = null;
-  if (penNamePresent) {
-    const penNameResolution = await resolveOwnPenNameId(user.id, penName);
-    if (!penNameResolution.ok) {
-      redirect(
-        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
-          penNameResolution.reason === "invalid"
-            ? penNameResolution.message
-            : "Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri",
-        )}`,
-      );
-    }
-    penNameId = penNameResolution.penNameId;
-  }
-
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART B FINAL PRE-COMMIT ROLLOUT-
-  // COMPATIBILITY CORRECTION: same five author-editable fields as
-  // createBook(), but this function keeps each resolver's full
-  // `{present, value}` result (never collapsing to just `.value` the
-  // way createBook() does) -- see the update-payload call site further
-  // below for exactly why: PUBLISHING-UX-1 is staged across three
-  // parts, and the still-old (pre-Part-D) Edit form does not submit
-  // these fields at all yet, so "the form didn't send this key" must
-  // be distinguished from "the author cleared this field," and only
-  // the latter may ever write `null` over an existing value.
-  //
-  // Never published_at regardless: no "publishedAt" form field is ever
-  // read here, present or not -- see performPublish()'s own comment for
-  // why that stays entirely outside author-submitted form data.
-  const subtitleResolved = resolveBoundedOptionalText(
-    formData,
-    "subtitle",
-    SUBTITLE_MAX_LENGTH,
-    "Nëntitulli",
-    `/dashboard/books/${bookId}/edit`,
-  );
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART D FINAL PRE-COMMIT SERVER-SIDE
-  // UNCHANGED-LANGUAGE PRESERVATION CORRECTION: updateBook()'s own
-  // narrow resolver, not the shared resolveLanguage() createBook()
-  // still uses unmodified -- see resolveLanguageForUpdate()'s own
-  // comment for why. `existing.language` is the authoritative DB value
-  // this update's own ownership-check query already fetched.
-  const languageResolution = resolveLanguageForUpdate(
-    formData,
-    existing.language,
-    `/dashboard/books/${bookId}/edit`,
-  );
-  const publisherResolved = resolveBoundedOptionalText(
-    formData,
-    "publisher",
-    PUBLISHER_MAX_LENGTH,
-    "Botuesi",
-    `/dashboard/books/${bookId}/edit`,
-  );
-  const editionResolved = resolveBoundedOptionalText(
-    formData,
-    "edition",
-    EDITION_MAX_LENGTH,
-    "Botimi",
-    `/dashboard/books/${bookId}/edit`,
-  );
-  const originalPublicationDateResolved = resolveOriginalPublicationDate(
-    formData,
-    `/dashboard/books/${bookId}/edit`,
-  );
-
-  const { seriesId, seriesPosition } = await resolveSeriesSelection(
-    supabase,
-    user.id,
-    formData,
-    `/dashboard/books/${bookId}/edit`,
-  );
-
-  // Normalizes EITHER a direct File OR a coverStoragePath reference
-  // into the same validated bytes -- see resolveCoverInput's own
-  // comment near the top of this file. `present: false` is a
-  // legitimate, ordinary outcome here: no replacement chosen, keep
-  // the existing cover untouched.
-  //
-  // BOOK-STORAGE-MUTATION-AUTH-1: a stored path is never re-persisted.
-  // Without a replacement, `cover_path`/`file_path` are simply absent
-  // from the update payload below (the column keeps its value, whatever
-  // it is) and no Storage call names them. With a replacement, the new
-  // key is built ONLY from the verified session user id, this row's own
-  // id and the verified bytes -- never from form data or the stored row.
-  //
-  // QA-FIX-3: BOTH inputs are resolved (and so fully validated) before
-  // any upload. The cover used to be uploaded before the manuscript was
-  // validated, so a rejected EPUB could leave a changed live cover behind
-  // an error message.
-  const coverResult = await resolveCoverInput(
-    supabase,
-    user.id,
-    formData,
-    `/dashboard/books/${bookId}/edit`,
-  );
-  // Normalizes EITHER a direct File OR a manuscriptStoragePath
-  // reference into the same validated bytes -- see
-  // resolveManuscriptInput's own comment near the top of this file.
-  // `present: false` is a legitimate, ordinary outcome here (unlike
-  // createBook()): it just means "no replacement chosen, keep the
-  // existing manuscript untouched."
-  const manuscriptResult = await resolveManuscriptInput(
-    supabase,
-    user.id,
-    formData,
-    `/dashboard/books/${bookId}/edit`,
-    bookId,
-  );
-
-  // QA-FIX-3: the live files are never overwritten before the row update
-  // below has succeeded. Since PEN-2 (covers) and ADMIN-3 (manuscripts)
-  // every replacement goes to a FRESH key, so it touches no live object
-  // and is uploaded BEFORE the write, as the row must never point at a
-  // missing object; nothing is ever overwritten in place.
-  type PendingUpload = {
-    bucket: typeof BOOK_COVERS_BUCKET | typeof BOOK_MANUSCRIPTS_BUCKET;
-    path: string;
-    bytes: Buffer;
-    contentType: string;
-    kind: "cover" | "manuscript";
-    // W7 r2 (R2): the Librum-made marker on a Librum-made ebook.
-    metadata?: Record<string, string>;
-  };
-  const uploadsBeforeWrite: PendingUpload[] = [];
-
-  let newCoverPath: string | null = null;
-  // The superseded cover, removed only AFTER the guarded update below
-  // proves it landed -- never before, so a failed update never leaves
-  // books.cover_path pointing at a file that's already gone. Set only
-  // when the stored value is this author's own canonical or documented
-  // legacy key for THIS book, or a new random-folder key read from this
-  // author's own row (src/lib/book-storage-path.ts); any other stored
-  // value is left untouched in Storage and only counted.
-  let coverPathToRemove: string | null = null;
-  let tempCoverToCleanup: string | null = null;
-
-  if (coverResult.present) {
-    // LAUNCH-1 P3-1: coverExtension is derived exclusively from the
-    // verified byte signature above -- cover.name never reaches this
-    // key. An existing.cover_path from before this hardening (e.g.
-    // "...-cover.JPG" or "...-cover.jpeg") is never reconstructed here:
-    // it is classified against this author and book below, and only the
-    // documented "jpeg" form (any ASCII case of those four letters, exact
-    // author/book stem) is recognised as removable -- and then removed
-    // exactly as stored.
-    //
-    // PEN-2 (L10): every replace gets a fresh random key
-    // (newBookCoverPath), so it never overwrites the live object in place
-    // and is always uploaded BEFORE the write, with the trusted catalog
-    // writer (C9). If the compare-and-set below misses, that new upload
-    // is removed instead of the old one.
-    newCoverPath = newBookCoverPath(coverResult.extension);
-    const storedCoverClass = classifyBookCoverPath(existing.cover_path, user.id, existing.id);
-
-    uploadsBeforeWrite.push({
-      bucket: BOOK_COVERS_BUCKET,
-      path: newCoverPath,
-      bytes: coverResult.bytes,
-      contentType: coverResult.contentType,
-      kind: "cover",
-    });
-
-    if (storedCoverClass !== "unsafe" && existing.cover_path !== newCoverPath) {
-      coverPathToRemove = existing.cover_path;
-    } else if (storedCoverClass === "unsafe" && existing.cover_path !== null) {
-      console.warn("updateBook: stored cover path is not this book's own key; left untouched", {
-        bookId: existing.id,
-        coverPathClass: storedCoverClass,
-      });
-    }
-
-    tempCoverToCleanup = coverResult.tempPathToCleanup;
-  }
-
-  let newManuscriptPath: string | null = null;
-  let tempManuscriptToCleanup: string | null = null;
-
-  if (manuscriptResult.present) {
-    // ADMIN-3-REVIEW (M1, Design): every replacement gets a FRESH
-    // versioned key (newBookManuscriptPath), so books.file_path changes
-    // whenever the bytes change and an approval of the old file can never
-    // cover the new one. The superseded key is never removed here
-    // directly: the retention rule below decides (N3/P1), after the write
-    // is proven -- under N2 ★a buyers keep the last approved file.
-    newManuscriptPath = newBookManuscriptPath(user.id, existing.id);
-    if (existing.file_path !== null && !isOwnBookManuscriptPath(existing.file_path, user.id, existing.id)) {
-      console.warn("updateBook: stored manuscript path is not this book's own key; left untouched", {
-        bookId: existing.id,
-        manuscriptPathClass: "unsafe",
-      });
-    }
-
-    uploadsBeforeWrite.push({
-      bucket: BOOK_MANUSCRIPTS_BUCKET,
-      path: newManuscriptPath,
-      bytes: manuscriptResult.bytes,
-      contentType: "application/epub+zip",
-      kind: "manuscript",
-    });
-
-    tempManuscriptToCleanup = manuscriptResult.tempPathToCleanup;
-  }
-
-  // ADMIN-3-REVIEW (C, 2b): a new file or cover takes a LIVE book out of
-  // the Bookstore until Librum approves it, so a book a published bundle
-  // sells cannot change them (the bundle would sell a book that is no
-  // longer available). Refused here, before any upload. Fails closed.
-  const filesChanged = newCoverPath !== null || newManuscriptPath !== null;
-  const wasLive = existing.status === "published";
-  // BD3 patch 4 (2b, 16:45Z a): a changed original author goes through
-  // the same review as a new file or cover -- Librum's approval binds to
-  // it (migration 20261101170000) -- so it is handled the same way: a
-  // live book goes back to draft in the same write and is sent again,
-  // and a draft already waiting gets its pending snapshot replaced.
-  const reviewChange = filesChanged || originalAuthorChanged;
-  if (reviewChange && wasLive) {
-    const membership = await bookBelongsToPublishedBundle(supabase, existing.id);
-    if (!membership.ok) {
-      redirect(
-        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`,
-      );
-    }
-    if (membership.inPublishedBundle) {
-      redirect(
-        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
-          filesChanged ? LIVE_FILES_IN_BUNDLE_MESSAGE : LIVE_ORIGINAL_AUTHOR_IN_BUNDLE_MESSAGE,
-        )}`,
-      );
-    }
-  }
-  // D: a draft already waiting for review gets its pending snapshot
-  // replaced (request_book_review cancels the stale row and inserts a new
-  // one, P1) when its file or cover changes. Read only when they change;
-  // an unreadable state leaves the stale row for the approve RPC to
-  // refuse (it binds to the current files) and the author can send it
-  // again.
-  let wasPending = false;
-  if (reviewChange && !wasLive) {
-    const reviewState = await getBookReviewState(supabase, existing.id);
-    wasPending = reviewState.kind === "ok" && reviewState.pending;
-  }
-
-  // CATALOG-WRITE-AUTH-1 / PEN-2: the trusted writer is created only now,
-  // after authentication, the ownership read, price validation, the
-  // repricing gate and both input validations. It uploads the cover
-  // (C9: covers are server-written only) and, since ADMIN-3 (M1), the
-  // manuscript, and writes the row below.
-  const catalogWriter = createCatalogWriteClient();
-
-  // W7: a Librum-made (Word) ebook carries the cover inside it (1a), with
-  // the saved title and pen name (3a). Directly uploaded ebooks are never
+async function syncLibrumEbookCover({
+  supabase,
+  catalogWriter,
+  userId,
+  existing,
+  coverResult,
+  title,
+  penNameId,
+  uploadsBeforeWrite,
+  caller,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  catalogWriter: ReturnType<typeof createCatalogWriteClient>;
+  userId: string;
+  existing: { id: string; file_path: string | null; cover_path: string | null; pen_name_id?: string | null };
+  coverResult: ResolvedCover;
+  title: string;
+  penNameId: string | null;
+  uploadsBeforeWrite: PendingUpload[];
+  caller: string;
+}): Promise<{ ebookCoverWarning: boolean; newManuscriptPath: string | null }> {
+  // Directly uploaded ebooks are never
   // touched (2a), and a failed swap never fails the save: the ebook is
   // then stored as it was, the reason is logged and the success message
   // gets one more line (Q1 b-lite).
@@ -1670,12 +650,13 @@ export async function updateBook(bookId: string, formData: FormData) {
   //     an unreadable marker: no swap. The cover change already takes a
   //     live book to review.
   let ebookCoverWarning = false;
+  let newManuscriptPath: string | null = null;
   const ownStoredManuscript =
-    existing.file_path !== null && isOwnBookManuscriptPath(existing.file_path, user.id, existing.id)
+    existing.file_path !== null && isOwnBookManuscriptPath(existing.file_path, userId, existing.id)
       ? existing.file_path
       : null;
-  const ebookPenNameId = penNameId ?? (existing as { pen_name_id?: string | null }).pen_name_id ?? null;
-  const getEbookAuthorName = () => readPenNameForEbook(supabase, user.id, ebookPenNameId);
+  const ebookPenNameId = penNameId ?? existing.pen_name_id ?? null;
+  const getEbookAuthorName = () => readPenNameForEbook(supabase, userId, ebookPenNameId);
   const pendingManuscriptUpload = uploadsBeforeWrite.find((upload) => upload.kind === "manuscript");
   if (pendingManuscriptUpload) {
     const sync = await syncCoverIntoLibrumEbook(pendingManuscriptUpload.bytes, {
@@ -1688,7 +669,7 @@ export async function updateBook(bookId: string, formData: FormData) {
         }
         if (
           existing.cover_path !== null &&
-          classifyBookCoverPath(existing.cover_path, user.id, existing.id) !== "unsafe"
+          classifyBookCoverPath(existing.cover_path, userId, existing.id) !== "unsafe"
         ) {
           const stored = await downloadStoredBytes(catalogWriter, BOOK_COVERS_BUCKET, existing.cover_path);
           // R1: a stored cover may be a PNG; the ebook needs a JPEG.
@@ -1699,7 +680,7 @@ export async function updateBook(bookId: string, formData: FormData) {
       title,
       getAuthorName: getEbookAuthorName,
       maxBytes: MAX_MANUSCRIPT_BYTES,
-      caller: "updateBook",
+      caller,
       bookId: existing.id,
     });
     if (sync.kind === "embedded") pendingManuscriptUpload.bytes = sync.bytes;
@@ -1708,14 +689,14 @@ export async function updateBook(bookId: string, formData: FormData) {
   } else if (coverResult.present && ownStoredManuscript !== null) {
     const marker = await readLibrumMadeMarker(catalogWriter.storage, ownStoredManuscript);
     if (marker === "unknown") {
-      console.error("updateBook: could not check whether Librum made the current ebook; cover not put inside it", {
+      console.error(`${caller}: could not check whether Librum made the current ebook; cover not put inside it`, {
         bookId: existing.id,
       });
     }
     if (marker === "yes") {
       const current = await downloadStoredBytes(catalogWriter, BOOK_MANUSCRIPTS_BUCKET, ownStoredManuscript);
       if (current === null) {
-        console.error("updateBook: current ebook not read; cover not put inside it", { bookId: existing.id });
+        console.error(`${caller}: current ebook not read; cover not put inside it`, { bookId: existing.id });
         ebookCoverWarning = true;
       } else {
         const sync = await syncCoverIntoLibrumEbook(current, {
@@ -1723,11 +704,11 @@ export async function updateBook(bookId: string, formData: FormData) {
           title,
           getAuthorName: getEbookAuthorName,
           maxBytes: MAX_MANUSCRIPT_BYTES,
-          caller: "updateBook",
+          caller,
           bookId: existing.id,
         });
         if (sync.kind === "embedded") {
-          newManuscriptPath = newBookManuscriptPath(user.id, existing.id);
+          newManuscriptPath = newBookManuscriptPath(userId, existing.id);
           uploadsBeforeWrite.push({
             bucket: BOOK_MANUSCRIPTS_BUCKET,
             path: newManuscriptPath,
@@ -1740,7 +721,7 @@ export async function updateBook(bookId: string, formData: FormData) {
           ebookCoverWarning = true;
         } else {
           // Marked, but not the shape Librum writes: left untouched.
-          console.error("updateBook: marked ebook is not a Librum-made package; cover not put inside it", {
+          console.error(`${caller}: marked ebook is not a Librum-made package; cover not put inside it`, {
             bookId: existing.id,
           });
         }
@@ -1748,285 +729,794 @@ export async function updateBook(bookId: string, formData: FormData) {
     }
   }
 
-  for (const upload of uploadsBeforeWrite) {
-    // Both go to a fresh key and never overwrite anything, so neither
-    // needs an upsert.
-    const { error: uploadError } = await catalogWriter.storage
-      .from(upload.bucket)
-      .upload(upload.path, upload.bytes, {
-        contentType: upload.contentType,
-        ...(upload.kind === "cover" ? { cacheControl: IMAGE_CACHE_CONTROL_SECONDS } : {}),
-        ...(upload.metadata ? { metadata: upload.metadata } : {}),
-      });
+  return { ebookCoverWarning, newManuscriptPath };
+}
 
+// BD15 P3: the new editor's Content tab (PLAN-BD15-r1 §2.4) -- the
+// manuscript, the cover, ISBN, publisher and the staff-only "AI used"
+// answer of the author's own book. A draft's row write is bound to
+// status 'draft'; a live book's changes go to its waiting changes
+// (P5b-2); a book waiting for review is read-only.
+//
+// The file handling is the old updateBook's, unchanged: both inputs
+// validated before any upload, fresh keys uploaded before the write, a compare-
+// and-set on the paths read, the W7 cover inside a Librum-made ebook,
+// and only after the write is proven the superseded objects removed
+// (Renato 11-04, Q1 a: a replaced manuscript goes at once, as today;
+// removeUnretainedManuscripts keeps the approved file buyers get).
+// BD15 P5a: a write refused because the book is waiting for review
+// (LB490) -- it was sent from another tab. P5b-3a: the editor shows it
+// read-only with "Anuloni shqyrtimin".
+function toInReviewEditPage(bookId: string): never {
+  redirect(withQuery(editorPath(bookId, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
+}
+
+export async function saveBookContent(bookId: string, formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    // The editor shows the maintenance notice (audit r1, F1: a path
+    // without "?tab=", since this helper adds "?error=").
+    redirectForMaintenance(`/dashboard/books/${bookId}/editor`);
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect("/login");
+  }
+
+  const here = editorPath(bookId, "content");
+  const fail = (message: string): never => redirect(withQuery(here, "error", message));
+
+  // An ownership-bound read: the row's own id must be
+  // exactly the id named, before any upload.
+  const { data: existing, error: existingError } = await supabase
+    .from("books")
+    .select("id, author_id, status, title, pen_name_id, cover_path, file_path, isbn, description, is_adult, original_author")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle<{
+      id: string;
+      author_id: string;
+      status: string;
+      title: string;
+      pen_name_id: string | null;
+      cover_path: string | null;
+      file_path: string | null;
+      isbn: string | null;
+      description: string;
+      is_adult: boolean;
+      original_author: string | null;
+    }>();
+  if (existingError || !existing || existing.id !== bookId || existing.author_id !== user.id) {
+    redirect("/dashboard");
+  }
+
+  // Drafts and (P5b-2) live books, not while waiting for review.
+  // P5b-3a: the editor shows a book in review read-only; an unreadable
+  // review state saves nothing.
+  const live = existing.status === "published";
+  if (existing.status !== "draft" && !live) redirect("/dashboard");
+  const review = await getBookReviewState(supabase, existing.id);
+  if (review.kind !== "ok") return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+  if (review.pending) toInReviewEditPage(existing.id);
+
+  // BD15 P5b-2: a live book's new manuscript or ballinë goes to its
+  // waiting changes, never onto the live row; the working version (the
+  // waiting one, else the live one) is what a new file replaces and what
+  // the Librum-made ebook's cover is taken from.
+  let pendingRead: PendingChanges | null = null;
+  // P5b-3b (audit P5b-2 r1 F4): the version read here; the save below is
+  // refused (LB496) if another save came in meanwhile.
+  let pendingVersion: number | null = null;
+  if (live) {
+    const read = await readPendingChanges(createCatalogWriteClient(), existing.id);
+    if (!read.ok) return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+    pendingRead = read.pending;
+    pendingVersion = read.version;
+  }
+  const liveValues: PendingChanges = {
+    filePath: existing.file_path,
+    coverPath: existing.cover_path,
+    description: existing.description,
+    isAdult: existing.is_adult,
+    originalAuthor: existing.original_author,
+  };
+  const working: PendingChanges = pendingRead ?? liveValues;
+
+  // ISBN: the shared rule (book-identifiers.ts); an unchanged stored value
+  // is kept as it is (FIX1 X9).
+  const isbnPresent = formData.has("isbn");
+  const isbn = String(formData.get("isbn") ?? "").trim() || null;
+  if (isbnPresent && isbn !== null && isbn !== existing.isbn && !isValidIsbn(isbn)) {
+    fail(INVALID_ISBN_MESSAGE);
+  }
+  const publisherResolved = resolveBoundedOptionalText(formData, "publisher", PUBLISHER_MAX_LENGTH, "Botuesi", here);
+  // Not answered stays not answered; a value other than yes/no is refused.
+  const rawAi = formData.get("aiUsed");
+  const aiAnswer = parseAiAnswer(rawAi);
+  if (rawAi !== null && rawAi !== "" && aiAnswer === null) {
+    fail(AI_NOT_SAVED_MESSAGE);
+  }
+
+  // Both inputs validated before any upload (QA-FIX-3).
+  const coverResult = await resolveCoverInput(supabase, user.id, formData, here);
+  const manuscriptResult = await resolveManuscriptInput(supabase, user.id, formData, here, existing.id);
+
+  const uploadsBeforeWrite: PendingUpload[] = [];
+  let newCoverPath: string | null = null;
+  let coverPathToRemove: string | null = null;
+  let tempCoverToCleanup: string | null = null;
+  if (coverResult.present) {
+    newCoverPath = newBookCoverPath(coverResult.extension);
+    const storedCoverClass = classifyBookCoverPath(existing.cover_path, user.id, existing.id);
+    uploadsBeforeWrite.push({
+      bucket: BOOK_COVERS_BUCKET,
+      path: newCoverPath,
+      bytes: coverResult.bytes,
+      contentType: coverResult.contentType,
+      kind: "cover",
+    });
+    if (live) {
+      // P5b-2: the live ballinë is never removed here; only a waiting one
+      // this save replaces (re-checked against the live row before it
+      // goes, below).
+      if (pendingRead?.coverPath && pendingRead.coverPath !== existing.cover_path && isNewBookCoverPath(pendingRead.coverPath)) {
+        coverPathToRemove = pendingRead.coverPath;
+      }
+    } else if (storedCoverClass !== "unsafe" && existing.cover_path !== newCoverPath) {
+      coverPathToRemove = existing.cover_path;
+    } else if (storedCoverClass === "unsafe" && existing.cover_path !== null) {
+      console.warn("saveBookContent: stored cover path is not this book's own key; left untouched", {
+        bookId: existing.id,
+        coverPathClass: storedCoverClass,
+      });
+    }
+    tempCoverToCleanup = coverResult.tempPathToCleanup;
+  }
+
+  let newManuscriptPath: string | null = null;
+  let tempManuscriptToCleanup: string | null = null;
+  if (manuscriptResult.present) {
+    newManuscriptPath = newBookManuscriptPath(user.id, existing.id);
+    if (existing.file_path !== null && !isOwnBookManuscriptPath(existing.file_path, user.id, existing.id)) {
+      console.warn("saveBookContent: stored manuscript path is not this book's own key; left untouched", {
+        bookId: existing.id,
+        manuscriptPathClass: "unsafe",
+      });
+    }
+    uploadsBeforeWrite.push({
+      bucket: BOOK_MANUSCRIPTS_BUCKET,
+      path: newManuscriptPath,
+      bytes: manuscriptResult.bytes,
+      contentType: "application/epub+zip",
+      kind: "manuscript",
+    });
+    tempManuscriptToCleanup = manuscriptResult.tempPathToCleanup;
+  }
+
+  const catalogWriter = createCatalogWriteClient();
+  const ebookSync = await syncLibrumEbookCover({
+    supabase,
+    catalogWriter,
+    userId: user.id,
+    existing: { ...existing, file_path: working.filePath, cover_path: working.coverPath },
+    coverResult,
+    title: existing.title,
+    penNameId: null,
+    uploadsBeforeWrite,
+    caller: "saveBookContent",
+  });
+  if (ebookSync.newManuscriptPath !== null) newManuscriptPath = ebookSync.newManuscriptPath;
+
+  const removeNewUploads = async () => {
+    if (newCoverPath !== null) await removeNewCoverUpload(catalogWriter, newCoverPath, "saveBookContent");
+    if (newManuscriptPath !== null) {
+      await removeNewManuscriptUpload(catalogWriter, newManuscriptPath, user.id, existing.id, "saveBookContent");
+    }
+  };
+
+  for (const upload of uploadsBeforeWrite) {
+    const { error: uploadError } = await catalogWriter.storage.from(upload.bucket).upload(upload.path, upload.bytes, {
+      contentType: upload.contentType,
+      ...(upload.kind === "cover" ? { cacheControl: IMAGE_CACHE_CONTROL_SECONDS } : {}),
+      ...(upload.metadata ? { metadata: upload.metadata } : {}),
+    });
     if (uploadError) {
-      console.error(`updateBook: ${upload.kind} upload failed:`, uploadError);
-      if (upload.kind === "manuscript" && newCoverPath !== null) {
-        await removeNewCoverUpload(catalogWriter, newCoverPath, "updateBook");
-      }
-      if (upload.kind === "cover" && newManuscriptPath !== null) {
-        await removeNewManuscriptUpload(catalogWriter, newManuscriptPath, user.id, existing.id, "updateBook");
-      }
-      redirect(
+      console.error(`saveBookContent: ${upload.kind} upload failed`, { bookId: existing.id });
+      await removeNewUploads();
+      fail(
         upload.kind === "cover"
-          ? `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Imazhi i kopertinës nuk u ngarkua dot. Provoni përsëri")}`
-          : `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Dorëshkrimi nuk u ngarkua dot. Provoni përsëri")}`,
+          ? "Imazhi i ballinës nuk u ngarkua dot. Provoni përsëri"
+          : "Dorëshkrimi nuk u ngarkua dot. Provoni përsëri",
       );
     }
   }
 
-  // LIBRUM 2.0 PRODUCT-1 PRE-COMMIT LEGACY RETIREMENT: preview_text is
-  // deliberately OMITTED from this update payload -- the Studio form no
-  // longer submits it at all, and a Supabase `.update()` only ever
-  // touches the keys actually present in the object passed here (unlike
-  // a full-row PUT/replace). Omitting the key means this column is
-  // simply never written by this call, so any legacy value already
-  // stored for an existing book survives editing untouched. Explicitly
-  // NOT `preview_text: String(formData.get("previewText") ?? "")`,
-  // which would have silently overwritten every existing legacy value
-  // with an empty string the very first time each book was next edited.
-  // LIBRUM 2.0 PUBLISHING-UX-1 PART B FINAL PRE-COMMIT ROLLOUT-
-  // COMPATIBILITY CORRECTION: each of the five new metadata fields is
-  // spread in ONLY when its own resolver reports `present: true` --
-  // exactly the same "a Supabase `.update()` only ever touches keys
-  // actually present in the object passed here" mechanism the comment
-  // above already relies on for preview_text, now applied deliberately
-  // to these five instead of by omission. A field the still-old
-  // (pre-Part-D) Edit form never submits is simply never a key on this
-  // object at all, so its existing database value -- however it got
-  // there, including from the Part-C wizard's own eventual create flow
-  // -- survives untouched. A field the form DOES submit, even as an
-  // empty string, IS included, as `null` -- an intentional clear, not
-  // an accidental one.
-  //
-  // PAID-REPRICING-1: guarded by `priceGuard` (see above) and followed by
-  // `.select("id")`, because an update that matched no row is not an
-  // error to PostgREST -- only the returned rows prove this write landed
-  // on the row that was authorized.
-  //
-  // CATALOG-WRITE-AUTH-1: this ONE row update carries `price_all`
-  // alongside the metadata, and `authenticated` may no longer write
-  // `price_all` directly, so it runs through the trusted catalog-write
-  // client -- created only here, after authentication, the ownership
-  // read, price validation, the repricing gate and every upload above.
-  // Metadata and price are never split into two writes: a failure or a
-  // stale guard changes neither. The `id` and `author_id` filters are the
-  // ownership boundary (that client bypasses RLS), and exactly one
-  // returned row is still the only proof of success.
-  const updateQuery = catalogWriter
-    .from("books")
-    .update({
-      title,
-      description,
-      keywords,
-      isbn,
-      genre,
-      series_id: seriesId,
-      series_position: seriesPosition,
-      // ALL-WIRING-2: `price_all` ONLY -- see createBook's own comment.
-      // Saving a valid ALL price is also the single act that brings a
-      // previously unpriced legacy row back into listings and search.
-      price_all: parsedPrice.priceAll,
-      // BOOK-STORAGE-MUTATION-AUTH-1: a path key is present ONLY when
-      // this request uploaded its replacement; otherwise it is absent
-      // and the stored value is not re-written.
-      ...(newCoverPath !== null ? { cover_path: newCoverPath } : {}),
-      ...(newManuscriptPath !== null ? { file_path: newManuscriptPath } : {}),
-      // ADMIN-3-REVIEW (C, S5): a new file or cover ALWAYS writes the
-      // book as a draft and clears Librum's choice (as unpublish does),
-      // in this same row write and whatever status was read -- so a
-      // publish that lands in between can never leave unapproved files
-      // live (the live-files trigger refuses that, LB463).
-      // BD3 patch 4 (2b): so does a changed original author (the
-      // live-files trigger refuses it on a live book otherwise).
-      ...(reviewChange ? { status: "draft" as const, librum_choice_at: null } : {}),
-      ...(subtitleResolved.present ? { subtitle: subtitleResolved.value } : {}),
-      // "omit" (absent) and "preserve" (unchanged unsupported value)
-      // both spread in nothing -- see resolveLanguageForUpdate()'s own
-      // comment for why "preserve" is a deliberate no-op, not merely
-      // an oversight sharing "omit"'s own code path.
-      ...(languageResolution.action === "set"
-        ? { language: languageResolution.value }
-        : languageResolution.action === "clear"
-          ? { language: null }
-          : {}),
-      ...(publisherResolved.present ? { publisher: publisherResolved.value } : {}),
-      ...(editionResolved.present ? { edition: editionResolved.value } : {}),
-      ...(originalPublicationDateResolved.present
-        ? { original_publication_date: originalPublicationDateResolved.value }
-        : {}),
-      ...(originalAuthorResolved.present ? { original_author: originalAuthorResolved.value } : {}),
-      // PEN-NAMES-1: only pen_name_id is written (the database keeps the
-      // legacy text in step), and only when the box was submitted.
-      ...(penNameId !== null ? { pen_name_id: penNameId } : {}),
-    })
-    .eq("id", existing.id)
-    .eq("author_id", user.id);
-  // BOOK-STORAGE-MUTATION-AUTH-1: a cover replacement also compares-and-
-  // sets the cover_path this request read. The superseded object removed
-  // below is then provably the value this write replaced: a concurrent
-  // edit that changed the cover in between makes this write match no
-  // row, so nothing is removed and the author is asked to retry.
-  const coverGuardedQuery =
-    newCoverPath === null
-      ? updateQuery
-      : existing.cover_path === null
-        ? updateQuery.is("cover_path", null)
-        : updateQuery.eq("cover_path", existing.cover_path);
-  // ADMIN-3-REVIEW (N3): the same compare-and-set for a manuscript
-  // replacement, so the key the retention cleanup below treats as
-  // superseded is provably the one this write replaced.
-  const fileGuardedQuery =
-    newManuscriptPath === null
-      ? coverGuardedQuery
-      : existing.file_path === null
-        ? coverGuardedQuery.is("file_path", null)
-        : coverGuardedQuery.eq("file_path", existing.file_path);
-  // F4 (P6): see the published-description check above.
-  const descriptionGuardedQuery = clearsDescription
-    ? fileGuardedQuery.eq("status", "draft")
-    : fileGuardedQuery;
-  const { data: updatedRows, error: updateError } = await applyCatalogRowGuard(
-    descriptionGuardedQuery,
-    priceGuard,
-  ).select("id");
-
-  if (updateError) {
-    console.error("updateBook: book update failed:", updateError);
-    if (newCoverPath !== null) {
-      await removeNewCoverUpload(catalogWriter, newCoverPath, "updateBook");
+  // One guarded row write: the caller's own draft, with the paths it read
+  // (compare-and-set), so the superseded objects removed below are
+  // provably the ones this write replaced.
+  const payload = {
+    ...(isbnPresent ? { isbn } : {}),
+    ...(publisherResolved.present ? { publisher: publisherResolved.value } : {}),
+    ...(!live && newCoverPath !== null ? { cover_path: newCoverPath } : {}),
+    ...(!live && newManuscriptPath !== null ? { file_path: newManuscriptPath } : {}),
+  };
+  // Audit r1, F4: nothing to write (a form without these fields) goes
+  // straight on to the AI answer; there is then no upload either.
+  if (Object.keys(payload).length > 0) {
+    let query = catalogWriter
+      .from("books")
+      .update(payload)
+      .eq("id", existing.id)
+      .eq("author_id", user.id)
+      .eq("status", live ? "published" : "draft");
+    if (!live && newCoverPath !== null) {
+      query = existing.cover_path === null ? query.is("cover_path", null) : query.eq("cover_path", existing.cover_path);
     }
-    if (newManuscriptPath !== null) {
-      await removeNewManuscriptUpload(catalogWriter, newManuscriptPath, user.id, existing.id, "updateBook");
+    if (!live && newManuscriptPath !== null) {
+      query = existing.file_path === null ? query.is("file_path", null) : query.eq("file_path", existing.file_path);
     }
-    // ADMIN-3-REVIEW (S3): the live-files trigger (LB463) or the publish
-    // gate (LB462) caught a change that landed after the read above.
-    if (updateError.code === "LB463" || updateError.code === "LB462") {
-      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
+    const { data: updatedRows, error: updateError } = await query.select("id");
+    if (updateError) {
+      console.error("saveBookContent: book update failed", { bookId: existing.id, code: updateError.code ?? null });
+      await removeNewUploads();
+      // BD15 P5a (P3 audit F3): sent for review in another tab after the
+      // check above; the book is read-only now.
+      if (isInReviewLockError(updateError)) toInReviewEditPage(existing.id);
+      if (["LB462", "LB463"].includes(updateError.code ?? "")) fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+      // BD15 P7 (Q1 a): a picked public-domain edition's ISBN and publisher.
+      if (updateError.code === "LB497") fail(PD_FROZEN_MESSAGE);
+      fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
     }
-    const penNameMessage = penNameErrorMessage(updateError);
-    if (penNameMessage) {
-      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(penNameMessage)}`);
+    if (!isExactlyOneRowWritten(updatedRows) || updatedRows?.[0]?.id !== existing.id) {
+      console.error("saveBookContent: guarded update did not change exactly one row", { bookId: existing.id });
+      await removeNewUploads();
+      fail(live ? LIVE_NOT_LIVE_MESSAGE : CATALOG_ROW_CHANGED_MESSAGE);
     }
-    redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`,
-    );
   }
-  if (!isExactlyOneRowWritten(updatedRows) || updatedRows?.[0]?.id !== existing.id) {
-    console.error("updateBook: guarded update did not change exactly one row", {
-      bookId,
-      rowCount: Array.isArray(updatedRows) ? updatedRows.length : null,
+
+  // P5b-2: a live book's new files become its waiting version (with its
+  // waiting -- or live -- description, 18+ label and original author).
+  if (live && (newCoverPath !== null || newManuscriptPath !== null)) {
+    const saved = await savePendingChanges(catalogWriter, {
+      authorId: user.id,
+      bookId: existing.id,
+      expectedVersion: pendingVersion,
+      changes: {
+        ...working,
+        filePath: newManuscriptPath ?? working.filePath,
+        coverPath: newCoverPath ?? working.coverPath,
+      },
     });
-    // PEN-2 (L10): the compare-and-set missed, so the row still names
-    // whatever cover it named before; the new upload is unreferenced and
-    // is removed, and the previous object is left alone.
-    if (newCoverPath !== null) {
-      await removeNewCoverUpload(catalogWriter, newCoverPath, "updateBook");
-    }
-    if (newManuscriptPath !== null) {
-      await removeNewManuscriptUpload(catalogWriter, newManuscriptPath, user.id, existing.id, "updateBook");
-    }
-    redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(CATALOG_ROW_CHANGED_MESSAGE)}`,
-    );
-  }
-
-  // F4 (P3): the Edit page's rights choice, recorded only now that the
-  // save is proven (so the declaration's book_title is the saved title),
-  // and only when it changes something: no declaration yet, or a
-  // different basis from the current one. An identical resubmission, or
-  // a book whose declarations cannot be read (`unavailable`), records
-  // nothing. A failure is logged and never undoes the save.
-  const rightsBasis = formData.get("rightsBasis");
-  if (isRightsBasis(rightsBasis)) {
-    const rightsState = await getRightsDeclarationState(existing.id);
-    if (
-      rightsState.kind === "none" ||
-      (rightsState.kind === "present" && rightsState.declaration.basis !== rightsBasis)
-    ) {
-      const recorded = await recordRightsDeclaration(existing.id, rightsBasis);
-      if (!recorded.ok) {
-        console.error("updateBook: rights declaration not recorded", {
-          bookId: existing.id,
-          reason: recorded.reason,
-        });
-      }
+    if (!saved.ok) {
+      console.error("saveBookContent: waiting changes not saved", { bookId: existing.id, reason: saved.reason });
+      await removeNewUploads();
+      if (saved.reason === "in_review") toInReviewEditPage(existing.id);
+      if (saved.reason === "not_live") fail(LIVE_NOT_LIVE_MESSAGE);
+      // Renato 11-05 (Q1 a): the later save is refused; its new upload is
+      // removed above and nothing the other save named is touched.
+      if (saved.reason === "conflict") fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+      fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
     }
   }
 
-  // ADMIN-3-REVIEW (C, D): the row is proven a draft with the new files.
-  // A book that was live, or was waiting for review, is sent for review
-  // with them now (a stale pending snapshot is replaced, P1). If the
-  // request fails, the book stays a draft and the author can press Send
-  // for review (S5).
-  let reviewRequestFailed = false;
-  let reviewAlreadyApproved = false;
-  if (reviewChange && (wasLive || wasPending)) {
-    const request = await requestBookReview(supabase, existing.id);
-    reviewRequestFailed = !request.ok && request.reason !== "already_pending" && request.reason !== "already_approved";
-    // BD3 patch 4, audit r2 (M1): the author put back the original author
-    // Librum already approved (a file or cover never returns to an
-    // approved key, a name can). The waiting review of the other name is
-    // stale: withdraw it, and tell the author the book can be published.
-    if (!request.ok && request.reason === "already_approved") {
-      const withdrawn = await withdrawBookReview(supabase, existing.id);
-      if (withdrawn.ok || withdrawn.reason === "not_pending") reviewAlreadyApproved = true;
-      else reviewRequestFailed = true;
-    }
-    // ADMIN-ALERTS-1 (2a): a new review request starts a new 48h clock.
-    if (request.ok) await sendReviewRequestedStaffEmail({ bookId: existing.id, authorId: user.id });
-  }
-
-  // ADMIN-3-REVIEW (N3, P1): after the review request -- whether it
-  // succeeded or failed -- remove this book's own manuscript keys the
-  // retention rule no longer keeps (the key this write superseded, and
-  // any stale snapshot). Trusted read and removal (authors can read no
-  // review paths and delete no final key); best effort.
+  // Superseded objects, only now that the write is proven (best effort).
   if (newManuscriptPath !== null) {
     await removeUnretainedManuscripts(catalogWriter, catalogWriter, {
       authorId: user.id,
       bookId: existing.id,
-      superseded: [existing.file_path],
-      caller: "updateBook",
+      superseded: [live ? working.filePath : existing.file_path],
+      caller: "saveBookContent",
+    });
+  }
+  if (live && coverPathToRemove !== null) {
+    // The replaced waiting ballinë, unless it became the live one since
+    // it was read (an approval in between).
+    const { data: now } = await catalogWriter
+      .from("books")
+      .select("cover_path")
+      .eq("id", existing.id)
+      .eq("author_id", user.id)
+      .maybeSingle<{ cover_path: string | null }>();
+    if (!now || now.cover_path === coverPathToRemove) coverPathToRemove = null;
+  }
+  const removals = temporaryUploadRemovals(user.id, tempManuscriptToCleanup, tempCoverToCleanup);
+  if (coverPathToRemove !== null) {
+    if (live) {
+      const { error: removeError } = await catalogWriter.storage.from(BOOK_COVERS_BUCKET).remove([coverPathToRemove]);
+      if (removeError) console.error("saveBookContent: replaced waiting ballinë not removed", { bookId: existing.id });
+    } else {
+      removals.unshift({ bucket: BOOK_COVERS_BUCKET, path: coverPathToRemove });
+    }
+  }
+  await removeProvenBookStorageObjects(supabase, removals, "saveBookContent");
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/books");
+
+  // The files are saved; an AI answer that fails to save is reported on
+  // the tab, never undoing them.
+  if (aiAnswer !== null) {
+    const aiWrite = await writeAiDisclosure(existing.id, aiAnswer);
+    if (aiWrite === "in_review") toInReviewEditPage(existing.id);
+    if (aiWrite !== "ok") {
+      console.error("saveBookContent: AI answer not recorded", { bookId: existing.id });
+      redirectAfterSave(ebookSync.ebookCoverWarning, withQuery(here, "error", AI_NOT_SAVED_MESSAGE));
+    }
+  }
+
+  // D1: "← Të dhënat" saves first, then goes back.
+  const intent = String(formData.get("intent") ?? "");
+  const next = editorPath(existing.id, intent === "next" ? "pricing" : intent === "back" ? "details" : "content");
+  const savedMessage = !live
+    ? CONTENT_SAVED_MESSAGE
+    : newCoverPath !== null || newManuscriptPath !== null || pendingRead !== null
+      ? LIVE_SAVED_PENDING_MESSAGE
+      : LIVE_SAVED_MESSAGE;
+  redirectAfterSave(ebookSync.ebookCoverWarning, `${next}&success=${encodeURIComponent(savedMessage)}`);
+}
+
+// BD15 P4: at "Send for review", a Librum-made ebook gets the book's
+// CURRENT title and byline written into it (restampLibrumEpubMetadata):
+// the Word conversion wrote them at upload, and the Details tab may have
+// changed either since. Directly uploaded ebooks are never touched. A
+// rewrite is stored under a fresh versioned key with the same
+// compare-and-set on file_path the Content tab uses, and the superseded
+// key goes through the same retention rule (removeUnretainedManuscripts:
+// the last approved file stays the buyers'). "failed" stops the send, so
+// a book never goes to review with an ebook that names the old title.
+async function restampLibrumEbookForSend({
+  supabase,
+  catalogWriter,
+  userId,
+  book,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  catalogWriter: ReturnType<typeof createCatalogWriteClient>;
+  userId: string;
+  book: { id: string; title: string; pen_name_id: string | null; file_path: string | null };
+}): Promise<"unchanged" | "stamped" | "failed"> {
+  const caller = "saveBookPricing";
+  if (book.file_path === null || !isOwnBookManuscriptPath(book.file_path, userId, book.id)) return "unchanged";
+  const marker = await readLibrumMadeMarker(catalogWriter.storage, book.file_path);
+  if (marker === "no") return "unchanged";
+  if (marker === "unknown") {
+    console.error(`${caller}: could not check whether Librum made the current ebook`, { bookId: book.id });
+    return "failed";
+  }
+  const current = await downloadStoredBytes(catalogWriter, BOOK_MANUSCRIPTS_BUCKET, book.file_path);
+  if (current === null) {
+    console.error(`${caller}: current ebook not read`, { bookId: book.id });
+    return "failed";
+  }
+  const authorName = await readPenNameForEbook(supabase, userId, book.pen_name_id);
+  // Audit r1, F4: an unread pen name would leave the old byline inside.
+  if (book.pen_name_id !== null && authorName === null) {
+    console.error(`${caller}: pen name not read; ebook byline not rewritten`, { bookId: book.id });
+    return "failed";
+  }
+  const restamped = await restampLibrumEpubMetadata(current, { title: book.title, authorName });
+  if (!restamped.ok && restamped.reason === "unreadable") {
+    console.error(`${caller}: Librum-made ebook could not be rewritten`, { bookId: book.id });
+    return "failed";
+  }
+  if (!restamped.ok) {
+    // Marked, but not the shape Librum writes: left as it is (as W7).
+    console.error(`${caller}: marked ebook is not a Librum-made package; title not rewritten`, {
+      bookId: book.id,
+      reason: restamped.reason,
+    });
+    return "unchanged";
+  }
+  if (!restamped.changed) return "unchanged";
+  if (restamped.bytes.length > MAX_MANUSCRIPT_BYTES || !(await validateEpubStructure(restamped.bytes)).valid) {
+    console.error(`${caller}: rewritten ebook failed the ebook checks`, { bookId: book.id });
+    return "failed";
+  }
+
+  const newPath = newBookManuscriptPath(userId, book.id);
+  const { error: uploadError } = await catalogWriter.storage.from(BOOK_MANUSCRIPTS_BUCKET).upload(newPath, restamped.bytes, {
+    contentType: "application/epub+zip",
+    metadata: { ...LIBRUM_MADE_EBOOK_METADATA },
+  });
+  if (uploadError) {
+    console.error(`${caller}: rewritten ebook upload failed`, { bookId: book.id });
+    await removeNewManuscriptUpload(catalogWriter, newPath, userId, book.id, caller);
+    return "failed";
+  }
+  const { data: rows, error: updateError } = await catalogWriter
+    .from("books")
+    .update({ file_path: newPath })
+    .eq("id", book.id)
+    .eq("author_id", userId)
+    .eq("status", "draft")
+    .eq("file_path", book.file_path)
+    .select("id");
+  if (updateError || !isExactlyOneRowWritten(rows)) {
+    console.error(`${caller}: guarded file_path update did not change exactly one row`, {
+      bookId: book.id,
+      code: updateError?.code ?? null,
+    });
+    await removeNewManuscriptUpload(catalogWriter, newPath, userId, book.id, caller);
+    return "failed";
+  }
+  await removeUnretainedManuscripts(catalogWriter, catalogWriter, {
+    authorId: userId,
+    bookId: book.id,
+    superseded: [book.file_path],
+    caller,
+  });
+  return "stamped";
+}
+
+// BD15 P5b-2: "Dërgoni ndryshimet për shqyrtim" for a LIVE book, after
+// its price is saved and both ticks are checked. Its waiting changes
+// must exist and differ from the live book, and the working version must
+// be complete (the same lists as a draft, with the AI answer: 13 older
+// staging books have none). No ebook re-stamp: the title and pen name of
+// a published book never change (LB480/LB481). The ticks are recorded,
+// then request_book_review() sends the waiting version (LB494 nothing to
+// send, LB493 18+ beside a children/teen category, LB489, LB460). The
+// book stays live and is read-only while in review (Q2 a).
+async function sendLiveBookChanges({
+  supabase,
+  userId,
+  existing,
+  rightsBasis,
+  priceAll,
+  here,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+  existing: {
+    id: string;
+    title: string;
+    categories: string[] | null;
+    file_path: string | null;
+    cover_path: string | null;
+    description: string | null;
+    is_adult: boolean;
+    original_author: string | null;
+  };
+  rightsBasis: RightsBasis | null;
+  priceAll: number;
+  here: string;
+  formData: FormData;
+}): Promise<never> {
+  const fail = (message: string): never => redirect(withQuery(here, "error", message));
+  const read = await readPendingChanges(createCatalogWriteClient(), existing.id);
+  if (!read.ok) return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+  const live: PendingChanges = {
+    filePath: existing.file_path,
+    coverPath: existing.cover_path,
+    description: existing.description ?? "",
+    isAdult: existing.is_adult,
+    originalAuthor: existing.original_author,
+  };
+  if (!read.pending || changedPendingFields(live, read.pending).length === 0) return fail(NO_CHANGES_TO_SEND_MESSAGE);
+  // Audit r1 F6: the same paid rule as a draft's send -- Librum's approval
+  // refuses a paid book while paid publishing is off, so it is not sent.
+  if (priceAll > 0 && !canPublishPaidTitle()) return fail(PAID_PUBLISHING_UNAVAILABLE_MESSAGE);
+  const working = read.pending;
+
+  const ai = await readAiDisclosure(existing.id);
+  const detailsMissing = missingDetails({
+    title: existing.title,
+    categories: existing.categories,
+    description: working.description,
+    rightsBasis,
+    originalAuthor: working.originalAuthor,
+  });
+  if (
+    detailsMissing.length > 0 ||
+    working.filePath === null ||
+    working.coverPath === null ||
+    !ai.ok ||
+    ai.answer === null ||
+    rightsBasis === null
+  ) {
+    fail(SEND_INCOMPLETE_MESSAGE);
+  }
+
+  const recorded = await recordRightsDeclaration(existing.id, rightsBasis!, { atSend: true });
+  if (!recorded.ok) {
+    console.error("saveBookPricing: send confirmation not recorded", { bookId: existing.id, reason: recorded.reason });
+    if (await isWaitingForReview(supabase, existing.id)) toInReviewEditPage(existing.id);
+    fail(SEND_CONFIRMATION_NOT_SAVED_MESSAGE);
+  }
+
+  const request = await requestBookReview(supabase, existing.id);
+  if (!request.ok) {
+    switch (request.reason) {
+      case "nothing_to_send":
+        fail(NO_CHANGES_TO_SEND_MESSAGE);
+        break;
+      case "adult_category":
+        fail(LIVE_ADULT_CATEGORY_MESSAGE);
+        break;
+      case "incomplete":
+        fail(SEND_INCOMPLETE_MESSAGE);
+        break;
+      case "already_pending":
+        fail(ALREADY_IN_REVIEW_MESSAGE);
+        break;
+      case "taken_down":
+        fail(TAKEN_DOWN_PUBLISH_MESSAGE);
+        break;
+      default:
+        fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+    }
+  }
+  // ADMIN-ALERTS-1 (2a): a new review request starts a new 48h clock.
+  await sendReviewRequestedStaffEmail({ bookId: existing.id, authorId: userId });
+  revalidatePath("/dashboard");
+  redirect(`/dashboard?success=${encodeURIComponent(CHANGES_SENT_MESSAGE)}`);
+}
+
+// BD15 P4: the new editor's Pricing tab (PLAN-BD15-r1 §2.5). Saves the
+// price ("Ruaj draftin"), or saves it and sends the book for review
+// ("Dërgo për shqyrtim"). Drafts and live books, not while in review;
+// a taken-down book's price saves but it is never sent (P5b-3a, Q2 a).
+//
+// Sending, in order, each step refusing before the next:
+//   1. the price is saved (so a refusal below never loses it);
+//   2. both ticks (Renato 11-04, Q2 a: unticked on every send);
+//   3. Details, Content (file, cover, AI answer) and the rights choice
+//      are complete -- the app-side check; request_book_review refuses
+//      a book with no file, cover or AI answer too (P5a, LB489);
+//   4. the ebook is re-stamped with the current title and byline;
+//   5. the ticks are recorded (a new rights declaration row);
+//   6. performPublish(): the same gate as everywhere else -- review, or
+//      publish when Librum's approval still matches the files (3a).
+export async function saveBookPricing(bookId: string, formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(`/dashboard/books/${bookId}/editor`);
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect("/login");
+  }
+
+  const here = editorPath(bookId, "pricing");
+  const fail = (message: string): never => redirect(withQuery(here, "error", message));
+
+  const { data: existing, error: existingError } = await supabase
+    .from("books")
+    .select("id, author_id, status, title, pen_name_id, price_all, file_path, cover_path, description, categories, original_author, is_adult")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle<{
+      id: string;
+      author_id: string;
+      status: string;
+      title: string;
+      pen_name_id: string | null;
+      price_all: number | null;
+      file_path: string | null;
+      cover_path: string | null;
+      description: string | null;
+      categories: string[] | null;
+      original_author: string | null;
+      is_adult: boolean;
+    }>();
+  if (existingError || !existing || existing.id !== bookId || existing.author_id !== user.id) {
+    redirect("/dashboard");
+  }
+
+  // BD15 P5b-2: a live book too (its price saves at once; "send" sends
+  // its waiting changes and it stays live).
+  const live = existing.status === "published";
+  if (existing.status !== "draft" && !live) redirect("/dashboard");
+  const [review, takedown, rights] = await Promise.all([
+    getBookReviewState(supabase, existing.id),
+    getActiveTakedownState(supabase, existing.id),
+    getRightsDeclarationState(existing.id),
+  ]);
+  // P5b-3a: a book in review shows read-only in the editor; an
+  // unreadable review state saves nothing.
+  if (review.kind !== "ok") return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+  if (review.pending) toInReviewEditPage(existing.id);
+  // Audit r1, F6: an unreadable takedown state is not a takedown.
+  if (takedown.kind === "unavailable") redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
+  // P5b-3a (Renato 11-04, Q2 a): a taken-down book is edited like a
+  // draft -- its price saves -- but it is never sent (checked again
+  // below, after the save, and by request_book_review, LB460).
+  const takenDown = takedown.kind === "active";
+  // Audit r1, F2: without the rights choice it is unknown whether the
+  // book is free only, so nothing is saved.
+  if (rights.kind === "unavailable") fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+  const rightsBasis = rights.kind === "present" ? rights.declaration.basis : null;
+
+  // D1: "← Përmbajtja" saves first, then goes back. With no price
+  // chosen yet there is nothing to save, so it just goes back; a price
+  // that is not valid stays here with its message, so nothing typed is
+  // lost.
+  const intent = String(formData.get("intent") ?? "");
+  const back = editorPath(existing.id, "content");
+  if (intent === "back" && !isFreeOnlyRightsBasis(rightsBasis) && parsePriceMode(formData.get(PRICE_MODE_FIELD)) === null) {
+    redirect(back);
+  }
+
+  // 1. The price. A public-domain book is free only.
+  const pricing = resolvePricingSubmission({
+    mode: formData.get(PRICE_MODE_FIELD),
+    price: formData.get(PRICE_FIELD),
+    rightsBasis,
+  });
+  const priceAll = pricing.ok
+    ? pricing.priceAll
+    : fail(pricing.reason === "missing_mode" ? PRICE_MODE_MISSING_MESSAGE : PRICE_INVALID_MESSAGE);
+  if (priceAll !== existing.price_all) {
+    if (live) {
+      // P5b-2: a live book's new price is a live price change -- the same
+      // two rules the edit page applies (PAID-REPRICING-1: a new paid
+      // price needs paid publishing; LIVE-PRICE-CONFIRM-1: the tick under
+      // the price carrying exactly this price).
+      const authorization = resolvePriceUpdateAuthorization({
+        currentStatus: existing.status,
+        currentPriceAll: existing.price_all,
+        submittedPriceAll: priceAll,
+      });
+      if (authorization.kind === "paid_publishing_permission_required" && !canPublishPaidTitle()) {
+        fail(PAID_REPRICING_UNAVAILABLE_MESSAGE);
+      }
+      if (isLivePriceChange({ status: existing.status, currentPriceAll: existing.price_all, submittedPriceAll: priceAll }) &&
+        !isPriceChangeConfirmed(formData, priceAll)) {
+        fail(PRICE_CHANGE_CONFIRM_MESSAGE);
+      }
+    }
+    // A draft (or the live book) only -- compare-and-set on status and the
+    // price read above -- through the trusted writer: price_all is a
+    // protected column.
+    const { data: rows, error } = await applyCatalogRowGuard(
+      createCatalogWriteClient().from("books").update({ price_all: priceAll }).eq("id", existing.id).eq("author_id", user.id),
+      { status: live ? "published" : "draft", priceAll: existing.price_all },
+    ).select("id");
+    if (error) {
+      console.error("saveBookPricing: price update failed", { bookId: existing.id, code: error.code ?? null });
+      if (isInReviewLockError(error)) toInReviewEditPage(existing.id);
+      fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+    }
+    if (!isExactlyOneRowWritten(rows)) fail(CATALOG_ROW_CHANGED_MESSAGE);
+  }
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/books");
+
+  if (intent !== "send") {
+    // P5b-2: a live book is not a draft; its price is live at once.
+    const savedMessage = live ? LIVE_SAVED_MESSAGE : DETAILS_SAVED_MESSAGE;
+    redirect(`${intent === "back" ? back : here}&success=${encodeURIComponent(savedMessage)}`);
+  }
+
+  // P5b-3a: the price above is saved; a taken-down book is not sent.
+  if (takenDown) fail(TAKEN_DOWN_PUBLISH_MESSAGE);
+
+  // 2. Both ticks, every send.
+  if (!hasSendTicks(formData)) fail(SEND_TICKS_MISSING_MESSAGE);
+
+  if (live) {
+    // Audit r1 F1: an older live book with no rights record sends as own
+    // rights, the only basis LB492 allows it; the ticked box records it.
+    await sendLiveBookChanges({
+      supabase,
+      userId: user.id,
+      existing,
+      rightsBasis: rightsBasis ?? (rights.kind === "none" ? "own_rights" : null),
+      priceAll,
+      here,
+      formData,
     });
   }
 
-  // Only now that the DB row correctly points at the new cover is it
-  // safe to remove the file it superseded. A cleanup failure here is an
-  // orphaned-file problem, not a failed update -- same philosophy as
-  // deleteBook's storage cleanup in Phase 8A: log it, don't tell the
-  // author their update failed, don't undo the already-successful save.
-  // The temporary uploads (both staged in the private manuscripts
-  // bucket, see resolveCoverInput's own comment) are removed only now
-  // too, once the row is confirmed pointing at the permanent keys.
-  const removals = temporaryUploadRemovals(user.id, tempManuscriptToCleanup, tempCoverToCleanup);
-  if (coverPathToRemove !== null) {
-    removals.unshift({ bucket: BOOK_COVERS_BUCKET, path: coverPathToRemove });
+  // 3. Every tab complete.
+  const ai = await readAiDisclosure(existing.id);
+  const detailsMissing = missingDetails({
+    title: existing.title,
+    categories: existing.categories,
+    description: existing.description,
+    rightsBasis,
+    originalAuthor: existing.original_author,
+  });
+  if (
+    detailsMissing.length > 0 ||
+    existing.file_path === null ||
+    existing.cover_path === null ||
+    !ai.ok ||
+    ai.answer === null ||
+    rightsBasis === null
+  ) {
+    fail(SEND_INCOMPLETE_MESSAGE);
   }
-  await removeProvenBookStorageObjects(supabase, removals, "updateBook");
 
-  revalidatePath("/dashboard");
-  revalidatePath(`/libra/${bookId}`);
-  revalidatePath("/");
-  if (reviewChange && (wasLive || wasPending)) {
-    if (reviewAlreadyApproved) {
-      redirectAfterSave(
-        ebookCoverWarning,
-        `/dashboard/books/${bookId}/edit?success=${encodeURIComponent(ORIGINAL_AUTHOR_ALREADY_APPROVED_MESSAGE)}`,
-      );
-    }
-    if (reviewRequestFailed) {
-      redirectAfterSave(ebookCoverWarning, `/dashboard/books/${bookId}/edit?success=${encodeURIComponent(LIVE_FILES_REQUEST_FAILED_MESSAGE)}`);
-    }
-    if (wasLive) {
-      revalidatePath("/librari");
-      redirectAfterSave(
-        ebookCoverWarning,
-        `/dashboard?success=${encodeURIComponent(filesChanged ? LIVE_FILES_SAVED_MESSAGE : LIVE_ORIGINAL_AUTHOR_SAVED_MESSAGE)}`,
-      );
-    }
+  // Audit r1, F3: the paid-publishing permission performPublish checks,
+  // asked before the ebook or the ticks are written, so a send that can
+  // not happen leaves no record behind.
+  if (priceAll > 0 && !canPublishPaidTitle()) fail(PAID_PUBLISHING_UNAVAILABLE_MESSAGE);
+
+  // 4. The current title and byline inside a Librum-made ebook.
+  const restamp = await restampLibrumEbookForSend({
+    supabase,
+    catalogWriter: createCatalogWriteClient(),
+    userId: user.id,
+    book: existing,
+  });
+  if (restamp === "failed") {
+    if (await isWaitingForReview(supabase, existing.id)) toInReviewEditPage(existing.id);
+    fail(EBOOK_RESTAMP_FAILED_MESSAGE);
   }
-  redirectAfterSave(ebookCoverWarning, `/dashboard?success=${encodeURIComponent("Libri u përditësua")}`);
+
+  // 5. The ticks, recorded for this send.
+  const recorded = await recordRightsDeclaration(existing.id, rightsBasis, { atSend: true });
+  if (!recorded.ok) {
+    console.error("saveBookPricing: send confirmation not recorded", { bookId: existing.id, reason: recorded.reason });
+    if (await isWaitingForReview(supabase, existing.id)) toInReviewEditPage(existing.id);
+    fail(SEND_CONFIRMATION_NOT_SAVED_MESSAGE);
+  }
+
+  // 6. The one publish gate.
+  const result = await performPublish(supabase, existing.id, user.id);
+  if (!result.ok) {
+    switch (result.reason) {
+      case "missing_files":
+        fail(MISSING_FILES_MESSAGE);
+        break;
+      case "missing_all_price":
+        fail(MISSING_ALL_PRICE_MESSAGE);
+        break;
+      case "missing_description":
+        fail(MISSING_DESCRIPTION_SHORT_MESSAGE);
+        break;
+      case "missing_rights":
+        fail(MISSING_RIGHTS_MESSAGE);
+        break;
+      case "send_incomplete":
+        fail(SEND_INCOMPLETE_MESSAGE);
+        break;
+      case "already_in_review":
+        fail(ALREADY_IN_REVIEW_MESSAGE);
+        break;
+      case "taken_down":
+        fail(TAKEN_DOWN_PUBLISH_MESSAGE);
+        break;
+      case "book_changed":
+        fail(BOOK_CHANGED_WHILE_EDITING_MESSAGE);
+        break;
+      case "paid_mode_required":
+        fail(PAID_PUBLISHING_UNAVAILABLE_MESSAGE);
+        break;
+      case "rights_unavailable":
+      case "takedown_unavailable":
+      case "review_unavailable":
+        redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
+        break;
+      default:
+        redirect("/dashboard");
+    }
+    return;
+  }
+
+  if (result.outcome === "sent_for_review") {
+    revalidatePath("/dashboard");
+    redirect(`/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`);
+  }
+
+  // Published (Librum's approval still matched).
+  if (result.wasNewlyPublished) {
+    sendNewBookEmailsAfterResponse("saveBookPricing", { bookId: existing.id, authorId: user.id });
+  }
+  try {
+    revalidatePath("/dashboard");
+    revalidatePath("/");
+  } catch (error) {
+    console.error("saveBookPricing: revalidatePath failed after a successful publish", { bookId: existing.id, error });
+  }
+  redirect(`/dashboard?success=${encodeURIComponent(BOOK_PUBLISHED_MESSAGE)}`);
 }
 
 // ADMIN-3-REVIEW (E): the author's "Cancel review" -- the pending review
@@ -2049,23 +1539,33 @@ export async function cancelBookReview(bookId: string) {
   const result = await withdrawBookReview(supabase, bookId);
   if (!result.ok) {
     redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(
+      withQuery(
+        editorPath(bookId, "details"),
+        "error",
         result.reason === "not_pending" ? NOT_IN_REVIEW_MESSAGE : "Diçka shkoi keq. Provoni përsëri",
-      )}`,
+      ),
     );
   }
 
   revalidatePath("/dashboard");
-  revalidatePath(`/dashboard/books/${bookId}/edit`);
-  redirect(`/dashboard/books/${bookId}/edit?success=${encodeURIComponent(REVIEW_CANCELLED_MESSAGE)}`);
+  revalidatePath(`/dashboard/books/${bookId}/editor`);
+  // BD15 P4: the book is a plain draft again, edited in the new editor.
+  // P5b-2 (audit r1 F2): a live book stays on sale; its changes wait in
+  // the editor again. An unreadable status says the draft line.
+  const { data: after } = await supabase
+    .from("books")
+    .select("status")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle<{ status: string }>();
+  const cancelledMessage = after?.status === "published" ? LIVE_REVIEW_CANCELLED_MESSAGE : REVIEW_CANCELLED_MESSAGE;
+  redirect(`${editorPath(bookId, "details")}&success=${encodeURIComponent(cancelledMessage)}`);
 }
 
 // LIBRUM 2.0 PUBLISHING-UX-1 PART B: the ONE authoritative, non-
-// redirecting publish gate -- extracted from what was previously
-// publishBook()'s own inline body, byte-for-byte the same rules,
-// so createBook()'s new "intent=publish" path (below) and the public
-// publishBook() Server Action (further below) can never drift apart
-// into two independently-maintained copies of the payout/status rule.
+// redirecting publish gate. BD15 cleanup: publishBook() and
+// createBook()'s "intent=publish" path are gone; saveBookPricing's Send
+// is its one caller.
 // Deliberately NOT exported and NOT itself a Server Action -- this
 // file already starts with "use server", which requires every
 // EXPORTED top-level value to be an async function; keeping this
@@ -2109,6 +1609,11 @@ type PerformPublishResult =
       ok: false;
       reason:
         | "not_found"
+        // BD15 P2: the new editor saves a draft before it has a
+        // manuscript or a cover (both columns are nullable). Such a book
+        // is never sent for review or published. Checked first, after
+        // the takedown: the author adds them on the edit page.
+        | "missing_files"
         | "missing_all_price"
         // FIX1 (X16): an empty (after trimming) description. Checked
         // after the price and before paid permission: the author can fix
@@ -2138,6 +1643,7 @@ type PerformPublishResult =
         // ADMIN-3-REVIEW (S3): the write met LB462/LB463 -- the book's
         // files changed after the read above.
         | "book_changed"
+        | "send_incomplete"
         | "paid_mode_required"
         | "update_failed";
     };
@@ -2149,16 +1655,13 @@ async function performPublish(
 ): Promise<PerformPublishResult> {
   // AUTH-1C: defense-in-depth -- Proxy already blocks /dashboard/* while
   // a recovery session is active, so this is the second layer against a
-  // crafted direct POST. Placed in this single shared helper (not
-  // duplicated in publishBook() and createBook()'s own intent=publish
-  // branch) so both callers get it for free and can't drift. Runs
-  // before the status mutation below -- a book's publish state is a
+  // crafted direct POST. Runs before the status mutation below -- a book's publish state is a
   // publicly-visible, buyer-facing change.
   await redirectIfRecoverySessionActive();
 
   const { data: book } = await supabase
     .from("books")
-    .select("status, price_all, published_at, description")
+    .select("status, price_all, published_at, description, file_path, cover_path")
     .eq("id", bookId)
     .eq("author_id", userId)
     .single();
@@ -2178,6 +1681,17 @@ async function performPublish(
     return { ok: false, reason: "takedown_unavailable" };
   }
 
+  // BD15 P2: no manuscript or no cover yet -- see "missing_files". Both
+  // columns are in the select above, so a row always carries them
+  // (null when empty). Only a book never published: an older book that
+  // was live once keeps the rules it was published under (audit r1, F2).
+  if (
+    book.published_at === null &&
+    (book.file_path === null || book.cover_path === null || book.file_path === "" || book.cover_path === "")
+  ) {
+    return { ok: false, reason: "missing_files" };
+  }
+
   // ADMIN-3-REVIEW (M2): the gate itself now lives in ONE shared helper,
   // checkPublishGate() (src/lib/publish-readiness.ts), so the staff
   // Approve action re-runs exactly these checks in exactly this order.
@@ -2193,8 +1707,7 @@ async function performPublish(
   //   else in this patch moves a row back to draft.
   //   FIX1 (X16): Renato's rule, a description before Publish. A refusal
   //   only: an already-published book without one is never moved back to
-  //   draft, and saving a draft without one is untouched (createBook
-  //   inserts the draft before calling this).
+  //   draft, and saving a draft without one is untouched.
   //   F4 (P4): Renato's rule, a rights choice before Publish -- read with
   //   the author's own session, three ways (book-rights.ts). A refusal
   //   only: an already-published book is never moved back to draft.
@@ -2255,6 +1768,11 @@ async function performPublish(
       if (request.reason === "taken_down") {
         return { ok: false, reason: "taken_down" };
       }
+      // BD15 P5a: the database's own check (LB489) -- the manuscript,
+      // the cover or the AI answer went missing after the app's check.
+      if (request.reason === "incomplete") {
+        return { ok: false, reason: "send_incomplete" };
+      }
       // "already_approved": an approval landed after the read above, so
       // the publish below goes ahead (the trigger re-checks it).
       if (request.reason !== "already_approved") {
@@ -2282,7 +1800,7 @@ async function performPublish(
   // PAID-REPRICING-1: compare-and-set. Every decision above was made
   // from the status and `price_all` read at the top of this function, so
   // the write lands only if the row is STILL in exactly that state. A
-  // concurrent updateBook that made a free draft paid in between leaves
+  // concurrent price save that made a free draft paid in between leaves
   // this publish matching no row, instead of publishing a paid title the
   // paid-mode check above never saw. `.select("id")` is what proves one
   // row changed; zero rows is a failure, never a publish.
@@ -2376,118 +1894,6 @@ async function clearOwnBookLibrumChoice(
   } catch (error) {
     console.error(`${caller}: clearing the Librum's choice pick failed`, { bookId, error });
   }
-}
-
-export async function publishBook(bookId: string) {
-  // ALL-CUTOVER APP-A: publish re-checks the catalog price and bundle
-  // membership state -- gated before any Supabase call.
-  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
-    redirectForMaintenance("/dashboard");
-  }
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  // Thin wrapper around the one authoritative helper above -- auth,
-  // then a redirect chosen from its small controlled result, nothing
-  // else. External behavior (redirect targets, notification timing) is
-  // unchanged from before this extraction.
-  const result = await performPublish(supabase, bookId, user.id);
-
-  if (!result.ok) {
-    // PAID-MODE-1: deliberately generic -- it names no environment
-    // variable, no deployment and no payout state. An author learns that
-    // paid publishing is closed, and nothing about why.
-    // ALL-WIRING-2: the missing-price refusal names the real obstacle
-    // and points at the one action that clears it. Unlike the paid-mode
-    // denial below, it is safe to be specific: it describes the author's
-    // OWN row back to them and leaks nothing about this deployment.
-    if (result.reason === "missing_all_price") {
-      redirect(
-        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_ALL_PRICE_MESSAGE)}`,
-      );
-    }
-    if (result.reason === "missing_description") {
-      redirect(
-        `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_DESCRIPTION_SHORT_MESSAGE)}`,
-      );
-    }
-    if (result.reason === "missing_rights") {
-      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(MISSING_RIGHTS_MESSAGE)}`);
-    }
-    // ADMIN-2-TAKEDOWN (G): the book stays locked; named on its own
-    // Edit page, where the takedown notice is shown.
-    if (result.reason === "taken_down") {
-      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(TAKEN_DOWN_PUBLISH_MESSAGE)}`);
-    }
-    // F4 (D3): the existing generic sentence, on the dashboard. ADMIN-2:
-    // an unreadable takedown state is answered the same way.
-    // ADMIN-3-REVIEW: already waiting, or changed under the author.
-    if (result.reason === "already_in_review") {
-      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(ALREADY_IN_REVIEW_MESSAGE)}`);
-    }
-    if (result.reason === "book_changed") {
-      redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent(BOOK_CHANGED_WHILE_EDITING_MESSAGE)}`);
-    }
-    if (
-      result.reason === "rights_unavailable" ||
-      result.reason === "takedown_unavailable" ||
-      result.reason === "review_unavailable"
-    ) {
-      redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
-    }
-    if (result.reason === "paid_mode_required") {
-      redirect(`/dashboard?error=${encodeURIComponent("Publikimi me pagesë nuk është i mundur tani")}`);
-    }
-    // "not_found" (no such book, or not owned by this user) and
-    // "update_failed" both redirect back to the dashboard -- the
-    // former matches this function's own pre-extraction behavior
-    // exactly (`if (!book) { redirect("/dashboard"); }`); the latter is
-    // a new, previously-unhandled case (the update call was never
-    // checked for an error before this extraction) getting the same
-    // safe fallback rather than being silently ignored.
-    redirect("/dashboard");
-  }
-
-  // ADMIN-3-REVIEW (A): sent for review -- nothing went live, so there is
-  // nothing to notify or refresh but the author's own Dashboard.
-  if (result.outcome === "sent_for_review") {
-    revalidatePath("/dashboard");
-    redirect(`/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`);
-  }
-
-  // The books.status="published" mutation above has already committed
-  // -- everything from here on is best-effort follow-up (notifying
-  // followers, refreshing cached pages), never something that may turn
-  // an already-successful publish into a reported failure. Each step is
-  // isolated in its own try/catch and logged server-side only, never
-  // rethrown, so a transient failure here can cost at most a missed
-  // notification or a stale cached page, never the user's confidence
-  // that their book is actually live. redirect() below stays OUTSIDE
-  // every try/catch: Next.js implements redirect() by throwing a special
-  // NEXT_REDIRECT signal that a surrounding catch would otherwise
-  // swallow, turning a successful publish into the generic error page.
-  if (result.wasNewlyPublished) {
-    sendNewBookEmailsAfterResponse("publishBook", { bookId, authorId: user.id });
-  }
-
-  try {
-    revalidatePath("/dashboard");
-    revalidatePath("/");
-  } catch (error) {
-    console.error("publishBook: revalidatePath failed after a successful publish", {
-      bookId,
-      error,
-    });
-  }
-
-  redirect(`/dashboard?success=${encodeURIComponent("Libri juaj u publikua")}`);
 }
 
 // PHASE-2C bundle-membership-integrity: shared by unpublishBook() and
@@ -2634,6 +2040,9 @@ export async function unpublishBook(bookId: string) {
 
   revalidatePath("/dashboard");
   revalidatePath("/");
+  // BD15 P5b-3a: "Hiqeni nga shitja" sits in the editor's Veprime box;
+  // the book opens there again as a draft, with what happened.
+  redirect(withQuery(editorPath(bookId, "details"), "success", UNPUBLISHED_MESSAGE));
 }
 
 export async function deleteBook(bookId: string) {
@@ -2667,13 +2076,22 @@ export async function deleteBook(bookId: string) {
   // mismatch stops here, before any write.
   const { data: book, error: bookError } = await supabase
     .from("books")
-    .select("id, author_id, cover_path, file_path")
+    .select("id, author_id, status, cover_path, file_path")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .single();
 
   if (bookError || !book || book.id !== bookId || book.author_id !== user.id) {
     redirect("/dashboard");
+  }
+
+  // Renato 11-05 (P6 Q4 a): only a draft is ever deleted. A live book is
+  // taken off sale first ("Hiqeni nga shitja"); the editor and the
+  // Dashboard menu hide Delete on one, and this refuses a direct POST.
+  // The delete below also filters on status = draft, so a book Librum
+  // approves after this read is not deleted either.
+  if (book.status !== "draft") {
+    redirect(`/dashboard?error=${encodeURIComponent(LIVE_DELETE_REFUSED_MESSAGE)}`);
   }
 
   // ADMIN-2-TAKEDOWN (M5, Renato's Q8 = a): a taken-down book can't be
@@ -2747,6 +2165,12 @@ export async function deleteBook(bookId: string) {
   if (!snapshots.ok) {
     redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të fshihet tani")}`);
   }
+  // BD15 P5b-2: a live book's waiting changes (the row goes with the
+  // book) may name a manuscript and a ballinë nothing else does.
+  const pendingAtDelete = await readPendingChanges(catalogWriter, book.id);
+  if (!pendingAtDelete.ok) {
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të fshihet tani")}`);
+  }
 
   // The books row is deleted BEFORE any storage cleanup is attempted --
   // deliberately, not incidentally. The count check above is only an
@@ -2768,6 +2192,7 @@ export async function deleteBook(bookId: string) {
     .delete()
     .eq("id", book.id)
     .eq("author_id", user.id)
+    .eq("status", "draft")
     .select("id");
 
   if (deleteError) {
@@ -2836,6 +2261,23 @@ export async function deleteBook(bookId: string) {
   })) {
     removals.push({ bucket: BOOK_MANUSCRIPTS_BUCKET, path });
   }
+  const pendingFiles = pendingAtDelete.pending;
+  if (pendingFiles) {
+    if (
+      pendingFiles.filePath !== null &&
+      isOwnBookManuscriptPath(pendingFiles.filePath, user.id, book.id) &&
+      !removals.some((r) => r.path === pendingFiles.filePath)
+    ) {
+      removals.push({ bucket: BOOK_MANUSCRIPTS_BUCKET, path: pendingFiles.filePath });
+    }
+    if (
+      pendingFiles.coverPath !== null &&
+      pendingFiles.coverPath !== book.cover_path &&
+      isNewBookCoverPath(pendingFiles.coverPath)
+    ) {
+      removals.push({ bucket: BOOK_COVERS_BUCKET, path: pendingFiles.coverPath });
+    }
+  }
   if (unsafeStoredPathCount > 0) {
     console.warn("deleteBook: stored paths that are not this book's own keys were left untouched", {
       bookId: book.id,
@@ -2846,80 +2288,6 @@ export async function deleteBook(bookId: string) {
 
   revalidatePath("/dashboard");
   revalidatePath("/");
-}
-
-export async function addContributor(bookId: string, formData: FormData) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const name = String(formData.get("name") ?? "").trim();
-  const role = String(formData.get("role") ?? "");
-
-  if (!name || !CONTRIBUTOR_ROLES.includes(role as (typeof CONTRIBUTOR_ROLES)[number])) {
-    redirect(`/dashboard/books/${bookId}/edit?error=${encodeURIComponent("Shkruani një emër dhe zgjidhni një rol")}`);
-  }
-
-  const { data: book } = await supabase
-    .from("books")
-    .select("id")
-    .eq("id", bookId)
-    .eq("author_id", user.id)
-    .maybeSingle();
-
-  if (!book) {
-    redirect("/dashboard");
-  }
-
-  const { error } = await supabase.from("book_contributors").insert({
-    book_id: bookId,
-    name,
-    role,
-  });
-
-  if (error) {
-    // LIBRUM 2.0 LAUNCH-FIX-1A ERR-2: was error.message -- see the
-    // identical correction in src/app/books/[id]/actions.ts for why.
-    redirect(
-      `/dashboard/books/${bookId}/edit?error=${encodeURIComponent(ADD_CONTRIBUTOR_ERROR_MESSAGE)}`,
-    );
-  }
-
-  revalidatePath(`/dashboard/books/${bookId}/edit`);
-  revalidatePath(`/libra/${bookId}`);
-  redirect(`/dashboard/books/${bookId}/edit?success=${encodeURIComponent("Bashkëpunëtori u shtua")}`);
-}
-
-export async function removeContributor(bookId: string, contributorId: string) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  // RLS also enforces this (the delete policy checks the book's
-  // author_id), but this makes the ownership check explicit here too.
-  const { data: book } = await supabase
-    .from("books")
-    .select("id")
-    .eq("id", bookId)
-    .eq("author_id", user.id)
-    .maybeSingle();
-
-  if (!book) {
-    redirect("/dashboard");
-  }
-
-  await supabase.from("book_contributors").delete().eq("id", contributorId);
-
-  revalidatePath(`/dashboard/books/${bookId}/edit`);
-  revalidatePath(`/libra/${bookId}`);
+  // BD15 P5b-3b: the editor of a deleted book would answer 404.
+  redirect(withQuery("/dashboard", "success", BOOK_DELETED_MESSAGE));
 }

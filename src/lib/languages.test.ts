@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { LANGUAGES, isSupportedLanguage, getLanguageLabel } from "./languages";
 
 describe("LANGUAGES", () => {
-  it("is exactly the launch set: sq, en, it", () => {
-    expect(LANGUAGES.map((l) => l.code)).toEqual(["sq", "en", "it"]);
+  it("is exactly the launch set: sq, en (BD15 P1: Italian removed)", () => {
+    expect(LANGUAGES.map((l) => l.code)).toEqual(["sq", "en"]);
   });
 
   it("every entry has a non-empty human label", () => {
@@ -17,7 +17,7 @@ describe("isSupportedLanguage", () => {
   it("accepts every launch code", () => {
     expect(isSupportedLanguage("sq")).toBe(true);
     expect(isSupportedLanguage("en")).toBe(true);
-    expect(isSupportedLanguage("it")).toBe(true);
+    expect(isSupportedLanguage("it")).toBe(false);
   });
 
   it("rejects an unsupported code", () => {
@@ -38,7 +38,7 @@ describe("getLanguageLabel", () => {
   it("returns the human label for every launch code", () => {
     expect(getLanguageLabel("sq")).toBe("Shqip");
     expect(getLanguageLabel("en")).toBe("Anglisht");
-    expect(getLanguageLabel("it")).toBe("Italisht");
+    expect(getLanguageLabel("it")).toBe("it");
   });
 
   it("falls back to the raw code itself for an unrecognized value, never throwing", () => {

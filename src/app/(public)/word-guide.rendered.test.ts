@@ -37,8 +37,8 @@ describe("BD6: the Word guide page", () => {
   });
 
   it("says the cover goes in its own field, not in the manuscript", () => {
-    expect(html).toContain("Kopertinën: mos e vendosni brenda dorëshkrimit; ngarkojeni veçmas, te fusha “Imazhi i kopertinës”.");
-    expect(read("src/components/cover-field.tsx")).toContain('"Imazhi i kopertinës"');
+    expect(html).toContain("Ballinën: mos e vendosni brenda dorëshkrimit; ngarkojeni veçmas, te fusha “Imazhi i ballinës”.");
+    expect(read("src/components/cover-field.tsx")).toContain('"Imazhi i ballinës"');
   });
 
   it("asks for .docx only and teaches no other app (5b)", () => {

@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { cache } from "react";
+import { notFound, redirect } from "next/navigation";
+import { cache, Fragment } from "react";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -39,6 +39,7 @@ import {
   resolveTranslatorLine,
   TRANSLATED_BY,
 } from "@/lib/book-byline";
+import { PD_PREPARED_BY, readPdEditionRedirect, showsPreparedBy } from "@/lib/pd-editions";
 import { readRightsBasisForPages } from "@/lib/librum-download-rights";
 import {
   authorPagePath,
@@ -56,6 +57,20 @@ import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER } from "@/lib
 import { bookWhatsappShareHref } from "@/lib/contact";
 import { bookPagePath, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
 import { pageErrorMessage } from "@/lib/page-messages";
+import { editorPath } from "@/lib/book-editor-copy";
+import {
+  ADULT_DETAIL_LABEL,
+  ADULT_DETAIL_VALUE,
+  EDITION_LABEL,
+  READING_AGE_LABEL,
+  bookCategories,
+  categoriesLabel,
+  descriptionSnippet,
+  editionValue,
+  isYoungReaderBook,
+  readingAgeValue,
+} from "@/lib/book-reader-details";
+import { BookDescriptionView } from "@/components/book-description-view";
 import {
   ANONYMOUS_REVIEWER_NAME,
   AUTHOR_REVIEWER_LABEL,
@@ -220,8 +235,10 @@ export async function generateMetadata({
   // "<title> — Librum" form unchanged (no Open Graph format change).
   const title = book.title;
   const ogTitle = `${book.title} — Librum`;
-  const description = book.description
-    ? truncateForMetadata(book.description, METADATA_DESCRIPTION_MAX)
+  // BD15 P8: the plain text of the rich description, never its marks.
+  const plainDescription = descriptionSnippet(book.description);
+  const description = plainDescription
+    ? truncateForMetadata(plainDescription, METADATA_DESCRIPTION_MAX)
     : undefined;
   // Local URL construction only -- getPublicUrl() makes no network call,
   // so creating a client here purely for this doesn't reintroduce a
@@ -322,8 +339,17 @@ export default async function BookDetailPage({
     book,
   ] = await Promise.all([supabase.auth.getUser(), getBookForDetail(id)]);
 
-  if (!book) {
+  // BD15 P7 (Q2 a): a public-domain edition Librum replaced with another
+  // sends readers to the picked one (only when the page would otherwise
+  // be "not found": its author and earlier readers still see it).
+  const notFoundOrPickedEdition = async (): Promise<never> => {
+    const picked = await readPdEditionRedirect(supabase, id);
+    if (picked) redirect(`/libra/${picked}`);
     notFound();
+  };
+
+  if (!book) {
+    return notFoundOrPickedEdition();
   }
 
   // PEN-NAMES-2: an own-row query, so the page never needs the book's
@@ -380,7 +406,7 @@ export default async function BookDetailPage({
   // point of view, and keeps this page's behavior legible without
   // having to reason about the RLS policy to know what it does.
   if (book.status !== "published" && !isAuthor && !owned) {
-    notFound();
+    return notFoundOrPickedEdition();
   }
 
   const coverUrl = book.cover_path
@@ -468,29 +494,39 @@ export default async function BookDetailPage({
           .order("series_position", { ascending: true, nullsFirst: false })
           .returns<SeriesEntry[]>()
       : Promise.resolve({ data: null }),
-    // 3a: "More by" = only books under this book's pen name.
-    supabase
-      .from("public_books")
-      .select("*, pen:public_pen_names(id, name)")
-      .eq("status", "published")
-      .not("price_all", "is", null)
-      .eq("pen_name_id", book.pen_name_id)
-      .neq("id", id)
-      .order("created_at", { ascending: false })
-      .limit(8)
-      .returns<BookWithAuthor[]>(),
-    book.genre
+    // 3a: "More by" = only books under this book's pen name. BD15 P7: a
+    // public-domain edition without the editor mention has none here.
+    book.pen_name_id
       ? supabase
           .from("public_books")
           .select("*, pen:public_pen_names(id, name)")
           .eq("status", "published")
           .not("price_all", "is", null)
-          .eq("genre", book.genre)
+          .eq("pen_name_id", book.pen_name_id)
           .neq("id", id)
+          .order("created_at", { ascending: false })
+          .limit(8)
+          .returns<BookWithAuthor[]>()
+      : Promise.resolve({ data: null }),
+    // BD15 P8 (Q2 a): books sharing ANY of this book's categories; on a
+    // book for children or teens, never an 18+ book.
+    bookCategories(book).length > 0
+      ? (() => {
+          let sameGenre = supabase
+            .from("public_books")
+            .select("*, pen:public_pen_names(id, name)")
+            .eq("status", "published")
+            .not("price_all", "is", null)
+            .overlaps("categories", bookCategories(book))
+            .neq("id", id);
+          if (isYoungReaderBook(book)) sameGenre = sameGenre.eq("is_adult", false);
           // PEN-NAMES-2 (L15): leave out the same pen name only. Leaving
           // out the whole account would let two shelves be compared to
-          // tell which pen names share an account.
-          .neq("pen_name_id", book.pen_name_id)
+          // tell which pen names share an account. BD15 P7: a
+          // public-domain edition without the editor mention shows no pen
+          // name, so there is none to leave out.
+          return book.pen_name_id ? sameGenre.neq("pen_name_id", book.pen_name_id) : sameGenre;
+        })()
           .order("created_at", { ascending: false })
           .limit(8)
           .returns<BookWithAuthor[]>()
@@ -780,7 +816,7 @@ export default async function BookDetailPage({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={coverUrl}
-              alt={`Kopertina e librit ${book.title}`}
+              alt={`Ballina e librit ${book.title}`}
               fetchPriority="high"
               className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
             />
@@ -850,6 +886,22 @@ export default async function BookDetailPage({
               {!penIsTranslator ? (
                 translatorLine
               ) : penNamePath ? (
+                <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
+                  {authorName}
+                </Link>
+              ) : (
+                <span className="font-semibold">{authorName}</span>
+              )}
+            </p>
+          )}
+
+          {/* BD15 P7 (Q4 a): the uploader of a public-domain edition, only
+              when Librum gave the editor mention (otherwise no pen name
+              reaches this page at all). */}
+          {showsPreparedBy(book) && authorName && (
+            <p className="mt-1 text-foreground">
+              {PD_PREPARED_BY}{" "}
+              {penNamePath ? (
                 <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
                   {authorName}
                 </Link>
@@ -1079,9 +1131,12 @@ export default async function BookDetailPage({
           {book.description && (
             <section className="mt-10">
               <h2 className={SECTION_HEADING}>Rreth librit</h2>
-              <p className="mt-4 max-w-[42.5rem] leading-relaxed whitespace-pre-line text-foreground/90">
-                {book.description}
-              </p>
+              {/* BD15 P8: the rich description (bold, italic, lists),
+                  parsed -- never rendered as HTML. */}
+              <BookDescriptionView
+                stored={book.description}
+                className="mt-4 max-w-[42.5rem] leading-relaxed text-foreground/90"
+              />
               {showSample && (
                 <div className="mt-4">
                   <BookSampleReader bookId={book.id} bookTitle={book.title} variant="text" />
@@ -1117,10 +1172,36 @@ export default async function BookDetailPage({
                   <dd className={DETAIL_VALUE_CLASSES}>{getLanguageLabel(book.language)}</dd>
                 </div>
               )}
-              {book.genre && (
+              {/* BD15 P8 (Q3 a): every category, each a link to that
+                  category in Libraria; then 18+ or the reading age. */}
+              {bookCategories(book).length > 0 && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Zhanri</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{book.genre}</dd>
+                  <dt className={DETAIL_LABEL_CLASSES}>{categoriesLabel(bookCategories(book).length)}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>
+                    {bookCategories(book).map((category, index) => (
+                      <Fragment key={category}>
+                        {index > 0 && ", "}
+                        <Link
+                          href={buildBookstoreHref({}, { genre: category })}
+                          className={INLINE_LINK_CLASSES}
+                        >
+                          {category}
+                        </Link>
+                      </Fragment>
+                    ))}
+                  </dd>
+                </div>
+              )}
+              {book.is_adult && (
+                <div>
+                  <dt className={DETAIL_LABEL_CLASSES}>{ADULT_DETAIL_LABEL}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{ADULT_DETAIL_VALUE}</dd>
+                </div>
+              )}
+              {readingAgeValue(book) && (
+                <div>
+                  <dt className={DETAIL_LABEL_CLASSES}>{READING_AGE_LABEL}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{readingAgeValue(book)}</dd>
                 </div>
               )}
               {seriesInfo && (
@@ -1140,10 +1221,11 @@ export default async function BookDetailPage({
                   <dd className={DETAIL_VALUE_CLASSES}>{book.publisher}</dd>
                 </div>
               )}
-              {book.edition && (
+              {/* BD15 P8: the edition number, else the old free text. */}
+              {editionValue(book) && (
                 <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Botimi</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{book.edition}</dd>
+                  <dt className={DETAIL_LABEL_CLASSES}>{EDITION_LABEL}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{editionValue(book)}</dd>
                 </div>
               )}
               {book.original_publication_date && (
@@ -1188,6 +1270,9 @@ export default async function BookDetailPage({
           the photo, name, bio and the Follow button from the author's
           own page.
           ============================================================ */}
+      {/* BD15 P7: not on a public-domain edition without the editor
+          mention -- the page has no pen name for it. */}
+      {book.pen && (
       <section className="mt-14">
         <h2 className={SECTION_HEADING}>Rreth autorit</h2>
         <div className="mt-4 flex flex-wrap items-center gap-6 rounded-[4px] border border-border bg-surface p-6 sm:p-7">
@@ -1274,6 +1359,7 @@ export default async function BookDetailPage({
             ))}
         </div>
       </section>
+      )}
 
       {/* ============================================================
           Reviews
@@ -1392,6 +1478,16 @@ export default async function BookDetailPage({
                       {AUTHOR_REVIEWER_LABEL}
                     </span>
                   )}
+                  {/* REVIEW-DATE: the day the reader first wrote it
+                      (created_at, already in public_reviews), in Tirana,
+                      same Albanian format as "Botuar në Librum". An edit
+                      keeps this date. */}
+                  <time
+                    dateTime={review.created_at}
+                    className="text-xs text-muted"
+                  >
+                    {formatTimestampAsDate(review.created_at)}
+                  </time>
                 </div>
                 {review.body && (
                   <p className="mt-1 text-sm text-foreground/90">
@@ -1599,7 +1695,7 @@ function PurchasePanel({
     return (
       <div className="flex flex-col gap-3">
         <span className="text-sm text-muted">Ky është libri juaj</span>
-        <Link href={`/dashboard/books/${bookId}/edit`} className={PRIMARY_ACTION_CLASSES}>
+        <Link href={editorPath(bookId, "details")} className={PRIMARY_ACTION_CLASSES}>
           Menaxhoni librin
         </Link>
         <a href={`/api/books/${bookId}/download`} className={SECONDARY_ACTION_CLASSES}>

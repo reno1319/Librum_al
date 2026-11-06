@@ -78,8 +78,8 @@ describe("POLICY PAGES: /kushtet", () => {
   // BD2 (3a): the Terms have their own date; Refunds keep the shared one.
   it("takes its date from its own line (BD2, 3. a)", () => {
     expect(text).toContain(TERMS_LAST_UPDATED_LINE);
-    // BD7 sets the Production release day; until then the build day.
-    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 2 nëntor 2026");
+    // BD15: the Production release day of the D2 Terms (7 November 2026).
+    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 7 nëntor 2026");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
   });
 

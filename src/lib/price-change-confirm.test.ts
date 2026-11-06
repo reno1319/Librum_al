@@ -74,10 +74,15 @@ describe("the Edit pages show the tick only for a live book or bundle", () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const read = (p: string) => readFileSync(path.join(root, p), "utf8");
 
-  it("book Edit page", () => {
-    const source = read("src/app/(public)/dashboard/books/[id]/edit/page.tsx");
-    expect(source).toContain("{isLive && <PriceChangeConfirm currentPriceAll={book.price_all ?? null} />}");
-    expect(source).toContain('const isLive = book.status === "published";');
+  // BD15 P5b-3a: the old book edit page is retired; a live book's price
+  // changes in the editor's Pricing tab, whose tick shows only when a
+  // live book's price is changing (P5b-2).
+  it("book editor Pricing tab", () => {
+    const source = read("src/components/book-pricing-form.tsx");
+    expect(source).toContain(
+      "const priceChanging = live !== null && newPriceAll !== null && newPriceAll !== live.currentPriceAll;",
+    );
+    expect(source).toContain("name={PRICE_CHANGE_CONFIRM_FIELD}");
   });
 
   it("bundle Edit page, which now reads the bundle's status", () => {

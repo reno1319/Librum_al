@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getPublishChecklist } from "@/lib/publish-checklist";
-import { resolveDashboardAttention } from "@/lib/dashboard-attention";
+import { inReviewIdsFrom, resolveDashboardAttention } from "@/lib/dashboard-attention";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { isSchedulerEnabled } from "@/lib/payout-scheduler";
 import { computeNextPayoutCycleDate, formatPayoutCycleDate } from "@/lib/payout-cycle";
@@ -10,6 +10,21 @@ import { formatTransactionMinorUnits, type CurrencyTotals } from "@/lib/transact
 import { AuthorBookRow } from "@/components/author-book-row";
 import { loadAuthorTakedownNotices } from "@/lib/book-takedowns";
 import { loadAuthorReviewNotices } from "@/lib/book-reviews";
+import type { AuthorReviewNotice } from "@/lib/book-review-copy";
+import { editorPath } from "@/lib/book-editor-copy";
+import { createCatalogWriteClient } from "@/lib/catalog-write-client";
+import { changedPendingFields, readShelfPendingChanges } from "@/lib/book-pending-changes";
+import {
+  SHELF_FILTERS,
+  SHELF_SORTS,
+  SHELF_VIEWS,
+  groupShelfBooks,
+  matchesShelfFilter,
+  parseShelfQuery,
+  resolveShelfState,
+  sortShelfBooks,
+  type ShelfState,
+} from "@/lib/bookshelf";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
@@ -66,8 +81,18 @@ export const dynamic = "force-dynamic";
 // canPublishPaidTitle() alone (see performPublish() in
 // dashboard/books/actions.ts). The live POK build
 // adds one "Bank account" box here.
-
-type BookTab = "all" | "published" | "drafts";
+//
+// BD15 P6 (bookshelf; Renato 11-05 Q1 a: the one shelf is HERE, and
+// /dashboard/books redirects to it): the All / Published / Drafts tabs
+// became a toolbar of plain GET selects -- sort (newest, title A-Z,
+// publish date; Q2 a: no "last changed", books.updated_at is never
+// written), filter by state, view by series or flat, title search --
+// so it still works without JavaScript. Each book's state comes from
+// src/lib/bookshelf.ts. A live book's waiting changes are read from
+// book_pending_changes (service_role only) with the trusted writer,
+// for the ids the author's own session just read, AFTER auth; when that
+// read fails the shelf says so in a visible line and shows those books
+// as plainly live.
 
 const TEXT_LINK_CLASSES =
   "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2";
@@ -75,22 +100,18 @@ const BOX_CLASSES = "rounded-[4px] border border-border bg-surface p-5";
 const BOX_LABEL_CLASSES = "text-[0.8125rem] uppercase tracking-[0.06em] text-muted";
 const BOX_FIGURE_CLASSES = "font-serif text-[2rem] leading-tight text-primary";
 
-function parseTab(value: string | undefined): BookTab {
-  return value === "published" || value === "drafts" ? value : "all";
-}
-
-function dashboardHref(tab: BookTab, q: string): string {
-  const params = new URLSearchParams();
-  if (tab !== "all") params.set("tab", tab);
-  if (q) params.set("q", q);
-  const query = params.toString();
-  return query ? `/dashboard?${query}` : "/dashboard";
-}
-
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string; tab?: string; q?: string; ebook_cover?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    success?: string;
+    q?: string;
+    sort?: string;
+    filter?: string;
+    view?: string;
+    ebook_cover?: string;
+  }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive page -- renders books.price_all
   // via AuthorBookRow (exhaustive route audit) -- checked as the first
@@ -99,7 +120,15 @@ export default async function DashboardPage({
     return <MaintenanceNotice />;
   }
 
-  const { error: rawError, success: rawSuccess, tab: rawTab, q: rawQ, ebook_cover: rawEbookCover } = await searchParams;
+  const {
+    error: rawError,
+    success: rawSuccess,
+    q: rawQ,
+    sort: rawSort,
+    filter: rawFilter,
+    view: rawView,
+    ebook_cover: rawEbookCover,
+  } = await searchParams;
 
   const error = pageErrorMessage(rawError);
 
@@ -124,10 +153,15 @@ export default async function DashboardPage({
     .returns<Book[]>();
 
   const allBooks = books ?? [];
+  // ADMIN-3-REVIEW (F, N9): the author's review rows, one read. BD15
+  // P5b-3a: read before the attention card, which skips drafts in review.
+  const reviewNotices =
+    allBooks.length > 0 ? await loadAuthorReviewNotices(supabase, user.id) : new Map<string, AuthorReviewNotice>();
 
   const attention = resolveDashboardAttention({
     books: allBooks,
     paidPublishingAvailable: canPublishPaidTitle(),
+    inReviewBookIds: inReviewIdsFrom(reviewNotices),
   });
 
   const heading = (
@@ -139,12 +173,20 @@ export default async function DashboardPage({
           Paneli juaj
         </h1>
       </div>
-      <Link
-        href="/dashboard/books/new"
-        className={buttonClasses("primary", "md", "min-h-11 shrink-0 rounded-[3px] px-4 font-bold sm:px-5")}
-      >
-        Libër i ri
-      </Link>
+      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+        <Link
+          href="/dashboard/series"
+          className={buttonClasses("outline", "md", "min-h-11 rounded-[3px] border-[#c9c0ae] px-4 font-semibold")}
+        >
+          + Seri e re
+        </Link>
+        <Link
+          href="/dashboard/books/new"
+          className={buttonClasses("primary", "md", "min-h-11 rounded-[3px] px-4 font-bold sm:px-5")}
+        >
+          + Libër i ri
+        </Link>
+      </div>
     </div>
   );
 
@@ -200,23 +242,64 @@ export default async function DashboardPage({
   // ADMIN-2-TAKEDOWN (G): the notices for books Librum took down, read
   // with the author's own session (RLS: own rows; named columns only).
   const takedownNotices = await loadAuthorTakedownNotices(supabase, user.id);
-  // ADMIN-3-REVIEW (F, N9): the author's review rows, one read.
-  const reviewNotices = await loadAuthorReviewNotices(supabase, user.id);
   const schedulerEnabled = isSchedulerEnabled(process.env.PAYOUT_SCHEDULER_ENABLED);
 
-  const publishedCount = allBooks.filter((book) => book.status === "published").length;
-  const draftCount = allBooks.filter((book) => book.status === "draft").length;
+  // BD15 P6: the series names for the cards and the group headings
+  // (the author's own rows, own session). Display only: unreadable names
+  // show the books outside a series, with a visible line.
+  const seriesIds = Array.from(new Set(allBooks.map((book) => book.series_id).filter((id): id is string => !!id)));
+  const seriesRead =
+    seriesIds.length > 0
+      ? await supabase.from("series").select("id, title").eq("author_id", user.id).returns<{ id: string; title: string }[]>()
+      : { data: [], error: null };
+  if (seriesRead.error) console.error("DashboardPage: series read failed", { code: seriesRead.error.code ?? null });
+  const seriesTitles = new Map((seriesRead.data ?? []).map((row) => [row.id, row.title]));
 
-  const tab = parseTab(rawTab);
-  const q = (rawQ ?? "").trim();
-  const needle = q.toLocaleLowerCase();
+  // BD15 P6: the waiting changes of the author's live books (see above).
+  const liveIds = allBooks.filter((book) => book.status === "published").map((book) => book.id);
+  const pendingRead =
+    liveIds.length > 0 ? await readShelfPendingChanges(createCatalogWriteClient(), liveIds) : null;
+
+  const states = new Map<string, ShelfState>();
+  for (const book of allBooks) {
+    const review = reviewNotices.get(book.id) ?? null;
+    const waiting = pendingRead?.ok ? (pendingRead.byBook.get(book.id) ?? null) : null;
+    const hasPendingChanges =
+      waiting !== null &&
+      changedPendingFields(
+        {
+          filePath: book.file_path,
+          coverPath: book.cover_path,
+          description: book.description,
+          isAdult: book.is_adult ?? false,
+          originalAuthor: book.original_author,
+        },
+        waiting.pending,
+      ).length > 0;
+    const pendingSentBack =
+      waiting !== null &&
+      review?.sentBack != null &&
+      Date.parse(waiting.createdAt) <= Date.parse(review.sentBack.sentBackAt);
+    states.set(
+      book.id,
+      resolveShelfState(book, {
+        takenDown: takedownNotices.has(book.id),
+        review,
+        hasPendingChanges,
+        pendingSentBack,
+      }),
+    );
+  }
+
+  const query = parseShelfQuery({ sort: rawSort, filter: rawFilter, view: rawView, q: rawQ });
+  const needle = query.q.toLocaleLowerCase();
   const listedBooks = allBooks.filter(
     (book) =>
-      (tab === "all" ||
-        (tab === "published" && book.status === "published") ||
-        (tab === "drafts" && book.status === "draft")) &&
+      matchesShelfFilter(states.get(book.id) ?? "draft", query.filter) &&
       (needle === "" || book.title.toLocaleLowerCase().includes(needle)),
   );
+  const groups = groupShelfBooks(sortShelfBooks(listedBooks, query.sort), query.view, seriesTitles);
+  const showGroupHeadings = groups.some((group) => group.seriesId !== null);
 
   const draftIncompleteCount =
     attention.kind === "continue-draft"
@@ -258,7 +341,7 @@ export default async function DashboardPage({
               ` — ${draftIncompleteCount === 1 ? "1 gjë" : `${draftIncompleteCount} gjëra`} për të parë para publikimit.`}
           </p>
           <Link
-            href={`/dashboard/books/${attention.book.id}/edit`}
+            href={editorPath(attention.book.id, "details")}
             className="focus-ring rounded-sm font-medium underline"
           >
             Vazhdoni redaktimin
@@ -278,70 +361,101 @@ export default async function DashboardPage({
           Librat tuaj
         </h2>
         <div className="mt-4 rounded-[4px] border border-border bg-surface">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
-            <nav aria-label="Librat tuaj" className="flex flex-wrap gap-2">
-              <BookTabLink label={`Të gjithë (${allBooks.length})`} href={dashboardHref("all", q)} active={tab === "all"} />
-              <BookTabLink
-                label={`Të publikuar (${publishedCount})`}
-                href={dashboardHref("published", q)}
-                active={tab === "published"}
-                disabled={publishedCount === 0}
-              />
-              <BookTabLink
-                label={`Drafte (${draftCount})`}
-                href={dashboardHref("drafts", q)}
-                active={tab === "drafts"}
-                disabled={draftCount === 0}
-              />
-            </nav>
-            <form action="/dashboard" method="get" role="search" className="flex w-full items-center gap-2 sm:w-auto">
-              <label htmlFor="dashboard-book-search" className="text-sm text-muted">
-                Kërkoni
-              </label>
-              {tab !== "all" && <input type="hidden" name="tab" value={tab} />}
+          <form
+            action="/dashboard"
+            method="get"
+            role="search"
+            className="grid grid-cols-2 items-end gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[repeat(3,minmax(0,11rem))_1fr_auto]"
+          >
+            <ShelfSelect id="shelf-sort" name="sort" label="Rendit sipas" value={query.sort} options={SHELF_SORTS} />
+            <ShelfSelect id="shelf-filter" name="filter" label="Filtro" value={query.filter} options={SHELF_FILTERS} />
+            <ShelfSelect id="shelf-view" name="view" label="Shfaq" value={query.view} options={SHELF_VIEWS} />
+            <label htmlFor="dashboard-book-search" className="col-span-2 flex flex-col gap-1 text-sm text-muted lg:col-span-1">
+              Kërkoni sipas titullit
               <input
                 id="dashboard-book-search"
                 type="search"
                 name="q"
-                defaultValue={q}
+                defaultValue={query.q}
                 placeholder="Titulli"
-                className="focus-ring min-h-11 min-w-0 flex-1 rounded-[3px] border border-[#8c8472] bg-surface px-3 text-sm sm:w-52 sm:flex-none"
+                className="focus-ring min-h-11 min-w-0 rounded-[3px] border border-[#8c8472] bg-surface px-3 text-sm text-foreground"
               />
-            </form>
-          </div>
+            </label>
+            <button
+              type="submit"
+              className={buttonClasses("outline", "sm", "col-span-2 min-h-11 rounded-[3px] border-[#c9c0ae] px-4 font-semibold lg:col-span-1")}
+            >
+              Shfaqni
+            </button>
+          </form>
 
-          {listedBooks.length === 0 ? (
+          {pendingRead && !pendingRead.ok && (
+            <p role="status" className="border-b border-border px-4 py-3 text-sm text-[#b42318] sm:px-5">
+              Nuk mundëm të kontrollojmë ndryshimet e papublikuara të librave live. Rifreskoni faqen.
+            </p>
+          )}
+          {seriesRead.error && (
+            <p role="status" className="border-b border-border px-4 py-3 text-sm text-[#b42318] sm:px-5">
+              Emrat e serive nuk u ngarkuan. Rifreskoni faqen.
+            </p>
+          )}
+
+          {groups.length === 0 ? (
             <EmptyState className="m-4 border-0 sm:m-5" title="Asnjë libër nuk përputhet me kërkimin." />
           ) : (
-            <ul className="divide-y divide-[#efe9dd]">
-              {listedBooks.map((book) => {
-                const coverUrl = book.cover_path
-                  ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
-                  : null;
-                return (
-                  <AuthorBookRow
-                    key={book.id}
-                    book={book}
-                    coverUrl={coverUrl}
-                    recentCopies={sales.ok ? (sales.summary.recentCopiesByBookId.get(book.id) ?? 0) : null}
-                    takedown={takedownNotices.get(book.id) ?? null}
-                    review={reviewNotices.get(book.id) ?? null}
-                    missing={
-                      book.status === "draft"
-                        ? getPublishChecklist(book)
-                            .filter((item) => !item.done)
-                            .map((item) => item.label)
-                        : []
-                    }
-                  />
-                );
-              })}
-            </ul>
+            groups.map((group) => (
+              <section
+                key={group.seriesId ?? "no-series"}
+                aria-label={group.seriesTitle ? `Seria ${group.seriesTitle}` : showGroupHeadings ? "Libra më vete" : undefined}
+              >
+                {showGroupHeadings && (
+                  <h3 className="flex flex-wrap items-baseline gap-x-3 border-b border-[#efe9dd] px-4 pt-5 pb-2 font-serif text-lg font-normal text-primary sm:px-5">
+                    {group.seriesTitle ? (
+                      <>
+                        <span className="font-sans text-xs font-bold uppercase tracking-[0.06em] text-muted">Seri</span>
+                        {group.seriesTitle}
+                        <span className="font-sans text-sm text-muted">
+                          {group.books.length === 1 ? "1 libër" : `${group.books.length} libra`}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="font-sans text-xs font-bold uppercase tracking-[0.06em] text-muted">Libra më vete</span>
+                    )}
+                  </h3>
+                )}
+                <ul className="divide-y divide-[#efe9dd]">
+                  {group.books.map((book) => {
+                    const coverUrl = book.cover_path
+                      ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
+                      : null;
+                    const state = states.get(book.id) ?? "draft";
+                    return (
+                      <AuthorBookRow
+                        key={book.id}
+                        book={book}
+                        coverUrl={coverUrl}
+                        state={state}
+                        seriesTitle={
+                          group.seriesId === null && book.series_id ? (seriesTitles.get(book.series_id) ?? null) : null
+                        }
+                        recentCopies={sales.ok ? (sales.summary.recentCopiesByBookId.get(book.id) ?? 0) : null}
+                        takedown={takedownNotices.get(book.id) ?? null}
+                        review={reviewNotices.get(book.id) ?? null}
+                        missing={
+                          state === "draft"
+                            ? getPublishChecklist(book)
+                                .filter((item) => !item.done)
+                                .map((item) => item.label)
+                            : []
+                        }
+                      />
+                    );
+                  })}
+                </ul>
+              </section>
+            ))
           )}
         </div>
-        <Link href="/dashboard/books" className={`${TEXT_LINK_CLASSES} mt-4 inline-block`}>
-          Shikoni të gjithë librat &rarr;
-        </Link>
       </section>
 
       <section className="mt-10">
@@ -364,35 +478,36 @@ export default async function DashboardPage({
   );
 }
 
-function BookTabLink({
+// BD15 P6: one labelled select of the shelf toolbar.
+function ShelfSelect({
+  id,
+  name,
   label,
-  href,
-  active,
-  disabled = false,
+  value,
+  options,
 }: {
+  id: string;
+  name: string;
   label: string;
-  href: string;
-  active: boolean;
-  disabled?: boolean;
+  value: string;
+  options: readonly { value: string; label: string }[];
 }) {
-  const base = "flex min-h-11 items-center rounded-[3px] border px-3.5 text-sm font-semibold";
-  // An empty tab (e.g. Drafts (0)) is shown but not a link: there is
-  // nothing to list there.
-  if (disabled && !active) {
-    return <span className={`${base} border-border bg-surface text-muted`}>{label}</span>;
-  }
   return (
-    <Link
-      href={href}
-      aria-current={active ? "page" : undefined}
-      className={`focus-ring ${base} transition-colors ${
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-[#c9c0ae] bg-surface text-foreground hover:bg-surface-hover"
-      }`}
-    >
+    <label htmlFor={id} className="flex flex-col gap-1 text-sm text-muted">
       {label}
-    </Link>
+      <select
+        id={id}
+        name={name}
+        defaultValue={value}
+        className="focus-ring min-h-11 min-w-0 rounded-[3px] border border-[#8c8472] bg-surface px-2 text-sm text-foreground"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 

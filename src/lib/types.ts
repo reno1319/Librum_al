@@ -126,6 +126,27 @@ export type Book = {
   // (NOT NULL in the database; optional here only so older fixtures and
   // narrow selects type-check). Readers see it through public_pen_names.
   pen_name_id?: string;
+  // BD15 P1 (migration 20261103200000). Optional for the same reason as
+  // librum_choice_at: older fixtures and narrow selects.
+  // categories: 1 to 3 of GENRES (src/lib/genres.ts), the first kept in
+  // `genre` by the database; null = none chosen yet.
+  categories?: string[] | null;
+  // 18+ is a label only (Q5); it forces reading_age_min to 18.
+  is_adult?: boolean;
+  // "Nga mosha": 3, 6, 9, 12, 14, 16 or 18; null = not set.
+  reading_age_min?: number | null;
+  // Whole edition number from 1; `edition` (free text) stays read-only.
+  edition_number?: number | null;
+  // The public-domain work this book is an edition of (set by staff),
+  // and whether staff credited the uploader as its editor. The "AI
+  // used" answer is never on this type: it lives in the staff-only
+  // book_ai_disclosures table.
+  // BD15 P7 (migration 20261105180000): without the credit public_books
+  // shows pen_name_id as null to everyone, the uploader too (it is
+  // books.public_pen_name_id there). On the books table pen_name_id is
+  // always the book's own.
+  pd_work_id?: string | null;
+  pd_editor_credit?: boolean;
 };
 
 // BOOK-PEN-NAME-RIGHTS-CHOICE-1: one row of public.book_rights_declarations,
