@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 234 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 237 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -26,7 +26,8 @@
 --   20261103200000), plus BD15 P5b-1's three book_pending_changes rows
 --   (migration 20261104170000), plus BD15 P5b-3b's three
 --   book_pending_changes_version_seq rows, no privilege for any role
---   (migration 20261105120000). A relation with no
+--   (migration 20261105120000), plus BD16 P1's three
+--   preorder_notify_requests rows (migration 20261106120000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -233,6 +234,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r pok_book_checkout_orders | anon | -'),
 ('rel','r pok_book_checkout_orders | authenticated | -'),
 ('rel','r pok_book_checkout_orders | service_role | INSERT,SELECT,UPDATE'),
+('rel','r preorder_notify_requests | anon | -'),
+('rel','r preorder_notify_requests | authenticated | SELECT'),
+('rel','r preorder_notify_requests | service_role | DELETE,SELECT,UPDATE'),
 ('rel','r profiles | anon | -'),
 ('rel','r profiles | authenticated | SELECT'),
 ('rel','r profiles | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
@@ -321,8 +325,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 234 then
-    raise exception 'FAIL: part1: the snapshot must hold 234 rows, holds %', v_expected;
+  if v_expected <> 237 then
+    raise exception 'FAIL: part1: the snapshot must hold 237 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

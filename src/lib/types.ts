@@ -26,7 +26,10 @@ export type Profile = {
   created_at: string;
 };
 
-export type BookStatus = "draft" | "published";
+// BD16 P1 (migration 20261106120000): "preorder" is a listed book that
+// comes out on its release_date. Everything that allows buying,
+// downloading, bundles or reviews checks for "published" only.
+export type BookStatus = "draft" | "published" | "preorder";
 
 // LIBRUM 2.0 BLOG-1: mirrors migration 047's blog_posts CHECK
 // constraints exactly. Only two states -- no scheduled/archived state
@@ -147,6 +150,18 @@ export type Book = {
   // always the book's own.
   pd_work_id?: string | null;
   pd_editor_credit?: boolean;
+  // BD16 P1 (migration 20261106120000). Optional for the same reason as
+  // librum_choice_at. release_date: the Tirana day (YYYY-MM-DD) a
+  // pre-order comes out (on a draft, the day asked for); the file is due
+  // 3 days before. The others are set only by the database's pre-order
+  // steps: the first listing time (never changes), the one date move
+  // used, how many times the book was listed (at most 2) and the last
+  // cancel time.
+  release_date?: string | null;
+  preorder_listed_at?: string | null;
+  preorder_slip_used?: boolean;
+  preorder_count?: number;
+  preorder_cancelled_at?: string | null;
 };
 
 // BOOK-PEN-NAME-RIGHTS-CHOICE-1: one row of public.book_rights_declarations,

@@ -31,7 +31,9 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: (table: string) => postgrest.from(table) }),
 }));
 
-const { getCatalogSchemaFeatures, resetCatalogSchemaFeaturesForTests } = await import("./catalog-schema-features");
+const { getCatalogSchemaFeatures, getPreorderSchemaFeature, resetCatalogSchemaFeaturesForTests } = await import(
+  "./catalog-schema-features"
+);
 
 const PRESENT: Answer = { status: 200, body: "[]" };
 const NOT_FOUND_EMPTY: Answer = { status: 404, body: "" };
@@ -126,6 +128,34 @@ describe("getCatalogSchemaFeatures: caching", () => {
     expect(await getCatalogSchemaFeatures()).toEqual({ rights: false });
     answers = { book_rights_declarations: PRESENT };
     expect(await getCatalogSchemaFeatures()).toEqual({ rights: true });
+    expect(requests).toHaveLength(2);
+  });
+});
+
+describe("getPreorderSchemaFeature (BD16 P1)", () => {
+  const PREORDER_COLUMN_MISSING: Answer = {
+    status: 400,
+    body: JSON.stringify({ code: "42703", details: null, hint: null, message: "column public_books.release_date does not exist" }),
+  };
+
+  it("asks public_books for release_date with a GET, limit 0", async () => {
+    answers = { public_books: PRESENT };
+    expect(await getPreorderSchemaFeature()).toBe(true);
+    expect(requests).toHaveLength(1);
+    const url = new URL(requests[0].url);
+    expect(requests[0].method).toBe("GET");
+    expect(url.pathname.endsWith("/public_books")).toBe(true);
+    expect(url.searchParams.get("select")).toBe("release_date");
+    expect(url.searchParams.get("limit")).toBe("0");
+  });
+
+  it("a missing column is off and is asked again; a present answer is cached", async () => {
+    answers = { public_books: PREORDER_COLUMN_MISSING };
+    expect(await getPreorderSchemaFeature()).toBe(false);
+    answers = { public_books: PRESENT };
+    expect(await getPreorderSchemaFeature()).toBe(true);
+    answers = { public_books: NOT_FOUND_EMPTY };
+    expect(await getPreorderSchemaFeature()).toBe(true);
     expect(requests).toHaveLength(2);
   });
 });

@@ -750,7 +750,10 @@ describe("the migration's grants are exactly the inventoried columns", () => {
   });
 
   it("the status default stays exactly 'draft' in schema.sql, on both tables", () => {
-    const status = schemaSql.match(/status text not null default '([a-z]+)' check \(status in \('draft', 'published'\)\)/g);
+    // BD16 P1 (migration 20261106120000): books also allows 'preorder'.
+    const status = schemaSql.match(
+      /status text not null default '([a-z]+)' check \(status in \('draft', 'published'(, 'preorder')?\)\)/g,
+    );
     expect(status).toHaveLength(2);
     for (const declaration of status!) expect(declaration).toContain("default 'draft'");
   });
