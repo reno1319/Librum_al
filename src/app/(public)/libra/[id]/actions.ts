@@ -701,6 +701,11 @@ export async function getFreeBook(bookId: string) {
   // in this file and the Stripe webhook) -- so a clearly-non-Stripe
   // placeholder satisfies the constraint without a schema change or any
   // risk of being mistaken for a real payment.
+  //
+  // BD16 CF1: keep the 'free_' prefix. The database trigger
+  // purchases_free_claim_live_only (migration 20261106200000) reads it
+  // and refuses the row (LB509) unless the book is live, so a book that
+  // isn't published can't be claimed even if the check above is wrong.
   const admin = createAdminClient();
   const { error } = await admin.from("purchases").upsert(
     {
