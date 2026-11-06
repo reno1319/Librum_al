@@ -115,7 +115,7 @@ export function BookPricingForm({
   checkoutAvailable,
   approvalValid,
   title,
-  penName,
+  byline,
   missing,
   live = null,
   sendRefusedNote = null,
@@ -134,7 +134,8 @@ export function BookPricingForm({
   // Librum's approval still matches the files: the button publishes.
   approvalValid: boolean;
   title: string;
-  penName: string;
+  // The author name readers see (original author or pen name).
+  byline: string;
   // What the other tabs still need before sending.
   missing: PricingMissing[];
   // BD15 P5b-3a (Renato 11-04, Q2 a): a taken-down book -- its price
@@ -297,7 +298,7 @@ export function BookPricingForm({
       <EditorSection id="pricing-reader" title="Si do ta shohin lexuesit">
         <div>
           <p className="font-serif text-lg">{title}</p>
-          <p className="text-[13px] text-muted">{penName}</p>
+          <p className="text-[13px] text-muted">{byline}</p>
           <p className="mt-1.5 font-semibold">{readerPrice}</p>
         </div>
       </EditorSection>

@@ -976,8 +976,16 @@ export default async function AdminBookPage({
                   Readers who already bought it keep it.
                 </p>
               )}
-              {publishedBundleTitles.length > 0 && (
-                <p className="text-sm font-semibold">This also unpublishes: {publishedBundleTitles.join(", ")}.</p>
+              {/* BD15 follow-up (F1 audit N3): an unreadable bundle list is
+                  said, never shown as "no bundle". */}
+              {reviewBundlesUnknown ? (
+                <p className="text-sm font-semibold">
+                  Couldn’t check which bundles this also unpublishes. Please reload the page.
+                </p>
+              ) : (
+                publishedBundleTitles.length > 0 && (
+                  <p className="text-sm font-semibold">This also unpublishes: {publishedBundleTitles.join(", ")}.</p>
+                )
               )}
               <UnpublishForm
                 action={unpublishBookAsStaff}

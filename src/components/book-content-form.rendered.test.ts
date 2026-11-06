@@ -57,6 +57,19 @@ describe("BookContentForm", () => {
     expect(html).not.toContain("<X>");
   });
 
+  // BD15 follow-up (walkthrough F5): Word (DOCX) is picked first, with its picker.
+  it("picks DOCX first and shows the Word picker; EPUB is offered but not picked", () => {
+    const html = render({ hasManuscript: false });
+    const radios = html.match(/<label[^>]*><input type="radio"[^>]*>[\s\S]*?<\/label>/g) ?? [];
+    const docx = radios.find((r) => r.includes(">DOCX</strong>"));
+    const epub = radios.find((r) => r.includes(">EPUB</strong>"));
+    expect(docx).toMatch(/<input type="radio"[^>]*checked=""/);
+    expect(epub).toBeDefined();
+    expect(epub).not.toMatch(/<input type="radio"[^>]*checked=""/);
+    expect(html).toContain('accept=".docx,');
+    expect(html).not.toContain('accept=".epub,');
+  });
+
   it("D1: ballinë in the editor's own words, ju form, and a back link that saves first", () => {
     const html = render();
     expect(html).not.toMatch(/>Kopertina<\/h2>|A ke përdorur/);

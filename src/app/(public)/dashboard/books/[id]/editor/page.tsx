@@ -27,6 +27,7 @@ import { getRightsDeclarationState } from "@/lib/book-rights";
 import { getBookReviewState } from "@/lib/book-reviews";
 import { PD_PICKED_EDITOR_NOTE, isPickedPdEdition } from "@/lib/pd-editions";
 import { missingDetails } from "@/lib/book-details";
+import { resolveBookByline } from "@/lib/book-byline";
 import {
   LIVE_STATUS_LABEL,
   TAKEN_DOWN_SEND_NOTE,
@@ -356,6 +357,7 @@ export default async function BookEditorPage({
           lockedPenName={lockedPenName}
           penNames={penNameList}
           series={series ?? []}
+          pdFrozen={isPickedPdEdition(book)}
         />
       ) : tab === "content" ? (
         <>
@@ -393,7 +395,15 @@ export default async function BookEditorPage({
           approvalValid={!live && !takenDown && review.approvalValid}
           live={live ? { currentPriceAll: book.price_all, hasChanges: changed.length > 0 } : null}
           title={book.title}
-          penName={lockedPenName ?? ""}
+          // BD15 follow-up (walkthrough F3): the name readers see -- the
+          // original author of a public-domain or translated book, else
+          // the pen name (resolveBookByline, as on the book page).
+          byline={
+            resolveBookByline({
+              pen: lockedPenName ? { id: book.pen_name_id, name: lockedPenName } : null,
+              original_author: working.originalAuthor,
+            }) ?? ""
+          }
           missing={sendMissing}
           sendRefusedNote={takenDown ? TAKEN_DOWN_SEND_NOTE : null}
         />

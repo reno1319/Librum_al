@@ -156,6 +156,11 @@ const FRONT_META_RE = new RegExp(
     String.raw`\bredakt(?:or|ore|imi|uar)${END}`,
     String.raw`\bkorrektur|\bkorrektor`,
     String.raw`\bkopertin`,
+    // B19 (D2 audit): Librum's own word for a cover, "Ballina", as a
+    // credit label ("Ballina: X") or "Dizajni i ballinës"; never the bare
+    // word, which a title or a story can use.
+    String.raw`\bballin(?:a|ë|ën|ës)?\s*:`,
+    String.raw`\bdizajn\p{L}* (?:i |e )?ballin`,
     String.raw`\bcover (?:design|art|image|by)${END}`,
     String.raw`\bprinted in${END}`,
     String.raw`\bshtypur n[ëe]${END}`,

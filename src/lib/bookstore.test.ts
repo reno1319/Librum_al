@@ -6,6 +6,7 @@ import {
   isKnownBookstoreSort,
   BOOKSTORE_SORT_OPTIONS,
 } from "./bookstore";
+import { GENRES } from "./genres";
 
 describe("parseBookstoreQuery", () => {
   it("no params: unfiltered, no price bounds", () => {
@@ -61,6 +62,33 @@ describe("parseBookstoreQuery", () => {
 
   it("q alone counts as filtered", () => {
     expect(parseBookstoreQuery({ q: "dante" }).isFiltered).toBe(true);
+  });
+
+  // BD15 follow-up (P8 audit N1): a genre Librum doesn't have is ignored.
+  it.each([["Horor"], ["}"], ['Poezi"'], ["Poezi,Horror"], ["poezi"], [""]])(
+    "an unknown genre %j is ignored: no filter, unfiltered page",
+    (genre) => {
+      const result = parseBookstoreQuery({ genre });
+      expect(result.genre).toBeUndefined();
+      expect(result.isFiltered).toBe(false);
+    },
+  );
+
+  it("a repeated ?genre= (an array) is ignored", () => {
+    const result = parseBookstoreQuery({ genre: ["Poezi", "Horror"] as unknown as string });
+    expect(result.genre).toBeUndefined();
+    expect(result.isFiltered).toBe(false);
+  });
+
+  it("an unknown genre does not drop the other filters", () => {
+    const result = parseBookstoreQuery({ genre: "Horor", q: "deti" });
+    expect(result.genre).toBeUndefined();
+    expect(result.q).toBe("deti");
+    expect(result.isFiltered).toBe(true);
+  });
+
+  it("every Librum genre is kept as is", () => {
+    for (const g of GENRES) expect(parseBookstoreQuery({ genre: g }).genre).toBe(g);
   });
 
   it("genre alone counts as filtered", () => {

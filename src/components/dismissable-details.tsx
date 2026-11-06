@@ -52,13 +52,39 @@ export function attachDismiss(
   };
 }
 
+/** The parts of a click closesOnLinkClick reads (a fake in tests). */
+export type DismissClick = {
+  target: unknown;
+  button: number;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+};
+
+/**
+ * BD15 follow-up (Bookstore genre box): a plain left click on a link
+ * inside the open <details> closes it, so the list doesn't stay open
+ * over the new results (the page keeps the same component on a
+ * ?genre= change). A click that opens a new tab or window (Ctrl, Cmd,
+ * Shift, Alt, a middle click) leaves this page as it is, so it stays open.
+ */
+export function closesOnLinkClick(click: DismissClick, details: Pick<HTMLDetailsElement, "contains">): boolean {
+  if (click.button !== 0 || click.metaKey || click.ctrlKey || click.shiftKey || click.altKey) return false;
+  const target = click.target as { closest?: (selector: string) => unknown } | null;
+  const link = typeof target?.closest === "function" ? target.closest("a[href]") : null;
+  return link != null && details.contains(link as Node);
+}
+
 export function DismissableDetails({
   className,
   closeOnFocusOut = false,
+  closeOnLinkClick = false,
   children,
 }: {
   className?: string;
   closeOnFocusOut?: boolean;
+  closeOnLinkClick?: boolean;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
@@ -70,7 +96,18 @@ export function DismissableDetails({
   }, [open, closeOnFocusOut]);
 
   return (
-    <details ref={ref} className={className} onToggle={(e) => setOpen(e.currentTarget.open)}>
+    <details
+      ref={ref}
+      className={className}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+      onClick={
+        closeOnLinkClick
+          ? (e) => {
+              if (e.currentTarget.open && closesOnLinkClick(e, e.currentTarget)) e.currentTarget.open = false;
+            }
+          : undefined
+      }
+    >
       {children}
     </details>
   );

@@ -13,7 +13,7 @@ const OTHER_PEN = "d5555555-5555-4555-8555-555555555555";
 function render(
   overrides: Partial<Parameters<typeof BookDetailsForm>[0]["initial"]> = {},
   locked = false,
-  liveProps: { rightsLocked?: boolean; live?: boolean } = {},
+  liveProps: { rightsLocked?: boolean; live?: boolean; pdFrozen?: boolean } = {},
 ) {
   return renderToStaticMarkup(
     createElement(BookDetailsForm, {
@@ -138,5 +138,112 @@ describe("BookDetailsForm", () => {
     expect(html).toContain('name="rightsBasis"');
     expect(html).not.toContain("Pret miratimin e Librum");
     expect(html).not.toContain("Të drejtat nuk ndryshohen sa libri është në shitje.");
+  });
+});
+
+// BD15 follow-up (P7 audit N5): a picked public-domain edition's frozen
+// fields are greyed (disabled), and the form still sends exactly what it
+// sent before, so the server's pdFrozenDetailsUnchanged check passes.
+// A small serializer of the static markup stands in for the browser's
+// FormData (vitest runs without a DOM).
+function decode(v: string): string {
+  return v.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+function attrs(tag: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of tag.matchAll(/\s([a-zA-Z-]+)(?:="([^"]*)")?/g)) out[m[1]] = decode(m[2] ?? "");
+  return out;
+}
+function submitted(html: string): [string, string][] {
+  const pairs: [string, string][] = [];
+  for (const m of html.matchAll(/<input\b[^>]*>/g)) {
+    const a = attrs(m[0]);
+    if (!a.name || "disabled" in a) continue;
+    if ((a.type === "radio" || a.type === "checkbox") && !("checked" in a)) continue;
+    pairs.push([a.name, a.value ?? ""]);
+  }
+  for (const m of html.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/g)) {
+    const a = attrs(m[1]);
+    if (!a.name || "disabled" in a) continue;
+    const options = [...m[2].matchAll(/<option\b([^>]*)>/g)].map((o) => attrs(o[1]));
+    const chosen = options.find((o) => "selected" in o) ?? options[0];
+    pairs.push([a.name, chosen?.value ?? ""]);
+  }
+  return pairs;
+}
+const FROZEN_NAMES = [
+  "language",
+  "subtitle",
+  "contributorId",
+  "contributorRole",
+  "contributorName",
+  "seriesId",
+  "seriesPosition",
+  "editionNumber",
+  "readingAge",
+  "categories",
+  "keywords",
+];
+const frozenPairs = (html: string) =>
+  submitted(html)
+    .filter(([name]) => FROZEN_NAMES.includes(name))
+    .sort((x, y) => (x[0] + "\u0000" + x[1]).localeCompare(y[0] + "\u0000" + y[1]));
+
+describe("BookDetailsForm: a picked public-domain edition (N5)", () => {
+  const PICKED = {
+    subtitle: "Botim i plotë",
+    language: "en",
+    seriesId: "s1",
+    seriesPosition: "2",
+    editionNumber: "3",
+    readingAge: "12",
+    keywords: "det, \"stuhi\"",
+    rightsBasis: "public_domain" as const,
+    originalAuthor: "Autor Prove",
+  };
+  const live = { rightsLocked: true, live: true };
+
+  it("sends exactly the same frozen values as the unfrozen form", () => {
+    const before = frozenPairs(render(PICKED, true, live));
+    const after = frozenPairs(render(PICKED, true, { ...live, pdFrozen: true }));
+    expect(before.length).toBeGreaterThan(8);
+    expect(after).toEqual(before);
+  });
+
+  it("the same with 18+ on and no series: one reading age 18, no series number", () => {
+    const values = { ...PICKED, isAdult: true, readingAge: "18", seriesId: "", seriesPosition: "" };
+    const before = frozenPairs(render(values, true, live));
+    const after = frozenPairs(render(values, true, { ...live, pdFrozen: true }));
+    expect(after).toEqual(before);
+    expect(after.filter(([n]) => n === "readingAge")).toEqual([["readingAge", "18"]]);
+    expect(after.some(([n]) => n === "seriesPosition")).toBe(false);
+  });
+
+  it("every frozen control is greyed (disabled); the editable ones are not", () => {
+    const html = render(PICKED, true, { ...live, pdFrozen: true });
+    const visible = (name: string) =>
+      [...html.matchAll(new RegExp(`<(input|select)\\b(?=[^>]*name="${name}")(?![^>]*type="hidden")[^>]*>`, "g"))].map((m) => m[0]);
+    for (const name of ["language", "subtitle", "contributorRole", "contributorName", "seriesId", "seriesPosition", "editionNumber", "readingAge", "keywords"]) {
+      const controls = visible(name);
+      expect(controls.length, name).toBeGreaterThan(0);
+      for (const c of controls) expect(c, name).toMatch(/\sdisabled=""/);
+    }
+    const categoryBoxes = html.match(/<input type="checkbox"[^>]*>/g) ?? [];
+    expect(categoryBoxes.length).toBeGreaterThan(10);
+    for (const box of categoryBoxes) expect(box).toContain('disabled=""');
+    for (const name of ["originalAuthor", "isAdult"]) {
+      for (const c of visible(name)) expect(c, name).not.toMatch(/\sdisabled=""/);
+    }
+    expect(html).not.toContain(">Hiq<");
+    expect(html).not.toContain("+ Shto kontribues");
+    expect(html).not.toContain("+ Krijo seri të re");
+  });
+
+  it("an ordinary live book is unchanged: nothing frozen, buttons there", () => {
+    const html = render(PICKED, true, live);
+    expect(html).not.toMatch(/name="subtitle"[^>]*disabled=""/);
+    expect(html).toContain(">Hiq<");
+    expect(html).toContain("+ Shto kontribues");
+    expect(html).toContain("+ Krijo seri të re");
   });
 });
