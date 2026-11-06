@@ -13,6 +13,21 @@ import {
   removeFromWishlist,
 } from "./actions";
 import { followPenName, unfollowPenName } from "../../autore/[id]/actions";
+import { notifyMeWhenOut, removePreorderNotice } from "./preorder-actions";
+import {
+  LISTED_BOOK_STATUSES,
+  NOTIFY_HELP,
+  NOTIFY_ME_LABEL,
+  NOTIFY_ON_NOTICE,
+  NOTIFY_REMOVE_LABEL,
+  NOTIFY_SIGN_IN_LABEL,
+  NOTIFY_STATUS_MESSAGES,
+  PREORDER_PRICE_NOTE,
+  isPreorder,
+  preorderReleaseLabel,
+  readNotifyStatus,
+  tiranaToday,
+} from "@/lib/preorder-reader";
 import { buildBookstoreHref } from "@/lib/bookstore";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
@@ -223,7 +238,8 @@ export async function generateMetadata({
   // PREVIEW-1 (A5, Renato 7a): plus noindex. Only the author (their
   // "Preview my book" page) and earlier buyers can open an unpublished
   // book's page, so a crawler never sees it anyway; this is extra safety.
-  if (!book || book.status !== "published") {
+  // BD16 P4 (D1): a pre-order is a public book page too.
+  if (!book || (book.status !== "published" && !isPreorder(book))) {
     return { robots: { index: false, follow: false } };
   }
 
@@ -300,6 +316,8 @@ export default async function BookDetailPage({
     // QA-FIX-2: set by POK's failRedirectUrl (src/lib/pok-checkout.ts)
     // when the reader cancels or the payment fails on POK's page.
     canceled?: string;
+    // BD16 P4: the "Më njofto" result (on / off / error), words only.
+    notify?: string;
   }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive public book detail page (V3 §3)
@@ -318,6 +336,7 @@ export default async function BookDetailPage({
     checkout_conflict: checkoutConflict,
     checkout_expired: checkoutExpired,
     canceled,
+    notify: rawNotify,
   } = await searchParams;
   const error = pageErrorMessage(rawError);
 
@@ -405,9 +424,27 @@ export default async function BookDetailPage({
   // check is what actually decides visibility from the application's
   // point of view, and keeps this page's behavior legible without
   // having to reason about the RLS policy to know what it does.
-  if (book.status !== "published" && !isAuthor && !owned) {
+  // BD16 P4 (D1): a live pre-order is public like a published book.
+  const preorder = isPreorder(book);
+  if (book.status !== "published" && !preorder && !isAuthor && !owned) {
     return notFoundOrPickedEdition();
   }
+
+  // BD16 P4 ("Më njofto"): the reader's own row (RLS: own rows only).
+  // Not for the author, and not for a reader who already owns the book
+  // (an earlier buyer of a book that is now pre-ordered again).
+  const notifyStatus = preorder ? readNotifyStatus(rawNotify) : null;
+  let notifyOn = false;
+  if (preorder && user && !isAuthor && !owned) {
+    const { data: noticeRow } = await supabase
+      .from("preorder_notify_requests")
+      .select("book_cancelled_at")
+      .eq("book_id", id)
+      .eq("user_id", user.id)
+      .maybeSingle<{ book_cancelled_at: string | null }>();
+    notifyOn = !!noticeRow && noticeRow.book_cancelled_at === null;
+  }
+  const releaseLabel = preorder ? preorderReleaseLabel(book.release_date, tiranaToday()) : null;
 
   const coverUrl = book.cover_path
     ? supabase.storage.from("covers").getPublicUrl(book.cover_path).data.publicUrl
@@ -489,7 +526,8 @@ export default async function BookDetailPage({
           .from("public_books")
           .select("id, title, series_position, created_at")
           .eq("series_id", book.series_id)
-          .eq("status", "published")
+          // BD16 P4 (D1): pre-orders are listed with the rest.
+          .in("status", LISTED_BOOK_STATUSES)
           .not("price_all", "is", null)
           .order("series_position", { ascending: true, nullsFirst: false })
           .returns<SeriesEntry[]>()
@@ -500,7 +538,7 @@ export default async function BookDetailPage({
       ? supabase
           .from("public_books")
           .select("*, pen:public_pen_names(id, name)")
-          .eq("status", "published")
+          .in("status", LISTED_BOOK_STATUSES)
           .not("price_all", "is", null)
           .eq("pen_name_id", book.pen_name_id)
           .neq("id", id)
@@ -515,7 +553,7 @@ export default async function BookDetailPage({
           let sameGenre = supabase
             .from("public_books")
             .select("*, pen:public_pen_names(id, name)")
-            .eq("status", "published")
+            .in("status", LISTED_BOOK_STATUSES)
             .not("price_all", "is", null)
             .overlaps("categories", bookCategories(book))
             .neq("id", id);
@@ -690,7 +728,9 @@ export default async function BookDetailPage({
   // EPUB), shown otherwise (PREVIEW-1: the author too), identically regardless of whether
   // this book's manuscript was uploaded directly as an EPUB or
   // converted from DOCX.
-  const showSample = resolveShowSample(purchaseState);
+  // BD16 P4 (D6): no sample of a pre-order for readers (the sample
+  // route refuses it too); its author still previews their own.
+  const showSample = resolveShowSample(purchaseState) && (!preorder || purchaseState === "author");
 
   const authorAvatarUrl = book.pen?.avatar_path
     ? supabase.storage.from("avatars").getPublicUrl(book.pen.avatar_path).data.publicUrl
@@ -701,12 +741,16 @@ export default async function BookDetailPage({
   // REDESIGN STEP 3 (P2): the existing purchase sentence, as the price
   // card's footnote. Shown in the same purchase states as before.
   const showPurchaseNote =
-    purchaseState === "anonymous-paid" ||
+    !preorder &&
+    (purchaseState === "anonymous-paid" ||
     purchaseState === "anonymous-free" ||
     purchaseState === "anonymous-unavailable" ||
     purchaseState === "paid-unowned" ||
     purchaseState === "free-unowned" ||
-    purchaseState === "unavailable-unowned";
+    purchaseState === "unavailable-unowned");
+  // BD16 P4: a pre-order offers no buy or free form to readers (plan §1
+  // "No payment"); the author and an earlier buyer keep their panels.
+  const showPreorderPanel = preorder && purchaseState !== "author" && purchaseState !== "owned";
   const checkoutSecurityNote = resolveCheckoutSecurityNote({
     priceAll: book.price_all,
     usePok,
@@ -746,14 +790,15 @@ export default async function BookDetailPage({
   // P2: schema.org Book data for Google, only on a published book (the
   // author's own preview and an earlier buyer's view of an unpublished
   // book carry none, the same rule as generateMetadata's).
-  const jsonLdOrigin = book.status === "published" ? siteOriginOrNull() : null;
+  // BD16 P4: a pre-order too, but never with an offer (it can't be bought).
+  const jsonLdOrigin = book.status === "published" || preorder ? siteOriginOrNull() : null;
   const bookJsonLd = jsonLdOrigin
     ? serializeJsonLd(
         buildBookJsonLd(book, {
           origin: jsonLdOrigin,
           coverUrl,
           pen: book.pen,
-          paidCheckoutOn: paidCheckoutAvailable,
+          paidCheckoutOn: paidCheckoutAvailable && !preorder,
           originalAuthor,
           translators: translatorNames,
           penIsTranslator,
@@ -769,7 +814,8 @@ export default async function BookDetailPage({
       {/* PREVIEW-1 (A5, Renato 1a): the author's own unpublished book is
           their "Preview my book" page. Not "only you can see this": a
           reader who bought the book before it was unpublished still can. */}
-      {isAuthor && book.status !== "published" && (
+      {/* BD16 P4: a pre-order is in Librari, so only a draft says this. */}
+      {isAuthor && book.status === "draft" && (
         <p
           role="status"
           className="mb-4 rounded-[3px] border-l-4 border-[#806510] bg-[#fbf6e8] px-3 py-2 text-sm font-medium text-foreground"
@@ -855,6 +901,12 @@ export default async function BookDetailPage({
           {book.subtitle && (
             <p className="mt-2 font-serif text-xl text-muted italic">{book.subtitle}</p>
           )}
+          {/* BD16 P4 (D1, D7): "Del më 12 dhjetor 2026". */}
+          {releaseLabel && (
+            <p data-preorder-release="" className="mt-3">
+              <span className={PREORDER_BADGE_CLASSES}>{releaseLabel}</span>
+            </p>
+          )}
 
           {/* REDESIGN STEP 3: author and series on one line, as in the
               mockup ("by <author> · Book 1 of <series>"). */}
@@ -939,13 +991,22 @@ export default async function BookDetailPage({
           <div className="mt-6 flex max-w-[32.5rem] flex-col gap-4 rounded-[4px] border border-border bg-surface p-5 sm:p-6">
             <span className="font-serif text-4xl text-primary">{formattedPrice}</span>
 
-            <PurchasePanel
-              state={purchaseState}
-              bookId={book.id}
-              formattedPrice={formattedPrice}
-              wishlisted={wishlisted}
-              downloadNote={downloadNote}
-            />
+            {showPreorderPanel ? (
+              <PreorderPanel
+                bookId={book.id}
+                signedIn={!!user}
+                notifyOn={notifyOn}
+              />
+            ) : (
+              <PurchasePanel
+                state={purchaseState}
+                bookId={book.id}
+                formattedPrice={formattedPrice}
+                wishlisted={wishlisted}
+                downloadNote={downloadNote}
+              />
+            )}
+            {preorder && <p className="text-sm text-muted">{PREORDER_PRICE_NOTE}</p>}
 
             {showPurchaseNote &&
               (purchaseState === "anonymous-unavailable" ||
@@ -975,7 +1036,7 @@ export default async function BookDetailPage({
                 </ul>
               ))}
 
-            {purchaseState === "owned" && book.status !== "published" && (
+            {purchaseState === "owned" && book.status === "draft" && (
               <p className="text-sm font-medium text-amber-700">
                 Ky libër nuk shitet më. Kopjen tuaj mund ta shkarkoni
                 përsëri kurdo.
@@ -1024,6 +1085,16 @@ export default async function BookDetailPage({
               ) : (
                 "U shtua në Bibliotekën tuaj! Mund të duhen disa sekonda që libri të shfaqet më poshtë si i juaji."
               )}
+            </p>
+          )}
+          {notifyStatus && (
+            <p
+              role="status"
+              className={`mt-4 max-w-[32.5rem] rounded-[3px] px-3 py-2 text-sm ${
+                notifyStatus === "error" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+              }`}
+            >
+              {NOTIFY_STATUS_MESSAGES[notifyStatus]}
             </p>
           )}
           {reportStatus === "success" && (
@@ -1246,6 +1317,12 @@ export default async function BookDetailPage({
                   migration's own comment), and this row is omitted for
                   exactly that book rather than guessing a date it doesn't
                   actually have. */}
+              {releaseLabel && (
+                <div>
+                  <dt className={DETAIL_LABEL_CLASSES}>Parapublikim</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{releaseLabel}</dd>
+                </div>
+              )}
               {book.status === "published" && book.published_at && (
                 <div>
                   <dt className={DETAIL_LABEL_CLASSES}>Botuar në Librum</dt>
@@ -1658,6 +1735,54 @@ const SECONDARY_ACTION_CLASSES = buttonClasses(
   "w-full rounded-[3px] border-[#8c8472] py-3 font-semibold",
 );
 const STATUS_PILL_CLASSES = "rounded-[3px] bg-surface-hover px-4 py-3 text-sm font-medium";
+const PREORDER_BADGE_CLASSES =
+  "inline-block rounded-[3px] border border-[#806510] bg-[#fbf6e8] px-2.5 py-1 text-sm font-semibold text-[#5c480b]";
+
+// BD16 P4 ("Më njofto", plan §1 and D8): a pre-order's panel for readers.
+// No buy, free or wishlist form; a signed-out visitor is asked to sign in
+// and comes back to this page.
+function PreorderPanel({
+  bookId,
+  signedIn,
+  notifyOn,
+}: {
+  bookId: string;
+  signedIn: boolean;
+  notifyOn: boolean;
+}) {
+  if (!signedIn) {
+    return (
+      <div className="flex flex-col gap-3">
+        <Link href={`/login?next=/libra/${bookId}`} className={PRIMARY_ACTION_CLASSES}>
+          {NOTIFY_SIGN_IN_LABEL}
+        </Link>
+        <p className="text-xs text-muted">{NOTIFY_HELP}</p>
+      </div>
+    );
+  }
+  if (notifyOn) {
+    return (
+      <div className="flex flex-col gap-3">
+        <span className={STATUS_PILL_CLASSES}>{NOTIFY_ON_NOTICE}</span>
+        <form action={removePreorderNotice.bind(null, bookId, "book")}>
+          <button type="submit" className={SECONDARY_ACTION_CLASSES}>
+            {NOTIFY_REMOVE_LABEL}
+          </button>
+        </form>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <form action={notifyMeWhenOut.bind(null, bookId)}>
+        <button type="submit" className={PRIMARY_ACTION_CLASSES}>
+          {NOTIFY_ME_LABEL}
+        </button>
+      </form>
+      <p className="text-xs text-muted">{NOTIFY_HELP}</p>
+    </div>
+  );
+}
 
 // ============================================================
 // Purchase / ownership action, by state -- see resolveBookPurchaseState

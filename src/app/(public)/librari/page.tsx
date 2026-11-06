@@ -27,6 +27,7 @@ import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
 import { OrnateShelf, ORNATE_SHELF_SIZE, type OrnateShelfBook } from "@/components/ornate-shelf";
+import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
 export const metadata: Metadata = {
   title: "Libraria",
@@ -126,7 +127,8 @@ async function fetchSearchResults(
     let query = supabase
       .from("public_books")
       .select("*, pen:public_pen_names(id, name)")
-      .eq("status", "published")
+      // BD16 P4 (D1): pre-orders are listed, with their badge.
+      .in("status", LISTED_BOOK_STATUSES)
       .not("price_all", "is", null);
     // BD15 P8: a category matches a book in ANY of its (up to 3)
     // categories, not only its primary one.
@@ -198,7 +200,7 @@ async function fetchSearchResults(
         let matchedQuery = supabase
           .from("public_books")
           .select("*, pen:public_pen_names(id, name)")
-          .eq("status", "published")
+          .in("status", LISTED_BOOK_STATUSES)
           .not("price_all", "is", null)
           .in("id", matchedIds);
         if (genre) matchedQuery = matchedQuery.contains("categories", [genre]);

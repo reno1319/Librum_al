@@ -27,6 +27,7 @@ import type { PublicBook, PublicBundle, PublicSeries } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { canonicalMetadata } from "@/lib/seo";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
 // LIBRUM 2.0 PRODUCT-2: this is a public DISCOVERY surface, not a
 // dashboard or a social profile -- see the PRODUCT-2 audit.
@@ -171,7 +172,8 @@ export default async function AuthorProfilePage({
         .from("public_books")
         .select("*")
         .eq("pen_name_id", id)
-        .eq("status", "published")
+        // BD16 P4 (D1): the author's pre-orders are listed too.
+        .in("status", LISTED_BOOK_STATUSES)
         .not("price_all", "is", null)
         .order("created_at", { ascending: false })
         .returns<PublicBook[]>(),

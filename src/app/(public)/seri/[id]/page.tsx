@@ -10,6 +10,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { PublicBook } from "@/lib/types";
 import { canonicalMetadata, seriesPagePath } from "@/lib/seo";
+import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
 // LIBRUM 2.0 PRODUCT-3: the public series page didn't exist before this
 // pass -- see the PRODUCT-3 audit (no /seri/[id] route, no series
@@ -95,7 +96,9 @@ const getPublicSeriesPageData = cache(
       .from("public_books")
       .select("*")
       .eq("series_id", id)
-      .eq("status", "published")
+      // BD16 P4 (D1): a pre-order belongs to its series page (and makes
+      // the series public, P1), so a series with only a pre-order shows.
+      .in("status", LISTED_BOOK_STATUSES)
       .not("price_all", "is", null)
       .returns<PublicBook[]>();
 
