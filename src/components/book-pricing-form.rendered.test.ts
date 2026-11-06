@@ -201,7 +201,10 @@ describe("BookPricingForm", () => {
     expect(box("WORLDWIDE_RIGHTS_FIELD")).toContain("onChange={(e) => setWorldwide(e.target.checked)}");
     expect(box("ACCEPT_TERMS_FIELD")).toContain("checked={terms}");
     expect(box("ACCEPT_TERMS_FIELD")).toContain("onChange={(e) => setTerms(e.target.checked)}");
-    expect(src).toContain("pricingTodo(bookId, missing, { worldwide, terms })");
+    // BD16 P2: a pre-order listing drops the items it may send without.
+    expect(src).toContain(
+      "pricingTodo(bookId, preorder ? missing.filter((m) => !m.preorderOptional) : missing, { worldwide, terms })",
+    );
     // BD15 P5b-2: a live book with no waiting change has nothing to send.
     // P5b-3a: a taken-down book is never sent (sendRefusedNote).
     expect(src).toContain(

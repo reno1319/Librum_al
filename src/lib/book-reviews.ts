@@ -84,6 +84,12 @@ export type RequestBookReviewResult =
         // waiting 18+ label beside a children/teen category (LB493).
         | "nothing_to_send"
         | "adult_category"
+        // BD16 P2 (migration 20261106120000): a pre-order listing's date
+        // is not 14 days to 6 months ahead (LB500), the book has had its
+        // 2 pre-orders (LB501), or it is a public-domain book (LB502).
+        | "preorder_date"
+        | "preorder_used_up"
+        | "preorder_public_domain"
         | "not_found"
         | "failed";
     };
@@ -97,6 +103,9 @@ export async function requestBookReview(supabase: SessionClient, bookId: string)
   if (error.code === "LB489") return { ok: false, reason: "incomplete" };
   if (error.code === "LB494") return { ok: false, reason: "nothing_to_send" };
   if (error.code === "LB493") return { ok: false, reason: "adult_category" };
+  if (error.code === "LB500") return { ok: false, reason: "preorder_date" };
+  if (error.code === "LB501") return { ok: false, reason: "preorder_used_up" };
+  if (error.code === "LB502") return { ok: false, reason: "preorder_public_domain" };
   const message = typeof error.message === "string" ? error.message : "";
   if (message === "this book is already waiting for review") return { ok: false, reason: "already_pending" };
   if (message === "this book is already approved") return { ok: false, reason: "already_approved" };

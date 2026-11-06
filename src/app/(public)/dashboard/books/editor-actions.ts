@@ -16,6 +16,7 @@
 // everything else straight onto the live book. Its rights basis is
 // fixed while it is live (Renato 11-04, Q4 a; LB492).
 
+import { getPreorderSchemaFeature } from "@/lib/catalog-schema-features";
 import { PD_FROZEN_MESSAGE, isPickedPdEdition, pdFrozenDetailsUnchanged, type PdFrozenDetails } from "@/lib/pd-editions";
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
@@ -76,6 +77,9 @@ type ExistingBook = {
   original_author: string | null;
   // BD15 P7: set when it is a public-domain work's edition.
   pd_work_id: string | null;
+  // BD16 P2: set once a pre-order was ever listed (read only where the
+  // column exists); the title and pen name stay locked from then (D4).
+  preorder_listed_at?: string | null;
 };
 
 function liveValuesOf(book: ExistingBook): PendingChanges {
@@ -92,7 +96,10 @@ async function readOwnBook(supabase: SessionClient, userId: string, bookId: stri
   if (!UUID.test(bookId)) return null;
   const { data, error } = await supabase
     .from("books")
-    .select("id, author_id, status, published_at, title, pen_name_id, file_path, cover_path, description, is_adult, original_author, pd_work_id")
+    .select(
+      "id, author_id, status, published_at, title, pen_name_id, file_path, cover_path, description, is_adult, original_author, pd_work_id" +
+        ((await getPreorderSchemaFeature()) ? ", preorder_listed_at" : ""),
+    )
     .eq("id", bookId)
     .eq("author_id", userId)
     .maybeSingle<ExistingBook>();
@@ -238,7 +245,7 @@ async function saveLiveBookDetails(
       .select("subtitle, language, series_id, series_position, edition_number, reading_age_min, categories, keywords")
       .eq("id", existing.id)
       .eq("author_id", userId)
-      .eq("status", "published")
+      .eq("status", existing.status)
       .maybeSingle<PdFrozenDetails>();
     if (storedError) redirect(withQuery(here, "error", SAVE_FAILED_MESSAGE));
     if (!stored) redirect(withQuery(here, "error", LIVE_NOT_LIVE_MESSAGE));
@@ -252,7 +259,8 @@ async function saveLiveBookDetails(
         .update(direct)
         .eq("id", existing.id)
         .eq("author_id", userId)
-        .eq("status", "published")
+        // BD16 P2: a live pre-order too, bound to its own status.
+        .eq("status", existing.status)
         .select("id");
   if (error) {
     console.error("saveBookDetails: live update failed", { bookId: existing.id, code: error.code ?? null });
@@ -437,7 +445,7 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
     // BD15 P5b-3a: a book in review shows read-only in the editor; an
     // unreadable review state saves nothing. (books.status is only ever
     // draft or published.)
-    if (existing.status !== "draft" && existing.status !== "published") {
+    if (existing.status !== "draft" && existing.status !== "published" && existing.status !== "preorder") {
       redirect("/dashboard");
     }
     const review = await getBookReviewState(supabase, existing.id);
@@ -448,14 +456,17 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
       redirect(withQuery(editorPath(existing.id, "details"), "error", IN_REVIEW_LOCKED_MESSAGE));
     }
   }
-  if (existing && existing.status === "published") {
+  // BD16 P2: a live pre-order is saved like a live book (its title and
+  // pen name are locked from the listing, D4).
+  if (existing && (existing.status === "published" || existing.status === "preorder")) {
     await saveLiveBookDetails(supabase, user.id, existing, details, formData);
   }
 
   // N1 and the title lock (migration 20261103200000, LB480/LB481): once a
   // book has been published its title and pen name never change. The
   // form doesn't offer them then; anything submitted is ignored.
-  const locked = existing !== null && existing.published_at !== null;
+  const locked =
+    existing !== null && (existing.published_at !== null || (existing.preorder_listed_at ?? null) !== null);
   const title = locked ? existing!.title : details.title;
 
   let penNameId: string;

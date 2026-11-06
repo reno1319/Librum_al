@@ -18,6 +18,21 @@ import {
 } from "@/lib/book-pricing";
 import { BOOK_CHANGED_WHILE_EDITING_MESSAGE, IN_REVIEW_LOCKED_MESSAGE, SENT_FOR_REVIEW_MESSAGE } from "@/lib/book-review-copy";
 import { TAKEN_DOWN_PUBLISH_MESSAGE } from "@/lib/takedown-reasons";
+import { CATALOG_ROW_CHANGED_MESSAGE } from "@/lib/paid-repricing";
+import {
+  CANCEL_PREORDER_CONFIRM_MISSING_MESSAGE,
+  PREORDER_BLOCK_NOTES,
+  PREORDER_CANCELLED_MESSAGE,
+  PREORDER_DATE_INVALID_MESSAGE,
+  PREORDER_NOT_AVAILABLE_MESSAGE,
+  PREORDER_NOT_PREORDER_MESSAGE,
+  PREORDER_SENT_MESSAGE,
+  PREORDER_UNPUBLISH_REFUSED_MESSAGE,
+  PUSH_DONE_MESSAGE,
+  PUSH_INVALID_MESSAGE,
+  PUSH_REFUSED_MESSAGE,
+  tiranaToday,
+} from "@/lib/preorders";
 
 // BD15 P4: saveBookPricing -- the Pricing tab's save and "Send for
 // review" -- against one recording Supabase double. The collaborators
@@ -88,6 +103,12 @@ vi.mock("@/lib/paid-readiness", async (importOriginal) => ({
   canPublishPaidTitle: () => paidPublishing,
 }));
 
+// BD16 P2: whether the database has pre-orders (off: as before P1).
+let preorderFeature = false;
+vi.mock("@/lib/catalog-schema-features", () => ({
+  getPreorderSchemaFeature: async () => preorderFeature,
+}));
+
 // ---- the recording Supabase double ----
 
 type Filter = { kind: string; column: string; value: unknown };
@@ -115,9 +136,14 @@ let pendingRead: { data: unknown; error: unknown } = { data: null, error: null }
 function query(table: string, via: "session" | "writer" = "session") {
   const filters: Filter[] = [];
   let op = "select";
+  let selected: unknown;
   let payload: unknown;
   const resolve = () => {
     if (op === "select") {
+      // BD16 P2 (audit r1 F2): performPublish's own release_date read.
+      if (table === "books" && selected === "release_date" && releaseReadFails) {
+        return { data: null, error: { code: "XX000", message: "read failed" } };
+      }
       if (table === "books") return { data: { ...book }, error: null };
       if (table === "pen_names") return penNameRead;
       if (table === "book_pending_changes") return pendingRead;
@@ -144,6 +170,7 @@ function query(table: string, via: "session" | "writer" = "session") {
             onPublishRead = null;
             hook();
           }
+          if (prop === "select" && op === "select") selected = args[0];
           if (prop === "update" || prop === "insert" || prop === "delete") {
             op = prop;
             payload = args[0];
@@ -191,15 +218,22 @@ function bucket(name: string) {
 const sessionClient = {
   auth: { getUser: async () => ({ data: { user: { id: USER_ID } } }) },
   from: (table: string) => query(table),
-  rpc: async () => ({ data: null, error: null }),
+  rpc: async (fn: string, args: unknown) => {
+    rpcCalls.push({ fn, args });
+    return { data: null, error: rpcError };
+  },
   storage: { from: (name: string) => bucket(name) },
 };
+// BD16 P2: push_preorder_release_date.
+let rpcCalls: { fn: string; args: unknown }[] = [];
+let rpcError: { code: string; message: string } | null = null;
+let releaseReadFails = false;
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
 // The catalog writer: the same double, its writes marked as the writer's.
 const writerClient = { ...sessionClient, from: (table: string) => query(table, "writer") };
 vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => writerClient }));
 
-const { saveBookPricing } = await import("./actions");
+const { saveBookPricing, cancelPreorder, pushPreorderDate, unpublishBook } = await import("./actions");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
 
 const OWN_EPUB = canonicalBookManuscriptPath(USER_ID, BOOK_ID);
@@ -280,6 +314,10 @@ beforeEach(async () => {
   pendingRead = { data: null, error: null };
   recoveryActive = false;
   onPublishRead = null;
+  preorderFeature = false;
+  rpcCalls = [];
+  rpcError = null;
+  releaseReadFails = false;
   afterCalls.length = 0;
   mockRevalidatePath.mockReset();
   mockSendNewBookEmails.mockReset().mockResolvedValue(undefined);
@@ -940,4 +978,256 @@ it("performPublish's book read does not include price_cents at all", () => {
   const source = readFileSync(fileURLToPath(new URL("./actions.ts", import.meta.url)), "utf8");
   const selectList = source.match(/\.select\("status, [^"]*"\)/)?.[0];
   expect(selectList).toBe('.select("status, price_all, published_at, description, file_path, cover_path")');
+});
+
+// ============================================================
+// BD16 P2: the author side of pre-orders (PLAN-BD16-r1 §3.4).
+// ============================================================
+describe("BD16 P2: a draft asks for a pre-order listing", () => {
+  const plus = (days: number) => {
+    const d = new Date(`${tiranaToday()}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  const releaseWrites = () =>
+    dbWrites.filter((w) => w.table === "books" && (w.payload as Record<string, unknown>)?.release_date !== undefined);
+  const requests = () => bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview");
+
+  beforeEach(() => {
+    preorderFeature = true;
+    book.preorder_count = 0;
+    book.pd_work_id = null;
+    book.release_date = null;
+  });
+
+  it("save: the day is written onto the own draft, bound to status draft, by the trusted writer", async () => {
+    const day = plus(20);
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate: day })));
+    expect(releaseWrites()).toHaveLength(1);
+    expect(releaseWrites()[0].payload).toEqual({ release_date: day });
+    expect(releaseWrites()[0].via).toBe("writer");
+    expect(releaseWrites()[0].filters).toEqual(
+      expect.arrayContaining([
+        { kind: "eq", column: "id", value: BOOK_ID },
+        { kind: "eq", column: "author_id", value: USER_ID },
+        { kind: "eq", column: "status", value: "draft" },
+      ]),
+    );
+  });
+
+  it('"now" clears a saved day, so a normal send never carries it', async () => {
+    book.release_date = plus(20);
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "now" })));
+    expect(releaseWrites()[0].payload).toEqual({ release_date: null });
+  });
+
+  it("a form without the choice leaves the day alone", async () => {
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free" })));
+    expect(releaseWrites()).toEqual([]);
+  });
+
+  it.each([
+    ["13 days ahead", 13],
+    ["more than 6 months ahead", 200],
+  ])("refuses a day %s, with no day written", async (_label, days) => {
+    const target = await run(
+      saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate: plus(days) })),
+    );
+    expect(target).toBe(err(PREORDER_DATE_INVALID_MESSAGE));
+    expect(releaseWrites()).toEqual([]);
+  });
+
+  it("refuses a missing or impossible day", async () => {
+    for (const releaseDate of ["", "2026-02-30", "nesër"]) {
+      const target = await run(
+        saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate })),
+      );
+      expect(target).toBe(err(PREORDER_DATE_INVALID_MESSAGE));
+    }
+    expect(releaseWrites()).toEqual([]);
+  });
+
+  it("Renato 11-06 (a): a book that was published before can't be a pre-order", async () => {
+    book.published_at = "2026-10-01T10:00:00Z";
+    const target = await run(
+      saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate: plus(20) })),
+    );
+    expect(target).toBe(err(PREORDER_BLOCK_NOTES.published_before));
+    expect(releaseWrites()).toEqual([]);
+  });
+
+  it("Q3b a: never a third pre-order; D3: never a public-domain book", async () => {
+    book.preorder_count = 2;
+    expect(
+      await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate: plus(20) }))),
+    ).toBe(err(PREORDER_BLOCK_NOTES.used_up));
+    book.preorder_count = 0;
+    rightsState = { kind: "present", declaration: { basis: "public_domain" } };
+    expect(
+      await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate: plus(20) }))),
+    ).toBe(err(PREORDER_BLOCK_NOTES.public_domain));
+    expect(releaseWrites()).toEqual([]);
+  });
+
+  it("before the P1 migration nothing about pre-orders is written, and a pre-order is refused", async () => {
+    preorderFeature = false;
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "now" })));
+    expect(releaseWrites()).toEqual([]);
+    expect(
+      await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate: plus(20) }))),
+    ).toBe(err(PREORDER_NOT_AVAILABLE_MESSAGE));
+  });
+
+  it("D5: send without a manuscript goes to review as a listing, never a publish", async () => {
+    const day = plus(20);
+    book.file_path = null;
+    const target = await run(
+      saveBookPricing(BOOK_ID, form({ ...SEND, releaseMode: "preorder", releaseDate: day })),
+    );
+    expect(target).toBe(`/dashboard?success=${encodeURIComponent(PREORDER_SENT_MESSAGE)}`);
+    expect(requests()).toHaveLength(1);
+    expect(publishWrites()).toEqual([]);
+    expect(book.release_date).toBe(day);
+  });
+
+  it("a still-valid earlier approval does not publish a pre-order listing: it is sent for review", async () => {
+    bookReviewsDoubleState.approvalValid = true;
+    const target = await run(saveBookPricing(BOOK_ID, form({ ...SEND, releaseMode: "preorder", releaseDate: plus(20) })));
+    expect(target).toBe(`/dashboard?success=${encodeURIComponent(PREORDER_SENT_MESSAGE)}`);
+    expect(publishWrites()).toEqual([]);
+    expect(requests()).toHaveLength(1);
+  });
+
+  it("the database's own refusals are named (LB500, LB501, LB502)", async () => {
+    for (const [reason, message] of [
+      ["preorder_date", PREORDER_DATE_INVALID_MESSAGE],
+      ["preorder_used_up", PREORDER_BLOCK_NOTES.used_up],
+      ["preorder_public_domain", PREORDER_BLOCK_NOTES.public_domain],
+    ] as const) {
+      bookReviewsDoubleState.requestResult = { ok: false, reason };
+      expect(await run(saveBookPricing(BOOK_ID, form({ ...SEND, releaseMode: "preorder", releaseDate: plus(20) })))).toBe(
+        err(message),
+      );
+    }
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("audit r1 F1: the day is written only onto a never-published book, in the write itself", async () => {
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate: plus(20) })));
+    expect(releaseWrites()[0].filters).toEqual(expect.arrayContaining([{ kind: "is", column: "published_at", value: null }]));
+    // Published meanwhile: the guarded write matches no row.
+    dbWrites = [];
+    updateRows = [];
+    const target = await run(
+      saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate: plus(20) })),
+    );
+    expect(target).toBe(err(CATALOG_ROW_CHANGED_MESSAGE));
+    // Clearing the day has no such filter.
+    dbWrites = [];
+    updateRows = [{ id: BOOK_ID }];
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "now" })));
+    expect(releaseWrites()[0].filters).not.toEqual(
+      expect.arrayContaining([{ kind: "is", column: "published_at", value: null }]),
+    );
+  });
+
+  it("audit r1 F2a: an unreadable release day fails closed, even with a matching earlier approval", async () => {
+    bookReviewsDoubleState.approvalValid = true;
+    releaseReadFails = true;
+    const target = await run(saveBookPricing(BOOK_ID, form({ ...SEND, releaseMode: "preorder", releaseDate: plus(20) })));
+    expect(target).toMatch(/^\/dashboard\?error=/);
+    expect(publishWrites()).toEqual([]);
+    expect(requests()).toEqual([]);
+  });
+
+  it('audit r1 F2b: a listing answered "already approved" is never published', async () => {
+    bookReviewsDoubleState.approvalValid = false;
+    bookReviewsDoubleState.requestResult = { ok: false, reason: "already_approved" };
+    const target = await run(saveBookPricing(BOOK_ID, form({ ...SEND, releaseMode: "preorder", releaseDate: plus(20) })));
+    expect(target).toMatch(/^\/dashboard\?error=/);
+    expect(publishWrites()).toEqual([]);
+  });
+
+  it("without a pre-order, a draft still needs its manuscript", async () => {
+    book.file_path = null;
+    expect(await run(saveBookPricing(BOOK_ID, form({ ...SEND, releaseMode: "now" })))).toBe(err(SEND_INCOMPLETE_MESSAGE));
+  });
+});
+
+describe("BD16 P2: a live pre-order", () => {
+  const DETAILS = `/dashboard/books/${BOOK_ID}/editor?tab=details`;
+  const at = (key: "error" | "success", message: string) => `${DETAILS}&${key}=${encodeURIComponent(message)}`;
+  const statusWrites = () =>
+    dbWrites.filter((w) => w.table === "books" && (w.payload as Record<string, unknown>)?.status !== undefined);
+
+  beforeEach(() => {
+    preorderFeature = true;
+    book.status = "preorder";
+    book.release_date = "2027-01-20";
+    book.preorder_count = 1;
+  });
+
+  it("a new price saves at once with no tick, bound to status preorder", async () => {
+    book.price_all = 0;
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "299" })));
+    expect(priceWrites()).toHaveLength(1);
+    expect(priceWrites()[0].filters).toEqual(expect.arrayContaining([{ kind: "eq", column: "status", value: "preorder" }]));
+  });
+
+  it("cancel: needs the tick, then goes back to draft through the writer, bound to status preorder", async () => {
+    expect(await run(cancelPreorder(BOOK_ID, form({})))).toBe(at("error", CANCEL_PREORDER_CONFIRM_MISSING_MESSAGE));
+    expect(statusWrites()).toEqual([]);
+    expect(await run(cancelPreorder(BOOK_ID, form({ confirmCancelPreorder: "yes" })))).toBe(
+      at("success", PREORDER_CANCELLED_MESSAGE),
+    );
+    const [write] = statusWrites();
+    expect(write.payload).toEqual({ status: "draft" });
+    expect(write.via).toBe("writer");
+    expect(write.filters).toEqual(
+      expect.arrayContaining([
+        { kind: "eq", column: "id", value: BOOK_ID },
+        { kind: "eq", column: "author_id", value: USER_ID },
+        { kind: "eq", column: "status", value: "preorder" },
+      ]),
+    );
+  });
+
+  it("cancel refuses a book that is not a pre-order (released or cancelled meanwhile)", async () => {
+    book.status = "published";
+    expect(await run(cancelPreorder(BOOK_ID, form({ confirmCancelPreorder: "yes" })))).toBe(
+      at("error", PREORDER_NOT_PREORDER_MESSAGE),
+    );
+    expect(statusWrites()).toEqual([]);
+  });
+
+  it("cancel that matches no row (released in between) says so", async () => {
+    updateRows = [];
+    expect(await run(cancelPreorder(BOOK_ID, form({ confirmCancelPreorder: "yes" })))).toBe(
+      at("error", PREORDER_NOT_PREORDER_MESSAGE),
+    );
+  });
+
+  it('"Hiqeni nga shitja" never takes a pre-order offline', async () => {
+    expect(await run(unpublishBook(BOOK_ID))).toBe(at("error", PREORDER_UNPUBLISH_REFUSED_MESSAGE));
+    expect(statusWrites()).toEqual([]);
+  });
+
+  it("push: 1 to 30 days later goes to push_preorder_release_date with the author's session", async () => {
+    expect(await run(pushPreorderDate(BOOK_ID, form({ releaseDate: "2027-02-19" })))).toBe(at("success", PUSH_DONE_MESSAGE));
+    expect(rpcCalls).toEqual([
+      { fn: "push_preorder_release_date", args: { p_book_id: BOOK_ID, p_release_date: "2027-02-19" } },
+    ]);
+  });
+
+  it("push refuses the same day, an earlier one, or more than 30 days, without calling the database", async () => {
+    for (const releaseDate of ["2027-01-20", "2027-01-10", "2027-02-20", "x"]) {
+      expect(await run(pushPreorderDate(BOOK_ID, form({ releaseDate })))).toBe(at("error", PUSH_INVALID_MESSAGE));
+    }
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("push: the database's LB504 (used, or too late) is shown plainly", async () => {
+    rpcError = { code: "LB504", message: "This pre-order's date was already moved once." };
+    expect(await run(pushPreorderDate(BOOK_ID, form({ releaseDate: "2027-01-25" })))).toBe(at("error", PUSH_REFUSED_MESSAGE));
+  });
 });

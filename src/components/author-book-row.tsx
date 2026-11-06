@@ -8,8 +8,9 @@ import type { Book } from "@/lib/types";
 import { buildAuthorTakedownNoticeLines, type AuthorTakedownNotice } from "@/lib/takedown-reasons";
 import { buildAuthorSentBackNoticeLines, type AuthorReviewNotice } from "@/lib/book-review-copy";
 import {
-  SHELF_STATE_COPY,
   isLiveState,
+  isPreorderState,
+  shelfStateCopy,
   resolveShelfState,
   shelfMenuItems,
   type ShelfMenuItem,
@@ -18,6 +19,7 @@ import {
 import { isPickedPdEdition, pdShelfLine } from "@/lib/pd-editions";
 import { BOOK_ACTIONS_ID, editorPath } from "@/lib/book-editor-copy";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
+import { formatReleaseDay, preorderFileDueDate, waitingReadersLine } from "@/lib/preorders";
 import { DismissableDetails } from "@/components/dismissable-details";
 
 // LIBRUM 2.0 UI-6: the operational (not reader-facing) book row shared
@@ -103,6 +105,10 @@ const DOT_CLASSES: Record<ShelfState, string> = {
   live_changes: "bg-[#1e5c3e]",
   live_in_review: "bg-[#806510]",
   live_sent_back: "bg-[#b42318]",
+  preorder: "bg-[#2b5a8a]",
+  preorder_changes: "bg-[#2b5a8a]",
+  preorder_in_review: "bg-[#806510]",
+  preorder_sent_back: "bg-[#b42318]",
   taken_down: "bg-[#8e2a1e]",
 };
 
@@ -116,6 +122,7 @@ const MENU_LABELS: Record<Exclude<ShelfMenuItem, "delete">, string> = {
   download_file: "Shkarkoni skedarin tuaj",
   discard_changes: "Hidhni poshtë ndryshimet",
   unpublish: "Hiqeni nga shitja",
+  cancel_preorder: "Anuloni parapublikimin",
 };
 
 function menuHref(item: Exclude<ShelfMenuItem, "delete">, bookId: string): string {
@@ -138,6 +145,7 @@ function menuHref(item: Exclude<ShelfMenuItem, "delete">, bookId: string): strin
     // In the editor's Veprime box, with its explanation and
     // confirmation (CLEANUP-1 reasoning above).
     case "unpublish":
+    case "cancel_preorder":
       return `${editorPath(bookId, "details")}#${BOOK_ACTIONS_ID}`;
   }
 }
@@ -151,9 +159,10 @@ export function AuthorBookRow({
   review = null,
   state: givenState,
   seriesTitle = null,
+  waitingReaders = null,
 }: {
   book: Pick<Book, "id" | "title" | "status" | "price_all" | "genre" | "published_at"> &
-    Partial<Pick<Book, "series_position" | "file_path" | "pd_work_id">>;
+    Partial<Pick<Book, "series_position" | "file_path" | "pd_work_id" | "release_date">>;
   coverUrl: string | null;
   recentCopies?: number | null;
   missing?: string[];
@@ -162,14 +171,29 @@ export function AuthorBookRow({
   state?: ShelfState;
   /** The book's series, shown on the card (null: none, or shown as the group heading). */
   seriesTitle?: string | null;
+  /** BD16 P2: readers waiting for a pre-order (null: not shown). */
+  waitingReaders?: number | null;
 }) {
   const state =
     givenState ??
     resolveShelfState(book, { takenDown: takedown !== null, review, hasPendingChanges: false, pendingSentBack: false });
-  const copy = SHELF_STATE_COPY[state];
+  const copy = shelfStateCopy(state, book);
   const live = isLiveState(state);
+  // BD16 P2: a pre-order's day, and (until its final file is approved)
+  // the file's due date.
+  const preorder = isPreorderState(state) && book.status === "preorder" && book.release_date ? book.release_date : null;
+  const preorderLine = preorder
+    ? [
+        `Del më ${formatReleaseDay(preorder)}`,
+        book.file_path ? null : `Dorëshkrimi final deri më ${formatReleaseDay(preorderFileDueDate(preorder))}`,
+        waitingReaders !== null && waitingReaders > 0 ? waitingReadersLine(waitingReaders) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
   const isDraft = book.status === "draft";
-  const sentBack = state === "sent_back" || state === "live_sent_back" ? (review?.sentBack ?? null) : null;
+  const sentBack =
+    state === "sent_back" || state === "live_sent_back" || state === "preorder_sent_back" ? (review?.sentBack ?? null) : null;
   const priceLabel = book.price_all === null ? "Pa çmim ende" : formatCatalogPriceLabel(book.price_all);
   const isFree = resolveCatalogPriceState(book.price_all) === "free";
   // BD15 P7: a public-domain edition Librum picked, or replaced (Q1/Q2 a).
@@ -189,14 +213,18 @@ export function AuthorBookRow({
     .filter(Boolean)
     .join(" · ");
 
-  const showRecent = !isDraft && recentCopies !== null;
+  // BD16 P2: a pre-order has no sales or downloads yet.
+  const showRecent = book.status === "published" && recentCopies !== null;
   const recentNoun = isFree
     ? recentCopies === 1
       ? "shkarkim"
       : "shkarkime"
     : "shitje";
 
-  const mainHref = copy.action === "book_page" ? `/libra/${book.id}` : editorPath(book.id, "details");
+  const mainHref =
+    copy.action === "book_page"
+      ? `/libra/${book.id}`
+      : editorPath(book.id, copy.action === "content" ? "content" : "details");
 
   return (
     <li className="flex flex-wrap items-center gap-x-5 gap-y-3 px-4 py-4 sm:px-5 sm:py-5">
@@ -227,6 +255,7 @@ export function AuthorBookRow({
           <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${DOT_CLASSES[state]}`} />
           <span>{copy.label}</span>
         </p>
+        {preorderLine && <p className="text-[0.8125rem] text-muted">{preorderLine}</p>}
         {copy.line && <p className="text-[0.8125rem] text-muted">{copy.line}</p>}
         {pdLine && <p className="text-[0.8125rem] text-muted">{pdLine}</p>}
         <p className="text-sm text-muted">{facts}</p>
@@ -250,7 +279,7 @@ export function AuthorBookRow({
         )}
         {sentBack && (
           <div role="status" className="mt-2 flex flex-col gap-1 rounded-[3px] border-l-4 border-[#806510] bg-[#fbf6e8] px-3 py-2 text-sm text-foreground">
-            {buildAuthorSentBackNoticeLines(sentBack, formatTimestampAsDate, live).map((line, index) => (
+            {buildAuthorSentBackNoticeLines(sentBack, formatTimestampAsDate, live || preorder !== null).map((line, index) => (
               <p key={index} className={index === 0 ? "font-semibold" : "whitespace-pre-wrap break-words"}>
                 {line}
               </p>
@@ -324,7 +353,8 @@ export function AuthorBookRow({
                     <Link
                       href={menuHref(item, book.id)}
                       className={
-                        item === "discard_changes" || item === "unpublish" ? MENU_DELETE_CLASSES : MENU_ITEM_CLASSES
+                        item === "discard_changes" || item === "unpublish" || item === "cancel_preorder"
+                          ? MENU_DELETE_CLASSES : MENU_ITEM_CLASSES
                       }
                     >
                       {MENU_LABELS[item]}

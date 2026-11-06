@@ -21,6 +21,15 @@ import {
   UNPUBLISH_PENDING_NOTE,
 } from "@/lib/book-editor-copy";
 import { TAKEN_DOWN_DELETE_MESSAGE } from "@/lib/takedown-reasons";
+import {
+  CANCEL_PREORDER_BUTTON,
+  CANCEL_PREORDER_CONFIRM_FIELD,
+  CANCEL_PREORDER_CONFIRM_TEXT,
+  PREORDER_DELETE_NOTE,
+  PREORDER_IN_REVIEW_NOTE,
+  cancelPreorderNote,
+  formatReleaseDay,
+} from "@/lib/preorders";
 
 // BD15 P5b-3a: the parts of the old edit page that now live in the
 // editor (the old page only redirects here).
@@ -39,6 +48,8 @@ export type SentVersion = {
   manuscriptLabel: string | null;
   priceAll: number | null;
   description: string;
+  // BD16 P2: the release day a pre-order listing asks for (else null).
+  releaseDate?: string | null;
 };
 
 function priceText(priceAll: number | null): string {
@@ -48,17 +59,20 @@ function priceText(priceAll: number | null): string {
 export function BookInReviewView({
   sent,
   live,
+  preorder = false,
   cancelAction,
 }: {
   sent: SentVersion;
   live: boolean;
+  // BD16 P2: a live pre-order's changes in review (it is not on sale).
+  preorder?: boolean;
   cancelAction: () => void | Promise<void>;
 }) {
   return (
     <section id="in-review" className="mt-4 rounded-card border border-border bg-surface p-4 shadow-sm">
       <h2 className="font-serif text-xl font-normal">{SENT_HEADING}</h2>
       <p className="mt-2 text-sm text-muted">{IN_REVIEW_READ_ONLY_NOTE}</p>
-      {live && <p className="mt-2 text-sm text-muted">{LIVE_IN_REVIEW_NOTE}</p>}
+      {live && <p className="mt-2 text-sm text-muted">{preorder ? PREORDER_IN_REVIEW_NOTE : LIVE_IN_REVIEW_NOTE}</p>}
       <div className="mt-4 flex gap-4">
         {sent.coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -83,12 +97,20 @@ export function BookInReviewView({
             <dt className="text-muted">Çmimi</dt>
             <dd>{priceText(sent.priceAll)}</dd>
           </div>
+          {sent.releaseDate ? (
+            <div>
+              <dt className="text-muted">Parapublikim, del më</dt>
+              <dd>{formatReleaseDay(sent.releaseDate)}</dd>
+            </div>
+          ) : null}
         </dl>
       </div>
       {sent.description ? (
         <p className="mt-4 whitespace-pre-wrap break-words text-sm">{descriptionPlainText(sent.description)}</p>
       ) : null}
-      <p className="mt-4 text-sm text-muted">{live ? LIVE_IN_REVIEW_PUBLISHING_NOTE : DRAFT_IN_REVIEW_NOTE}</p>
+      <p className="mt-4 text-sm text-muted">
+        {preorder ? PREORDER_IN_REVIEW_NOTE : live ? LIVE_IN_REVIEW_PUBLISHING_NOTE : DRAFT_IN_REVIEW_NOTE}
+      </p>
       <form action={cancelAction} className="mt-4">
         <button type="submit" className={buttonClasses("outline", "md", "w-full sm:w-auto")}>
           {CANCEL_REVIEW_LABEL}
@@ -107,7 +129,15 @@ export function BookActionsBox({
   unpublishAction,
   deleteAction,
   pdPicked = false,
+  preorder = null,
 }: {
+  // BD16 P2: a live pre-order -- it is cancelled, never taken off sale
+  // or deleted (LB507). waiting: readers on its list (null: unread).
+  preorder?: {
+    cancelAction: (formData: FormData) => void | Promise<void>;
+    waiting: number | null;
+    preorderCount: number;
+  } | null;
   bookId: string;
   title: string;
   live: boolean;
@@ -147,7 +177,28 @@ export function BookActionsBox({
           . {PREVIEW_NOTE}
         </p>
       )}
-      {pdPicked ? (
+      {preorder ? (
+        <div className="mt-3">
+          <p className="text-sm text-muted">{cancelPreorderNote(preorder)}</p>
+          <form action={preorder.cancelAction} className="mt-2 flex flex-col gap-2">
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+              <input
+                type="checkbox"
+                name={CANCEL_PREORDER_CONFIRM_FIELD}
+                value="yes"
+                required
+                className="focus-ring mt-0.5 h-[18px] w-[18px] shrink-0 accent-primary"
+              />
+              <span>{CANCEL_PREORDER_CONFIRM_TEXT}</span>
+            </label>
+            <div>
+              <button type="submit" className={buttonClasses("outline", "md", "w-full sm:w-auto")}>
+                {CANCEL_PREORDER_BUTTON}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : pdPicked ? (
         <Alert variant="warning" className="mt-3">
           {PD_PICKED_ACTIONS_NOTE}
         </Alert>
@@ -168,6 +219,8 @@ export function BookActionsBox({
       <div className="mt-4 border-t border-border pt-4">
         {takenDown ? (
           <Alert variant="warning">{TAKEN_DOWN_DELETE_MESSAGE}</Alert>
+        ) : preorder ? (
+          <p className="text-sm text-muted">{PREORDER_DELETE_NOTE}</p>
         ) : live ? (
           // P6 Q4 a: no Delete on a live book; deleteBook refuses it too.
           <p className="text-sm text-muted">{LIVE_DELETE_NOTE}</p>

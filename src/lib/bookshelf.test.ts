@@ -8,6 +8,7 @@ import {
   resolveShelfState,
   shelfHref,
   shelfMenuItems,
+  shelfStateCopy,
   sortShelfBooks,
   type ShelfBook,
   type ShelfFacts,
@@ -83,7 +84,8 @@ describe("SHELF_STATE_COPY", () => {
 
   it("only the live states with waiting or sent changes carry the readers line", () => {
     const withLine = ALL_STATES.filter((state) => SHELF_STATE_COPY[state].line !== null);
-    expect(withLine.sort()).toEqual(["live_changes", "live_in_review", "live_sent_back"]);
+    // BD16 P2: a pre-order's unsent changes carry "send them" instead.
+    expect(withLine.sort()).toEqual(["live_changes", "live_in_review", "live_sent_back", "preorder_changes"]);
   });
 });
 
@@ -169,7 +171,11 @@ describe("matchesShelfFilter", () => {
     expect(ALL_STATES.filter((s) => matchesShelfFilter(s, "live")).sort()).toEqual(
       ["live", "live_changes", "live_in_review", "live_sent_back"].sort(),
     );
-    expect(ALL_STATES.filter((s) => matchesShelfFilter(s, "review")).sort()).toEqual(["in_review", "live_in_review"]);
+    expect(ALL_STATES.filter((s) => matchesShelfFilter(s, "review")).sort()).toEqual([
+      "in_review",
+      "live_in_review",
+      "preorder_in_review",
+    ]);
     expect(ALL_STATES.every((s) => matchesShelfFilter(s, "all"))).toBe(true);
   });
 });
@@ -235,5 +241,52 @@ describe("groupShelfBooks", () => {
     expect(groupShelfBooks(sorted, "flat", titles)).toEqual([{ seriesId: null, seriesTitle: null, books: sorted }]);
     expect(groupShelfBooks([], "flat", titles)).toEqual([]);
     expect(groupShelfBooks([], "series", titles)).toEqual([]);
+  });
+});
+
+describe("BD16 P2: pre-orders on the shelf", () => {
+  const pre = { status: "preorder" };
+  const items = (state: ShelfState) => shelfMenuItems({ state, status: "preorder", hasFile: false });
+
+  it("the four pre-order states, like a live book's; a takedown outranks them", () => {
+    expect(resolveShelfState(pre, NONE)).toBe("preorder");
+    expect(resolveShelfState(pre, { ...NONE, hasPendingChanges: true })).toBe("preorder_changes");
+    expect(resolveShelfState(pre, { ...NONE, review: { inReview: true, sentBack: null } })).toBe("preorder_in_review");
+    expect(
+      resolveShelfState(pre, {
+        ...NONE,
+        hasPendingChanges: true,
+        pendingSentBack: true,
+        review: { inReview: false, sentBack: SENT_BACK },
+      }),
+    ).toBe("preorder_sent_back");
+    expect(resolveShelfState(pre, { ...NONE, takenDown: true })).toBe("taken_down");
+  });
+
+  it("the main button: upload the final file, or the book page once it is approved", () => {
+    expect(shelfStateCopy("preorder", { status: "preorder", file_path: null }).action).toBe("content");
+    expect(shelfStateCopy("preorder", { status: "preorder", file_path: "f.epub" }).action).toBe("book_page");
+  });
+
+  it("LB507: never Delete or Hiqeni nga shitja; Cancel instead; the public page is in the menu", () => {
+    for (const state of ["preorder", "preorder_changes", "preorder_in_review", "preorder_sent_back"] as const) {
+      expect(items(state)).not.toContain("delete");
+      expect(items(state)).not.toContain("unpublish");
+      expect(items(state)).not.toContain("preview_page");
+      expect(items(state)).toContain("cancel_preorder");
+      expect(items(state)).toContain("view_page");
+    }
+    expect(items("preorder_in_review")).not.toContain("edit_content");
+    expect(items("preorder_changes")).toContain("discard_changes");
+  });
+
+  it("the Parapublikime filter holds every pre-order state and nothing else; Publikuar holds none", () => {
+    expect(ALL_STATES.filter((s) => matchesShelfFilter(s, "preorder")).sort()).toEqual([
+      "preorder",
+      "preorder_changes",
+      "preorder_in_review",
+      "preorder_sent_back",
+    ]);
+    expect(ALL_STATES.filter((s) => matchesShelfFilter(s, "live")).some((s) => s.startsWith("preorder"))).toBe(false);
   });
 });
