@@ -64,6 +64,11 @@ vi.mock("@/lib/email", () => ({
   sendPreorderListedEmail: (to: string, args: unknown) => mockPreorderListedEmail(to, args),
   sendPreorderFileApprovedEmail: (to: string, args: unknown) => mockPreorderFileEmail(to, args),
 }));
+// BD16 P5: the "Më njofto" readers' sweep is scheduled after an action.
+const mockScheduleReaders = vi.fn();
+vi.mock("@/lib/preorder-emails", () => ({
+  scheduleWaitingReaderEmails: (source: string) => mockScheduleReaders(source),
+}));
 // BD16 P3: the pre-order approval emails.
 const mockPreorderListedEmail = vi.fn();
 const mockPreorderFileEmail = vi.fn();
@@ -153,6 +158,16 @@ describe("unpublishBookAsStaff", () => {
       `/admin/books/${BOOK_ID}?report=${REPORT_ID}&error=${encodeURIComponent("Write a message to the author.")}`,
     );
     expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("P5: a takedown schedules the readers' sweep (a taken-down pre-order's one cancel email); a refused one does not", async () => {
+    mockScheduleReaders.mockClear();
+    await redirectOf(() => unpublishBookAsStaff(form({ bookId: BOOK_ID, reason: "copyright", message: "Send proof." })));
+    expect(mockScheduleReaders).toHaveBeenCalledWith("unpublishBookAsStaff");
+    mockScheduleReaders.mockClear();
+    mockRpc.mockResolvedValueOnce({ data: null, error: { code: "XX000", message: "boom" } });
+    await redirectOf(() => unpublishBookAsStaff(form({ bookId: BOOK_ID, reason: "copyright", message: "Send proof." })));
+    expect(mockScheduleReaders).not.toHaveBeenCalled();
   });
 
   it("calls admin_unpublish_book with the session, then emails the author and revalidates", async () => {
@@ -663,6 +678,7 @@ describe("BD16 P3: pre-order reviews", () => {
     resetReviewMocks();
     mockPreorderListedEmail.mockReset().mockResolvedValue(undefined);
     mockPreorderFileEmail.mockReset().mockResolvedValue(undefined);
+    mockScheduleReaders.mockClear();
   });
   const NO_FILE_CHECKS = { cover_is_fine: "on", rights_ok: "on" };
   const setBook = (fields: Record<string, unknown>) => {
@@ -736,6 +752,9 @@ describe("BD16 P3: pre-order reviews", () => {
     await settleAfterTasks();
     expect(mockNewBookEmails).not.toHaveBeenCalled();
     expect(mockApprovedEmail).not.toHaveBeenCalled();
+    // P5: the sweep is scheduled for any pre-order final file; it acts
+    // only on a published book, so nothing goes to readers here.
+    expect(mockScheduleReaders).toHaveBeenCalledWith("approveBookReviewAsStaff");
   });
 
   it("a pre-order's final file approved after its day releases it: the published email and the followers email", async () => {
@@ -748,6 +767,18 @@ describe("BD16 P3: pre-order reviews", () => {
     await settleAfterTasks();
     expect(mockNewBookEmails).toHaveBeenCalledTimes(1);
     expect(mockPreorderFileEmail).not.toHaveBeenCalled();
+    // P5: its "Më njofto" readers hear now, not at the next morning's job.
+    expect(mockScheduleReaders).toHaveBeenCalledTimes(1);
+  });
+
+  it("P5: a listing or a pre-order's other changes schedule no reader sweep", async () => {
+    setBook({ status: "draft", file_path: null, release_date: "2026-12-12" });
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    adminRowQueue.books = [{ data: { status: "preorder", release_date: "2026-12-12" }, error: null }];
+    await redirectOf(() =>
+      approveBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: "", coverPath: COVER, ...NO_FILE_CHECKS })),
+    );
+    expect(mockScheduleReaders).not.toHaveBeenCalled();
   });
 
   it("a pre-order's other changes: the changes email", async () => {

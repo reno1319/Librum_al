@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff } from "@/lib/staff";
 import { sendAccountSuspendedEmail, sendAccountSuspensionLiftedEmail } from "@/lib/email";
+import { scheduleWaitingReaderEmails } from "@/lib/preorder-emails";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
 import {
@@ -160,6 +161,9 @@ export async function liftSuspensionAsStaff(formData: FormData) {
 
   const unbanned = await setBan(userId, LIFT_BAN_DURATION);
   await emailAccount(userId, sendAccountSuspensionLiftedEmail, "lifted");
+  // BD16 P5 (Q4 a): a paused pre-order that couldn't come back ended as
+  // cancelled; its waiting readers get the one "cancelled" email.
+  scheduleWaitingReaderEmails("liftSuspensionAsStaff");
   revalidateEverything(userId);
 
   redirect(

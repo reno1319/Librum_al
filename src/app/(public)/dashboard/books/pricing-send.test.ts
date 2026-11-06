@@ -73,6 +73,13 @@ vi.mock("@/lib/staff-alerts", () => ({
 const mockSendNewBookEmails = vi.fn(async () => undefined);
 vi.mock("@/lib/email", () => ({ sendNewBookEmails: () => mockSendNewBookEmails() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({}) }));
+// BD16 P5: the cancel schedules the waiting readers' one email.
+const mockScheduleReaders = vi.fn();
+const mockScheduleMoved = vi.fn();
+vi.mock("@/lib/preorder-emails", () => ({
+  scheduleWaitingReaderEmails: (source: string) => mockScheduleReaders(source),
+  scheduleDateMovedReaderEmails: (source: string, move: unknown) => mockScheduleMoved(source, move),
+}));
 
 let takedownKind: "none" | "active" | "unavailable" = "none";
 vi.mock("@/lib/book-takedowns", () => ({
@@ -1175,8 +1182,10 @@ describe("BD16 P2: a live pre-order", () => {
   });
 
   it("cancel: needs the tick, then goes back to draft through the writer, bound to status preorder", async () => {
+    mockScheduleReaders.mockClear();
     expect(await run(cancelPreorder(BOOK_ID, form({})))).toBe(at("error", CANCEL_PREORDER_CONFIRM_MISSING_MESSAGE));
     expect(statusWrites()).toEqual([]);
+    expect(mockScheduleReaders).not.toHaveBeenCalled();
     expect(await run(cancelPreorder(BOOK_ID, form({ confirmCancelPreorder: "yes" })))).toBe(
       at("success", PREORDER_CANCELLED_MESSAGE),
     );
@@ -1190,14 +1199,18 @@ describe("BD16 P2: a live pre-order", () => {
         { kind: "eq", column: "status", value: "preorder" },
       ]),
     );
+    // P5 (Q4 a): the waiting readers' "cancelled" email goes right after.
+    expect(mockScheduleReaders).toHaveBeenCalledWith("cancelPreorder");
   });
 
   it("cancel refuses a book that is not a pre-order (released or cancelled meanwhile)", async () => {
+    mockScheduleReaders.mockClear();
     book.status = "published";
     expect(await run(cancelPreorder(BOOK_ID, form({ confirmCancelPreorder: "yes" })))).toBe(
       at("error", PREORDER_NOT_PREORDER_MESSAGE),
     );
     expect(statusWrites()).toEqual([]);
+    expect(mockScheduleReaders).not.toHaveBeenCalled();
   });
 
   it("cancel that matches no row (released in between) says so", async () => {
@@ -1217,17 +1230,23 @@ describe("BD16 P2: a live pre-order", () => {
     expect(rpcCalls).toEqual([
       { fn: "push_preorder_release_date", args: { p_book_id: BOOK_ID, p_release_date: "2027-02-19" } },
     ]);
+    // P5 (Renato 11-06): the waiting readers' one "new date" email.
+    expect(mockScheduleMoved).toHaveBeenCalledWith("pushPreorderDate", { bookId: BOOK_ID, releaseDate: "2027-02-19" });
   });
 
   it("push refuses the same day, an earlier one, or more than 30 days, without calling the database", async () => {
+    mockScheduleMoved.mockClear();
     for (const releaseDate of ["2027-01-20", "2027-01-10", "2027-02-20", "x"]) {
       expect(await run(pushPreorderDate(BOOK_ID, form({ releaseDate })))).toBe(at("error", PUSH_INVALID_MESSAGE));
     }
     expect(rpcCalls).toEqual([]);
+    expect(mockScheduleMoved).not.toHaveBeenCalled();
   });
 
   it("push: the database's LB504 (used, or too late) is shown plainly", async () => {
     rpcError = { code: "LB504", message: "This pre-order's date was already moved once." };
+    mockScheduleMoved.mockClear();
     expect(await run(pushPreorderDate(BOOK_ID, form({ releaseDate: "2027-01-25" })))).toBe(at("error", PUSH_REFUSED_MESSAGE));
+    expect(mockScheduleMoved).not.toHaveBeenCalled();
   });
 });

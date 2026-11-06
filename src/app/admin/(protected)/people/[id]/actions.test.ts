@@ -55,6 +55,11 @@ vi.mock("@/lib/email", () => ({
   sendAccountSuspensionLiftedEmail: (to: string) => mockLiftedEmail(to),
 }));
 
+// BD16 P5: a lift that cancels a paused pre-order tells its readers.
+const mockScheduleReaders = vi.fn();
+vi.mock("@/lib/preorder-emails", () => ({
+  scheduleWaitingReaderEmails: (source: string) => mockScheduleReaders(source),
+}));
 const { suspendAccountAsStaff, liftSuspensionAsStaff, retryAccountAccessAsStaff } = await import("./actions");
 
 const ANA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -192,9 +197,11 @@ describe("liftSuspensionAsStaff", () => {
     expect(mockUpdateUserById).toHaveBeenCalledWith(ANA, { ban_duration: "none" });
     expect(mockLiftedEmail).toHaveBeenCalledWith("ana@example.com");
     expect(messageOf(target, "success")).toBe("Suspension lifted. They can sign in again.");
+    expect(mockScheduleReaders).toHaveBeenCalledWith("liftSuspensionAsStaff");
   });
 
   it("maps 'not suspended' and anything else (N2) without unbanning", async () => {
+    mockScheduleReaders.mockClear();
     mockRpc.mockResolvedValueOnce({ data: null, error: { code: "P0001", message: "this account is not suspended" } });
     let target = await redirectOf(() => liftSuspensionAsStaff(form({ userId: ANA })));
     expect(messageOf(target, "error")).toBe("This account isn't suspended. Reload to see what changed.");
@@ -206,6 +213,7 @@ describe("liftSuspensionAsStaff", () => {
     expect(messageOf(target, "error")).toBe("Please try again.");
     expect(mockUpdateUserById).not.toHaveBeenCalled();
     expect(mockLiftedEmail).not.toHaveBeenCalled();
+    expect(mockScheduleReaders).not.toHaveBeenCalled();
   });
 
   it("says plainly when the unban step fails", async () => {

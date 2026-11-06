@@ -5,9 +5,9 @@ import type { PreorderRunCounts } from "@/lib/preorder-staff";
 // BD16 P3 (PLAN-BD16-r1 §3.5): the daily pre-order job's database step,
 // run_preorder_day() (migration 20261106120000; service role only, safe
 // to run twice, one book failing never stops the others). Used by the
-// owner's "run now" button on the Today page. P5 adds the cron route and
-// the emails on top of this same call; until then nothing here sends
-// an email (the rows the emails are built from stay in the database).
+// owner's "run now" button on the Today page and (P5) the cron route
+// src/app/api/internal/preorders/run. Nothing here sends an email: the
+// callers then run src/lib/preorder-emails.ts sendPreorderJobEmails.
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 

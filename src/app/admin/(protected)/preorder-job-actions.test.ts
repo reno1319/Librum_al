@@ -19,6 +19,13 @@ vi.mock("@/lib/staff", () => ({ requireStaff: (permission: string) => mockRequir
 const mockRpc = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ rpc: mockRpc }) }));
 vi.mock("server-only", () => ({}));
+// BD16 P5: the emails are scheduled with after() once the run is done.
+const afterTasks: (() => Promise<unknown>)[] = [];
+vi.mock("next/server", () => ({ after: (task: () => Promise<unknown>) => afterTasks.push(task) }));
+const mockJobEmails = vi.fn(async (_admin: unknown, _summary: unknown) => ({ released: 0, cancelled: 0 }));
+vi.mock("@/lib/preorder-emails", () => ({
+  sendPreorderJobEmails: (admin: unknown, summary: unknown) => mockJobEmails(admin, summary),
+}));
 
 const { runPreorderJobAsOwner } = await import("./preorder-job-actions");
 
@@ -31,6 +38,8 @@ describe("runPreorderJobAsOwner", () => {
   beforeEach(() => {
     role = "owner";
     mockRedirect.mockClear();
+    afterTasks.length = 0;
+    mockJobEmails.mockClear();
     mockRpc.mockReset().mockResolvedValue({
       data: {
         today: "2026-11-06",
@@ -56,16 +65,36 @@ describe("runPreorderJobAsOwner", () => {
     expect(mockRpc).toHaveBeenCalledWith("run_preorder_day", { p_today: null });
   });
 
+  it("P5: sends the job's emails after answering, with the run's summary", async () => {
+    await target();
+    expect(mockJobEmails).not.toHaveBeenCalled();
+    expect(afterTasks).toHaveLength(1);
+    await afterTasks[0]();
+    expect(mockJobEmails).toHaveBeenCalledTimes(1);
+    const summary = mockJobEmails.mock.calls[0][1] as { releasedBookIds: string[]; slipped: unknown[] };
+    expect(summary.releasedBookIds).toEqual(["b1"]);
+    expect(summary.slipped).toEqual([{ bookId: "b2", releaseDate: "2026-12-06" }]);
+  });
+
+  it("P5: a failed run still sweeps the readers' emails (summary null)", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: "42501", message: "x" } });
+    await target();
+    await afterTasks[0]();
+    expect(mockJobEmails).toHaveBeenCalledWith(expect.anything(), null);
+  });
+
   it.each(["admin", "moderator", "editor", "support"])("refuses %s without running", async (r) => {
     role = r;
     expect(await target()).toBe("/admin?error=Only the owner can run the pre-order job.");
     expect(mockRpc).not.toHaveBeenCalled();
+    expect(afterTasks).toHaveLength(0);
   });
 
   it("refuses before 08:00 Tirana", async () => {
     vi.setSystemTime(new Date("2026-11-06T06:59:00Z"));
     expect(await target()).toContain("starts at 08:00 Tirana time");
     expect(mockRpc).not.toHaveBeenCalled();
+    expect(afterTasks).toHaveLength(0);
   });
 
   it("is refused in maintenance before the staff check", async () => {

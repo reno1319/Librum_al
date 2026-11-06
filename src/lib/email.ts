@@ -51,14 +51,42 @@ export const EMAIL_BATCH_PAUSE_MS = 600;
 
 type EmailMessage = { to: string; subject: string; html: string };
 
+// BD16 P5 r2 (audit F2): callers that mark an email as sent before
+// sending it (the pre-order emails) check this first, so a deploy
+// without the key marks nothing.
+export function emailSendingConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY);
+}
+
+// BD16 P5 r3 (audit G1, G2): what a caller that marks emails as sent
+// before sending (the pre-order emails) needs to know. notSent: the
+// indexes (into messages) that were DEFINITELY not sent -- no key, or a
+// request Resend answered with a refusal status (400, 401, 403, 422,
+// 429: it refused before sending anything). invalid: with permissive
+// validation, the emails Resend refused one by one (a bad address);
+// permanent, so never retried. Anything else -- a dropped connection, a
+// timeout, a 5xx, no status at all (resend@6 returns these as { error }
+// with statusCode null or 5xx, it never throws), or a throw -- is an
+// UNKNOWN outcome: Resend may have sent it, so it is in neither list and
+// the caller keeps it marked (at most once, never twice).
+export type EmailBatchResult = { notSent: number[]; invalid: number[] };
+
+const DEFINITE_REFUSAL_STATUSES = new Set([400, 401, 403, 422, 429]);
+
+export function isDefiniteRefusal(statusCode: unknown): boolean {
+  return typeof statusCode === "number" && DEFINITE_REFUSAL_STATUSES.has(statusCode);
+}
+
 export async function sendEmailBatch(
   messages: EmailMessage[],
-  { pauseMs = EMAIL_BATCH_PAUSE_MS }: { pauseMs?: number } = {},
-) {
-  if (messages.length === 0) return;
+  { pauseMs = EMAIL_BATCH_PAUSE_MS, permissive = false }: { pauseMs?: number; permissive?: boolean } = {},
+): Promise<EmailBatchResult> {
+  const notSent: number[] = [];
+  const invalid: number[] = [];
+  if (messages.length === 0) return { notSent, invalid };
   if (!process.env.RESEND_API_KEY) {
     console.warn(`RESEND_API_KEY not set — skipping ${messages.length} email(s) "${messages[0].subject}"`);
-    return;
+    return { notSent: messages.map((_m, i) => i), invalid };
   }
 
   const resend = new Resend(process.env.RESEND_API_KEY);
@@ -66,19 +94,43 @@ export async function sendEmailBatch(
     if (start > 0 && pauseMs > 0) await new Promise((resolve) => setTimeout(resolve, pauseMs));
     const batch = messages.slice(start, start + EMAIL_BATCH_SIZE).map((m) => ({ from: FROM, ...m }));
     try {
-      const { error } = await resend.batch.send(batch);
+      // G2: permissive validation sends the valid emails of a batch and
+      // lists the invalid ones, so one bad address can't hold back the rest.
+      const { data, error } = permissive
+        ? await resend.batch.send(batch, { batchValidation: "permissive" })
+        : await resend.batch.send(batch);
       if (error) {
-        console.error("Failed to send email batch: Resend refused it", {
-          subject: batch[0].subject,
-          count: batch.length,
-          name: error.name ?? null,
-          statusCode: error.statusCode ?? null,
-        });
+        const definite = isDefiniteRefusal(error.statusCode);
+        console.error(
+          definite
+            ? "Failed to send email batch: Resend refused it"
+            : "Email batch outcome unknown: Resend may have sent it",
+          {
+            subject: batch[0].subject,
+            count: batch.length,
+            name: error.name ?? null,
+            statusCode: error.statusCode ?? null,
+          },
+        );
+        if (definite) for (let i = start; i < start + batch.length; i++) notSent.push(i);
+      } else if (permissive) {
+        const errors = (data as { errors?: { index?: unknown }[] } | null)?.errors ?? [];
+        let refused = 0;
+        for (const e of errors) {
+          if (typeof e?.index === "number" && Number.isInteger(e.index) && e.index >= 0 && e.index < batch.length) {
+            invalid.push(start + e.index);
+            refused += 1;
+          }
+        }
+        if (refused > 0) {
+          console.error("Email batch: Resend refused some addresses", { subject: batch[0].subject, count: refused });
+        }
       }
     } catch (error) {
-      console.error("Failed to send email batch:", error);
+      console.error("Email batch outcome unknown: the send threw", { error });
     }
   }
+  return { notSent, invalid };
 }
 
 // ALL-TXN-CURRENCY-4: every purchase email states its amount in the
@@ -303,6 +355,23 @@ export async function sendNewBookEmails(
 
   if (!penName || !follows || follows.length === 0) return;
 
+  // BD16 P5 (D2): a follower who also asked "Më njofto" for this book
+  // gets only the pre-order release email, never this one too. Any row
+  // of the current pre-order counts (sent or not); a row whose pre-order
+  // was cancelled does not (that reader got the "cancelled" email and
+  // did not ask again). An unreadable list sends to every follower.
+  const waiting = new Set<string>();
+  const { data: waiters, error: waitersError } = await admin
+    .from("preorder_notify_requests")
+    .select("user_id")
+    .eq("book_id", bookId)
+    .is("book_cancelled_at", null)
+    .returns<{ user_id: string }[]>();
+  if (waitersError) console.error("sendNewBookEmails: the pre-order readers read failed", { code: waitersError.code ?? null });
+  for (const row of waiters ?? []) waiting.add(row.user_id);
+  const recipients = follows.filter(({ follower_id: followerId }) => !waiting.has(followerId));
+  if (recipients.length === 0) return;
+
   const authorName = escapeEmailHtml(penName.name);
   const bookUrl = `${origin}/libra/${bookId}`;
   const subject = `${penName.name} publikoi një libër të ri`;
@@ -314,9 +383,9 @@ export async function sendNewBookEmails(
         </div>`;
 
   const emails: string[] = [];
-  for (let start = 0; start < follows.length; start += EMAIL_BATCH_SIZE) {
+  for (let start = 0; start < recipients.length; start += EMAIL_BATCH_SIZE) {
     const found = await Promise.all(
-      follows.slice(start, start + EMAIL_BATCH_SIZE).map(async ({ follower_id: followerId }) => {
+      recipients.slice(start, start + EMAIL_BATCH_SIZE).map(async ({ follower_id: followerId }) => {
         const { data: follower } = await admin.auth.admin.getUserById(followerId);
         return follower?.user?.email ?? null;
       }),
@@ -445,6 +514,113 @@ export async function sendPreorderFileApprovedEmail(
         <h1 style="font-size: 20px;">Dorëshkrimi final i <strong>${escapeEmailHtml(title)}</strong> u miratua</h1>
         <p>Libri del vetë më ${escapeEmailHtml(formatDateOnly(releaseDate))}, rreth orës 08:00.</p>
         <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
+      </div>`,
+  );
+}
+
+// BD16 P5: the one email a reader who asked "Më njofto" gets (plan §1,
+// Q4 a). Built here, sent in batches by src/lib/preorder-emails.ts.
+// Only the title is named (escaped); the footer says it is the only one.
+export function preorderReleasedReaderEmail({ title, bookId }: { title: string; bookId: string }) {
+  const origin = resolveSiteOrigin();
+  return {
+    subject: `"${title}" doli në Librum`,
+    html: `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;"><strong>${escapeEmailHtml(title)}</strong> doli</h1>
+        <p>Libri për të cilin kërkuat të njoftoheni sapo doli në Librari.</p>
+        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin</a></p>
+        <p style="font-size: 12px; color: #666;">E morët këtë email sepse shtypët "Më njofto" për këtë libër. Është i vetmi email që do të merrni për të.</p>
+      </div>`,
+  };
+}
+
+// BD16 P5 (Renato 11-06, card: "Yes, one short new-date email"): the
+// one allowed date move of a pre-order (the job's 30-day slip or the
+// author's own push). Not the reader's one release email: that still
+// comes when the book is out.
+export function preorderDateMovedReaderEmail({
+  title,
+  bookId,
+  releaseDate,
+}: {
+  title: string;
+  bookId: string;
+  releaseDate: string;
+}) {
+  const origin = resolveSiteOrigin();
+  return {
+    subject: `"${title}" del në një datë të re`,
+    html: `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;"><strong>${escapeEmailHtml(title)}</strong> del më ${escapeEmailHtml(formatDateOnly(releaseDate))}</h1>
+        <p>Data e daljes së librit për të cilin kërkuat të njoftoheni u shty. Data e re është ${escapeEmailHtml(formatDateOnly(releaseDate))}.</p>
+        <p>Do t'ju shkruajmë përsëri kur të dalë libri.</p>
+        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin</a></p>
+        <p style="font-size: 12px; color: #666;">E morët këtë email sepse shtypët "Më njofto" për këtë libër. Që të mos merrni më, hapni faqen e librit dhe shtypni "Hiq njoftimin".</p>
+      </div>`,
+  };
+}
+
+// BD16 P5 (Q4 a): the pre-order ended before its day, for whatever
+// reason (the author, a second missed deadline, Librum). The same
+// neutral words every time: who or why is never said. The book page is
+// gone, so the link is the Librari.
+export function preorderCancelledReaderEmail({ title }: { title: string }) {
+  const origin = resolveSiteOrigin();
+  return {
+    subject: `"${title}" nuk do të dalë në datën e njoftuar`,
+    html: `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Parapublikimi i <strong>${escapeEmailHtml(title)}</strong> u anulua</h1>
+        <p>Libri për të cilin kërkuat të njoftoheni nuk do të dalë në datën e njoftuar.</p>
+        <p>Nëse njoftohet përsëri, hapni faqen e librit dhe shtypni përsëri "Më njofto".</p>
+        <p><a href="${origin}/librari">Shikoni Librarinë</a></p>
+        <p style="font-size: 12px; color: #666;">E morët këtë email sepse shtypët "Më njofto" për këtë libër. Nuk do të merrni email të tjerë për të.</p>
+      </div>`,
+  };
+}
+
+// BD16 P5: the author's emails from the daily job (plan §3.5). The
+// author's own cancel and a staff takedown already tell the author, so
+// these cover only what the job did by itself.
+export async function sendPreorderReleasedAuthorEmail(to: string, { title, bookId }: { title: string; bookId: string }) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    `Libri juaj "${title}" doli sot në Librum`,
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Libri juaj <strong>${escapeEmailHtml(title)}</strong> doli sot</h1>
+        <p>Erdhi data e daljes, ndaj parapublikimi u bë libër në Librari. Lexuesit që prisnin po marrin njoftimin e tyre.</p>
+        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
+      </div>`,
+  );
+}
+
+export async function sendPreorderDateMovedEmail(
+  to: string,
+  { title, releaseDate }: { title: string; releaseDate: string },
+) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    `Data e daljes së "${title}" u shty me 30 ditë`,
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Data e daljes së <strong>${escapeEmailHtml(title)}</strong> u shty</h1>
+        <p>Dorëshkrimi final nuk erdhi deri në afatin e tij, ndaj data e daljes u shty me 30 ditë, në ${escapeEmailHtml(formatDateOnly(releaseDate))}. Kjo ishte shtyrja e vetme e lejuar.</p>
+        <p>Dërgojeni dorëshkrimin final për shqyrtim të paktën 3 ditë para datës së re. Nëse nuk vjen as këtë herë, parapublikimi anulohet.</p>
+        <p><a href="${origin}/dashboard">Hapni panelin e autorit</a></p>
+      </div>`,
+  );
+}
+
+export async function sendPreorderCancelledAuthorEmail(to: string, { title }: { title: string }) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    `Parapublikimi i "${title}" u anulua`,
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Parapublikimi i <strong>${escapeEmailHtml(title)}</strong> u anulua</h1>
+        <p>Dorëshkrimi final nuk erdhi as pas shtyrjes së datës, ndaj parapublikimi u anulua dhe libri u kthye në draft. Lexuesit që prisnin u njoftuan.</p>
+        <p>Mund ta publikoni kur dorëshkrimi të jetë gati.</p>
+        <p><a href="${origin}/dashboard">Hapni panelin e autorit</a></p>
       </div>`,
   );
 }
