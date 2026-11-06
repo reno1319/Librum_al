@@ -43,10 +43,11 @@ describe("Book Detail: metadata dl row order and conditional rendering", () => {
   const dlBlock = block('<dl className="mt-4 grid', "</dl>");
 
   it("Format remains always visible, unconditional", () => {
-    expect(dlBlock).toContain("E-libër · EPUB");
+    expect(dlBlock).toContain("<dd className={DETAIL_VALUE_CLASSES}>EPUB</dd>");
+    expect(dlBlock).not.toContain("E-libër");
     // Format's <div> is the only one with no preceding {book.x && (
     // guard -- confirmed by it appearing before the first conditional.
-    const formatIndex = dlBlock.indexOf("E-libër · EPUB");
+    const formatIndex = dlBlock.indexOf(">EPUB<");
     const firstConditionalIndex = dlBlock.indexOf("&&");
     expect(formatIndex).toBeLessThan(firstConditionalIndex);
   });
@@ -149,6 +150,20 @@ describe("Book Detail: review date", () => {
   it("the public reviews read still selects created_at from public_reviews", () => {
     expect(source).toMatch(
       /from\("public_reviews"\)\s*\.select\("[^"]*\bcreated_at\b[^"]*"\)/,
+    );
+  });
+});
+
+// Upload notes 3a (Enkelejd 11-06): no "E-libër" on the book page; the
+// eyebrow is the genre alone and shows nothing without one.
+describe("Book Detail: format wording", () => {
+  it("never says E-libër", () => {
+    expect(source).not.toMatch(/E-lib[eë]r/i);
+  });
+
+  it("the eyebrow is the genre only, and only when there is one", () => {
+    expect(source).toContain(
+      '{book.genre && (\n            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">{book.genre}</p>',
     );
   });
 });

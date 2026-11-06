@@ -260,12 +260,19 @@ export type DetailsCompleteness = {
 };
 
 export function missingDetails(book: DetailsCompleteness): string[] {
-  const missing: string[] = [];
-  if (!book.title?.trim()) missing.push("Titulli");
-  if (!book.categories || book.categories.length === 0) missing.push("Të paktën një kategori");
-  if (!book.description?.trim()) missing.push("Përshkrimi");
-  if (!book.rightsBasis) missing.push("Të drejtat");
-  else if (book.rightsBasis !== "own_rights" && !book.originalAuthor?.trim()) missing.push("Autori origjinal");
+  return missingDetailItems(book).map((m) => m.label);
+}
+
+// Upload notes 2 (Enkelejd 11-06): the same list with each item's field,
+// so the Details tab can mark the empty ones red.
+export function missingDetailItems(book: DetailsCompleteness): { field: DetailsField; label: string }[] {
+  const missing: { field: DetailsField; label: string }[] = [];
+  if (!book.title?.trim()) missing.push({ field: "title", label: "Titulli" });
+  if (!book.categories || book.categories.length === 0) missing.push({ field: "categories", label: "Të paktën një kategori" });
+  if (!book.description?.trim()) missing.push({ field: "description", label: "Përshkrimi" });
+  if (!book.rightsBasis) missing.push({ field: "rightsBasis", label: "Të drejtat" });
+  else if (book.rightsBasis !== "own_rights" && !book.originalAuthor?.trim())
+    missing.push({ field: "originalAuthor", label: "Autori origjinal" });
   return missing;
 }
 

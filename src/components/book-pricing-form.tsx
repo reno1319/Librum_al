@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { UnsavedChangesGuard } from "@/components/unsaved-changes-guard";
 import {
   EDITOR_CONTROL_CLASSES,
   EDITOR_FIELD_CLASSES,
@@ -9,12 +10,15 @@ import {
   EDITOR_LABEL_CLASSES,
   EditorActionBar,
   EditorSection,
+  editorControlClassesFor,
 } from "@/components/book-editor-ui";
 import { groupAllDigits } from "@/lib/catalog-price";
 import {
-  editorPath,
+  CONTENT_MISSING_SECTION,
+  editorMissingPath,
   EDITOR_TABS,
   LIVE_SAVE_BUTTON,
+  MISSING_FOR_SEND_MESSAGE,
   NO_CHANGES_TO_SEND_NOTE,
   SEND_CHANGES_BUTTON,
   type EditorTab,
@@ -91,6 +95,8 @@ const TICK_INPUT_CLASSES = "focus-ring mt-0.5 h-[18px] w-[18px] shrink-0 accent-
 // The to-do lines for the two ticks on this tab.
 export const WORLDWIDE_TODO_LABEL = "Të drejtat për shitje në të gjithë botën";
 export const TERMS_TODO_LABEL = "Kushtet e Librum";
+// A pre-order date outside the window shown under the field.
+export const RELEASE_DATE_OUTSIDE_MESSAGE = "Zgjidhni një datë brenda kufijve më sipër.";
 
 // BD16 P2: preorderOptional -- not needed for a pre-order listing (the
 // manuscript may come later, D5).
@@ -110,9 +116,17 @@ export type PricingRelease =
 
 export type PricingTodo = { key: string; label: string; tab: EditorTab; href: string };
 
+// A missing item's link: its tab with the "show missing" flag, and for
+// the Content tab the box it is in.
+function missingItemHref(bookId: string, m: PricingMissing): string {
+  const section = m.tab === "content" ? CONTENT_MISSING_SECTION[m.label] : undefined;
+  return `${editorMissingPath(bookId, m.tab)}${section ? `#${section}` : ""}`;
+}
+
 /**
  * Everything still missing before "Send": the other tabs' gaps (linked
- * to their tab), then each unticked box on this tab (linked to the box).
+ * to their tab, which then marks them red -- upload notes 2), then each
+ * unticked box on this tab (linked to the box).
  */
 export function pricingTodo(
   bookId: string,
@@ -120,7 +134,7 @@ export function pricingTodo(
   ticks: { worldwide: boolean; terms: boolean },
 ): PricingTodo[] {
   return [
-    ...missing.map((m) => ({ key: `${m.tab}-${m.label}`, label: m.label, tab: m.tab, href: editorPath(bookId, m.tab) })),
+    ...missing.map((m) => ({ key: `${m.tab}-${m.label}`, label: m.label, tab: m.tab, href: missingItemHref(bookId, m) })),
     ...(ticks.worldwide
       ? []
       : [{ key: "tick-worldwide", label: WORLDWIDE_TODO_LABEL, tab: "pricing" as const, href: "#pricing-worldwide" }]),
@@ -183,14 +197,25 @@ export function BookPricingForm({
   const readerPrice =
     mode === "free" ? PRICE_FREE_LABEL : preview.kind === "paid" ? `${groupAllDigits(preview.priceAll)} lekë` : "—";
 
+  // Upload notes 2 (Enkelejd 11-06): after a click on the blocked send
+  // button, what is missing on this tab is outlined red.
+  const [showMissing, setShowMissing] = useState(false);
   const [worldwide, setWorldwide] = useState(false);
   const [terms, setTerms] = useState(false);
   const [releaseMode, setReleaseMode] = useState<ReleaseMode>(release?.available ? release.initialMode : "now");
   const [releaseDate, setReleaseDate] = useState(release?.available ? release.initialDate : "");
   const preorder = release?.available === true && releaseMode === "preorder";
+  // Upload notes 2, audit A r1 N2: a date outside the allowed window (typed
+  // by hand, or an earlier date the window has since passed) is refused by
+  // the server, so it counts as missing here too, like an empty one.
+  const releaseDateOutside =
+    preorder &&
+    release?.available === true &&
+    releaseDate !== "" &&
+    (releaseDate < release.window.min || releaseDate > release.window.max);
   const todo = [
     ...pricingTodo(bookId, preorder ? missing.filter((m) => !m.preorderOptional) : missing, { worldwide, terms }),
-    ...(preorder && releaseDate === ""
+    ...(preorder && (releaseDate === "" || releaseDateOutside)
       ? [{ key: "release-date", label: RELEASE_DATE_TODO_LABEL, tab: "pricing" as const, href: "#pricing-release-date" }]
       : []),
   ];
@@ -203,16 +228,39 @@ export function BookPricingForm({
   const priceChanging =
     live !== null && live.confirmPrice !== false && newPriceAll !== null && newPriceAll !== live.currentPriceAll;
   const sendBlocked = sendRefusedNote !== null || todo.length > 0 || (live !== null && !live.hasChanges);
+  const todoNoteShown = sendRefusedNote === null && !(live !== null && !live.hasChanges) && todo.length > 0;
   const sendNote =
     sendRefusedNote ??
     (live !== null && !live.hasChanges ? NO_CHANGES_TO_SEND_NOTE : pricingTodoNote(todo.length));
+  const markWorldwide = showMissing && !worldwide;
+  const markTerms = showMissing && !terms;
+  const markReleaseDate = showMissing && preorder && (releaseDate === "" || releaseDateOutside);
+
+  // The first missing thing on this tab gets the focus; anything else
+  // missing is on another tab, so the to-do list does.
+  const showWhatIsMissing = () => {
+    if (todo.length === 0) return;
+    setShowMissing(true);
+    const first = todo.find((m) => m.tab === "pricing");
+    const target = document.getElementById(first ? first.href.slice(1) : "pricing-todo");
+    target?.scrollIntoView({ block: "center" });
+    target?.focus({ preventScroll: true });
+  };
 
   return (
     <form action={action} className="mt-2 flex flex-col gap-2">
-      <EditorSection id="pricing-where" title={PRICING_WHERE_HEADING} help={PRICING_WHERE_LINE}>
+      <UnsavedChangesGuard />
+      <EditorSection
+        id="pricing-where"
+        title={PRICING_WHERE_HEADING}
+        help={PRICING_WHERE_LINE}
+        invalid={markWorldwide ? MISSING_FOR_SEND_MESSAGE : undefined}
+      >
         <label className={TICK_CLASSES}>
           <input
             id="pricing-worldwide"
+            data-unsaved-ignore
+            aria-invalid={markWorldwide ? true : undefined}
             type="checkbox"
             name={WORLDWIDE_RIGHTS_FIELD}
             checked={worldwide}
@@ -390,9 +438,15 @@ export function BookPricingForm({
                     min={release.window.min}
                     max={release.window.max}
                     onChange={(e) => setReleaseDate(e.target.value)}
-                    className={`${EDITOR_CONTROL_CLASSES} max-w-48`}
+                    aria-invalid={markReleaseDate ? true : undefined}
+                    className={`${editorControlClassesFor(markReleaseDate)} max-w-48`}
                   />
                   <span className={EDITOR_HINT_CLASSES}>{releaseDateHint(release.window)}</span>
+                  {markReleaseDate && (
+                    <span className="text-sm font-medium text-red-800">
+                      {releaseDateOutside ? RELEASE_DATE_OUTSIDE_MESSAGE : MISSING_FOR_SEND_MESSAGE}
+                    </span>
+                  )}
                 </label>
               )}
             </>
@@ -408,10 +462,12 @@ export function BookPricingForm({
         </div>
       </EditorSection>
 
-      <EditorSection id="pricing-terms" title="Kushtet">
+      <EditorSection id="pricing-terms" title="Kushtet" invalid={markTerms ? MISSING_FOR_SEND_MESSAGE : undefined}>
         <label className={TICK_CLASSES}>
           <input
             id="pricing-terms-tick"
+            data-unsaved-ignore
+            aria-invalid={markTerms ? true : undefined}
             type="checkbox"
             name={ACCEPT_TERMS_FIELD}
             checked={terms}
@@ -430,7 +486,12 @@ export function BookPricingForm({
       </EditorSection>
 
       {todo.length > 0 && (
-        <div className="rounded-lg border border-[#eadfb8] bg-reader-tint px-4 py-3.5 text-sm" role="status">
+        <div
+          id="pricing-todo"
+          tabIndex={-1}
+          className="focus-ring rounded-lg border border-[#eadfb8] bg-reader-tint px-4 py-3.5 text-sm"
+          role="status"
+        >
           <p className="font-semibold">Para dërgimit plotësoni:</p>
           <ul className="mt-1.5 flex list-disc flex-col gap-1 pl-[18px]">
             {todo.map((m) => (
@@ -456,7 +517,9 @@ export function BookPricingForm({
         primaryLabel={sendLabel}
         primaryIntent="send"
         primaryBlocked={sendBlocked}
+        onBlockedClick={showWhatIsMissing}
         primaryNote={sendNote}
+        primaryNoteHref={todoNoteShown ? "#pricing-todo" : undefined}
         saveLabel={live ? LIVE_SAVE_BUTTON : undefined}
         extra={
           publishesNow ? (

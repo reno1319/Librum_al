@@ -11,7 +11,17 @@ import {
   EditorSection,
   Optional,
 } from "@/components/book-editor-ui";
-import { AI_QUESTION, AI_STAFF_ONLY_NOTE, DRM_FREE_NOTE, LIVE_SAVE_BUTTON } from "@/lib/book-editor-copy";
+import { UnsavedChangesGuard } from "@/components/unsaved-changes-guard";
+import {
+  AI_QUESTION,
+  AI_STAFF_ONLY_NOTE,
+  CONTENT_MISSING_AI,
+  CONTENT_MISSING_COVER,
+  CONTENT_MISSING_MANUSCRIPT,
+  DRM_FREE_NOTE,
+  LIVE_SAVE_BUTTON,
+  MISSING_FOR_SEND_MESSAGE,
+} from "@/lib/book-editor-copy";
 import type { AiAnswer } from "@/lib/book-ai-disclosure";
 
 // BD15 P3: the new editor's Content tab (PLAN-BD15-r1 §2.4; mockup
@@ -48,8 +58,12 @@ export function BookContentForm({
   aiAnswer,
   aiUnreadable,
   live = false,
+  markMissing = [],
 }: {
   action: (formData: FormData) => void | Promise<void>;
+  // Upload notes 2 (Enkelejd 11-06): opened from the Pricing tab's to-do
+  // list -- the boxes of what is still missing for the send are red.
+  markMissing?: string[];
   // BD15 P5b-2: a live book -- a new manuscript or ballinë waits for
   // Librum's review; the save button says so.
   live?: boolean;
@@ -62,11 +76,14 @@ export function BookContentForm({
   // leaving both unticked keeps whatever is stored.
   aiUnreadable: boolean;
 }) {
+  const invalid = (label: string) => (markMissing.includes(label) ? MISSING_FOR_SEND_MESSAGE : undefined);
   return (
     <form action={action} className="mt-2 flex flex-col gap-2">
+      <UnsavedChangesGuard />
       <EditorSection
         id="content-manuscript"
         title="Dorëshkrimi"
+        invalid={invalid(CONTENT_MISSING_MANUSCRIPT)}
         help="DOCX ose EPUB, deri në 50 MB. Skedarin Word e kthejmë ne në libër elektronik dhe ju tregojmë çfarë duhet parë. Një skedar i ri zëvendëson të mëparshmin."
       >
         <p className="text-sm font-semibold">{book.hasManuscript ? "Dorëshkrimi aktual: skedar EPUB" : "Nuk ka dorëshkrim ende"}</p>
@@ -79,7 +96,7 @@ export function BookContentForm({
         <p className="text-[13px] text-muted">{DRM_FREE_NOTE}</p>
       </EditorSection>
 
-      <EditorSection id="content-cover" title="Ballina">
+      <EditorSection id="content-cover" title="Ballina" invalid={invalid(CONTENT_MISSING_COVER)}>
         <CoverField authorId={authorId} existingCoverUrl={book.coverUrl ?? undefined} />
       </EditorSection>
 
@@ -95,15 +112,16 @@ export function BookContentForm({
         {book.hasManuscript && (
           <div className="flex flex-wrap gap-3">
             <BookSampleReader bookId={book.id} bookTitle={book.title} label="Hap pamjen paraprake" />
-            {/* A plain link: the route checks the session and that this is the author's own book. */}
-            <a href={`/api/books/${book.id}/download`} className={EDITOR_SMALL_BUTTON}>
+            {/* A plain link: the route checks the session and that this is the author's own book.
+                download: the page stays, so the unsaved-changes guard does not ask (upload notes 1). */}
+            <a href={`/api/books/${book.id}/download`} download className={EDITOR_SMALL_BUTTON}>
               Shkarko skedarin tim
             </a>
           </div>
         )}
       </EditorSection>
 
-      <EditorSection id="content-ai" title="AI" help={AI_STAFF_ONLY_NOTE}>
+      <EditorSection id="content-ai" title="AI" help={AI_STAFF_ONLY_NOTE} invalid={invalid(CONTENT_MISSING_AI)}>
         <fieldset className="m-0 flex flex-col border-0 p-0">
           <legend className={EDITOR_LABEL_CLASSES}>{AI_QUESTION}</legend>
           <div className="mt-1.5 flex gap-7">

@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createSeriesFromEditor } from "@/app/(public)/dashboard/books/editor-actions";
 import { GENRES } from "@/lib/genres";
 import { LANGUAGES } from "@/lib/languages";
@@ -26,6 +27,7 @@ import {
   LIVE_REVIEW_FIELD_HINT,
   LIVE_RIGHTS_LOCKED_NOTE,
   LIVE_SAVE_BUTTON,
+  MISSING_FOR_SEND_MESSAGE,
   PEN_NAME_LOCKED_NOTE,
   TITLE_LOCKED_NOTE,
   TITLE_WILL_LOCK_NOTE,
@@ -43,6 +45,7 @@ import {
   editorControlClassesFor,
 } from "@/components/book-editor-ui";
 import { DescriptionEditor } from "@/components/description-editor";
+import { UnsavedChangesGuard, keepUnsavedMark } from "@/components/unsaved-changes-guard";
 import type { RightsBasis } from "@/lib/types";
 
 // BD15 P2: the Details tab ("Të dhënat") of the new book editor
@@ -109,6 +112,7 @@ export function BookDetailsForm({
   penNames,
   series: initialSeries,
   pdFrozen = false,
+  markMissing = [],
 }: {
   action: (formData: FormData) => void | Promise<void>;
   initial: DetailsFormValues;
@@ -128,8 +132,14 @@ export function BookDetailsForm({
   // hidden copies send the stored values, so a save still goes through
   // pdFrozenDetailsUnchanged on the server as before.
   pdFrozen?: boolean;
+  // Upload notes 2 (Enkelejd 11-06): opened from the Pricing tab's to-do
+  // list -- the fields still empty for the send start out red, with the
+  // first one focused.
+  markMissing?: DetailsField[];
 }) {
-  const [errors, setErrors] = useState<Partial<Record<DetailsField, string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<DetailsField, string>>>(() =>
+    Object.fromEntries(markMissing.map((field) => [field, MISSING_FOR_SEND_MESSAGE])),
+  );
   const [penNameId, setPenNameId] = useState(initial.penNameId);
   const [seriesList, setSeriesList] = useState(initialSeries);
   const [seriesId, setSeriesId] = useState(initial.seriesId);
@@ -144,6 +154,29 @@ export function BookDetailsForm({
   const [keywords, setKeywords] = useState(initial.keywords);
   const [rightsBasis, setRightsBasis] = useState<RightsBasis | "">(initial.rightsBasis);
   const formRef = useRef<HTMLFormElement>(null);
+  const router = useRouter();
+  // Upload notes 1 (Enkelejd 11-06): the pen-name page opens in a new
+  // tab; on coming back here, the list is read again so a name added
+  // there can be picked without reloading (and losing) this form.
+  const penNamesOpenedRef = useRef(false);
+  const firstMissing = markMissing[0];
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !penNamesOpenedRef.current) return;
+      penNamesOpenedRef.current = false;
+      router.refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [router]);
+
+  useEffect(() => {
+    if (!firstMissing) return;
+    const target = formRef.current?.querySelector<HTMLElement>(`[data-field="${firstMissing}"]`);
+    target?.scrollIntoView({ block: "center" });
+    target?.focus({ preventScroll: true });
+  }, [firstMissing]);
 
   // A series carries one pen name: only the chosen pen name's series
   // are offered (the database refuses a mix, LB451).
@@ -155,6 +188,7 @@ export function BookDetailsForm({
     const result = parseBookDetails(new FormData(form));
     if (!result.ok) {
       event.preventDefault();
+      keepUnsavedMark(form);
       setErrors(result.errors);
       const first = Object.keys(result.errors)[0];
       const target = form.querySelector<HTMLElement>(`[data-field="${first}"]`);
@@ -196,6 +230,7 @@ export function BookDetailsForm({
 
   return (
     <form ref={formRef} action={action} onSubmit={onSubmit} noValidate className="mt-2 flex flex-col gap-2">
+      <UnsavedChangesGuard />
       <Section title="Gjuha" lead="Gjuha në të cilën është shkruar libri.">
         <label className={`${EDITOR_FIELD_CLASSES} max-w-80`}>
           <span className={EDITOR_LABEL_CLASSES}>Gjuha</span>
@@ -296,8 +331,17 @@ export function BookDetailsForm({
             </select>
             <span className={EDITOR_HINT_CLASSES}>
               Shtoni ose ndryshoni emra te{" "}
-              <Link href="/dashboard/pen-names" className={TEXT_LINK_CLASSES}>
+              <Link
+                href="/dashboard/pen-names"
+                target="_blank"
+                rel="noopener"
+                onClick={() => {
+                  penNamesOpenedRef.current = true;
+                }}
+                className={TEXT_LINK_CLASSES}
+              >
                 Profili → Emrat e autorit
+                <span className="sr-only"> (hapet në një skedë të re)</span>
               </Link>
               .
             </span>

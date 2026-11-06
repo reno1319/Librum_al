@@ -883,9 +883,11 @@ export default async function BookDetailPage({
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">
-            {book.genre ? `${book.genre} · E-libër` : "E-libër"}
-          </p>
+          {/* Upload notes 3a (Enkelejd 11-06): the genre only; the format
+              is "EPUB" in Formati below. */}
+          {book.genre && (
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">{book.genre}</p>
+          )}
           <h1 className="mt-3 font-serif text-4xl leading-[1.08] font-normal text-primary sm:text-5xl">
             {book.title}
           </h1>
@@ -1235,7 +1237,7 @@ export default async function BookDetailPage({
             <dl className="mt-4 grid max-w-[42.5rem] grid-cols-2 gap-x-6 gap-y-5 rounded-[4px] border border-border bg-surface p-5 sm:grid-cols-3">
               <div>
                 <dt className={DETAIL_LABEL_CLASSES}>Formati</dt>
-                <dd className={DETAIL_VALUE_CLASSES}>E-libër · EPUB</dd>
+                <dd className={DETAIL_VALUE_CLASSES}>EPUB</dd>
               </div>
               {book.language && (
                 <div>
