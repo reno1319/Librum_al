@@ -1,3 +1,5 @@
+import { GENRES, type Genre } from "@/lib/genres";
+
 // LIBRUM 2.0 UI-4: pure decision/URL-building helpers extracted from
 // src/app/bookstore/page.tsx, mirroring the same "extract a pure
 // function, unit-test it directly" pattern already used by
@@ -73,8 +75,17 @@ function parsePriceAllFilter(value: string | undefined): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
+// BD15 follow-up (P8 audit N1): only a genre Librum has filters the
+// grid. Anything else in a hand-made ?genre= (an old name, a typo,
+// "}" or a repeated key, which arrives as an array) is ignored, so the
+// page shows every book instead of a load error.
+export function knownGenre(value: unknown): Genre | undefined {
+  return typeof value === "string" && (GENRES as readonly string[]).includes(value) ? (value as Genre) : undefined;
+}
+
 export function parseBookstoreQuery(params: BookstoreQuery): ParsedBookstoreQuery {
-  const { q, genre, sort, minPrice, maxPrice } = params;
+  const { q, sort, minPrice, maxPrice } = params;
+  const genre = knownGenre(params.genre);
   const minPriceAll = parsePriceAllFilter(minPrice);
   const maxPriceAll = parsePriceAllFilter(maxPrice);
 

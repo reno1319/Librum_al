@@ -326,6 +326,30 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(fiction).toMatch(/<summary[^>]*>Letërsi artistike<svg/);
   });
 
+  // BD15 follow-up (P8 audit N1): an unknown ?genre= is ignored, so the
+  // page is the normal unfiltered Bookstore, never a load error.
+  it("an unknown or malformed genre shows the normal page with every book", async () => {
+    for (const genre of ["Horor", 'Poezi"}', "Poezi,Horror"]) {
+      const html = await render({ genre });
+      expect(html).toMatch(/<summary[^>]*>Të gjitha zhanret<svg/);
+      expect(html).toContain("Book 04");
+      expect(html).toContain(">Të gjithë librat</h2>");
+      expect(html).not.toContain('name="genre"');
+      expect(html).not.toContain(genre.replace(/"/g, "&quot;"));
+    }
+  });
+
+  it("the genre box closes when a genre is picked", async () => {
+    const html = await render({});
+    const nav = html.indexOf('<nav aria-label="Zhanret"');
+    expect(nav).toBeGreaterThan(-1);
+    // closeOnLinkClick is a client handler; the server markup only shows
+    // the box. The wiring is checked in the source.
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    expect(source).toMatch(/<DismissableDetails className="group relative text-sm" closeOnLinkClick>\s*<summary className=\{DROPDOWN_SUMMARY_CLASSES\}>\s*\{genre \?\? "Të gjitha zhanret"\}/);
+  });
+
   // BOOKSTORE ORNATE SHELF (Renato 10-25, header B; 1a/2a): the grid's
   // five newest books as ornate spines beside the heading, from 768px up,
   // and only on the unfiltered view.

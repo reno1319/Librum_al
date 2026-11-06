@@ -428,7 +428,7 @@ export default async function BookstorePage({
   return (
     <main className="flex-1 bg-background">
       <div className="page-container pt-5 pb-10 sm:pt-8 md:pb-12">
-        <BookstoreToolbar query={rawQuery} isFiltered={isFiltered} shelfBooks={ornateBooks} />
+        <BookstoreToolbar query={{ ...rawQuery, genre }} isFiltered={isFiltered} shelfBooks={ornateBooks} />
 
         {featured && (
           <FeaturedBook
@@ -547,8 +547,9 @@ function BookstoreToolbar({
       <div className="mt-6 grid grid-cols-1 gap-2 border-y border-border py-2.5 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-6 sm:gap-y-3">
         {/* REDESIGN STEP 3 r3 (Renato 14:21Z: "one button and when you
             click it, it opens the genres"): the button names the current
-            genre, or "All genres"; the list opens under it. */}
-        <DismissableDetails className="group relative text-sm">
+            genre, or "All genres"; the list opens under it. BD15
+            follow-up: picking a genre closes the list. */}
+        <DismissableDetails className="group relative text-sm" closeOnLinkClick>
           <summary className={DROPDOWN_SUMMARY_CLASSES}>
             {genre ?? "Të gjitha zhanret"}
             <ChevronIcon />

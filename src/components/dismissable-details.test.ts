@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { attachDismiss, type DismissDetails, type DismissDocument } from "./dismissable-details";
+import { attachDismiss, closesOnLinkClick, type DismissDetails, type DismissDocument } from "./dismissable-details";
 
 // LEFTOVERS (L1): the dismiss logic of the floating <details> menus,
 // called directly with fake element/document objects (vitest runs in
@@ -132,5 +132,41 @@ describe("attachDismiss closeOnFocusOut", () => {
     const { listeners, cleanup } = setup("inside", { closeOnFocusOut: true });
     cleanup();
     expect(listeners.size).toBe(0);
+  });
+});
+
+// BD15 follow-up: the Bookstore genre box closes when a genre is picked.
+describe("closesOnLinkClick", () => {
+  const link = { tag: "a" };
+  const insideText = { closest: (sel: string) => (sel === "a[href]" ? link : null) };
+  const insideNoLink = { closest: () => null };
+  const outsideLink = { tag: "a-outside" };
+  const outsideText = { closest: () => outsideLink };
+  const details = { contains: (node: unknown) => node === link };
+  const plain = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
+
+  it("a plain click on a link inside closes it (also Enter, which fires a click)", () => {
+    expect(closesOnLinkClick({ ...plain, target: insideText }, details)).toBe(true);
+  });
+
+  it("a click inside but not on a link (the list's padding, the summary) keeps it open", () => {
+    expect(closesOnLinkClick({ ...plain, target: insideNoLink }, details)).toBe(false);
+  });
+
+  it("a link outside the box is not its business", () => {
+    expect(closesOnLinkClick({ ...plain, target: outsideText }, details)).toBe(false);
+  });
+
+  it.each(["metaKey", "ctrlKey", "shiftKey", "altKey"] as const)("%s + click (new tab or window) keeps it open", (key) => {
+    expect(closesOnLinkClick({ ...plain, [key]: true, target: insideText }, details)).toBe(false);
+  });
+
+  it("a middle click keeps it open", () => {
+    expect(closesOnLinkClick({ ...plain, button: 1, target: insideText }, details)).toBe(false);
+  });
+
+  it("a target with no closest() (a text node in an old browser) keeps it open", () => {
+    expect(closesOnLinkClick({ ...plain, target: {} }, details)).toBe(false);
+    expect(closesOnLinkClick({ ...plain, target: null }, details)).toBe(false);
   });
 });

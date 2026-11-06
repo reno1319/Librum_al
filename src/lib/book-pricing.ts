@@ -90,12 +90,14 @@ export function authorShareMinor(priceAll: number): number {
   return paidMinor - librumShareMinor(paidMinor);
 }
 
-/** "693 lekë", "69,30 lekë" (Albanian: dot groups thousands, comma for qindarka). */
+/**
+ * "693 lekë", "1.234 lekë" (Albanian: dot groups thousands). BD15
+ * follow-up (walkthrough F4): whole lek, rounded down, so 299 lek at 70%
+ * shows "209 lekë", never "209,30 lekë" -- lek is paid in whole numbers,
+ * and the preview never promises more than that.
+ */
 export function formatShareMinor(minor: number): string {
-  const whole = Math.floor(minor / MINOR);
-  const rest = minor % MINOR;
-  const digits = groupAllDigits(whole);
-  return rest === 0 ? `${digits} lekë` : `${digits},${String(rest).padStart(2, "0")} lekë`;
+  return `${groupAllDigits(Math.floor(minor / MINOR))} lekë`;
 }
 
 /** What the preview box shows for the form's current values. */

@@ -165,6 +165,27 @@ describe("AdminBookPage", () => {
     expect(html).not.toMatch(/sold|sales/i);
   });
 
+  // BD15 follow-up (F1 audit N3): the Unpublish panel says when it
+  // couldn't read the bundles, instead of dropping the line.
+  it("the Unpublish panel says so when the bundle list can't be read", async () => {
+    rows.bundle_books = { data: null, error: { message: "boom" } };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const html = await render("moderator");
+    expect(html).toContain("Unpublish now");
+    expect(html).toContain("Couldn’t check which bundles this also unpublishes. Please reload the page.");
+    expect(html).not.toContain("This also unpublishes:");
+    expect(html).not.toContain("boom");
+    errorSpy.mockRestore();
+  });
+
+  it("the Unpublish panel has no bundle line when the book is in no bundle", async () => {
+    rows.bundle_books = { data: [], error: null };
+    const html = await render("moderator");
+    expect(html).toContain("Unpublish now");
+    expect(html).not.toContain("This also unpublishes");
+    expect(html).not.toContain("Couldn’t check which bundles");
+  });
+
   it("says so when there is no rights statement", async () => {
     rows.book_rights_declarations = { data: [], error: null };
     expect(await render("moderator")).toContain("No rights statement on record.");
