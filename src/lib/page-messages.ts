@@ -220,7 +220,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "This request is no longer awaiting review -- it may have already been reviewed or cancelled.",
   "This review no longer exists.",
   "This staff member no longer exists.",
-  "Tick all three checks before you approve.",
+  "Tick all the checks before you approve.",
   "Title is required.",
   "Title must be 200 characters or fewer.",
   "Të dhënat bankare nuk u ruajtën. Kontrolloni të dhënat dhe provoni përsëri.",
@@ -310,6 +310,14 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Për ta fshirë, anuloni fillimisht parapublikimin.",
   "Parapublikimi nuk mund të anulohet tani. Provoni përsëri",
   "Data nuk mund të shtyhet tani. Provoni përsëri",
+  // BD16 P3: pre-orders, the staff side (src/lib/preorder-staff.ts,
+  // books/book-admin-logic.ts).
+  "Too late to approve: this pre-order's date is too close. Send it back so the author picks a new date.",
+  "This book has had its 2 pre-orders. Send it back; the author can still publish it as usual.",
+  "This pre-order changed. Reload and check again.",
+  "The pre-order run starts at 08:00 Tirana time, so a file sent before then still counts as on time. Try again after 08:00.",
+  "The pre-order run failed. Try again; running it twice changes nothing more.",
+  "Only the owner can run the pre-order job.",
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
@@ -371,6 +379,11 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Parapublikimi u anulua. Libri është sërish draft.",
   "Data e daljes u shty.",
   "Shqyrtimi u anulua. Parapublikimi mbetet në Librari; ndryshimet tuaja presin përsëri te redaktori.",
+  // BD16 P3: pre-orders, the staff side (books/book-admin-logic.ts).
+  "Pre-order approved. It shows in the Bookstore as coming out on its date.",
+  "Final file approved. The book stays a pre-order and comes out by itself on its day.",
+  "Final file approved. Its day had passed, so the book is live now.",
+  "Changes approved. Readers see the new version of the pre-order.",
 ]);
 
 type QueryValue = string | string[] | undefined;

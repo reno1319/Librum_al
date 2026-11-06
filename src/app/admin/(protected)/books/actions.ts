@@ -12,6 +12,8 @@ import {
   sendBookSentBackEmail,
   sendBookTakedownEmail,
   sendNewBookEmails,
+  sendPreorderFileApprovedEmail,
+  sendPreorderListedEmail,
 } from "@/lib/email";
 import { BOOK_COVERS_BUCKET, classifyBookCoverPath } from "@/lib/book-storage-path";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
@@ -22,7 +24,8 @@ import { checkPublishGate } from "@/lib/publish-readiness";
 import { removeUnretainedManuscripts } from "@/lib/book-reviews";
 import { readRightsStateForStaff } from "./admin-book-reads";
 import {
-  APPROVED_SUCCESS_MESSAGE,
+  APPROVAL_SUCCESS_MESSAGES,
+  approvalOutcome,
   GENERIC_REVIEW_ERROR_MESSAGE,
   SENT_BACK_SUCCESS_MESSAGE,
   approveReadinessMessage,
@@ -253,6 +256,9 @@ type ReviewedBook = {
   // BD15 P7: a linked book is approved as its work's edition.
   pd_work_id: string | null;
   pd_editor_credit: boolean;
+  // BD16 P3: a pre-order's final file and date.
+  file_path: string | null;
+  release_date: string | null;
 };
 
 export async function approveBookReviewAsStaff(formData: FormData) {
@@ -272,7 +278,7 @@ export async function approveBookReviewAsStaff(formData: FormData) {
   const admin = createAdminClient();
   const { data: book, error: bookError } = await admin
     .from("books")
-    .select("id, title, author_id, status, price_all, description, pen_name_id, cover_path, pd_work_id, pd_editor_credit")
+    .select("id, title, author_id, status, price_all, description, pen_name_id, cover_path, pd_work_id, pd_editor_credit, file_path, release_date")
     .eq("id", validation.bookId)
     .maybeSingle<ReviewedBook>();
   if (bookError || !book) {
@@ -316,15 +322,48 @@ export async function approveBookReviewAsStaff(formData: FormData) {
     redirect(withQuery(bookPath, "error", mapReviewRpcError(error)));
   }
 
+  // BD16 P3: what the approval did (a listing, a final file, a release
+  // on approval after the day). The book as it is now, best effort.
+  // (A live book stays live: nothing to read.)
+  let afterBook: { status: string; release_date: string | null } | null = null;
+  if (book.status !== "published") {
+    try {
+      const { data } = await admin
+        .from("books")
+        .select("status, release_date")
+        .eq("id", book.id)
+        .maybeSingle<{ status: string; release_date: string | null }>();
+      afterBook = data ?? null;
+    } catch {
+      afterBook = null;
+    }
+  }
+  const outcome = approvalOutcome({
+    beforeStatus: book.status,
+    beforeFilePath: book.file_path,
+    approvedFilePath: validation.filePath,
+    afterStatus: afterBook?.status ?? null,
+    firstPublication: firstPublication === true,
+    beforeReleaseDate: book.release_date,
+  });
+  const releaseDate = afterBook?.release_date ?? book.release_date;
+
   // ALBANIAN-12: the author's own email goes first, so the follower
   // batches (which pause between batches) can't hold it up.
   try {
     const { data: author } = await admin.auth.admin.getUserById(book.author_id);
     const email = author?.user?.email;
     // BD15 P5b-2: a live book's approved changes get their own email.
+    // BD16 P3: a pre-order's listing and its final file get theirs.
     if (email) {
-      if (book.status === "published") await sendBookChangesApprovedEmail(email, { title: book.title, bookId: book.id });
-      else await sendBookApprovedEmail(email, { title: book.title, bookId: book.id });
+      const mail = { title: book.title, bookId: book.id };
+      if (outcome === "listed" && releaseDate) {
+        // Audit r1 N2: the final-file line only when it came without one.
+        await sendPreorderListedEmail(email, { ...mail, releaseDate, hasFile: validation.filePath !== null });
+      }
+      else if (outcome === "final_file" && releaseDate) await sendPreorderFileApprovedEmail(email, { ...mail, releaseDate });
+      else if (outcome === "live_changes" || outcome === "preorder_changes") await sendBookChangesApprovedEmail(email, mail);
+      else if (outcome === "published" || outcome === "released") await sendBookApprovedEmail(email, mail);
     }
   } catch (followUpError) {
     console.error("approveBookReviewAsStaff: the author email failed after a successful approval", {
@@ -367,7 +406,12 @@ export async function approveBookReviewAsStaff(formData: FormData) {
   // BD15 P5b-2: a live book's approved new ballinë replaced the one
   // readers saw; that one is removed once the book is proven to name the
   // new one (best effort; never another book's key).
-  if (book.status === "published" && book.cover_path !== null && book.cover_path !== validation.coverPath) {
+  // BD16 P3: a live pre-order's too.
+  if (
+    (book.status === "published" || book.status === "preorder") &&
+    book.cover_path !== null &&
+    book.cover_path !== validation.coverPath
+  ) {
     try {
       const { data: now } = await admin
         .from("books")
@@ -402,7 +446,7 @@ export async function approveBookReviewAsStaff(formData: FormData) {
     "approveBookReviewAsStaff",
   );
 
-  redirect(withQuery(bookPath, "success", APPROVED_SUCCESS_MESSAGE));
+  redirect(withQuery(bookPath, "success", APPROVAL_SUCCESS_MESSAGES[outcome]));
 }
 
 export async function sendBackBookReviewAsStaff(formData: FormData) {
@@ -460,7 +504,8 @@ export async function sendBackBookReviewAsStaff(formData: FormData) {
           title: review.book_title,
           reasonLabel: authorTakedownReasonLabel(review.reason),
           message: review.message_to_author,
-          live: sentBackBook?.status === "published",
+          // BD16 P3: a live pre-order stays listed too.
+          live: sentBackBook?.status === "published" || sentBackBook?.status === "preorder",
         });
       }
       // N3: nothing the rule keeps is removed (the book's current file

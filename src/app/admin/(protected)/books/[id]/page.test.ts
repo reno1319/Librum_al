@@ -692,4 +692,115 @@ describe("AdminBookPage", () => {
       expect(html).not.toContain("boom");
     });
   });
+
+  // ============================================================
+  // BD16 P3: pre-orders (listing, final file, after a lift).
+  // ============================================================
+  describe("BD16 P3: pre-orders", () => {
+    const REVIEW_ID = "55555555-5555-4555-8555-555555555555";
+    const FILE = "author-1/22222222-2222-4222-8222-222222222222/0f0e0d0c-0b0a-4908-8706-050403020100.epub";
+    const COVER = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
+    const review = (fields: Record<string, unknown>) => ({
+      id: REVIEW_ID,
+      status: "pending",
+      grandfathered: false,
+      buyer_file_only: false,
+      submitted_at: new Date(Date.now() - 3_600_000).toISOString(),
+      decided_at: null,
+      decided_by: null,
+      reason: null,
+      file_path: null,
+      cover_path: COVER,
+      original_author: null,
+      description: "Text",
+      is_adult: false,
+      release_date: null,
+      ...fields,
+    });
+    const setBook = (fields: Record<string, unknown>) => {
+      rows.books.data = {
+        ...(rows.books.data as object),
+        published_at: null,
+        file_path: null,
+        cover_path: COVER,
+        description: "Text",
+        is_adult: false,
+        original_author: null,
+        preorder_count: 1,
+        preorder_slip_used: false,
+        ...fields,
+      };
+    };
+
+    it("a listing without a file, in time: two boxes, no file link, Approve the pre-order", async () => {
+      setBook({ status: "draft", release_date: "2099-01-10" });
+      rows.book_reviews = { data: [review({ release_date: "2099-01-10" })], error: null };
+      const html = await render("admin");
+      expect(html).toContain("This is a pre-order listing.");
+      expect(html).toContain("No file yet: the author must send the final file by 7 Jan 2099.");
+      expect(html).toContain("Approve the pre-order");
+      expect(html).not.toContain('name="file_opens"');
+      expect(html).toContain('name="cover_is_fine"');
+      expect(html).not.toContain("Open the book file");
+    });
+
+    it("a listing too late (LB506): no Approve, only Send back", async () => {
+      setBook({ status: "draft", release_date: "2020-01-10" });
+      rows.book_reviews = { data: [review({ release_date: "2020-01-10" })], error: null };
+      const html = await render("admin");
+      expect(html).toContain("Too late to approve");
+      expect(html).not.toContain("Approve the pre-order");
+      expect(html).toContain("Send back to the author");
+    });
+
+    it("a listing whose date changed after sending is not approvable", async () => {
+      setBook({ status: "draft", release_date: "2099-02-10" });
+      rows.book_reviews = { data: [review({ release_date: "2099-01-10" })], error: null };
+      const html = await render("admin");
+      expect(html).not.toContain("Approve the pre-order");
+    });
+
+    it("a pre-order's final file after its day: Approve and release now, the send-back deadline, the Pre-order box", async () => {
+      setBook({ status: "preorder", release_date: "2020-01-10" });
+      rows.book_reviews = { data: [review({ file_path: FILE })], error: null };
+      rows.book_pending_changes = {
+        data: { file_path: FILE, cover_path: COVER, description: "Text", is_adult: false, original_author: null },
+        error: null,
+      };
+      const html = await render("admin");
+      expect(html).toContain("Pre-order · comes out 10 Jan 2020");
+      expect(html).toContain("approving releases the book at once");
+      expect(html).toContain("Approve and release now");
+      expect(html).toContain("Final book file");
+      expect(html).toContain("If you send the final file back, the author has until");
+      expect(html).toContain("Final file waiting for review. The release day has passed");
+      expect(html).toContain("Pre-order 1 of 2 for this book.");
+      expect(html).toContain("Unpublishing cancels the pre-order");
+      expect(html).toContain('href="/libra/22222222-2222-4222-8222-222222222222"');
+    });
+
+    // Audit r1 N4: any pre-order review with a file releases once the day has passed.
+    it("a pre-order with its file already approved, changes waiting after its day: Approve and release now", async () => {
+      setBook({ status: "preorder", file_path: FILE, release_date: "2020-01-10" });
+      rows.book_reviews = { data: [review({ file_path: FILE, description: "New" })], error: null };
+      rows.book_pending_changes = {
+        data: { file_path: FILE, cover_path: COVER, description: "New", is_adult: false, original_author: null },
+        error: null,
+      };
+      const html = await render("admin");
+      expect(html).toContain("Approve and release now");
+    });
+
+    it("after a lifted suspension (a saved, unsent final file): staff are told the author must send it again", async () => {
+      setBook({ status: "preorder", release_date: "2099-01-10" });
+      rows.book_reviews = { data: [], error: null };
+      rows.book_pending_changes = {
+        data: { file_path: FILE, cover_path: COVER, description: "Text", is_adult: false, original_author: null },
+        error: null,
+      };
+      const html = await render("admin");
+      expect(html).toContain("After a suspension is lifted, the author must send the final file again.");
+      expect(html).not.toContain("Review this book");
+    });
+  });
 });

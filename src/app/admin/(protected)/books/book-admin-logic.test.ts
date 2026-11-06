@@ -38,7 +38,7 @@ const REPORT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 describe("books list filters (B)", () => {
   // ADMIN-3-REVIEW (G): "In review" joins the filters.
   it("offers All, Live, In review, Draft and Taken down", () => {
-    expect(BOOKS_FILTERS.map((f) => f.label)).toEqual(["All", "Live", "In review", "Draft", "Taken down"]);
+    expect(BOOKS_FILTERS.map((f) => f.label)).toEqual(["All", "Live", "Pre-orders", "In review", "Draft", "Taken down"]);
     expect(parseBooksFilter("in_review")).toBe("in_review");
   });
 
@@ -334,5 +334,60 @@ describe("adminBookDetailRows (walkthrough F1+F2)", () => {
     });
     expect(value(rows, "Categories")).toBe("Romancë, Thriller");
     expect(value(rows, "Reading age")).toBe("12+");
+  });
+});
+
+// BD16 P3: pre-orders in the books list, the eyebrow and the approval.
+describe("BD16 P3: pre-orders", () => {
+  it("has its own filter and label", async () => {
+    const { parseBooksFilter, bookStateLabel, booksListHref } = await import("./book-admin-logic");
+    expect(parseBooksFilter("preorder")).toBe("preorder");
+    expect(booksListHref("preorder", "")).toBe("/admin/books?status=preorder");
+    expect(bookStateLabel("preorder", false, true)).toBe("Pre-order");
+    expect(bookStateLabel("preorder", true)).toBe("Taken down");
+  });
+
+  it("the eyebrow says the day and the price", async () => {
+    const { describeBookEyebrow } = await import("./book-admin-logic");
+    expect(describeBookEyebrow({ status: "preorder", price_all: 0, release_date: "2026-12-12" }, false)).toBe(
+      "Pre-order · comes out 12 Dec 2026 · Free",
+    );
+    expect(describeBookEyebrow({ status: "preorder", price_all: 499, release_date: "2026-12-12" }, false, true)).toBe(
+      "Pre-order · comes out 12 Dec 2026 · Paid · 499 lekë",
+    );
+  });
+
+  it("validateApproveForm: no file, no file box; the three-key checklist", async () => {
+    const { validateApproveForm, APPROVED_NO_FILE_CHECKLIST } = await import("./book-admin-logic");
+    const f = new FormData();
+    for (const [k, v] of Object.entries({
+      reviewId: "55555555-5555-4555-8555-555555555555",
+      bookId: "22222222-2222-4222-8222-222222222222",
+      filePath: "",
+      cover_is_fine: "on",
+      rights_ok: "on",
+    }))
+      f.set(k, v);
+    const result = validateApproveForm(f);
+    expect(result.ok && result.checklist).toEqual(APPROVED_NO_FILE_CHECKLIST);
+    expect(Object.keys(APPROVED_NO_FILE_CHECKLIST).sort()).toEqual(["cover_is_fine", "not_someone_elses_work", "rights_declared"]);
+  });
+
+  it("approvalOutcome", async () => {
+    const { approvalOutcome } = await import("./book-admin-logic");
+    const o = (beforeStatus: string, afterStatus: string | null, firstPublication = false, beforeFilePath: string | null = null, approvedFilePath: string | null = "f") =>
+      approvalOutcome({ beforeStatus, afterStatus, firstPublication, beforeFilePath, approvedFilePath });
+    expect(o("draft", "preorder")).toBe("listed");
+    expect(o("draft", "published", true)).toBe("published");
+    expect(o("draft", null, true)).toBe("published");
+    // Audit r1 N1: a failed re-read after a listing approval is still a listing.
+    expect(approvalOutcome({ beforeStatus: "draft", afterStatus: null, firstPublication: false, beforeFilePath: null, approvedFilePath: null, beforeReleaseDate: "2026-12-12" })).toBe("listed");
+    expect(approvalOutcome({ beforeStatus: "draft", afterStatus: null, firstPublication: false, beforeFilePath: "f", approvedFilePath: "f", beforeReleaseDate: null })).toBe("published");
+    expect(o("preorder", "preorder")).toBe("final_file");
+    expect(o("preorder", "published")).toBe("released");
+    expect(o("preorder", null, true)).toBe("released");
+    expect(o("preorder", "preorder", false, "f", "g")).toBe("preorder_changes");
+    expect(o("preorder", "preorder", false, null, null)).toBe("preorder_changes");
+    expect(o("published", "published")).toBe("live_changes");
   });
 });

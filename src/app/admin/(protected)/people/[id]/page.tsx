@@ -29,6 +29,8 @@ import { liftSuspensionAsStaff, retryAccountAccessAsStaff, suspendAccountAsStaff
 import { setReviewNameAsStaff } from "../../reader-reviews/actions";
 import { REVIEW_NAME_MAX } from "@/lib/reader-reviews";
 import { SuspensionPanel } from "./suspension-panel";
+import { tiranaToday } from "@/lib/preorders";
+import { liftPreorderLine } from "@/lib/preorder-staff";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
@@ -74,6 +76,8 @@ type SuspensionRow = {
   suspended_at: string;
   lifted_at: string | null;
   lifted_by: string | null;
+  // BD16: the pre-orders the suspension paused (back on lift).
+  preorder_book_ids: string[];
 };
 
 const BOOKS_SHOWN = 100;
@@ -161,7 +165,7 @@ export default async function AdminPersonPage({
       .returns<BookRow[]>(),
     admin
       .from("account_suspensions")
-      .select("id, reason, book_ids, bundle_ids, suspended_by, suspended_at, lifted_at, lifted_by")
+      .select("id, reason, book_ids, bundle_ids, suspended_by, suspended_at, lifted_at, lifted_by, preorder_book_ids")
       .eq("user_id", id)
       .order("suspended_at", { ascending: false })
       .returns<SuspensionRow[]>(),
@@ -197,6 +201,29 @@ export default async function AdminPersonPage({
       ? await admin.from("books").select("id, title").in("id", purchaseBookIds).returns<{ id: string; title: string }[]>()
       : { data: [] as { id: string; title: string }[], error: null };
   const purchaseTitles = new Map((purchaseTitlesResult.data ?? []).map((b) => [b.id, b.title]));
+
+  // BD16 P3 (Renato 11-06, a): the Lift box names each paused pre-order
+  // and what the next daily run does to it; the dates stay.
+  const activeSuspension = suspensions.find((s) => s.lifted_at === null) ?? null;
+  const pausedIds = activeSuspension?.preorder_book_ids ?? [];
+  const pausedResult =
+    canManage && pausedIds.length > 0
+      ? await admin
+          .from("books")
+          .select("id, title, file_path, release_date, preorder_slip_used")
+          .in("id", pausedIds)
+          .returns<{ id: string; title: string; file_path: string | null; release_date: string | null; preorder_slip_used: boolean }[]>()
+      : { data: [] as { id: string; title: string; file_path: string | null; release_date: string | null; preorder_slip_used: boolean }[], error: null };
+  if (pausedResult.error) console.error("person: the paused pre-orders read failed", { code: pausedResult.error.code ?? null });
+  const today = tiranaToday();
+  const pausedPreorderLines = pausedResult.error
+    ? null
+    : (pausedResult.data ?? []).map((b) =>
+        liftPreorderLine(
+          { title: b.title, releaseDate: b.release_date, slipUsed: b.preorder_slip_used, hasApprovedFile: b.file_path !== null },
+          today,
+        ),
+      );
 
   const loadFailed = Boolean(
     pensResult.error ||
@@ -279,6 +306,7 @@ export default async function AdminPersonPage({
           userId={id}
           suspended={suspensions.some((s) => s.lifted_at === null)}
           accessFix={accessFix}
+          pausedPreorderLines={pausedIds.length > 0 ? pausedPreorderLines : []}
           suspendAction={suspendAccountAsStaff}
           liftAction={liftSuspensionAsStaff}
           retryAction={retryAccountAccessAsStaff}

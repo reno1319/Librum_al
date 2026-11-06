@@ -256,3 +256,30 @@ describe("buildTodoItems: books waiting for review", () => {
     expect(buildTodoItems(reports, refunds, 2, now, [review]).map((i) => i.key)).toEqual(["report-r1", "review-rev-1"]);
   });
 });
+
+// BD16 P3 (D9): overdue pre-orders first, then final files and too-late
+// listings, then everything else oldest first.
+describe("BD16 P3: pre-order items on Today", () => {
+  it("sorts by urgency before age", async () => {
+    const { buildTodoItems } = await import("./admin-landing-logic");
+    const now = new Date("2026-11-06T12:00:00Z");
+    const base = { title: "T", penName: "P", bookId: "b" };
+    const items = buildTodoItems(
+      [{ id: "r1", created_at: "2026-10-01T10:00:00Z", reason: "copyright", bookTitle: "Old" }],
+      [],
+      10,
+      now,
+      [
+        { ...base, reviewId: "plain", submittedAt: "2026-10-02T10:00:00Z" },
+        { ...base, reviewId: "file", submittedAt: "2026-11-05T10:00:00Z", preorder: { state: "final_file", releaseDate: "2026-12-12" } },
+        { ...base, reviewId: "late", submittedAt: "2026-11-04T10:00:00Z", preorder: { state: "listing_too_late", releaseDate: "2026-11-07" } },
+        { ...base, reviewId: "over", submittedAt: "2026-11-06T10:00:00Z", preorder: { state: "overdue", releaseDate: "2026-11-05" } },
+      ],
+    );
+    expect(items.map((i) => i.key)).toEqual(["review-over", "review-late", "review-file", "report-r1", "review-plain"]);
+    expect(items[0].title).toContain("Pre-order overdue");
+    expect(items[0].title).toContain("5 Nov 2026");
+    expect(items[1].title).toContain("too late to approve");
+    expect(Object.keys(items[0]).sort()).toEqual(["actionLabel", "at", "detail", "href", "key", "title"]);
+  });
+});

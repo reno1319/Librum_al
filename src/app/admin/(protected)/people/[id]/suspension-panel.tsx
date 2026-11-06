@@ -1,4 +1,5 @@
 import { SUSPEND_REASON_MAX_LENGTH, type AccessFix } from "../suspension-logic";
+import { LIFT_PREORDER_INTRO, SUSPEND_PREORDER_NOTE } from "@/lib/preorder-staff";
 
 // PEOPLE-2 (1a, 2a): the Suspend / Lift panel on /admin/people/[id],
 // rendered only for people.manage holders, never on a staff row or the
@@ -23,6 +24,7 @@ export function SuspensionPanel({
   userId,
   suspended,
   accessFix,
+  pausedPreorderLines = [],
   suspendAction,
   liftAction,
   retryAction,
@@ -30,6 +32,8 @@ export function SuspensionPanel({
   userId: string;
   suspended: boolean;
   accessFix: AccessFix;
+  // BD16 P3: one line per pre-order the suspension paused; null = unreadable.
+  pausedPreorderLines?: readonly string[] | null;
   suspendAction: Action;
   liftAction: Action;
   retryAction: Action;
@@ -60,6 +64,22 @@ export function SuspensionPanel({
             Lifting lets them sign in again and puts back the books and bundles the suspension took out, except any
             that need review or were taken down.
           </p>
+          {pausedPreorderLines === null ? (
+            <p className="mb-3 text-sm text-red-700">Couldn’t load the paused pre-orders. Reload before you lift.</p>
+          ) : (
+            pausedPreorderLines.length > 0 && (
+              <div className="mb-3 flex flex-col gap-1.5 text-sm">
+                <p className="font-semibold">{LIFT_PREORDER_INTRO}</p>
+                <ul className="flex list-disc flex-col gap-1 pl-5">
+                  {pausedPreorderLines.map((line, index) => (
+                    <li key={index} className="break-words">
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          )}
           <details className="group rounded-[3px] border border-border">
             <summary className={`${SUMMARY_CLASSES} text-primary`}>Lift suspension</summary>
             <form action={liftAction} className="flex flex-col gap-3 p-4">
@@ -77,6 +97,7 @@ export function SuspensionPanel({
             Suspending signs them out and blocks sign-in, and takes their books, pen-name pages, series pages and
             reviews out of the Bookstore. Readers keep what they bought. Payouts are held.
           </p>
+          <p className="mb-3 text-sm text-muted">{SUSPEND_PREORDER_NOTE}</p>
           <details className="group rounded-[3px] border border-border">
             <summary className={`${SUMMARY_CLASSES} text-[#8E2A1E]`}>Suspend account</summary>
             <form action={suspendAction} className="flex flex-col gap-4 p-4">

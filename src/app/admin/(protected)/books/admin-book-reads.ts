@@ -1,5 +1,8 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { tiranaToday } from "@/lib/preorders";
+import { finalFileReleasesNow, isListingTooLate, reviewKind } from "@/lib/preorder-staff";
+import { todayReviewPriority, type TodayPreorderState } from "../../admin-landing-logic";
 
 // ADMIN-2-TAKEDOWN (M2, R2): staff pages must show drafts and taken-down
 // books. A staff session sees every book only once PEN-NAMES-2's contract
@@ -84,47 +87,104 @@ export type PendingReviewForStaff = {
   title: string;
   penName: string | null;
   submittedAt: string;
+  // BD16 P3 (D9): set for a pre-order listing or a pre-order's final file.
+  preorder?: { state: TodayPreorderState; releaseDate: string };
 };
 
-// ADMIN-3-REVIEW (I): Today's "waiting for review" items, oldest first:
-// the pending reviews and the pen name each book carries now. Null on a
-// read error (the page shows its own load error).
-export async function readPendingReviewsForStaff(limit: number): Promise<{ items: PendingReviewForStaff[]; total: number } | null> {
+// BD16 P3: at most this many waiting reviews are read to sort Today's
+// list (the urgent pre-order items first, D9). Waiting reviews are few.
+const PENDING_REVIEWS_READ_CAP = 500;
+
+// ADMIN-3-REVIEW (I): Today's "waiting for review" items: the pending
+// reviews and the pen name each book carries now. BD16 P3 (D9): an
+// overdue pre-order's final file first, then pre-order final files and
+// listings too late to approve, then the rest oldest first; at most
+// `limit` items. overdue = how many final files wait past their day.
+// Null on a read error (the page shows its own load error).
+export async function readPendingReviewsForStaff(
+  limit: number,
+): Promise<{ items: PendingReviewForStaff[]; total: number; overdue: number } | null> {
   const admin = createAdminClient();
   const { data, error, count } = await admin
     .from("book_reviews")
-    .select("id, book_id, book_title, submitted_at", { count: "exact" })
+    .select("id, book_id, book_title, submitted_at, file_path, release_date", { count: "exact" })
     .eq("status", "pending")
     .not("book_id", "is", null)
     .order("submitted_at", { ascending: true })
-    .limit(limit)
-    .returns<{ id: string; book_id: string; book_title: string; submitted_at: string }[]>();
+    .limit(PENDING_REVIEWS_READ_CAP)
+    .returns<
+      {
+        id: string;
+        book_id: string;
+        book_title: string;
+        submitted_at: string;
+        file_path: string | null;
+        release_date: string | null;
+      }[]
+    >();
   if (error) {
     console.error("readPendingReviewsForStaff: read failed", { error });
     return null;
   }
   const rows = data ?? [];
-  const penByBook = new Map<string, string>();
+  type BookRow = {
+    id: string;
+    status: string;
+    file_path: string | null;
+    release_date: string | null;
+    pen: { name: string } | null;
+  };
+  const bookById = new Map<string, BookRow>();
   if (rows.length > 0) {
     const { data: books, error: booksError } = await admin
       .from("books")
-      .select("id, title, pen:pen_names!books_pen_name_id_fkey(name)")
+      .select("id, status, file_path, release_date, pen:pen_names!books_pen_name_id_fkey(name)")
       .in("id", rows.map((row) => row.book_id))
-      .returns<{ id: string; title: string; pen: { name: string } | null }[]>();
+      .returns<BookRow[]>();
     if (booksError) {
       console.error("readPendingReviewsForStaff: books read failed", { error: booksError });
     }
-    for (const book of books ?? []) if (book.pen?.name) penByBook.set(book.id, book.pen.name);
+    for (const book of books ?? []) bookById.set(book.id, book);
   }
-  return {
-    items: rows.map((row) => ({
+  const today = tiranaToday();
+  const all: PendingReviewForStaff[] = rows.map((row) => {
+    const book = bookById.get(row.book_id);
+    const item: PendingReviewForStaff = {
       reviewId: row.id,
       bookId: row.book_id,
       title: row.book_title,
-      penName: penByBook.get(row.book_id) ?? null,
+      penName: book?.pen?.name ?? null,
       submittedAt: row.submitted_at,
-    })),
+    };
+    if (book) {
+      const kind = reviewKind({
+        bookStatus: book.status,
+        bookFilePath: book.file_path,
+        reviewFilePath: row.file_path,
+        reviewReleaseDate: row.release_date,
+      });
+      if (kind === "final_file" && book.release_date) {
+        item.preorder = {
+          state: finalFileReleasesNow(book.release_date, today) ? "overdue" : "final_file",
+          releaseDate: book.release_date,
+        };
+      } else if (kind === "listing" && row.release_date) {
+        item.preorder = {
+          state: isListingTooLate({ releaseDate: row.release_date, hasFile: row.file_path !== null, today })
+            ? "listing_too_late"
+            : "listing",
+          releaseDate: row.release_date,
+        };
+      }
+    }
+    return item;
+  });
+  // Stable: rows are oldest first already.
+  const sorted = [...all].sort((a, b) => todayReviewPriority(a) - todayReviewPriority(b));
+  return {
+    items: sorted.slice(0, Math.max(0, limit)),
     total: count ?? rows.length,
+    overdue: all.filter((item) => item.preorder?.state === "overdue").length,
   };
 }
 
