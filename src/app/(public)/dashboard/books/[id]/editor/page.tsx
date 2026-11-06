@@ -2,11 +2,19 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { discardBookPendingChanges, saveBookDetails } from "../../editor-actions";
-import { cancelBookReview, deleteBook, saveBookContent, saveBookPricing, unpublishBook } from "../../actions";
+import {
+  cancelBookReview,
+  cancelPreorder,
+  deleteBook,
+  pushPreorderDate,
+  saveBookContent,
+  saveBookPricing,
+  unpublishBook,
+} from "../../actions";
 import { createCatalogWriteClient } from "@/lib/catalog-write-client";
 import { changedPendingFields, readPendingChanges, type PendingChanges } from "@/lib/book-pending-changes";
 import { LiveEditNotice } from "@/components/live-edit-notice";
-import { BookPricingForm, type PricingMissing } from "@/components/book-pricing-form";
+import { BookPricingForm, type PricingMissing, type PricingRelease } from "@/components/book-pricing-form";
 import { isFreeOnlyRightsBasis } from "@/lib/book-pricing";
 import { canPublishPaidTitle, canStartPaidCheckout } from "@/lib/paid-readiness";
 import { loadAuthorTakedownNoticeForBook } from "@/lib/book-takedowns";
@@ -36,6 +44,18 @@ import {
   type EditorTab,
 } from "@/lib/book-editor-copy";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { getPreorderSchemaFeature } from "@/lib/catalog-schema-features";
+import { PreorderPanel } from "@/components/preorder-panel";
+import {
+  PREORDER_BLOCK_NOTES,
+  countWaitingReaders,
+  preorderBlock,
+  preorderDateWindow,
+  preorderFinalFileState,
+  preorderPushState,
+  preorderStatusLabel,
+  tiranaToday,
+} from "@/lib/preorders";
 
 export const metadata: Metadata = {
   title: "Redaktori i librit",
@@ -70,6 +90,11 @@ type EditorBook = {
   publisher: string | null;
   // BD15 P7: set by staff when it is a public-domain work's edition.
   pd_work_id: string | null;
+  // BD16 P2: read only once the pre-order columns exist (P1 migration).
+  release_date?: string | null;
+  preorder_count?: number;
+  preorder_slip_used?: boolean;
+  preorder_listed_at?: string | null;
 };
 
 // BD15 P2: the new book editor for a draft (PLAN-BD15-r1 §2.2): Details
@@ -118,19 +143,26 @@ export default async function BookEditorPage({
     redirect(`/login?next=/dashboard/books/${id}/editor`);
   }
 
+  // BD16 P2: the pre-order columns only where the database has them.
+  const preorderFeature = await getPreorderSchemaFeature();
   const { data: book } = await supabase
     .from("books")
     .select(
-      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, categories, keywords, original_author, status, published_at, file_path, cover_path, price_all, isbn, publisher, pd_work_id",
+      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, categories, keywords, original_author, status, published_at, file_path, cover_path, price_all, isbn, publisher, pd_work_id" +
+        (preorderFeature ? ", release_date, preorder_count, preorder_slip_used, preorder_listed_at" : ""),
     )
     .eq("id", id)
     .eq("author_id", user.id)
     .maybeSingle<EditorBook>();
   if (!book || book.author_id !== user.id) notFound();
 
-  // books.status is only ever draft or published.
-  if (book.status !== "draft" && book.status !== "published") notFound();
-  const live = book.status === "published";
+  // BD16 P2: a live pre-order ('preorder') is edited like a live book:
+  // its manuscript, ballinë, description, 18+ label and original author
+  // wait for review (book_pending_changes); the final file comes so too.
+  if (book.status !== "draft" && book.status !== "published" && book.status !== "preorder") notFound();
+  const preorder = book.status === "preorder" && typeof book.release_date === "string" ? book.release_date : null;
+  if (book.status === "preorder" && preorder === null) notFound();
+  const live = book.status === "published" || preorder !== null;
   // P5b-3a: an unreadable review or takedown state shows nothing that
   // could be saved or sent (the old edit page showed it with Publish
   // disabled; the actions refuse on their own too).
@@ -175,8 +207,35 @@ export default async function BookEditorPage({
   const coverUrl = working.coverPath
     ? supabase.storage.from("covers").getPublicUrl(working.coverPath).data.publicUrl
     : null;
+  // BD16 P2: readers waiting for this pre-order (a count; display only).
+  const waiting = preorder ? ((await countWaitingReaders(createCatalogWriteClient(), [book.id]))?.get(book.id) ?? 0) : null;
+  const preorderPanel = preorder ? (
+    <PreorderPanel
+      releaseDate={preorder}
+      finalFile={preorderFinalFileState({
+        bookFilePath: book.file_path,
+        pendingFilePath: pending?.filePath ?? null,
+        inReview: inReview && (pending?.filePath ?? null) !== null,
+      })}
+      waitingReaders={waiting}
+      push={preorderPushState(
+        { release_date: preorder, preorder_slip_used: book.preorder_slip_used === true },
+        tiranaToday(),
+      )}
+      pushAction={pushPreorderDate.bind(null, book.id)}
+    />
+  ) : null;
   const actionsBox = (
     <BookActionsBox
+      preorder={
+        preorder
+          ? {
+              cancelAction: cancelPreorder.bind(null, book.id),
+              waiting,
+              preorderCount: book.preorder_count ?? 1,
+            }
+          : null
+      }
       title={book.title}
       live={live}
       hasPendingChanges={changed.length > 0}
@@ -197,19 +256,27 @@ export default async function BookEditorPage({
       manuscriptLabel: getManuscriptLabel(working.filePath),
       priceAll: book.price_all,
       description: working.description ?? "",
+      // A listing asks for its release day (a draft's release_date).
+      releaseDate: !live ? (book.release_date ?? null) : null,
     };
     return (
       <BookEditorShell
         bookId={book.id}
         heading={book.title}
-        statusLabel={IN_REVIEW_LABEL}
+        statusLabel={preorder ? `${preorderStatusLabel(preorder)} · ${IN_REVIEW_LABEL}` : IN_REVIEW_LABEL}
         tab={tab}
         done={{ details: true, content: true, pricing: true }}
         error={pageErrorMessage(rawError)}
         success={pageSuccessMessage(rawSuccess)}
         readOnly
       >
-        <BookInReviewView sent={sent} live={live} cancelAction={cancelBookReview.bind(null, book.id)} />
+        {preorderPanel}
+        <BookInReviewView
+          sent={sent}
+          live={live}
+          preorder={preorder !== null}
+          cancelAction={cancelBookReview.bind(null, book.id)}
+        />
         {actionsBox}
       </BookEditorShell>
     );
@@ -245,7 +312,9 @@ export default async function BookEditorPage({
   // locked choice shows and sends exactly that.
   const rightsBasis =
     rights.kind === "present" ? rights.declaration.basis : live && rights.kind === "none" ? "own_rights" : null;
-  const locked = book.published_at !== null;
+  // BD16 P2 (D4): a book ever listed as a pre-order keeps its title and
+  // pen name, also after a cancel (books_lock_after_first_publish).
+  const locked = book.published_at !== null || (book.preorder_listed_at ?? null) !== null;
   const penNameList = penNames ?? [];
   const lockedPenName = penNameList.find((p) => p.id === book.pen_name_id)?.name ?? null;
 
@@ -257,8 +326,10 @@ export default async function BookEditorPage({
     originalAuthor: working.originalAuthor,
   });
   // BD15 P3 (mockup): the manuscript, the cover and the AI answer.
+  // BD16 P2: a pre-order's final manuscript is followed in its own box
+  // (PreorderPanel), not as a missing item.
   const contentMissing = [
-    ...(working.filePath === null ? ["Dorëshkrimi"] : []),
+    ...(working.filePath === null && preorder === null ? ["Dorëshkrimi"] : []),
     ...(working.coverPath === null ? ["Ballina"] : []),
     ...(!ai.ok || ai.answer === null ? ["Pyetja për AI"] : []),
   ];
@@ -268,10 +339,33 @@ export default async function BookEditorPage({
     pricing: book.price_all !== null,
   };
   // BD15 P4: what "Send for review" still needs from the other tabs.
+  // BD16 P2: a pre-order listing may be sent without the manuscript (D5).
   const sendMissing: PricingMissing[] = [
     ...detailsMissing.map((label) => ({ tab: "details" as const, label })),
-    ...contentMissing.map((label) => ({ tab: "content" as const, label })),
+    ...contentMissing.map((label) => ({ tab: "content" as const, label, preorderOptional: label === "Dorëshkrimi" })),
   ];
+  // BD16 P2: a draft's "Kur del libri" choice, once the database has
+  // pre-orders. A taken-down book is never sent, so it gets none.
+  const block =
+    !live && !takenDown && preorderFeature
+      ? preorderBlock({
+          published_at: book.published_at,
+          preorder_count: book.preorder_count ?? 0,
+          pd_work_id: book.pd_work_id,
+          rightsBasis,
+        })
+      : null;
+  const release: PricingRelease | null =
+    live || takenDown || !preorderFeature
+      ? null
+      : block !== null
+        ? { available: false, note: PREORDER_BLOCK_NOTES[block] }
+        : {
+            available: true,
+            initialMode: book.release_date ? "preorder" : "now",
+            initialDate: book.release_date ?? "",
+            window: preorderDateWindow(tiranaToday()),
+          };
   // P5b-3a: a live book's sent-back note is about the changes it was
   // sent with. Once they are discarded (or replaced by changes first
   // saved after it), the note is stale and no longer shows. A draft's
@@ -308,7 +402,9 @@ export default async function BookEditorPage({
     <BookEditorShell
       bookId={book.id}
       heading={book.title}
-      statusLabel={live ? LIVE_STATUS_LABEL : takenDown ? TAKEN_DOWN_STATUS_LABEL : "Draft"}
+      statusLabel={
+        preorder ? preorderStatusLabel(preorder) : live ? LIVE_STATUS_LABEL : takenDown ? TAKEN_DOWN_STATUS_LABEL : "Draft"
+      }
       tab={tab}
       done={done}
       error={pageErrorMessage(rawError)}
@@ -316,8 +412,10 @@ export default async function BookEditorPage({
     >
       {/* BD15 P4: a book Librum sent back is fixed here now, so the
           staff note shows on every tab until it is sent again. */}
+      {preorderPanel}
       {live && (
         <LiveEditNotice
+          preorder={preorder !== null}
           bookId={book.id}
           changed={changed}
           discardAction={discardBookPendingChanges.bind(null, book.id)}
@@ -393,7 +491,12 @@ export default async function BookEditorPage({
           paidPublishingAvailable={canPublishPaidTitle()}
           checkoutAvailable={canStartPaidCheckout()}
           approvalValid={!live && !takenDown && review.approvalValid}
-          live={live ? { currentPriceAll: book.price_all, hasChanges: changed.length > 0 } : null}
+          live={
+            live
+              ? { currentPriceAll: book.price_all, hasChanges: changed.length > 0, confirmPrice: preorder === null }
+              : null
+          }
+          release={release}
           title={book.title}
           // BD15 follow-up (walkthrough F3): the name readers see -- the
           // original author of a public-domain or translated book, else

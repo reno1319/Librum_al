@@ -14,6 +14,7 @@ import type { AuthorReviewNotice } from "@/lib/book-review-copy";
 import { editorPath } from "@/lib/book-editor-copy";
 import { createCatalogWriteClient } from "@/lib/catalog-write-client";
 import { changedPendingFields, readShelfPendingChanges } from "@/lib/book-pending-changes";
+import { countWaitingReaders } from "@/lib/preorders";
 import {
   SHELF_FILTERS,
   SHELF_SORTS,
@@ -256,9 +257,17 @@ export default async function DashboardPage({
   const seriesTitles = new Map((seriesRead.data ?? []).map((row) => [row.id, row.title]));
 
   // BD15 P6: the waiting changes of the author's live books (see above).
-  const liveIds = allBooks.filter((book) => book.status === "published").map((book) => book.id);
+  // BD16 P2: a pre-order keeps waiting changes like a live book.
+  const liveIds = allBooks
+    .filter((book) => book.status === "published" || book.status === "preorder")
+    .map((book) => book.id);
   const pendingRead =
     liveIds.length > 0 ? await readShelfPendingChanges(createCatalogWriteClient(), liveIds) : null;
+  // BD16 P2: how many readers wait for each pre-order (a count only; the
+  // author's own books; display only, null when unreadable).
+  const preorderIds = allBooks.filter((book) => book.status === "preorder").map((book) => book.id);
+  const waitingReaders =
+    preorderIds.length > 0 ? await countWaitingReaders(createCatalogWriteClient(), preorderIds) : null;
 
   const states = new Map<string, ShelfState>();
   for (const book of allBooks) {
@@ -441,6 +450,7 @@ export default async function DashboardPage({
                         recentCopies={sales.ok ? (sales.summary.recentCopiesByBookId.get(book.id) ?? 0) : null}
                         takedown={takedownNotices.get(book.id) ?? null}
                         review={reviewNotices.get(book.id) ?? null}
+                        waitingReaders={waitingReaders?.get(book.id) ?? (waitingReaders ? 0 : null)}
                         missing={
                           state === "draft"
                             ? getPublishChecklist(book)

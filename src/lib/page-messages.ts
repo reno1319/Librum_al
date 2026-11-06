@@ -296,6 +296,20 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "A new work needs its title and its original author.",
   "Only a book whose rights choice is \"public domain\" can be a work's edition.",
   "Ky botim është zgjedhur nga Librum, prandaj kjo fushë nuk ndryshon. Nëse diçka duhet korrigjuar, ngarkoni një botim të ri dhe Librum mund ta zgjedhë atë.",
+  // BD16 P2: pre-orders, the author side (src/lib/preorders.ts).
+  "Zgjidhni një datë daljeje nga 14 ditë deri në 6 muaj nga sot.",
+  "Ky libër nuk mund të bëhet parapublikim.",
+  "Ky libër ka pasur 2 parapublikime. Tani mund të publikohet vetëm si zakonisht.",
+  "Ky libër ka qenë i publikuar, ndaj nuk mund të bëhet parapublikim.",
+  "Një libër i domenit publik nuk mund të bëhet parapublikim.",
+  "Ky libër nuk është më parapublikim. Rifreskoni faqen.",
+  "Shënoni kutinë për të konfirmuar anulimin.",
+  "Zgjidhni një datë të re nga 1 deri në 30 ditë pas datës së tanishme.",
+  "Data nuk mund të shtyhet më për këtë parapublikim.",
+  "Ky libër është parapublikim. Përdorni «Anuloni parapublikimin».",
+  "Për ta fshirë, anuloni fillimisht parapublikimin.",
+  "Parapublikimi nuk mund të anulohet tani. Provoni përsëri",
+  "Data nuk mund të shtyhet tani. Provoni përsëri",
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
@@ -352,6 +366,11 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Libri u fshi.",
   // BD15 P7: the admin book page's Public-domain edition box.
   "Public-domain edition saved.",
+  // BD16 P2: pre-orders, the author side (src/lib/preorders.ts).
+  "Parapublikimi u dërgua për shqyrtim. Kur Librum ta miratojë, libri shfaqet në Librari me datën e daljes.",
+  "Parapublikimi u anulua. Libri është sërish draft.",
+  "Data e daljes u shty.",
+  "Shqyrtimi u anulua. Parapublikimi mbetet në Librari; ndryshimet tuaja presin përsëri te redaktori.",
 ]);
 
 type QueryValue = string | string[] | undefined;

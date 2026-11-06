@@ -115,6 +115,32 @@ import {
   isPriceChangeConfirmed,
   PRICE_CHANGE_CONFIRM_MESSAGE,
 } from "@/lib/price-change-confirm";
+import { getPreorderSchemaFeature } from "@/lib/catalog-schema-features";
+import {
+  CANCEL_PREORDER_CONFIRM_FIELD,
+  CANCEL_PREORDER_CONFIRM_MISSING_MESSAGE,
+  PREORDER_CANCELLED_MESSAGE,
+  PREORDER_DATE_INVALID_MESSAGE,
+  PREORDER_NOT_AVAILABLE_MESSAGE,
+  PREORDER_NOT_PREORDER_MESSAGE,
+  PREORDER_REVIEW_CANCELLED_MESSAGE,
+  PREORDER_SENT_MESSAGE,
+  PREORDER_UNPUBLISH_REFUSED_MESSAGE,
+  PREORDER_DELETE_NOTE,
+  PREORDER_PUBLIC_DOMAIN_NOTE,
+  PREORDER_PUBLISHED_BEFORE_NOTE,
+  PREORDER_USED_UP_NOTE,
+  PUSH_DONE_MESSAGE,
+  PUSH_INVALID_MESSAGE,
+  PUSH_REFUSED_MESSAGE,
+  RELEASE_DATE_FIELD,
+  isInPreorderWindow,
+  isValidPushDate,
+  parseDay,
+  parseReleaseChoice,
+  preorderBlock,
+  tiranaToday,
+} from "@/lib/preorders";
 
 // B6: the follower emails go out after the page has answered (Next's
 // after()), so a long follower list can't slow down or time out Publish.
@@ -795,8 +821,9 @@ export async function saveBookContent(bookId: string, formData: FormData) {
 
   // Drafts and (P5b-2) live books, not while waiting for review.
   // P5b-3a: the editor shows a book in review read-only; an unreadable
-  // review state saves nothing.
-  const live = existing.status === "published";
+  // review state saves nothing. BD16 P2: a live pre-order is saved like
+  // a live book (its final manuscript becomes a waiting change).
+  const live = existing.status === "published" || existing.status === "preorder";
   if (existing.status !== "draft" && !live) redirect("/dashboard");
   const review = await getBookReviewState(supabase, existing.id);
   if (review.kind !== "ok") return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
@@ -951,7 +978,7 @@ export async function saveBookContent(bookId: string, formData: FormData) {
       .update(payload)
       .eq("id", existing.id)
       .eq("author_id", user.id)
-      .eq("status", live ? "published" : "draft");
+      .eq("status", existing.status);
     if (!live && newCoverPath !== null) {
       query = existing.cover_path === null ? query.is("cover_path", null) : query.eq("cover_path", existing.cover_path);
     }
@@ -1172,6 +1199,7 @@ async function sendLiveBookChanges({
   userId: string;
   existing: {
     id: string;
+    status: string;
     title: string;
     categories: string[] | null;
     file_path: string | null;
@@ -1209,9 +1237,12 @@ async function sendLiveBookChanges({
     rightsBasis,
     originalAuthor: working.originalAuthor,
   });
+  // BD16 P2: a pre-order may send its other changes before the final
+  // manuscript (request_book_review allows it while it has none).
+  const fileOptional = existing.status === "preorder" && existing.file_path === null;
   if (
     detailsMissing.length > 0 ||
-    working.filePath === null ||
+    (working.filePath === null && !fileOptional) ||
     working.coverPath === null ||
     !ai.ok ||
     ai.answer === null ||
@@ -1310,8 +1341,9 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
   }
 
   // BD15 P5b-2: a live book too (its price saves at once; "send" sends
-  // its waiting changes and it stays live).
-  const live = existing.status === "published";
+  // its waiting changes and it stays live). BD16 P2: so does a live
+  // pre-order (nobody can buy it, so a new price needs no tick).
+  const live = existing.status === "published" || existing.status === "preorder";
   if (existing.status !== "draft" && !live) redirect("/dashboard");
   const [review, takedown, rights] = await Promise.all([
     getBookReviewState(supabase, existing.id),
@@ -1376,7 +1408,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
     // protected column.
     const { data: rows, error } = await applyCatalogRowGuard(
       createCatalogWriteClient().from("books").update({ price_all: priceAll }).eq("id", existing.id).eq("author_id", user.id),
-      { status: live ? "published" : "draft", priceAll: existing.price_all },
+      { status: existing.status, priceAll: existing.price_all },
     ).select("id");
     if (error) {
       console.error("saveBookPricing: price update failed", { bookId: existing.id, code: error.code ?? null });
@@ -1387,6 +1419,62 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
   }
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/books");
+
+  // BD16 P2: a draft's "Kur del libri" choice (Pricing tab). A pre-order
+  // asks for its day on the draft (books.release_date); "now" clears it,
+  // so a normal send never carries a stale day (the approval compares
+  // it). Saved on every save, before any send; request_book_review
+  // checks the same window again (LB500, LB501, LB502).
+  if (!live) {
+    const choice = parseReleaseChoice(formData);
+    if (choice.kind === "invalid") fail(PREORDER_DATE_INVALID_MESSAGE);
+    if (choice.kind === "now" || choice.kind === "preorder") {
+      const preorderFeature = await getPreorderSchemaFeature();
+      if (choice.kind === "preorder") {
+        if (!preorderFeature || takenDown) fail(PREORDER_NOT_AVAILABLE_MESSAGE);
+        const { data: facts, error: factsError } = await supabase
+          .from("books")
+          .select("published_at, preorder_count, pd_work_id")
+          .eq("id", existing.id)
+          .eq("author_id", user.id)
+          .maybeSingle<{ published_at: string | null; preorder_count: number; pd_work_id: string | null }>();
+        if (factsError || !facts) fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+        const block = preorderBlock({ ...facts!, rightsBasis });
+        if (block !== null) {
+          fail(
+            block === "used_up"
+              ? PREORDER_USED_UP_NOTE
+              : block === "published_before"
+                ? PREORDER_PUBLISHED_BEFORE_NOTE
+                : PREORDER_PUBLIC_DOMAIN_NOTE,
+          );
+        }
+        if (!isInPreorderWindow(choice.releaseDate, tiranaToday())) fail(PREORDER_DATE_INVALID_MESSAGE);
+      }
+      if (preorderFeature) {
+        const releaseDate = choice.kind === "preorder" ? choice.releaseDate : null;
+        // The trusted writer (authenticated may not write books columns),
+        // bound to the caller's own draft. Audit r1 F1: a day is written
+        // only onto a book still never published, in the write itself (the
+        // database does not check it; Renato 11-06 a). Clearing is always
+        // allowed.
+        let write = createCatalogWriteClient()
+          .from("books")
+          .update({ release_date: releaseDate })
+          .eq("id", existing.id)
+          .eq("author_id", user.id)
+          .eq("status", "draft");
+        if (releaseDate !== null) write = write.is("published_at", null);
+        const { data: rows, error } = await write.select("id");
+        if (error) {
+          console.error("saveBookPricing: release date update failed", { bookId: existing.id, code: error.code ?? null });
+          if (isInReviewLockError(error)) toInReviewEditPage(existing.id);
+          fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+        }
+        if (!isExactlyOneRowWritten(rows)) fail(CATALOG_ROW_CHANGED_MESSAGE);
+      }
+    }
+  }
 
   if (intent !== "send") {
     // P5b-2: a live book is not a draft; its price is live at once.
@@ -1414,7 +1502,9 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
     });
   }
 
-  // 3. Every tab complete.
+  // 3. Every tab complete. BD16 P2: a pre-order listing may come
+  // without its manuscript (D5).
+  const preorderListing = parseReleaseChoice(formData).kind === "preorder";
   const ai = await readAiDisclosure(existing.id);
   const detailsMissing = missingDetails({
     title: existing.title,
@@ -1425,7 +1515,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
   });
   if (
     detailsMissing.length > 0 ||
-    existing.file_path === null ||
+    (existing.file_path === null && !preorderListing) ||
     existing.cover_path === null ||
     !ai.ok ||
     ai.answer === null ||
@@ -1490,6 +1580,15 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
       case "paid_mode_required":
         fail(PAID_PUBLISHING_UNAVAILABLE_MESSAGE);
         break;
+      case "preorder_date":
+        fail(PREORDER_DATE_INVALID_MESSAGE);
+        break;
+      case "preorder_used_up":
+        fail(PREORDER_USED_UP_NOTE);
+        break;
+      case "preorder_public_domain":
+        fail(PREORDER_PUBLIC_DOMAIN_NOTE);
+        break;
       case "rights_unavailable":
       case "takedown_unavailable":
       case "review_unavailable":
@@ -1503,7 +1602,9 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
 
   if (result.outcome === "sent_for_review") {
     revalidatePath("/dashboard");
-    redirect(`/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`);
+    redirect(
+      `/dashboard?success=${encodeURIComponent(result.preorder ? PREORDER_SENT_MESSAGE : SENT_FOR_REVIEW_MESSAGE)}`,
+    );
   }
 
   // Published (Librum's approval still matched).
@@ -1558,7 +1659,12 @@ export async function cancelBookReview(bookId: string) {
     .eq("id", bookId)
     .eq("author_id", user.id)
     .maybeSingle<{ status: string }>();
-  const cancelledMessage = after?.status === "published" ? LIVE_REVIEW_CANCELLED_MESSAGE : REVIEW_CANCELLED_MESSAGE;
+  const cancelledMessage =
+    after?.status === "published"
+      ? LIVE_REVIEW_CANCELLED_MESSAGE
+      : after?.status === "preorder"
+        ? PREORDER_REVIEW_CANCELLED_MESSAGE
+        : REVIEW_CANCELLED_MESSAGE;
   redirect(`${editorPath(bookId, "details")}&success=${encodeURIComponent(cancelledMessage)}`);
 }
 
@@ -1599,7 +1705,8 @@ export async function cancelBookReview(bookId: string) {
 // (request_book_review) and stays a draft: outcome "sent_for_review".
 type PerformPublishResult =
   | { ok: true; outcome: "published"; wasNewlyPublished: boolean }
-  | { ok: true; outcome: "sent_for_review" }
+  // BD16 P2: preorder -- the review is a pre-order listing.
+  | { ok: true; outcome: "sent_for_review"; preorder: boolean }
   // ALL-WIRING-2: `missing_all_price` is a DISTINCT reason, never folded
   // into paid_mode_required. The two refusals have opposite remedies --
   // the author fixes the first themselves in one edit and can do nothing
@@ -1645,6 +1752,10 @@ type PerformPublishResult =
         | "book_changed"
         | "send_incomplete"
         | "paid_mode_required"
+        // BD16 P2: request_book_review refused the listing (LB500-LB502).
+        | "preorder_date"
+        | "preorder_used_up"
+        | "preorder_public_domain"
         | "update_failed";
     };
 
@@ -1670,6 +1781,21 @@ async function performPublish(
     return { ok: false, reason: "not_found" };
   }
 
+  // BD16 P2: a draft with a release day asks for a pre-order listing.
+  // Read on its own, only where the database has the column; unreadable
+  // there fails closed (a listing must never be published directly).
+  let preorderListing = false;
+  if (book.status === "draft" && (await getPreorderSchemaFeature())) {
+    const { data: day, error: dayError } = await supabase
+      .from("books")
+      .select("release_date")
+      .eq("id", bookId)
+      .eq("author_id", userId)
+      .maybeSingle<{ release_date: string | null }>();
+    if (dayError || !day) return { ok: false, reason: "review_unavailable" };
+    preorderListing = typeof day.release_date === "string";
+  }
+
   // ADMIN-2-TAKEDOWN (G, S4): a taken-down book stays locked until staff
   // allow it again -- read with the author's own session (RLS: own rows),
   // and fail closed. The books trigger refuses the write below as well.
@@ -1685,9 +1811,12 @@ async function performPublish(
   // columns are in the select above, so a row always carries them
   // (null when empty). Only a book never published: an older book that
   // was live once keeps the rules it was published under (audit r1, F2).
+  // BD16 P2 (D5): a pre-order listing's manuscript may come later.
   if (
     book.published_at === null &&
-    (book.file_path === null || book.cover_path === null || book.file_path === "" || book.cover_path === "")
+    ((!preorderListing && (book.file_path === null || book.file_path === "")) ||
+      book.cover_path === null ||
+      book.cover_path === "")
   ) {
     return { ok: false, reason: "missing_files" };
   }
@@ -1755,12 +1884,25 @@ async function performPublish(
     if (reviewState.kind === "unavailable") {
       return { ok: false, reason: "review_unavailable" };
     }
-    if (!reviewState.approvalValid) {
+    // BD16 P2: a pre-order listing always goes to review (the database
+    // skips the "already approved" answer for it, too).
+    if (!reviewState.approvalValid || preorderListing) {
       const request = await requestBookReview(supabase, bookId);
       if (request.ok) {
         // ADMIN-ALERTS-1: best effort, never throws.
         await sendReviewRequestedStaffEmail({ bookId, authorId: userId });
-        return { ok: true, outcome: "sent_for_review" };
+        return { ok: true, outcome: "sent_for_review", preorder: preorderListing };
+      }
+      if (
+        request.reason === "preorder_date" ||
+        request.reason === "preorder_used_up" ||
+        request.reason === "preorder_public_domain"
+      ) {
+        return { ok: false, reason: request.reason };
+      }
+      // A listing is never published here, whatever the answer.
+      if (preorderListing && request.reason === "already_approved") {
+        return { ok: false, reason: "review_unavailable" };
       }
       if (request.reason === "already_pending") {
         return { ok: false, reason: "already_in_review" };
@@ -1978,10 +2120,10 @@ export async function unpublishBook(bookId: string) {
   // codebase.
   const { data: book, error: bookReadError } = await supabase
     .from("books")
-    .select("id")
+    .select("id, status")
     .eq("id", bookId)
     .eq("author_id", user.id)
-    .maybeSingle();
+    .maybeSingle<{ id: string; status: string }>();
 
   if (bookReadError) {
     console.error("unpublishBook: book read failed", { bookId, error: bookReadError });
@@ -1989,6 +2131,11 @@ export async function unpublishBook(bookId: string) {
   }
   if (!book) {
     redirect("/dashboard");
+  }
+  // BD16 P2: a pre-order is cancelled with its own confirmation
+  // (cancelPreorder), never through "Hiqeni nga shitja".
+  if (book.status === "preorder") {
+    redirect(withQuery(editorPath(bookId, "details"), "error", PREORDER_UNPUBLISH_REFUSED_MESSAGE));
   }
 
   // PHASE-2C: a book that's a member of a currently published bundle
@@ -2091,7 +2238,9 @@ export async function deleteBook(bookId: string) {
   // The delete below also filters on status = draft, so a book Librum
   // approves after this read is not deleted either.
   if (book.status !== "draft") {
-    redirect(`/dashboard?error=${encodeURIComponent(LIVE_DELETE_REFUSED_MESSAGE)}`);
+    redirect(
+      `/dashboard?error=${encodeURIComponent(book.status === "preorder" ? PREORDER_DELETE_NOTE : LIVE_DELETE_REFUSED_MESSAGE)}`,
+    );
   }
 
   // ADMIN-2-TAKEDOWN (M5, Renato's Q8 = a): a taken-down book can't be
@@ -2290,4 +2439,115 @@ export async function deleteBook(bookId: string) {
   revalidatePath("/");
   // BD15 P5b-3b: the editor of a deleted book would answer 404.
   redirect(withQuery("/dashboard", "success", BOOK_DELETED_MESSAGE));
+}
+
+// BD16 P2 (Q3 b): the author cancels a live pre-order. It goes back to
+// draft; books_preorder_rules (P1) clears its day, sets
+// preorder_cancelled_at and marks every waiting reader for the one
+// "cancelled" email (Q4 a, sent by the daily job, P5); its waiting review
+// is cancelled and its waiting changes become the draft (as any book
+// going offline). It may be pre-ordered again while it has had fewer
+// than 2 (Q3b a). A required tick confirms it. The write goes through the
+// trusted writer (status is protected), bound to the caller's own book
+// and to status 'preorder', so a book released meanwhile is untouched.
+export async function cancelPreorder(bookId: string, formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(`/dashboard/books/${bookId}/editor`);
+  }
+  await redirectIfRecoverySessionActive();
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect("/login");
+  }
+
+  const here = editorPath(bookId, "details");
+  const { data: book, error: readError } = await supabase
+    .from("books")
+    .select("id, author_id, status")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle<{ id: string; author_id: string; status: string }>();
+  if (readError || !book || book.id !== bookId || book.author_id !== user.id) {
+    redirect("/dashboard");
+  }
+  if (book.status !== "preorder") redirect(withQuery(here, "error", PREORDER_NOT_PREORDER_MESSAGE));
+  if (formData.get(CANCEL_PREORDER_CONFIRM_FIELD) !== "yes") {
+    redirect(withQuery(here, "error", CANCEL_PREORDER_CONFIRM_MISSING_MESSAGE));
+  }
+
+  const catalogWriter = createCatalogWriteClient();
+  const { data: rows, error } = await catalogWriter
+    .from("books")
+    .update({ status: "draft" })
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .eq("status", "preorder")
+    .select("id");
+  if (error) {
+    console.error("cancelPreorder: update failed", { bookId, code: error.code ?? null });
+    redirect(withQuery(here, "error", "Parapublikimi nuk mund të anulohet tani. Provoni përsëri"));
+  }
+  if (!isExactlyOneRowWritten(rows)) redirect(withQuery(here, "error", PREORDER_NOT_PREORDER_MESSAGE));
+
+  // As unpublishBook: it stops being Librum's choice (best effort).
+  await clearOwnBookLibrumChoice(catalogWriter, bookId, user.id, "cancelPreorder");
+
+  revalidatePath("/dashboard");
+  revalidatePath("/");
+  redirect(withQuery(here, "success", PREORDER_CANCELLED_MESSAGE));
+}
+
+// BD16 P2 (Q2 a): the author moves the release day once, 1 to 30 days
+// later, until the final file's due date. push_preorder_release_date
+// (P1) checks every rule again with the author's own session (LB504)
+// and marks the one slip used.
+export async function pushPreorderDate(bookId: string, formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance(`/dashboard/books/${bookId}/editor`);
+  }
+  await redirectIfRecoverySessionActive();
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect("/login");
+  }
+
+  const here = editorPath(bookId, "details");
+  const { data: book, error: readError } = await supabase
+    .from("books")
+    .select("id, author_id, status, release_date")
+    .eq("id", bookId)
+    .eq("author_id", user.id)
+    .maybeSingle<{ id: string; author_id: string; status: string; release_date: string | null }>();
+  if (readError || !book || book.id !== bookId || book.author_id !== user.id) {
+    redirect("/dashboard");
+  }
+  if (book.status !== "preorder" || book.release_date === null) {
+    redirect(withQuery(here, "error", PREORDER_NOT_PREORDER_MESSAGE));
+  }
+  const wanted = parseDay(formData.get(RELEASE_DATE_FIELD));
+  if (wanted === null || !isValidPushDate(book.release_date, wanted)) {
+    redirect(withQuery(here, "error", PUSH_INVALID_MESSAGE));
+  }
+
+  const { error } = await supabase.rpc("push_preorder_release_date", {
+    p_book_id: bookId,
+    p_release_date: wanted,
+  });
+  if (error) {
+    if (error.code === "LB504") redirect(withQuery(here, "error", PUSH_REFUSED_MESSAGE));
+    console.error("pushPreorderDate: push failed", { bookId, code: error.code ?? null });
+    redirect(withQuery(here, "error", "Data nuk mund të shtyhet tani. Provoni përsëri"));
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/libra/${bookId}`);
+  redirect(withQuery(here, "success", PUSH_DONE_MESSAGE));
 }

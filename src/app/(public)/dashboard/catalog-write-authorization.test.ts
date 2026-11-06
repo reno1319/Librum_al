@@ -1138,6 +1138,8 @@ describe("the privileged client stays server-only", () => {
       "src/lib/book-ai-disclosure.ts",
       // BD15 P5b-2: a type import only (the caller passes the writer).
       "src/lib/book-pending-changes.ts",
+      // BD16 P2: a type import only (the caller passes the writer).
+      "src/lib/preorders.ts",
     ]);
   });
 });

@@ -11,6 +11,7 @@ import {
   BOOK_ACTIONS_ID,
   editorPath,
 } from "@/lib/book-editor-copy";
+import { PREORDER_EDIT_NOTE, PREORDER_MANAGE_LINK } from "@/lib/preorders";
 
 // BD15 P5b-2: the note on every tab of a live book's editor -- it stays
 // on sale as it is, which changes wait for Librum's review, the changes
@@ -20,7 +21,10 @@ export function LiveEditNotice({
   bookId,
   changed,
   discardAction,
+  preorder = false,
 }: {
+  // BD16 P2: a live pre-order -- listed, not on sale.
+  preorder?: boolean;
   bookId: string;
   changed: readonly PendingChangeField[];
   discardAction: () => void | Promise<void>;
@@ -28,13 +32,13 @@ export function LiveEditNotice({
   return (
     <div className="mt-4 flex flex-col gap-3">
       <Alert variant="info">
-        <p>{LIVE_EDIT_NOTE}</p>
+        <p>{preorder ? PREORDER_EDIT_NOTE : LIVE_EDIT_NOTE}</p>
         <p className="mt-1.5">
           <a
             href={`#${BOOK_ACTIONS_ID}`}
             className="font-medium text-primary underline underline-offset-2 hover:decoration-2"
           >
-            {LIVE_MANAGE_LINK}
+            {preorder ? PREORDER_MANAGE_LINK : LIVE_MANAGE_LINK}
           </a>
         </p>
       </Alert>
