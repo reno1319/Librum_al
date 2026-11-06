@@ -684,7 +684,7 @@ export async function sendAccountSuspensionLiftedEmail(to: string) {
         <p>Mund të hyni përsëri.</p>
         <p>Nëse publikoni libra në Librum, ata janë sërish në Librari, përveç atyre që presin shqyrtim ose që janë hequr.</p>
         <p>${QUESTIONS_LINE}</p>
-        <p><a href="${origin}/login">Hyni</a></p>
+        <p><a href="${origin}/login">Hyr</a></p>
       </div>`,
   );
 }

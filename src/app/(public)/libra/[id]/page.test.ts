@@ -356,8 +356,8 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     expect(html).not.toContain("Merreni e-librin");
     expect(html).not.toContain('placeholder="Kodi promocional (opsional)"');
     expect(html).not.toContain('name="code"');
-    expect(html).not.toContain("Hyni për ta blerë");
-    expect(html).not.toContain("Hyni për ta marrë këtë libër");
+    expect(html).not.toContain("Hyr për ta blerë");
+    expect(html).not.toContain("Hyr për ta marrë këtë libër");
     // What it DOES show: the unavailable state, and the two things that
     // remain legitimate -- saving it for later, and the sample.
     expect(html).toContain("Nuk mund të blihet tani");
@@ -391,7 +391,7 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
     expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).not.toContain("Vazhdoni atë pagesë");
-    expect(html).not.toContain("Hyni për ta blerë");
+    expect(html).not.toContain("Hyr për ta blerë");
   });
 
   it("a FREE book exposes no paid-checkout resume surface either", async () => {
@@ -554,9 +554,9 @@ describe("BookDetailPage: redesign step 3", () => {
     expect(await render({ user: { id: "reader" }, following: true })).toMatch(/>Po e ndiqni<\/button>/);
   });
 
-  it("a visitor gets the author page's own Hyni për ta ndjekur link; the author gets no follow control", async () => {
+  it("a visitor gets the author page's own Hyr për ta ndjekur link; the author gets no follow control", async () => {
     const anon = await render({ user: null });
-    expect(anon).toContain("Hyni për ta ndjekur");
+    expect(anon).toContain("Hyr për ta ndjekur");
     expect(anon).toContain('href="/login?next=/autore/pen-an-author"');
     const author = await render({ user: { id: "author" } });
     expect(author).not.toContain("Follow");

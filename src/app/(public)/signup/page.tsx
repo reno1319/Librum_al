@@ -9,7 +9,7 @@ import { ACCOUNT_NAME_MAX_LENGTH } from "@/lib/account-name";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Krijoni llogari",
+  title: "Krijo llogari",
   description: "Krijoni një llogari në Librum për të botuar ose për të blerë libra elektronikë.",
 };
 
@@ -23,7 +23,7 @@ export default async function SignupPage({
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
-      <h1 className="font-serif text-3xl font-normal">Regjistrohuni</h1>
+      <h1 className="font-serif text-3xl font-normal">Regjistrohu</h1>
 
       {error && (
         <Alert variant="error" className="mt-4">
@@ -130,14 +130,14 @@ export default async function SignupPage({
         </div>
 
         <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
-          Krijoni llogarinë
+          Krijo llogarinë
         </button>
       </form>
 
       <p className="mt-6 text-sm text-muted">
         Keni tashmë llogari?{" "}
         <Link href="/login" className="focus-ring rounded-sm font-medium text-primary underline">
-          Hyni
+          Hyr
         </Link>
       </p>
     </main>

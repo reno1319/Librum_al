@@ -98,7 +98,7 @@ async function render(opts: Parameters<typeof stub>[0] & { searchParams?: Record
 function noBuyControls(html: string) {
   expect(html).not.toContain("Blini e-librin");
   expect(html).not.toContain("Merreni e-librin");
-  expect(html).not.toContain("Hyni për ta blerë");
+  expect(html).not.toContain("Hyr për ta blerë");
   expect(html).not.toContain("Ruajeni për më vonë");
   expect(html).not.toContain("Lexoni një pjesë");
 }
@@ -112,12 +112,12 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("BD16 P4: a pre-order's book page", () => {
-  it("a visitor sees the date, the price and 'Hyni që të njoftoheni', and nothing to buy", async () => {
+  it("a visitor sees the date, the price and 'Hyr që të njoftohesh', and nothing to buy", async () => {
     const html = await render({ b: book(), user: null });
     expect(html).toContain("data-preorder-release");
     expect(html).toContain("Del më 12 dhjetor 2099");
     expect(html).toContain("499");
-    expect(html).toContain("Hyni që të njoftoheni");
+    expect(html).toContain("Hyr që të njoftohesh");
     expect(html).toMatch(/href="\/login\?next=\/libra\/[0-9a-f-]+"/);
     expect(html).toContain("Nuk mund të blihet ose të shkarkohet para se të dalë.");
     expect(html).not.toContain("Parapamje. Ky libër nuk është në Librari.");

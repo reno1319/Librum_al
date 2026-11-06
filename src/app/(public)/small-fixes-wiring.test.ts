@@ -68,7 +68,7 @@ describe("FIX1 X12: header on one row, a quiet Log out, one word for it", () => 
   });
 
   it("draws Log out as a text link, not the outline button", () => {
-    const logout = header.match(/<button type="submit" className=\{(\w+)\}>\s*Dilni/);
+    const logout = header.match(/<button type="submit" className=\{(\w+)\}>\s*Dil\s*</);
     expect(logout?.[1]).toBe("QUIET_LINK_ON_DARK_CLASSES");
   });
 
@@ -82,9 +82,9 @@ describe("FIX1 X12: header on one row, a quiet Log out, one word for it", () => 
       expect(source).toContain("Log out");
       expect(source).not.toMatch(/>\s*Sign out\s*</);
     }
-    // ALBANIAN-7: the reader's Account page says "Dilni", like the header.
+    // ALBANIAN-7: the reader's Account page says "Dil", like the header.
     const account = read("src/app/(public)/account/page.tsx");
-    expect(account).toMatch(/>\s*Dilni\s*</);
+    expect(account).toMatch(/>\s*Dil\s*</);
     expect(account).not.toMatch(/>\s*(Log out|Sign out)\s*</);
   });
 });

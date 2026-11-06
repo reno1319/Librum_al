@@ -383,7 +383,7 @@ export default async function AuthorProfilePage({
                 href={`/login?next=${authorPagePath(id)}`}
                 className={`${buttonClasses("outline", "md")} mt-4`}
               >
-                Hyni për ta ndjekur
+                Hyr për ta ndjekur
               </Link>
             ))}
         </div>

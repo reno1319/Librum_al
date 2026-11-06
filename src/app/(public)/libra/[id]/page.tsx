@@ -1431,7 +1431,7 @@ export default async function BookDetailPage({
                 href={`/login?next=${penNamePath}`}
                 className={buttonClasses("outline", "md", "rounded-[3px] border-primary px-5 py-3 font-semibold")}
               >
-                Hyni për ta ndjekur
+                Hyr për ta ndjekur
               </Link>
             ))}
         </div>
@@ -1896,7 +1896,7 @@ function PurchasePanel({
     return (
       <div className="flex flex-col gap-3">
         <Link href={`/login?next=/libra/${bookId}`} className={PRIMARY_ACTION_CLASSES}>
-          {state === "anonymous-free" ? "Hyni për ta marrë këtë libër" : "Hyni për ta blerë"}
+          {state === "anonymous-free" ? "Hyr për ta marrë këtë libër" : "Hyr për ta blerë"}
         </Link>
       </div>
     );

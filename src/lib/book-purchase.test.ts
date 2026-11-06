@@ -8,7 +8,7 @@ import {
 
 describe("resolveBookPurchaseState", () => {
   // Distinct states, not a single collapsed "anonymous" -- a free book
-  // must present "Hyni për ta marrë këtë libër", never "Hyni për ta blerë", so
+  // must present "Hyr për ta marrë këtë libër", never "Hyr për ta blerë", so
   // the presentation layer needs the price distinction here, not just
   // the auth distinction.
   it("anonymous + paid resolves to anonymous-paid, not the free variant", () => {
