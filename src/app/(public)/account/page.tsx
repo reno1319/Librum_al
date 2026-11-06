@@ -12,6 +12,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
 import { pageErrorMessage } from "@/lib/page-messages";
+import { MY_NOTICES_PATH, MY_NOTICES_TITLE } from "@/lib/preorder-reader";
 
 export const metadata: Metadata = {
   title: "Llogaria",
@@ -111,6 +112,13 @@ export default async function AccountPage({
             className={`focus-ring inline-flex ${buttonClasses("outline", "sm")}`}
           >
             Shkoni te Biblioteka ime
+          </Link>
+          {/* BD16 P4 (D8): the pre-orders this reader asked to hear about. */}
+          <Link
+            href={MY_NOTICES_PATH}
+            className={`focus-ring inline-flex ${buttonClasses("outline", "sm")}`}
+          >
+            {MY_NOTICES_TITLE}
           </Link>
         </div>
       </SurfaceCard>

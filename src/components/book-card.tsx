@@ -5,6 +5,7 @@ import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { authorPagePath } from "@/lib/pen-names";
 import { resolveOriginalAuthor } from "@/lib/book-byline";
 import { AdultTag } from "@/components/adult-tag";
+import { isPreorder, preorderReleaseLabel, tiranaToday } from "@/lib/preorder-reader";
 
 // LIBRUM 2.0 UI-4: the shared reader-commerce card, used by the
 // Bookstore grid, the author profile page, the wishlist page, and
@@ -39,7 +40,12 @@ export function BookCard({
   // fails to type-check instead of linking an original author's name.
   // BD15 P8 (Q1 a): is_adult drives the 18+ tag. Every caller selects
   // "*" from public_books (book-card.test.ts pins the tag).
-  book: Pick<Book, "id" | "title" | "genre" | "price_all" | "pen_name_id" | "original_author" | "is_adult">;
+  // BD16 P4 (D1): status and release_date drive the "Del më …" badge.
+  // Optional: a caller without them shows no badge (buying a pre-order
+  // is refused by the database either way); every page caller selects
+  // "*" from public_books, so they have both.
+  book: Pick<Book, "id" | "title" | "genre" | "price_all" | "pen_name_id" | "original_author" | "is_adult"> &
+    { status?: string | null; release_date?: string | null };
   coverUrl: string | null;
   authorName?: string | null;
 }) {
@@ -79,6 +85,14 @@ export function BookCard({
           <p className="font-serif text-[1.0625rem] leading-snug text-foreground group-hover:underline">
             {book.title}
           </p>
+          {isPreorder(book) && (
+            <span
+              data-preorder-badge=""
+              className="mt-1 inline-block rounded-[3px] border border-[#806510] bg-[#fbf6e8] px-1.5 text-xs leading-5 font-semibold text-[#5c480b]"
+            >
+              {preorderReleaseLabel(book.release_date, tiranaToday())}
+            </span>
+          )}
         </div>
       </Link>
 
