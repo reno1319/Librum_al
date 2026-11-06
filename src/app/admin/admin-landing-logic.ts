@@ -132,7 +132,69 @@ export function shortReportReason(reason: string | null | undefined): string {
 export type TodayReport = { id: string; created_at: string; reason: string | null; bookTitle: string | null };
 export type TodayRefund = { id: string; requested_at: string; readerName: string };
 // ADMIN-3-REVIEW (I): a book waiting for review.
-export type TodayReview = { reviewId: string; bookId: string; title: string; penName: string | null; submittedAt: string };
+/**
+ * BD16 P3 (D9): what a waiting review means for a pre-order.
+ * "overdue": a live pre-order's final file, its release day passed;
+ * "final_file": a live pre-order's final file, before its day;
+ * "listing_too_late": a listing that can no longer be approved (LB506);
+ * "listing": a listing that can still be approved.
+ */
+export type TodayPreorderState = "overdue" | "final_file" | "listing_too_late" | "listing";
+
+export type TodayReview = {
+  reviewId: string;
+  bookId: string;
+  title: string;
+  penName: string | null;
+  submittedAt: string;
+  preorder?: { state: TodayPreorderState; releaseDate: string };
+};
+
+/** D9: overdue first, then final files and too-late listings, then the rest. */
+export function todayReviewPriority(review: TodayReview): number {
+  const state = review.preorder?.state;
+  if (state === "overdue") return 0;
+  if (state === "final_file" || state === "listing_too_late") return 1;
+  return 2;
+}
+
+function preorderReviewText(review: TodayReview, now: Date): { title: string; detail: string } | null {
+  if (!review.preorder) return null;
+  const by = review.penName ?? "an unknown author";
+  const day = formatDateOnlyEn(review.preorder.releaseDate);
+  const sent = `Sent ${formatTodayDate(review.submittedAt)}`;
+  switch (review.preorder.state) {
+    case "overdue":
+      return {
+        title: `Pre-order overdue: the final file of “${review.title}” by ${by} is waiting, release day was ${day}`,
+        detail: `${sent} · Approving releases it at once`,
+      };
+    case "final_file":
+      return {
+        title: `Pre-order final file of “${review.title}” by ${by} is waiting for review, ${formatRelativeTime(review.submittedAt, now)}`,
+        detail: `${sent} · Comes out ${day}`,
+      };
+    case "listing_too_late":
+      return {
+        title: `Pre-order listing of “${review.title}” by ${by} is too late to approve: send it back`,
+        detail: `${sent} · Asked for ${day}`,
+      };
+    case "listing":
+      return {
+        title: `Pre-order listing of “${review.title}” by ${by} is waiting for review, ${formatRelativeTime(review.submittedAt, now)}`,
+        detail: `${sent} · Asks for ${day}`,
+      };
+  }
+}
+
+function formatDateOnlyEn(day: string): string {
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
 
 export type TodoItem = {
   key: string;
@@ -167,15 +229,21 @@ export function buildTodoItems(
   now: Date = new Date(),
   reviews: readonly TodayReview[] = [],
 ): TodoItem[] {
-  const items: TodoItem[] = [
-    ...reviews.map((review) => ({
-      key: `review-${review.reviewId}`,
-      href: `/admin/books/${review.bookId}`,
-      title: `“${review.title}” by ${review.penName ?? "an unknown author"} is waiting for review, ${formatRelativeTime(review.submittedAt, now)}`,
-      detail: `Sent ${formatTodayDate(review.submittedAt)}`,
-      actionLabel: "Review book",
-      at: review.submittedAt,
-    })),
+  const items: (TodoItem & { priority: number })[] = [
+    ...reviews.map((review) => {
+      const preorderText = preorderReviewText(review, now);
+      return {
+        key: `review-${review.reviewId}`,
+        href: `/admin/books/${review.bookId}`,
+        title:
+          preorderText?.title ??
+          `“${review.title}” by ${review.penName ?? "an unknown author"} is waiting for review, ${formatRelativeTime(review.submittedAt, now)}`,
+        detail: preorderText?.detail ?? `Sent ${formatTodayDate(review.submittedAt)}`,
+        actionLabel: "Review book",
+        at: review.submittedAt,
+        priority: todayReviewPriority(review),
+      };
+    }),
     ...reports.map((report) => ({
       key: `report-${report.id}`,
       href: `/admin/reports/${report.id}`,
@@ -183,6 +251,7 @@ export function buildTodoItems(
       detail: `Reported ${formatTodayDate(report.created_at)}`,
       actionLabel: "Review report",
       at: report.created_at,
+      priority: 2,
     })),
     ...refunds.map((refund) => ({
       key: `refund-${refund.id}`,
@@ -191,13 +260,16 @@ export function buildTodoItems(
       detail: `Requested ${formatTodayDate(refund.requested_at)}`,
       actionLabel: "Review request",
       at: refund.requested_at,
+      priority: 2,
     })),
   ];
   // Compared as instants, not strings: created_at and requested_at come
   // from two tables and need not share one text format.
+  // BD16 P3 (D9): the urgent pre-order items first, then oldest first.
   items.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
     const diff = Date.parse(a.at) - Date.parse(b.at);
     return diff !== 0 ? diff : a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
   });
-  return items.slice(0, Math.max(0, limit));
+  return items.slice(0, Math.max(0, limit)).map(({ priority: _priority, ...item }) => item);
 }

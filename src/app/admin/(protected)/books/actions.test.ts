@@ -61,7 +61,12 @@ vi.mock("@/lib/email", () => ({
   sendBookChangesApprovedEmail: (to: string, args: unknown) => mockChangesApprovedEmail(to, args),
   sendBookSentBackEmail: (to: string, args: unknown) => mockSentBackEmail(to, args),
   sendNewBookEmails: (admin: unknown, args: unknown) => mockNewBookEmails(admin, args),
+  sendPreorderListedEmail: (to: string, args: unknown) => mockPreorderListedEmail(to, args),
+  sendPreorderFileApprovedEmail: (to: string, args: unknown) => mockPreorderFileEmail(to, args),
 }));
+// BD16 P3: the pre-order approval emails.
+const mockPreorderListedEmail = vi.fn();
+const mockPreorderFileEmail = vi.fn();
 // B6: follower emails are scheduled with next/server's after(). By
 // default a task starts on the next microtask, so its send is visible
 // once the action settles (and every "no email" assertion still means
@@ -319,7 +324,7 @@ describe("approveBookReviewAsStaff", () => {
     f.delete("file_opens");
     const target = await redirectOf(() => approveBookReviewAsStaff(f));
     expect(mockRequireStaff).toHaveBeenCalledWith("books.review");
-    expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent("Tick all three checks before you approve.")}`);
+    expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent("Tick all the checks before you approve.")}`);
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
@@ -649,5 +654,131 @@ describe("BD15 P7: setPdEditionAsStaff", () => {
     expect((await redirectOf(() => setPdEditionAsStaff(form({ bookId: BOOK_ID, mode: "unlink" })))).startsWith("/admin/books?error=")).toBe(true);
     expect(mockRequireStaff).not.toHaveBeenCalled();
     vi.unstubAllEnvs();
+  });
+});
+
+// BD16 P3: approving and sending back pre-orders.
+describe("BD16 P3: pre-order reviews", () => {
+  beforeEach(() => {
+    resetReviewMocks();
+    mockPreorderListedEmail.mockReset().mockResolvedValue(undefined);
+    mockPreorderFileEmail.mockReset().mockResolvedValue(undefined);
+  });
+  const NO_FILE_CHECKS = { cover_is_fine: "on", rights_ok: "on" };
+  const setBook = (fields: Record<string, unknown>) => {
+    adminRows.books = { data: { ...(adminRows.books.data as object), ...fields }, error: null };
+  };
+
+  it("a listing without a file: two boxes are enough, the RPC gets the three-key checklist, the author gets the listing email", async () => {
+    setBook({ status: "draft", file_path: null, release_date: "2026-12-12" });
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    adminRowQueue.books = [{ data: { status: "preorder", release_date: "2026-12-12" }, error: null }];
+    const target = await redirectOf(() =>
+      approveBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: "", coverPath: COVER, ...NO_FILE_CHECKS })),
+    );
+    expect(mockRpc).toHaveBeenCalledWith("admin_approve_book_review", {
+      p_review_id: REVIEW_ID,
+      p_file_path: null,
+      p_cover_path: COVER,
+      p_price_all: 0,
+      p_checklist: { cover_is_fine: true, not_someone_elses_work: true, rights_declared: true },
+    });
+    expect(target).toBe(
+      `/admin/books/${BOOK_ID}?success=${encodeURIComponent("Pre-order approved. It shows in the Bookstore as coming out on its date.")}`,
+    );
+    expect(mockPreorderListedEmail).toHaveBeenCalledWith("ana@example.com", {
+      title: "Kënga e fundit",
+      bookId: BOOK_ID,
+      releaseDate: "2026-12-12",
+      hasFile: false,
+    });
+    expect(mockApprovedEmail).not.toHaveBeenCalled();
+    await settleAfterTasks();
+    expect(mockNewBookEmails).not.toHaveBeenCalled();
+  });
+
+  // Audit r1 N1 + N2.
+  it("a listing whose re-read fails is still a listing: never the published email or message", async () => {
+    setBook({ status: "draft", file_path: FILE, release_date: "2026-12-12" });
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    adminRowQueue.books = [{ data: null, error: { message: "boom" } }];
+    const target = await redirectOf(() =>
+      approveBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: FILE, coverPath: COVER, ...ALL_CHECKS })),
+    );
+    expect(target).toContain(encodeURIComponent("Pre-order approved."));
+    expect(mockApprovedEmail).not.toHaveBeenCalled();
+    expect(mockPreorderListedEmail).toHaveBeenCalledWith("ana@example.com", {
+      title: "Kënga e fundit",
+      bookId: BOOK_ID,
+      releaseDate: "2026-12-12",
+      hasFile: true,
+    });
+  });
+
+  it("a review with a file still needs the file box", async () => {
+    const f = form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: FILE, coverPath: COVER, ...NO_FILE_CHECKS });
+    const target = await redirectOf(() => approveBookReviewAsStaff(f));
+    expect(target).toContain(encodeURIComponent("Tick all the checks before you approve."));
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("a pre-order's final file before its day: the final-file email, no followers, it stays a pre-order", async () => {
+    setBook({ status: "preorder", file_path: null, release_date: "2026-12-12" });
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    adminRowQueue.books = [{ data: { status: "preorder", release_date: "2026-12-12" }, error: null }];
+    const target = await redirectOf(() => approveBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: FILE, coverPath: COVER, ...ALL_CHECKS })));
+    expect(target).toContain(encodeURIComponent("Final file approved. The book stays a pre-order"));
+    expect(mockPreorderFileEmail).toHaveBeenCalledWith("ana@example.com", {
+      title: "Kënga e fundit",
+      bookId: BOOK_ID,
+      releaseDate: "2026-12-12",
+    });
+    await settleAfterTasks();
+    expect(mockNewBookEmails).not.toHaveBeenCalled();
+    expect(mockApprovedEmail).not.toHaveBeenCalled();
+  });
+
+  it("a pre-order's final file approved after its day releases it: the published email and the followers email", async () => {
+    setBook({ status: "preorder", file_path: null, release_date: "2026-11-01" });
+    mockRpc.mockResolvedValue({ data: true, error: null });
+    adminRowQueue.books = [{ data: { status: "published", release_date: "2026-11-01" }, error: null }];
+    const target = await redirectOf(() => approveBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: FILE, coverPath: COVER, ...ALL_CHECKS })));
+    expect(target).toContain(encodeURIComponent("Final file approved. Its day had passed, so the book is live now."));
+    expect(mockApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID });
+    await settleAfterTasks();
+    expect(mockNewBookEmails).toHaveBeenCalledTimes(1);
+    expect(mockPreorderFileEmail).not.toHaveBeenCalled();
+  });
+
+  it("a pre-order's other changes: the changes email", async () => {
+    setBook({ status: "preorder", file_path: FILE, release_date: "2026-12-12" });
+    mockRpc.mockResolvedValue({ data: false, error: null });
+    adminRowQueue.books = [{ data: { status: "preorder", release_date: "2026-12-12" }, error: null }];
+    const target = await redirectOf(() => approveBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: FILE, coverPath: COVER, ...ALL_CHECKS })));
+    expect(target).toContain(encodeURIComponent("Changes approved. Readers see the new version of the pre-order."));
+    expect(mockChangesApprovedEmail).toHaveBeenCalledTimes(1);
+    expect(mockPreorderFileEmail).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["LB506", "Too late to approve: this pre-order's date is too close. Send it back so the author picks a new date."],
+    ["LB501", "This book has had its 2 pre-orders. Send it back; the author can still publish it as usual."],
+    ["LB503", "This pre-order changed. Reload and check again."],
+  ])("the database's %s is said to staff, and nothing is sent", async (code, shown) => {
+    setBook({ status: "draft", file_path: null, release_date: "2026-11-08" });
+    mockRpc.mockResolvedValue({ data: null, error: { code, message: "raw database text" } });
+    const target = await redirectOf(() =>
+      approveBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: "", coverPath: COVER, ...NO_FILE_CHECKS })),
+    );
+    expect(target).toBe(`/admin/books/${BOOK_ID}?error=${encodeURIComponent(shown)}`);
+    expect(mockPreorderListedEmail).not.toHaveBeenCalled();
+  });
+
+  it("a pre-order's sent-back change is a live book's (it stays listed)", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    mockGetUserById.mockResolvedValue({ data: { user: { email: "ana@example.com" } } });
+    setBook({ status: "preorder" });
+    await redirectOf(() => sendBackBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, reason: "broken_file", message: "Fix it." })));
+    expect(mockSentBackEmail).toHaveBeenCalledWith("ana@example.com", expect.objectContaining({ live: true }));
   });
 });

@@ -84,8 +84,16 @@ const mockReadTitles = vi.fn(
 );
 // ADMIN-3-REVIEW (I): books waiting for review (books.review only).
 let pendingReviews: {
-  items: { reviewId: string; bookId: string; title: string; penName: string | null; submittedAt: string }[];
+  items: {
+    reviewId: string;
+    bookId: string;
+    title: string;
+    penName: string | null;
+    submittedAt: string;
+    preorder?: { state: "overdue" | "final_file" | "listing_too_late" | "listing"; releaseDate: string };
+  }[];
   total: number;
+  overdue?: number;
 } | null = { items: [], total: 0 };
 const mockReadPendingReviews = vi.fn((limit: number) => {
   void limit;
@@ -98,9 +106,11 @@ vi.mock("./books/admin-book-reads", () => ({
 
 const { default: AdminPage } = await import("./page");
 
-async function renderAs(role: StaffRole): Promise<string> {
+async function renderAs(role: StaffRole, search?: Record<string, string>): Promise<string> {
   mockRequireStaff.mockResolvedValueOnce({ userId: "staff-1", role });
-  return renderToStaticMarkup((await AdminPage()) as ReactElement);
+  return renderToStaticMarkup(
+    (await AdminPage(search ? { searchParams: Promise.resolve(search) } : undefined)) as ReactElement,
+  );
 }
 
 const OPEN_REPORT = {
@@ -372,5 +382,43 @@ describe("AdminPage (Today)", () => {
     const admin = await renderAs("admin");
     expect(admin).toMatch(/Books waiting for review.*—/);
     expect(admin).toContain("Some items couldn’t be loaded.");
+  });
+
+  // BD16 P3: the owner's pre-order run and the overdue tile.
+  describe("BD16 P3: pre-orders", () => {
+    it("only the owner sees the run box and its result", async () => {
+      const owner = await renderAs("owner", { preorderRun: "1.0.2.3.0" });
+      expect(owner).toContain("Run the pre-order job now");
+      expect(owner).toContain("Pre-order run done: 1 released, 0 moved 30 days later, 2 cancelled, 3 overdue.");
+      const admin = await renderAs("admin", { preorderRun: "1.0.2.3.0" });
+      expect(admin).not.toContain("Run the pre-order job now");
+      expect(admin).not.toContain("Pre-order run done");
+    });
+
+    it("a crafted result shows nothing", async () => {
+      const html = await renderAs("owner", { preorderRun: "<b>hi</b>" });
+      expect(html).not.toContain("Pre-order run done");
+      expect(html).not.toContain("hi</b>");
+    });
+
+    it("an overdue pre-order gets its tile and leads the To do list", async () => {
+      pendingReviews = {
+        items: [
+          {
+            reviewId: "rv-1",
+            bookId: "book-9",
+            title: "Libri",
+            penName: "Pena",
+            submittedAt: "2026-10-18T08:00:00Z",
+            preorder: { state: "overdue", releaseDate: "2026-10-18" },
+          },
+        ],
+        total: 1,
+        overdue: 1,
+      };
+      const html = await renderAs("admin");
+      expect(html).toContain("Pre-orders overdue");
+      expect(html).toContain("Pre-order overdue: the final file of “Libri” by Pena is waiting");
+    });
   });
 });

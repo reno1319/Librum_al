@@ -3,6 +3,7 @@ import type { createAdminClient } from "@/lib/supabase/admin";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { LIVE_SENT_BACK_FIX_LINE, QUESTIONS_LINE, SENT_BACK_FIX_LINE } from "@/lib/book-review-copy";
 import { formatTransactionMinorUnits, type TransactionCurrency } from "@/lib/transaction-money";
+import { formatDateOnly } from "@/lib/book-detail-dates";
 
 const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
 
@@ -402,6 +403,47 @@ export async function sendBookChangesApprovedEmail(to: string, { title, bookId }
     `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h1 style="font-size: 20px;">Ndryshimet e librit <strong>${escapeEmailHtml(title)}</strong> u miratuan</h1>
         <p>I kontrolluam dhe tani lexuesit shohin versionin e ri.</p>
+        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
+      </div>`,
+  );
+}
+
+// BD16 P3: Librum approved a pre-order listing; it shows in the Librari
+// as coming out on its day. Readers can ask to be told.
+export async function sendPreorderListedEmail(
+  to: string,
+  { title, bookId, releaseDate, hasFile }: { title: string; bookId: string; releaseDate: string; hasFile: boolean },
+) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    `Parapublikimi i "${title}" u miratua`,
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Parapublikimi i <strong>${escapeEmailHtml(title)}</strong> u miratua</h1>
+        <p>Libri tani shfaqet në Librari me datën e daljes ${escapeEmailHtml(formatDateOnly(releaseDate))}. Lexuesit mund të kërkojnë të njoftohen kur të dalë.</p>
+        ${
+          hasFile
+            ? "<p>Dorëshkrimi final u miratua bashkë me parapublikimin, ndaj libri del vetë në datën e daljes.</p>"
+            : "<p>Dorëshkrimi final duhet dërguar për shqyrtim të paktën 3 ditë para datës së daljes.</p>"
+        }
+        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
+      </div>`,
+  );
+}
+
+// BD16 P3: Librum approved a pre-order's final manuscript before its
+// day; the book comes out by itself on that day.
+export async function sendPreorderFileApprovedEmail(
+  to: string,
+  { title, bookId, releaseDate }: { title: string; bookId: string; releaseDate: string },
+) {
+  const origin = resolveSiteOrigin();
+  await sendEmail(
+    to,
+    `Dorëshkrimi final i "${title}" u miratua`,
+    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h1 style="font-size: 20px;">Dorëshkrimi final i <strong>${escapeEmailHtml(title)}</strong> u miratua</h1>
+        <p>Libri del vetë më ${escapeEmailHtml(formatDateOnly(releaseDate))}, rreth orës 08:00.</p>
         <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
       </div>`,
   );

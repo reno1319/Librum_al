@@ -12,6 +12,7 @@ import { REVIEW_CHECKLIST_ITEMS } from "@/lib/book-review-copy";
 import type { PublishGateRefusal } from "@/lib/publish-readiness";
 import { splitKeywords } from "@/lib/book-details";
 import { bookCategories, editionValue } from "@/lib/book-reader-details";
+import { LISTING_TOO_LATE_MESSAGE, preorderEyebrow } from "@/lib/preorder-staff";
 
 // ADMIN-2-TAKEDOWN: pure helpers for /admin/books and /admin/books/[id]
 // (list filters and search, the book page's eyebrow, the Unpublish form
@@ -32,11 +33,13 @@ export const BOOKS_PAGE_SIZE = 50;
 
 // ADMIN-3-REVIEW (G): "In review" = a draft with a pending review;
 // "Draft" excludes books in review and taken-down books.
-export type BooksFilter = "all" | "live" | "in_review" | "draft" | "taken_down";
+// BD16 P3: "Pre-orders" = status 'preorder' (live pre-orders).
+export type BooksFilter = "all" | "live" | "preorder" | "in_review" | "draft" | "taken_down";
 
 export const BOOKS_FILTERS: { value: BooksFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "live", label: "Live" },
+  { value: "preorder", label: "Pre-orders" },
   { value: "in_review", label: "In review" },
   { value: "draft", label: "Draft" },
   { value: "taken_down", label: "Taken down" },
@@ -48,7 +51,9 @@ function first(raw: unknown): unknown {
 
 export function parseBooksFilter(raw: unknown): BooksFilter {
   const value = first(raw);
-  return value === "live" || value === "in_review" || value === "draft" || value === "taken_down" ? value : "all";
+  return value === "live" || value === "preorder" || value === "in_review" || value === "draft" || value === "taken_down"
+    ? value
+    : "all";
 }
 
 export function parseBooksPage(raw: unknown): number {
@@ -102,11 +107,12 @@ export function booksListHref(filter: BooksFilter, q: string, page = 1): string 
   return query ? `/admin/books?${query}` : "/admin/books";
 }
 
-export type BookStateLabel = "Live" | "In review" | "Draft" | "Taken down";
+export type BookStateLabel = "Live" | "Pre-order" | "In review" | "Draft" | "Taken down";
 
 export function bookStateLabel(status: string, takenDown: boolean, inReview = false): BookStateLabel {
   if (takenDown) return "Taken down";
   if (status === "published") return "Live";
+  if (status === "preorder") return "Pre-order";
   return inReview ? "In review" : "Draft";
 }
 
@@ -114,18 +120,23 @@ export function bookStateLabel(status: string, takenDown: boolean, inReview = fa
 // Book page (C)
 // ------------------------------------------------------------
 
-/** "Live · Paid · 499 ALL", "Live · Free", "In review", "Draft" or "Taken down". */
+/**
+ * "Live · Paid · 499 ALL", "Live · Free", "In review", "Draft", "Taken
+ * down", or (BD16) "Pre-order · comes out 12 Dec 2026 · Free".
+ */
 export function describeBookEyebrow(
-  book: { status: string; price_all: number | null },
+  book: { status: string; price_all: number | null; release_date?: string | null },
   takenDown: boolean,
   inReview = false,
 ): string {
   if (takenDown) return "Taken down";
-  if (book.status !== "published") return inReview ? "In review" : "Draft";
+  const lead =
+    book.status === "published" ? "Live" : book.status === "preorder" ? preorderEyebrow(book.release_date ?? null) : null;
+  if (lead === null) return inReview ? "In review" : "Draft";
   const state = resolveCatalogPriceState(book.price_all);
-  if (state === "free") return "Live · Free";
-  if (state === "paid") return `Live · Paid · ${formatCatalogPriceAll(book.price_all as number)}`;
-  return "Live · Price unavailable";
+  if (state === "free") return `${lead} · Free`;
+  if (state === "paid") return `${lead} · Paid · ${formatCatalogPriceAll(book.price_all as number)}`;
+  return `${lead} · Price unavailable`;
 }
 
 /** ?report=<id> counts only when it names an OPEN report of this book. */
@@ -193,10 +204,17 @@ export const ALLOWED_AGAIN_SUCCESS_MESSAGE = "The author can publish this book a
 // ADMIN-3-REVIEW (H): Approve and Send back
 // ------------------------------------------------------------
 
-export const CHECKLIST_INCOMPLETE_MESSAGE = "Tick all three checks before you approve.";
+export const CHECKLIST_INCOMPLETE_MESSAGE = "Tick all the checks before you approve.";
 export const SEND_BACK_MESSAGE_TOO_LONG_MESSAGE = `Please keep the message under ${SEND_BACK_MESSAGE_MAX_LENGTH} characters.`;
 export const GENERIC_REVIEW_ERROR_MESSAGE = "Something went wrong. Please try again.";
 export const APPROVED_SUCCESS_MESSAGE = "Book approved. It's live in the Bookstore now.";
+// BD16 P3: what an approval did to a pre-order.
+export const PREORDER_LISTED_SUCCESS_MESSAGE =
+  "Pre-order approved. It shows in the Bookstore as coming out on its date.";
+export const PREORDER_FILE_APPROVED_SUCCESS_MESSAGE =
+  "Final file approved. The book stays a pre-order and comes out by itself on its day.";
+export const PREORDER_RELEASED_SUCCESS_MESSAGE = "Final file approved. Its day had passed, so the book is live now.";
+export const PREORDER_CHANGES_APPROVED_SUCCESS_MESSAGE = "Changes approved. Readers see the new version of the pre-order.";
 export const SENT_BACK_SUCCESS_MESSAGE = "Book sent back. The author sees your message on their Dashboard.";
 export const AUTHOR_CHANGED_FILES_MESSAGE = "The author changed the file or cover. Reload and check again.";
 export const AUTHOR_CHANGED_BOOK_MESSAGE = "The author changed the book. Reload and check again.";
@@ -214,6 +232,23 @@ export const APPROVED_CHECKLIST = {
   rights_declared: true,
 } as const;
 
+/**
+ * BD16 P3: a review sent without a book file (a pre-order listing, or a
+ * pre-order's change before its final file) has nothing to open, so its
+ * checklist has no "file_opens" -- exactly the three keys
+ * admin_approve_book_review requires when the review's file_path is null.
+ */
+export const APPROVED_NO_FILE_CHECKLIST = {
+  cover_is_fine: true,
+  not_someone_elses_work: true,
+  rights_declared: true,
+} as const;
+
+/** The boxes staff tick: without a file, no "The book file opens". */
+export function reviewChecklistItems(hasFile: boolean) {
+  return REVIEW_CHECKLIST_ITEMS.filter((item) => hasFile || item.key !== "file_opens");
+}
+
 export type ApproveFormValidation =
   | {
       ok: true;
@@ -221,7 +256,7 @@ export type ApproveFormValidation =
       bookId: string;
       filePath: string | null;
       coverPath: string | null;
-      checklist: typeof APPROVED_CHECKLIST;
+      checklist: typeof APPROVED_CHECKLIST | typeof APPROVED_NO_FILE_CHECKLIST;
     }
   | { ok: false; error: string };
 
@@ -232,20 +267,24 @@ function optionalPath(value: FormDataEntryValue | null): string | null {
 // Every box ticked (server-validated: a crafted post without them is
 // refused here and by the RPC). The paths are the values the page
 // rendered, so the RPC can refuse an approval of files staff never saw.
+// BD16 P3: without a file path there is no file box; a post that drops
+// the path of a review that has a file is refused by the RPC (the path
+// must be the review's own).
 export function validateApproveForm(formData: FormData): ApproveFormValidation {
   const reviewId = formData.get("reviewId");
   const bookId = formData.get("bookId");
   if (!isUuid(reviewId) || !isUuid(bookId)) return { ok: false, error: GENERIC_REVIEW_ERROR_MESSAGE };
-  for (const item of REVIEW_CHECKLIST_ITEMS) {
+  const filePath = optionalPath(formData.get("filePath"));
+  for (const item of reviewChecklistItems(filePath !== null)) {
     if (formData.get(item.key) !== "on") return { ok: false, error: CHECKLIST_INCOMPLETE_MESSAGE };
   }
   return {
     ok: true,
     reviewId,
     bookId,
-    filePath: optionalPath(formData.get("filePath")),
+    filePath,
     coverPath: optionalPath(formData.get("coverPath")),
-    checklist: APPROVED_CHECKLIST,
+    checklist: filePath !== null ? APPROVED_CHECKLIST : APPROVED_NO_FILE_CHECKLIST,
   };
 }
 
@@ -313,8 +352,53 @@ const KNOWN_PD_RPC_ERRORS: Record<string, string> = {
   "invalid public-domain edition": PD_EDITION_INVALID_MESSAGE,
 };
 
+// BD16 P3: what one approval did, from the book before it, the book
+// after it (null when that read failed) and the RPC's answer (true only
+// for a first publication). A pre-order was never published (P2), so
+// for one "true" means the approval released it.
+export type ApprovalOutcome = "published" | "listed" | "released" | "final_file" | "preorder_changes" | "live_changes";
+
+export function approvalOutcome(params: {
+  beforeStatus: string;
+  beforeFilePath: string | null;
+  approvedFilePath: string | null;
+  afterStatus: string | null;
+  firstPublication: boolean;
+  // The draft's release date before approving: set only for a listing
+  // (admin_approve_book_review binds it to the review's date).
+  beforeReleaseDate?: string | null;
+}): ApprovalOutcome {
+  if (params.beforeStatus === "published") return "live_changes";
+  if (params.beforeStatus === "preorder") {
+    if (params.firstPublication || params.afterStatus === "published") return "released";
+    return params.beforeFilePath === null && params.approvedFilePath !== null ? "final_file" : "preorder_changes";
+  }
+  if (params.afterStatus === "preorder") return "listed";
+  // Audit r1 N1: the re-read failed. A listing never publishes and never
+  // returns true, so it must not be told "published".
+  if (params.afterStatus === null && !params.firstPublication && (params.beforeReleaseDate ?? null) !== null) return "listed";
+  return "published";
+}
+
+export const APPROVAL_SUCCESS_MESSAGES: Record<ApprovalOutcome, string> = {
+  published: APPROVED_SUCCESS_MESSAGE,
+  live_changes: APPROVED_SUCCESS_MESSAGE,
+  listed: PREORDER_LISTED_SUCCESS_MESSAGE,
+  released: PREORDER_RELEASED_SUCCESS_MESSAGE,
+  final_file: PREORDER_FILE_APPROVED_SUCCESS_MESSAGE,
+  preorder_changes: PREORDER_CHANGES_APPROVED_SUCCESS_MESSAGE,
+};
+
+// BD16 (migration 20261106120000): the pre-order refusals, by code.
+export const PREORDER_USED_UP_APPROVE_MESSAGE =
+  "This book has had its 2 pre-orders. Send it back; the author can still publish it as usual.";
+export const PREORDER_CHANGED_MESSAGE = "This pre-order changed. Reload and check again.";
+
 export function mapReviewRpcError(error: { code?: string | null; message?: string | null } | null | undefined): string {
   if (error?.code === "40P01") return "Please try again.";
+  if (error?.code === "LB506") return LISTING_TOO_LATE_MESSAGE;
+  if (error?.code === "LB501") return PREORDER_USED_UP_APPROVE_MESSAGE;
+  if (error?.code === "LB503") return PREORDER_CHANGED_MESSAGE;
   if (error?.code === "LB464") return AUTHOR_SUSPENDED_APPROVE_MESSAGE;
   if (error?.code === "LB498") return PD_NOT_LINKED_APPROVE_MESSAGE;
   if (error?.code === "LB485") return PD_NOT_PICKED_APPROVE_MESSAGE;
