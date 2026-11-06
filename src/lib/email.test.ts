@@ -26,6 +26,7 @@ process.env.RESEND_API_KEY = "test-key";
 
 const {
   sendEmailBatch,
+  emailSendingConfigured,
   EMAIL_BATCH_SIZE,
   sendNewBookEmails,
   sendBookTakedownEmail,
@@ -35,6 +36,12 @@ const {
   sendAccountSuspendedEmail,
   sendAccountSuspensionLiftedEmail,
   escapeEmailHtml,
+  preorderReleasedReaderEmail,
+  preorderCancelledReaderEmail,
+  preorderDateMovedReaderEmail,
+  sendPreorderReleasedAuthorEmail,
+  sendPreorderDateMovedEmail,
+  sendPreorderCancelledAuthorEmail,
 } = await import("./email");
 
 // PEN-NAMES-1 (4a): the email goes to the followers of the BOOK'S pen
@@ -43,8 +50,12 @@ function makeFakeAdmin(overrides: {
   book?: { title: string; author_id: string; pen_name_id: string | null; pd_work_id?: string | null; pd_editor_credit?: boolean } | null;
   penName?: { name: string } | null;
   follows?: { follower_id: string }[];
+  waiters?: { user_id: string; book_cancelled_at: string | null }[];
+  waitersError?: { code: string } | null;
 }) {
   const {
+    waiters = [],
+    waitersError = null,
     book = { title: "Test Book", author_id: "author-1", pen_name_id: "pen-1" },
     penName = { name: "R. A. Nightingale" },
     follows = [],
@@ -71,6 +82,22 @@ function makeFakeAdmin(overrides: {
           select: () => ({
             eq: (_column: string, value: string) =>
               Promise.resolve({ data: value === book?.pen_name_id ? follows : [] }),
+          }),
+        };
+      }
+      // BD16 P5 (D2): the current pre-order's "Më njofto" readers.
+      if (table === "preorder_notify_requests") {
+        return {
+          select: () => ({
+            eq: () => ({
+              is: (_column: string, value: null) => ({
+                returns: () =>
+                  Promise.resolve({
+                    data: waitersError ? null : waiters.filter((w) => w.book_cancelled_at === value),
+                    error: waitersError,
+                  }),
+              }),
+            }),
           }),
         };
       }
@@ -185,6 +212,92 @@ describe("sendNewBookEmails", () => {
 
 // PC2: Resend takes at most EMAIL_BATCH_SIZE emails per batch call and
 // about 2 calls a second, so batches go one after another.
+describe("sendNewBookEmails: BD16 P5 follower dedupe (D2)", () => {
+  beforeEach(() => {
+    batchMock.mockClear();
+  });
+
+  it("leaves out a follower who asked 'Më njofto' for this pre-order (sent or not)", async () => {
+    const admin = makeFakeAdmin({
+      follows: [{ follower_id: "f-waiting" }, { follower_id: "f-only" }],
+      waiters: [{ user_id: "f-waiting", book_cancelled_at: null }, { user_id: "r-not-follower", book_cancelled_at: null }],
+    });
+    await sendNewBookEmails(admin, { bookId: "book-1", authorId: "author-1" });
+    expect(batchMock.mock.calls[0][0].map((m) => m.to)).toEqual(["f-only@example.com"]);
+  });
+
+  it("keeps a follower whose earlier request ended with a cancelled pre-order", async () => {
+    const admin = makeFakeAdmin({
+      follows: [{ follower_id: "f-old" }],
+      waiters: [{ user_id: "f-old", book_cancelled_at: "2026-11-01T08:00:00Z" }],
+    });
+    await sendNewBookEmails(admin, { bookId: "book-1", authorId: "author-1" });
+    expect(batchMock.mock.calls[0][0].map((m) => m.to)).toEqual(["f-old@example.com"]);
+  });
+
+  it("sends nothing when every follower is a waiting reader", async () => {
+    const admin = makeFakeAdmin({
+      follows: [{ follower_id: "f1" }],
+      waiters: [{ user_id: "f1", book_cancelled_at: null }],
+    });
+    await sendNewBookEmails(admin, { bookId: "book-1", authorId: "author-1" });
+    expect(batchMock).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable list still sends to every follower, logging only the code", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const admin = makeFakeAdmin({ follows: [{ follower_id: "f1" }], waitersError: { code: "42501" } });
+    await sendNewBookEmails(admin, { bookId: "book-1", authorId: "author-1" });
+    expect(batchMock.mock.calls[0][0]).toHaveLength(1);
+    expect(JSON.stringify(errors.mock.calls)).not.toContain("@");
+    errors.mockRestore();
+  });
+});
+
+describe("BD16 P5 pre-order emails", () => {
+  beforeEach(() => {
+    sendMock.mockClear();
+  });
+
+  it("reader release email: title escaped, links to the book, says it is the only one", () => {
+    const { subject, html } = preorderReleasedReaderEmail({ title: "<b>Vjeshta</b>", bookId: "book-1" });
+    expect(subject).toBe('"<b>Vjeshta</b>" doli në Librum');
+    expect(html).toContain("&lt;b&gt;Vjeshta&lt;/b&gt;");
+    expect(html).not.toContain("<b>Vjeshta</b>");
+    expect(html).toContain("/libra/book-1");
+    expect(html).toContain("i vetmi email");
+  });
+
+  it("reader cancel email: neutral (never who or why), links to the Librari, says how to ask again", () => {
+    const { subject, html } = preorderCancelledReaderEmail({ title: "Vjeshta" });
+    expect(subject).toBe('"Vjeshta" nuk do të dalë në datën e njoftuar');
+    expect(html).toContain("/librari");
+    expect(html).toContain('shtypni përsëri "Më njofto"');
+    expect(html).not.toMatch(/autor|Librum e hoqi|takedown/i);
+  });
+
+  it("reader new-date email: the new date, title escaped, says the release email still comes", () => {
+    const { subject, html } = preorderDateMovedReaderEmail({ title: "A&B", bookId: "book-1", releaseDate: "2027-01-19" });
+    expect(subject).toBe('"A&B" del në një datë të re');
+    expect(html).toContain("A&amp;B");
+    expect(html).toContain("2027");
+    expect(html).toContain("/libra/book-1");
+    expect(html).toContain("kur të dalë libri");
+  });
+
+  it("author emails: released, date moved (new date shown), cancelled", async () => {
+    await sendPreorderReleasedAuthorEmail("a@example.com", { title: "T<", bookId: "book-1" });
+    await sendPreorderDateMovedEmail("a@example.com", { title: "T", releaseDate: "2026-12-06" });
+    await sendPreorderCancelledAuthorEmail("a@example.com", { title: "T" });
+    const [released, moved, cancelled] = sendMock.mock.calls.map((c) => c[0]);
+    expect(released.subject).toBe('Libri juaj "T<" doli sot në Librum');
+    expect(released.html).toContain("T&lt;");
+    expect(moved.subject).toBe('Data e daljes së "T" u shty me 30 ditë');
+    expect(moved.html).toContain("2026");
+    expect(cancelled.subject).toBe('Parapublikimi i "T" u anulua');
+  });
+});
+
 describe("sendEmailBatch", () => {
   beforeEach(() => batchMock.mockClear());
 
@@ -192,6 +305,9 @@ describe("sendEmailBatch", () => {
     Array.from({ length: n }, (_, i) => ({ to: `r${i}@example.com`, subject: "S", html: "H" }));
 
   it("splits into batches of EMAIL_BATCH_SIZE, in order, each email carrying the sender", async () => {
+    expect(emailSendingConfigured()).toBe(true);
+    expect((await sendEmailBatch(messages(1), { pauseMs: 0 })).notSent).toEqual([]);
+    batchMock.mockClear();
     await sendEmailBatch(messages(EMAIL_BATCH_SIZE * 2 + 1), { pauseMs: 0 });
     expect(batchMock).toHaveBeenCalledTimes(3);
     expect(batchMock.mock.calls.map(([b]) => b.length)).toEqual([EMAIL_BATCH_SIZE, EMAIL_BATCH_SIZE, 1]);
@@ -223,7 +339,10 @@ describe("sendEmailBatch", () => {
     } as never);
     batchMock.mockRejectedValueOnce(new Error("network down"));
     try {
-      await expect(sendEmailBatch(messages(EMAIL_BATCH_SIZE * 2 + 1), { pauseMs: 0 })).resolves.toBeUndefined();
+      // BD16 P5 r2 (audit F3): only the refused batch is reported as
+      // surely not sent; the thrown one may have gone out.
+      const result = await sendEmailBatch(messages(EMAIL_BATCH_SIZE * 2 + 1), { pauseMs: 0 });
+      expect(result.notSent).toEqual(Array.from({ length: EMAIL_BATCH_SIZE }, (_v, i) => i));
       expect(batchMock).toHaveBeenCalledTimes(3);
       expect(errorSpy).toHaveBeenCalledTimes(2);
       const logged = JSON.stringify(errorSpy.mock.calls[0]);
@@ -242,7 +361,8 @@ describe("sendEmailBatch", () => {
     const key = process.env.RESEND_API_KEY;
     delete process.env.RESEND_API_KEY;
     try {
-      await sendEmailBatch(messages(2));
+      expect(emailSendingConfigured()).toBe(false);
+      expect((await sendEmailBatch(messages(2))).notSent).toEqual([0, 1]);
       expect(batchMock).not.toHaveBeenCalled();
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("example.com");
     } finally {

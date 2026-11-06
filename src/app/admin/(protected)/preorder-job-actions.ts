@@ -6,7 +6,9 @@ import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
+import { after } from "next/server";
 import { preorderDayCounts, runPreorderDay } from "@/lib/preorder-job";
+import { sendPreorderJobEmails } from "@/lib/preorder-emails";
 import {
   PREORDER_RUN_FAILED_MESSAGE,
   PREORDER_RUN_OWNER_ONLY_MESSAGE,
@@ -22,8 +24,9 @@ import {
 // is read on the server, never from the form), then the 08:00 Tirana
 // rule (Renato 11-06: a file sent before the 08:00 job counts as on
 // time), then run_preorder_day with the service-role client (granted to
-// service_role only). The database step is safe to run twice. Emails
-// come with P5.
+// service_role only). The database step is safe to run twice. BD16 P5:
+// the emails (src/lib/preorder-emails.ts) go after the page has answered;
+// the readers' sweep runs even when the database step failed.
 export async function runPreorderJobAsOwner() {
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
     redirectForMaintenance("/admin");
@@ -38,7 +41,19 @@ export async function runPreorderJobAsOwner() {
     redirect(`/admin?error=${encodeURIComponent(PREORDER_RUN_TOO_EARLY_MESSAGE)}`);
   }
 
-  const summary = await runPreorderDay(createAdminClient());
+  const admin = createAdminClient();
+  const summary = await runPreorderDay(admin);
+  try {
+    after(async () => {
+      try {
+        await sendPreorderJobEmails(admin, summary);
+      } catch (sendError) {
+        console.error("runPreorderJobAsOwner: the pre-order emails failed", { error: sendError });
+      }
+    });
+  } catch (scheduleError) {
+    console.error("runPreorderJobAsOwner: the pre-order emails could not be scheduled", { error: scheduleError });
+  }
   if (!summary) {
     redirect(`/admin?error=${encodeURIComponent(PREORDER_RUN_FAILED_MESSAGE)}`);
   }

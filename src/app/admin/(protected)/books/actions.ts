@@ -22,6 +22,7 @@ import { authorTakedownReasonLabel } from "@/lib/takedown-reasons";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { checkPublishGate } from "@/lib/publish-readiness";
 import { removeUnretainedManuscripts } from "@/lib/book-reviews";
+import { scheduleWaitingReaderEmails } from "@/lib/preorder-emails";
 import { readRightsStateForStaff } from "./admin-book-reads";
 import {
   APPROVAL_SUCCESS_MESSAGES,
@@ -188,6 +189,11 @@ async function notifyAuthorAndRevalidate(
       error: followUpError,
     });
   }
+
+  // BD16 P5 (Q4 a): taking down a pre-order cancels it; its waiting
+  // readers get the one "cancelled" email (marked by the database). For
+  // any other book the sweep finds nothing new.
+  scheduleWaitingReaderEmails("unpublishBookAsStaff");
 
   for (const path of paths) {
     try {
@@ -395,6 +401,16 @@ export async function approveBookReviewAsStaff(formData: FormData) {
     } catch (followUpError) {
       logFollowersFailure(followUpError);
     }
+  }
+
+  // BD16 P5: a pre-order's final file approved on or after its day
+  // released it (BD15 Q3): its "Më njofto" readers hear now, not at the
+  // next morning's job. Any final-file approval of a pre-order schedules
+  // the sweep (it acts only on books that are published), so a failed
+  // re-read above can't skip it; the job sends whatever this misses,
+  // and a row is never sent twice (src/lib/preorder-emails.ts).
+  if (book.status === "preorder" && validation.filePath !== null) {
+    scheduleWaitingReaderEmails("approveBookReviewAsStaff");
   }
 
   // N3: the previously approved file is no longer the buyers' file.

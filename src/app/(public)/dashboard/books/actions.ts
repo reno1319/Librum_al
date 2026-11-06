@@ -116,6 +116,7 @@ import {
   PRICE_CHANGE_CONFIRM_MESSAGE,
 } from "@/lib/price-change-confirm";
 import { getPreorderSchemaFeature } from "@/lib/catalog-schema-features";
+import { scheduleDateMovedReaderEmails, scheduleWaitingReaderEmails } from "@/lib/preorder-emails";
 import {
   CANCEL_PREORDER_CONFIRM_FIELD,
   CANCEL_PREORDER_CONFIRM_MISSING_MESSAGE,
@@ -2444,7 +2445,7 @@ export async function deleteBook(bookId: string) {
 // BD16 P2 (Q3 b): the author cancels a live pre-order. It goes back to
 // draft; books_preorder_rules (P1) clears its day, sets
 // preorder_cancelled_at and marks every waiting reader for the one
-// "cancelled" email (Q4 a, sent by the daily job, P5); its waiting review
+// "cancelled" email (Q4 a, sent right after, P5); its waiting review
 // is cancelled and its waiting changes become the draft (as any book
 // going offline). It may be pre-ordered again while it has had fewer
 // than 2 (Q3b a). A required tick confirms it. The write goes through the
@@ -2496,6 +2497,10 @@ export async function cancelPreorder(bookId: string, formData: FormData) {
   // As unpublishBook: it stops being Librum's choice (best effort).
   await clearOwnBookLibrumChoice(catalogWriter, bookId, user.id, "cancelPreorder");
 
+  // BD16 P5 (Q4 a): the waiting readers' one "cancelled" email, once the
+  // page has answered (the daily job sends whatever this misses).
+  scheduleWaitingReaderEmails("cancelPreorder");
+
   revalidatePath("/dashboard");
   revalidatePath("/");
   redirect(withQuery(here, "success", PREORDER_CANCELLED_MESSAGE));
@@ -2546,6 +2551,10 @@ export async function pushPreorderDate(bookId: string, formData: FormData) {
     console.error("pushPreorderDate: push failed", { bookId, code: error.code ?? null });
     redirect(withQuery(here, "error", "Data nuk mund të shtyhet tani. Provoni përsëri"));
   }
+
+  // BD16 P5 (Renato 11-06): this is the pre-order's one date move; its
+  // waiting readers get the one "new date" email.
+  scheduleDateMovedReaderEmails("pushPreorderDate", { bookId, releaseDate: wanted });
 
   revalidatePath("/dashboard");
   revalidatePath(`/libra/${bookId}`);
