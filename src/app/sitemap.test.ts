@@ -16,7 +16,7 @@ function mockQuery(table: string) {
   const query: Query = { table, calls: [] };
   queries.push(query);
   const builder: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "not", "order", "range", "returns"]) {
+  for (const method of ["select", "eq", "in", "not", "order", "range", "returns"]) {
     builder[method] = (...args: unknown[]) => {
       query.calls.push({ method, args });
       return builder;
@@ -191,7 +191,13 @@ describe("sitemap", () => {
       await sitemap();
       for (const table of ["public_books", "public_bundles"]) {
         const [query] = queriesOf(table);
-        expect(argsOf(query, "eq")).toContainEqual(["status", "published"]);
+        // BD16 P4 (D1): books are published or a live pre-order; never a draft.
+        if (table === "public_books") {
+          expect(argsOf(query, "in")).toContainEqual(["status", ["published", "preorder"]]);
+          expect(argsOf(query, "eq")).not.toContainEqual(["status", "draft"]);
+        } else {
+          expect(argsOf(query, "eq")).toContainEqual(["status", "published"]);
+        }
         expect(argsOf(query, "not")).toContainEqual(["price_all", "is", null]);
       }
       expect(queriesOf("books")).toHaveLength(0);

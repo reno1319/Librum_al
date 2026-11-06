@@ -452,6 +452,21 @@ describe("getFreeBook: provider-free acquisition remains available (STRIPE-DISAB
     expect(mockRpc).not.toHaveBeenCalledWith("create_book_checkout_intent", expect.anything());
   });
 
+  // BD16 P4 audit r1 F1: a free pre-order (D3) can't be claimed before
+  // it comes out. This status check is the only guard (no DB backstop
+  // on purchases), so a pre-order row must be refused before any write.
+  it.each(["preorder", "draft"])("refuses a free book whose status is %s, and writes nothing", async (status) => {
+    mockBookSingle.mockResolvedValue({
+      data: { id: BOOK_ID, price_all: 0, status, author_id: AUTHOR_ID },
+      error: null,
+    });
+
+    await expect(getFreeBook(BOOK_ID)).rejects.toMatchObject({ target: `/libra/${BOOK_ID}` });
+
+    expect(mockPurchasesUpsert).not.toHaveBeenCalled();
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+  });
+
   it("already-owned free book: idempotent no-op redirect, never re-upserts", async () => {
     mockRpc.mockResolvedValue({ data: true, error: null });
 
@@ -1011,6 +1026,18 @@ describe("buyBook: the catalog price decides, and null is neither free nor paid"
     await expect(buyBook("book", new FormData())).rejects.toMatchObject({
       target: "/libra/book?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20blihet%20tani.",
     });
+
+    expect(rpc).not.toHaveBeenCalledWith("create_book_checkout_intent", expect.anything());
+    expect(mockStartPok).not.toHaveBeenCalled();
+    expect(mockPokConfig).not.toHaveBeenCalled();
+  });
+
+  // BD16 P4 audit r1 (M2): a paid pre-order can't be bought before it
+  // comes out; refused before any intent is minted or provider called.
+  it.each(["preorder", "draft"])("refuses a paid book whose status is %s, before any intent is minted", async (status) => {
+    bookRow = { ...bookRow, status };
+
+    await expect(buyBook("book", new FormData())).rejects.toMatchObject({ target: "/libra/book" });
 
     expect(rpc).not.toHaveBeenCalledWith("create_book_checkout_intent", expect.anything());
     expect(mockStartPok).not.toHaveBeenCalled();
