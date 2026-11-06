@@ -4,6 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // BD15 P2: the Details tab renders every section, and the locks show.
 vi.mock("@/app/(public)/dashboard/books/editor-actions", () => ({ createSeriesFromEditor: async () => ({ ok: false, message: "" }) }));
+// Upload notes 1: the form re-reads the pen names when the author comes back.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
 
 const { BookDetailsForm } = await import("./book-details-form");
 
@@ -13,7 +15,7 @@ const OTHER_PEN = "d5555555-5555-4555-8555-555555555555";
 function render(
   overrides: Partial<Parameters<typeof BookDetailsForm>[0]["initial"]> = {},
   locked = false,
-  liveProps: { rightsLocked?: boolean; live?: boolean; pdFrozen?: boolean } = {},
+  liveProps: { rightsLocked?: boolean; live?: boolean; pdFrozen?: boolean; markMissing?: ("title" | "categories" | "description" | "rightsBasis" | "originalAuthor")[] } = {},
 ) {
   return renderToStaticMarkup(
     createElement(BookDetailsForm, {
@@ -245,5 +247,35 @@ describe("BookDetailsForm: a picked public-domain edition (N5)", () => {
     expect(html).toContain(">Hiq<");
     expect(html).toContain("+ Shto kontribues");
     expect(html).toContain("+ Krijo seri të re");
+  });
+});
+
+// Upload notes 1 and 2 (Enkelejd 11-06).
+describe("BookDetailsForm: upload notes", () => {
+  it("the pen-name page opens in a new tab, and says so", () => {
+    const link = render().match(/<a[^>]*href="\/dashboard\/pen-names"[^>]*>[\s\S]*?<\/a>/)![0];
+    expect(link).toContain('target="_blank"');
+    expect(link).toContain('rel="noopener"');
+    expect(link).toContain("(hapet në një skedë të re)");
+  });
+
+  it("carries the unsaved-changes guard inside the form", () => {
+    expect(render()).toMatch(/^<form[^>]*><span hidden="">/);
+  });
+
+  it("opened from the to-do list: the missing fields start red with a message", () => {
+    const html = render({ title: "" }, false, { markMissing: ["title", "description", "rightsBasis"] });
+    expect(html.match(/<input[^>]*name="title"[^>]*>/)![0]).toContain("border-red-700");
+    expect(html).toContain('id="details-title-error"');
+    expect(html).toContain('id="details-description-error"');
+    expect(html).toContain('id="details-rightsBasis-error"');
+    expect(html.split("Plotësojeni këtë para se ta dërgoni.").length - 1).toBe(3);
+    expect(html).not.toContain('id="details-categories-error"');
+  });
+
+  it("without the flag nothing is red", () => {
+    const html = render({ title: "" });
+    expect(html).not.toContain("Plotësojeni këtë para se ta dërgoni.");
+    expect(html.match(/<input[^>]*name="title"[^>]*>/)![0]).not.toContain("border-red-700");
   });
 });

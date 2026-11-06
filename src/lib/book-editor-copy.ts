@@ -17,6 +17,26 @@ export function editorPath(bookId: string, tab: EditorTab): string {
   return `/dashboard/books/${bookId}/editor?tab=${tab}`;
 }
 
+// Upload notes 2 (Enkelejd 11-06): the Pricing tab's to-do links open the
+// other tabs with this flag, and those tabs mark what is still missing
+// for the send in red (the page reads ?mungon=1).
+export function editorMissingPath(bookId: string, tab: EditorTab): string {
+  return `${editorPath(bookId, tab)}&mungon=1`;
+}
+
+export const MISSING_FOR_SEND_MESSAGE = "Plotësojeni këtë para se ta dërgoni.";
+
+// The Content tab's missing items, and the box each one is in (its to-do
+// link jumps there).
+export const CONTENT_MISSING_MANUSCRIPT = "Dorëshkrimi";
+export const CONTENT_MISSING_COVER = "Ballina";
+export const CONTENT_MISSING_AI = "Pyetja për AI";
+export const CONTENT_MISSING_SECTION: Readonly<Record<string, string>> = {
+  [CONTENT_MISSING_MANUSCRIPT]: "content-manuscript",
+  [CONTENT_MISSING_COVER]: "content-cover",
+  [CONTENT_MISSING_AI]: "content-ai",
+};
+
 export const DETAILS_SAVED_MESSAGE = "U ruajt si draft";
 export const DETAILS_INVALID_MESSAGE = "Disa fusha nuk janë plotësuar si duhet. Kontrolloni të dhënat dhe provoni përsëri.";
 export const SAVE_FAILED_MESSAGE = "Diçka shkoi keq gjatë ruajtjes së librit. Provoni përsëri";

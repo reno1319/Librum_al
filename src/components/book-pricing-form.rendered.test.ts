@@ -8,6 +8,7 @@ vi.mock("next/link", () => ({
 }));
 
 const { BookPricingForm, pricingTodo, pricingTodoNote } = await import("./book-pricing-form");
+const { EditorActionBar } = await import("./book-editor-ui");
 
 // BD15 P4: the Pricing tab rendered (first paint; the live preview's
 // rules are in src/lib/book-pricing.test.ts).
@@ -108,9 +109,49 @@ describe("BookPricingForm", () => {
   });
 
   it("the send button: Dërgo për shqyrtim, or Publiko when the approval still matches", () => {
-    expect(button(render(), "Dërgo për shqyrtim")).toContain('value="send"');
-    expect(button(render({ approvalValid: true }), "Publiko")).toContain('value="send"');
+    // On first paint the two ticks are empty, so it is the blocked one.
+    expect(button(render(), "Dërgo për shqyrtim")).toContain('aria-disabled="true"');
+    expect(button(render({ approvalValid: true }), "Publiko")).toContain('aria-disabled="true"');
     expect(button(render(), "Ruaj draftin")).toContain('value="save"');
+  });
+
+  // Upload notes 2 (Enkelejd 11-06): the blocked button answers a click
+  // (aria-disabled, type="button": it can never send); the open one is
+  // the form's send button.
+  it("the action bar: a blocked main button can be clicked but never sends; an open one sends", () => {
+    const bar = (blocked: boolean) =>
+      renderToStaticMarkup(
+        createElement(EditorActionBar, {
+          primaryLabel: "Dërgo për shqyrtim",
+          primaryIntent: "send",
+          primaryBlocked: blocked,
+          primaryNote: "Plotësoni 1 gjë më lart",
+          primaryNoteHref: "#pricing-todo",
+        }),
+      );
+    const blocked = button(bar(true), "Dërgo për shqyrtim");
+    expect(blocked).toContain('type="button"');
+    expect(blocked).toContain('aria-disabled="true"');
+    expect(blocked).not.toContain('disabled=""');
+    expect(blocked).not.toContain('value="send"');
+    expect(blocked).toContain('aria-describedby="editor-primary-note"');
+    const open = button(bar(false), "Dërgo për shqyrtim");
+    expect(open).toContain('type="submit"');
+    expect(open).toContain('value="send"');
+    expect(open).not.toContain("aria-disabled");
+    expect(bar(true)).toContain('<a href="#pricing-todo" class="text-primary underline">Plotësoni 1 gjë më lart</a>');
+  });
+
+  it("upload notes 2: the to-do note is a link to the list; nothing is red before the click", () => {
+    const html = render();
+    expect(html).toContain('id="pricing-todo" tabindex="-1"');
+    expect(html).toContain('<a href="#pricing-todo" class="text-primary underline">Plotësoni 2 gjëra më lart</a>');
+    expect(html).not.toContain("border-red-700");
+    expect(html).not.toContain("Plotësojeni këtë para se ta dërgoni.");
+    // The ticks are asked again on every send: ticking them is not an
+    // unsaved change (upload notes 1).
+    expect(tick(html, "worldwideRights")).toContain("data-unsaved-ignore");
+    expect(tick(html, "acceptAuthorTerms")).toContain("data-unsaved-ignore");
   });
 
   it("BD15 P5a (P4 audit F7): Publiko says a changed byline goes back to review", () => {
@@ -126,10 +167,12 @@ describe("BookPricingForm", () => {
         { tab: "content", label: "Pyetja për AI" },
       ],
     });
-    expect(html).toContain(`href="/dashboard/books/${BOOK_ID}/editor?tab=details"`);
-    expect(html).toContain(`href="/dashboard/books/${BOOK_ID}/editor?tab=content"`);
+    // Upload notes 2: the other tab opens with its missing fields red;
+    // a Content item jumps to its box.
+    expect(html).toContain(`href="/dashboard/books/${BOOK_ID}/editor?tab=details&amp;mungon=1"`);
+    expect(html).toContain(`href="/dashboard/books/${BOOK_ID}/editor?tab=content&amp;mungon=1#content-ai"`);
     expect(html).toContain("Pyetja për AI</a> <span class=\"text-muted\">(Përmbajtja)</span>");
-    expect(button(html, "Dërgo për shqyrtim")).toContain('disabled=""');
+    expect(button(html, "Dërgo për shqyrtim")).toContain('aria-disabled="true"');
     // The two unticked boxes count too (Renato 11-04, a): 2 + 2.
     expect(html).toContain('href="#pricing-worldwide"');
     expect(html).toContain('href="#pricing-terms-tick"');
@@ -141,7 +184,9 @@ describe("BookPricingForm", () => {
   // to-do count.
   it("a taken-down book: Send disabled with the refusal note, Save still there", () => {
     const html = render({ sendRefusedNote: "Librum e hoqi këtë libër, prandaj nuk mund ta dërgoni tani." });
-    expect(button(html, "Dërgo për shqyrtim")).toContain('disabled=""');
+    expect(button(html, "Dërgo për shqyrtim")).toContain('aria-disabled="true"');
+    // The refusal note is not a link to the to-do list.
+    expect(html).not.toContain('href="#pricing-todo"');
     expect(html).toContain("Librum e hoqi këtë libër, prandaj nuk mund ta dërgoni tani.");
     expect(html).not.toContain("Plotësoni 2 gjëra më lart");
     expect(html).toContain('value="save"');
@@ -150,7 +195,7 @@ describe("BookPricingForm", () => {
   it("D1: on first paint the two boxes are unticked, so Send is a dashed, disabled button", () => {
     const html = render();
     const send = button(html, "Dërgo për shqyrtim");
-    expect(send).toContain('disabled=""');
+    expect(send).toContain('aria-disabled="true"');
     expect(send).toContain("border-dashed");
     expect(html).toContain("Plotësoni 2 gjëra më lart");
     expect(html).toContain('id="pricing-worldwide"');
@@ -164,7 +209,7 @@ describe("BookPricingForm", () => {
     expect(pricingTodo(BOOK_ID, [], { worldwide: false, terms: true }).map((t) => t.key)).toEqual(["tick-worldwide"]);
     const all = pricingTodo(BOOK_ID, missing, { worldwide: false, terms: false });
     expect(all.map((t) => t.href)).toEqual([
-      `/dashboard/books/${BOOK_ID}/editor?tab=content`,
+      `/dashboard/books/${BOOK_ID}/editor?tab=content&mungon=1#content-cover`,
       "#pricing-worldwide",
       "#pricing-terms-tick",
     ]);
@@ -218,5 +263,42 @@ describe("BookPricingForm", () => {
     expect(html).toContain("Libri im");
     expect(html).toContain("Arben Leka");
     expect(html).toContain('<p class="mt-1.5 font-semibold">1.500 lekë</p>');
+  });
+
+  // Audit A r1 N2: a pre-order date the server would refuse blocks the
+  // send here too -- empty, or outside the window.
+  describe("pre-order date", () => {
+    const WINDOW = { min: "2026-11-20", max: "2027-05-06" };
+    const preorderRender = (initialDate: string) =>
+      render({ release: { available: true, initialMode: "preorder", initialDate, window: WINDOW } });
+
+    it("an empty date is on the to-do list and blocks the send", () => {
+      const html = preorderRender("");
+      expect(html).toContain('<a href="#pricing-release-date" class="text-primary underline">Data e daljes së parapublikimit</a>');
+      expect(html).toContain("Plotësoni 3 gjëra më lart");
+      expect(button(html, "Dërgo për shqyrtim")).toContain('aria-disabled="true"');
+    });
+
+    it("a date before or after the window is too", () => {
+      for (const day of ["2026-11-19", "2027-05-07"]) {
+        const html = preorderRender(day);
+        expect(html).toContain("Data e daljes së parapublikimit");
+        expect(html).toContain("Plotësoni 3 gjëra më lart");
+      }
+    });
+
+    it("a date inside the window, edges included, is not", () => {
+      for (const day of ["2026-11-20", "2027-01-15", "2027-05-06"]) {
+        const html = preorderRender(day);
+        expect(html).not.toContain("Data e daljes së parapublikimit");
+        expect(html).toContain("Plotësoni 2 gjëra më lart");
+      }
+    });
+
+    it("nothing is red before the click", () => {
+      const html = preorderRender("2026-01-01");
+      expect(html.match(/<input[^>]*id="pricing-release-date"[^>]*>/)![0]).not.toContain("border-red-700");
+      expect(html).not.toContain("Zgjidhni një datë brenda kufijve më sipër.");
+    });
   });
 });

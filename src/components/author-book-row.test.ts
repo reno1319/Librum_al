@@ -53,6 +53,16 @@ describe("AuthorBookRow: a book Librum took down", () => {
   });
 });
 
+// Upload notes 3a (Enkelejd 11-06): the shelf line names the file
+// format, "EPUB", not "E-libër".
+describe("AuthorBookRow: format wording", () => {
+  it("says EPUB, never E-libër", () => {
+    const html = render({ book: { ...BOOK, status: "published" as const } });
+    expect(html).toContain("EPUB · Letërsi artistike · Publikuar më");
+    expect(html).not.toContain("E-libër");
+  });
+});
+
 // ADMIN-3-REVIEW (F, 4a): the IN REVIEW tag (no timing promise, no
 // "Vazhdoni përgatitjen"), and the send-back notice while it is the newest
 // review. The takedown notice keeps priority.

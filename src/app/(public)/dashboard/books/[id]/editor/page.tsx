@@ -34,9 +34,12 @@ import { BookDetailsForm, type DetailsFormValues } from "@/components/book-detai
 import { getRightsDeclarationState } from "@/lib/book-rights";
 import { getBookReviewState } from "@/lib/book-reviews";
 import { PD_PICKED_EDITOR_NOTE, isPickedPdEdition } from "@/lib/pd-editions";
-import { missingDetails } from "@/lib/book-details";
+import { missingDetailItems } from "@/lib/book-details";
 import { resolveBookByline } from "@/lib/book-byline";
 import {
+  CONTENT_MISSING_AI,
+  CONTENT_MISSING_COVER,
+  CONTENT_MISSING_MANUSCRIPT,
   LIVE_STATUS_LABEL,
   TAKEN_DOWN_SEND_NOTE,
   TAKEN_DOWN_STATUS_LABEL,
@@ -120,7 +123,7 @@ export default async function BookEditorPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; error?: string; success?: string; ebook_cover?: string }>;
+  searchParams: Promise<{ tab?: string; error?: string; success?: string; ebook_cover?: string; mungon?: string }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive page (renders books.price_all for
   // editing), checked first, before any Supabase call -- as the old edit
@@ -130,7 +133,16 @@ export default async function BookEditorPage({
   }
 
   const { id } = await params;
-  const { tab: rawTab, error: rawError, success: rawSuccess, ebook_cover: rawEbookCover } = await searchParams;
+  const {
+    tab: rawTab,
+    error: rawError,
+    success: rawSuccess,
+    ebook_cover: rawEbookCover,
+    mungon: rawShowMissing,
+  } = await searchParams;
+  // Upload notes 2 (Enkelejd 11-06): opened from the Pricing tab's to-do
+  // list; the tab marks what is still missing for the send in red.
+  const showMissing = rawShowMissing === "1";
   const tab: EditorTab = isEditorTab(rawTab) ? rawTab : "details";
 
   if (!UUID.test(id)) notFound();
@@ -318,20 +330,21 @@ export default async function BookEditorPage({
   const penNameList = penNames ?? [];
   const lockedPenName = penNameList.find((p) => p.id === book.pen_name_id)?.name ?? null;
 
-  const detailsMissing = missingDetails({
+  const detailsMissingItems = missingDetailItems({
     title: book.title,
     categories: book.categories,
     description: working.description,
     rightsBasis,
     originalAuthor: working.originalAuthor,
   });
+  const detailsMissing = detailsMissingItems.map((m) => m.label);
   // BD15 P3 (mockup): the manuscript, the cover and the AI answer.
   // BD16 P2: a pre-order's final manuscript is followed in its own box
   // (PreorderPanel), not as a missing item.
   const contentMissing = [
-    ...(working.filePath === null && preorder === null ? ["Dorëshkrimi"] : []),
-    ...(working.coverPath === null ? ["Ballina"] : []),
-    ...(!ai.ok || ai.answer === null ? ["Pyetja për AI"] : []),
+    ...(working.filePath === null && preorder === null ? [CONTENT_MISSING_MANUSCRIPT] : []),
+    ...(working.coverPath === null ? [CONTENT_MISSING_COVER] : []),
+    ...(!ai.ok || ai.answer === null ? [CONTENT_MISSING_AI] : []),
   ];
   const done: Record<EditorTab, boolean> = {
     details: detailsMissing.length === 0,
@@ -342,7 +355,7 @@ export default async function BookEditorPage({
   // BD16 P2: a pre-order listing may be sent without the manuscript (D5).
   const sendMissing: PricingMissing[] = [
     ...detailsMissing.map((label) => ({ tab: "details" as const, label })),
-    ...contentMissing.map((label) => ({ tab: "content" as const, label, preorderOptional: label === "Dorëshkrimi" })),
+    ...contentMissing.map((label) => ({ tab: "content" as const, label, preorderOptional: label === CONTENT_MISSING_MANUSCRIPT })),
   ];
   // BD16 P2: a draft's "Kur del libri" choice, once the database has
   // pre-orders. A taken-down book is never sent, so it gets none.
@@ -456,6 +469,7 @@ export default async function BookEditorPage({
           penNames={penNameList}
           series={series ?? []}
           pdFrozen={isPickedPdEdition(book)}
+          markMissing={showMissing ? detailsMissingItems.map((m) => m.field) : []}
         />
       ) : tab === "content" ? (
         <>
@@ -480,6 +494,7 @@ export default async function BookEditorPage({
             authorName={penNameList.find((p) => p.id === book.pen_name_id)?.name ?? ""}
             aiAnswer={ai.ok ? ai.answer : null}
             aiUnreadable={!ai.ok}
+            markMissing={showMissing ? contentMissing : []}
           />
         </>
       ) : (

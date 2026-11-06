@@ -205,8 +205,9 @@ export function AuthorBookRow({
     pdPicked: isPickedPdEdition(book),
   });
 
+  // Upload notes 3a (Enkelejd 11-06): the file format, not "E-libër".
   const facts = [
-    "E-libër",
+    "EPUB",
     book.genre,
     !isDraft && book.published_at ? `Publikuar më ${formatTimestampAsDate(book.published_at)}` : null,
   ]

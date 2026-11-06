@@ -10,7 +10,9 @@ import { coverRatioIsOff } from "./cover-field";
 const BOOK = "c3333333-3333-4333-8333-333333333333";
 const AUTHOR = "a1111111-1111-4111-8111-111111111111";
 
-function render(o: { hasManuscript?: boolean; aiAnswer?: "yes" | "no" | null; aiUnreadable?: boolean } = {}) {
+function render(
+  o: { hasManuscript?: boolean; aiAnswer?: "yes" | "no" | null; aiUnreadable?: boolean; markMissing?: string[] } = {},
+) {
   return renderToStaticMarkup(
     createElement(BookContentForm, {
       action: async () => undefined,
@@ -27,6 +29,7 @@ function render(o: { hasManuscript?: boolean; aiAnswer?: "yes" | "no" | null; ai
       authorName: "Arta Kodra",
       aiAnswer: o.aiAnswer ?? null,
       aiUnreadable: o.aiUnreadable ?? false,
+      markMissing: o.markMissing,
     }),
   );
 }
@@ -112,5 +115,28 @@ describe("coverRatioIsOff (a warning, never a block)", () => {
     expect(coverRatioIsOff(1000, 1000)).toBe(true);
     expect(coverRatioIsOff(1000, 2000)).toBe(true);
     expect(coverRatioIsOff(0, 100)).toBe(false);
+  });
+});
+
+// Upload notes 1 and 2 (Enkelejd 11-06).
+describe("BookContentForm: upload notes", () => {
+  const section = (html: string, id: string) => html.match(new RegExp(`<section aria-labelledby="${id}"[^>]*>`))![0];
+
+  it("carries the unsaved-changes guard inside the form", () => {
+    expect(render()).toMatch(/^<form[^>]*><span hidden="">/);
+  });
+
+  it("opened from the to-do list: each missing box is outlined red with a message", () => {
+    const html = render({ markMissing: ["Ballina", "Pyetja për AI"] });
+    expect(section(html, "content-cover")).toContain("border-red-700");
+    expect(section(html, "content-ai")).toContain("border-red-700");
+    expect(section(html, "content-manuscript")).not.toContain("border-red-700");
+    expect(html.split("Plotësojeni këtë para se ta dërgoni.").length - 1).toBe(2);
+  });
+
+  it("without the flag nothing is red", () => {
+    const html = render();
+    expect(html).not.toContain("border-red-700");
+    expect(html).not.toContain("Plotësojeni këtë para se ta dërgoni.");
   });
 });
