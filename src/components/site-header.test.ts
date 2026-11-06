@@ -32,7 +32,7 @@ describe("buildSiteHeaderNav", () => {
     expect(nav.showLogout).toBe(false);
     expect(nav.showAccountLink).toBe(true);
     expect(nav.accountHref).toBe("/login");
-    expect(nav.accountLabel).toBe("Hyni ose regjistrohuni");
+    expect(nav.accountLabel).toBe("Hyr ose regjistrohu");
     expect(nav.recoveryLabel).toBeNull();
   });
 

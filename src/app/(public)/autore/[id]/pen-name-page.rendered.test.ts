@@ -255,7 +255,7 @@ describe("PEN-NAMES-1 Author Page", () => {
     install({ user: ACCOUNT });
     const html = await render();
     expect(html).not.toContain(">Ndiqni<");
-    expect(html).not.toContain("Hyni për ta ndjekur");
+    expect(html).not.toContain("Hyr për ta ndjekur");
   });
 
   it("staff with reports.resolve see the account behind the pen name and Remove links (13a); nobody else does", async () => {

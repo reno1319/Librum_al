@@ -497,7 +497,7 @@ describe("sendAccountSuspendedEmail / sendAccountSuspensionLiftedEmail", () => {
     expect(args.subject).toBe("Llogaria juaj në Librum është sërish aktive");
     expect(args.html).toContain("Mund të hyni përsëri.");
     expect(args.html).toContain("Nëse publikoni libra në Librum, ata janë sërish në Librari, përveç atyre që presin shqyrtim ose që janë hequr.");
-    expect(args.html).toMatch(/href="[^"]*\/login">Hyni<\/a>/);
+    expect(args.html).toMatch(/href="[^"]*\/login">Hyr<\/a>/);
     expect(args.html).toContain("Pyetje? Na shkruani te support@librum.al");
   });
 });

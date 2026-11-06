@@ -49,7 +49,7 @@ export function buildSiteHeaderNav(params: {
   const { user, displayName, role, recoveryActive } = params;
 
   const accountHref = user ? "/account" : "/login";
-  const accountLabel = user ? "Llogaria" : "Hyni ose regjistrohuni";
+  const accountLabel = user ? "Llogaria" : "Hyr ose regjistrohu";
 
   if (recoveryActive) {
     return {
@@ -163,7 +163,7 @@ export async function SiteHeader() {
 
           {/* Wraps onto a second row rather than scrolling sideways when
               the labels get longer. From lg to xl the Albanian labels of
-              a signed-in author (with "Paneli i autorit", "Dilni" and the
+              a signed-in author (with "Paneli i autorit", "Dil" and the
               greeting) ran into the right-hand group, so that range uses
               slightly smaller text and gaps, and this group no longer
               shrinks: the name in the greeting is shortened instead. */}
@@ -192,18 +192,18 @@ export async function SiteHeader() {
             {!user && (
               <>
                 <Link href={nav.accountHref} className={OUTLINE_ON_DARK_CLASSES}>
-                  Hyni
+                  Hyr
                 </Link>
                 {/* FIX1 (X2): Author chosen, as on Earnings. */}
                 <Link href="/signup?role=author" className={BRASS_BUTTON_CLASSES}>
-                  Regjistrohuni
+                  Regjistrohu
                 </Link>
               </>
             )}
             {nav.showLogout && (
               <form action={logout}>
                 <button type="submit" className={QUIET_LINK_ON_DARK_CLASSES}>
-                  Dilni
+                  Dil
                 </button>
               </form>
             )}

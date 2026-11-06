@@ -111,7 +111,7 @@ export function MobileNav({
               <span className="text-sm text-primary-foreground/80">Rikthimi i fjalëkalimit</span>
               <form action={logoutAction}>
                 <button type="submit" className={linkClassName}>
-                  Dilni
+                  Dil
                 </button>
               </form>
             </div>
@@ -133,18 +133,18 @@ export function MobileNav({
                     </Link>
                     <form action={logoutAction}>
                       <button type="submit" className={linkClassName}>
-                        Dilni
+                        Dil
                       </button>
                     </form>
                   </>
                 ) : (
                   <>
                     <Link href="/login" className={linkClassName}>
-                      Hyni
+                      Hyr
                     </Link>
                     {/* FIX1 (X2): Author chosen, as on Earnings. */}
                     <Link href="/signup?role=author" className={linkClassName}>
-                      Regjistrohuni
+                      Regjistrohu
                     </Link>
                   </>
                 )}
