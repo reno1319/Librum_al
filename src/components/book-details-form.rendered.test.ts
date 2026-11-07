@@ -15,7 +15,7 @@ const OTHER_PEN = "d5555555-5555-4555-8555-555555555555";
 function render(
   overrides: Partial<Parameters<typeof BookDetailsForm>[0]["initial"]> = {},
   locked = false,
-  liveProps: { rightsLocked?: boolean; live?: boolean; pdFrozen?: boolean; markMissing?: ("title" | "categories" | "description" | "rightsBasis" | "originalAuthor")[] } = {},
+  liveProps: { rightsLocked?: boolean; live?: boolean; pdFrozen?: boolean; markMissing?: ("title" | "bookType" | "categories" | "description" | "rightsBasis" | "originalAuthor")[] } = {},
 ) {
   return renderToStaticMarkup(
     createElement(BookDetailsForm, {
@@ -32,6 +32,7 @@ function render(
         description: "**Hyrje** <script>alert(1)</script>",
         isAdult: false,
         readingAge: "",
+        bookType: "",
         categories: ["Poezi", "Histori"],
         keywords: "a, b",
         contributors: [{ id: "c1", name: "Besnik", role: "Editor" }],
@@ -241,6 +242,19 @@ describe("BookDetailsForm: a picked public-domain edition (N5)", () => {
     expect(html).not.toContain("+ Krijo seri të re");
   });
 
+  // Upload notes C: the type is frozen once set; with none it is free.
+  it("a picked edition with a type sends it unchanged and greyed; with none it may choose", () => {
+    const withType = { ...PICKED, bookType: "Poezi" };
+    const before = submitted(render(withType, true, live)).filter(([n]) => n === "bookType");
+    const html = render(withType, true, { ...live, pdFrozen: true });
+    expect(submitted(html).filter(([n]) => n === "bookType")).toEqual(before);
+    expect(before).toEqual([["bookType", "Poezi"]]);
+    expect(html.match(/<select[^>]*name="bookType"[^>]*>/)![0]).toMatch(/\sdisabled=""/);
+    const none = render({ ...PICKED, bookType: "" }, true, { ...live, pdFrozen: true });
+    expect(none.match(/<select[^>]*name="bookType"[^>]*>/)![0]).not.toMatch(/\sdisabled=""/);
+    expect(submitted(none).filter(([n]) => n === "bookType")).toEqual([["bookType", ""]]);
+  });
+
   it("an ordinary live book is unchanged: nothing frozen, buttons there", () => {
     const html = render(PICKED, true, live);
     expect(html).not.toMatch(/name="subtitle"[^>]*disabled=""/);
@@ -271,6 +285,29 @@ describe("BookDetailsForm: upload notes", () => {
     expect(html).toContain('id="details-rightsBasis-error"');
     expect(html.split("Plotësojeni këtë para se ta dërgoni.").length - 1).toBe(3);
     expect(html).not.toContain('id="details-categories-error"');
+  });
+
+  // Upload notes C.
+  it("Lloji i librit: one pick from the eight types, before the categories, and it can start red", () => {
+    const html = render({ bookType: "Roman" });
+    const select = html.match(/<select[^>]*name="bookType"[^>]*>([\s\S]*?)<\/select>/)!;
+    const options = [...select[1].matchAll(/<option[^>]*value="([^"]*)"/g)].map((m) => m[1]);
+    expect(options).toEqual([
+      "",
+      "Roman",
+      "Novelë / tregim",
+      "Përmbledhje me tregime",
+      "Poezi",
+      "Dramë",
+      "Ese",
+      "Biografi &amp; kujtime",
+      "Jo-artistik (studim, tjetër)",
+    ]);
+    expect(submitted(html).filter(([n]) => n === "bookType")).toEqual([["bookType", "Roman"]]);
+    expect(html.indexOf("Lloji i librit")).toBeLessThan(html.indexOf("Kategoritë"));
+    const red = render({ bookType: "" }, false, { markMissing: ["bookType"] });
+    expect(red.match(/<select[^>]*name="bookType"[^>]*>/)![0]).toContain("border-red-700");
+    expect(red).toContain('id="details-bookType-error"');
   });
 
   it("without the flag nothing is red", () => {
