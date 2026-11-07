@@ -20,6 +20,7 @@ import { LIBRUM_MADE_EBOOK_METADATA, readLibrumMadeMarker, syncCoverIntoLibrumEb
 import { withEbookCoverWarning } from "@/lib/ebook-cover-notice";
 import { readLibrumEbookCover, restampLibrumEpubMetadata } from "@/lib/epub-cover";
 import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
+import { recordManuscriptWords } from "@/lib/page-estimate";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
@@ -1030,6 +1031,21 @@ export async function saveBookContent(bookId: string, formData: FormData) {
     }
   }
 
+  // Upload notes D: the new file's words, for the page estimate (best
+  // effort, after the write is proven; keyed by this exact file, so a
+  // live book's waiting file has its count when Librum approves it).
+  const savedManuscript = uploadsBeforeWrite.find(
+    (upload) => upload.kind === "manuscript" && upload.path === newManuscriptPath,
+  );
+  if (savedManuscript) {
+    await recordManuscriptWords(catalogWriter, {
+      bookId: existing.id,
+      filePath: savedManuscript.path,
+      bytes: savedManuscript.bytes,
+      caller: "saveBookContent",
+    });
+  }
+
   // Superseded objects, only now that the write is proven (best effort).
   if (newManuscriptPath !== null) {
     await removeUnretainedManuscripts(catalogWriter, catalogWriter, {
@@ -1176,6 +1192,8 @@ async function restampLibrumEbookForSend({
     superseded: [book.file_path],
     caller,
   });
+  // Upload notes D: the rewritten file is a new key; count it too.
+  await recordManuscriptWords(catalogWriter, { bookId: book.id, filePath: newPath, bytes: restamped.bytes, caller });
   return "stamped";
 }
 

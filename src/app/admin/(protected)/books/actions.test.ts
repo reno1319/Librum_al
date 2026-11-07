@@ -42,11 +42,23 @@ vi.mock("@/lib/supabase/admin", () => ({
       const chain = { select: () => chain, eq: () => chain, in: () => chain, maybeSingle: done, returns: done };
       return chain;
     },
-    storage: { from: (bucket: string) => ({ remove: (paths: string[]) => mockCoverRemove([bucket, ...paths]) }) },
+    storage: {
+      from: (bucket: string) => ({
+        remove: (paths: string[]) => mockCoverRemove([bucket, ...paths]),
+        download: (path: string) => mockDownload(bucket, path),
+      }),
+    },
     auth: { admin: { getUserById: (id: string) => mockGetUserById(id) } },
   }),
 }));
 let adminRowsRead: Record<string, boolean> = {};
+// Upload notes D: the staff "Count pages" button.
+const mockDownload = vi.fn();
+const mockRecordWords = vi.fn();
+vi.mock("@/lib/page-estimate", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/page-estimate")>()),
+  recordManuscriptWords: (...args: unknown[]) => mockRecordWords(...args),
+}));
 
 const mockSendEmail = vi.fn();
 // ADMIN-3-REVIEW: the review emails, the followers email, the rights
@@ -97,8 +109,14 @@ vi.mock("@/lib/book-reviews", () => ({
   removeUnretainedManuscripts: (...args: unknown[]) => mockRetention(...args),
 }));
 
-const { unpublishBookAsStaff, allowBookAgainAsStaff, approveBookReviewAsStaff, sendBackBookReviewAsStaff, setPdEditionAsStaff } =
-  await import("./actions");
+const {
+  unpublishBookAsStaff,
+  allowBookAgainAsStaff,
+  approveBookReviewAsStaff,
+  sendBackBookReviewAsStaff,
+  setPdEditionAsStaff,
+  countBookPagesAsStaff,
+} = await import("./actions");
 
 const BOOK_ID = "22222222-2222-4222-8222-222222222222";
 const REPORT_ID = "11111111-1111-4111-8111-111111111111";
@@ -811,5 +829,62 @@ describe("BD16 P3: pre-order reviews", () => {
     setBook({ status: "preorder" });
     await redirectOf(() => sendBackBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, reason: "broken_file", message: "Fix it." })));
     expect(mockSentBackEmail).toHaveBeenCalledWith("ana@example.com", expect.objectContaining({ live: true }));
+  });
+});
+
+describe("Upload notes D: countBookPagesAsStaff", () => {
+  const FILE = "author-1/22222222-2222-4222-8222-222222222222/v3.epub";
+  beforeEach(() => {
+    mockRedirect.mockClear();
+    mockRevalidatePath.mockReset();
+    mockRequireStaff.mockClear();
+    mockDownload.mockReset().mockResolvedValue({ data: new Blob([new Uint8Array([1, 2, 3])]), error: null });
+    mockRecordWords.mockReset().mockResolvedValue("recorded");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    adminRows = { books: { data: { id: BOOK_ID, file_path: FILE }, error: null } };
+    adminRowQueue = {};
+    adminRowsRead = {};
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("needs books.review, counts the CURRENT file and stores it for that file", async () => {
+    const target = await redirectOf(() => countBookPagesAsStaff(BOOK_ID));
+    expect(mockRequireStaff).toHaveBeenCalledWith("books.review");
+    expect(mockDownload).toHaveBeenCalledWith("manuscripts", FILE);
+    expect(mockRecordWords).toHaveBeenCalledTimes(1);
+    const [, params] = mockRecordWords.mock.calls[0] as [unknown, { bookId: string; filePath: string; bytes: Buffer }];
+    expect(params.bookId).toBe(BOOK_ID);
+    expect(params.filePath).toBe(FILE);
+    expect(Buffer.isBuffer(params.bytes)).toBe(true);
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/libra/${BOOK_ID}`);
+    expect(target).toBe(`/admin/books/${BOOK_ID}?success=${encodeURIComponent("Pages counted.")}`);
+  });
+
+  it("refuses a non-uuid id before any read", async () => {
+    const target = await redirectOf(() => countBookPagesAsStaff("../x"));
+    expect(target).toBe("/admin/books");
+    expect(mockDownload).not.toHaveBeenCalled();
+  });
+
+  it("a book with no file: nothing read or written", async () => {
+    adminRows = { books: { data: { id: BOOK_ID, file_path: null }, error: null } };
+    const target = await redirectOf(() => countBookPagesAsStaff(BOOK_ID));
+    expect(target).toContain(encodeURIComponent("This book has no file to count."));
+    expect(mockDownload).not.toHaveBeenCalled();
+    expect(mockRecordWords).not.toHaveBeenCalled();
+  });
+
+  it("an unread file or a failed count is an error, never a success", async () => {
+    mockDownload.mockResolvedValueOnce({ data: null, error: { message: "nope" } });
+    let target = await redirectOf(() => countBookPagesAsStaff(BOOK_ID));
+    expect(target).toContain(encodeURIComponent("Couldn't count this book's pages. Try again."));
+    expect(mockRecordWords).not.toHaveBeenCalled();
+
+    mockRecordWords.mockResolvedValueOnce("unreadable");
+    target = await redirectOf(() => countBookPagesAsStaff(BOOK_ID));
+    expect(target).toContain(encodeURIComponent("Couldn't count this book's pages. Try again."));
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });

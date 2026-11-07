@@ -77,6 +77,7 @@ vi.mock("../actions", () => ({
   approveBookReviewAsStaff: vi.fn(),
   sendBackBookReviewAsStaff: vi.fn(),
   setPdEditionAsStaff: vi.fn(),
+  countBookPagesAsStaff: vi.fn(),
 }));
 
 const { default: AdminBookPage } = await import("./page");
@@ -690,6 +691,55 @@ describe("AdminBookPage", () => {
       expect(html).toContain("<dd class=\"break-words text-red-700\">Couldn’t load the contributors.</dd>");
       expect(html).not.toContain("Not answered");
       expect(html).not.toContain("boom");
+    });
+  });
+
+  // ============================================================
+  // Upload notes D (Renato 11-07, Q2 a): the page estimate box and the
+  // staff-only "Count pages" button, for a book with a file.
+  // ============================================================
+  describe("Upload notes D: page estimate", () => {
+    const PE_FILE = "author-1/22222222-2222-4222-8222-222222222222/v9.epub";
+    beforeEach(() => {
+      selects.length = 0;
+      eqs.length = 0;
+      rows.books.data = { ...(rows.books.data as object), file_path: PE_FILE };
+    });
+
+    it("shows the count of the CURRENT file and a Count pages again button to reviewers", async () => {
+      rows.book_file_words = { data: { word_count: 45700 }, error: null };
+      const html = await render("admin");
+      expect(html).toContain(">Page estimate<");
+      expect(html).toContain("rreth 183 faqe (45,700 words), shown on the book page.");
+      expect(html).toContain("Count pages again");
+      expect(eqs).toContainEqual({ table: "book_file_words", column: "book_id", value: BOOK_ID });
+      expect(eqs).toContainEqual({ table: "book_file_words", column: "file_path", value: PE_FILE });
+    });
+
+    it("not counted yet: says so and offers Count pages", async () => {
+      rows.book_file_words = { data: null, error: null };
+      const html = await render("admin");
+      expect(html).toContain("Not counted yet. The book page shows no page estimate.");
+      expect(html).toContain(">Count pages<");
+    });
+
+    it("an unreadable count says so, never 'not counted'", async () => {
+      rows.book_file_words = { data: null, error: { message: "boom" } };
+      const html = await render("admin");
+      expect(html).toContain("Couldn&#x27;t read the count.");
+      expect(html).not.toContain("Not counted yet");
+      expect(html).not.toContain("boom");
+    });
+
+    it("no button without books.review (moderator); no box for a book with no file", async () => {
+      rows.book_file_words = { data: null, error: null };
+      // moderator holds reports.view but not books.review.
+      expect(await render("moderator")).not.toContain(">Count pages<");
+      rows.books.data = { ...(rows.books.data as object), file_path: null };
+      selects.length = 0;
+      const html = await render("admin");
+      expect(html).not.toContain(">Page estimate<");
+      expect(selects.some((sel) => sel.table === "book_file_words")).toBe(false);
     });
   });
 

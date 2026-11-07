@@ -26,6 +26,7 @@ import {
 import {
   allowBookAgainAsStaff,
   approveBookReviewAsStaff,
+  countBookPagesAsStaff,
   sendBackBookReviewAsStaff,
   setPdEditionAsStaff,
   unpublishBookAsStaff,
@@ -34,6 +35,7 @@ import { PD_ALREADY_HAVE_NOTE, PD_PREPARED_BY } from "@/lib/pd-editions";
 import { UnpublishForm } from "./unpublish-form";
 import { SendBackForm } from "./send-back-form";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { BOOK_FILE_WORDS_TABLE, pageEstimateFromWords } from "@/lib/page-estimate";
 import { descriptionPlainText } from "@/lib/book-description";
 import { preorderFinalFileState, preorderFileDueDate, tiranaToday } from "@/lib/preorders";
 import {
@@ -278,10 +280,20 @@ export default async function AdminBookPage({
       .order("created_at", { ascending: true })
       .returns<{ name: string; role: string }[]>(),
   ]);
+  // Upload notes D: the word count of the book's CURRENT file, if any.
+  const wordsResult = book.file_path
+    ? await admin
+        .from(BOOK_FILE_WORDS_TABLE)
+        .select("word_count")
+        .eq("book_id", book.id)
+        .eq("file_path", book.file_path)
+        .maybeSingle<{ word_count: number }>()
+    : { data: null, error: null };
   for (const [what, result] of [
     ["AI answer", aiResult],
     ["series", seriesResult],
     ["contributors", contributorsResult],
+    ["word count", wordsResult],
   ] as const) {
     if (result.error) console.error(`admin book: the ${what} read failed`, { error: result.error });
   }
@@ -632,6 +644,33 @@ export default async function AdminBookPage({
             </div>
           </dl>
         </section>
+
+        {/* Upload notes D (Renato 11-07, Q2 a): count a file stored before
+            the page estimate existed. Shown to reviewers, for a book with a file. */}
+        {book.file_path && (
+          <section aria-labelledby="book-page-estimate" className={SECTION_CLASSES}>
+            <h2 id="book-page-estimate" className={SECTION_HEADING_CLASSES}>
+              Page estimate
+            </h2>
+            <p className="text-sm">
+              {wordsResult.error
+                ? "Couldn't read the count."
+                : wordsResult.data
+                  ? `rreth ${pageEstimateFromWords(wordsResult.data.word_count) ?? 0} faqe (${wordsResult.data.word_count.toLocaleString("en-US")} words), shown on the book page.`
+                  : "Not counted yet. The book page shows no page estimate."}
+            </p>
+            {canReview && (
+              <form action={countBookPagesAsStaff.bind(null, book.id)} className="mt-3">
+                <button
+                  type="submit"
+                  className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
+                >
+                  {wordsResult.data ? "Count pages again" : "Count pages"}
+                </button>
+              </form>
+            )}
+          </section>
+        )}
 
         <section aria-labelledby="book-open-reports" className={SECTION_CLASSES}>
           <h2 id="book-open-reports" className={SECTION_HEADING_CLASSES}>

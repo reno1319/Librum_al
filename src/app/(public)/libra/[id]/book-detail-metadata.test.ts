@@ -176,3 +176,21 @@ describe("Book Detail: format wording", () => {
     expect(details).toContain("{bookTypeOf(book) && (");
   });
 });
+
+// Upload notes D (Renato 11-07): "Faqe: rreth N" right after
+// Formati, only once the current file is counted (Q4 a: hidden without).
+describe("Book Detail: page estimate", () => {
+  it("shows the Faqe row after Formati, and only with a count", () => {
+    const details = source.slice(source.indexOf("Të dhënat e librit"));
+    const formatAt = details.indexOf("<dt className={DETAIL_LABEL_CLASSES}>Formati</dt>");
+    const pagesAt = details.indexOf("<dt className={DETAIL_LABEL_CLASSES}>{PAGE_ESTIMATE_LABEL}</dt>");
+    expect(formatAt).toBeGreaterThan(0);
+    expect(pagesAt).toBeGreaterThan(formatAt);
+    expect(pagesAt).toBeLessThan(details.indexOf("{book.language && ("));
+    expect(details).toContain("{pageEstimateText(book.word_count) && (");
+  });
+
+  it("reads the count from public_books, never the manuscript", () => {
+    expect(source).not.toMatch(/countEpubWords|recordManuscriptWords|book_file_words/);
+  });
+});
