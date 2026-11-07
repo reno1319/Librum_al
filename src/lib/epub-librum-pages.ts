@@ -89,15 +89,18 @@ function line(text: string, cls?: string): string {
 // own styles to headings (Apple Books left-aligns h1/h2) and split words
 // with English rules ("rez-ervuara"), so every element says centered
 // and no word-splitting itself instead of inheriting it from body.
-const STYLE = `body{margin:0;padding:0 1em;text-align:center;font-family:serif;line-height:1.5}
+// K3 (Renato's Kindle test, 7 Nov): the © page spilled onto a second,
+// almost empty screen, so its spacing is tighter (the last page's own
+// h1.thanks/h2 spacing stays).
+const STYLE = `body{margin:0;padding:0 1em;text-align:center;font-family:serif;line-height:1.4}
 body,h1,h2,p,ul,li{text-align:center !important;-webkit-hyphens:none !important;-epub-hyphens:none;-moz-hyphens:none;hyphens:none !important;adobe-hyphenate:none}
-h1{font-size:1.6em;margin:2.5em 0 .3em;font-weight:bold}
+h1{font-size:1.5em;margin:1em 0 .3em;font-weight:bold}
 h1.thanks{font-size:1.4em;margin:2em 0 1.5em}
 h2{font-size:1.25em;margin:2em 0 .8em}
-p{margin:.35em 0;text-indent:0}
+p{margin:.25em 0;text-indent:0}
 .sub{font-style:italic}
-.author{margin:.6em 0 2.5em;font-size:1.15em}
-.gap{margin-top:1.8em}
+.author{margin:.5em 0 1.2em;font-size:1.15em}
+.gap{margin-top:1em}
 .small{font-size:.85em}
 ul{list-style:none;padding:0;margin:0 0 2em}
 li{margin:.5em 0}`;

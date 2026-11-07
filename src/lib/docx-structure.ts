@@ -58,6 +58,9 @@ export type ParaPlan = {
   splitAtBreaks?: boolean;
   // W3 Part 2: one blank line before this paragraph (answer 4a).
   gapBefore?: boolean;
+  // K1a: a new ebook page starts here (a page break typed before the
+  // first chapter: title page, dedication, foreword, epigraphs).
+  pageBefore?: boolean;
 };
 
 export type StructureOptions = {
@@ -82,9 +85,13 @@ export type StructureOptions = {
   notVerse?: number[];
   // BD3 patch 2 (answer 1a): a removed copyright page the author brings
   // back, and a typed title page the author chooses to remove (the
-  // guess's paragraph number).
+  // guess's paragraph number). K1c (Renato 7 Nov, a): typed title lines
+  // that are the book's title (bookTitle) are removed by default, and
+  // keepTitlePage brings them back.
   keepCopyright?: number[];
   removeTitlePage?: number[];
+  keepTitlePage?: number[];
+  bookTitle?: string;
 };
 
 export type StructureResult = {
@@ -97,6 +104,8 @@ export type StructureResult = {
   contentsLinesRemoved: number;
   // BD3 patch 2: lines of the author's copyright page and typed title page.
   frontLinesRemoved: number;
+  // K1a: new pages started before the first chapter.
+  frontPages: number;
   emptyRemoved: number;
   paragraphsSplit: number;
   gaps: number;
@@ -187,6 +196,7 @@ const PART_HEADING_RE = new RegExp(
 // A dedication never counts as a book title (audit r3 H1, M1).
 const DEDICATION_START_RE = /^(?:p[ëe]r|for|to|kushtuar|dedikuar|in memoriam|n[ëe] kujtim)(?![\p{L}\d])/iu;
 const MAX_FRONT_PARAS = 60;
+const MAX_FRONT_PAGES = 20;
 const MAX_COPYRIGHT_PARA_WORDS = 90;
 const MAX_META_LINE_WORDS = 8;
 const MAX_TITLE_LINE_WORDS = 12;
@@ -203,6 +213,17 @@ function trailingPageNumber(t: string): { value: number; roman: boolean } | null
     total += i + 1 < r.length && ROMAN[r[i + 1]] > v ? -v : v;
   }
   return { value: total, roman: true };
+}
+
+// K1c: a title compared without case, accents (ë, ç), punctuation or
+// extra spaces, so "LIBRI I BARDHE." is the book "Libri i Bardhë".
+function titleKey(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLocaleLowerCase("sq")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 function words(s: string): number {
@@ -341,21 +362,28 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   // ---- 2. layout facts per block ----
   const n = blocks.length;
   const newPage: boolean[] = new Array(n).fill(false);
+  // K1a: the same, counting only page breaks typed in the text (and
+  // section breaks), never Word's "page break before" setting.
+  const hardNewPage: boolean[] = new Array(n).fill(false);
   const emptiesBefore: number[] = new Array(n).fill(0);
   {
     let pendingBreak = false;
+    let pendingHard = false;
     let empties = 0;
     let seenContent = false;
     for (let j = 0; j < n; j++) {
       const f = para(j);
       if (f && (f.empty || isRemoved(j))) {
         if (f.breakBefore || f.breakAfter) pendingBreak = true;
+        if (f.hardBreakBefore || f.breakAfter) pendingHard = true;
         if (f.empty) empties++;
         continue;
       }
       newPage[j] = seenContent && (pendingBreak || (f?.breakBefore ?? false));
+      hardNewPage[j] = seenContent && (pendingHard || (f?.hardBreakBefore ?? false));
       emptiesBefore[j] = seenContent ? empties : 0;
       pendingBreak = f?.breakAfter ?? false;
+      pendingHard = f?.breakAfter ?? false;
       empties = 0;
       seenContent = true;
     }
@@ -923,11 +951,15 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   //   Title style), and a byline ("nga ...", "përktheu ...").
   // Only before the first chapter, plus the short lines right under the
   // title of a one-story book (its only chapter). The author can undo
-  // copyright group in the preview (keepCopyright); a title page is only
-  // offered for removal (removeTitlePage, Renato 1 Nov after audit r4).
+  // copyright group in the preview (keepCopyright). A title page is only
+  // offered for removal (removeTitlePage, Renato 1 Nov after audit r4),
+  // except lines that are the book's own title (K1c, Renato 7 Nov, a):
+  // those go by default and keepTitlePage brings them back.
   const firstChapter = textParas.find((j) => chapterSet.has(j));
   const keepCopyrightSet = new Set(options.keepCopyright ?? []);
   const removeTitlePageSet = new Set(options.removeTitlePage ?? []);
+  const keepTitlePageSet = new Set(options.keepTitlePage ?? []);
+  const bookTitleKey = titleKey(options.bookTitle ?? "");
   let frontLinesRemoved = 0;
   {
     const text = (j: number) => para(j)!.trimmed;
@@ -981,15 +1013,21 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
       i + 1 < pages.length || (!storyStarted && firstChapter !== undefined && newPage[firstChapter]);
 
     const removedNow = new Set<number>();
-    // `choiceSet`: for copyright lines, the author's undo (removed unless
-    // listed); for a title page, the author's own "remove" (kept unless
-    // listed: audit r4 showed the title cannot be told apart from a
-    // dedication or a heading alone on page 1 without the book's title).
-    const removeGroup = (lines: number[], kind: "copyright_page" | "title_page", sign: string, choiceSet: Set<number>) => {
+    // `choiceSet`: with `byDefault`, the author's undo (removed unless
+    // listed); without, the author's own "remove" (kept unless listed:
+    // audit r4 showed a big line on page 1 cannot be told apart from a
+    // dedication or a heading without the book's title).
+    const removeGroup = (
+      lines: number[],
+      kind: "copyright_page" | "title_page",
+      sign: string,
+      choiceSet: Set<number>,
+      byDefault = true,
+    ) => {
       const own = lines.filter((j) => !removedNow.has(j));
       if (own.length === 0 || own.every(separator)) return;
       const listed = choiceSet.has(indexOf(own[0]));
-      const kept = kind === "title_page" ? !listed : listed;
+      const kept = byDefault ? listed : !listed;
       for (const j of own) removedNow.add(j);
       if (!kept) {
         for (const j of own) {
@@ -1005,7 +1043,7 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
         text: kind === "title_page" ? own.map(text).join(" / ") : truncate(own.map(text).join(" / ")),
         confidence: "high",
         applied: !kept,
-        signs: [sign, ...(kind === "title_page" ? (kept ? [] : ["removed by the author"]) : kept ? ["kept by the author"] : [])],
+        signs: [sign, ...(byDefault ? (kept ? ["kept by the author"] : []) : kept ? [] : ["removed by the author"])],
       });
     };
     // Runs of touching copyright/meta/separator lines with a copyright
@@ -1065,9 +1103,10 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     // not a smaller author line, a byline, a year or a dedication
     // (audit r2 H1, H2, M1); a stray author name is harmless, a lost
     // dedication is not. A page with a prose paragraph on it is not a
-    // title page (audit r2 M2).
+    // title page (audit r2 M2). K1b: lines already taken out above (an
+    // old edition's licence paragraph) do not count.
     if (firstChapter !== undefined && pages.length > 0 && closed(0)) {
-      const page = pages[0];
+      const page = pages[0].filter((j) => !plans.get(j)?.remove);
       const isTitleStyle = (j: number) => /^title$/i.test(para(j)!.styleName.trim());
       const chapterSizes = [...chapterSet].map((j) => para(j)?.size ?? null).filter((x): x is number => x !== null);
       const biggest = chapterSizes.length > 0 ? Math.max(...chapterSizes) : median;
@@ -1091,13 +1130,41 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
           : bigger(para(j)!) && (para(j)!.size ?? 0) === pageMax && pageMax > biggest);
       const prosePara = page.some((j) => words(text(j)) > MAX_TITLE_LINE_WORDS);
       if (!prosePara && page.length <= 12) {
+        const anchors = page.filter(anchor);
+        // K1c: the lines that are the book's title -- all of them read
+        // together (a title on two lines), or one line on its own.
+        const together = bookTitleKey !== "" && titleKey(anchors.map(text).join(" ")) === bookTitleKey;
+        const isBookTitle = (j: number) => together || (bookTitleKey !== "" && titleKey(text(j)) === bookTitleKey);
         removeGroup(
-          page.filter(anchor),
+          anchors.filter(isBookTitle),
+          "title_page",
+          "typed title page with the book's own title; Librum's own page shows the title and the author",
+          keepTitlePageSet,
+        );
+        removeGroup(
+          anchors.filter((j) => !isBookTitle(j)),
           "title_page",
           "typed title page; Librum's own page shows the title and the author",
           removeTitlePageSet,
+          false,
         );
       }
+    }
+  }
+
+  // ---- 5b. front-matter pages (K1a, Renato 7 Nov) ----
+  // A page break typed before the first chapter starts a new ebook
+  // page, so a title page, a dedication, a foreword and epigraphs are
+  // not run together on one screen. Only typed breaks count (see
+  // hardNewPage); a file with more of them than a front part has is
+  // left as one page.
+  let frontPages = 0;
+  if (firstChapter !== undefined) {
+    // Every block, so a page holding only a picture counts too.
+    const starts = hardNewPage.flatMap((on, j) => (on && j < firstChapter ? [j] : []));
+    if (starts.length <= MAX_FRONT_PAGES) {
+      for (const j of starts) plan(j).pageBefore = true;
+      frontPages = starts.length;
     }
   }
 
@@ -1402,6 +1469,7 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     sceneBreaks,
     contentsLinesRemoved,
     frontLinesRemoved,
+    frontPages,
     emptyRemoved,
     paragraphsSplit,
     gaps,
