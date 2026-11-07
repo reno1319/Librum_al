@@ -145,7 +145,7 @@ const CLOSED: Array<[string, () => void]> = [
 
 /** Every paid checkout initiation or resume surface, asserted one by one. */
 function expectNoPaidCheckoutSurface(html: string) {
-  expect(html).not.toContain("Hyni për ta blerë");
+  expect(html).not.toContain("Hyr për ta blerë");
   expect(html).not.toContain(`/login?next=/libra/${BOOK_U_ID}`);
   expect(html).not.toContain('name="code"');
   expect(html).not.toContain("Kodi promocional");
@@ -173,7 +173,7 @@ afterEach(() => vi.unstubAllEnvs());
 describe.each(CLOSED)("paid checkout closed: %s", (_label, configure) => {
   beforeEach(configure);
 
-  it("anonymous: the valid ALL price shows, 'Hyni për ta blerë' does not, and one neutral notice does", async () => {
+  it("anonymous: the valid ALL price shows, 'Hyr për ta blerë' does not, and one neutral notice does", async () => {
     const { html, rpc } = await render({ user: null });
     expect(html).toContain("199 lekë");
     expectNoPaidCheckoutSurface(html);
@@ -196,9 +196,9 @@ describe.each(CLOSED)("paid checkout closed: %s", (_label, configure) => {
 describe("paid checkout open: exact controlled-staging mode on protected staging", () => {
   beforeEach(openPaidCheckout);
 
-  it("anonymous: 'Hyni për ta blerë' is restored and no unavailable notice shows", async () => {
+  it("anonymous: 'Hyr për ta blerë' is restored and no unavailable notice shows", async () => {
     const { html } = await render({ user: null });
-    expect(html).toContain("Hyni për ta blerë");
+    expect(html).toContain("Hyr për ta blerë");
     expect(html).toContain(`/login?next=/libra/${BOOK_U_ID}`);
     expect(html).not.toContain(NOTICE);
   });
@@ -229,7 +229,7 @@ describe("states that never had a paid checkout are unchanged, open or closed", 
       expect(reader.html).not.toContain(NOTICE);
       expect(reader.rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
       const anon = await render({ user: null, book: free });
-      expect(anon.html).toContain("Hyni për ta marrë këtë libër");
+      expect(anon.html).toContain("Hyr për ta marrë këtë libër");
       expect(anon.html).not.toContain(NOTICE);
     });
 

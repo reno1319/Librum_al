@@ -50,7 +50,7 @@ export const PREORDER_PRICE_NOTE =
 // "Më njofto" (plan §1, D8). Signed-in readers only; one email when the
 // book comes out (or one if the pre-order is cancelled).
 export const NOTIFY_ME_LABEL = "Më njofto kur të dalë";
-export const NOTIFY_SIGN_IN_LABEL = "Hyni që të njoftoheni";
+export const NOTIFY_SIGN_IN_LABEL = "Hyr që të njoftohesh";
 export const NOTIFY_ON_NOTICE = "Do t'ju njoftojmë me email kur të dalë libri.";
 export const NOTIFY_REMOVE_LABEL = "Hiq njoftimin";
 export const NOTIFY_HELP = "Do të merrni një email të vetëm kur të dalë libri.";

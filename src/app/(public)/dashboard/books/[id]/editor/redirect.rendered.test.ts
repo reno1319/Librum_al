@@ -14,6 +14,8 @@ vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
     throw new Error(`REDIRECT:${url}`);
   },
+  // Upload notes 1: the Details tab re-reads the pen names on return.
+  useRouter: () => ({ refresh: () => undefined }),
 }));
 vi.mock("../../../editor-actions", () => ({
   saveBookDetails: { bind: () => async () => undefined },
@@ -86,10 +88,10 @@ vi.mock("@/lib/supabase/server", () => ({
 
 const { default: BookEditorPage } = await import("./page");
 
-async function render(tab = "details"): Promise<string> {
+async function render(tab = "details", extra: { mungon?: string } = {}): Promise<string> {
   const element = await BookEditorPage({
     params: Promise.resolve({ id: BOOK_ID }),
-    searchParams: Promise.resolve({ tab }),
+    searchParams: Promise.resolve({ tab, ...extra }),
   });
   return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
 }
@@ -177,6 +179,17 @@ describe("editor page: which books it takes", () => {
     // Audit P5b-2 r2, R2-1 N8: nothing pre-chosen, and still missing.
     expect(html).not.toMatch(CHECKED_RIGHTS_RADIO);
     expect(html).toMatch(/Të drejtat|rights/i);
+  });
+
+  // Upload notes 2 (Enkelejd 11-06): from the Pricing tab's to-do list
+  // (?mungon=1), the Details tab marks the still-missing rights choice.
+  it("upload notes 2: ?mungon=1 marks what is missing for the send; without it nothing", async () => {
+    const flagged = await render("details", { mungon: "1" });
+    expect(flagged).toContain('id="details-rightsBasis-error"');
+    expect(flagged).toContain("Plotësojeni këtë para se ta dërgoni.");
+    const plain = await render("details");
+    expect(plain).not.toContain("Plotësojeni këtë para se ta dërgoni.");
+    expect(await render("details", { mungon: "yes" })).not.toContain("Plotësojeni këtë para se ta dërgoni.");
   });
 
   it("audit P5b-2 r2, R2-1 N9: a live book whose rights can't be read gets no own-rights default", async () => {

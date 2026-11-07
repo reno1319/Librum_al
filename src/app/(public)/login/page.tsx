@@ -9,7 +9,7 @@ import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Hyni",
+  title: "Hyr",
   description: "Hyni në llogarinë tuaj në Librum.",
 };
 
@@ -24,7 +24,7 @@ export default async function LoginPage({
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-sm flex-col justify-center px-4 py-10">
-      <h1 className="font-serif text-3xl font-normal">Hyni</h1>
+      <h1 className="font-serif text-3xl font-normal">Hyr</h1>
       <p className="mt-1 text-sm text-muted">Mirë se u kthyet në Librum.</p>
 
       {/* PEOPLE-2: set only by Proxy when it cuts off a suspended
@@ -71,7 +71,7 @@ export default async function LoginPage({
         </label>
 
         <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
-          Hyni
+          Hyr
         </button>
       </form>
 
@@ -84,7 +84,7 @@ export default async function LoginPage({
       <p className="mt-2 text-sm text-muted">
         Nuk keni ende llogari?{" "}
         <Link href="/signup" className="focus-ring rounded-sm font-medium text-primary underline">
-          Regjistrohuni
+          Regjistrohu
         </Link>
       </p>
     </main>

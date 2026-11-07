@@ -38,6 +38,7 @@ export function EditorSection({
   title,
   help,
   live,
+  invalid,
   children,
 }: {
   id: string;
@@ -45,13 +46,19 @@ export function EditorSection({
   help?: ReactNode;
   // The section's content changes as the author types (royalty preview).
   live?: boolean;
+  // Upload notes 2 (Enkelejd 11-06): something here is still missing for
+  // the send -- the box is outlined in the error colour, with the
+  // message under its fields.
+  invalid?: string;
   children?: ReactNode;
 }) {
   return (
     <section
       aria-labelledby={id}
       aria-live={live ? "polite" : undefined}
-      className="grid gap-x-7 gap-y-2 rounded-lg bg-surface px-4 pt-[18px] pb-5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:px-8 sm:pt-[22px] sm:pb-[26px]"
+      className={`grid gap-x-7 gap-y-2 rounded-lg bg-surface px-4 pt-[18px] pb-5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:px-8 sm:pt-[22px] sm:pb-[26px] ${
+        invalid ? "border-2 border-red-700" : ""
+      }`}
     >
       <h2 id={id} className="m-0 font-sans text-[17px] font-semibold leading-snug text-muted">
         {title}
@@ -59,6 +66,7 @@ export function EditorSection({
       <div className="flex min-w-0 flex-col gap-3">
         {help && <p className="text-sm text-foreground">{help}</p>}
         {children}
+        {invalid && <p className="text-sm font-medium text-red-800">{invalid}</p>}
       </div>
     </section>
   );
@@ -88,7 +96,9 @@ export function EditorActionBar({
   primaryLabel,
   primaryIntent,
   primaryBlocked = false,
+  onBlockedClick,
   primaryNote,
+  primaryNoteHref,
   extra,
   saveLabel = "Ruaj draftin",
 }: {
@@ -100,7 +110,13 @@ export function EditorActionBar({
   primaryIntent: string;
   // Something is still missing: the main button cannot be pressed.
   primaryBlocked?: boolean;
+  // Upload notes 2 (Enkelejd 11-06): a blocked button still answers a
+  // click (aria-disabled, not disabled): it shows what is missing. It
+  // never sends; the server refuses an incomplete send on its own.
+  onBlockedClick?: () => void;
   primaryNote?: string;
+  // The note is a link to the list of what is missing.
+  primaryNoteHref?: string;
   extra?: ReactNode;
 }) {
   const { pending } = useFormStatus();
@@ -120,16 +136,39 @@ export function EditorActionBar({
           {saveLabel}
         </button>
         <div className="flex flex-col items-center gap-1.5">
-          <button
-            type="submit"
-            name="intent"
-            value={primaryIntent}
-            disabled={pending || primaryBlocked}
-            className={primaryBlocked ? EDITOR_BLOCKED_BUTTON : EDITOR_PRIMARY_BUTTON}
-          >
-            {primaryLabel}
-          </button>
-          {primaryNote && <small className="text-center text-[13px] text-muted">{primaryNote}</small>}
+          {primaryBlocked ? (
+            <button
+              type="button"
+              aria-disabled="true"
+              aria-describedby={primaryNote ? "editor-primary-note" : undefined}
+              disabled={pending}
+              onClick={onBlockedClick}
+              className={EDITOR_BLOCKED_BUTTON}
+            >
+              {primaryLabel}
+            </button>
+          ) : (
+            <button
+              type="submit"
+              name="intent"
+              value={primaryIntent}
+              disabled={pending}
+              className={EDITOR_PRIMARY_BUTTON}
+            >
+              {primaryLabel}
+            </button>
+          )}
+          {primaryNote && (
+            <small id="editor-primary-note" className="text-center text-[13px] text-muted">
+              {primaryNoteHref ? (
+                <a href={primaryNoteHref} className="text-primary underline">
+                  {primaryNote}
+                </a>
+              ) : (
+                primaryNote
+              )}
+            </small>
+          )}
         </div>
         {backLabel ? (
           <button

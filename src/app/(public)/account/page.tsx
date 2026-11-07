@@ -175,7 +175,7 @@ export default async function AccountPage({
 
       <form action={logout} className="mt-6">
         <button type="submit" className="focus-ring rounded-sm text-sm text-muted hover:underline">
-          Dilni
+          Dil
         </button>
       </form>
 
