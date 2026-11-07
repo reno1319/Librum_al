@@ -271,9 +271,10 @@ begin
 
   -- exact view columns and options (BD3-P4, migration 20261101170000:
   -- original_author appended last; BD15 P1, migration 20261103200000:
-  -- six more appended after it, never ai_used)
+  -- six more appended after it, never ai_used; BD16 P1, migration
+  -- 20261106120000: release_date appended last)
   perform pg_temp.assert(pg_temp.cols('public.public_books') =
-    'id,title,subtitle,description,preview_text,keywords,isbn,language,publisher,edition,original_publication_date,genre,series_id,series_position,price_cents,cover_path,status,published_at,created_at,updated_at,price_all,librum_choice_at,pen_name_id,original_author,categories,is_adult,reading_age_min,edition_number,pd_work_id,pd_editor_credit',
+    'id,title,subtitle,description,preview_text,keywords,isbn,language,publisher,edition,original_publication_date,genre,series_id,series_position,price_cents,cover_path,status,published_at,created_at,updated_at,price_all,librum_choice_at,pen_name_id,original_author,categories,is_adult,reading_age_min,edition_number,pd_work_id,pd_editor_credit,release_date',
     'part1: public_books columns (no author_id, file_path, pen_name)');
   perform pg_temp.assert(pg_temp.cols('public.public_series') = 'id,title,pen_name_id,created_at', 'part1: public_series columns');
   perform pg_temp.assert(pg_temp.cols('public.public_bundles') =
@@ -535,6 +536,7 @@ insert into pg_temp.allow values
   ('reviews', 'reader_id', 'own', 'readers read own reviews (upsert)'),
   ('purchases', 'reader_id', 'own', 'readers read own purchases'),
   ('wishlist_items', 'reader_id', 'own', 'own wishlist'),
+  ('preorder_notify_requests', 'user_id', 'own', 'own pre-order notices (BD16 P1)'),
   ('pen_name_follows', 'follower_id', 'own', 'own follows'),
   ('discount_codes', 'author_id', 'own', 'own codes'),
   ('author_payout_destinations', 'author_id', 'own', 'own payout destination'),

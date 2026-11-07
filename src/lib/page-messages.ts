@@ -220,7 +220,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "This request is no longer awaiting review -- it may have already been reviewed or cancelled.",
   "This review no longer exists.",
   "This staff member no longer exists.",
-  "Tick all three checks before you approve.",
+  "Tick all the checks before you approve.",
   "Title is required.",
   "Title must be 200 characters or fewer.",
   "Të dhënat bankare nuk u ruajtën. Kontrolloni të dhënat dhe provoni përsëri.",
@@ -296,6 +296,28 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "A new work needs its title and its original author.",
   "Only a book whose rights choice is \"public domain\" can be a work's edition.",
   "Ky botim është zgjedhur nga Librum, prandaj kjo fushë nuk ndryshon. Nëse diçka duhet korrigjuar, ngarkoni një botim të ri dhe Librum mund ta zgjedhë atë.",
+  // BD16 P2: pre-orders, the author side (src/lib/preorders.ts).
+  "Zgjidhni një datë daljeje nga 14 ditë deri në 6 muaj nga sot.",
+  "Ky libër nuk mund të bëhet parapublikim.",
+  "Ky libër ka pasur 2 parapublikime. Tani mund të publikohet vetëm si zakonisht.",
+  "Ky libër ka qenë i publikuar, ndaj nuk mund të bëhet parapublikim.",
+  "Një libër i domenit publik nuk mund të bëhet parapublikim.",
+  "Ky libër nuk është më parapublikim. Rifreskoni faqen.",
+  "Shënoni kutinë për të konfirmuar anulimin.",
+  "Zgjidhni një datë të re nga 1 deri në 30 ditë pas datës së tanishme.",
+  "Data nuk mund të shtyhet më për këtë parapublikim.",
+  "Ky libër është parapublikim. Përdorni «Anuloni parapublikimin».",
+  "Për ta fshirë, anuloni fillimisht parapublikimin.",
+  "Parapublikimi nuk mund të anulohet tani. Provoni përsëri",
+  "Data nuk mund të shtyhet tani. Provoni përsëri",
+  // BD16 P3: pre-orders, the staff side (src/lib/preorder-staff.ts,
+  // books/book-admin-logic.ts).
+  "Too late to approve: this pre-order's date is too close. Send it back so the author picks a new date.",
+  "This book has had its 2 pre-orders. Send it back; the author can still publish it as usual.",
+  "This pre-order changed. Reload and check again.",
+  "The pre-order run starts at 08:00 Tirana time, so a file sent before then still counts as on time. Try again after 08:00.",
+  "The pre-order run failed. Try again; running it twice changes nothing more.",
+  "Only the owner can run the pre-order job.",
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
@@ -352,6 +374,16 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Libri u fshi.",
   // BD15 P7: the admin book page's Public-domain edition box.
   "Public-domain edition saved.",
+  // BD16 P2: pre-orders, the author side (src/lib/preorders.ts).
+  "Parapublikimi u dërgua për shqyrtim. Kur Librum ta miratojë, libri shfaqet në Librari me datën e daljes.",
+  "Parapublikimi u anulua. Libri është sërish draft.",
+  "Data e daljes u shty.",
+  "Shqyrtimi u anulua. Parapublikimi mbetet në Librari; ndryshimet tuaja presin përsëri te redaktori.",
+  // BD16 P3: pre-orders, the staff side (books/book-admin-logic.ts).
+  "Pre-order approved. It shows in the Bookstore as coming out on its date.",
+  "Final file approved. The book stays a pre-order and comes out by itself on its day.",
+  "Final file approved. Its day had passed, so the book is live now.",
+  "Changes approved. Readers see the new version of the pre-order.",
 ]);
 
 type QueryValue = string | string[] | undefined;

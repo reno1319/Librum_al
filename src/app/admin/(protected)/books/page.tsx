@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
+import { formatStaffDay } from "@/lib/preorder-staff";
 import { formControlClasses } from "@/lib/form-styles";
 import { buttonClasses } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
@@ -51,10 +52,13 @@ type BookListRow = {
   pen: { name: string } | null;
   // BD3 patch 4 (audit r1, M1): the byline readers see, when set.
   original_author: string | null;
+  // BD16 P3: a pre-order's day.
+  release_date: string | null;
 };
 
 const CHIP_CLASSES: Record<BookStateLabel, string> = {
   Live: "bg-[#e1f0e7] text-[#1e5c3e]",
+  "Pre-order": "bg-[#e3ebf6] text-[#1e3f6e]",
   "In review": "bg-[#fbf0d4] text-[#806510]",
   Draft: "bg-reader-tint text-[#7a5a00]",
   "Taken down": "bg-[#f6e3df] text-[#8e2a1e]",
@@ -113,10 +117,11 @@ async function loadBooks(filter: ReturnType<typeof parseBooksFilter>, q: string,
 
   let query = admin
     .from("books")
-    .select("id, title, status, author_id, published_at, created_at, pen:pen_names!books_pen_name_id_fkey(name), original_author", {
+    .select("id, title, status, author_id, published_at, created_at, pen:pen_names!books_pen_name_id_fkey(name), original_author, release_date", {
       count: "exact",
     });
   if (filter === "live") query = query.eq("status", "published");
+  if (filter === "preorder") query = query.eq("status", "preorder");
   if (filter === "draft") {
     query = query.eq("status", "draft");
     const excluded = [...takenDownIds, ...inReviewIds];
@@ -249,7 +254,11 @@ export default async function AdminBooksPage({
                         </span>
                       )}
                       <span className="text-muted sm:w-36 sm:text-right">
-                        {book.published_at ? `Published ${formatTimestampAsDate(book.published_at)}` : "Never published"}
+                        {book.status === "preorder" && book.release_date
+                          ? `Comes out ${formatStaffDay(book.release_date)}`
+                          : book.published_at
+                            ? `Published ${formatTimestampAsDate(book.published_at)}`
+                            : "Never published"}
                       </span>
                     </span>
                   </Link>

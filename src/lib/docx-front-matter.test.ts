@@ -313,6 +313,36 @@ describe("BD3 patch 2: never loses the author's text (audit r1 H1-H6, M2)", () =
   });
 });
 
+// B19 (D2 audit): "Ballina" credit lines go like "Kopertina" ones; the
+// bare word, a title or a story line with it, stays.
+describe("B19: Ballina credit lines on the copyright page", () => {
+  it("removes 'Ballina: X' and 'Dizajni i ballinës: X' with the copyright lines", async () => {
+    const r = await convert(
+      fmt("© 2020 Autor Prove", { align: "center" }) +
+        fmt("Botuar në Tiranë", { align: "center" }) +
+        fmt("Ballina: Artist Prove", { align: "center" }) +
+        fmt("Dizajni i ballinës: Studio Prova", { align: "center" }) +
+        fmt("Dizajner i ballinës Artist Tjetër", { align: "center", pageBreakAfter: true }) +
+        BODY,
+    );
+    const text = allText(r);
+    for (const gone of ["Ballina: Artist Prove", "Dizajni i ballinës", "Dizajner i ballinës"]) expect(text).not.toContain(gone);
+    expect(text).toContain("Dita ishte");
+  });
+
+  it("keeps a short line that only uses the word (no label), next to copyright lines", async () => {
+    const r = await convert(
+      fmt("© 2020 Autor Prove", { align: "center" }) +
+        fmt("Ballina e shtëpisë", { align: "center" }) +
+        fmt("Botuar në Tiranë", { align: "center", pageBreakAfter: true }) +
+        BODY,
+    );
+    const text = allText(r);
+    expect(text).toContain("Ballina e shtëpisë");
+    expect(text).not.toContain("Botuar në Tiranë");
+  });
+});
+
 // Audit r2 (FAIL): each input that lost real text, kept as a test.
 describe("BD3 patch 2: title page takes only the title (audit r2)", () => {
   const T = (x: string) => fmt("LIBRI I DETIT", { align: "center", size: 48 }) + x;

@@ -9,7 +9,6 @@ import { takedownReasonForReport, takedownReasonLabel } from "@/lib/takedown-rea
 import {
   BUYER_FILE_ONLY_HISTORY_LABEL,
   GRANDFATHERED_HISTORY_LABEL,
-  REVIEW_CHECKLIST_ITEMS,
   REVIEW_STATUS_LABELS,
   type BookReviewStatus,
 } from "@/lib/book-review-copy";
@@ -17,7 +16,13 @@ import { Alert } from "@/components/ui/alert";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import type { Metadata } from "next";
 import { formatActivityTime, formatRelativeTime, formatTodayDate } from "../../../admin-landing-logic";
-import { adminBookDetailRows, describeBookEyebrow, isUuid, resolveTakedownReport } from "../book-admin-logic";
+import {
+  adminBookDetailRows,
+  describeBookEyebrow,
+  isUuid,
+  resolveTakedownReport,
+  reviewChecklistItems,
+} from "../book-admin-logic";
 import {
   allowBookAgainAsStaff,
   approveBookReviewAsStaff,
@@ -30,6 +35,25 @@ import { UnpublishForm } from "./unpublish-form";
 import { SendBackForm } from "./send-back-form";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 import { descriptionPlainText } from "@/lib/book-description";
+import { preorderFinalFileState, preorderFileDueDate, tiranaToday } from "@/lib/preorders";
+import {
+  LISTING_INTRO,
+  LISTING_TOO_LATE_MESSAGE,
+  NO_FILE_CHECKLIST_NOTE,
+  PREORDER_CHANGES_INTRO,
+  PREORDER_UNPUBLISH_NOTE,
+  finalFileIntro,
+  finalFileReleasesNow,
+  finalFileSendBackNote,
+  formatStaffDay,
+  isListingTooLate,
+  listingDateLine,
+  preorderCountLine,
+  reviewKind,
+  slipLine,
+  staffFinalFileLine,
+  waitingReadersStaffLine,
+} from "@/lib/preorder-staff";
 
 export const metadata: Metadata = {
   title: "Book",
@@ -65,6 +89,16 @@ export const dynamic = "force-dynamic";
 // as the work's one public edition; the previous edition goes back to
 // its uploader as a draft. A submission staff don't pick is sent back
 // with the ready-made note. Staff with books.review only.
+//
+// BD16 P3 (pre-orders): a pre-order listing (a draft whose review asks
+// for a release date) is reviewed like a draft, without the file box
+// when it came without a file, and is not approvable once too late
+// (LB506; Renato 11-06: no listing approval after the date). A live
+// pre-order is reviewed like a live book; its final file comes as a
+// waiting change, and approving it on or after the release day releases
+// the book (BD15 Q3). The Pre-order box says the dates, the final file's
+// state (after a lifted suspension: "send it again", Renato 11-06), the
+// date move and the waiting readers' count.
 type AdminBook = {
   id: string;
   title: string;
@@ -94,6 +128,10 @@ type AdminBook = {
   keywords: string | null;
   publisher: string | null;
   isbn: string | null;
+  // BD16: the pre-order columns (migration 20261106120000).
+  release_date: string | null;
+  preorder_count: number;
+  preorder_slip_used: boolean;
 };
 
 type PdWork = { id: string; title: string; original_author: string; picked_book_id: string | null };
@@ -137,6 +175,8 @@ type ReviewRow = {
   // P5b-1: the snapshot binds these too (null on old rows).
   description: string | null;
   is_adult: boolean | null;
+  // BD16: the release date a pre-order listing asks for (else null).
+  release_date: string | null;
 };
 
 type ActiveTakedown = {
@@ -170,7 +210,7 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, release_date, preorder_count, preorder_slip_used")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();
@@ -208,7 +248,7 @@ export default async function AdminBookPage({
       .returns<{ bundle_id: string; bundles: { title: string; status: string } }[]>(),
     admin
       .from("book_reviews")
-      .select("id, status, grandfathered, buyer_file_only, submitted_at, decided_at, decided_by, reason, file_path, cover_path, original_author, description, is_adult")
+      .select("id, status, grandfathered, buyer_file_only, submitted_at, decided_at, decided_by, reason, file_path, cover_path, original_author, description, is_adult, release_date")
       .eq("book_id", book.id)
       .order("submitted_at", { ascending: false })
       .returns<ReviewRow[]>(),
@@ -277,13 +317,17 @@ export default async function AdminBookPage({
     console.error("admin book: the published bundles read failed", { error: bundlesResult.error });
   }
   const reviews = reviewsResult.data ?? [];
-  const liveUpdate = book.status === "published";
+  // BD16: a live pre-order's changes are reviewed like a live book's.
+  const isPreorder = book.status === "preorder";
+  const liveUpdate = book.status === "published" || isPreorder;
   const pendingReview =
     book.status === "draft" || liveUpdate ? (reviews.find((r) => r.status === "pending") ?? null) : null;
   // P5b-2: a live book's waiting changes. Unreadable: not approvable.
+  // BD16: a pre-order's too, with or without a review (a final file
+  // saved but not sent, e.g. after a lifted suspension).
   let pendingChange: PendingChangeRow | null = null;
   let pendingChangeUnreadable = false;
-  if (liveUpdate && pendingReview) {
+  if (liveUpdate && (pendingReview || isPreorder)) {
     const { data, error: pendingChangeError } = await admin
       .from("book_pending_changes")
       .select("file_path, cover_path, description, is_adult, original_author")
@@ -308,7 +352,42 @@ export default async function AdminBookPage({
         pendingReview.is_adult === pendingChange.is_adult
       : pendingReview.file_path === book.file_path &&
         pendingReview.cover_path === book.cover_path &&
-        (pendingReview.original_author ?? null) === (book.original_author ?? null));
+        (pendingReview.original_author ?? null) === (book.original_author ?? null) &&
+        // BD16: a listing binds its release date too.
+        (pendingReview.release_date ?? null) === (book.release_date ?? null));
+  // BD16: what the waiting review asks, and the pre-order's dates.
+  const today = tiranaToday();
+  const kind = pendingReview
+    ? reviewKind({
+        bookStatus: book.status,
+        bookFilePath: book.file_path,
+        reviewFilePath: pendingReview.file_path,
+        reviewReleaseDate: pendingReview.release_date,
+      })
+    : null;
+  const reviewHasFile = pendingReview !== null && pendingReview.file_path !== null;
+  const listingTooLate =
+    kind === "listing" && pendingReview?.release_date
+      ? isListingTooLate({ releaseDate: pendingReview.release_date, hasFile: reviewHasFile, today })
+      : false;
+  const finalFileState = isPreorder
+    ? preorderFinalFileState({
+        bookFilePath: book.file_path,
+        pendingFilePath: pendingChange?.file_path ?? null,
+        inReview: reviewHasFile,
+      })
+    : null;
+  let waitingReaders: number | null = null;
+  if (isPreorder) {
+    const { count, error: waitingError } = await admin
+      .from("preorder_notify_requests")
+      .select("book_id", { count: "exact", head: true })
+      .eq("book_id", book.id)
+      .is("notified_at", null)
+      .is("book_cancelled_at", null);
+    if (waitingError) console.error("admin book: the waiting readers count failed", { code: waitingError.code ?? null });
+    waitingReaders = waitingError ? null : (count ?? 0);
+  }
   // Only what changed, live beside new (Q2 a).
   const coverUrlOf = (path: string | null) =>
     path ? admin.storage.from("covers").getPublicUrl(path).data.publicUrl : null;
@@ -322,7 +401,9 @@ export default async function AdminBookPage({
         after: coverUrlOf(pendingReview.cover_path),
       });
     }
-    if (pendingReview.file_path !== book.file_path) liveChanges.push({ key: "file", label: "Book file" });
+    if (pendingReview.file_path !== book.file_path) {
+      liveChanges.push({ key: "file", label: book.file_path === null ? "Final book file" : "Book file" });
+    }
     if (pendingReview.description !== null && pendingReview.description !== book.description) {
       liveChanges.push({
         key: "text",
@@ -483,13 +564,48 @@ export default async function AdminBookPage({
                 {book.original_author}
               </p>
             )}
-            {book.status === "published" && (
+            {(book.status === "published" || isPreorder) && (
               <Link href={`/libra/${book.id}`} className="mt-1 inline-flex min-h-11 items-center text-sm text-primary underline">
                 View public book page
               </Link>
             )}
           </div>
         </div>
+
+        {isPreorder && book.release_date && finalFileState && (
+          <section aria-labelledby="book-preorder" className={SECTION_CLASSES}>
+            <h2 id="book-preorder" className={SECTION_HEADING_CLASSES}>
+              Pre-order
+            </h2>
+            <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[max-content_1fr]">
+              <div className="contents">
+                <dt className="font-semibold">Comes out</dt>
+                <dd>{formatStaffDay(book.release_date)}, at about 08:00 Tirana time</dd>
+              </div>
+              <div className="contents">
+                <dt className="font-semibold">Final file due</dt>
+                <dd>{formatStaffDay(preorderFileDueDate(book.release_date))}</dd>
+              </div>
+              <div className="contents">
+                <dt className="font-semibold">Final file</dt>
+                <dd className={pendingChangeUnreadable ? "break-words text-red-700" : "break-words"}>
+                  {pendingChangeUnreadable
+                    ? "Couldn’t load the waiting changes."
+                    : staffFinalFileLine(finalFileState, book.release_date, today)}
+                </dd>
+              </div>
+              <div className="contents">
+                <dt className="font-semibold">Date move</dt>
+                <dd>{slipLine(book.preorder_slip_used)}</dd>
+              </div>
+              <div className="contents">
+                <dt className="font-semibold">Readers waiting</dt>
+                <dd className={waitingReaders === null ? "text-red-700" : undefined}>{waitingReadersStaffLine(waitingReaders)}</dd>
+              </div>
+            </dl>
+            <p className="mt-2.5 text-sm text-muted">{preorderCountLine(book.preorder_count)}</p>
+          </section>
+        )}
 
         <section aria-labelledby="book-details" className={SECTION_CLASSES}>
           <h2 id="book-details" className={SECTION_HEADING_CLASSES}>
@@ -607,10 +723,20 @@ export default async function AdminBookPage({
             <p className="text-[0.9375rem]">
               Sent {formatRelativeTime(pendingReview.submitted_at, now)} by {publicName}.
             </p>
-            {liveUpdate && (
+            {kind === "live_changes" && (
               <p className="text-sm text-muted">
                 This book is live. These are changes to it; readers keep the current version until you approve them.
               </p>
+            )}
+            {kind === "preorder_changes" && <p className="text-sm text-muted">{PREORDER_CHANGES_INTRO}</p>}
+            {kind === "final_file" && book.release_date && (
+              <p className="text-sm font-semibold">{finalFileIntro(book.release_date, today)}</p>
+            )}
+            {kind === "listing" && pendingReview.release_date && (
+              <>
+                <p className="text-sm text-muted">{LISTING_INTRO}</p>
+                <p className="text-sm font-semibold">{listingDateLine(pendingReview.release_date, reviewHasFile)}</p>
+              </>
             )}
             {reviewBundlesUnknown ? (
               <p className="text-sm text-red-700">
@@ -703,14 +829,21 @@ export default async function AdminBookPage({
                   ) : (
                     <CoverPlaceholder title={book.title} authorName={publicName} className="h-24 w-16 shrink-0 rounded-[3px]" />
                   )}
-                  <a
-                    href={`/admin/books/${book.id}/file?review=${pendingReview.id}`}
-                    className="focus-ring inline-flex min-h-11 items-center text-[0.9375rem] font-semibold text-primary underline underline-offset-2 hover:decoration-2"
-                  >
-                    Open the book file
-                  </a>
+                  {reviewHasFile ? (
+                    <a
+                      href={`/admin/books/${book.id}/file?review=${pendingReview.id}`}
+                      className="focus-ring inline-flex min-h-11 items-center text-[0.9375rem] font-semibold text-primary underline underline-offset-2 hover:decoration-2"
+                    >
+                      Open the book file
+                    </a>
+                  ) : (
+                    <p className="text-sm text-muted">{NO_FILE_CHECKLIST_NOTE}</p>
+                  )}
                 </div>
                 )}
+                {listingTooLate ? (
+                  <p className="text-sm font-semibold text-red-700">{LISTING_TOO_LATE_MESSAGE}</p>
+                ) : (
                 <form action={approveBookReviewAsStaff} className="flex flex-col gap-3">
                   <input type="hidden" name="bookId" value={book.id} />
                   <input type="hidden" name="reviewId" value={pendingReview.id} />
@@ -718,7 +851,7 @@ export default async function AdminBookPage({
                   <input type="hidden" name="coverPath" value={pendingReview.cover_path ?? ""} />
                   <fieldset className="flex flex-col gap-1">
                     <legend className="mb-1 text-[0.9375rem] font-semibold">Check before you approve</legend>
-                    {REVIEW_CHECKLIST_ITEMS.map((item) => (
+                    {reviewChecklistItems(reviewHasFile).map((item) => (
                       <label key={item.key} className="flex min-h-11 items-center gap-3 text-[0.9375rem]">
                         <input type="checkbox" name={item.key} required className="size-5 shrink-0 accent-primary" />
                         {item.label}
@@ -741,9 +874,23 @@ export default async function AdminBookPage({
                     type="submit"
                     className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground hover:opacity-90"
                   >
-                    {liveUpdate ? "Approve changes" : book.pd_work_id ? "Approve and pick this edition" : "Approve and publish"}
+                    {kind === "listing"
+                      ? "Approve the pre-order"
+                      : isPreorder && reviewHasFile && book.release_date && finalFileReleasesNow(book.release_date, today)
+                        ? "Approve and release now"
+                        : kind === "final_file"
+                          ? "Approve the final file"
+                          : liveUpdate
+                            ? "Approve changes"
+                            : book.pd_work_id
+                              ? "Approve and pick this edition"
+                              : "Approve and publish"}
                   </button>
                 </form>
+                )}
+                {kind === "final_file" && book.release_date && (
+                  <p className="text-sm text-muted">{finalFileSendBackNote(book.release_date, today)}</p>
+                )}
                 <SendBackForm
                   action={sendBackBookReviewAsStaff}
                   bookId={book.id}
@@ -964,7 +1111,12 @@ export default async function AdminBookPage({
               </h2>
               {/* SMALL-FIXES-1 (2a, audit A5): a draft is not in the Bookstore,
                   so it can't "leave" it; a takedown also cancels a waiting review. */}
-              {book.status === "draft" ? (
+              {isPreorder ? (
+                <p className="text-sm text-muted">
+                  {PREORDER_UNPUBLISH_NOTE} The author can&apos;t list it again until you allow it.
+                  {pendingReview && " This also cancels the waiting review."}
+                </p>
+              ) : book.status === "draft" ? (
                 <p className="text-sm text-muted">
                   The book stays out of the Bookstore. The author can&apos;t publish it until you allow it. Readers who
                   already bought it keep it.
@@ -976,8 +1128,16 @@ export default async function AdminBookPage({
                   Readers who already bought it keep it.
                 </p>
               )}
-              {publishedBundleTitles.length > 0 && (
-                <p className="text-sm font-semibold">This also unpublishes: {publishedBundleTitles.join(", ")}.</p>
+              {/* BD15 follow-up (F1 audit N3): an unreadable bundle list is
+                  said, never shown as "no bundle". */}
+              {reviewBundlesUnknown ? (
+                <p className="text-sm font-semibold">
+                  Couldn’t check which bundles this also unpublishes. Please reload the page.
+                </p>
+              ) : (
+                publishedBundleTitles.length > 0 && (
+                  <p className="text-sm font-semibold">This also unpublishes: {publishedBundleTitles.join(", ")}.</p>
+                )
               )}
               <UnpublishForm
                 action={unpublishBookAsStaff}

@@ -3,6 +3,7 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
 import { authorPagePath } from "@/lib/pen-names";
 import { bookPagePath, bundlePagePath, seriesPagePath } from "@/lib/seo";
+import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
 // LIBRUM 2.0 LAUNCH-FIX-1A SEO-2: static public/marketing routes. The
 // per-entity pages (books/authors/series/bundles) were left for a later
@@ -112,7 +113,8 @@ async function catalogSitemapEntries(origin: string): Promise<MetadataRoute.Site
       supabase
         .from("public_books")
         .select("id, pen_name_id, series_id, updated_at")
-        .eq("status", "published")
+        // BD16 P4 (D1): a pre-order's page is public, so it is listed.
+        .in("status", LISTED_BOOK_STATUSES)
         .not("price_all", "is", null)
         .order("id")
         .range(from, to)

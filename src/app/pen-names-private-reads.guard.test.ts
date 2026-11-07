@@ -57,7 +57,10 @@ const OWN_ROW_EQ = /\.eq\("(author_id|reader_id)",\s*(user\.id|userId)\)/;
 // to build transactional emails, and it never renders a public page.
 // staff-alerts.ts likewise (ADMIN-ALERTS-1): it reads a book's title
 // with the service-role client only to email staff, never for a page.
-const NOT_PUBLIC_LIB = new Set(["lib/email.ts", "lib/staff-alerts.ts"]);
+// BD16 P5: preorder-emails.ts likewise -- the cron route and staff /
+// author actions give it the service-role client; it reads a book's
+// title and author only to build the pre-order emails.
+const NOT_PUBLIC_LIB = new Set(["lib/email.ts", "lib/staff-alerts.ts", "lib/preorder-emails.ts"]);
 const PUBLIC_FILES = [
   ...walk(join(SRC, "app", "(public)")),
   ...walk(join(SRC, "components")),

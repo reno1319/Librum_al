@@ -95,9 +95,13 @@ describe("royaltyPreview (D3 rates, display only)", () => {
 
   it("formats lek and qindarka the Albanian way", () => {
     expect(formatShareMinor(69300)).toBe("693 lekë");
-    expect(formatShareMinor(4950)).toBe("49,50 lekë");
-    expect(formatShareMinor(13930)).toBe("139,30 lekë");
-    expect(formatShareMinor(7000005)).toBe("70.000,05 lekë");
+    // BD15 follow-up (F4): whole lek, rounded down.
+    expect(formatShareMinor(4950)).toBe("49 lekë");
+    expect(formatShareMinor(13930)).toBe("139 lekë");
+    expect(formatShareMinor(20930)).toBe("209 lekë");
+    expect(formatShareMinor(20999)).toBe("209 lekë");
+    expect(formatShareMinor(7000005)).toBe("70.000 lekë");
+    expect(formatShareMinor(0)).toBe("0 lekë");
   });
 
   it("the ledger rate is untouched until the POK build (BD2 1a)", () => {

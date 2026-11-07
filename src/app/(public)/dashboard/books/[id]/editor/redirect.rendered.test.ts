@@ -60,9 +60,11 @@ vi.mock("@/lib/book-ai-disclosure", () => ({ readAiDisclosure: async () => ({ ok
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
 const BOOK_ID = "c3d4e5f6-2222-4222-8222-abcdef222222";
 let book: Record<string, unknown>;
+let penNameRows: { id: string; name: string; is_default: boolean }[] = [];
 
 function chain(table: string) {
-  const resolve = () => Promise.resolve({ data: table === "books" ? book : [], error: null });
+  const resolve = () =>
+    Promise.resolve({ data: table === "books" ? book : table === "pen_names" ? penNameRows : [], error: null });
   const proxy: object = new Proxy(
     {},
     {
@@ -127,6 +129,7 @@ beforeEach(() => {
   rightsState = { kind: "none" };
   pendingRead = { ok: true, pending: null, createdAt: null };
   maintenance = false;
+  penNameRows = [];
 });
 
 describe("editor page: which books it takes", () => {
@@ -285,6 +288,51 @@ describe("editor page: which books it takes", () => {
     const html = await render();
     expect(html).not.toContain("Çfarë dërguat");
     expect(html).toContain("Hequr nga Libraria");
+  });
+
+  // BD15 follow-up (walkthrough F3): "Si do ta shohin lexuesit" names the
+  // author readers see -- the original author of a public-domain book,
+  // never the uploader's pen name; a book of the author's own shows the pen name.
+  function readerPreview(html: string): string {
+    const start = html.indexOf(">Si do ta shohin lexuesit<");
+    expect(start).toBeGreaterThan(-1);
+    return html.slice(start, html.indexOf("</section>", start));
+  }
+
+  it("the Pricing preview of a public-domain book shows the original author, not the pen name", async () => {
+    penNameRows = [{ id: "p1", name: "Review Author", is_default: true }];
+    book = { ...book, original_author: "Autor Prove" };
+    const preview = readerPreview(await render("pricing"));
+    expect(preview).toContain("Autor Prove");
+    expect(preview).not.toContain("Review Author");
+  });
+
+  it("the Pricing preview of a live public-domain book follows its waiting original author", async () => {
+    penNameRows = [{ id: "p1", name: "Review Author", is_default: true }];
+    book = { ...book, status: "published", published_at: "2026-11-01T10:00:00Z", original_author: "Autor Prove" };
+    pendingRead = {
+      ok: true,
+      pending: { filePath: null, coverPath: null, description: "", isAdult: false, originalAuthor: "Autor i Ri" },
+      createdAt: "2026-11-05T10:00:00Z",
+    };
+    const preview = readerPreview(await render("pricing"));
+    expect(preview).toContain("Autor i Ri");
+    expect(preview).not.toContain("Review Author");
+  });
+
+  it("the Pricing preview of the author's own book shows the pen name", async () => {
+    penNameRows = [{ id: "p1", name: "Review Author", is_default: true }];
+    const preview = readerPreview(await render("pricing"));
+    expect(preview).toContain("Review Author");
+  });
+
+  // BD15 follow-up (P7 audit N5): the editor greys a picked edition's frozen fields.
+  it("a picked public-domain edition's Details tab greys the frozen fields; another live book's doesn't", async () => {
+    const liveBook = { ...book, status: "published", published_at: "2026-11-01T10:00:00Z", description: "Hyrje" };
+    book = { ...liveBook, pd_work_id: "w1" };
+    expect(await render()).toMatch(/<input(?=[^>]*name="subtitle")(?=[^>]*disabled="")[^>]*>/);
+    book = { ...liveBook, pd_work_id: null };
+    expect(await render()).not.toMatch(/<input(?=[^>]*name="subtitle")(?=[^>]*disabled="")[^>]*>/);
   });
 
   it("a taken-down book's Pricing tab: Send blocked with the reason", async () => {

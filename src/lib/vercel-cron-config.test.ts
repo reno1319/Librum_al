@@ -38,9 +38,18 @@ describe("vercel.json cron configuration", () => {
     expect(payout?.schedule).toBe(PAYOUT_CYCLE_CRON_EXPRESSION);
   });
 
-  it("contains exactly two cron entries -- payouts and the BD5 clean-up, nothing accidentally removed", () => {
+  it("contains exactly four cron entries -- payouts, the BD5 clean-up and the two BD16 pre-order runs", () => {
     const config = readVercelConfig();
-    expect(config.crons).toHaveLength(2);
+    expect(config.crons).toHaveLength(4);
+  });
+
+  // BD16 P5 (PLAN-BD16-r1 §3.5): Vercel crons are UTC and Tirana is
+  // UTC+1 or UTC+2, so the job is called at 06:00 and 07:00 UTC and acts
+  // only from 08:00 Tirana. The ?at= keeps the two paths distinct.
+  it("registers the pre-order job twice a day, at 06:00 and 07:00 UTC", () => {
+    const config = readVercelConfig();
+    const runs = config.crons.filter((cron) => cron.path.startsWith("/api/internal/preorders/run"));
+    expect(runs.map((cron) => cron.schedule).sort()).toEqual(["0 6 * * *", "0 7 * * *"]);
   });
 
   // BD5 (W9): daily at 03:00 UTC. Vercel Hobby allows one run a day.

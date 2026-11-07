@@ -25,7 +25,7 @@ function render(overrides: Partial<Props> = {}): string {
     checkoutAvailable: false,
     approvalValid: false,
     title: "Libri im",
-    penName: "Arben Leka",
+    byline: "Arben Leka",
     missing: [],
     ...overrides,
   };
@@ -69,7 +69,8 @@ describe("BookPricingForm", () => {
     expect(html).toContain("Përqindja juaj");
     expect(html).toContain("Ju merrni për çdo shitje");
     expect(html).not.toMatch(/Përqindja jote|Ti merr/);
-    expect(html).toContain("174,30 lekë");
+    expect(html).toMatch(/<dd[^>]*>174 lekë<\/dd>/);
+    expect(html).not.toContain("174,30");
     expect(html).toContain("Shuma është para tatimit 15% që mbahet në burim.");
     expect(html).toContain("50% për çmime nën 199 lekë, 70% nga 199 lekë e lart.");
   });
@@ -77,8 +78,9 @@ describe("BookPricingForm", () => {
   it("below 199 lek: 50%, and what 199 lek would pay", () => {
     const html = render({ initialPriceAll: 99 });
     expect(html).toMatch(/<dd[^>]*>50%<\/dd>/);
-    expect(html).toContain("49,50 lekë");
-    expect(html).toContain("Me 199 lekë do të merrnit 139,30 lekë për çdo shitje (70%).");
+    expect(html).toMatch(/<dd[^>]*>49 lekë<\/dd>/);
+    expect(html).not.toContain("49,50");
+    expect(html).toContain("Me 199 lekë do të merrnit 139 lekë për çdo shitje (70%).");
   });
 
   it("a stored free price: Falas picked, no price box", () => {
@@ -199,7 +201,10 @@ describe("BookPricingForm", () => {
     expect(box("WORLDWIDE_RIGHTS_FIELD")).toContain("onChange={(e) => setWorldwide(e.target.checked)}");
     expect(box("ACCEPT_TERMS_FIELD")).toContain("checked={terms}");
     expect(box("ACCEPT_TERMS_FIELD")).toContain("onChange={(e) => setTerms(e.target.checked)}");
-    expect(src).toContain("pricingTodo(bookId, missing, { worldwide, terms })");
+    // BD16 P2: a pre-order listing drops the items it may send without.
+    expect(src).toContain(
+      "pricingTodo(bookId, preorder ? missing.filter((m) => !m.preorderOptional) : missing, { worldwide, terms })",
+    );
     // BD15 P5b-2: a live book with no waiting change has nothing to send.
     // P5b-3a: a taken-down book is never sent (sendRefusedNote).
     expect(src).toContain(

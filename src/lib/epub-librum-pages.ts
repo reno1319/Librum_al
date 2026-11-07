@@ -225,8 +225,9 @@ function maskComments(xml: string): string | null {
 
 // A whole-word "cover" or "kopertin…" (also "coverpage", "cover-image",
 // "cover.xhtml", "coverImage", "bookcover", "frontcover"), never
-// "discovery", "recover" or "uncover" (audits r1 and r2).
-const COVER_WORD_RE = /(?:^|[^a-z])(?:book|front)?(?:cover(?:page|image|img)?|kopertin[a-z]*)(?:[^a-z]|$)/i;
+// "discovery", "recover" or "uncover" (audits r1 and r2). B19 (D2
+// audit): also "ballin…" ("ballina.xhtml"), Librum's own word.
+const COVER_WORD_RE = /(?:^|[^a-z])(?:book|front)?(?:cover(?:page|image|img)?|kopertin[a-z]*|ballin[a-z]*)(?:[^a-z]|$)/i;
 
 // EPUB 2's <guide><reference type="cover" href="…"/>: Calibre names its
 // cover page "titlepage.xhtml" and marks it only here (audit r2, N2).

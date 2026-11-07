@@ -141,7 +141,9 @@ export function ManuscriptField({
   // Files step). Optional, for the same reason as onManuscriptChange.
   onUploadExpired?: () => void;
 }) {
-  const [mode, setMode] = useState<"epub" | "docx">("epub");
+  // BD15 follow-up (walkthrough F5): Word is what most authors upload, so
+  // DOCX is picked first; EPUB is one click away.
+  const [mode, setMode] = useState<"epub" | "docx">("docx");
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [warnings, setWarnings] = useState<ConversionWarning[]>([]);
@@ -170,7 +172,7 @@ export function ManuscriptField({
   const liveTitleRef = useRef(bookTitle);
   const liveLanguageRef = useRef(bookLanguage ?? "");
   const liveAuthorRef = useRef(authorName);
-  const modeRef = useRef<"epub" | "docx">("epub");
+  const modeRef = useRef<"epub" | "docx">("docx");
   // The authoritative small reference this field maintains: whichever
   // temp EPUB Storage path (direct upload OR DOCX-generated, kept
   // repackaged in place) is currently ready to submit.

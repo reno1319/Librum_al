@@ -21,6 +21,15 @@ import { readBookTitlesForStaff, readPendingReviewsForStaff } from "./books/admi
 import type { AuditEventRow } from "@/lib/types";
 import { loadStaffDisplayNames } from "@/lib/staff-display-names";
 import type { Metadata } from "next";
+import { pageErrorMessage } from "@/lib/page-messages";
+import {
+  PREORDER_RUN_BUTTON,
+  PREORDER_RUN_HEADING,
+  PREORDER_RUN_NOTE,
+  parseRunCounts,
+  runCountsLine,
+} from "@/lib/preorder-staff";
+import { runPreorderJobAsOwner } from "./preorder-job-actions";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -57,8 +66,17 @@ type WaitingRefundRow = {
 // role never asks the database for rows it may not open. Counts only:
 // no amount is selected or shown (money figures arrive with the live
 // POK build).
-export default async function AdminPage() {
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ error?: string | string[]; preorderRun?: string | string[] }>;
+} = {}) {
   const { role } = await requireStaff("admin.access");
+  // BD16 P3: the owner's pre-order run (its result is digits only).
+  const { error: rawError, preorderRun: rawRun } = (await searchParams) ?? {};
+  const pageError = pageErrorMessage(rawError);
+  const isOwner = role === "owner";
+  const runCounts = isOwner ? parseRunCounts(rawRun) : null;
 
   const { showReports, showRefunds, showActivity, showReviews, showReaderReviews } = resolveTodayVisibility({
     reportsView: roleHasPermission(role, "reports.view"),
@@ -162,6 +180,17 @@ export default async function AdminPage() {
   const activity: AuditEventRow[] = activityResult?.ok ? activityResult.data : [];
 
   const tiles = [
+    // BD16 P3 (D9): final files waiting past the release day.
+    showReviews &&
+      (reviewsResult?.overdue ?? 0) > 0 && {
+        key: "preorders-overdue",
+        href: "/admin/books?status=preorder",
+        label: "Pre-orders overdue",
+        failed: false,
+        count: reviewsResult?.overdue ?? 0,
+        // Overdue items sort first, so the oldest one is in the list.
+        oldestAt: todoReviews.find((r) => r.preorder?.state === "overdue")?.submittedAt ?? null,
+      },
     showReviews && {
       key: "reviews",
       href: "/admin/books?status=in_review",
@@ -215,6 +244,16 @@ export default async function AdminPage() {
         </ul>
       </div>
 
+      {pageError && (
+        <p role="alert" className="rounded-card border border-[#8E2A1E] bg-surface p-3 text-sm text-red-700">
+          {pageError}
+        </p>
+      )}
+      {runCounts && (
+        <p role="status" className="rounded-card border border-border bg-surface p-3 text-sm">
+          {runCountsLine(runCounts)}
+        </p>
+      )}
       {tiles.length > 0 && (
         <section aria-label="Waiting" className="grid grid-cols-2 gap-2.5 md:grid-cols-4 md:gap-4">
           {tiles.map((tile) => (
@@ -307,6 +346,22 @@ export default async function AdminPage() {
           </section>
         )}
       </div>
+      {isOwner && (
+        <section aria-labelledby="today-preorder-run" className="rounded-card border border-border bg-surface p-4 md:p-6">
+          <h2 id="today-preorder-run" className="font-serif text-[1.375rem] font-bold text-primary md:text-2xl">
+            {PREORDER_RUN_HEADING}
+          </h2>
+          <p className="mt-1 mb-3 text-sm text-muted">{PREORDER_RUN_NOTE}</p>
+          <form action={runPreorderJobAsOwner}>
+            <button
+              type="submit"
+              className="focus-ring inline-flex min-h-11 items-center justify-center rounded-control bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
+            >
+              {PREORDER_RUN_BUTTON}
+            </button>
+          </form>
+        </section>
+      )}
     </main>
   );
 }

@@ -190,6 +190,10 @@ vi.mock("@/lib/book-rights", () => ({
   },
 }));
 
+// BD16 P2: whether the database has pre-orders (off: as before P1).
+let preorderFeature = false;
+vi.mock("@/lib/catalog-schema-features", () => ({ getPreorderSchemaFeature: async () => preorderFeature }));
+
 const { saveBookDetails, createSeriesFromEditor, discardBookPendingChanges } = await import("./editor-actions");
 const { LIVE_PARTLY_SAVED_MESSAGE } = await import("@/lib/book-editor-copy");
 const { BOOK_CHANGED_WHILE_EDITING_MESSAGE } = await import("@/lib/book-review-copy");
@@ -241,6 +245,7 @@ async function redirectOf(p: Promise<unknown>): Promise<string> {
 const bookRow = () => tables.books.find((b) => b.id === BOOK)!;
 
 beforeEach(() => {
+  preorderFeature = false;
   seed();
   catalogWrites = [];
   sessionContributorWrites = [];
@@ -800,5 +805,26 @@ describe("discardBookPendingChanges (P5b-2)", () => {
     currentUser = OTHER;
     expect(await redirectOf(discardBookPendingChanges(BOOK))).toBe("/dashboard");
     expect(rpcCalls).toEqual([]);
+  });
+});
+
+describe("BD16 P2: saveBookDetails and pre-orders", () => {
+  it("a live pre-order saves like a live book, bound to status preorder", async () => {
+    seedLive();
+    seed({ ...bookRow(), status: "preorder", published_at: null, preorder_listed_at: "2026-11-01T10:00:00Z" });
+    preorderFeature = true;
+    await redirectOf(saveBookDetails(BOOK, liveForm({ subtitle: "Nën" })));
+    const update = catalogWrites.find((w) => w.op === "update")!;
+    expect(update.filters).toEqual(expect.arrayContaining([["id", BOOK], ["author_id", USER], ["status", "preorder"]]));
+    expect(update.payload).not.toHaveProperty("title");
+    expect(update.payload).not.toHaveProperty("description");
+  });
+
+  it("D4: a draft that was once listed keeps its title and pen name after a cancel", async () => {
+    preorderFeature = true;
+    seed({ preorder_listed_at: "2026-11-01T10:00:00Z" });
+    await redirectOf(saveBookDetails(BOOK, form({ title: "Changed", penNameId: PEN_2, subtitle: "Ok" })));
+    expect(catalogWrites[0].payload).not.toHaveProperty("title");
+    expect(catalogWrites[0].payload).not.toHaveProperty("pen_name_id");
   });
 });

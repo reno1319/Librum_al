@@ -8,6 +8,14 @@
     {
       "path": "/api/internal/tmp-uploads/cleanup",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/internal/preorders/run?at=0600",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/internal/preorders/run?at=0700",
+      "schedule": "0 7 * * *"
     }
   ]
 }

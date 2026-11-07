@@ -108,6 +108,7 @@ export function BookDetailsForm({
   lockedPenName,
   penNames,
   series: initialSeries,
+  pdFrozen = false,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   initial: DetailsFormValues;
@@ -121,6 +122,12 @@ export function BookDetailsForm({
   lockedPenName: string | null;
   penNames: EditorPenName[];
   series: EditorSeries[];
+  // BD15 follow-up (P7 audit N5): a picked public-domain edition. Its
+  // frozen details (language, subtitle, contributors, series, edition,
+  // reading age, categories, keywords) show greyed and can't be changed;
+  // hidden copies send the stored values, so a save still goes through
+  // pdFrozenDetailsUnchanged on the server as before.
+  pdFrozen?: boolean;
 }) {
   const [errors, setErrors] = useState<Partial<Record<DetailsField, string>>>({});
   const [penNameId, setPenNameId] = useState(initial.penNameId);
@@ -196,6 +203,7 @@ export function BookDetailsForm({
             name="language"
             data-field="language"
             defaultValue={initial.language || "sq"}
+            disabled={pdFrozen}
             aria-describedby={describe("language")}
             className={editorControlClassesFor(!!err("language"))}
           >
@@ -206,6 +214,7 @@ export function BookDetailsForm({
             ))}
           </select>
           <FieldError id="details-language-error" message={err("language")} />
+          {pdFrozen && <input type="hidden" name="language" value={initial.language || "sq"} />}
         </label>
       </Section>
 
@@ -248,10 +257,12 @@ export function BookDetailsForm({
             type="text"
             maxLength={SUBTITLE_MAX_LENGTH}
             defaultValue={initial.subtitle}
+            disabled={pdFrozen}
             aria-describedby={describe("subtitle")}
             className={editorControlClassesFor(!!err("subtitle"))}
           />
           <FieldError id="details-subtitle-error" message={err("subtitle")} />
+          {pdFrozen && <input type="hidden" name="subtitle" value={initial.subtitle} />}
         </label>
       </Section>
 
@@ -301,11 +312,18 @@ export function BookDetailsForm({
           {contributors.map((c, i) => (
             <div key={c.id || `new-${i}`} className="flex flex-wrap items-end gap-3">
               <input type="hidden" name="contributorId" value={c.id} />
+              {pdFrozen && (
+                <>
+                  <input type="hidden" name="contributorRole" value={c.role} />
+                  <input type="hidden" name="contributorName" value={c.name} />
+                </>
+              )}
               <label className={`${EDITOR_FIELD_CLASSES} w-full sm:w-48`}>
                 <span className={EDITOR_HINT_CLASSES}>Roli</span>
                 <select
                   name="contributorRole"
                   value={c.role}
+                  disabled={pdFrozen}
                   onChange={(e) =>
                     setContributors((list) => list.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))
                   }
@@ -325,22 +343,25 @@ export function BookDetailsForm({
                   type="text"
                   maxLength={CONTRIBUTOR_NAME_MAX_LENGTH}
                   value={c.name}
+                  disabled={pdFrozen}
                   onChange={(e) =>
                     setContributors((list) => list.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
                   }
                   className={editorControlClassesFor(false)}
                 />
               </label>
-              <button
-                type="button"
-                onClick={() => setContributors((list) => list.filter((_, j) => j !== i))}
-                className={EDITOR_SMALL_BUTTON}
-              >
-                Hiq
-              </button>
+              {!pdFrozen && (
+                <button
+                  type="button"
+                  onClick={() => setContributors((list) => list.filter((_, j) => j !== i))}
+                  className={EDITOR_SMALL_BUTTON}
+                >
+                  Hiq
+                </button>
+              )}
             </div>
           ))}
-          {contributors.length < MAX_CONTRIBUTORS ? (
+          {pdFrozen ? null : contributors.length < MAX_CONTRIBUTORS ? (
             <button
               type="button"
               onClick={() => setContributors((list) => [...list, { id: "", name: "", role: "Co-Author" }])}
@@ -368,6 +389,7 @@ export function BookDetailsForm({
             <select
               name="seriesId"
               value={seriesId}
+              disabled={pdFrozen}
               onChange={(e) => setSeriesId(e.target.value)}
               className={editorControlClassesFor(false)}
             >
@@ -386,7 +408,7 @@ export function BookDetailsForm({
               data-field="seriesPosition"
               type="text"
               inputMode="numeric"
-              disabled={!seriesId}
+              disabled={!seriesId || pdFrozen}
               defaultValue={initial.seriesPosition}
               aria-describedby={describe("seriesPosition")}
               className={editorControlClassesFor(!!err("seriesPosition"))}
@@ -394,7 +416,13 @@ export function BookDetailsForm({
           </label>
         </div>
         <FieldError id="details-seriesPosition-error" message={err("seriesPosition")} />
-        {!locked || penNameId ? (
+        {pdFrozen && (
+          <>
+            <input type="hidden" name="seriesId" value={seriesId} />
+            {seriesId && <input type="hidden" name="seriesPosition" value={initial.seriesPosition} />}
+          </>
+        )}
+        {pdFrozen ? null : !locked || penNameId ? (
           newSeriesOpen ? (
             <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
               <label className={EDITOR_FIELD_CLASSES}>
@@ -462,11 +490,13 @@ export function BookDetailsForm({
             inputMode="numeric"
             maxLength={String(EDITION_NUMBER_MAX).length}
             defaultValue={initial.editionNumber}
+            disabled={pdFrozen}
             aria-describedby={describe("editionNumber")}
             className={editorControlClassesFor(!!err("editionNumber"))}
           />
         </label>
         <FieldError id="details-editionNumber-error" message={err("editionNumber")} />
+        {pdFrozen && <input type="hidden" name="editionNumber" value={initial.editionNumber} />}
       </Section>
 
       <Section title="Përshkrimi" lead="Ky tekst del në faqen e librit. Shkruajeni për lexuesin.">
@@ -550,7 +580,8 @@ export function BookDetailsForm({
                   onChange={() => {
                     const adult = o.value === "yes";
                     setIsAdult(adult);
-                    if (adult) setReadingAge("18");
+                    // A frozen reading age keeps its stored value underneath.
+                    if (adult && !pdFrozen) setReadingAge("18");
                   }}
                   className={CHOICE_INPUT_CLASSES}
                 />
@@ -572,7 +603,7 @@ export function BookDetailsForm({
             name="readingAge"
             data-field="readingAge"
             value={isAdult ? "18" : readingAge}
-            disabled={isAdult}
+            disabled={isAdult || pdFrozen}
             onChange={(e) => setReadingAge(e.target.value)}
             aria-describedby={describe("readingAge")}
             className={editorControlClassesFor(!!err("readingAge"))}
@@ -584,7 +615,11 @@ export function BookDetailsForm({
               </option>
             ))}
           </select>
-          {isAdult && <input type="hidden" name="readingAge" value="18" />}
+          {isAdult ? (
+            <input type="hidden" name="readingAge" value="18" />
+          ) : (
+            pdFrozen && <input type="hidden" name="readingAge" value={readingAge} />
+          )}
         </label>
         <FieldError id="details-readingAge-error" message={err("readingAge")} />
       </Section>
@@ -601,7 +636,11 @@ export function BookDetailsForm({
                 <label
                   key={genre}
                   className={`flex min-h-11 items-center gap-2 rounded-full border px-3 text-sm focus-within:shadow-[var(--focus-ring)] sm:min-h-8 ${
-                    on
+                    pdFrozen
+                      ? on
+                        ? "cursor-not-allowed border-border bg-background font-semibold text-muted"
+                        : "cursor-not-allowed border-border bg-surface text-muted"
+                      : on
                       ? "cursor-pointer border-primary bg-primary text-primary-foreground"
                       : blockedByAdult || full
                         ? "cursor-not-allowed border-border bg-surface text-muted"
@@ -611,7 +650,7 @@ export function BookDetailsForm({
                   <input
                     type="checkbox"
                     checked={on}
-                    disabled={(blockedByAdult && !on) || full}
+                    disabled={pdFrozen || (blockedByAdult && !on) || full}
                     onChange={(e) => toggleCategory(genre, e.target.checked)}
                     className="h-4 w-4 shrink-0 accent-accent"
                   />
@@ -643,6 +682,7 @@ export function BookDetailsForm({
             data-field="keywords"
             type="text"
             value={keywords}
+            disabled={pdFrozen}
             onChange={(e) => setKeywords(e.target.value)}
             aria-describedby={describe("keywords", "details-keywords-count")}
             className={editorControlClassesFor(!!err("keywords") || keywordCount > MAX_KEYWORDS)}
@@ -656,6 +696,7 @@ export function BookDetailsForm({
               : `${keywordCount} nga ${MAX_KEYWORDS}`}
           </span>
           <FieldError id="details-keywords-error" message={err("keywords")} />
+          {pdFrozen && <input type="hidden" name="keywords" value={keywords} />}
         </label>
       </Section>
 

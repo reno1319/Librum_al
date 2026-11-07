@@ -56,6 +56,20 @@ import {
   royaltyPreview,
   type PriceMode,
 } from "@/lib/book-pricing";
+import {
+  PREORDER_SEND_NOTE,
+  RELEASE_DATE_FIELD,
+  RELEASE_DATE_LABEL,
+  RELEASE_DATE_TODO_LABEL,
+  RELEASE_HEADING,
+  RELEASE_MODE_FIELD,
+  RELEASE_NOW_LABEL,
+  RELEASE_NOW_SUBLINE,
+  RELEASE_PREORDER_LABEL,
+  RELEASE_PREORDER_SUBLINE,
+  releaseDateHint,
+  type ReleaseMode,
+} from "@/lib/preorders";
 
 // BD15 P4: the new editor's Pricing tab (PLAN-BD15-r1 §2.5; mockup
 // "Çmimi"). A client form only for the live royalty preview; every rule
@@ -78,7 +92,21 @@ const TICK_INPUT_CLASSES = "focus-ring mt-0.5 h-[18px] w-[18px] shrink-0 accent-
 export const WORLDWIDE_TODO_LABEL = "Të drejtat për shitje në të gjithë botën";
 export const TERMS_TODO_LABEL = "Kushtet e Librum";
 
-export type PricingMissing = { tab: EditorTab; label: string };
+// BD16 P2: preorderOptional -- not needed for a pre-order listing (the
+// manuscript may come later, D5).
+export type PricingMissing = { tab: EditorTab; label: string; preorderOptional?: boolean };
+
+// BD16 P2: the draft's "Kur del libri" choice. null: not offered (a live
+// book or pre-order, or the database has no pre-orders yet); note: shown
+// instead of the choice when this book can't be a pre-order.
+export type PricingRelease =
+  | {
+      available: true;
+      initialMode: ReleaseMode;
+      initialDate: string;
+      window: { min: string; max: string };
+    }
+  | { available: false; note: string };
 
 export type PricingTodo = { key: string; label: string; tab: EditorTab; href: string };
 
@@ -115,16 +143,20 @@ export function BookPricingForm({
   checkoutAvailable,
   approvalValid,
   title,
-  penName,
+  byline,
   missing,
   live = null,
   sendRefusedNote = null,
+  release = null,
 }: {
+  release?: PricingRelease | null;
   action: (formData: FormData) => void | Promise<void>;
   // BD15 P5b-2: a live book -- its saved price (a new one needs the tick
   // under the price, LIVE-PRICE-CONFIRM-1) and whether it has waiting
   // changes to send. The button sends them; the book stays live.
-  live?: { currentPriceAll: number | null; hasChanges: boolean } | null;
+  // BD16 P2: confirmPrice false for a live pre-order -- nobody has
+  // bought it, so a new price needs no tick (isLivePriceChange).
+  live?: { currentPriceAll: number | null; hasChanges: boolean; confirmPrice?: boolean } | null;
   bookId: string;
   initialPriceAll: number | null;
   // Public-domain book: "Falas" only.
@@ -134,7 +166,8 @@ export function BookPricingForm({
   // Librum's approval still matches the files: the button publishes.
   approvalValid: boolean;
   title: string;
-  penName: string;
+  // The author name readers see (original author or pen name).
+  byline: string;
   // What the other tabs still need before sending.
   missing: PricingMissing[];
   // BD15 P5b-3a (Renato 11-04, Q2 a): a taken-down book -- its price
@@ -152,11 +185,23 @@ export function BookPricingForm({
 
   const [worldwide, setWorldwide] = useState(false);
   const [terms, setTerms] = useState(false);
-  const todo = pricingTodo(bookId, missing, { worldwide, terms });
-  const sendLabel = live ? SEND_CHANGES_BUTTON : approvalValid ? PUBLISH_APPROVED_BUTTON : SEND_FOR_REVIEW_BUTTON;
+  const [releaseMode, setReleaseMode] = useState<ReleaseMode>(release?.available ? release.initialMode : "now");
+  const [releaseDate, setReleaseDate] = useState(release?.available ? release.initialDate : "");
+  const preorder = release?.available === true && releaseMode === "preorder";
+  const todo = [
+    ...pricingTodo(bookId, preorder ? missing.filter((m) => !m.preorderOptional) : missing, { worldwide, terms }),
+    ...(preorder && releaseDate === ""
+      ? [{ key: "release-date", label: RELEASE_DATE_TODO_LABEL, tab: "pricing" as const, href: "#pricing-release-date" }]
+      : []),
+  ];
+  // BD16 P2: a pre-order listing always goes to review, even when an
+  // earlier approval still matches (the server sends it the same way).
+  const publishesNow = approvalValid && !preorder;
+  const sendLabel = live ? SEND_CHANGES_BUTTON : publishesNow ? PUBLISH_APPROVED_BUTTON : SEND_FOR_REVIEW_BUTTON;
   // The price this form would save, for a live book's confirm tick.
   const newPriceAll = mode === "free" ? 0 : preview.kind === "paid" ? preview.priceAll : null;
-  const priceChanging = live !== null && newPriceAll !== null && newPriceAll !== live.currentPriceAll;
+  const priceChanging =
+    live !== null && live.confirmPrice !== false && newPriceAll !== null && newPriceAll !== live.currentPriceAll;
   const sendBlocked = sendRefusedNote !== null || todo.length > 0 || (live !== null && !live.hasChanges);
   const sendNote =
     sendRefusedNote ??
@@ -294,10 +339,71 @@ export function BookPricingForm({
         )}
       </EditorSection>
 
+      {release && (
+        <EditorSection id="pricing-release" title={RELEASE_HEADING}>
+          {!release.available ? (
+            <>
+              <input type="hidden" name={RELEASE_MODE_FIELD} value="now" />
+              <p className="text-sm text-muted">{release.note}</p>
+            </>
+          ) : (
+            <>
+              <fieldset className="m-0 grid gap-2.5 border-0 p-0 sm:grid-cols-2">
+                <legend className="sr-only">{RELEASE_HEADING}</legend>
+                <label className={CHOICE_CLASSES}>
+                  <input
+                    type="radio"
+                    name={RELEASE_MODE_FIELD}
+                    value="now"
+                    checked={releaseMode === "now"}
+                    onChange={() => setReleaseMode("now")}
+                    className="focus-ring h-[18px] w-[18px] shrink-0 accent-primary"
+                  />
+                  <span>
+                    <span className="block font-semibold">{RELEASE_NOW_LABEL}</span>
+                    <small className="block text-[13px] text-muted">{RELEASE_NOW_SUBLINE}</small>
+                  </span>
+                </label>
+                <label className={CHOICE_CLASSES}>
+                  <input
+                    type="radio"
+                    name={RELEASE_MODE_FIELD}
+                    value="preorder"
+                    checked={releaseMode === "preorder"}
+                    onChange={() => setReleaseMode("preorder")}
+                    className="focus-ring h-[18px] w-[18px] shrink-0 accent-primary"
+                  />
+                  <span>
+                    <span className="block font-semibold">{RELEASE_PREORDER_LABEL}</span>
+                    <small className="block text-[13px] text-muted">{RELEASE_PREORDER_SUBLINE}</small>
+                  </span>
+                </label>
+              </fieldset>
+              {releaseMode === "preorder" && (
+                <label className={EDITOR_FIELD_CLASSES}>
+                  <span className={EDITOR_LABEL_CLASSES}>{RELEASE_DATE_LABEL}</span>
+                  <input
+                    id="pricing-release-date"
+                    type="date"
+                    name={RELEASE_DATE_FIELD}
+                    value={releaseDate}
+                    min={release.window.min}
+                    max={release.window.max}
+                    onChange={(e) => setReleaseDate(e.target.value)}
+                    className={`${EDITOR_CONTROL_CLASSES} max-w-48`}
+                  />
+                  <span className={EDITOR_HINT_CLASSES}>{releaseDateHint(release.window)}</span>
+                </label>
+              )}
+            </>
+          )}
+        </EditorSection>
+      )}
+
       <EditorSection id="pricing-reader" title="Si do ta shohin lexuesit">
         <div>
           <p className="font-serif text-lg">{title}</p>
-          <p className="text-[13px] text-muted">{penName}</p>
+          <p className="text-[13px] text-muted">{byline}</p>
           <p className="mt-1.5 font-semibold">{readerPrice}</p>
         </div>
       </EditorSection>
@@ -352,7 +458,13 @@ export function BookPricingForm({
         primaryBlocked={sendBlocked}
         primaryNote={sendNote}
         saveLabel={live ? LIVE_SAVE_BUTTON : undefined}
-        extra={approvalValid ? <p className="text-sm text-muted sm:text-right">{PUBLISH_APPROVED_NOTE}</p> : undefined}
+        extra={
+          publishesNow ? (
+            <p className="text-sm text-muted sm:text-right">{PUBLISH_APPROVED_NOTE}</p>
+          ) : preorder ? (
+            <p className="text-sm text-muted sm:text-right">{PREORDER_SEND_NOTE}</p>
+          ) : undefined
+        }
       />
     </form>
   );

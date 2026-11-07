@@ -79,8 +79,10 @@ describe("the Edit pages show the tick only for a live book or bundle", () => {
   // live book's price is changing (P5b-2).
   it("book editor Pricing tab", () => {
     const source = read("src/components/book-pricing-form.tsx");
+    // BD16 P2: not on a live pre-order (confirmPrice false): nobody has
+    // bought it, and isLivePriceChange asks only a published book.
     expect(source).toContain(
-      "const priceChanging = live !== null && newPriceAll !== null && newPriceAll !== live.currentPriceAll;",
+      "live !== null && live.confirmPrice !== false && newPriceAll !== null && newPriceAll !== live.currentPriceAll;",
     );
     expect(source).toContain("name={PRICE_CHANGE_CONFIRM_FIELD}");
   });

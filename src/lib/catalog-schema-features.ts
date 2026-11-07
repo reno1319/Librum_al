@@ -60,7 +60,25 @@ export async function getCatalogSchemaFeatures(): Promise<CatalogSchemaFeatures>
   return { rights };
 }
 
+// BD16 P1 (migration 20261106120000): whether the pre-order columns
+// exist yet, so the editor (P2) offers "Parapublikim" only when it can
+// be saved. Same probe and cache rules as above, on
+// public_books.release_date (the view, never the base table).
+let preorderPresent = false;
+
+export async function getPreorderSchemaFeature(): Promise<boolean> {
+  if (preorderPresent) return true;
+
+  const supabase = await createClient();
+  const preorder = await probe("book pre-orders", () =>
+    supabase.from("public_books").select("release_date").limit(0),
+  );
+  if (preorder) preorderPresent = true;
+  return preorder;
+}
+
 // Tests only: forget the cached answers.
 export function resetCatalogSchemaFeaturesForTests(): void {
   rightsPresent = false;
+  preorderPresent = false;
 }
