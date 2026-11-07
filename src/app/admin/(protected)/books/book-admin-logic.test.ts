@@ -290,6 +290,14 @@ describe("adminBookDetailRows (walkthrough F1+F2)", () => {
     expect(of(undefined)).toEqual({ label: "AI used", value: "Couldn’t load the AI answer.", unreadable: true });
   });
 
+  // Upload notes C.
+  it("shows the book type after the AI answer, or Not set", () => {
+    const of = (book_type: string | null) =>
+      adminBookDetailRows({ book: { ...base, book_type }, aiUsed: null, seriesTitle: null, contributors: [] });
+    expect(of("Roman")[1]).toEqual({ label: "Book type", value: "Roman" });
+    expect(value(of(null), "Book type")).toBe("Not set");
+  });
+
   it("falls back to genre, the legacy edition, and says Not set / None when empty", () => {
     const rows = adminBookDetailRows({
       book: { ...base, categories: [], genre: "Poezi", edition: " Botimi i dytë ", keywords: " , ", publisher: "  ", isbn: null },

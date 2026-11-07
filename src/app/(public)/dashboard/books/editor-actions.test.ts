@@ -335,12 +335,14 @@ describe("saveBookDetails: the first save creates the draft", () => {
           editionNumber: "3",
           description: "**Hyrje**",
           isAdult: "yes",
+          bookType: "Roman",
           categories: ["Romancë", "Poezi"],
           keywords: "a, b",
         }),
       ),
     );
     expect(catalogWrites[0].payload).toMatchObject({
+      book_type: "Roman",
       language: "en",
       pen_name_id: PEN_2,
       series_id: SERIES,
@@ -581,6 +583,36 @@ describe("saveBookDetails: a live book (P5b-2)", () => {
     expect(catalogWrites.filter((w) => w.op === "update")).toEqual([]);
     expect(rpcCalls.length).toBeGreaterThan(0);
     expect(target).toMatch(/editor\?tab=details&success=/);
+  });
+
+  // Upload notes C (Renato 11-07, a): the type changes at once, no review.
+  it("a live book's type is written onto the live row, nothing waits for review", async () => {
+    seedLive();
+    await redirectOf(saveBookDetails(BOOK, liveForm({ bookType: "Ese" })));
+    const update = catalogWrites.find((w) => w.op === "update")!;
+    expect(update.payload).toMatchObject({ book_type: "Ese" });
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("a picked edition with no type yet may choose one: only the type is written", async () => {
+    seedLive();
+    Object.assign(tables.books[0], { pd_work_id: "55555555-5555-4555-8555-555555555555", book_type: null });
+    const target = await redirectOf(saveBookDetails(BOOK, liveForm({ bookType: "Poezi" })));
+    const updates = catalogWrites.filter((w) => w.op === "update");
+    expect(updates).toHaveLength(1);
+    expect(updates[0].payload).toEqual({ book_type: "Poezi" });
+    expect(target).toMatch(/editor\?tab=details&success=/);
+  });
+
+  it("a picked edition keeps its type once it has one", async () => {
+    seedLive();
+    Object.assign(tables.books[0], { pd_work_id: "55555555-5555-4555-8555-555555555555", book_type: "Poezi" });
+    const same = await redirectOf(saveBookDetails(BOOK, liveForm({ bookType: "Poezi" })));
+    expect(catalogWrites.filter((w) => w.op === "update")).toEqual([]);
+    expect(same).toMatch(/editor\?tab=details&success=/);
+    const changed = await redirectOf(saveBookDetails(BOOK, liveForm({ bookType: "Ese" })));
+    expect(catalogWrites.filter((w) => w.op === "update")).toEqual([]);
+    expect(decodeURIComponent(changed)).toContain(PD_FROZEN_MESSAGE);
   });
 
   it("a picked edition: a changed frozen detail is refused before anything is written", async () => {

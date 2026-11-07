@@ -154,16 +154,25 @@ describe("Book Detail: review date", () => {
   });
 });
 
-// Upload notes 3a (Enkelejd 11-06): no "E-libër" on the book page; the
-// eyebrow is the genre alone and shows nothing without one.
+// Upload notes 3a (Enkelejd 11-06): no "E-libër" on the book page.
+// Upload notes C: the eyebrow is bookEyebrow() (type, then genre; tested
+// in src/lib/book-types.test.ts), shown only when it has something.
 describe("Book Detail: format wording", () => {
   it("never says E-libër", () => {
     expect(source).not.toMatch(/E-lib[eë]r/i);
   });
 
-  it("the eyebrow is the genre only, and only when there is one", () => {
+  it("the eyebrow is the type and genre, and only when there is one", () => {
     expect(source).toContain(
-      '{book.genre && (\n            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">{book.genre}</p>',
+      '{bookEyebrow(book) && (\n            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">{bookEyebrow(book)}</p>',
     );
+  });
+
+  it("Të dhënat e librit shows the type before the genres", () => {
+    const details = source.slice(source.indexOf("Të dhënat e librit"));
+    const typeAt = details.indexOf("<dt className={DETAIL_LABEL_CLASSES}>{BOOK_TYPE_LABEL}</dt>");
+    expect(typeAt).toBeGreaterThan(0);
+    expect(typeAt).toBeLessThan(details.indexOf("categoriesLabel(bookCategories(book).length)"));
+    expect(details).toContain("{bookTypeOf(book) && (");
   });
 });

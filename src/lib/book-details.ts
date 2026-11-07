@@ -3,9 +3,11 @@
 // server (the real check before any write). Pure: no Supabase, no
 // server-only import. The database repeats the hard limits
 // (migration 20261103200000: categories, 18+ with the children's
-// categories, reading age, edition number, at most 3 contributors).
+// categories, reading age, edition number, at most 3 contributors;
+// migration 20261107120000: the book type's list).
 
 import { GENRES } from "@/lib/genres";
+import { isBookType, type BookType } from "@/lib/book-types";
 import { isSupportedLanguage } from "@/lib/languages";
 import { CONTRIBUTOR_ROLES, type ContributorRole } from "@/lib/contributor-roles";
 import { isRightsBasis, RIGHTS_BASES } from "@/lib/rights-statements";
@@ -38,6 +40,7 @@ export const SERIES_POSITION_MESSAGE = "Numri në seri duhet të jetë numër i 
 export const EDITION_NUMBER_MESSAGE = `Numri i botimit duhet të jetë numër i plotë, nga 1 deri në ${EDITION_NUMBER_MAX}.`;
 export const PEN_NAME_MESSAGE = "Zgjidhni një nga emrat tuaj të autorit.";
 export const READING_AGE_MESSAGE = "Zgjidhni moshën nga lista.";
+export const BOOK_TYPE_MESSAGE = "Zgjidhni llojin e librit nga lista.";
 export const CATEGORIES_INVALID_MESSAGE = "Zgjidhni kategoritë nga lista.";
 export const CATEGORIES_TOO_MANY_MESSAGE = `Zgjidhni deri në ${MAX_CATEGORIES} kategori.`;
 export const ADULT_CATEGORIES_MESSAGE =
@@ -59,6 +62,7 @@ export type DetailsField =
   | "penNameId"
   | "description"
   | "readingAge"
+  | "bookType"
   | "categories"
   | "keywords"
   | "contributors"
@@ -78,6 +82,8 @@ export type BookDetails = {
   description: string;
   isAdult: boolean;
   readingAgeMin: number | null;
+  // Upload notes C: null = not chosen yet (a draft may be saved so).
+  bookType: BookType | null;
   categories: string[];
   keywords: string[];
   contributors: DetailsContributor[];
@@ -166,6 +172,13 @@ export function parseBookDetails(input: DetailsInput): DetailsResult {
   }
   if (isAdult) readingAgeMin = ADULT_READING_AGE;
 
+  const bookTypeRaw = str(input.get("bookType")).trim();
+  let bookType: BookType | null = null;
+  if (bookTypeRaw) {
+    if (isBookType(bookTypeRaw)) bookType = bookTypeRaw;
+    else errors.bookType = BOOK_TYPE_MESSAGE;
+  }
+
   const categories: string[] = [];
   for (const value of input.getAll("categories")) {
     const category = str(value);
@@ -238,6 +251,7 @@ export function parseBookDetails(input: DetailsInput): DetailsResult {
       description: description.ok ? description.value : "",
       isAdult,
       readingAgeMin,
+      bookType,
       categories,
       keywords,
       contributors,
@@ -248,11 +262,12 @@ export function parseBookDetails(input: DetailsInput): DetailsResult {
 }
 
 // The Details tab is "done" (Plotësuar) once the book has what review
-// needs from it: a title, at least one category, a description and the
-// rights choice (with the original author for a public-domain one).
+// needs from it: a title, the book type (upload notes C), at least one
+// category, a description and the rights choice (with the original author for a public-domain one).
 // Everything else is optional.
 export type DetailsCompleteness = {
   title: string | null | undefined;
+  bookType: string | null | undefined;
   categories: readonly string[] | null | undefined;
   description: string | null | undefined;
   rightsBasis: RightsBasis | null | undefined;
@@ -268,6 +283,7 @@ export function missingDetails(book: DetailsCompleteness): string[] {
 export function missingDetailItems(book: DetailsCompleteness): { field: DetailsField; label: string }[] {
   const missing: { field: DetailsField; label: string }[] = [];
   if (!book.title?.trim()) missing.push({ field: "title", label: "Titulli" });
+  if (!isBookType(book.bookType)) missing.push({ field: "bookType", label: "Lloji i librit" });
   if (!book.categories || book.categories.length === 0) missing.push({ field: "categories", label: "Të paktën një kategori" });
   if (!book.description?.trim()) missing.push({ field: "description", label: "Përshkrimi" });
   if (!book.rightsBasis) missing.push({ field: "rightsBasis", label: "Të drejtat" });

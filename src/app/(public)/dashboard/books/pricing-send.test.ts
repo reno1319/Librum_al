@@ -298,6 +298,7 @@ beforeEach(async () => {
     file_path: OWN_EPUB,
     cover_path: canonicalBookCoverPath(USER_ID, BOOK_ID, "jpg"),
     description: "Një përshkrim.",
+    book_type: "Roman",
     categories: ["Letërsi artistike"],
     original_author: null,
   };
@@ -508,6 +509,8 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
     ["no manuscript", () => (book.file_path = null)],
     ["no cover", () => (book.cover_path = null)],
     ["no category", () => (book.categories = [])],
+    // Upload notes C: the book type is needed too.
+    ["no book type", () => (book.book_type = null)],
     ["no description", () => (book.description = "")],
     ["no rights choice", () => (rightsState = { kind: "none" })],
   ])("%s: not ready, nothing recorded or requested", async (_l, setUp) => {
