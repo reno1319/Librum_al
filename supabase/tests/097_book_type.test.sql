@@ -9,7 +9,7 @@
 -- * part3  a book waiting for review can't change it (LB490);
 -- * part4  a picked public-domain edition: a first choice is allowed,
 --          a change after that is refused (LB497); the owner may;
--- * part5  public_books carries it, as its last column, grants kept.
+-- * part5  public_books carries it, after release_date, grants kept.
 --
 -- To reproduce, from the repo root, against a disposable PostgreSQL 17:
 --
@@ -253,8 +253,13 @@ select pg_temp.assert(
 select pg_temp.assert(
   (select a.attname from pg_attribute a
     where a.attrelid = 'public.public_books'::regclass and a.attnum > 0 and not a.attisdropped
-    order by a.attnum desc limit 1) = 'book_type',
-  'part5: book_type is public_books'' last column');
+    order by a.attnum desc limit 1) in ('book_type', 'word_count')
+  and (select a.attnum from pg_attribute a
+        where a.attrelid = 'public.public_books'::regclass and a.attname = 'book_type')
+      = (select a.attnum + 1 from pg_attribute a
+          where a.attrelid = 'public.public_books'::regclass and a.attname = 'release_date'),
+  -- Upload notes D (migration 20261107140000) appends word_count after it.
+  'part5: book_type follows release_date, last or before word_count');
 select pg_temp.assert(
   (select release_date is null and book_type = 'Ese' from public.public_books where id = 'e0970001-0000-4000-8000-00000000000a'),
   'part5: the view shows the live book''s type');

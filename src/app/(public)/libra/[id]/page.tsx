@@ -35,6 +35,7 @@ import { BookSampleReader } from "@/components/book-sample-reader";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
 import { BOOK_TYPE_LABEL, bookEyebrow, bookTypeOf } from "@/lib/book-types";
+import { PAGE_ESTIMATE_LABEL, pageEstimateText } from "@/lib/page-estimate";
 import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { formatTransactionAmount, provenanceFromStoredCurrency } from "@/lib/transaction-money";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
@@ -1241,6 +1242,13 @@ export default async function BookDetailPage({
                 <dt className={DETAIL_LABEL_CLASSES}>Formati</dt>
                 <dd className={DETAIL_VALUE_CLASSES}>EPUB</dd>
               </div>
+              {/* Upload notes D: words / 250, only once the file is counted. */}
+              {pageEstimateText(book.word_count) && (
+                <div>
+                  <dt className={DETAIL_LABEL_CLASSES}>{PAGE_ESTIMATE_LABEL}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{pageEstimateText(book.word_count)}</dd>
+                </div>
+              )}
               {book.language && (
                 <div>
                   <dt className={DETAIL_LABEL_CLASSES}>Gjuha</dt>

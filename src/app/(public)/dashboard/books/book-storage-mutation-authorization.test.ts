@@ -135,6 +135,7 @@ function query(table: string) {
     if (op === "insert") {
       return { data: [{ id: (payload as { id: string }).id }], error: null };
     }
+    if (op === "upsert") return { data: null, error: null };
     throw new Error(`unexpected op ${op}`);
   };
   const chain: Record<string, unknown> = {
@@ -154,6 +155,12 @@ function query(table: string) {
     insert: (p: unknown) => {
       op = "insert";
       payload = p;
+      return chain;
+    },
+    // Upload notes D: the page estimate's word count (book_file_words).
+    upsert: (p: unknown, options?: unknown) => {
+      op = "upsert";
+      payload = { row: p, options };
       return chain;
     },
     eq: (column: string, value: unknown) => {
@@ -457,6 +464,47 @@ describe("saveBookContent with a replacement", () => {
       { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB] },
     ]);
     expect(writerStorageOps).toEqual(["upload:manuscripts", "remove:manuscripts"]);
+  });
+
+  // Upload notes D: the new file's words are stored for that exact key,
+  // after the guarded book write, with the catalog writer.
+  it("manuscript: stores the new file's word count after the book write", async () => {
+    bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
+    const zip = await JSZip.loadAsync(await validEpub());
+    zip.file(
+      "content.opf",
+      `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>`,
+    );
+    zip.file("c1.xhtml", `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>${"fjalë ".repeat(600)}</p></body></html>`);
+    const f = editForm();
+    f.set("manuscript", new File([new Uint8Array(await zip.generateAsync({ type: "nodebuffer" }))], "book.epub"));
+    expect(await run(saveBookContent(BOOK_ID, f))).toBe(CONTENT_SAVED);
+    const words = dbWrites.filter((w) => w.table === "book_file_words");
+    expect(words).toHaveLength(1);
+    expect(words[0].op).toBe("upsert");
+    const { row: wordsRow, options } = words[0].payload as {
+      row: { book_id: string; file_path: string; word_count: number };
+      options: unknown;
+    };
+    expect(wordsRow.book_id).toBe(BOOK_ID);
+    expect(wordsRow.file_path).toEqual(NEW_EPUB);
+    expect(wordsRow.file_path).toBe((bookUpdates()[0].payload as { file_path: string }).file_path);
+    expect(wordsRow.word_count).toBe(600);
+    expect(options).toEqual({ onConflict: "book_id,file_path" });
+    expect(events.indexOf("db:upsert:book_file_words")).toBeGreaterThan(events.indexOf("db:update:books"));
+  });
+
+  it("an EPUB with no readable spine (the default fixture): saved, no word count", async () => {
+    bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(await run(saveBookContent(BOOK_ID, await withManuscript(editForm())))).toBe(CONTENT_SAVED);
+    expect(dbWrites.filter((w) => w.table === "book_file_words")).toHaveLength(0);
+  });
+
+  it("no new manuscript: no word count is written", async () => {
+    bookReadResult = { data: row({ cover_path: LEGACY_JPEG }), error: null };
+    await run(saveBookContent(BOOK_ID, editForm()));
+    expect(dbWrites.filter((w) => w.table === "book_file_words")).toHaveLength(0);
   });
 
   it("cover only: writes only cover_path, never re-persists or removes the manuscript", async () => {
