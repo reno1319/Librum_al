@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import {
   SITE_LOCK_ENV,
@@ -92,12 +94,13 @@ describe("locked page", () => {
     expect(siteLockResponse(request("/login", { method: "POST" }))?.status).toBe(503);
   });
 
-  it("leaves exactly the six machine routes open", () => {
+  it("leaves exactly the seven machine routes open", () => {
     vi.stubEnv(SITE_LOCK_ENV, KEY);
     expect([...SITE_LOCK_OPEN_PATHS].sort()).toEqual([
       "/api/health",
       "/api/health/db",
       "/api/internal/payouts/run",
+      "/api/internal/preorders/run",
       "/api/internal/tmp-uploads/cleanup",
       "/api/payments/pok/webhook",
       "/auth/callback",
@@ -105,6 +108,40 @@ describe("locked page", () => {
     for (const path of SITE_LOCK_OPEN_PATHS) {
       expect(siteLockResponse(request(path, { method: "POST" }))).toBeNull();
       expect(siteLockResponse(request(`${path}?code=abc`))).toBeNull();
+    }
+  });
+});
+
+describe("cron routes behind the lock", () => {
+  // Every cron path in vercel.json must get through the lock, with its
+  // query (the pre-order job's ?at=0600 / ?at=0700) ignored. Each route
+  // checks CRON_SECRET itself.
+  const vercelCrons = (
+    JSON.parse(readFileSync(join(process.cwd(), "vercel.json"), "utf8")) as {
+      crons: { path: string }[];
+    }
+  ).crons.map((cron) => cron.path);
+
+  it("covers both pre-order cron entries", () => {
+    expect(vercelCrons).toEqual(
+      expect.arrayContaining(["/api/internal/preorders/run?at=0600", "/api/internal/preorders/run?at=0700"]),
+    );
+  });
+
+  it.each(vercelCrons)("lets the cron call %s through", (path) => {
+    vi.stubEnv(SITE_LOCK_ENV, KEY);
+    expect(siteLockResponse(request(path))).toBeNull();
+  });
+
+  it("still locks look-alike pre-order paths", () => {
+    vi.stubEnv(SITE_LOCK_ENV, KEY);
+    for (const path of [
+      "/api/internal/preorders",
+      "/api/internal/preorders/run/",
+      "/api/internal/preorders/run/x",
+      "/api/internal/preorders/runx",
+    ]) {
+      expect(siteLockResponse(request(path))?.status).toBe(503);
     }
   });
 });
