@@ -58,6 +58,7 @@ export default async function NewBookPage({
     description: "",
     isAdult: false,
     readingAge: "",
+    bookType: "",
     categories: [],
     keywords: "",
     contributors: [],

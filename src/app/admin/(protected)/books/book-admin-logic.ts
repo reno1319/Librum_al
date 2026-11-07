@@ -487,6 +487,8 @@ export function validatePdEditionForm(formData: FormData): PdEditionFormValidati
 // tabs, and their AI answer (book_ai_disclosures, staff only). A value
 // that could not be read says so; it is never shown as "None".
 export type BookDetailsSource = {
+  // Upload notes C: "Lloji i librit"; null = not chosen yet.
+  book_type?: string | null;
   categories?: string[] | null;
   genre?: string | null;
   is_adult: boolean;
@@ -538,6 +540,7 @@ export function adminBookDetailRows(input: {
     aiUsed === undefined
       ? { label: "AI used", value: "Couldn’t load the AI answer.", unreadable: true }
       : { label: "AI used", value: aiUsed === null ? AI_ANSWER_LABELS.none : aiUsed ? AI_ANSWER_LABELS.yes : AI_ANSWER_LABELS.no },
+    { label: "Book type", value: textOrNotSet(book.book_type) },
     { label: categories.length > 1 ? "Categories" : "Category", value: categories.length > 0 ? categories.join(", ") : NOT_SET },
     { label: "18+", value: book.is_adult ? "Yes" : "No" },
     { label: "Reading age", value: typeof age === "number" && age > 0 ? `${age}+` : NOT_SET },

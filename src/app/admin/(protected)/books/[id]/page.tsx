@@ -118,6 +118,7 @@ type AdminBook = {
   pd_work_id: string | null;
   pd_editor_credit: boolean;
   // Walkthrough F2: the details staff check (read-only box).
+  book_type: string | null;
   categories: string[] | null;
   genre: string | null;
   reading_age_min: number | null;
@@ -210,7 +211,7 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, release_date, preorder_count, preorder_slip_used")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit, book_type, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, release_date, preorder_count, preorder_slip_used")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();

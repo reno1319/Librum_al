@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ADULT_CATEGORIES_MESSAGE,
+  BOOK_TYPE_MESSAGE,
   CATEGORIES_INVALID_MESSAGE,
   CATEGORIES_TOO_MANY_MESSAGE,
   CONTRIBUTORS_TOO_MANY_MESSAGE,
@@ -14,6 +15,7 @@ import {
   SERIES_POSITION_MESSAGE,
   TITLE_REQUIRED_MESSAGE,
   TITLE_TOO_LONG_MESSAGE,
+  missingDetailItems,
   missingDetails,
   parseBookDetails,
   splitKeywords,
@@ -49,6 +51,7 @@ describe("parseBookDetails", () => {
         description: "",
         isAdult: false,
         readingAgeMin: null,
+        bookType: null,
         categories: [],
         keywords: [],
         contributors: [],
@@ -89,6 +92,20 @@ describe("parseBookDetails", () => {
     const ok = parseBookDetails(form({ title: "T", description: "  **a**\n\n\n- b " }));
     expect(ok.ok && ok.details.description).toBe("**a**\n\n- b");
     expect(errorsOf({ description: "a".repeat(4001) }).description).toBe(DESCRIPTION_TOO_LONG_MESSAGE);
+  });
+
+  // Upload notes C: one of the eight types, or none yet (a draft saves).
+  it("reads the book type: one of the list, or none", () => {
+    const none = parseBookDetails(form({ title: "T" }));
+    expect(none.ok && none.details.bookType).toBeNull();
+    const roman = parseBookDetails(form({ title: "T", bookType: "Roman" }));
+    expect(roman.ok && roman.details.bookType).toBe("Roman");
+    const nonfiction = parseBookDetails(form({ title: "T", bookType: "Jo-artistik (studim, tjetër)" }));
+    expect(nonfiction.ok && nonfiction.details.bookType).toBe("Jo-artistik (studim, tjetër)");
+    expect(errorsOf({ bookType: "Tregime" }).bookType).toBe(BOOK_TYPE_MESSAGE);
+    expect(errorsOf({ bookType: "roman" }).bookType).toBe(BOOK_TYPE_MESSAGE);
+    // NFD "ë" (e + U+0308) is not the stored NFC value.
+    expect(errorsOf({ bookType: "Drame\u0308" }).bookType).toBe(BOOK_TYPE_MESSAGE);
   });
 
   it("keeps categories in the order chosen, without repeats, up to 3 of the list", () => {
@@ -155,6 +172,7 @@ describe("parseBookDetails", () => {
 describe("missingDetails (the Details tab's done state)", () => {
   const complete = {
     title: "T",
+    bookType: "Roman",
     categories: ["Poezi"],
     description: "Rreth librit",
     rightsBasis: "own_rights" as const,
@@ -172,5 +190,17 @@ describe("missingDetails (the Details tab's done state)", () => {
       "Të drejtat",
     ]);
     expect(missingDetails({ ...complete, rightsBasis: "public_domain" })).toEqual(["Autori origjinal"]);
+  });
+
+  // Upload notes C: the book type is needed before review, and only a
+  // value on the list counts.
+  it("needs the book type", () => {
+    expect(missingDetails({ ...complete, bookType: null })).toEqual(["Lloji i librit"]);
+    expect(missingDetails({ ...complete, bookType: "" })).toEqual(["Lloji i librit"]);
+    expect(missingDetails({ ...complete, bookType: "Tregime" })).toEqual(["Lloji i librit"]);
+    expect(missingDetailItems({ ...complete, bookType: null, categories: null }).map((m) => m.field)).toEqual([
+      "bookType",
+      "categories",
+    ]);
   });
 });

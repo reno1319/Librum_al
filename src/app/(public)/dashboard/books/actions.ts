@@ -1202,6 +1202,7 @@ async function sendLiveBookChanges({
     id: string;
     status: string;
     title: string;
+    book_type: string | null;
     categories: string[] | null;
     file_path: string | null;
     cover_path: string | null;
@@ -1233,6 +1234,7 @@ async function sendLiveBookChanges({
   const ai = await readAiDisclosure(existing.id);
   const detailsMissing = missingDetails({
     title: existing.title,
+    bookType: existing.book_type,
     categories: existing.categories,
     description: working.description,
     rightsBasis,
@@ -1320,7 +1322,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
 
   const { data: existing, error: existingError } = await supabase
     .from("books")
-    .select("id, author_id, status, title, pen_name_id, price_all, file_path, cover_path, description, categories, original_author, is_adult")
+    .select("id, author_id, status, title, pen_name_id, price_all, file_path, cover_path, description, book_type, categories, original_author, is_adult")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .maybeSingle<{
@@ -1333,6 +1335,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
       file_path: string | null;
       cover_path: string | null;
       description: string | null;
+      book_type: string | null;
       categories: string[] | null;
       original_author: string | null;
       is_adult: boolean;
@@ -1509,6 +1512,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
   const ai = await readAiDisclosure(existing.id);
   const detailsMissing = missingDetails({
     title: existing.title,
+    bookType: existing.book_type,
     categories: existing.categories,
     description: existing.description,
     rightsBasis,

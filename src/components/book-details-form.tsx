@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSeriesFromEditor } from "@/app/(public)/dashboard/books/editor-actions";
 import { GENRES } from "@/lib/genres";
+import { BOOK_TYPES, BOOK_TYPE_LABEL } from "@/lib/book-types";
 import { LANGUAGES } from "@/lib/languages";
 import { CONTRIBUTOR_ROLES, contributorRoleLabel } from "@/lib/contributor-roles";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
@@ -64,6 +65,8 @@ export type DetailsFormValues = {
   description: string;
   isAdult: boolean;
   readingAge: string;
+  // Upload notes C: "" = not chosen yet.
+  bookType: string;
   categories: string[];
   keywords: string;
   contributors: { id: string; name: string; role: string }[];
@@ -128,7 +131,8 @@ export function BookDetailsForm({
   series: EditorSeries[];
   // BD15 follow-up (P7 audit N5): a picked public-domain edition. Its
   // frozen details (language, subtitle, contributors, series, edition,
-  // reading age, categories, keywords) show greyed and can't be changed;
+  // reading age, categories, keywords; the book type once it has one)
+  // show greyed and can't be changed;
   // hidden copies send the stored values, so a save still goes through
   // pdFrozenDetailsUnchanged on the server as before.
   pdFrozen?: boolean;
@@ -160,6 +164,9 @@ export function BookDetailsForm({
   // there can be picked without reloading (and losing) this form.
   const penNamesOpenedRef = useRef(false);
   const firstMissing = markMissing[0];
+  // Upload notes C: a picked public-domain edition keeps its type once it
+  // has one (LB497); with none yet it may still choose one.
+  const bookTypeFrozen = pdFrozen && initial.bookType !== "";
 
   useEffect(() => {
     const onVisible = () => {
@@ -666,6 +673,30 @@ export function BookDetailsForm({
           )}
         </label>
         <FieldError id="details-readingAge-error" message={err("readingAge")} />
+      </Section>
+
+      <Section title={BOOK_TYPE_LABEL} lead="Çfarë lloj libri është? Zgjidhni një.">
+        <label className={`${EDITOR_FIELD_CLASSES} w-full sm:w-80`}>
+          <span className="sr-only">{BOOK_TYPE_LABEL}</span>
+          <select
+            name="bookType"
+            data-field="bookType"
+            defaultValue={initial.bookType}
+            disabled={bookTypeFrozen}
+            aria-describedby={describe("bookType")}
+            aria-invalid={err("bookType") ? true : undefined}
+            className={editorControlClassesFor(!!err("bookType"))}
+          >
+            <option value="">Zgjidhni</option>
+            {BOOK_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+          {bookTypeFrozen && <input type="hidden" name="bookType" value={initial.bookType} />}
+        </label>
+        <FieldError id="details-bookType-error" message={err("bookType")} />
       </Section>
 
       <Section title="Kategoritë" lead={`Zgjidhni deri në ${MAX_CATEGORIES}. E para që zgjidhni është kategoria kryesore.`}>

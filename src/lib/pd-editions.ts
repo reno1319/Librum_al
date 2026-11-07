@@ -72,6 +72,9 @@ export type PdFrozenDetails = {
   series_position: number | null;
   edition_number: number | null;
   reading_age_min?: number | null;
+  // Upload notes C: frozen once set; a first choice (from none) is not a
+  // change here either, as in LB497.
+  book_type?: string | null;
   categories: string[] | null;
   keywords: string | null;
 };
@@ -96,6 +99,7 @@ export function pdFrozenDetailsUnchanged(stored: PdFrozenDetails, wanted: PdFroz
     (stored.series_position ?? null) === (wanted.series_position ?? null) &&
     (stored.edition_number ?? null) === (wanted.edition_number ?? null) &&
     (!("reading_age_min" in wanted) || (stored.reading_age_min ?? null) === (wanted.reading_age_min ?? null)) &&
+    (!("book_type" in wanted) || (stored.book_type ?? null) === null || stored.book_type === (wanted.book_type ?? null)) &&
     categories(stored.categories) === categories(wanted.categories) &&
     keywords(stored.keywords) === keywords(wanted.keywords)
   );
