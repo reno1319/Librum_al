@@ -177,7 +177,7 @@ describe("Book Detail: format wording", () => {
   });
 });
 
-// Upload notes D (Renato 11-07): "Faqe: rreth N" right after
+// Upload notes D (Renato 11-07): "Faqe: N" (D2: bare number) right after
 // Formati, only once the current file is counted (Q4 a: hidden without).
 describe("Book Detail: page estimate", () => {
   it("shows the Faqe row after Formati, and only with a count", () => {

@@ -144,7 +144,7 @@ export type Book = {
   // BOOK_TYPES (src/lib/book-types.ts); null = none chosen yet.
   book_type?: string | null;
   // Upload notes D: public_books.word_count, the words of the book's
-  // current file (null until counted); shown as "Faqe: rreth N".
+  // current file (null until counted); shown as "Faqe: N".
   word_count?: number | null;
   // The public-domain work this book is an edition of (set by staff),
   // and whether staff credited the uploader as its editor. The "AI

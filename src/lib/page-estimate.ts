@@ -2,8 +2,8 @@ import { countEpubWords } from "@/lib/epub-sample";
 
 // Upload notes D (SIZING-r1 note 3b): an EPUB reflows, so a book has no
 // true page count. The estimate is words / 250 (a printed page), shown
-// as the row "Faqe: rreth N" on the book page only (Renato 11-07: Q1 a, Q3 b exact
-// number, minimum 1). The words are counted when the manuscript is saved
+// as the row "Faqe: N" on the book page only (Renato 11-07: Q1 a, Q3 b exact
+// number, minimum 1; D2: bare number, no "rreth", like Amazon's print length). The words are counted when the manuscript is saved
 // and, for a file saved before this change, when staff press the button
 // on the admin book page (Q2 a) -- never on a public request.
 
@@ -19,7 +19,7 @@ export function pageEstimateFromWords(words: unknown): number | null {
 
 export function pageEstimateText(words: unknown): string | null {
   const pages = pageEstimateFromWords(words);
-  return pages === null ? null : `rreth ${pages}`;
+  return pages === null ? null : `${pages}`;
 }
 
 type WordsWriter = {
