@@ -864,13 +864,13 @@ export default async function BookDetailPage({
               src={coverUrl}
               alt={`Ballina e librit ${book.title}`}
               fetchPriority="high"
-              className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
+              className="aspect-[5/8] w-full rounded-[3px] object-contain object-bottom drop-shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
             />
           ) : (
             <CoverPlaceholder
               title={book.title}
               authorName={bookByline}
-              className="aspect-[2/3] w-full rounded-[3px] shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
+              className="aspect-[5/8] w-full rounded-[3px] shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
             />
           )}
           {/* See resolveShowSample's own comment (src/lib/book-purchase.ts):

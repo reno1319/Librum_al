@@ -48,13 +48,13 @@ export function LibraryBookCard({
             alt=""
             loading="lazy"
             decoding="async"
-            className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-sm transition-[transform,box-shadow] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-md motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
+            className="aspect-[5/8] w-full rounded-[3px] object-contain object-bottom drop-shadow-sm transition-[transform,filter] duration-150 group-hover:-translate-y-0.5 group-hover:drop-shadow-md motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
           />
         ) : (
           <CoverPlaceholder
             title={title}
             authorName={authorName}
-            className="aspect-[2/3] w-full rounded-[3px]"
+            className="aspect-[5/8] w-full rounded-[3px]"
           />
         )}
         <p className="font-serif text-base font-semibold leading-snug">{title}</p>

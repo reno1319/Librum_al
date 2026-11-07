@@ -525,9 +525,9 @@ export default async function AdminBookPage({
         <div className="flex gap-4 sm:gap-5">
           {coverUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={coverUrl} alt="" className="h-[120px] w-20 shrink-0 rounded-[3px] object-cover sm:h-36 sm:w-24" />
+            <img src={coverUrl} alt="" className="aspect-[5/8] w-20 shrink-0 rounded-[3px] object-contain object-bottom sm:w-24" />
           ) : (
-            <CoverPlaceholder title={book.title} authorName={publicName} className="h-[120px] w-20 shrink-0 rounded-[3px] sm:h-36 sm:w-24" />
+            <CoverPlaceholder title={book.title} authorName={publicName} className="aspect-[5/8] w-20 shrink-0 rounded-[3px] sm:w-24" />
           )}
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-[0.14em] text-[#806510] uppercase md:text-[0.8125rem]">
@@ -790,9 +790,9 @@ export default async function AdminBookPage({
                                 <figure key={side.caption} className="flex flex-col gap-1">
                                   {side.url ? (
                                     // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={side.url} alt={`Cover: ${side.caption}`} className="h-24 w-16 rounded-[3px] object-cover" />
+                                    <img src={side.url} alt={`Cover: ${side.caption}`} className="aspect-[5/8] w-16 rounded-[3px] object-contain object-bottom" />
                                   ) : (
-                                    <CoverPlaceholder title={book.title} authorName={publicName} className="h-24 w-16 rounded-[3px]" />
+                                    <CoverPlaceholder title={book.title} authorName={publicName} className="aspect-[5/8] w-16 rounded-[3px]" />
                                   )}
                                   <figcaption>{side.caption}</figcaption>
                                 </figure>
@@ -825,9 +825,9 @@ export default async function AdminBookPage({
                 <div className="flex items-start gap-4">
                   {coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={coverUrl} alt="The cover sent for review" className="h-24 w-16 shrink-0 rounded-[3px] object-cover" />
+                    <img src={coverUrl} alt="The cover sent for review" className="aspect-[5/8] w-16 shrink-0 rounded-[3px] object-contain object-bottom" />
                   ) : (
-                    <CoverPlaceholder title={book.title} authorName={publicName} className="h-24 w-16 shrink-0 rounded-[3px]" />
+                    <CoverPlaceholder title={book.title} authorName={publicName} className="aspect-[5/8] w-16 shrink-0 rounded-[3px]" />
                   )}
                   {reviewHasFile ? (
                     <a
