@@ -37,16 +37,16 @@ describe("pageEstimateFromWords / pageEstimateText (Q3 b: exact, minimum 1)", ()
     expect(pageEstimateFromWords(45_700)).toBe(183);
     expect(pageEstimateFromWords(45_750)).toBe(183);
     expect(pageEstimateFromWords(45_875)).toBe(184);
-    expect(pageEstimateText(45_700)).toBe("rreth 183");
+    expect(pageEstimateText(45_700)).toBe("183");
     expect(PAGE_ESTIMATE_LABEL).toBe("Faqe");
-    // The row reads "Faqe: rreth 183": the label already says "faqe".
-    expect(pageEstimateText(45_700)).not.toMatch(/faqe/i);
+    // The row reads "Faqe: 183" (D2: no "rreth"): the label already says "faqe".
+    expect(pageEstimateText(45_700)).not.toMatch(/faqe|rreth/i);
   });
 
   it("never shows less than 1 page", () => {
     expect(pageEstimateFromWords(0)).toBe(1);
     expect(pageEstimateFromWords(100)).toBe(1);
-    expect(pageEstimateText(1)).toBe("rreth 1");
+    expect(pageEstimateText(1)).toBe("1");
   });
 
   it("shows nothing without a real count (Q4 a)", () => {
