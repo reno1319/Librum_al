@@ -92,6 +92,10 @@ export type CleanupOptions = {
   notVerse?: number[];
   keepCopyright?: number[];
   removeTitlePage?: number[];
+  keepTitlePage?: number[];
+  // K1c: the book's title as the author typed it on Details, so a typed
+  // title page carrying it can be removed by default. Never shown.
+  bookTitle?: string;
   fixQuotes?: boolean;
   // W4: mark each paragraph with its Word paragraph number (a bookmark
   // Mammoth turns into <a id="lbp_N">), so the author preview can say
@@ -223,6 +227,14 @@ function gapParagraph(): XElem {
   return p;
 }
 
+// K1a: where a new front-matter page starts. docx-converter.ts splits
+// the book there and drops this paragraph; its text is never shown.
+function pageBreakParagraph(): XElem {
+  const p = el("w:p", "", [textRun("\u00a0")]);
+  setParagraphStyle(p, LIBRUM_STYLES.pageBreak.id);
+  return p;
+}
+
 function sceneBreakParagraph(): XElem {
   const p = el("w:p", "", [textRun("* * *")]);
   setParagraphStyle(p, LIBRUM_STYLES.sceneBreak.id);
@@ -293,6 +305,8 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
     notVerse: options.notVerse,
     keepCopyright: options.keepCopyright,
     removeTitlePage: options.removeTitlePage,
+    keepTitlePage: options.keepTitlePage,
+    bookTitle: options.bookTitle,
   });
   const { plans } = structure;
 
@@ -394,6 +408,9 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
     // A top-level bookmark of the author's with a mark name (N1).
     if (ownMarkIds.size > 0 && isOwnMark(c)) continue;
     const p = plans.get(j);
+    // Before the removal check: the page still starts here when its
+    // first line (a typed title) is taken out.
+    if (p?.pageBefore) out.push(pageBreakParagraph());
     if (p?.remove || p?.mergedAway) continue;
     const b = blocks[j];
     const index = b.kind === "p" ? b.index : -1;

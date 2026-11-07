@@ -581,7 +581,14 @@ const HEADING_STYLE_MAP = [
   "p[style-name='Librum Verse Indent'] => p.verse-indent:fresh",
   "p[style-name='Librum Plain'] => p:fresh",
   "p[style-name='Librum Gap'] => p.gap:fresh",
+  "p[style-name='Librum Page Break'] => p.librum-page-break:fresh",
 ];
+
+// K1a: the clean-up pass's front-matter page starts. The book is split
+// there like at a chapter title, into a part with no title, and the
+// marker paragraph itself is dropped.
+const PAGE_BREAK_PART_RE = /^<p class="librum-page-break">[\s\S]*?<\/p>$/;
+const SECTION_SPLIT_RE = /(<h1>[\s\S]*?<\/h1>|<p class="librum-page-break">[\s\S]*?<\/p>)/;
 
 // W4: Mammoth writes the clean-up pass's paragraph marks as empty
 // anchors. They are taken out of the ebook's HTML before anything else
@@ -826,11 +833,11 @@ export async function convertDocxToDocument(
   // epub-generator.ts itself from `heading`, never left inline inside
   // `html`, so there's exactly one place a chapter title is ever
   // rendered from), so splitting on it has to happen first.
-  const rawParts = rawHtml.split(/(<h1>[\s\S]*?<\/h1>)/);
+  const rawParts = rawHtml.split(SECTION_SPLIT_RE);
   // W4: the marked copy splits into exactly the same parts (the marks
   // are only empty anchors); if it ever doesn't, there is no preview
   // marking rather than a wrong one.
-  let markedParts = markedHtml !== null ? markedHtml.split(/(<h1>[\s\S]*?<\/h1>)/) : null;
+  let markedParts = markedHtml !== null ? markedHtml.split(SECTION_SPLIT_RE) : null;
   if (markedParts && markedParts.length !== rawParts.length) markedParts = null;
   const rawSections: {
     heading: string | null;
@@ -863,7 +870,16 @@ export async function convertDocxToDocument(
   for (const [partIndex, part] of rawParts.entries()) {
     const headingMatch = part.match(/^<h1>([\s\S]*?)<\/h1>$/);
     const markedPart = markedParts ? markedParts[partIndex] : "";
-    if (headingMatch) {
+    if (PAGE_BREAK_PART_RE.test(part)) {
+      // A new page with no title: what follows starts a part of its own.
+      flushRaw();
+      currentHeading = null;
+      currentLines = undefined;
+      currentKeys = [];
+      currentHtml = "";
+      currentHeadingPara = null;
+      currentMarked = "";
+    } else if (headingMatch) {
       flushRaw();
       currentHeadingPara = firstParagraphMark(markedPart);
       currentMarked = "";

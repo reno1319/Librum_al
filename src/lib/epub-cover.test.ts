@@ -97,8 +97,8 @@ describe("embedCoverInLibrumEpub", () => {
     );
     expect(opf).toContain('<item id="librum-cover-page" href="cover.xhtml" media-type="application/xhtml+xml"/>');
     expect(opf).toContain('<meta name="cover" content="librum-cover-image"/>');
-    // First in the spine, before chapter 1.
-    expect(opf).toMatch(/<spine>\n<itemref idref="librum-cover-page"\/>\n<itemref idref="chapter1"\/>/);
+    // First in the spine, before the contents page (K4) and chapter 1.
+    expect(opf).toMatch(/<spine>\n<itemref idref="librum-cover-page"\/>\n<itemref idref="nav"\/>\n<itemref idref="chapter1"\/>/);
 
     const zip = await JSZip.loadAsync(result.bytes);
     expect(await zip.file(EBOOK_COVER_IMAGE_ENTRY)!.async("nodebuffer")).toEqual(COVER_A);

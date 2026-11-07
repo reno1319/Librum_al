@@ -20,6 +20,7 @@ export const CHOICE_LISTS = [
   "notVerse",
   "keepCopyright",
   "removeTitlePage",
+  "keepTitlePage",
 ] as const;
 export type ChoiceList = (typeof CHOICE_LISTS)[number];
 
@@ -44,6 +45,7 @@ export function emptyChoices(): PreviewChoices {
     notVerse: [],
     keepCopyright: [],
     removeTitlePage: [],
+    keepTitlePage: [],
     fixQuotes: true,
   };
 }
@@ -94,7 +96,10 @@ const GUESS_LISTS: Record<GuessKind, { off?: ChoiceList; on?: ChoiceList }> = {
   merged_title: { off: "keepTitleApart" },
   split_lines: { off: "keepLines" },
   verse: { off: "notVerse" },
-  title_page: { on: "removeTitlePage" },
+  // K1c (Renato 7 Nov, a): a typed title line that is the book's title
+  // is removed by default (keepTitlePage brings it back); other big
+  // lines on page 1 are only offered (removeTitlePage), as since 1 Nov.
+  title_page: { off: "keepTitlePage", on: "removeTitlePage" },
   copyright_page: { off: "keepCopyright" },
 };
 

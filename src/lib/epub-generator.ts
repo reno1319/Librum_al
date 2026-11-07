@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { cleanupPassEnabled } from "@/lib/docx-cleanup";
+import { ENDNOTES_HEADING } from "@/lib/docx-notes";
 import type { DocImage, DocSection } from "@/lib/docx-converter";
 
 // LIBRUM 2.0 PRODUCT-5: builds a real, minimal, valid EPUB 3 package
@@ -97,6 +98,8 @@ p.verse-indent { text-indent: 0; margin-left: 3em; }
 blockquote { margin: 1em 2em; font-style: italic; }
 ul, ol { margin: 0 0 1em; padding-left: 1.5em; }
 img { max-width: 100%; }
+nav#toc ol { list-style: none; padding-left: 0; margin: 0; }
+nav#toc li { margin: 0.5em 0; text-indent: 0; }
 table { border-collapse: collapse; width: 100%; margin: 0 0 1em; }
 td, th { border: 1px solid #999; padding: 0.4em; text-align: left; }
 `;
@@ -133,6 +136,10 @@ ${headingHtml}${section.html}
 `;
 }
 
+// K4 (Renato 7 Nov, a): the contents list is also a page of the book,
+// right after Librum's © page (that page is put in front of the spine at
+// download, after the cover), with every chapter tappable. Landmarks
+// tell Apple Books and Kindle where the contents and the text start.
 function renderNavXhtml(sections: DocSection[], language: string): string {
   const items = sections
     .map((section, i) =>
@@ -147,18 +154,33 @@ function renderNavXhtml(sections: DocSection[], language: string): string {
   // rather than an empty <ol>, per the brief's own "if no chapter
   // headings: use a minimal valid navigation entry" rule.
   const list = items || `<li><a href="${chapterFilename(0)}">${EPUB_TOC_ONLY_ENTRY}</a></li>`;
+  // The text starts at the first chapter with a title (untitled front
+  // pages come before it), else at the first part. The endnotes added
+  // after the last chapter are never the start.
+  const last = sections.length - 1;
+  const firstTitled = sections.findIndex(
+    (section, i) => !!section.heading && !(i === last && i > 0 && section.heading === ENDNOTES_HEADING),
+  );
+  const bodyStart = chapterFilename(Math.max(0, firstTitled));
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${escapeXml(language)}" lang="${escapeXml(language)}">
 <head>
 <meta charset="utf-8"/>
 <title>${EPUB_TOC_TITLE}</title>
+<link rel="stylesheet" type="text/css" href="styles.css"/>
 </head>
 <body>
 <nav epub:type="toc" id="toc">
 <h1>${EPUB_TOC_TITLE}</h1>
 <ol>
 ${list}
+</ol>
+</nav>
+<nav epub:type="landmarks" id="landmarks" hidden="">
+<ol>
+<li><a epub:type="toc" href="nav.xhtml#toc">${EPUB_TOC_TITLE}</a></li>
+<li><a epub:type="bodymatter" href="${bodyStart}">${EPUB_TOC_ONLY_ENTRY}</a></li>
 </ol>
 </nav>
 </body>
@@ -179,7 +201,12 @@ function renderOpf(input: EpubGeneratorInput, modifiedAt: string): string {
     }),
   ].join("\n");
 
-  const spineItems = input.sections.map((_, i) => `<itemref idref="chapter${i + 1}"/>`).join("\n");
+  // K4: the contents page first; the cover and Librum's © page are put
+  // in front of it later (epub-cover.ts, epub-librum-pages.ts).
+  const spineItems = [
+    `<itemref idref="nav"/>`,
+    ...input.sections.map((_, i) => `<itemref idref="chapter${i + 1}"/>`),
+  ].join("\n");
 
   // A generated internal identifier derived from the book's own id --
   // never a fabricated ISBN (per the brief's explicit "do not invent

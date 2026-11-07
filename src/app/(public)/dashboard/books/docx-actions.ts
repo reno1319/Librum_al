@@ -146,7 +146,17 @@ export type ParseDocxResult =
 // choices.ts), re-validated here; the browser sends the same Word file
 // again for every rebuild (answer 5a), so the Word file is still
 // deleted right after each conversion.
-export async function parseDocxToDocument(tempDocxPath: string, choices?: unknown): Promise<ParseDocxResult> {
+// K1c: a book title longer than this is not a title; it is ignored.
+const MAX_BOOK_TITLE_CHARS = 500;
+
+export async function parseDocxToDocument(
+  tempDocxPath: string,
+  choices?: unknown,
+  // K1c (Renato 7 Nov, a): the book's title as saved on Details, so a
+  // typed title page carrying it goes by default. Only compared with
+  // the file's lines; anything but a short string is ignored.
+  bookTitle?: unknown,
+): Promise<ParseDocxResult> {
   const auth = await requireOwnedTempPath(tempDocxPath);
   if (!auth.ok) return { success: false, error: auth.error };
   const { supabase, userId } = auth;
@@ -184,7 +194,8 @@ export async function parseDocxToDocument(tempDocxPath: string, choices?: unknow
     return { success: false, error: ERROR_MESSAGES.invalid_choices };
   }
 
-  const conversion = await convertDocxToDocument(bytes, options, { preview: true });
+  const title = typeof bookTitle === "string" && bookTitle.length <= MAX_BOOK_TITLE_CHARS ? bookTitle : "";
+  const conversion = await convertDocxToDocument(bytes, { ...options, bookTitle: title }, { preview: true });
   // The temporary DOCX is never needed again past this point, success
   // or failure -- see the correction brief's "temporary DOCX only"
   // lifecycle rule (upload -> convert -> delete).

@@ -656,7 +656,8 @@ export function ManuscriptField({
           return;
         }
 
-        const parsed = await parseDocxToDocument(tempDocxPath, withChoices);
+        // K1c: the title the book has now, for the typed title page.
+        const parsed = await parseDocxToDocument(tempDocxPath, withChoices, liveTitleRef.current);
         if (stale()) {
           if (parsed.success) {
             void removeTempObject(parsed.conversionId);
