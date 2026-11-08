@@ -93,6 +93,9 @@ export type CleanupOptions = {
   keepCopyright?: number[];
   removeTitlePage?: number[];
   keepTitlePage?: number[];
+  // KP2: epigraph undo (notEpigraph) and confirm (makeEpigraph).
+  notEpigraph?: number[];
+  makeEpigraph?: number[];
   // K1c: the book's title as the author typed it on Details, so a typed
   // title page carrying it can be removed by default. Never shown.
   bookTitle?: string;
@@ -306,6 +309,8 @@ export async function cleanUpDocx(zip: JSZip, options: CleanupOptions = {}): Pro
     keepCopyright: options.keepCopyright,
     removeTitlePage: options.removeTitlePage,
     keepTitlePage: options.keepTitlePage,
+    notEpigraph: options.notEpigraph,
+    makeEpigraph: options.makeEpigraph,
     bookTitle: options.bookTitle,
   });
   const { plans } = structure;

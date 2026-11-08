@@ -82,7 +82,7 @@ h2 { font-size: 1.3em; }
 h3 { font-size: 1.1em; }
 h4 { font-size: 1em; }
 ${bookStyle ? `p { margin: 0; text-indent: 1.5em; }
-h1 + p, h2 + p, h3 + p, h4 + p, blockquote + p, ul + p, ol + p, table + p, p.scene-break + p, p.center + p, p.right + p, p.verse + p, p.verse-stanza + p, p.verse-indent + p, body > p:first-child { text-indent: 0; }
+h1 + p, h2 + p, h3 + p, h4 + p, blockquote + p, ul + p, ol + p, table + p, p.scene-break + p, p.center + p, p.right + p, p.verse + p, p.verse-stanza + p, p.verse-indent + p, p.epigraph-source + p, body > p:first-child { text-indent: 0; }
 p.gap, p.gap + p { text-indent: 0; }
 p.gap { margin: 0; }
 sup a { text-decoration: none; }
@@ -95,6 +95,8 @@ p.right { text-align: right; text-indent: 0; }
 p.verse, p.verse-stanza { text-indent: 0; margin-left: 1em; }
 p.verse-stanza { margin-top: 1em; }
 p.verse-indent { text-indent: 0; margin-left: 3em; }
+p.epigraph { text-indent: 0; margin: 0 1.5em 0 3em; }
+p.epigraph-source { text-indent: 0; text-align: right; margin: 0.4em 1.5em 1.8em 3em; }
 blockquote { margin: 1em 2em; font-style: italic; }
 ul, ol { margin: 0 0 1em; padding-left: 1.5em; }
 img { max-width: 100%; }

@@ -30,7 +30,8 @@ export type GuessKind =
   | "typed_contents"
   | "verse"
   | "split_lines"
-  | "merged_title";
+  | "merged_title"
+  | "epigraph";
 
 export type CleanupGuess = {
   // Index of the Word paragraph (counting every top-level paragraph of
@@ -92,6 +93,11 @@ export type StructureOptions = {
   removeTitlePage?: number[];
   keepTitlePage?: number[];
   bookTitle?: string;
+  // KP2 (Renato 7 Nov): epigraphs the author turns back into normal
+  // text, and unsure ones the author confirms (the guess's paragraph
+  // number: the epigraph's first quote line).
+  notEpigraph?: number[];
+  makeEpigraph?: number[];
 };
 
 export type StructureResult = {
@@ -200,6 +206,40 @@ const MAX_FRONT_PAGES = 20;
 const MAX_COPYRIGHT_PARA_WORDS = 90;
 const MAX_META_LINE_WORDS = 8;
 const MAX_TITLE_LINE_WORDS = 12;
+// KP2: an epigraph is 1-4 short quote paragraphs and a name line.
+const MAX_EPIGRAPH_QUOTES = 4;
+const MAX_EPIGRAPH_QUOTE_WORDS = 70;
+const MAX_EPIGRAPH_WORDS = 140;
+const MAX_EPIGRAPHS_IN_A_ROW = 3;
+// A word of a name: capitalised ("Prova", "O'Neill", "Saint-Exupéry")
+// or an initial ("J."); the small words names carry in between.
+const NAME_WORD_RE = /^(?:\p{Lu}[\p{L}'’.-]*|\p{Lu}\.)$/u;
+const NAME_LINK_RE = /^(?:de|da|di|del|della|van|von|der|den|la|le|du|al|el|bin|ibn|y|i|e|of|the)$/iu;
+// Where the name ends and the work starts: "Name – “Work”", "Name, Work", "Name (1912)".
+const SOURCE_SPLIT_RE = /\s+[–—-]\s+|,\s+|\s+\(/u;
+const OPEN_QUOTE_RE = /^["“„«‘'‹]/u;
+const CLOSE_QUOTE_RE = /["”“»’'›][.,;:…!?]*$/u;
+
+// KP2: the name line under an epigraph ("BESNIK PROVA", "— Besnik Prova",
+// "Mira Prova – “Netë të gjata”"). Never a sentence, a question or
+// a line that ends like a list item; the name itself is 1-5 name words.
+function epigraphSourceLine(t: string): { dash: boolean; caps: boolean; work: boolean } | null {
+  if (t.length === 0 || t.length > 100 || t.includes("\n") || words(t) > 14) return null;
+  if (SENTENCE_LIKE_END_RE.test(t) || /[,:;]["”»’)]*$/u.test(t)) return null;
+  const dash = DIALOGUE_START_RE.test(t);
+  const rest = t.replace(/^[—–-]\s*/u, "");
+  const m = rest.match(SOURCE_SPLIT_RE);
+  const name = (m && m.index !== undefined ? rest.slice(0, m.index) : rest).trim();
+  const ws = name.split(/\s+/).filter(Boolean);
+  if (ws.length === 0 || ws.length > 5 || !NAME_WORD_RE.test(ws[0])) return null;
+  if (!ws.every((w) => NAME_WORD_RE.test(w) || NAME_LINK_RE.test(w))) return null;
+  const letters = name.replace(/[^\p{L}]/gu, "");
+  // Audit N1: one word in capitals ("BUM", "KËTU") is a shout, not a name sign.
+  const caps =
+    ws.length >= 2 && letters.length >= 3 && letters === letters.toLocaleUpperCase("sq") && letters !== letters.toLocaleLowerCase("sq");
+  const work = !!m && m.index !== undefined && rest.slice(m.index + m[0].length).trim().length > 0;
+  return { dash, caps, work };
+}
 
 const ROMAN: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
 function trailingPageNumber(t: string): { value: number; roman: boolean } | null {
@@ -1182,9 +1222,131 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   for (const [t, c] of tabCounts) if (c > bodyTabsCount) { bodyTabs = t; bodyTabsCount = c; }
   const hasOwnStyle = (f: ParaFacts) => !!f.styleId && /^(quote|intense quote|list paragraph)$/i.test(f.styleName.trim());
 
+  // ---- 6a. epigraphs (KP2, Renato 7 Nov) ----
+  // Right after a chapter title, and on a page of its own before the
+  // first chapter: 1-4 short quote paragraphs and then a NAME line (the
+  // name decides; italics and quotation marks are only extra signs).
+  // The quote becomes an epigraph block (no first-line indent), the name
+  // line is set apart under it, and the story's first paragraph starts
+  // without an indent. Dialogue never matches (a quote line starting
+  // with a dash, or a sentence). With fewer than two signs the epigraph
+  // is only offered to the author (unsure guess, never silent); an
+  // epigraph with no name line is not covered.
+  {
+    const notEpigraphSet = new Set(options.notEpigraph ?? []);
+    const makeEpigraphSet = new Set(options.makeEpigraph ?? []);
+    const asideAlign = (f: ParaFacts) => f.align === "center" || f.align === "right" || f.align === "end";
+    const looseLine = (j: number) => {
+      const f = para(j);
+      return !!f && plainSet.has(j) && !plans.get(j)?.style && !f.hasObject && !f.num && !NOT_A_TITLE_RE.test(f.trimmed);
+    };
+    const quoteOk = (j: number) => {
+      const f = para(j);
+      return (
+        // Audit N2: a line bigger than the body is a title, not a quote.
+        !!f && looseLine(j) && !asideAlign(f) && !bigger(f) && !DIALOGUE_START_RE.test(f.trimmed) &&
+        words(f.trimmed) <= MAX_EPIGRAPH_QUOTE_WORDS
+      );
+    };
+    const sourceAt = (j: number) => {
+      const f = para(j);
+      if (!f || !looseLine(j) || bigger(f) || f.lineBreaks > 0) return null;
+      const t = f.trimmed;
+      if (PART_HEADING_RE.test(t) || LABEL_ONLY_RE.test(t) || CHAPTER_WORD_RE.test(t) || CONTENTS_TITLE_RE.test(t) || DEDICATION_START_RE.test(t)) return null;
+      return epigraphSourceLine(t);
+    };
+    type Epigraph = { quotes: number[]; source: number; signs: string[] };
+    const epigraphAt = (start: number): Epigraph | null => {
+      const quotes: number[] = [];
+      let total = 0;
+      let k = start;
+      while (quotes.length < MAX_EPIGRAPH_QUOTES) {
+        if (k < 0 || !quoteOk(k) || (quotes.length > 0 && newPage[k])) return null;
+        quotes.push(k);
+        total += words(para(k)!.trimmed);
+        if (total > MAX_EPIGRAPH_WORDS) return null;
+        const s = nextContent(k);
+        if (s < 0 || newPage[s]) return null;
+        const src = sourceAt(s);
+        if (src) {
+          const qs = quotes.map((q) => para(q)!);
+          const after = nextContent(s);
+          // "— Ana" over a line of dialogue is a conversation.
+          const dialogueAfter = after >= 0 && !!para(after) && DIALOGUE_START_RE.test(para(after)!.trimmed);
+          const signs = ["a name line after the quote"];
+          if (qs.every((f) => f.italic)) signs.push("quote in italics");
+          if (OPEN_QUOTE_RE.test(qs[0].trimmed) && CLOSE_QUOTE_RE.test(qs[qs.length - 1].trimmed)) signs.push("quote in quotation marks");
+          if (src.dash && !dialogueAfter) signs.push("name after a dash");
+          if (src.caps) signs.push("name in capitals");
+          if (src.work) signs.push("name and work");
+          if (para(s)!.align === "right" || para(s)!.align === "end") signs.push("name aligned right");
+          return { quotes, source: s, signs };
+        }
+        k = s;
+      }
+      return null;
+    };
+    const run = (start: number): { found: Epigraph[]; next: number } => {
+      const found: Epigraph[] = [];
+      let at = start;
+      while (found.length < MAX_EPIGRAPHS_IN_A_ROW && at >= 0 && !isHeading(at)) {
+        const e = epigraphAt(at);
+        if (!e) break;
+        found.push(e);
+        at = nextContent(e.source);
+      }
+      return { found, next: at };
+    };
+    const take = (found: Epigraph[]) => {
+      for (const e of found) {
+        const p = indexOf(e.quotes[0]);
+        const sure = e.signs.length >= 3; // the name line + two more signs
+        const byAuthor = notEpigraphSet.has(p) ? false : makeEpigraphSet.has(p) ? true : null;
+        const apply = byAuthor ?? sure;
+        if (apply) {
+          for (const q of e.quotes) plan(q).style = "epigraph";
+          plan(e.source).style = "epigraphSource";
+        }
+        guesses.push({
+          paragraph: p,
+          kind: "epigraph",
+          text: truncate(`${para(e.quotes[0])!.trimmed} — ${para(e.source)!.trimmed}`),
+          confidence: sure ? "high" : "medium",
+          applied: apply,
+          signs: [
+            ...e.signs,
+            ...(byAuthor !== null && byAuthor !== sure ? [byAuthor ? "confirmed by the author" : "kept as normal text by the author"] : []),
+          ],
+        });
+      }
+    };
+    // After each chapter title, with the story after it.
+    for (const c of [...chapterSet].sort((a, b) => a - b)) {
+      const { found, next } = run(nextContent(c));
+      if (found.length > 0 && next >= 0 && !!para(next) && !isHeading(next)) take(found);
+    }
+    // A page of its own before the first chapter (nothing else on it).
+    if (firstChapter !== undefined) {
+      let first = true;
+      for (let j = 0; j < firstChapter; j++) {
+        const f = para(j);
+        if (f && (f.empty || isRemoved(j))) continue;
+        const pageStart = first || newPage[j];
+        first = false;
+        if (!pageStart) continue;
+        const { found, next } = run(j);
+        if (found.length > 0 && (next < 0 || next >= firstChapter || newPage[next])) take(found);
+      }
+    }
+  }
+  const isEpigraph = (j: number) => {
+    const s = plans.get(j)?.style;
+    return s === "epigraph" || s === "epigraphSource";
+  };
+
   for (const j of plain) {
     const f = para(j)!;
-    if (hasOwnStyle(f) || f.num || f.hasObject) continue;
+    if (hasOwnStyle(f) || f.num || f.hasObject || isEpigraph(j)) continue;
     const len = f.trimmed.length;
     if (f.align === "center" && len <= 600 && centerMeaningful) plan(j).style = "center";
     else if ((f.align === "right" || f.align === "end") && len <= 600) plan(j).style = "right";
