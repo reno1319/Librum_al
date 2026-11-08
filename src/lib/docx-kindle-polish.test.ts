@@ -88,6 +88,19 @@ describe("K1a: Word page breaks before the first chapter become pages", () => {
     expect(text(r.sections[0].html)).toBe("Nënës sime, që më mësoi të dëgjoj detin.");
   });
 
+  it("keeps a page whose first line is removed as its own page (the page mark comes before the removal; audit N1)", async () => {
+    const bodyXml =
+      DEDICATION +
+      fmt("© 2010 Autor Prove. Të gjitha të drejtat e rezervuara.", { align: "center" }) +
+      fmt("Një fjalë e shkurtër për lexuesin", { align: "center", italic: true }) +
+      PAGE_BREAK +
+      STORIES;
+    const r = await convert({}, bodyXml);
+    expect(r.sections.map((s) => s.heading)).toEqual([null, null, "LIBRI I DETIT", "GURI"]);
+    expect(text(r.sections[0].html)).toBe("Nënës sime, që më mësoi të dëgjoj detin.");
+    expect(text(r.sections[1].html)).toBe("Një fjalë e shkurtër për lexuesin");
+  });
+
   it("leaves a front part with more page breaks than a front part has as one part", async () => {
     const lines = Array.from({ length: 22 }, (_, i) => fmt(`Rreshti ${i + 1}`, { align: "center" }) + PAGE_BREAK).join("");
     const r = await convert({}, lines + STORIES);
@@ -125,8 +138,15 @@ describe("K1b + K1c: the typed title page", () => {
       expect(text(r.sections[0].html)).not.toContain("LIBRI I DETIT");
       expect(text(r.sections[0].html)).toContain("Tregime");
     }
-    const accentless = await convert({ bookTitle: "Libri i Bardhë" }, BOOK.replace("LIBRI I DETIT", "LIBRI I BARDHE"));
+    const accentless = await convert({ bookTitle: "Deti i Përgjumur" }, BOOK.replace("LIBRI I DETIT", "DETI I PERGJUMUR"));
     expect(titleGuesses(accentless)[0].applied).toBe(true);
+  });
+
+  it("K1c: a big line that only contains the title is not the title (equal, not contains; audit N1)", async () => {
+    const r = await convert({ bookTitle: "Deti" }, BOOK.replace("LIBRI I DETIT", "DETI NUK PYET"));
+    expect(titleGuesses(r).every((g) => !g.applied)).toBe(true);
+    expect(titleGuesses(r)[0].text).toContain("DETI NUK PYET");
+    expect(text(r.sections[0].html)).toContain("DETI NUK PYET");
   });
 
   it("K1c: a two-line title read together is the book's title", async () => {

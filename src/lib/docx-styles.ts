@@ -218,6 +218,9 @@ export const LIBRUM_STYLES = {
   plain: { id: "LibrumPlain", name: "Librum Plain" },
   // K1a: a new page before the first chapter (docx-converter splits there).
   pageBreak: { id: "LibrumPageBreak", name: "Librum Page Break" },
+  // KP2: a chapter-opening (or front-page) epigraph and its name line.
+  epigraph: { id: "LibrumEpigraph", name: "Librum Epigraph" },
+  epigraphSource: { id: "LibrumEpigraphSource", name: "Librum Epigraph Source" },
 } as const;
 export type LibrumStyleKey = keyof typeof LIBRUM_STYLES;
 

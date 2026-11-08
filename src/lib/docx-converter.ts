@@ -388,7 +388,7 @@ const ALLOWED_TAGS = new Set([
 const VOID_TAGS = new Set(["br", "hr", "img"]);
 // W3: the only class names kept -- the ones docx-converter's own style
 // map writes for the clean-up pass's marks. Anything else is dropped.
-const ALLOWED_P_CLASSES = new Set(["scene-break", "center", "right", "verse", "verse-stanza", "verse-indent", "gap"]);
+const ALLOWED_P_CLASSES = new Set(["scene-break", "center", "right", "verse", "verse-stanza", "verse-indent", "gap", "epigraph", "epigraph-source"]);
 const DROP_ENTIRELY_TAGS = new Set([
   "script", "style", "iframe", "object", "embed", "form", "input", "button",
   "select", "textarea", "option", "video", "audio", "canvas", "svg",
@@ -582,6 +582,9 @@ const HEADING_STYLE_MAP = [
   "p[style-name='Librum Plain'] => p:fresh",
   "p[style-name='Librum Gap'] => p.gap:fresh",
   "p[style-name='Librum Page Break'] => p.librum-page-break:fresh",
+  // KP2: epigraphs.
+  "p[style-name='Librum Epigraph'] => p.epigraph:fresh",
+  "p[style-name='Librum Epigraph Source'] => p.epigraph-source:fresh",
 ];
 
 // K1a: the clean-up pass's front-matter page starts. The book is split
