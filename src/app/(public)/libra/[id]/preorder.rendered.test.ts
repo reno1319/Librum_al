@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // BD16 P4: the real book page for a pre-order (same stubbed-client
 // harness as reader-side.rendered.test.ts): the "Del më …" line, no buy,
-// free, wishlist or sample control for readers, "Më njofto" for a
+// free or wishlist control for readers (a sample only from an approved file, PREVIEW-READER-1), "Më njofto" for a
 // signed-in reader, sign-in for a visitor, the author's own panel, an
 // indexable page with no schema.org offer, and a draft still hidden.
 
@@ -12,8 +12,16 @@ const mockCreateClient = vi.fn((): unknown => {
 });
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 const adminInsert = vi.fn(async () => ({ data: null }));
+// PREVIEW-READER-1: the page reads a pre-order's reviews to decide the
+// sample button.
+let reviewRows: unknown = { data: [], error: null };
 vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: () => ({ from: () => ({ insert: adminInsert }) }),
+  createAdminClient: () => ({
+    from: (table: string) =>
+      table === "book_reviews"
+        ? { select: () => ({ in: () => ({ returns: async () => reviewRows }) }) }
+        : { insert: adminInsert },
+  }),
 }));
 vi.mock("./actions", () => ({
   buyBook: vi.fn(), getFreeBook: vi.fn(), submitReview: vi.fn(),
@@ -107,6 +115,7 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://librum.al");
   publicBookQueries = [];
   noticeQueries = 0;
+  reviewRows = { data: [], error: null };
   adminInsert.mockClear();
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -158,6 +167,32 @@ describe("BD16 P4: a pre-order's book page", () => {
     const html = await render({ b: book({ release_date: "2020-01-01" }), user: null });
     expect(html).toContain("Del së shpejti");
     expect(html).not.toContain("1 janar 2020");
+  });
+
+  // PREVIEW-READER-1 (Q6 b): replaces "no sample for a pre-order".
+  it("readers get 'Lexoni një pjesë' once a file is approved, and still nothing to buy", async () => {
+    const b = book();
+    reviewRows = {
+      data: [{ id: "r1", book_id: b.id, status: "approved", file_path: "a/b.epub", cover_path: null, submitted_at: "2026-10-01T00:00:00Z", decided_at: "2026-10-02T00:00:00Z" }],
+      error: null,
+    };
+    const html = await render({ b, user: null });
+    expect(html).toContain("Lexoni një pjesë");
+    expect(html).not.toContain("Blini e-librin");
+    expect(html).not.toContain("Merreni e-librin");
+  });
+
+  it("approved without a file, never approved, or a read error: no sample button", async () => {
+    for (const rows of [
+      { data: [{ id: "r1", book_id: "x", status: "approved", file_path: null, cover_path: null, submitted_at: null, decided_at: "2026-10-02T00:00:00Z" }], error: null },
+      { data: [{ id: "r1", book_id: "x", status: "pending", file_path: "a/b.epub", cover_path: null, submitted_at: null, decided_at: null }], error: null },
+      { data: null, error: { code: "x" } },
+    ]) {
+      const b = book();
+      reviewRows = { ...rows, data: rows.data?.map((r) => ({ ...r, book_id: b.id })) ?? null };
+      const html = await render({ b, user: READER_ID });
+      expect(html).not.toContain("Lexoni një pjesë");
+    }
   });
 
   it("the author gets their own panel (manage, preview sample), no notify button, no draft banner", async () => {

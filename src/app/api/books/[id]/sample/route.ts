@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { extractEpubSample } from "@/lib/epub-sample";
-import { readDownloadFilePath } from "@/lib/book-reviews";
+import { buildReaderContent } from "@/lib/epub-reader";
+import { latestApprovedReview, readDownloadFilePath, readReviewSnapshots } from "@/lib/book-reviews";
 import { resolveBookByline } from "@/lib/book-byline";
 import {
   BOOK_MANUSCRIPTS_BUCKET,
@@ -87,7 +87,7 @@ function isSampleStorageRow(data: unknown): data is SampleStorageRow {
 // of every /api/* route (LAUNCH-1 P1-11), and the preview only ever shows
 // the caller their own book, so no guard is added here either.
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -121,7 +121,10 @@ export async function GET(
   // PREVIEW-1: who is asking. Only an unpublished book needs a session;
   // for a published one it only decides which file (the author's current
   // file vs. the approved one). An auth error reads as anonymous.
-  const isPublished = book.status === "published";
+  // PREVIEW-READER-1 (Q6 b): a pre-order is listed too; its readers get a
+  // sample only from an APPROVED file (below).
+  const isPreorder = book.status === "preorder";
+  const isPublished = book.status === "published" || isPreorder;
   const { data: authData, error: authError } = await supabase.auth.getUser();
   const userId = !authError && authData?.user ? authData.user.id : null;
   if (!isPublished && !userId) {
@@ -135,7 +138,7 @@ export async function GET(
   const admin = createAdminClient();
   const storageQuery = admin.from("books").select("author_id, file_path").eq("id", book.id);
   const { data: storageData, error: storageError } = await (isPublished
-    ? storageQuery.eq("status", "published")
+    ? storageQuery.eq("status", book.status)
     : storageQuery
   ).maybeSingle<SampleStorageRow>();
   const storageRow = !storageError && isSampleStorageRow(storageData) ? storageData : null;
@@ -154,11 +157,17 @@ export async function GET(
   // the latest approved one (or the current one if the book was never
   // approved). A review read error fails closed and never falls back to
   // the current file.
-  const chosen = await readDownloadFilePath(admin, {
-    bookId: book.id,
-    isAuthor,
-    currentFilePath: storageRow.file_path as string,
-  });
+  // PREVIEW-READER-1 (Q6 b): for a pre-order a reader only ever gets the
+  // file of the latest APPROVED review -- never the current file, never a
+  // fallback (an approved pre-order may have no file yet, and an author's
+  // unapproved replacement never shows to readers).
+  const chosen = isPreorder && !isAuthor
+    ? await readApprovedFilePath(admin, book.id)
+    : await readDownloadFilePath(admin, {
+        bookId: book.id,
+        isAuthor,
+        currentFilePath: storageRow.file_path as string,
+      });
   if (!chosen.ok) {
     return NextResponse.json({ error: "sample_unavailable" }, { status: 404 });
   }
@@ -190,8 +199,12 @@ export async function GET(
     return NextResponse.json({ error: "sample_unavailable" }, { status: 404 });
   }
 
+  // PREVIEW-READER-1 (Q4 a): the author may ask for their whole book
+  // (?mode=full); everyone else, the author included by default, gets the
+  // readers' sample.
+  const mode = isAuthor && new URL(request.url).searchParams.get("mode") === "full" ? "full" : "sample";
   const bytes = Buffer.from(await fileBlob.arrayBuffer());
-  const sample = await extractEpubSample(bytes);
+  const sample = await buildReaderContent(bytes, mode);
 
   if (!sample.available) {
     return NextResponse.json({ error: "sample_unavailable" }, { status: 404 });
@@ -205,9 +218,20 @@ export async function GET(
       bookId: id,
       title: book.title,
       author: resolveBookByline(book),
-      sections: sample.sections,
+      mode,
+      html: sample.html,
+      toc: sample.toc,
       approximatePercent: sample.approximatePercent,
     },
     isAuthor ? { headers: { "Cache-Control": "private, no-store" } } : undefined,
   );
+}
+
+async function readApprovedFilePath(
+  admin: ReturnType<typeof createAdminClient>,
+  bookId: string,
+): Promise<{ ok: true; filePath: string | null } | { ok: false }> {
+  const read = await readReviewSnapshots(admin, [bookId]);
+  if (!read.ok) return { ok: false };
+  return { ok: true, filePath: latestApprovedReview(read.byBook.get(bookId) ?? [])?.file_path ?? null };
 }
