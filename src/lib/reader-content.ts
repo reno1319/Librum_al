@@ -228,6 +228,27 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
     }
   }
 
+  // Closes every frame above stack[idx - 1], innermost first.
+  function closeFrom(idx: number) {
+    while (stack.length > idx) {
+      const done = stack.pop()!;
+      if (done.dropped) continue;
+      const inner = done.html.join("");
+      const text = done.text.join("");
+      let rendered = inner;
+      if (done.allowed) {
+        const classAttr = done.classes ? ` class="${done.classes}"` : "";
+        const idAttr = done.id ? ` id="${done.id}"` : "";
+        rendered = `<${done.tag}${idAttr}${classAttr}>${inner}</${done.tag}>`;
+      } else if (done.classes) {
+        // An unwrapped container (section, a, ...) that carried layout:
+        // keep the layout on a neutral wrapper.
+        rendered = `<div class="${done.classes}">${inner}</div>`;
+      }
+      emit(rendered, text, done.images);
+    }
+  }
+
   const capped = bodyHtml.length > MAX_READER_DOCUMENT_CHARS ? bodyHtml.slice(0, MAX_READER_DOCUMENT_CHARS) : bodyHtml;
   const re = new RegExp(TOKEN_RE.source, "g");
   let last = 0;
@@ -241,23 +262,7 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
       const name = closeName.toLowerCase();
       const idx = stack.map((f) => f.tag).lastIndexOf(name);
       if (idx <= 0) continue;
-      while (stack.length > idx) {
-        const done = stack.pop()!;
-        if (done.dropped) continue;
-        const inner = done.html.join("");
-        const text = done.text.join("");
-        let rendered = inner;
-        if (done.allowed) {
-          const classAttr = done.classes ? ` class="${done.classes}"` : "";
-          const idAttr = done.id ? ` id="${done.id}"` : "";
-          rendered = `<${done.tag}${idAttr}${classAttr}>${inner}</${done.tag}>`;
-        } else if (done.classes) {
-          // An unwrapped container (section, a, ...) that carried layout:
-          // keep the layout on a neutral wrapper.
-          rendered = `<div class="${done.classes}">${inner}</div>`;
-        }
-        emit(rendered, text, done.images);
-      }
+      closeFrom(idx);
       continue;
     }
 
@@ -298,6 +303,10 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
     stack.push(frame(name, allowed, false, classes, id));
   }
   appendText(capped.slice(last));
+  // Tags still open at the end of the document (e.g. `<p>hello` with no
+  // `</p>`) are closed here, innermost first, by the same rules as a real
+  // close tag, so their text is kept; dropped frames stay dropped.
+  closeFrom(1);
   flushRoot();
   return chunks;
 }
