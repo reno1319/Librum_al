@@ -22,15 +22,18 @@ const mockCreateClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 const mockCreateAdminClient = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));
-vi.mock("@/lib/epub-sample", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/epub-sample")>();
-  return { ...actual, extractEpubSample: vi.fn(actual.extractEpubSample) };
+// PREVIEW-READER-1: the route now builds the reader content with
+// buildReaderContent (epub-reader.ts); the spy name below is kept.
+vi.mock("@/lib/epub-reader", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/epub-reader")>();
+  return { ...actual, buildReaderContent: vi.fn(actual.buildReaderContent) };
 });
 
 const { GET } = await import("./route");
-const { extractEpubSample } = await import("@/lib/epub-sample");
-const mockExtractEpubSample = vi.mocked(extractEpubSample);
+const { buildReaderContent } = await import("@/lib/epub-reader");
+const mockExtractEpubSample = vi.mocked(buildReaderContent);
 const JSZip = (await import("jszip")).default;
+const { READER_TAGS } = await import("@/lib/reader-content");
 
 const AUTHOR_ID = "3f2a8c1e-5b7d-4e9a-8c6f-1a2b3c4d5e6f";
 const BOOK_ID = "9d8c7b6a-5f4e-4d3c-9b2a-1f0e9d8c7b6a";
@@ -239,12 +242,12 @@ async function buildValidEpubBytes(): Promise<Buffer> {
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
 
-function makeRequest() {
-  return new Request(`https://librumal.vercel.app/api/books/${BOOK_ID}/sample`);
+function makeRequest(query = "") {
+  return new Request(`https://librumal.vercel.app/api/books/${BOOK_ID}/sample${query}`);
 }
 
-function callRoute() {
-  return GET(makeRequest(), { params: Promise.resolve({ id: BOOK_ID }) });
+function callRoute(query = "") {
+  return GET(makeRequest(query), { params: Promise.resolve({ id: BOOK_ID }) });
 }
 
 describe("GET /api/books/[id]/sample", () => {
@@ -277,8 +280,9 @@ describe("GET /api/books/[id]/sample", () => {
       expect(body.bookId).toBe(BOOK_ID);
       expect(body.title).toBe("Test Book");
       expect(body.author).toBe("Renata Author");
-      expect(body.sections.length).toBeGreaterThan(0);
-      expect(body.sections[0].html).toContain("real sample content");
+      expect(body.mode).toBe("sample");
+      expect(body.html).toContain("real sample content");
+      expect(Array.isArray(body.toc)).toBe(true);
       expect(typeof body.approximatePercent).toBe("number");
     });
 
@@ -661,7 +665,9 @@ describe("GET /api/books/[id]/sample", () => {
       const body = await response.json();
 
       expect(response.status).toBe(200);
-      const allHtml: string = body.sections.map((s: { html: string }) => s.html).join("");
+      // PREVIEW-READER-1: the reader HTML keeps only our tag list, our own
+      // class names and ids, and pictures only as data: URIs.
+      const allHtml: string = body.html;
 
       expect(allHtml).not.toContain("steal");
       expect(allHtml).not.toContain("document.cookie");
@@ -670,17 +676,14 @@ describe("GET /api/books/[id]/sample", () => {
       expect(allHtml).not.toMatch(/<script/i);
       expect(allHtml).not.toMatch(/<img/i);
       expect(allHtml).not.toMatch(/<a[\s>]/i);
-      // Every tag present is from the fixed allowed vocabulary, and
-      // none of them carry any attribute at all.
+      expect(allHtml).not.toMatch(/\son[a-z]+=/i);
       const tagNames = [...allHtml.matchAll(/<\/?([a-zA-Z0-9]+)[^>]*>/g)].map((m) => m[1].toLowerCase());
-      const ALLOWED = new Set([
-        "p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote",
-        "em", "strong", "i", "b", "br", "hr", "ul", "ol", "li", "small", "sup", "sub",
-      ]);
       for (const tag of tagNames) {
-        expect(ALLOWED.has(tag)).toBe(true);
+        expect(READER_TAGS.has(tag) || tag === "section").toBe(true);
       }
-      expect(allHtml).not.toMatch(/<[a-zA-Z][^>]*=/);
+      for (const m of allHtml.matchAll(/\s([a-z-]+)="/gi)) {
+        expect(["class", "id"]).toContain(m[1]);
+      }
       expect(allHtml).toContain("Real content");
     });
   });
@@ -710,7 +713,7 @@ describe("GET /api/books/[id]/sample", () => {
 
         expect(response.status).toBe(200);
         expect(response.headers.get("cache-control")).toBe("private, no-store");
-        expect((await response.json()).sections.length).toBeGreaterThan(0);
+        expect((await response.json()).html.length).toBeGreaterThan(0);
         // An unpublished book: the service role reads by id only.
         expect(admin.__calls).toEqual([
           { table: "books", columns: EXPECTED_STORAGE_COLUMNS, filters: [["id", BOOK_ID]] },
@@ -764,6 +767,97 @@ describe("GET /api/books/[id]/sample", () => {
       expect(response.status).toBe(404);
       expect(await response.json()).toEqual({ error: "sample_unavailable" });
       expect(admin.__download).not.toHaveBeenCalled();
+    });
+
+    // PREVIEW-READER-1 (Q6 b, replaces BD16 D6 "no sample for a
+    // pre-order"): readers of a pre-order get a sample ONLY from the file
+    // of its latest approved review -- no approved file, no sample.
+    describe("pre-orders", () => {
+      it("a reader gets the approved file, never the author's newer waiting one", async () => {
+        const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews: approvedV1PendingV2 });
+        mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ status: "preorder", file_path: V2 }) }));
+        mockCreateAdminClient.mockReturnValue(admin);
+
+        const response = await callRoute();
+
+        expect(response.status).toBe(200);
+        expect(admin.__calls).toEqual([
+          { table: "books", columns: EXPECTED_STORAGE_COLUMNS, filters: [["id", BOOK_ID], ["status", "preorder"]] },
+        ]);
+        expect(admin.__download).toHaveBeenCalledTimes(1);
+        expect(admin.__download).toHaveBeenCalledWith(V1);
+      });
+
+      it("approved without a file (file comes later): 404, nothing downloaded", async () => {
+        const reviews = { data: reviewRows([{ status: "approved", file_path: null, decided_at: "2026-10-02T00:00:00Z" }]), error: null };
+        const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews });
+        mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ status: "preorder", file_path: V2 }) }));
+        mockCreateAdminClient.mockReturnValue(admin);
+
+        const response = await callRoute();
+
+        expect(response.status).toBe(404);
+        expect(admin.__download).not.toHaveBeenCalled();
+      });
+
+      it("never approved: no fallback to the current file", async () => {
+        const reviews = { data: reviewRows([{ status: "pending", file_path: V2, decided_at: null, submitted_at: "2026-10-03T00:00:00Z" }]), error: null };
+        const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews });
+        mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ status: "preorder", file_path: V2 }) }));
+        mockCreateAdminClient.mockReturnValue(admin);
+
+        expect((await callRoute()).status).toBe(404);
+        expect(admin.__download).not.toHaveBeenCalled();
+      });
+
+      it("a review read error fails closed", async () => {
+        const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews: { data: null, error: new Error("x") } });
+        mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ status: "preorder", file_path: V2 }) }));
+        mockCreateAdminClient.mockReturnValue(admin);
+
+        expect((await callRoute()).status).toBe(404);
+        expect(admin.__download).not.toHaveBeenCalled();
+      });
+
+      it("the pre-order's author previews their current file", async () => {
+        const admin = makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews: approvedV1PendingV2 });
+        mockCreateClient.mockResolvedValue(
+          makeFakeSupabase({ book: publishedBook({ status: "preorder", file_path: V2 }), userId: AUTHOR_ID }),
+        );
+        mockCreateAdminClient.mockReturnValue(admin);
+
+        const response = await callRoute();
+        expect(response.status).toBe(200);
+        expect(response.headers.get("cache-control")).toBe("private, no-store");
+        expect(admin.__download).toHaveBeenCalledWith(V2);
+      });
+    });
+
+    describe("the author's full preview (?mode=full)", () => {
+      it("the author gets the whole book with mode full", async () => {
+        mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ status: "draft", file_path: V2 }), userId: AUTHOR_ID }));
+        mockCreateAdminClient.mockReturnValue(makeFakeAdminClient({ fileBytes: await buildValidEpubBytes() }));
+
+        const response = await callRoute("?mode=full");
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body.mode).toBe("full");
+        expect(body.html).toContain('id="lb-sample-end"');
+        expect(mockExtractEpubSample).toHaveBeenCalledWith(expect.any(Buffer), "full");
+      });
+
+      it("anyone else asking for mode=full still gets only the sample", async () => {
+        mockCreateClient.mockResolvedValue(makeFakeSupabase({ book: publishedBook({ file_path: V2 }), userId: OTHER_AUTHOR_ID }));
+        mockCreateAdminClient.mockReturnValue(
+          makeFakeAdminClient({ fileBytes: await buildValidEpubBytes(), reviews: approvedV1PendingV2 }),
+        );
+
+        const response = await callRoute("?mode=full");
+        const body = await response.json();
+        expect(body.mode).toBe("sample");
+        expect(body.html).not.toContain("lb-sample-end");
+        expect(mockExtractEpubSample).toHaveBeenCalledWith(expect.any(Buffer), "sample");
+      });
     });
 
     it("a reader of a live book with a new file waiting for review gets the approved file", async () => {

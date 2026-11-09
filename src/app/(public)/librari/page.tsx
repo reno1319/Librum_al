@@ -791,7 +791,13 @@ function FeaturedBook({
               Blini · {priceLabel}
             </Link>
           )}
-          <BookSampleReader bookId={book.id} bookTitle={book.title} variant="text" />
+          <BookSampleReader
+            bookId={book.id}
+            bookTitle={book.title}
+            variant="text"
+            coverUrl={coverUrl}
+            endLink={{ label: "Shihni librin", href: `/libra/${book.id}` }}
+          />
         </div>
       </div>
 

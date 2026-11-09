@@ -32,6 +32,7 @@ import { buildBookstoreHref } from "@/lib/bookstore";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
 import { BookSampleReader } from "@/components/book-sample-reader";
+import { latestApprovedReview, readReviewSnapshots } from "@/lib/book-reviews";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
 import { BOOK_TYPE_LABEL, bookEyebrow, bookTypeOf } from "@/lib/book-types";
@@ -730,9 +731,33 @@ export default async function BookDetailPage({
   // EPUB), shown otherwise (PREVIEW-1: the author too), identically regardless of whether
   // this book's manuscript was uploaded directly as an EPUB or
   // converted from DOCX.
-  // BD16 P4 (D6): no sample of a pre-order for readers (the sample
-  // route refuses it too); its author still previews their own.
-  const showSample = resolveShowSample(purchaseState) && (!preorder || purchaseState === "author");
+  // PREVIEW-READER-1 (Q6 b, replaces BD16 P4 D6): a pre-order's readers
+  // get a sample only once a file has been APPROVED (the sample route
+  // reads that same file and never the current one). No approved file
+  // yet, or a read error: the button stays hidden. Its author still
+  // previews their own.
+  let preorderSampleReady = false;
+  if (preorder && purchaseState !== "author" && resolveShowSample(purchaseState)) {
+    const reviews = await readReviewSnapshots(createAdminClient(), [book.id]);
+    preorderSampleReady = reviews.ok && !!latestApprovedReview(reviews.byBook.get(book.id) ?? [])?.file_path;
+  }
+  const showSample =
+    resolveShowSample(purchaseState) && (!preorder || purchaseState === "author" || preorderSampleReady);
+  // PREVIEW-READER-1: the sample's end page button, by what the price
+  // card offers (the author gets none).
+  const sampleEndLink =
+    purchaseState === "author"
+      ? null
+      : {
+          targetId: "blerja",
+          label: preorder
+            ? "Më njofto kur të dalë"
+            : purchaseState.includes("free")
+              ? "Merreni e-librin"
+              : purchaseState.includes("paid") && !purchaseState.includes("closed")
+                ? "Blini e-librin"
+                : "Kthehuni te libri",
+        };
 
   const authorAvatarUrl = book.pen?.avatar_path
     ? supabase.storage.from("avatars").getPublicUrl(book.pen.avatar_path).data.publicUrl
@@ -879,7 +904,12 @@ export default async function BookDetailPage({
               omitted for "owned", who already have Download EPUB. */}
           {showSample && (
             <div className="flex flex-col [&>button]:w-full [&>button]:rounded-[3px] [&>button]:border-primary [&>button]:py-3 [&>button]:font-semibold [&>button]:text-primary">
-              <BookSampleReader bookId={book.id} bookTitle={book.title} />
+              <BookSampleReader
+                bookId={book.id}
+                bookTitle={book.title}
+                coverUrl={coverUrl}
+                endLink={sampleEndLink}
+              />
             </div>
           )}
         </div>
@@ -993,7 +1023,9 @@ export default async function BookDetailPage({
           {/* REDESIGN STEP 3 (P2): the purchase panel as a white card --
               a large price, a full-width primary action, the secondary
               action under it, and the purchase sentence as a footnote. */}
-          <div className="mt-6 flex max-w-[32.5rem] flex-col gap-4 rounded-[4px] border border-border bg-surface p-5 sm:p-6">
+          {/* PREVIEW-READER-1: id="blerja" is where the sample's end page
+              button takes the reader. */}
+          <div id="blerja" className="mt-6 flex max-w-[32.5rem] scroll-mt-24 flex-col gap-4 rounded-[4px] border border-border bg-surface p-5 sm:p-6">
             <span className="font-serif text-4xl text-primary">{formattedPrice}</span>
 
             {showPreorderPanel ? (
@@ -1215,7 +1247,13 @@ export default async function BookDetailPage({
               />
               {showSample && (
                 <div className="mt-4">
-                  <BookSampleReader bookId={book.id} bookTitle={book.title} variant="text" />
+                  <BookSampleReader
+                    bookId={book.id}
+                    bookTitle={book.title}
+                    variant="text"
+                    coverUrl={coverUrl}
+                    endLink={sampleEndLink}
+                  />
                 </div>
               )}
             </section>
