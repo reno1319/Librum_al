@@ -695,3 +695,78 @@ describe("sanitizeBodyIntoChunks: hostile/malformed markup", () => {
     expect(html).not.toMatch(/<[a-zA-Z][^>]*=/);
   });
 });
+
+// Sample XSS fix (9 Nov 2026): a broken tag with no closing '>' before
+// the next real tag is never matched by TOKEN_RE, so it reached the
+// output as raw "text" and the browser parsed it as a live element
+// (book-sample-reader.tsx renders sections with dangerouslySetInnerHTML).
+// Text runs now have '<' and '>' escaped in the HTML output.
+describe("sanitizeBodyIntoChunks: broken tags in text are escaped", () => {
+  const ALLOWED = new Set([
+    "p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote",
+    "em", "strong", "i", "b", "br", "hr", "ul", "ol", "li", "small", "sup", "sub",
+  ]);
+
+  // Every '<' in the output must start one of our own bare tags: an
+  // allowed name, optional leading '/', then '>' straight away.
+  function expectOnlyBareAllowedTags(html: string) {
+    for (const m of html.matchAll(/<[^>]*>?/g)) {
+      const tag = m[0].match(/^<\/?([a-z0-9]+)>$/);
+      expect(tag, `unexpected markup ${JSON.stringify(m[0])} in ${JSON.stringify(html)}`).not.toBeNull();
+      expect(ALLOWED.has(tag![1])).toBe(true);
+    }
+  }
+
+  const hostile = [
+    `<p>hi <img src=x onerror=alert(1)// <b>x</b></p>`,
+    `<p>hi <script src=//evil.example/x.js <b>x</b></p>`,
+    `<p>hi <svg/onload=alert(1)// <b>x</b></p>`,
+    `<p>hi <iframe srcdoc=x <em>y</em></p>`,
+    `<p>trailing broken tag at the very end <img src=x onerror=alert(1)//`,
+    `<p>ok</p><img src=x onerror=alert(1)// `,
+    `<p>a <![CDATA[ unterminated <b>z</b></p>`,
+    `<p>a <? unterminated pi <b>z</b></p>`,
+    `<p>a <!DOCTYPE x <b>z</b></p>`,
+    `<p>a </b <i>z</i></p>`,
+    `<p>a << <<<img src=x onerror=alert(1)//<b>z</b></p>`,
+  ];
+
+  it("the reported case: '<img ... onerror' without '>' comes out as inert text", () => {
+    const html = sanitizedHtml(`<p>hi <img src=x onerror=alert(1)// <b>x</b></p>`);
+    expect(html).toBe("<p>hi &lt;img src=x onerror=alert(1)// <b>x</b></p>");
+  });
+
+  it("'<script' without '>' comes out as inert text", () => {
+    const html = sanitizedHtml(`<p>hi <script src=//evil.example/x.js <b>x</b></p>`);
+    expect(html).toBe("<p>hi &lt;script src=//evil.example/x.js <b>x</b></p>");
+    expect(html).not.toMatch(/<script/i);
+  });
+
+  it("'<svg/onload=...' without '>' comes out as inert text", () => {
+    const html = sanitizedHtml(`<p>hi <svg/onload=alert(1)// <b>x</b></p>`);
+    expect(html).toBe("<p>hi &lt;svg/onload=alert(1)// <b>x</b></p>");
+    expect(html).not.toMatch(/<svg/i);
+  });
+
+  it("no '<' in the output starts anything but a bare allowed tag, for every hostile case", () => {
+    for (const input of hostile) {
+      expectOnlyBareAllowedTags(sanitizedHtml(input));
+    }
+  });
+
+  it("a stray '>' in text is escaped too; entities already in the text are not double-escaped", () => {
+    const html = sanitizedHtml(`<p>a > b, Tom &amp; Jerry, &lt;tag&gt;, caf&#233;</p>`);
+    expect(html).toBe("<p>a &gt; b, Tom &amp; Jerry, &lt;tag&gt;, caf&#233;</p>");
+  });
+
+  it("the plain text used for the 10% length and word count stays unescaped", () => {
+    const chunks = sanitizeBodyIntoChunks(`<p>a > b <img src=x</p>`);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].text).toBe("a > b <img src=x");
+  });
+
+  it("a normal well-formed paragraph is unchanged", () => {
+    const input = `<p>Një ditë <em>e bukur</em>, tha ai &amp; ajo.</p><h2>Kreu 2</h2>`;
+    expect(sanitizedHtml(input)).toBe(input);
+  });
+});
