@@ -47,13 +47,13 @@ export function HomeCoverFan({ covers }: { covers: FanCover<FanBook>[] }) {
                   src={cover.book.url}
                   alt=""
                   width={middle ? 220 : 170}
-                  height={middle ? 330 : 255}
+                  height={middle ? 352 : 272}
                   loading="eager"
                   fetchPriority={middle ? "high" : "auto"}
-                  className={`block aspect-[2/3] w-full rounded-[3px] object-cover transition-transform duration-150 group-hover/cover:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover/cover:translate-y-0 ${
+                  className={`block aspect-[5/8] w-full rounded-[3px] object-contain object-bottom transition-transform duration-150 group-hover/cover:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover/cover:translate-y-0 ${
                     middle
-                      ? "shadow-[0_18px_36px_-10px_rgba(0,0,0,0.6)]"
-                      : "shadow-[0_10px_24px_-10px_rgba(0,0,0,0.55)] brightness-[0.92]"
+                      ? "drop-shadow-[0_12px_14px_rgba(0,0,0,0.5)]"
+                      : "drop-shadow-[0_8px_10px_rgba(0,0,0,0.45)] brightness-[0.92]"
                   }`}
                 />
                 {cover.sponsored && (

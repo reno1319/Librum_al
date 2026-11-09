@@ -81,6 +81,7 @@ type EditorBook = {
   description: string;
   is_adult: boolean;
   reading_age_min: number | null;
+  book_type: string | null;
   categories: string[] | null;
   keywords: string;
   original_author: string | null;
@@ -160,7 +161,7 @@ export default async function BookEditorPage({
   const { data: book } = await supabase
     .from("books")
     .select(
-      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, categories, keywords, original_author, status, published_at, file_path, cover_path, price_all, isbn, publisher, pd_work_id" +
+      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, book_type, categories, keywords, original_author, status, published_at, file_path, cover_path, price_all, isbn, publisher, pd_work_id" +
         (preorderFeature ? ", release_date, preorder_count, preorder_slip_used, preorder_listed_at" : ""),
     )
     .eq("id", id)
@@ -332,6 +333,7 @@ export default async function BookEditorPage({
 
   const detailsMissingItems = missingDetailItems({
     title: book.title,
+    bookType: book.book_type,
     categories: book.categories,
     description: working.description,
     rightsBasis,
@@ -404,6 +406,7 @@ export default async function BookEditorPage({
     description: working.description ?? "",
     isAdult: working.isAdult,
     readingAge: book.reading_age_min !== null ? String(book.reading_age_min) : "",
+    bookType: book.book_type ?? "",
     categories: book.categories ?? [],
     keywords: book.keywords ?? "",
     contributors: (contributors ?? []).map((c) => ({ id: c.id, name: c.name, role: c.role })),

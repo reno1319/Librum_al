@@ -484,13 +484,13 @@ export default async function AuthorProfilePage({
                             alt=""
                             loading="lazy"
                             decoding="async"
-                            className="aspect-[2/3] w-full rounded-[2px] object-cover shadow-sm"
+                            className="aspect-[5/8] w-full rounded-[2px] object-contain object-bottom drop-shadow-sm"
                           />
                         ) : (
                           <CoverPlaceholder
                             title={book.title}
                             authorName={authorPublicName}
-                            className="aspect-[2/3] w-full rounded-[2px]"
+                            className="aspect-[5/8] w-full rounded-[2px]"
                           />
                         )}
                       </Link>

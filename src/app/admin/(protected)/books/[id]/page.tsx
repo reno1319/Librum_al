@@ -26,6 +26,7 @@ import {
 import {
   allowBookAgainAsStaff,
   approveBookReviewAsStaff,
+  countBookPagesAsStaff,
   sendBackBookReviewAsStaff,
   setPdEditionAsStaff,
   unpublishBookAsStaff,
@@ -34,6 +35,7 @@ import { PD_ALREADY_HAVE_NOTE, PD_PREPARED_BY } from "@/lib/pd-editions";
 import { UnpublishForm } from "./unpublish-form";
 import { SendBackForm } from "./send-back-form";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { BOOK_FILE_WORDS_TABLE, pageEstimateFromWords } from "@/lib/page-estimate";
 import { descriptionPlainText } from "@/lib/book-description";
 import { preorderFinalFileState, preorderFileDueDate, tiranaToday } from "@/lib/preorders";
 import {
@@ -118,6 +120,7 @@ type AdminBook = {
   pd_work_id: string | null;
   pd_editor_credit: boolean;
   // Walkthrough F2: the details staff check (read-only box).
+  book_type: string | null;
   categories: string[] | null;
   genre: string | null;
   reading_age_min: number | null;
@@ -210,7 +213,7 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, release_date, preorder_count, preorder_slip_used")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit, book_type, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, release_date, preorder_count, preorder_slip_used")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();
@@ -277,10 +280,20 @@ export default async function AdminBookPage({
       .order("created_at", { ascending: true })
       .returns<{ name: string; role: string }[]>(),
   ]);
+  // Upload notes D: the word count of the book's CURRENT file, if any.
+  const wordsResult = book.file_path
+    ? await admin
+        .from(BOOK_FILE_WORDS_TABLE)
+        .select("word_count")
+        .eq("book_id", book.id)
+        .eq("file_path", book.file_path)
+        .maybeSingle<{ word_count: number }>()
+    : { data: null, error: null };
   for (const [what, result] of [
     ["AI answer", aiResult],
     ["series", seriesResult],
     ["contributors", contributorsResult],
+    ["word count", wordsResult],
   ] as const) {
     if (result.error) console.error(`admin book: the ${what} read failed`, { error: result.error });
   }
@@ -525,9 +538,9 @@ export default async function AdminBookPage({
         <div className="flex gap-4 sm:gap-5">
           {coverUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={coverUrl} alt="" className="h-[120px] w-20 shrink-0 rounded-[3px] object-cover sm:h-36 sm:w-24" />
+            <img src={coverUrl} alt="" className="aspect-[5/8] w-20 shrink-0 rounded-[3px] object-contain object-bottom sm:w-24" />
           ) : (
-            <CoverPlaceholder title={book.title} authorName={publicName} className="h-[120px] w-20 shrink-0 rounded-[3px] sm:h-36 sm:w-24" />
+            <CoverPlaceholder title={book.title} authorName={publicName} className="aspect-[5/8] w-20 shrink-0 rounded-[3px] sm:w-24" />
           )}
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-[0.14em] text-[#806510] uppercase md:text-[0.8125rem]">
@@ -631,6 +644,33 @@ export default async function AdminBookPage({
             </div>
           </dl>
         </section>
+
+        {/* Upload notes D (Renato 11-07, Q2 a): count a file stored before
+            the page estimate existed. Shown to reviewers, for a book with a file. */}
+        {book.file_path && (
+          <section aria-labelledby="book-page-estimate" className={SECTION_CLASSES}>
+            <h2 id="book-page-estimate" className={SECTION_HEADING_CLASSES}>
+              Page estimate
+            </h2>
+            <p className="text-sm">
+              {wordsResult.error
+                ? "Couldn't read the count."
+                : wordsResult.data
+                  ? `rreth ${pageEstimateFromWords(wordsResult.data.word_count) ?? 0} faqe (${wordsResult.data.word_count.toLocaleString("en-US")} words), shown on the book page.`
+                  : "Not counted yet. The book page shows no page estimate."}
+            </p>
+            {canReview && (
+              <form action={countBookPagesAsStaff.bind(null, book.id)} className="mt-3">
+                <button
+                  type="submit"
+                  className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
+                >
+                  {wordsResult.data ? "Count pages again" : "Count pages"}
+                </button>
+              </form>
+            )}
+          </section>
+        )}
 
         <section aria-labelledby="book-open-reports" className={SECTION_CLASSES}>
           <h2 id="book-open-reports" className={SECTION_HEADING_CLASSES}>
@@ -790,9 +830,9 @@ export default async function AdminBookPage({
                                 <figure key={side.caption} className="flex flex-col gap-1">
                                   {side.url ? (
                                     // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={side.url} alt={`Cover: ${side.caption}`} className="h-24 w-16 rounded-[3px] object-cover" />
+                                    <img src={side.url} alt={`Cover: ${side.caption}`} className="aspect-[5/8] w-16 rounded-[3px] object-contain object-bottom" />
                                   ) : (
-                                    <CoverPlaceholder title={book.title} authorName={publicName} className="h-24 w-16 rounded-[3px]" />
+                                    <CoverPlaceholder title={book.title} authorName={publicName} className="aspect-[5/8] w-16 rounded-[3px]" />
                                   )}
                                   <figcaption>{side.caption}</figcaption>
                                 </figure>
@@ -825,9 +865,9 @@ export default async function AdminBookPage({
                 <div className="flex items-start gap-4">
                   {coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={coverUrl} alt="The cover sent for review" className="h-24 w-16 shrink-0 rounded-[3px] object-cover" />
+                    <img src={coverUrl} alt="The cover sent for review" className="aspect-[5/8] w-16 shrink-0 rounded-[3px] object-contain object-bottom" />
                   ) : (
-                    <CoverPlaceholder title={book.title} authorName={publicName} className="h-24 w-16 shrink-0 rounded-[3px]" />
+                    <CoverPlaceholder title={book.title} authorName={publicName} className="aspect-[5/8] w-16 shrink-0 rounded-[3px]" />
                   )}
                   {reviewHasFile ? (
                     <a

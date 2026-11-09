@@ -236,12 +236,12 @@ export function AuthorBookRow({
           alt=""
           loading="lazy"
           decoding="async"
-          className="h-[84px] w-14 shrink-0 rounded-[2px] object-cover shadow-sm sm:h-24 sm:w-16"
+          className="aspect-[5/8] w-14 shrink-0 rounded-[2px] object-contain object-bottom drop-shadow-sm sm:w-16"
         />
       ) : (
         <CoverPlaceholder
           title={book.title}
-          className="h-[84px] w-14 shrink-0 rounded-[2px] sm:h-24 sm:w-16"
+          className="aspect-[5/8] w-14 shrink-0 rounded-[2px] sm:w-16"
         />
       )}
 

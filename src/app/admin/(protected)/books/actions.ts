@@ -15,7 +15,13 @@ import {
   sendPreorderFileApprovedEmail,
   sendPreorderListedEmail,
 } from "@/lib/email";
-import { BOOK_COVERS_BUCKET, classifyBookCoverPath } from "@/lib/book-storage-path";
+import { BOOK_COVERS_BUCKET, BOOK_MANUSCRIPTS_BUCKET, classifyBookCoverPath } from "@/lib/book-storage-path";
+import {
+  NO_FILE_TO_COUNT_MESSAGE,
+  PAGES_COUNTED_MESSAGE,
+  PAGES_NOT_COUNTED_MESSAGE,
+  recordManuscriptWords,
+} from "@/lib/page-estimate";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance } from "@/lib/maintenance-response";
 import { authorTakedownReasonLabel } from "@/lib/takedown-reasons";
@@ -598,4 +604,52 @@ export async function setPdEditionAsStaff(formData: FormData) {
   );
 
   redirect(withQuery(bookPath, "success", PD_EDITION_SAVED_MESSAGE));
+}
+
+// Upload notes D (Renato 11-07, Q2 a): "Count pages" for a file stored
+// before the page estimate existed (or one whose count failed on save).
+// Staff only (books.review); reads the book's CURRENT file with the
+// service key, counts its words and stores them for that file. Nothing
+// about the book itself changes. Never run from a public request.
+export async function countBookPagesAsStaff(bookId: string) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/admin/books");
+  }
+
+  await requireStaff("books.review");
+
+  if (!isUuid(bookId)) redirect("/admin/books");
+  const bookPath = `/admin/books/${bookId}`;
+
+  const admin = createAdminClient();
+  const { data: book, error } = await admin
+    .from("books")
+    .select("id, file_path")
+    .eq("id", bookId)
+    .maybeSingle<{ id: string; file_path: string | null }>();
+  if (error || !book) redirect(withQuery(bookPath, "error", PAGES_NOT_COUNTED_MESSAGE));
+  if (book.file_path === null) redirect(withQuery(bookPath, "error", NO_FILE_TO_COUNT_MESSAGE));
+
+  let bytes: Buffer | null = null;
+  try {
+    const { data, error: downloadError } = await admin.storage.from(BOOK_MANUSCRIPTS_BUCKET).download(book.file_path);
+    if (!downloadError && data) bytes = Buffer.from(await data.arrayBuffer());
+  } catch {
+    bytes = null;
+  }
+  if (bytes === null) {
+    console.error("countBookPagesAsStaff: current file not read", { bookId: book.id });
+    redirect(withQuery(bookPath, "error", PAGES_NOT_COUNTED_MESSAGE));
+  }
+
+  const result = await recordManuscriptWords(admin, {
+    bookId: book.id,
+    filePath: book.file_path,
+    bytes,
+    caller: "countBookPagesAsStaff",
+  });
+  if (result !== "recorded") redirect(withQuery(bookPath, "error", PAGES_NOT_COUNTED_MESSAGE));
+
+  revalidateAll([`/libra/${book.id}`, bookPath], "countBookPagesAsStaff");
+  redirect(withQuery(bookPath, "success", PAGES_COUNTED_MESSAGE));
 }

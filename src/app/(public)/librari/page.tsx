@@ -806,7 +806,7 @@ function FeaturedBook({
             <img
               src={coverUrl}
               alt=""
-              className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_16px_32px_rgba(0,0,0,0.4)]"
+              className="aspect-[5/8] w-full rounded-[3px] object-contain object-bottom drop-shadow-[0_16px_32px_rgba(0,0,0,0.4)]"
             />
           ) : (
             // On the green panel, a thin cream edge keeps the green
@@ -814,7 +814,7 @@ function FeaturedBook({
             <CoverPlaceholder
               title={book.title}
               authorName={authorName}
-              className="aspect-[2/3] w-full rounded-[3px] shadow-[0_16px_32px_rgba(0,0,0,0.4)] ring-1 ring-primary-foreground/40"
+              className="aspect-[5/8] w-full rounded-[3px] shadow-[0_16px_32px_rgba(0,0,0,0.4)] ring-1 ring-primary-foreground/40"
             />
           )}
         </Link>
@@ -982,12 +982,12 @@ function BundlesSection({
                 <div aria-hidden="true" className="relative h-[110px] w-24 shrink-0">
                   {(covers.length > 0 ? covers : [null]).map((url, i) => {
                     const src = coverUrlFor(supabase, url);
-                    const position = `absolute h-24 w-16 rounded-[2px] ${offsets[i]} ${
-                      i === Math.max(covers.length, 1) - 1 ? "shadow-[0_4px_10px_rgba(0,0,0,0.2)]" : ""
+                    const position = `absolute aspect-[5/8] w-16 rounded-[2px] ${offsets[i]} ${
+                      i === Math.max(covers.length, 1) - 1 ? "drop-shadow-[0_4px_10px_rgba(0,0,0,0.2)]" : ""
                     }`;
                     return src ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img key={i} src={src} alt="" loading="lazy" decoding="async" className={`${position} object-cover`} />
+                      <img key={i} src={src} alt="" loading="lazy" decoding="async" className={`${position} object-contain object-bottom`} />
                     ) : (
                       <div key={i} className={`${position} bg-border`} />
                     );

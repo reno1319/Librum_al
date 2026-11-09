@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 237 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 240 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -27,7 +27,8 @@
 --   (migration 20261104170000), plus BD15 P5b-3b's three
 --   book_pending_changes_version_seq rows, no privilege for any role
 --   (migration 20261105120000), plus BD16 P1's three
---   preorder_notify_requests rows (migration 20261106120000). A relation with no
+--   preorder_notify_requests rows (migration 20261106120000), plus Upload
+--   notes D's three book_file_words rows (migration 20261107140000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -156,6 +157,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r book_ai_disclosures | anon | -'),
 ('rel','r book_ai_disclosures | authenticated | -'),
 ('rel','r book_ai_disclosures | service_role | INSERT,SELECT,UPDATE'),
+('rel','r book_file_words | anon | -'),
+('rel','r book_file_words | authenticated | -'),
+('rel','r book_file_words | service_role | INSERT,SELECT,UPDATE'),
 ('rel','r book_pending_changes | anon | -'),
 ('rel','r book_pending_changes | authenticated | -'),
 ('rel','r book_pending_changes | service_role | SELECT'),
@@ -325,8 +329,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 237 then
-    raise exception 'FAIL: part1: the snapshot must hold 237 rows, holds %', v_expected;
+  if v_expected <> 240 then
+    raise exception 'FAIL: part1: the snapshot must hold 240 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

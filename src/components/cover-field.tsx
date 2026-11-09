@@ -72,7 +72,7 @@ const RECOMMENDED_COVER_HINT = "Përmasa e rekomanduar: 1600 × 2560 px (raport 
 const COVER_RATIO_MIN = 1.4;
 const COVER_RATIO_MAX = 1.8;
 const COVER_RATIO_WARNING =
-  "Kjo ballinë nuk e ka raportin 1 : 1,6, ndaj në disa vende mund të duket e prerë.";
+  "Kjo ballinë nuk e ka raportin 1 : 1,6, ndaj do të shfaqet e plotë, me hapësirë bosh përreth.";
 export function coverRatioIsOff(width: number, height: number): boolean {
   if (!(width > 0 && height > 0)) return false;
   const ratio = height / width;
@@ -367,10 +367,10 @@ export function CoverField({
             <img
               src={displayedPreview}
               alt=""
-              className="h-24 w-16 rounded-[2px] object-cover shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
+              className="aspect-[5/8] w-16 rounded-[2px] object-contain object-bottom drop-shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
             />
           ) : (
-            <div className="h-24 w-16 rounded-[2px] bg-border" />
+            <div className="aspect-[5/8] w-16 rounded-[2px] bg-border" />
           )}
         </>
       )}
@@ -397,7 +397,7 @@ export function CoverField({
         <img
           src={previewUrl}
           alt=""
-          className="aspect-[2/3] w-32 rounded-[3px] object-cover shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
+          className="aspect-[5/8] w-32 rounded-[3px] object-contain object-bottom drop-shadow-[0_6px_14px_rgba(30,58,50,0.18)]"
         />
       )}
 

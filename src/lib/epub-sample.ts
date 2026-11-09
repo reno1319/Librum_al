@@ -358,7 +358,16 @@ function parseSpineIdrefs(opfXml: string): string[] {
 
 const CONTENT_MEDIA_TYPES = new Set(["application/xhtml+xml", "text/html"]);
 
-export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult> {
+// Upload notes D: the spine walk shared by the sample (below) and the
+// page estimate (countEpubWords). Every spine content document, in spine
+// order, as sanitized chunks -- or the same "unavailable" reason the
+// sample has always returned. Moved here unchanged from
+// extractEpubSample; only the return shape is new.
+type SpineChunksResult =
+  | { ok: true; docChunks: { html: string; text: string }[][] }
+  | { ok: false; reason: EpubSampleUnavailableReason };
+
+async function readSpineChunks(bytes: Buffer): Promise<SpineChunksResult> {
   // LIBRUM 2.0 EPUB-VALIDATION-1B: this is the CRITICAL call site --
   // /api/books/[id]/sample is public and unauthenticated, so this
   // function's own decompression calls below run on every request for
@@ -376,18 +385,18 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
   // never a raw ZIP-parser error, never a 500.
   const preflight = preflightZipEntries(bytes, EPUB_ZIP_PREFLIGHT_LIMITS);
   if (!preflight.ok) {
-    return { available: false, reason: "invalid_zip" };
+    return { ok: false, reason: "invalid_zip" };
   }
 
   let zip: JSZip;
   try {
     zip = await JSZip.loadAsync(bytes);
   } catch {
-    return { available: false, reason: "invalid_zip" };
+    return { ok: false, reason: "invalid_zip" };
   }
 
   const containerFile = zip.file("META-INF/container.xml");
-  if (!containerFile) return { available: false, reason: "missing_container" };
+  if (!containerFile) return { ok: false, reason: "missing_container" };
 
   let containerXml: string;
   try {
@@ -395,13 +404,13 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
     // same as every other entry in this archive.
     containerXml = await containerFile.async("string");
   } catch {
-    return { available: false, reason: "missing_container" };
+    return { ok: false, reason: "missing_container" };
   }
 
   const rootfileMatch = containerXml.match(
     /<rootfile\b[^>]*\bfull-path\s*=\s*(["'])(.*?)\1/i,
   );
-  if (!rootfileMatch) return { available: false, reason: "missing_container" };
+  if (!rootfileMatch) return { ok: false, reason: "missing_container" };
 
   // Leading-slash stripped first, exactly matching
   // epub-validation.ts's own approved compatibility tolerance for this
@@ -411,10 +420,10 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
   // differently on purpose.
   const opfPathRaw = rootfileMatch[2].trim().replace(/^\/+/, "");
   const resolvedOpfPath = opfPathRaw ? resolveArchivePath("", opfPathRaw) : ({ safe: false } as const);
-  if (!resolvedOpfPath.safe) return { available: false, reason: "missing_opf" };
+  if (!resolvedOpfPath.safe) return { ok: false, reason: "missing_opf" };
 
   const opfFile = zip.file(resolvedOpfPath.path);
-  if (!opfFile) return { available: false, reason: "missing_opf" };
+  if (!opfFile) return { ok: false, reason: "missing_opf" };
   const opfPath = resolvedOpfPath.path;
 
   let opfXml: string;
@@ -422,14 +431,14 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
     // Safe to decompress fully -- bounded by the preflight above.
     opfXml = await opfFile.async("string");
   } catch {
-    return { available: false, reason: "missing_opf" };
+    return { ok: false, reason: "missing_opf" };
   }
 
   const manifest = parseManifest(opfXml);
-  if (manifest.size === 0) return { available: false, reason: "missing_manifest" };
+  if (manifest.size === 0) return { ok: false, reason: "missing_manifest" };
 
   const spineIdrefs = parseSpineIdrefs(opfXml);
-  if (spineIdrefs.length === 0) return { available: false, reason: "missing_spine" };
+  if (spineIdrefs.length === 0) return { ok: false, reason: "missing_spine" };
 
   const opfDir = posix.dirname(opfPath);
 
@@ -482,6 +491,14 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
     if (chunks.length > 0) docChunks.push(chunks);
   }
 
+  return { ok: true, docChunks };
+}
+
+export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult> {
+  const spine = await readSpineChunks(bytes);
+  if (!spine.ok) return { available: false, reason: spine.reason };
+  const { docChunks } = spine;
+
   const totalLength = docChunks.reduce(
     (sum, chunks) => sum + chunks.reduce((s, c) => s + c.text.length, 0),
     0,
@@ -508,6 +525,24 @@ export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult
   const approximatePercent = Math.min(100, Math.round((included / totalLength) * 100));
 
   return { available: true, sections, approximatePercent };
+}
+
+// Upload notes D: words in the book's readable text (the same spine
+// documents and sanitized text the sample reads), for the page estimate.
+// A word is a whitespace-separated run with at least one letter or digit.
+// null when the EPUB has no readable spine (the sample's own failures).
+export async function countEpubWords(bytes: Buffer): Promise<number | null> {
+  const spine = await readSpineChunks(bytes);
+  if (!spine.ok) return null;
+  let words = 0;
+  for (const chunks of spine.docChunks) {
+    for (const chunk of chunks) {
+      for (const token of chunk.text.split(/\s+/)) {
+        if (/[\p{L}\p{N}]/u.test(token)) words += 1;
+      }
+    }
+  }
+  return words;
 }
 
 // Exported for tests only -- lets the sanitizer/tokenizer be exercised

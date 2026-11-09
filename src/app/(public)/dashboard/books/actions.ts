@@ -20,6 +20,7 @@ import { LIBRUM_MADE_EBOOK_METADATA, readLibrumMadeMarker, syncCoverIntoLibrumEb
 import { withEbookCoverWarning } from "@/lib/ebook-cover-notice";
 import { readLibrumEbookCover, restampLibrumEpubMetadata } from "@/lib/epub-cover";
 import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
+import { recordManuscriptWords } from "@/lib/page-estimate";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
@@ -1030,6 +1031,21 @@ export async function saveBookContent(bookId: string, formData: FormData) {
     }
   }
 
+  // Upload notes D: the new file's words, for the page estimate (best
+  // effort, after the write is proven; keyed by this exact file, so a
+  // live book's waiting file has its count when Librum approves it).
+  const savedManuscript = uploadsBeforeWrite.find(
+    (upload) => upload.kind === "manuscript" && upload.path === newManuscriptPath,
+  );
+  if (savedManuscript) {
+    await recordManuscriptWords(catalogWriter, {
+      bookId: existing.id,
+      filePath: savedManuscript.path,
+      bytes: savedManuscript.bytes,
+      caller: "saveBookContent",
+    });
+  }
+
   // Superseded objects, only now that the write is proven (best effort).
   if (newManuscriptPath !== null) {
     await removeUnretainedManuscripts(catalogWriter, catalogWriter, {
@@ -1176,6 +1192,8 @@ async function restampLibrumEbookForSend({
     superseded: [book.file_path],
     caller,
   });
+  // Upload notes D: the rewritten file is a new key; count it too.
+  await recordManuscriptWords(catalogWriter, { bookId: book.id, filePath: newPath, bytes: restamped.bytes, caller });
   return "stamped";
 }
 
@@ -1202,6 +1220,7 @@ async function sendLiveBookChanges({
     id: string;
     status: string;
     title: string;
+    book_type: string | null;
     categories: string[] | null;
     file_path: string | null;
     cover_path: string | null;
@@ -1233,6 +1252,7 @@ async function sendLiveBookChanges({
   const ai = await readAiDisclosure(existing.id);
   const detailsMissing = missingDetails({
     title: existing.title,
+    bookType: existing.book_type,
     categories: existing.categories,
     description: working.description,
     rightsBasis,
@@ -1320,7 +1340,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
 
   const { data: existing, error: existingError } = await supabase
     .from("books")
-    .select("id, author_id, status, title, pen_name_id, price_all, file_path, cover_path, description, categories, original_author, is_adult")
+    .select("id, author_id, status, title, pen_name_id, price_all, file_path, cover_path, description, book_type, categories, original_author, is_adult")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .maybeSingle<{
@@ -1333,6 +1353,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
       file_path: string | null;
       cover_path: string | null;
       description: string | null;
+      book_type: string | null;
       categories: string[] | null;
       original_author: string | null;
       is_adult: boolean;
@@ -1509,6 +1530,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
   const ai = await readAiDisclosure(existing.id);
   const detailsMissing = missingDetails({
     title: existing.title,
+    bookType: existing.book_type,
     categories: existing.categories,
     description: existing.description,
     rightsBasis,

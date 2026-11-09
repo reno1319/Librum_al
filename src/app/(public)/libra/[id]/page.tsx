@@ -34,6 +34,8 @@ import { BookShelf } from "@/components/book-shelf";
 import { BookSampleReader } from "@/components/book-sample-reader";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
+import { BOOK_TYPE_LABEL, bookEyebrow, bookTypeOf } from "@/lib/book-types";
+import { PAGE_ESTIMATE_LABEL, pageEstimateText } from "@/lib/page-estimate";
 import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { formatTransactionAmount, provenanceFromStoredCurrency } from "@/lib/transaction-money";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
@@ -864,13 +866,13 @@ export default async function BookDetailPage({
               src={coverUrl}
               alt={`Ballina e librit ${book.title}`}
               fetchPriority="high"
-              className="aspect-[2/3] w-full rounded-[3px] object-cover shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
+              className="aspect-[5/8] w-full rounded-[3px] object-contain object-bottom drop-shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
             />
           ) : (
             <CoverPlaceholder
               title={book.title}
               authorName={bookByline}
-              className="aspect-[2/3] w-full rounded-[3px] shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
+              className="aspect-[5/8] w-full rounded-[3px] shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
             />
           )}
           {/* See resolveShowSample's own comment (src/lib/book-purchase.ts):
@@ -883,10 +885,11 @@ export default async function BookDetailPage({
         </div>
 
         <div className="min-w-0 flex-1">
-          {/* Upload notes 3a (Enkelejd 11-06): the genre only; the format
-              is "EPUB" in Formati below. */}
-          {book.genre && (
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">{book.genre}</p>
+          {/* Upload notes 3a (Enkelejd 11-06): the format is "EPUB" in
+              Formati below. Upload notes C: the book's type, then the
+              genre ("ROMAN · HORROR"); the genre only while it has none. */}
+          {bookEyebrow(book) && (
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">{bookEyebrow(book)}</p>
           )}
           <h1 className="mt-3 font-serif text-4xl leading-[1.08] font-normal text-primary sm:text-5xl">
             {book.title}
@@ -1239,10 +1242,24 @@ export default async function BookDetailPage({
                 <dt className={DETAIL_LABEL_CLASSES}>Formati</dt>
                 <dd className={DETAIL_VALUE_CLASSES}>EPUB</dd>
               </div>
+              {/* Upload notes D: words / 250, only once the file is counted. */}
+              {pageEstimateText(book.word_count) && (
+                <div>
+                  <dt className={DETAIL_LABEL_CLASSES}>{PAGE_ESTIMATE_LABEL}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{pageEstimateText(book.word_count)}</dd>
+                </div>
+              )}
               {book.language && (
                 <div>
                   <dt className={DETAIL_LABEL_CLASSES}>Gjuha</dt>
                   <dd className={DETAIL_VALUE_CLASSES}>{getLanguageLabel(book.language)}</dd>
+                </div>
+              )}
+              {/* Upload notes C: the book's type, before its genres. */}
+              {bookTypeOf(book) && (
+                <div>
+                  <dt className={DETAIL_LABEL_CLASSES}>{BOOK_TYPE_LABEL}</dt>
+                  <dd className={DETAIL_VALUE_CLASSES}>{bookTypeOf(book)}</dd>
                 </div>
               )}
               {/* BD15 P8 (Q3 a): every category, each a link to that

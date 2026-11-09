@@ -556,7 +556,7 @@ function PublishedWithLibrumSection({ books }: { books: Cover[] }) {
                   src={book.url}
                   alt=""
                   loading="lazy"
-                  className="aspect-[2/3] w-28 shrink-0 self-start rounded-[3px] object-cover shadow-[0_8px_16px_-8px_rgba(0,0,0,0.45)] transition-transform duration-150 group-hover/book:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover/book:translate-y-0 sm:w-32 xl:w-36"
+                  className="aspect-[5/8] w-28 shrink-0 self-start rounded-[3px] object-contain object-bottom drop-shadow-[0_6px_6px_rgba(0,0,0,0.3)] transition-transform duration-150 group-hover/book:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover/book:translate-y-0 sm:w-32 xl:w-36"
                 />
                 <div className="min-w-0">
                   {(book.genre || book.isAdult) && (

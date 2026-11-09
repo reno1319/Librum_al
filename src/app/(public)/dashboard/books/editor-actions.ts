@@ -231,6 +231,9 @@ async function saveLiveBookDetails(
     series_position: details.seriesId ? details.seriesPosition : null,
     edition_number: details.editionNumber,
     ...(details.isAdult === existing.is_adult ? { reading_age_min: details.readingAgeMin } : {}),
+    // Upload notes C (Renato 11-07, a): a live book's type changes at
+    // once, like its categories; nothing waits for review.
+    book_type: details.bookType,
     categories: details.categories.length > 0 ? details.categories : null,
     keywords: details.keywords.join(", "),
   };
@@ -239,10 +242,11 @@ async function saveLiveBookDetails(
   // stored values may be spelled differently from the form's); a save
   // that changes one is refused here, before anything is written.
   let skipDirect = false;
+  let pdFirstType: { book_type: string } | null = null;
   if (isPickedPdEdition(existing)) {
     const { data: stored, error: storedError } = await catalogWriter
       .from("books")
-      .select("subtitle, language, series_id, series_position, edition_number, reading_age_min, categories, keywords")
+      .select("subtitle, language, series_id, series_position, edition_number, reading_age_min, book_type, categories, keywords")
       .eq("id", existing.id)
       .eq("author_id", userId)
       .eq("status", existing.status)
@@ -251,12 +255,18 @@ async function saveLiveBookDetails(
     if (!stored) redirect(withQuery(here, "error", LIVE_NOT_LIVE_MESSAGE));
     if (!pdFrozenDetailsUnchanged(stored, direct)) redirect(withQuery(here, "error", PD_FROZEN_MESSAGE));
     skipDirect = true;
+    // Upload notes C: a picked edition with no type yet may choose one
+    // (LB497 allows the first choice); only the type is written then.
+    if ((stored.book_type ?? null) === null && details.bookType !== null) {
+      pdFirstType = { book_type: details.bookType };
+      skipDirect = false;
+    }
   }
   const { data, error } = skipDirect
     ? { data: [{ id: existing.id }], error: null }
     : await catalogWriter
         .from("books")
-        .update(direct)
+        .update(pdFirstType ?? direct)
         .eq("id", existing.id)
         .eq("author_id", userId)
         // BD16 P2: a live pre-order too, bound to its own status.
@@ -503,6 +513,7 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
     description: details.description,
     is_adult: details.isAdult,
     reading_age_min: details.readingAgeMin,
+    book_type: details.bookType,
     // An empty list is "none chosen yet" (the column's CHECK wants 1-3);
     // the database keeps genre = categories[1].
     categories: details.categories.length > 0 ? details.categories : null,

@@ -76,7 +76,7 @@ export function BookInReviewView({
       <div className="mt-4 flex gap-4">
         {sent.coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={sent.coverUrl} alt="" className="h-36 w-24 shrink-0 rounded-sm object-cover" />
+          <img src={sent.coverUrl} alt="" className="aspect-[5/8] w-24 shrink-0 rounded-sm object-contain object-bottom" />
         ) : null}
         <dl className="flex flex-col gap-2 text-sm">
           <div>
