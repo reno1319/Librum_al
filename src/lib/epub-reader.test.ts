@@ -124,6 +124,30 @@ describe("reader cleaner: layout", () => {
   });
 });
 
+// Audit F1: a tag still open at the end of a document kept its text.
+describe("reader cleaner: tags left open at the end", () => {
+  it("keeps the text of an unclosed <p>", () => {
+    expect(clean("<p>hello")).toBe("<p>hello</p>");
+    expect(clean("<p>a</p><p>b")).toBe("<p>a</p><p>b</p>");
+  });
+
+  it("closes nested unclosed tags innermost first", () => {
+    expect(clean('<section style="text-align:center"><p>a</p><p>b')).toBe('<div class="lb-c"><p>a</p><p>b</p></div>');
+    expect(clean("<section><p>x <em>y")).toBe("<p>x <em>y</em></p>");
+  });
+
+  it("an unclosed dropped tag still drops its content", () => {
+    expect(clean("<p>a</p><script>bad()")).toBe("<p>a</p>");
+    expect(clean("<p>a</p><svg><text>b")).toBe("<p>a</p>");
+    expect(clean("<p>a <script>bad()")).toBe("<p>a </p>");
+  });
+
+  it("text in an unclosed tag stays escaped", () => {
+    const out = clean("<p>hi <img src=x onerror=alert(1)//");
+    expect(out).toBe("<p>hi &lt;img src=x onerror=alert(1)//</p>");
+  });
+});
+
 describe("buildReaderContent: the sample cut", () => {
   const chapters = Array.from({ length: 10 }, (_, i) => ({
     id: `c${i}`,

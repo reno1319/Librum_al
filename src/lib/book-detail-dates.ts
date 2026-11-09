@@ -45,9 +45,30 @@ export function formatTimestampAsDate(timestamp: string): string {
 // LOCAL midnight instead, so the parse and the format below both use
 // the SAME timezone reference and can never disagree, regardless of
 // what timezone this code happens to run in.
+//
+// X21: built from fixed Albanian month names, NOT Intl. This runs in the
+// browser too (the pre-order date hint in BookPricingForm), and a browser
+// without Albanian locale data (Chrome) printed "November 21, 2026" and
+// mismatched the server's HTML. The output is byte-identical to Node's
+// toLocaleDateString("sq") with READER_DATE_OPTIONS for every valid day
+// (see the test that sweeps both against each other).
+const SQ_MONTHS = [
+  "janar",
+  "shkurt",
+  "mars",
+  "prill",
+  "maj",
+  "qershor",
+  "korrik",
+  "gusht",
+  "shtator",
+  "tetor",
+  "nëntor",
+  "dhjetor",
+] as const;
+
 export function formatDateOnly(dateOnly: string): string {
-  return new Date(`${dateOnly}T00:00:00Z`).toLocaleDateString(SQ_LOCALE, {
-    ...READER_DATE_OPTIONS,
-    timeZone: "UTC",
-  });
+  const day = new Date(`${dateOnly}T00:00:00Z`);
+  if (Number.isNaN(day.getTime())) return "Invalid Date";
+  return `${day.getUTCDate()} ${SQ_MONTHS[day.getUTCMonth()]} ${day.getUTCFullYear()}`;
 }
