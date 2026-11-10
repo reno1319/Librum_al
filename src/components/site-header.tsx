@@ -7,6 +7,7 @@ import { IconPerson } from "@/components/icons";
 import { NavLinks, type NavItem } from "@/components/nav-links";
 import { MobileNav } from "@/components/mobile-nav";
 import { accountFirstName } from "@/lib/account-first-name";
+import { HeaderSearchForm, HeaderShopLinks } from "@/components/header-bookstore-controls";
 
 // LAUNCH-1 P2-5: the render-state decision, extracted as a pure function
 // so it's directly unit-testable (src/components/site-header.test.ts)
@@ -29,6 +30,15 @@ import { accountFirstName } from "@/lib/account-first-name";
 // member any more, not merely an unused one.
 export type SiteHeaderNavState = {
   primaryLinks: NavItem[];
+  // P2 (design B, Renato option a): the cream row's right-hand links --
+  // every primary link except Libraria, which leads the row's left side
+  // (with the genre menu and Libra falas). The phone menu keeps the full
+  // primaryLinks list.
+  siteLinks: NavItem[];
+  // P2: the search box in the green bar and the cream row under it. Off
+  // during password recovery: /librari and every link in the row are
+  // dead ends there (RECOVERY_ALLOWED_PATHS, see the P2-5 note above).
+  showShopBar: boolean;
   // HEADER NAME (Renato 1a 2a 3a): the account's first name, shown
   // beside the person icon on every page and width; null when there is
   // no real name (see accountFirstName) or no ordinary session.
@@ -54,6 +64,8 @@ export function buildSiteHeaderNav(params: {
   if (recoveryActive) {
     return {
       primaryLinks: [],
+      siteLinks: [],
+      showShopBar: false,
       headerName: null,
       showAccountLink: false,
       showLogout: true,
@@ -95,6 +107,8 @@ export function buildSiteHeaderNav(params: {
 
   return {
     primaryLinks,
+    siteLinks: primaryLinks.filter((link) => link.href !== "/librari"),
+    showShopBar: true,
     headerName,
     showAccountLink: true,
     showLogout: !!user,
@@ -146,115 +160,129 @@ export async function SiteHeader() {
   });
 
   return (
-    <header className="relative bg-primary text-primary-foreground">
-      {/* FIX1 (X12): one row from 1024px up -- no wrapping at lg, and
-          tighter gaps there; the roomier gaps return at xl. */}
-      {/* HEADER NAME: one row at every width now (below lg it only ever
-          held the logo and the right-hand icons); on phones the name in
-          the right group shrinks first, never the logo. */}
-      <div className="page-container flex flex-nowrap items-center justify-between gap-x-4 py-3 sm:gap-x-8 lg:gap-x-4 xl:gap-x-8">
-        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-8 gap-y-2 lg:flex-nowrap lg:gap-x-4 xl:gap-x-8">
+    <header className="relative">
+      {/* P2 (design B): the green bar holds the logo, the search box and
+          the account. The menu links moved down to the cream row below
+          (Renato option a). From lg up it is one row; below lg the
+          search drops to a full-width second line of the bar (it is the
+          last item and takes the whole width), so the logo and the
+          right-hand icons keep the first line. */}
+      <div className="bg-primary text-primary-foreground">
+        <div className="page-container flex flex-wrap items-center justify-between gap-x-4 gap-y-3 py-3 lg:flex-nowrap lg:gap-x-6">
           <Link
             href="/"
-            className="focus-ring rounded-sm font-serif text-[1.75rem] font-bold text-primary-foreground"
+            className="focus-ring shrink-0 rounded-sm font-serif text-[1.75rem] font-bold text-primary-foreground"
           >
             Librum
           </Link>
 
-          {/* Wraps onto a second row rather than scrolling sideways when
-              the labels get longer. From lg to xl the Albanian labels of
-              a signed-in author (with "Paneli i autorit", "Dil" and the
-              greeting) ran into the right-hand group, so that range uses
-              slightly smaller text and gaps, and this group no longer
-              shrinks: the name in the greeting is shortened instead. */}
-          <nav aria-label="Kryesore" className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex lg:flex-nowrap lg:gap-x-3 lg:text-[0.9375rem] lg:whitespace-nowrap xl:gap-x-6 xl:text-base">
-            <NavLinks items={nav.primaryLinks} onDark />
-          </nav>
-        </div>
+          {nav.showShopBar && <HeaderSearchForm />}
 
-        <div className="flex min-w-0 items-center gap-3">
-          <nav aria-label="Llogaria" className="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap">
-            {nav.recoveryLabel && (
-              <span className="text-primary-foreground/80">{nav.recoveryLabel}</span>
-            )}
-            {/* LIBRUM 2.0 UI-3 final polish: logged-out desktop gets an
-                explicit "Log in" text link rather than relying solely on
-                the person icon below -- purely a presentational split by
-                breakpoint, so it's driven directly off `user` here rather
-                than adding a field to buildSiteHeaderNav()'s state. `user`
-                being falsy already rules out recovery (a recovery session
-                always has a real Supabase user), so no separate
-                recoveryActive check is needed.
-                REDESIGN STEP 2: "Log in" is an outline button and "Sign
-                up" (the label the mobile menu already uses for /signup) a
-                brass one -- account actions, so the header stays
-                navigation/account-only as UI-3 decided. */}
-            {!user && (
-              <>
-                <Link href={nav.accountHref} className={OUTLINE_ON_DARK_CLASSES}>
-                  Hyr
+          {/* Below lg this group takes the rest of the first line
+              (flex-1 from a zero basis), so it never wraps under the
+              logo: a long greeting shortens instead, as before. */}
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-3 lg:flex-none">
+            <nav aria-label="Llogaria" className="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap">
+              {nav.recoveryLabel && (
+                <span className="text-primary-foreground/80">{nav.recoveryLabel}</span>
+              )}
+              {/* LIBRUM 2.0 UI-3 final polish: logged-out desktop gets an
+                  explicit "Log in" text link rather than relying solely on
+                  the person icon below -- purely a presentational split by
+                  breakpoint, so it's driven directly off `user` here rather
+                  than adding a field to buildSiteHeaderNav()'s state. `user`
+                  being falsy already rules out recovery (a recovery session
+                  always has a real Supabase user), so no separate
+                  recoveryActive check is needed.
+                  REDESIGN STEP 2: "Log in" is an outline button and "Sign
+                  up" (the label the mobile menu already uses for /signup) a
+                  brass one -- account actions, so the header stays
+                  navigation/account-only as UI-3 decided. */}
+              {!user && (
+                <>
+                  <Link href={nav.accountHref} className={OUTLINE_ON_DARK_CLASSES}>
+                    Hyr
+                  </Link>
+                  {/* FIX1 (X2): Author chosen, as on Earnings. */}
+                  <Link href="/signup?role=author" className={BRASS_BUTTON_CLASSES}>
+                    Regjistrohu
+                  </Link>
+                </>
+              )}
+              {nav.showLogout && (
+                <form action={logout}>
+                  <button type="submit" className={QUIET_LINK_ON_DARK_CLASSES}>
+                    Dil
+                  </button>
+                </form>
+              )}
+            </nav>
+
+            {/* HEADER NAME (Renato 1a 2a 3a; r2 "Hello, " before it): the
+                greeting with the first name and the person
+                icon are one Account link, on every page and width. It
+                replaces FIX1's full name (1280px+ only). A long name ends in
+                an ellipsis at about 12 letters, and shrinks further rather
+                than wrap the bar on a narrow phone. The accessible name
+                starts with the visible text. */}
+            {nav.showAccountLink &&
+              (nav.headerName ? (
+                <Link
+                  href={nav.accountHref}
+                  aria-label={`Përshëndetje, ${nav.headerName}, ${nav.accountLabel}`}
+                  title={`Përshëndetje, ${nav.headerName}`}
+                  className="focus-ring flex min-h-11 min-w-0 items-center gap-2 rounded-sm px-1.5 text-base font-medium text-primary-foreground"
+                >
+                  {/* r2 (Renato 11:52Z): "Hello, " stays whole; only the name
+                      is shortened. */}
+                  <span className="flex min-w-0 items-baseline">
+                    <span className="shrink-0 whitespace-pre">Përshëndetje, </span>
+                    <span className="min-w-0 max-w-[12ch] truncate">{nav.headerName}</span>
+                  </span>
+                  <span aria-hidden="true" className="shrink-0">
+                    <IconPerson className="size-5" />
+                  </span>
                 </Link>
-                {/* FIX1 (X2): Author chosen, as on Earnings. */}
-                <Link href="/signup?role=author" className={BRASS_BUTTON_CLASSES}>
-                  Regjistrohu
+              ) : (
+                <Link
+                  href={nav.accountHref}
+                  aria-label={nav.accountLabel}
+                  className={`focus-ring flex size-11 shrink-0 items-center justify-center rounded-sm text-primary-foreground ${!user ? "lg:hidden" : ""}`}
+                >
+                  <span aria-hidden="true">
+                    <IconPerson className="size-5" />
+                  </span>
                 </Link>
-              </>
-            )}
-            {nav.showLogout && (
-              <form action={logout}>
-                <button type="submit" className={QUIET_LINK_ON_DARK_CLASSES}>
-                  Dil
-                </button>
-              </form>
-            )}
-          </nav>
+              ))}
 
-          {/* HEADER NAME (Renato 1a 2a 3a; r2 "Hello, " before it): the
-              greeting with the first name and the person
-              icon are one Account link, on every page and width. It
-              replaces FIX1's full name (1280px+ only). A long name ends in
-              an ellipsis at about 12 letters, and shrinks further rather
-              than wrap the bar on a narrow phone. The accessible name
-              starts with the visible text. */}
-          {nav.showAccountLink &&
-            (nav.headerName ? (
-              <Link
-                href={nav.accountHref}
-                aria-label={`Përshëndetje, ${nav.headerName}, ${nav.accountLabel}`}
-                title={`Përshëndetje, ${nav.headerName}`}
-                className="focus-ring flex min-h-11 min-w-0 items-center gap-2 rounded-sm px-1.5 text-base font-medium text-primary-foreground"
-              >
-                {/* r2 (Renato 11:52Z): "Hello, " stays whole; only the name
-                    is shortened. */}
-                <span className="flex min-w-0 items-baseline">
-                  <span className="shrink-0 whitespace-pre">Përshëndetje, </span>
-                  <span className="min-w-0 max-w-[12ch] truncate">{nav.headerName}</span>
-                </span>
-                <span aria-hidden="true" className="shrink-0">
-                  <IconPerson className="size-5" />
-                </span>
-              </Link>
-            ) : (
-              <Link
-                href={nav.accountHref}
-                aria-label={nav.accountLabel}
-                className={`focus-ring flex size-11 shrink-0 items-center justify-center rounded-sm text-primary-foreground ${!user ? "lg:hidden" : ""}`}
-              >
-                <span aria-hidden="true">
-                  <IconPerson className="size-5" />
-                </span>
-              </Link>
-            ))}
-
-          <MobileNav
-            items={nav.primaryLinks}
-            loggedIn={!!user}
-            accountHref={nav.accountHref}
-            logoutAction={logout}
-            recoveryActive={recoveryActive}
-          />
+            <MobileNav
+              items={nav.primaryLinks}
+              loggedIn={!!user}
+              accountHref={nav.accountHref}
+              logoutAction={logout}
+              recoveryActive={recoveryActive}
+            />
+          </div>
         </div>
       </div>
+
+      {/* P2 (Renato option a): the cream row. Left: Libraria, the genre
+          menu (all 18) and Libra falas, at every width. Right, from lg
+          up: the site links that used to sit in the green bar (below lg
+          they are in the menu). No overflow clipping here, so the genre
+          list can open over the page. */}
+      {nav.showShopBar && (
+        <div className="border-b border-border bg-background text-[0.9375rem]">
+          <div className="page-container flex items-center justify-between gap-x-6 py-2">
+            <nav aria-label="Libraria" className="flex min-w-0 items-center gap-x-5">
+              <HeaderShopLinks />
+            </nav>
+            <nav aria-label="Kryesore" className="hidden items-center gap-x-5 whitespace-nowrap lg:flex xl:gap-x-6">
+              <NavLinks items={nav.siteLinks} />
+            </nav>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

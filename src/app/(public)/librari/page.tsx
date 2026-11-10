@@ -1,19 +1,16 @@
 import Link from "next/link";
 import { AdultTag } from "@/components/adult-tag";
-import { bundleIsAdult, descriptionSnippet } from "@/lib/book-reader-details";
+import { bundleIsAdult } from "@/lib/book-reader-details";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { GENRES } from "@/lib/genres";
 import { formatCatalogPriceLabel, resolveCatalogPriceState } from "@/lib/catalog-price";
 import {
   parseBookstoreQuery,
   buildBookstoreHref,
-  toggleGenreHref,
   BOOKSTORE_SORT_OPTIONS,
   type BookstoreQuery,
 } from "@/lib/bookstore";
 import { BookCard } from "@/components/book-card";
-import { BookSampleReader } from "@/components/book-sample-reader";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
 import { resolveBookByline, resolveOriginalAuthor } from "@/lib/book-byline";
@@ -26,7 +23,8 @@ import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
-import { OrnateShelf, ORNATE_SHELF_SIZE, type OrnateShelfBook } from "@/components/ornate-shelf";
+import { AutoSubmitSelect } from "@/components/auto-submit-select";
+import { SITE_SEARCH_FORM_ID } from "@/lib/header-bookstore";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
 export const metadata: Metadata = {
@@ -404,41 +402,37 @@ export default async function BookstorePage({
     isFiltered ? Promise.resolve(null) : getLibrumChoiceBook(),
   ]);
 
-  // REDESIGN STEP 3: the unfiltered view leads with the newest book
-  // (D1), then free books, then the full grid. A filtered view is the
-  // grid alone (B4). FIX1 (X6): the second "New on Librum" shelf that
-  // followed the featured book is gone (Renato 17:11Z, 5a); the
-  // featured block keeps its label.
-  // F5 (C2): same gate as before, so a pick never shows over a failed
-  // load; inside it, the priced pick as "Librum's choice", else the
-  // newest book as "New on Librum".
+  // REDESIGN STEP 3 / F5 (C2): the feature only on the unfiltered view
+  // and never over a failed load; inside it, the priced pick as
+  // "Librum's choice", else the newest book as "New on Librum".
   const showShelves = !isFiltered && !error && books.length > 0;
   const featured = showShelves ? resolveBookstoreFeature<BookWithAuthor>(librumChoice, books[0]) : null;
-  // BOOKSTORE ORNATE SHELF (Renato 10-25, header B): the five newest
-  // books as ornate spines beside the heading -- the grid's own first
-  // five (unfiltered, so newest first), no extra query. Same gate as the
-  // shelves below (Renato 10-25: hidden once a reader searches, filters
-  // or sorts).
-  const ornateBooks: OrnateShelfBook[] = showShelves
-    ? books.slice(0, ORNATE_SHELF_SIZE).map((book) => ({
-        id: book.id,
-        title: book.title,
-        author: resolveBookByline(book),
-      }))
-    : [];
 
+  // P2 (design B): the big heading, the ornate shelf, the page's own
+  // search box and genre button are gone -- search and genres now live
+  // in the site header on every page. The page is white, opens with a
+  // slim feature strip, then "Libraria · N libra" with Sort and Price,
+  // then the grid. The free shelf follows the grid (the header's own
+  // "Libra falas" link leads there too), then bundles and the band.
   return (
-    <main className="flex-1 bg-background">
-      <div className="page-container pt-5 pb-10 sm:pt-8 md:pb-12">
-        <BookstoreToolbar query={{ ...rawQuery, genre }} isFiltered={isFiltered} shelfBooks={ornateBooks} />
-
+    <main className="flex-1 bg-surface">
+      <div className="page-container pt-5 pb-10 sm:pt-6 md:pb-12">
         {featured && (
-          <FeaturedBook
+          <FeaturedStrip
             book={featured.book}
             label={featured.label}
             coverUrl={coverUrlFor(supabase, featured.book.cover_path)}
           />
         )}
+
+        <BookstoreHeading
+          query={{ ...rawQuery, genre }}
+          isFiltered={isFiltered}
+          countLine={error || books.length === 0 ? null : countLineFor(totalMatched)}
+          hasFeature={!!featured}
+        />
+
+        <BookGrid supabase={supabase} books={books} error={error} isFiltered={isFiltered} />
 
         {freeBooks.length > 0 && (
           <CoverShelf
@@ -449,14 +443,6 @@ export default async function BookstorePage({
           />
         )}
 
-        <BookGrid
-          supabase={supabase}
-          books={books}
-          error={error}
-          totalMatched={totalMatched}
-          isFiltered={isFiltered}
-        />
-
         {!isFiltered && bundles.length > 0 && <BundlesSection bundles={bundles} supabase={supabase} />}
 
         {!isFiltered && <AuthorBand signedIn={signedIn} />}
@@ -465,240 +451,169 @@ export default async function BookstorePage({
   );
 }
 
-// REDESIGN STEP 3 (Renato D2, "Search sample 2"): the page heading on the
-// left with the search box beside it, then one ruled row holding a
-// genre dropdown (r3, Renato: one button that opens the genres) and,
-// on the right, Sort and the price range. The sort select stays a field of the search form (the `form` attribute)
-// so it is submitted with Search exactly as before.
-// BOOKSTORE ORNATE SHELF (header B): the heading, line and search box
-// stack on the left; the ornate shelf stands on the right at 70% of its
-// full size, from 768px up only (Renato 10-25: hidden on phones and
-// small tablets, so the search box stays near the top).
-function BookstoreToolbar({
+// The grid's count: every match when it fits, else the visible cap.
+function countLineFor(totalMatched: number): string {
+  return totalMatched <= SEARCH_RESULT_LIMIT
+    ? `${totalMatched} ${totalMatched === 1 ? "libër" : "libra"}`
+    : `Po shfaqen ${SEARCH_RESULT_LIMIT} librat e parë`;
+}
+
+// P2 (design B): "Libraria · <genre> · “<words>” · N libra" on the left;
+// Sort and Price on the right (stacked full-width under 640px). Sort is
+// its own small GET form now (the search box moved to the header): it
+// keeps the current words, genre and price and sends itself on change,
+// with a button only when JavaScript is off.
+function BookstoreHeading({
   query,
   isFiltered,
-  shelfBooks,
+  countLine,
+  hasFeature,
 }: {
   query: BookstoreQuery;
   isFiltered: boolean;
-  shelfBooks: OrnateShelfBook[];
+  countLine: string | null;
+  hasFeature: boolean;
 }) {
   const { q, genre, sort, minPrice, maxPrice } = query;
+  const words = q?.trim();
+  const details = [genre, words ? `“${words}”` : null, countLine].filter(Boolean);
 
   return (
-    <div>
-      <div className="flex items-end justify-between gap-x-12">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
-            Libraria Librum
-          </p>
-          <h1 className="mt-2 font-serif text-4xl font-normal leading-tight text-primary sm:text-[2.5rem]">
-            Zbuloni libra të pavarur.
-          </h1>
-          <p className="mt-2 text-muted">
-            Libra të botuar drejtpërdrejt nga autorë që shkruajnë shqip.
-          </p>
+    <div
+      className={`${hasFeature ? "mt-6" : "mt-1"} flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5 border-b border-border pb-3`}
+    >
+      <h1 className="min-w-0 text-xl font-semibold text-foreground">
+        Libraria
+        {details.map((part) => (
+          <span key={part} className="text-sm font-normal text-muted">
+            {" · "}
+            {part}
+          </span>
+        ))}
+      </h1>
 
-          <form
-            id="bookstore-search"
-            action="/librari"
-            method="get"
-            role="search"
-            className="mt-6 flex w-full min-w-0 sm:max-w-[35rem]"
-          >
-            <label htmlFor="bookstore-q" className="sr-only">
-              Kërkoni libra ose autorë
-            </label>
-            <input
-              id="bookstore-q"
-              type="search"
-              name="q"
-              defaultValue={q ?? ""}
-              placeholder="Kërkoni libra ose autorë"
-              className="focus-ring min-w-0 flex-1 rounded-l-[3px] border border-r-0 border-[#8c8472] bg-surface px-4 py-3 text-base"
-            />
+      {/* The header's search box is the one search on the site. These
+          fields belong to it (form="site-search"), so a new search typed
+          here keeps the current genre, sort and price, as the old
+          page-level search form did. The words are not carried: a new
+          search replaces them. */}
+      {genre && <input type="hidden" name="genre" value={genre} form={SITE_SEARCH_FORM_ID} />}
+      {sort && <input type="hidden" name="sort" value={sort} form={SITE_SEARCH_FORM_ID} />}
+      {minPrice && <input type="hidden" name="minPrice" value={minPrice} form={SITE_SEARCH_FORM_ID} />}
+      {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} form={SITE_SEARCH_FORM_ID} />}
 
-            {/* A plain GET form only sends its own named fields -- these
-                preserve the current genre/price selections so submitting a
-                new search term (or changing sort) doesn't silently discard
-                them. */}
-            {genre && <input type="hidden" name="genre" value={genre} />}
-            {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
-            {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
-
-            <button
-              type="submit"
-              className="focus-ring shrink-0 rounded-r-[3px] bg-primary px-5 text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
-            >
-              Kërkoni
-            </button>
-          </form>
-        </div>
-
-        {shelfBooks.length > 0 && (
-          <div className="hidden shrink-0 md:block [zoom:0.7]">
-            <OrnateShelf books={shelfBooks} label="Librat më të rinj" />
-          </div>
-        )}
-      </div>
-
-      {/* V1 (V8): genre, sort and price range are one control look --
-          44px tall, the control border, 3px corners, the same type and
-          the same down arrow. Below 640px the three stack as equal,
-          full-width controls instead of a ragged wrapped row. */}
-      <div className="mt-6 grid grid-cols-1 gap-2 border-y border-border py-2.5 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-6 sm:gap-y-3">
-        {/* REDESIGN STEP 3 r3 (Renato 14:21Z: "one button and when you
-            click it, it opens the genres"): the button names the current
-            genre, or "All genres"; the list opens under it. BD15
-            follow-up: picking a genre closes the list. */}
-        <DismissableDetails className="group relative text-sm" closeOnLinkClick>
-          <summary className={DROPDOWN_SUMMARY_CLASSES}>
-            {genre ?? "Të gjitha zhanret"}
-            <ChevronIcon />
-          </summary>
-          <nav
-            aria-label="Zhanret"
-            className="absolute left-0 z-20 mt-2 w-[min(26rem,calc(100vw-2rem))] rounded-[3px] border border-border bg-surface p-2 shadow-md"
-          >
-            <ul className="grid gap-0.5 sm:grid-cols-2">
-              <li>
-                <GenreLink
-                  label="Të gjitha zhanret"
-                  href={buildBookstoreHref(query, { genre: undefined })}
-                  active={!genre}
-                />
-              </li>
-              {GENRES.map((g) => (
-                <li key={g}>
-                  <GenreLink label={g} href={toggleGenreHref(query, g)} active={genre === g} />
-                </li>
-              ))}
-            </ul>
-          </nav>
-        </DismissableDetails>
-
-        <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2.5">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+        <form action="/librari" method="get" className="contents">
+          {q && <input type="hidden" name="q" value={q} />}
+          {genre && <input type="hidden" name="genre" value={genre} />}
+          {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
+          {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
           {/* Still a native select: the box around it (with "Sort by")
-              is drawn to match the two dropdown buttons beside it. */}
+              is drawn to match the Price button beside it. */}
           <label
             htmlFor="bookstore-sort"
             className={`${FILTER_CONTROL_CLASSES} has-[select:focus-visible]:shadow-[var(--focus-ring)]`}
           >
-            <span className="font-normal text-muted">Renditni sipas</span>
+            {/* On phones the label is for screen readers only, so Sort and
+                Price fit on one line. */}
+            <span className="sr-only font-normal text-muted sm:not-sr-only">Renditni sipas</span>
             <span className="relative flex flex-1 items-center">
-              <select
+              <AutoSubmitSelect
                 id="bookstore-sort"
                 name="sort"
-                form="bookstore-search"
                 defaultValue={sort ?? ""}
-                className="w-full cursor-pointer appearance-none bg-transparent py-2 pr-5 font-semibold text-foreground outline-none"
+                className="w-full cursor-pointer appearance-none bg-transparent pr-5 font-semibold text-foreground outline-none"
               >
                 {BOOKSTORE_SORT_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
                 ))}
-              </select>
+              </AutoSubmitSelect>
               <span className="pointer-events-none absolute right-0 flex">
                 <ChevronIcon />
               </span>
             </span>
           </label>
+          <noscript>
+            <button type="submit" className={buttonClasses("outline", "sm", "rounded-[8px]")}>
+              Renditni
+            </button>
+          </noscript>
+        </form>
 
-          <DismissableDetails className="group relative text-sm">
-            <summary className={DROPDOWN_SUMMARY_CLASSES}>
-              Çmimi (lekë)
-              <ChevronIcon />
-            </summary>
-            <form
-              action="/librari"
-              method="get"
-              className="absolute left-0 z-20 mt-2 flex w-max items-end gap-3 rounded-[3px] border border-border bg-surface p-3 shadow-md sm:right-0 sm:left-auto"
-            >
-              {q && <input type="hidden" name="q" value={q} />}
-              {genre && <input type="hidden" name="genre" value={genre} />}
-              {sort && <input type="hidden" name="sort" value={sort} />}
+        {/* P2 r2: on phones the price box spans the page, 16px from each
+            edge (Sort and Price now share one line, so a box hung under
+            the button could run off the screen); from 640px up it hangs
+            under the button, right-aligned. */}
+        <DismissableDetails className="group text-sm sm:relative">
+          <summary className={DROPDOWN_SUMMARY_CLASSES}>
+            Çmimi (lekë)
+            <ChevronIcon />
+          </summary>
+          <form
+            action="/librari"
+            method="get"
+            className="absolute inset-x-4 z-20 mt-2 flex items-end gap-3 rounded-[8px] border border-border bg-surface p-3 shadow-md sm:inset-x-auto sm:right-0 sm:w-max"
+          >
+            {q && <input type="hidden" name="q" value={q} />}
+            {genre && <input type="hidden" name="genre" value={genre} />}
+            {sort && <input type="hidden" name="sort" value={sort} />}
 
-              <div>
-                <label htmlFor="bookstore-min-price" className="block text-xs text-muted">
-                  Nga
-                </label>
-                <input
-                  id="bookstore-min-price"
-                  type="number"
-                  name="minPrice"
-                  defaultValue={minPrice ?? ""}
-                  placeholder="0"
-                  min="0"
-                  step="1"
-                  className="focus-ring w-24 rounded-[3px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm"
-                />
-              </div>
-              <div>
-                <label htmlFor="bookstore-max-price" className="block text-xs text-muted">
-                  Deri
-                </label>
-                <input
-                  id="bookstore-max-price"
-                  type="number"
-                  name="maxPrice"
-                  defaultValue={maxPrice ?? ""}
-                  placeholder="Pa kufi"
-                  min="0"
-                  step="1"
-                  className="focus-ring w-24 rounded-[3px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm"
-                />
-              </div>
-              <button type="submit" className={buttonClasses("outline", "sm", "rounded-[3px]")}>
-                Zbatoni
-              </button>
-            </form>
-          </DismissableDetails>
+            <div className="min-w-0 flex-1 sm:flex-none">
+              <label htmlFor="bookstore-min-price" className="block text-xs text-muted">
+                Nga
+              </label>
+              <input
+                id="bookstore-min-price"
+                type="number"
+                name="minPrice"
+                defaultValue={minPrice ?? ""}
+                placeholder="0"
+                min="0"
+                step="1"
+                className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm sm:w-24"
+              />
+            </div>
+            <div className="min-w-0 flex-1 sm:flex-none">
+              <label htmlFor="bookstore-max-price" className="block text-xs text-muted">
+                Deri
+              </label>
+              <input
+                id="bookstore-max-price"
+                type="number"
+                name="maxPrice"
+                defaultValue={maxPrice ?? ""}
+                placeholder="Pa kufi"
+                min="0"
+                step="1"
+                className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm sm:w-24"
+              />
+            </div>
+            <button type="submit" className={buttonClasses("outline", "sm", "rounded-[8px]")}>
+              Zbatoni
+            </button>
+          </form>
+        </DismissableDetails>
 
-          {isFiltered && (
-            <Link href="/librari" className={`${TEXT_LINK_CLASSES} ml-1 justify-self-start`}>
-              Hiqni filtrat
-            </Link>
-          )}
-        </div>
+        {isFiltered && (
+          <Link href="/librari" className={`${TEXT_LINK_CLASSES} ml-1 justify-self-start`}>
+            Hiqni filtrat
+          </Link>
+        )}
       </div>
     </div>
   );
 }
 
-// One genre in the dropdown list. The current genre is bold green with
-// a brass bar at its left and carries aria-current; brass is a rule
-// here, never text colour.
-function GenreLink({
-  label,
-  href,
-  active,
-}: {
-  label: string;
-  href: string;
-  active: boolean;
-}) {
-  return (
-    <Link
-      href={href}
-      aria-current={active ? "true" : undefined}
-      className={`focus-ring block rounded-[2px] border-l-[3px] px-3 py-2 text-[0.9375rem] transition-colors ${
-        active
-          ? "border-accent bg-surface-hover font-bold text-primary"
-          : "border-transparent font-medium text-foreground hover:bg-surface-hover hover:text-primary"
-      }`}
-    >
-      {label}
-    </Link>
-  );
-}
-
-// V1 (V8): the one look shared by the genre and price buttons and the
-// box around the Sort select. iPhone step (I1b): 16px on phones, so the
-// row stays matched with the 16px sort select (globals.css), 14px from
-// 640px up.
+// V1 (V8): the one look shared by the price button and the box around
+// the Sort select. iPhone step (I1b): 16px on phones, so the row stays
+// matched with the 16px sort select (globals.css), 14px from 640px up.
+// P2 r2 (Renato 13:43Z: "too big and squared"): slim rounded pills,
+// 40px tall on phones and 34px from 640px up; the control border keeps
+// its 3:1 contrast.
 const FILTER_CONTROL_CLASSES =
-  "flex min-h-11 cursor-pointer items-center justify-between gap-1.5 rounded-control border border-control bg-surface px-3 text-base font-semibold text-foreground sm:text-sm";
+  "flex h-10 cursor-pointer items-center justify-between gap-1.5 rounded-full border border-control bg-surface px-3.5 text-base font-semibold text-foreground sm:h-[34px] sm:text-sm";
 const DROPDOWN_SUMMARY_CLASSES = `focus-ring ${FILTER_CONTROL_CLASSES} list-none select-none [&::-webkit-details-marker]:hidden`;
 
 function ChevronIcon() {
@@ -713,11 +628,12 @@ function ChevronIcon() {
   );
 }
 
-// REDESIGN STEP 3 (B1): a white card with the text on the left and a
-// green panel holding the large cover on the right (cover first on
-// phones). The block links to the book's own page, which owns the
-// purchase; "Read sample" is the same sample reader the book page uses.
-function FeaturedBook({
+// P2 (design B): the feature is one slim strip -- small cover, label,
+// title, "nga <author> · <genre>", the price and one "Shikoni librin"
+// pill to the book's own page, which owns buying and the sample reader.
+// Same byline rule as before: an original author has no Librum page, so
+// it is plain text; the pen name keeps its link.
+function FeaturedStrip({
   book,
   label,
   coverUrl,
@@ -727,37 +643,48 @@ function FeaturedBook({
   coverUrl: string | null;
 }) {
   const authorName = resolveBookByline(book);
-  const priceState = resolveCatalogPriceState(book.price_all);
   const priceLabel = formatCatalogPriceLabel(book.price_all);
+  const isFree = resolveCatalogPriceState(book.price_all) === "free";
 
   return (
     <section
       aria-labelledby="featured-book-title"
-      className="mt-8 flex flex-col-reverse overflow-hidden rounded-[4px] border border-border bg-surface md:flex-row"
+      className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[12px] border border-border bg-[#fbf9f4] p-3 sm:gap-x-5 sm:px-5 sm:py-4"
     >
-      <div className="flex min-w-0 flex-[1_1_24rem] flex-col justify-center gap-4 p-6 sm:p-10">
-        <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">
-          {label}
-        </p>
-        <h2
-          id="featured-book-title"
-         
-          className="font-serif text-3xl font-normal leading-tight text-primary sm:text-[2.5rem]"
-        >
+      <Link
+        href={`/libra/${book.id}`}
+        aria-hidden="true"
+        tabIndex={-1}
+        className="block w-14 shrink-0 sm:w-[76px]"
+      >
+        {coverUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={coverUrl}
+            alt=""
+            className="aspect-[5/8] w-full rounded-[2px] object-contain object-bottom drop-shadow-[0_2px_6px_rgba(0,0,0,0.18)]"
+          />
+        ) : (
+          <CoverPlaceholder
+            title={book.title}
+            authorName={authorName}
+            className="aspect-[5/8] w-full rounded-[2px] shadow-[0_2px_6px_rgba(0,0,0,0.18)]"
+          />
+        )}
+      </Link>
+
+      <div className="min-w-0 flex-[1_1_11rem]">
+        <p className="text-[0.8125rem] font-semibold text-[#806510]">{label}</p>
+        <h2 id="featured-book-title" className="mt-0.5 font-serif text-lg leading-snug text-primary sm:mt-1 sm:text-[1.375rem]">
           <Link href={`/libra/${book.id}`} className="focus-ring rounded-sm hover:underline">
             {book.title}
           </Link>
         </h2>
-        <p className="text-muted">
-          {/* BD3 patch 4: an original author has no Librum page, so it
-              is plain text; the pen name keeps its link. */}
+        <p className="mt-0.5 text-sm text-muted">
           {authorName && book.pen && !resolveOriginalAuthor(book) && (
             <>
               nga{" "}
-              <Link
-                href={authorPagePath(book.pen.id)}
-                className="focus-ring rounded-sm hover:underline"
-              >
+              <Link href={authorPagePath(book.pen.id)} className="focus-ring rounded-sm hover:underline">
                 {authorName}
               </Link>
             </>
@@ -765,6 +692,8 @@ function FeaturedBook({
           {authorName && resolveOriginalAuthor(book) && <>nga {authorName}</>}
           {authorName && book.genre && " · "}
           {book.genre}
+          {(authorName || book.genre) && " · "}
+          <span className={`font-semibold ${isFree ? "text-[#2f6b4f]" : "text-foreground"}`}>{priceLabel}</span>
           {book.is_adult && (
             <>
               {" "}
@@ -772,65 +701,17 @@ function FeaturedBook({
             </>
           )}
         </p>
-        {/* BD15 P8: the plain text of the rich description. */}
-        {descriptionSnippet(book.description) && (
-          <p className="line-clamp-3 max-w-xl leading-relaxed text-muted">
-            {descriptionSnippet(book.description)}
-          </p>
-        )}
-        <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-3">
-          {priceState === "free" ? (
-            <Link href={`/libra/${book.id}`} className={FEATURE_CTA_CLASSES}>
-              Merreni e-librin — Falas
-            </Link>
-          ) : (
-            // Renato (r2, 14:09Z "1. b"): the mockup's Buy button, linking
-            // to the book page, which owns the purchase -- shown even while
-            // paid checkout is closed there.
-            <Link href={`/libra/${book.id}`} className={FEATURE_CTA_CLASSES}>
-              Blini · {priceLabel}
-            </Link>
-          )}
-          <BookSampleReader
-            bookId={book.id}
-            bookTitle={book.title}
-            variant="text"
-            coverUrl={coverUrl}
-            endLink={{ label: "Shihni librin", href: `/libra/${book.id}` }}
-          />
-        </div>
       </div>
 
-      <div className="flex flex-[1_1_20rem] items-center justify-center bg-primary p-8 sm:p-10">
-        <Link
-          href={`/libra/${book.id}`}
-          aria-label={book.title}
-          className="focus-ring block w-36 rounded-[3px] sm:w-[12.5rem]"
-        >
-          {coverUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={coverUrl}
-              alt=""
-              className="aspect-[5/8] w-full rounded-[3px] object-contain object-bottom drop-shadow-[0_16px_32px_rgba(0,0,0,0.4)]"
-            />
-          ) : (
-            // On the green panel, a thin cream edge keeps the green
-            // placeholder from disappearing into it.
-            <CoverPlaceholder
-              title={book.title}
-              authorName={authorName}
-              className="aspect-[5/8] w-full rounded-[3px] shadow-[0_16px_32px_rgba(0,0,0,0.4)] ring-1 ring-primary-foreground/40"
-            />
-          )}
-        </Link>
-      </div>
+      <Link href={`/libra/${book.id}`} className={FEATURE_CTA_CLASSES}>
+        Shikoni librin
+      </Link>
     </section>
   );
 }
 
 const FEATURE_CTA_CLASSES =
-  "focus-ring inline-flex items-center justify-center rounded-[3px] bg-primary px-6 py-3.5 font-semibold text-primary-foreground transition-colors hover:bg-primary-hover";
+  "focus-ring inline-flex shrink-0 items-center justify-center rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-colors hover:bg-primary-hover hover:text-primary-foreground";
 
 // REDESIGN STEP 3 (B2): a headed shelf of cover cards with "See all".
 // One row that scrolls sideways on phones; a grid from the small
@@ -869,17 +750,16 @@ function CoverShelf({
   );
 }
 
+// The grid alone: its count now sits in BookstoreHeading above.
 function BookGrid({
   supabase,
   books,
   error,
-  totalMatched,
   isFiltered,
 }: {
   supabase: SupabaseClient;
   books: BookWithAuthor[];
   error: boolean;
-  totalMatched: number;
   isFiltered: boolean;
 }) {
   if (error) {
@@ -917,25 +797,9 @@ function BookGrid({
     );
   }
 
-  const countLine =
-    totalMatched <= SEARCH_RESULT_LIMIT
-      ? `${totalMatched} ${totalMatched === 1 ? "libër" : "libra"}`
-      : `Po shfaqen ${SEARCH_RESULT_LIMIT} librat e parë`;
-
-  // REDESIGN STEP 3 (Renato D3, "List sample 1"): on the unfiltered view
-  // this is the "All books" grid under the shelves; a filtered view
-  // shows the same grid under its result count only.
   return (
-    <section id="all-books" className={isFiltered ? "mt-8" : "mt-14 scroll-mt-6"}>
-      <div
-        className={`flex flex-wrap items-baseline gap-3 border-b border-border pb-3 ${
-          isFiltered ? "" : "justify-between"
-        }`}
-      >
-        {!isFiltered && <h2 className={SECTION_HEADING}>Të gjithë librat</h2>}
-        <p className="text-sm text-muted">{countLine}</p>
-      </div>
-      <ul className="mt-6 grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+    <section id="all-books" aria-label="Të gjithë librat" className="mt-6 scroll-mt-6">
+      <ul className="grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {books.map((book) => (
           <li key={book.id}>
             <BookCard
