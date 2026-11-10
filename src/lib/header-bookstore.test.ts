@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
-import { FREE_BOOKS_HREF, SITE_SEARCH_FORM_ID, headerGenreHref } from "./header-bookstore";
+import { FREE_BOOKS_HREF, SITE_SEARCH_FORM_ID, headerGenreHref, usesShopHeader } from "./header-bookstore";
 import { HeaderSearchForm, HeaderShopLinksView } from "@/components/header-bookstore-controls";
 import { GENRES } from "./genres";
 
 // P2 (design B, Renato option a): the header's search box and the cream
-// row's Libraria links, on every public page.
+// row's Libraria links (P2b: only on Libraria and the book pages).
 describe("header links", () => {
   it("a genre opens that genre alone; Libra falas is the free filter", () => {
     expect(headerGenreHref("Horror")).toBe("/librari?genre=Horror");
@@ -57,6 +57,25 @@ describe("header markup", () => {
   // (src/lib/page-messages.sources.test.ts); the header never reads it.
   it("the header controls never read the address's query", () => {
     const source = readFileSync(new URL("../components/header-bookstore-controls.tsx", import.meta.url), "utf8");
+    expect(source).not.toMatch(/useSearchParams|searchParams/);
+  });
+
+  // P2b (Renato 11-10 option a): the new header only on Libraria and the
+  // book pages; the homepage and every other page keep the old header.
+  it("uses the new header only on Libraria and book pages", () => {
+    expect(usesShopHeader("/librari")).toBe(true);
+    expect(usesShopHeader("/libra/abc-123")).toBe(true);
+    const others = [
+      "/", "/si-funksionon", "/rreth-nesh", "/fitimet", "/blog", "/blog/x", "/account",
+      "/dashboard", "/login", "/library", "/libra", "/libra/", "/libra/x/report",
+      "/librari/x", "/librarix", "", null, undefined,
+    ];
+    for (const p of others) expect(usesShopHeader(p)).toBe(false);
+  });
+
+  it("the header switch reads only the pathname", () => {
+    const source = readFileSync(new URL("../components/site-header-scope.tsx", import.meta.url), "utf8");
+    expect(source).toContain("usePathname");
     expect(source).not.toMatch(/useSearchParams|searchParams/);
   });
 });
