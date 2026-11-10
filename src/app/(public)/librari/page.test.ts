@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { GENRES } from "@/lib/genres";
 
 // ALL-CUTOVER APP-A: focused coverage of the maintenance gate on this
 // schema-sensitive public discovery page (V3 §3) -- not a general audit
@@ -307,25 +308,52 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(html).toMatch(/<h1[^>]*>Libraria<span[^>]*> · Letërsi artistike<\/span><span[^>]*> · “book”<\/span><span[^>]*> · 10 libra<\/span><\/h1>/);
   });
 
-  it("has no big heading, page search box, page genre menu or ornate shelf any more", async () => {
+  it("has no big heading or ornate shelf any more", async () => {
     const html = await render();
     expect(html).not.toContain("Zbuloni libra të pavarur.");
-    expect(html).not.toContain('id="bookstore-search"');
-    expect(html).not.toContain('name="q"');
-    expect(html).not.toContain('aria-label="Zhanret"');
     expect(html).not.toContain('aria-label="Librat më të rinj"');
+    expect(html).not.toContain('form="site-search"');
   });
 
-  // P2: the header's search box is the one search; on Libraria the page
-  // gives it the current genre, sort and price (form="site-search"), never
-  // the old words.
-  it("adds the current genre, sort and price to the header search, not the words", async () => {
+  // P2c (Renato 11-10 option b): the old header is back on every page, so
+  // the search box and the genre list are back inside Libraria.
+  it("the page's own search box shows the words and keeps the genre, sort and price", async () => {
     const html = await render({ q: "book", genre: "Letërsi artistike", minPrice: "1", maxPrice: "500", sort: "price_asc" });
-    for (const [name, value] of [["genre", "Letërsi artistike"], ["sort", "price_asc"], ["minPrice", "1"], ["maxPrice", "500"]]) {
-      expect(html).toContain(`<input type="hidden" form="site-search" name="${name}" value="${value}"/>`);
-    }
-    expect(html).not.toMatch(/form="site-search" name="q"/);
-    expect(await render()).not.toContain('form="site-search"');
+    const start = html.indexOf('<form id="bookstore-search"');
+    expect(start).toBeGreaterThan(-1);
+    const form = html.slice(start, html.indexOf("</form>", start));
+    expect(form).toContain('action="/librari"');
+    expect(form).toContain('role="search"');
+    expect(form).toMatch(/<input id="bookstore-q" type="search"[^>]*name="q" value="book"\/>/);
+    expect(form).toContain('<input type="hidden" name="genre" value="Letërsi artistike"/>');
+    expect(form).toContain('<input type="hidden" name="sort" value="price_asc"/>');
+    expect(form).toContain('<input type="hidden" name="minPrice" value="1"/>');
+    expect(form).toContain('<input type="hidden" name="maxPrice" value="500"/>');
+    expect(form).not.toContain('type="hidden" name="q"');
+    const plain = await render();
+    const p0 = plain.indexOf('<form id="bookstore-search"');
+    expect(plain.slice(p0, plain.indexOf("</form>", p0))).not.toContain('type="hidden"');
+  });
+
+  it("the genre list has every genre plus all genres, each keeping the words, sort and price", async () => {
+    const html = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", maxPrice: "500" });
+    const start = html.indexOf('<nav aria-label="Zhanret"');
+    expect(start).toBeGreaterThan(-1);
+    const menu = html.slice(start, html.indexOf("</nav>", start));
+    const links = [...menu.matchAll(/<a [^>]*>/g)];
+    expect(links).toHaveLength(GENRES.length + 1);
+    expect(menu).toContain(">Të gjitha zhanret</a>");
+    expect(menu).toContain('href="/librari?q=book&amp;sort=price_asc&amp;maxPrice=500"');
+    for (const g of GENRES) expect(menu).toContain(`>${g.replace("&", "&amp;")}</a>`);
+    expect(menu).toMatch(/href="\/librari\?q=book&amp;genre=Poezi&amp;sort=price_asc&amp;maxPrice=500"/);
+    expect(menu).toMatch(/aria-current="true"[^>]*>Letërsi artistike</);
+    expect((menu.match(/aria-current/g) ?? []).length).toBe(1);
+  });
+
+  it("Libra falas is a pill to free books that keeps the words, genre and sort", async () => {
+    const html = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", minPrice: "100" });
+    expect(html).toMatch(/href="\/librari\?q=book&amp;genre=Let%C3%ABrsi\+artistike&amp;sort=price_asc&amp;maxPrice=0"[^>]*>Libra falas<\/a>/);
+    expect(await render({ maxPrice: "0" })).toMatch(/aria-current="true"[^>]*>Libra falas<\/a>/);
   });
 
   it("the sort is its own form that keeps the words, genre and price", async () => {
@@ -365,10 +393,6 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(html).toContain("10 libra");
     expect(html).toContain("Hiqni filtrat");
   });
-
-  // P2: the genre menu moved to the site header
-  // (src/components/header-bookstore-controls.tsx, tested in
-  // src/lib/header-bookstore.test.ts).
 
   // BD15 follow-up (P8 audit N1): an unknown ?genre= is ignored, so the
   // page is the normal unfiltered Bookstore, never a load error.

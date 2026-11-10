@@ -24,7 +24,7 @@ import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
 import { AutoSubmitSelect } from "@/components/auto-submit-select";
-import { SITE_SEARCH_FORM_ID } from "@/lib/header-bookstore";
+import { GENRES } from "@/lib/genres";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
 export const metadata: Metadata = {
@@ -408,12 +408,13 @@ export default async function BookstorePage({
   const showShelves = !isFiltered && !error && books.length > 0;
   const featured = showShelves ? resolveBookstoreFeature<BookWithAuthor>(librumChoice, books[0]) : null;
 
-  // P2 (design B): the big heading, the ornate shelf, the page's own
-  // search box and genre button are gone -- search and genres now live
-  // in the site header on every page. The page is white, opens with a
-  // slim feature strip, then "Libraria · N libra" with Sort and Price,
-  // then the grid. The free shelf follows the grid (the header's own
-  // "Libra falas" link leads there too), then bundles and the band.
+  // P2 (design B): the big heading and the ornate shelf are gone. The
+  // page is white, opens with a slim feature strip, then "Libraria · N
+  // libra" with the page's own search box, genres, Sort, Price and Libra
+  // falas (P2c, Renato 11-10 option b: the site header is the old one on
+  // every page again, so search and genres are back inside this page),
+  // then the grid. The free shelf follows the grid, then bundles and the
+  // band.
   return (
     <main className="flex-1 bg-surface">
       <div className="page-container pt-5 pb-10 sm:pt-6 md:pb-12">
@@ -458,11 +459,12 @@ function countLineFor(totalMatched: number): string {
     : `Po shfaqen ${SEARCH_RESULT_LIMIT} librat e parë`;
 }
 
-// P2 (design B): "Libraria · <genre> · “<words>” · N libra" on the left;
-// Sort and Price on the right (stacked full-width under 640px). Sort is
-// its own small GET form now (the search box moved to the header): it
-// keeps the current words, genre and price and sends itself on change,
-// with a button only when JavaScript is off.
+// P2 (design B): "Libraria · <genre> · “<words>” · N libra" on the left,
+// the search box on the right (full width under 640px). P2c: under them
+// one row of pills: Zhanret, Sort, Price, Libra falas. Each keeps the
+// other current filters: the search box and Sort are small GET forms
+// with hidden fields (Sort sends itself on change, with a button only
+// when JavaScript is off); genres and Libra falas are links.
 function BookstoreHeading({
   query,
   isFiltered,
@@ -478,31 +480,94 @@ function BookstoreHeading({
   const words = q?.trim();
   const details = [genre, words ? `“${words}”` : null, countLine].filter(Boolean);
 
+  const freeActive = maxPrice === "0" && !minPrice;
+
   return (
-    <div
-      className={`${hasFeature ? "mt-6" : "mt-1"} flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5 border-b border-border pb-3`}
-    >
-      <h1 className="min-w-0 text-xl font-semibold text-foreground">
-        Libraria
-        {details.map((part) => (
-          <span key={part} className="text-sm font-normal text-muted">
-            {" · "}
-            {part}
-          </span>
-        ))}
-      </h1>
+    <div className={`${hasFeature ? "mt-6" : "mt-1"} border-b border-border pb-3`}>
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5">
+        <h1 className="min-w-0 text-xl font-semibold text-foreground">
+          Libraria
+          {details.map((part) => (
+            <span key={part} className="text-sm font-normal text-muted">
+              {" · "}
+              {part}
+            </span>
+          ))}
+        </h1>
 
-      {/* The header's search box is the one search on the site. These
-          fields belong to it (form="site-search"), so a new search typed
-          here keeps the current genre, sort and price, as the old
-          page-level search form did. The words are not carried: a new
-          search replaces them. */}
-      {genre && <input type="hidden" name="genre" value={genre} form={SITE_SEARCH_FORM_ID} />}
-      {sort && <input type="hidden" name="sort" value={sort} form={SITE_SEARCH_FORM_ID} />}
-      {minPrice && <input type="hidden" name="minPrice" value={minPrice} form={SITE_SEARCH_FORM_ID} />}
-      {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} form={SITE_SEARCH_FORM_ID} />}
+        {/* P2c: the page's own search box (as before P2). It keeps the
+            current genre, sort and price; a new search replaces the words.
+            16px text on phones so iPhone Safari does not zoom in. */}
+        <form
+          id="bookstore-search"
+          action="/librari"
+          method="get"
+          role="search"
+          className="flex w-full min-w-0 sm:w-auto sm:max-w-[28rem] sm:min-w-[18rem] sm:flex-1"
+        >
+          <label htmlFor="bookstore-q" className="sr-only">
+            Kërkoni libra ose autorë
+          </label>
+          <input
+            id="bookstore-q"
+            type="search"
+            name="q"
+            defaultValue={q ?? ""}
+            placeholder="Kërkoni libra ose autorë"
+            className="focus-ring h-9 min-w-0 flex-1 rounded-l-full border border-r-0 border-control bg-surface px-4 text-base text-foreground sm:h-8 sm:text-sm"
+          />
+          {genre && <input type="hidden" name="genre" value={genre} />}
+          {sort && <input type="hidden" name="sort" value={sort} />}
+          {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
+          {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
+          <button
+            type="submit"
+            className="focus-ring h-9 shrink-0 rounded-r-full bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover sm:h-8"
+          >
+            Kërkoni
+          </button>
+        </form>
+      </div>
 
-      <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+      <div className="mt-2.5 flex flex-wrap items-center gap-2 sm:gap-2.5">
+        {/* P2c: the genre list, as the old header menu had it. On phones
+            it spans the page, 16px from each edge, so it never runs past
+            the screen; from 640px up it hangs under the button. Each
+            genre keeps the current words, sort and price. */}
+        <DismissableDetails className="group text-sm sm:relative" closeOnLinkClick>
+          <summary className={DROPDOWN_SUMMARY_CLASSES}>
+            Zhanret
+            <ChevronIcon />
+          </summary>
+          <nav
+            aria-label="Zhanret"
+            className="absolute inset-x-4 z-30 mt-2 rounded-[8px] border border-border bg-surface p-2 shadow-md sm:inset-x-auto sm:left-0 sm:w-[26rem]"
+          >
+            <ul className="grid gap-0.5 sm:grid-cols-2">
+              <li>
+                <Link
+                  href={buildBookstoreHref(query, { genre: undefined })}
+                  aria-current={!genre ? "true" : undefined}
+                  className={`${GENRE_LINK_CLASSES} ${!genre ? "font-semibold text-primary" : "font-medium text-foreground"}`}
+                >
+                  Të gjitha zhanret
+                </Link>
+              </li>
+              {GENRES.map((g) => (
+                <li key={g}>
+                  <Link
+                    href={buildBookstoreHref(query, { genre: g })}
+                    aria-current={genre === g ? "true" : undefined}
+                    className={`${GENRE_LINK_CLASSES} ${genre === g ? "font-semibold text-primary" : "font-medium text-foreground"}`}
+                  >
+                    {g}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </DismissableDetails>
+
         <form action="/librari" method="get" className="contents">
           {q && <input type="hidden" name="q" value={q} />}
           {genre && <input type="hidden" name="genre" value={genre} />}
@@ -596,6 +661,16 @@ function BookstoreHeading({
           </form>
         </DismissableDetails>
 
+        {/* P2c: Libra falas (the old header link) as a pill: free books,
+            keeping the current words, genre and sort. */}
+        <Link
+          href={buildBookstoreHref(query, { minPrice: undefined, maxPrice: "0" })}
+          aria-current={freeActive ? "true" : undefined}
+          className={`focus-ring ${FILTER_CONTROL_CLASSES} ${freeActive ? "border-primary text-primary" : ""}`}
+        >
+          Libra falas
+        </Link>
+
         {isFiltered && (
           <Link href="/librari" className={`${TEXT_LINK_CLASSES} ml-1 justify-self-start`}>
             Hiqni filtrat
@@ -611,9 +686,13 @@ function BookstoreHeading({
 // matched with the 16px sort select (globals.css), 14px from 640px up.
 // P2 r2 (Renato 13:43Z: "too big and squared"): slim rounded pills,
 // 40px tall on phones and 34px from 640px up; the control border keeps
-// its 3:1 contrast.
+// its 3:1 contrast. P2c (Renato 11-10 18:01Z, option a): slimmer still,
+// 36px on phones and 32px from 640px up (the search box too); the text
+// stays 16px on phones so iPhone Safari does not zoom in.
 const FILTER_CONTROL_CLASSES =
-  "flex h-10 cursor-pointer items-center justify-between gap-1.5 rounded-full border border-control bg-surface px-3.5 text-base font-semibold text-foreground sm:h-[34px] sm:text-sm";
+  "flex h-9 cursor-pointer items-center justify-between gap-1.5 rounded-full border border-control bg-surface px-3 text-base font-semibold text-foreground sm:h-8 sm:text-sm";
+const GENRE_LINK_CLASSES =
+  "focus-ring block rounded-[4px] px-3 py-2 text-[0.9375rem] transition-colors hover:bg-surface-hover hover:text-primary";
 const DROPDOWN_SUMMARY_CLASSES = `focus-ring ${FILTER_CONTROL_CLASSES} list-none select-none [&::-webkit-details-marker]:hidden`;
 
 function ChevronIcon() {
