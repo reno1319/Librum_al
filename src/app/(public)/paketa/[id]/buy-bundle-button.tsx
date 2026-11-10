@@ -17,7 +17,7 @@ export function BuyBundleButton() {
     <button
       type="submit"
       disabled={pending}
-      className="rounded-control bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+      className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
     >
       {pending ? "Po hapet pagesa…" : "Blini paketën"}
     </button>

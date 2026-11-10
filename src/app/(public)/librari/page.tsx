@@ -601,7 +601,7 @@ function BookstoreHeading({
             </span>
           </label>
           <noscript>
-            <button type="submit" className={buttonClasses("outline", "sm", "rounded-[8px]")}>
+            <button type="submit" className={buttonClasses("outline", "sm", "rounded-full")}>
               Renditni
             </button>
           </noscript>
@@ -655,7 +655,7 @@ function BookstoreHeading({
                 className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm sm:w-24"
               />
             </div>
-            <button type="submit" className={buttonClasses("outline", "sm", "rounded-[8px]")}>
+            <button type="submit" className={buttonClasses("outline", "sm", "rounded-full")}>
               Zbatoni
             </button>
           </form>
@@ -982,7 +982,7 @@ function AuthorBand({ signedIn }: { signedIn: boolean }) {
       </div>
       <Link
         href={signedIn ? "/dashboard/books/new" : "/signup?role=author"}
-        className="focus-ring inline-flex items-center justify-center rounded-[3px] bg-accent px-6 py-3.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground"
+        className="focus-ring inline-flex items-center justify-center rounded-full bg-accent px-6 py-3.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground"
       >
         Filloni të publikoni
       </Link>

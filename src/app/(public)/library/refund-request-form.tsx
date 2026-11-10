@@ -10,7 +10,7 @@ function SubmitButton() {
     <button
       type="submit"
       disabled={pending}
-      className="rounded-control bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+      className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
     >
       {pending ? "Duke dërguar…" : "Dërgoni kërkesën për rimbursim"}
     </button>
@@ -38,7 +38,7 @@ export function RefundRequestForm({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+        className="rounded-full border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
       >
         Kërkoni rimbursim
       </button>
@@ -73,7 +73,7 @@ export function RefundRequestForm({
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="rounded-control border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+          className="rounded-full border border-border px-3 py-2 text-sm hover:bg-surface-hover"
         >
           Anuloni
         </button>

@@ -138,7 +138,7 @@ export default async function SeriesPage({
             <form action={deleteSeries.bind(null, s.id)}>
               <button
                 type="submit"
-                className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                className="focus-ring rounded-full border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
               >
                 Fshini
               </button>

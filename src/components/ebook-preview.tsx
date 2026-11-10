@@ -340,7 +340,7 @@ export function EbookPreview({
           ref={closeRef}
           type="button"
           onClick={onClose}
-          className="focus-ring min-h-11 rounded-[3px] border border-primary px-3 text-sm font-semibold text-primary"
+          className="focus-ring min-h-11 rounded-full border border-primary px-3 text-sm font-semibold text-primary"
         >
           Mbyll
         </button>
@@ -525,7 +525,7 @@ export function EbookPreview({
             {selected.action && (
               <button
                 type="button"
-                className="focus-ring min-h-11 rounded-[3px] bg-primary px-4 font-semibold text-white"
+                className="focus-ring min-h-11 rounded-full bg-primary px-4 font-semibold text-white"
                 onClick={() => doTap(selected)}
               >
                 {selected.action === "makeChapter"
@@ -537,7 +537,7 @@ export function EbookPreview({
             )}
             <button
               type="button"
-              className="focus-ring min-h-11 rounded-[3px] border border-primary px-4 font-semibold text-primary"
+              className="focus-ring min-h-11 rounded-full border border-primary px-4 font-semibold text-primary"
               onClick={() => setSelected(null)}
             >
               Anulo
@@ -564,7 +564,7 @@ export function EbookPreview({
             <button
               type="button"
               disabled={applying}
-              className="focus-ring min-h-11 rounded-[3px] border border-primary px-4 font-semibold text-primary disabled:opacity-60"
+              className="focus-ring min-h-11 rounded-full border border-primary px-4 font-semibold text-primary disabled:opacity-60"
               onClick={() => onChoicesChange(appliedChoices)}
             >
               Anulo ndryshimet
@@ -572,7 +572,7 @@ export function EbookPreview({
             <button
               type="button"
               disabled={applying}
-              className="focus-ring min-h-11 rounded-[3px] bg-primary px-4 font-semibold text-white disabled:opacity-60"
+              className="focus-ring min-h-11 rounded-full bg-primary px-4 font-semibold text-white disabled:opacity-60"
               onClick={onApply}
             >
               Apliko ndryshimet
@@ -582,7 +582,7 @@ export function EbookPreview({
           <button
             type="button"
             disabled={applying || !book}
-            className="focus-ring min-h-11 rounded-[3px] bg-primary px-4 font-semibold text-white disabled:opacity-60"
+            className="focus-ring min-h-11 rounded-full bg-primary px-4 font-semibold text-white disabled:opacity-60"
             onClick={onApprove}
           >
             E kontrollova, libri duket mirë

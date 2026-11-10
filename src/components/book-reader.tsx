@@ -592,7 +592,7 @@ function EndPage({
             <button
               type="button"
               onClick={endAction.onSelect}
-              className="focus-ring w-full max-w-[16rem] rounded-[3px] bg-[#1e3a32] px-5 py-3 text-sm font-semibold text-white hover:bg-[#16302a]"
+              className="focus-ring w-full max-w-[16rem] rounded-full bg-[#1e3a32] px-5 py-3 text-sm font-semibold text-white hover:bg-[#16302a]"
             >
               {endAction.label}
             </button>

@@ -103,7 +103,7 @@ export default async function WishlistPage() {
                 <form action={removeFromWishlist.bind(null, book.id)}>
                   <button
                     type="submit"
-                    className="focus-ring w-fit rounded-control border border-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                    className="focus-ring w-fit rounded-full border border-border px-3 py-1.5 text-xs hover:bg-surface-hover"
                   >
                     Hiqeni
                   </button>

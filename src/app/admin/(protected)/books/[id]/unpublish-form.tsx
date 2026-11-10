@@ -79,13 +79,13 @@ export function UnpublishForm({
       <div className="flex flex-wrap gap-2.5">
         <button
           type="submit"
-          className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] bg-[#8E2A1E] px-[1.125rem] text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#74221a]"
+          className="focus-ring inline-flex min-h-11 items-center justify-center rounded-full bg-[#8E2A1E] px-[1.125rem] text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#74221a]"
         >
           Unpublish now
         </button>
         <Link
           href={reportId ? `/admin/reports/${reportId}` : "/admin/books"}
-          className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
+          className="focus-ring inline-flex min-h-11 items-center justify-center rounded-full border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
         >
           Cancel
         </Link>

@@ -16,9 +16,9 @@ const CONTROL_CLASSES = "focus-ring rounded-control border border-control bg-sur
 const SUMMARY_CLASSES =
   "focus-ring flex min-h-11 cursor-pointer list-none items-center justify-center rounded-[3px] px-[1.125rem] text-[0.9375rem] font-semibold hover:bg-surface-hover group-open:border-b group-open:border-border";
 const RED_BUTTON_CLASSES =
-  "focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] bg-[#8E2A1E] px-[1.125rem] text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#74221a]";
+  "focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-full bg-[#8E2A1E] px-[1.125rem] text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#74221a]";
 const PLAIN_BUTTON_CLASSES =
-  "focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover";
+  "focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-full bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover";
 
 export function SuspensionPanel({
   userId,

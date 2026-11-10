@@ -111,7 +111,7 @@ export default async function AdminBlogListPage({
               key={filter.value}
               href={href}
               aria-current={isActive ? "true" : undefined}
-              className={`rounded-control border px-3 py-1 text-sm ${
+              className={`rounded-full border px-3 py-1 text-sm ${
                 isActive
                   ? "border-primary bg-primary text-primary-foreground"
                   : "border-border bg-surface text-foreground hover:bg-surface-hover"

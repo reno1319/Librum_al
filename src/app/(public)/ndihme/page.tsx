@@ -126,7 +126,7 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
 
 // Topic links on the green band: the hero's outline-on-dark look.
 const TOPIC_LINK_CLASSES =
-  "focus-ring inline-flex min-h-11 items-center rounded-[3px] border border-primary-foreground/40 px-4 text-sm font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover";
+  "focus-ring inline-flex min-h-11 items-center rounded-full border border-primary-foreground/40 px-4 text-sm font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover";
 
 export default async function HelpPage() {
   const cta = await getAuthorPageCta();
