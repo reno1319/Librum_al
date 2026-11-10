@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
 import sharp from "sharp";
-import { buildReaderContent } from "./epub-reader";
+import { buildReaderContent, countWords, FRONT_MATTER_FREE_MAX_WORDS, SAMPLE_MAX_WORDS } from "./epub-reader";
 import { parseCssClassRules, sanitizeReaderBody, READER_CLASSES, READER_TAGS } from "./reader-content";
 
 // PREVIEW-READER-1: the readers' sample and the author's full preview.
@@ -124,6 +124,61 @@ describe("reader cleaner: layout", () => {
   });
 });
 
+// SC1: a chapter wrapped in one container stays ONE chunk with the same
+// html as before, and lists where it may be cut (its inner blocks).
+describe("reader cleaner: block boundaries inside big containers", () => {
+  const run = (body: string) =>
+    sanitizeReaderBody(body, { classRules: parseCssClassRules(".calibre1 { page-break-before: always }"), headingCounter: { next: 1 }, registerImage: () => null });
+  // What the chunk would be if cut after part i.
+  const cuts = (body: string) => {
+    const [chunk] = run(body);
+    return (chunk.parts ?? []).map((p) => chunk.html.slice(0, p.end) + p.close);
+  };
+
+  it("chunk html is unchanged; parts are prefixes with the wrappers closed", () => {
+    const body = '<div class="calibre1"><h1>T</h1><p>a</p><p>b</p></div>';
+    const chunks = run(body);
+    expect(chunks.map((c) => c.html)).toEqual(['<div class="lb-pb"><h1 id="lb-h-1">T</h1><p>a</p><p>b</p></div>']);
+    expect(cuts(body)).toEqual([
+      '<div class="lb-pb"><h1 id="lb-h-1">T</h1></div>',
+      '<div class="lb-pb"><h1 id="lb-h-1">T</h1><p>a</p></div>',
+      '<div class="lb-pb"><h1 id="lb-h-1">T</h1><p>a</p><p>b</p></div>',
+    ]);
+    expect(chunks[0].parts!.map((p) => [p.text, p.heading])).toEqual([["T", true], ["a", false], ["b", false]]);
+  });
+
+  it("nested plain containers: boundaries reach the inner blocks, every wrapper is closed", () => {
+    expect(cuts("<section><div><p>a</p><p>b</p></div></section>")).toEqual(["<div><p>a</p></div>", "<div><p>a</p><p>b</p></div>"]);
+  });
+
+  it("loose text before a block belongs to that block's part", () => {
+    const [chunk] = run("<div>intro <em>x</em><p>a</p><p>b</p> </div>");
+    expect(chunk.html).toBe("<div>intro <em>x</em><p>a</p><p>b</p> </div>");
+    expect(chunk.parts!.map((p) => p.text)).toEqual(["intro xa", "b"]);
+    expect(chunk.text).toBe("intro xab ");
+  });
+
+  it("blocks that are not plain containers are not looked into (a blockquote, a list)", () => {
+    expect(cuts("<div><blockquote><p>a</p><p>b</p></blockquote><ul><li>x</li><li>y</li></ul></div>")).toEqual([
+      "<div><blockquote><p>a</p><p>b</p></blockquote></div>",
+      "<div><blockquote><p>a</p><p>b</p></blockquote><ul><li>x</li><li>y</li></ul></div>",
+    ]);
+    expect(run("<blockquote><div><p>a</p><p>b</p></div></blockquote>")[0].parts).toBeUndefined();
+  });
+
+  it("a container with one block, or none, has no parts", () => {
+    expect(run("<div><p>a</p></div>")[0].parts).toBeUndefined();
+    expect(run("<div> </div><p>a</p>").map((c) => c.html)).toEqual(["<p>a</p>"]);
+  });
+
+  it("the chunks' html is byte-identical to a cleaner without boundaries", () => {
+    const body = '<div class="calibre1"><h2>Ch</h2><p>a <b>b</b></p><div><p>c</p><br/>d</div><p>e</p></div><p>f</p>';
+    expect(run(body).map((c) => c.html).join("")).toBe(
+      '<div class="lb-pb"><h2 id="lb-h-1">Ch</h2><p>a <b>b</b></p><div><p>c</p><br>d</div><p>e</p></div><p>f</p>',
+    );
+  });
+});
+
 // Audit F1: a tag still open at the end of a document kept its text.
 describe("reader cleaner: tags left open at the end", () => {
   it("keeps the text of an unclosed <p>", () => {
@@ -194,6 +249,116 @@ describe("buildReaderContent: the sample cut", () => {
     if (!r.available) throw new Error("unavailable");
     expect(r.html).toContain("intro");
     expect(r.html).not.toContain("w0");
+  });
+
+  // SC1: 10%, but never more than SAMPLE_MAX_WORDS (~30 printed pages).
+  // 20 chapters x 20 paragraphs x 100 words = 40,000 words: 10% would be
+  // 4,000, under the cap. 20 x 50 x 100 = 100,000: 10% would be 10,000.
+  const book = (chapterCount: number, parasPerChapter: number) =>
+    Array.from({ length: chapterCount }, (_, i) => ({
+      id: `c${i}`,
+      href: `c${i}.xhtml`,
+      body: `<h1>Kapitulli ${i + 1}</h1>${Array.from({ length: parasPerChapter }, (_, j) => para(`k${String(i).padStart(2, "0")}p${String(j).padStart(2, "0")}`, 100)).join("")}`,
+    }));
+  const wordsIn = (html: string) => countWords(html.replace(/<[^>]*>/g, " ").replace(/Kapitulli \d+/g, ""));
+
+  it("a long book's sample stops at the word cap, with the real smaller %", async () => {
+    const r = await buildReaderContent(await epub({ docs: book(20, 50) }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    const sent = wordsIn(r.html);
+    expect(sent).toBe(SAMPLE_MAX_WORDS); // 75 whole paragraphs, cut at a paragraph end
+    expect(r.html).toContain("k01p24 ");
+    expect(r.html).not.toContain("k01p25");
+    expect(r.html).not.toContain("Kapitulli 3");
+    expect(r.approximatePercent).toBe(8); // 7,500 of 100,000 words, rounded
+  });
+
+  it("a short book is unchanged: still ~10%", async () => {
+    const r = await buildReaderContent(await epub({ docs: book(20, 20) }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(wordsIn(r.html)).toBe(4000);
+    expect(r.approximatePercent).toBe(10);
+  });
+
+  it("full mode puts the 'sample ends here' mark at the capped point", async () => {
+    const r = await buildReaderContent(await epub({ docs: book(20, 50) }), "full");
+    if (!r.available) throw new Error("unavailable");
+    const before = r.html.slice(0, r.html.indexOf('<div class="lb-sample-end"'));
+    expect(wordsIn(before)).toBe(SAMPLE_MAX_WORDS);
+    expect(r.html).toContain("k19p49");
+    expect(r.approximatePercent).toBe(8);
+  });
+
+  it("front matter stays free under the word cap (up to 3% of the book's words)", async () => {
+    const front = { id: "f", href: "f.xhtml", body: para("front", 500) };
+    const docs = [front, ...book(20, 50)];
+    const guide = `<guide><reference type="text" href="c0.xhtml"/></guide>`;
+    const r = await buildReaderContent(await epub({ docs, guide }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(r.html).toContain("front");
+    expect(wordsIn(r.html)).toBe(500 + SAMPLE_MAX_WORDS);
+  });
+
+  it("a long introduction is free only up to ~5 pages; the rest counts toward the 30", async () => {
+    const intro = { id: "f", href: "f.xhtml", body: Array.from({ length: 30 }, (_, j) => para(`intro${j}`, 100)).join("") };
+    const docs = [intro, ...book(20, 50)];
+    const guide = `<guide><reference type="text" href="c0.xhtml"/></guide>`;
+    const r = await buildReaderContent(await epub({ docs, guide }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(FRONT_MATTER_FREE_MAX_WORDS).toBe(1250);
+    // Word target 7,500 + 1,250 = 8,750: 3,000 intro + 5,800 of the story
+    // (stops at the first paragraph that reaches it; titles are 2 words each).
+    expect(wordsIn(r.html)).toBe(8800);
+    expect(r.html).toContain("k01p07 ");
+    expect(r.html).not.toContain("k01p08");
+  });
+
+  it("the cap also holds when each chapter is one big container (Calibre style)", async () => {
+    const wrapped = book(20, 50).map((d) => ({ ...d, body: `<div class="calibre">${d.body}</div>` }));
+    const r = await buildReaderContent(await epub({ docs: wrapped }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(wordsIn(r.html)).toBe(SAMPLE_MAX_WORDS);
+    expect(r.html).not.toContain("k01p25");
+    expect(r.html).not.toContain("Kapitulli 3");
+    // Audit B1/B2: each chapter keeps ONE wrapper (paragraph indents and
+    // page-break classes stay as before); only the last one is trimmed.
+    expect(r.html.match(/<div\b/g)).toHaveLength(2);
+  });
+
+  it("before the cut, a wrapped book's output is byte-identical to the full book's", async () => {
+    const wrapped = book(20, 50).map((d) => ({ ...d, body: `<div style="page-break-before:always">${d.body}</div>` }));
+    const bytes = await epub({ docs: wrapped });
+    const sample = await buildReaderContent(bytes, "sample");
+    const full = await buildReaderContent(bytes, "full");
+    if (!sample.available || !full.available) throw new Error("unavailable");
+    const marker = '<div class="lb-sample-end" id="lb-sample-end"></div>';
+    const at = full.html.indexOf(marker);
+    // Sample = full html up to the marker, then the trimmed chapter's
+    // wrapper and its section are closed. Nothing else differs.
+    expect(sample.html).toBe(`${full.html.slice(0, at)}</div></section>`);
+    // The full book is the untouched chunks plus the marker, once.
+    expect(full.html.split(marker)).toHaveLength(2);
+    expect(full.html.replace(marker, "")).toBe(
+      book(20, 50).map((d, i) => `<section class="lb-sec"><div class="lb-pb">${d.body.replace("<h1>", `<h1 id="lb-h-${i + 1}">`)}</div></section>`).join(""),
+    );
+  });
+
+  it("a chapter title inside a wrapper is never the sample's last line", async () => {
+    // Chapter 1 = title (2 words) + 7,497 words, so the cap is first
+    // reached by chapter 2's (wrapped) title: the sample must step back.
+    const ch1 = `<div><h1>Kapitulli 1</h1>${Array.from({ length: 74 }, (_, j) => para(`a${String(j).padStart(2, "0")}`, 100)).join("")}${para("last", 97)}</div>`;
+    const rest = book(20, 50).slice(1).map((d) => ({ ...d, body: `<div>${d.body}</div>` }));
+    const docs = [{ id: "c0", href: "c0.xhtml", body: ch1 }, ...rest];
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(r.html).toContain("last");
+    expect(r.html).not.toContain("Kapitulli 2");
+    expect(r.html).not.toContain("k01p00");
+  });
+
+  it("countWords: letters or digits make a word; entities are not words", () => {
+    expect(countWords("Një  fjalë, 2 — p&#235;r &amp; tjetër")).toBe(5);
+    expect(countWords("   ")).toBe(0);
   });
 
   it("refuses non-EPUB bytes", async () => {
