@@ -353,7 +353,14 @@ describe("BookstorePage: redesign step 3 layout", () => {
   it("Libra falas is a pill to free books that keeps the words, genre and sort", async () => {
     const html = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", minPrice: "100" });
     expect(html).toMatch(/href="\/librari\?q=book&amp;genre=Let%C3%ABrsi\+artistike&amp;sort=price_asc&amp;maxPrice=0"[^>]*>Libra falas<\/a>/);
-    expect(await render({ maxPrice: "0" })).toMatch(/aria-current="true"[^>]*>Libra falas<\/a>/);
+    // P2d: when on, a tick icon comes before the words.
+    expect(await render({ maxPrice: "0" })).toMatch(/aria-current="true"[^>]*><svg[^]*?<\/svg>Libra falas<\/a>/);
+  });
+
+  it("Libra falas switches off when tapped again, keeping the words, genre and sort (P2d)", async () => {
+    const on = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", maxPrice: "0" });
+    expect(on).toMatch(/href="\/librari\?q=book&amp;genre=Let%C3%ABrsi\+artistike&amp;sort=price_asc"[^>]*><svg[^]*?<\/svg>Libra falas<\/a>/);
+    expect(await render({ maxPrice: "0" })).toMatch(/href="\/librari"[^>]*><svg[^]*?<\/svg>Libra falas<\/a>/);
   });
 
   it("the sort is its own form that keeps the words, genre and price", async () => {
