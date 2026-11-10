@@ -44,6 +44,11 @@ export const metadata: Metadata = {
 // BD13 (Renato 2 Nov, "c"): reviews show after staff approval, with
 // the review name, and an author account's review carries the public
 // "Autor në Librum" tag.
+// PL1 (BD16 pre-orders, Renato 11-06 card "a", 11-10): the "Më njofto
+// kur të dalë" requests for books in parapublikim (preorder_notify_requests),
+// their one email, what the author sees (a count only) and how long the
+// requests are kept. PRIVACY_LAST_UPDATED moves to the day this text goes
+// live on Production (that release sets it).
 export default function PrivacyPage() {
   return (
     <main className="flex-1">
@@ -87,7 +92,8 @@ export default function PrivacyPage() {
               </p>
               <p className="mt-2">
                 <strong>Si lexues:</strong> blerjet tuaja dhe librat falas
-                që merrni, lista e dëshirave, autorët që ndiqni, vlerësimet,
+                që merrni, lista e dëshirave, autorët që ndiqni, kërkesat
+                «Më njofto kur të dalë» për librat në parapublikim, vlerësimet,
                 çdo raportim përmbajtjeje dhe kërkesë rimbursimi që na
                 dërgoni, si dhe një regjistrim për çdo herë që shkarkoni një
                 libër që keni blerë ose marrë falas (data, ora dhe cili
@@ -156,7 +162,8 @@ export default function PrivacyPage() {
                   pagesave (përfshirë regjistrimet e shkarkimeve), moderimi i
                   përmbajtjes, dhe dërgimi i emaileve për llogarinë dhe
                   blerjet tuaja, si dhe për librat e rinj të autorëve që
-                  ndiqni.
+                  ndiqni dhe për librat në parapublikim për të cilët keni
+                  kërkuar njoftim.
                 </li>
               </ul>
               <p className="mt-2">
@@ -195,7 +202,8 @@ export default function PrivacyPage() {
                 vlerësimit shfaqet &ldquo;Autor në Librum&rdquo;. Autorët shfaqen me
                 pseudonimin e tyre, dhe emri i llogarisë së një autori mbetet
                 privat. Autorët shohin shitjet e librave të tyre, por jo kush
-                i bleu.
+                i bleu. Për një libër në parapublikim, autori sheh vetëm sa
+                lexues presin njoftimin, jo kush janë.
               </p>
             </section>
 
@@ -277,6 +285,13 @@ export default function PrivacyPage() {
                   10 vjet, siç kërkojnë rregullat kontabël të Shqipërisë,
                   edhe pasi ta fshini llogarinë. Kur është e mundur, e heqim
                   lidhjen mes këtyre regjistrimeve dhe jush.
+                </li>
+                <li>
+                  <strong>Kërkesat «Më njofto»:</strong> derisa ta hiqni
+                  kërkesën ose ta fshini llogarinë. Pasi dërgohet emaili,
+                  kërkesa nuk shfaqet më te Njoftimet e mia, por e ruajmë
+                  bashkë me shënimin që emaili u dërgua, derisa ta fshini
+                  llogarinë.
                 </li>
                 <li>
                   <strong>Regjistrimet e shkarkimeve:</strong> për aq kohë sa
