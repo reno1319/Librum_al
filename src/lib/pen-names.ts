@@ -74,6 +74,28 @@ export function penNameLinkLabel(link: string): string {
   }
 }
 
+// P1 book page (design B): which icon a link gets -- Instagram or
+// Facebook by its host (the site itself or any subdomain, e.g.
+// m.facebook.com), anything else a globe. Only decides the picture; the
+// link itself is rendered exactly as readPenNameLinks returned it.
+export type PenNameLinkKind = "instagram" | "facebook" | "web";
+
+function hostIs(hostname: string, site: string): boolean {
+  return hostname === site || hostname.endsWith(`.${site}`);
+}
+
+export function penNameLinkKind(link: string): PenNameLinkKind {
+  let hostname: string;
+  try {
+    hostname = new URL(link).hostname.toLowerCase();
+  } catch {
+    return "web";
+  }
+  if (hostIs(hostname, "instagram.com")) return "instagram";
+  if (hostIs(hostname, "facebook.com") || hostIs(hostname, "fb.com")) return "facebook";
+  return "web";
+}
+
 export type PenNameLinksResult = { ok: true; links: string[] } | { ok: false; message: string };
 
 // Server-side validation of the Pen names form's link boxes: empty boxes

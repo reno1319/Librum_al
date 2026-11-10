@@ -88,7 +88,8 @@ describe("Book page: Rreth autorit placeholder (I4)", () => {
     expect(placeholder).not.toBeNull();
     expect(placeholder![2]).toBe("JP");
     const classes = placeholder![1].split(" ");
-    for (const c of ["bg-[#d9e2dc]", "size-20", "sm:size-[5.5rem]", "rounded-full", "font-semibold", "text-foreground/70", "text-lg", "sm:text-xl"]) {
+    // P1 (design B): one 96px circle on every screen.
+    for (const c of ["bg-[#d9e2dc]", "size-24", "rounded-full", "font-semibold", "text-foreground/70", "text-2xl"]) {
       expect(classes).toContain(c);
     }
     expect(section).not.toContain("<img");

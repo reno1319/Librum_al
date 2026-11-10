@@ -39,80 +39,96 @@ describe("Book Detail: Subtitle near the Title", () => {
   });
 });
 
-describe("Book Detail: metadata dl row order and conditional rendering", () => {
-  const dlBlock = block('<dl className="mt-4 grid', "</dl>");
+// P1 (design B, 2026-11-10): the details are now two lists -- a row of
+// tiles (Faqe, Kohë leximi, Gjuha, Botuar, Formati) and plain
+// "Label: value" lines for the rest. Every rule below is the old one.
+describe("Book Detail: metadata tiles and rows, order and conditional rendering", () => {
+  const tiles = block('<dl data-detail-tiles=""', "</dl>");
+  const rows = block('<dl data-detail-rows=""', "</dl>");
 
-  it("Format remains always visible, unconditional", () => {
-    expect(dlBlock).toContain("<dd className={DETAIL_VALUE_CLASSES}>EPUB</dd>");
-    expect(dlBlock).not.toContain("E-libër");
-    // Format's <div> is the only one with no preceding {book.x && (
-    // guard -- confirmed by it appearing before the first conditional.
-    const formatIndex = dlBlock.indexOf(">EPUB<");
-    const firstConditionalIndex = dlBlock.indexOf("&&");
-    expect(formatIndex).toBeLessThan(firstConditionalIndex);
+  it("Format remains always visible, unconditional (the last tile)", () => {
+    expect(tiles).toMatch(/\)\}\s*<DetailTile label="Formati"[\s\S]*?\/>\}>\s*<Acronym>EPUB<\/Acronym>\s*<\/DetailTile>\s*$/);
+    expect(tiles).not.toContain("E-libër");
   });
 
-  // BD15 P8 (Q3 a): Zhanri/Zhanret, then Përmbajtja (18+) and Mosha,
-  // after Gjuha; Botimi reads EDITION_LABEL.
-  it("renders rows in the exact order: Formati, Gjuha, Zhanri/Zhanret, Përmbajtja, Mosha, Seria, Botuesi, Botimi, Botuar për herë të parë, Botuar në Librum, ISBN", () => {
-    const labels = ["Formati", "Gjuha", "categoriesLabel(", "ADULT_DETAIL_LABEL", "READING_AGE_LABEL", "Seria", "Botuesi", "EDITION_LABEL", "Botuar për herë të parë", "Botuar në Librum", "ISBN"];
+  it("tiles in the exact order: Faqe, Kohë leximi, Gjuha, Botuar, Formati", () => {
+    const labels = ["PAGE_ESTIMATE_LABEL", "READING_TIME_LABEL", 'label="Gjuha"', 'label="Botuar"', 'label="Formati"'];
     const positions = labels.map((label) => {
-      const idx = dlBlock.indexOf(label);
-      expect(idx, `expected to find label "${label}"`).toBeGreaterThan(-1);
+      const idx = tiles.indexOf(label);
+      expect(idx, `expected to find tile "${label}"`).toBeGreaterThan(-1);
       return idx;
     });
-    const sorted = [...positions].sort((a, b) => a - b);
-    expect(positions).toEqual(sorted);
+    expect(positions).toEqual([...positions].sort((x, y) => x - y));
+  });
+
+  // BD15 P8 (Q3 a): Zhanri/Zhanret, then Përmbajtja (18+) and Mosha;
+  // Botimi reads EDITION_LABEL.
+  it("rows in the exact order: Lloji, Zhanri/Zhanret, Përmbajtja, Mosha, Seria, Botuesi, Botimi, Botuar për herë të parë, Parapublikim, ISBN", () => {
+    const labels = ["BOOK_TYPE_LABEL", "categoriesLabel(", "ADULT_DETAIL_LABEL", "READING_AGE_LABEL", 'label="Seria"', 'label="Botuesi"', "EDITION_LABEL", 'label="Botuar për herë të parë"', 'label="Parapublikim"', 'label="ISBN"'];
+    const positions = labels.map((label) => {
+      const idx = rows.indexOf(label);
+      expect(idx, `expected to find row "${label}"`).toBeGreaterThan(-1);
+      return idx;
+    });
+    expect(positions).toEqual([...positions].sort((x, y) => x - y));
+  });
+
+  it("no capital-letter labels any more", () => {
+    expect(source).not.toContain("uppercase tracking-wide");
+    expect(source).not.toContain("DETAIL_LABEL_CLASSES");
   });
 
   it("Language uses getLanguageLabel() (human label, or a safe raw-code fallback for an unrecognized code), never a raw code rendered directly", () => {
-    const languageRow = dlBlock.match(/\{book\.language && \([\s\S]*?\)\)?\}/)![0];
+    const languageRow = tiles.match(/\{book\.language && \([\s\S]*?\)\}/)![0];
     expect(languageRow).toContain("getLanguageLabel(book.language)");
     expect(languageRow).not.toMatch(/\{book\.language\}/);
   });
 
-  it("Language row is omitted entirely when language is null", () => {
-    const languageRow = dlBlock.match(/\{book\.language && \([\s\S]*?\)\)?\}/)![0];
+  it("Language tile is omitted entirely when language is null", () => {
+    const languageRow = tiles.match(/\{book\.language && \([\s\S]*?\)\}/)![0];
     expect(languageRow.startsWith("{book.language &&")).toBe(true);
   });
 
   it("Publisher renders only book.publisher itself -- never a substituted 'Librum' or author name", () => {
-    const publisherRow = dlBlock.match(/\{book\.publisher && \([\s\S]*?\)\)?\}/)![0];
+    const publisherRow = rows.match(/\{book\.publisher && \([\s\S]*?\)\}/)![0];
     expect(publisherRow).toContain("{book.publisher}");
     expect(publisherRow).not.toContain("Librum");
     expect(publisherRow).not.toContain("profiles?.display_name");
   });
 
   it("Edition renders only when present (BD15 P8: number, else the old text)", () => {
-    const editionRow = dlBlock.match(/\{editionValue\(book\) && \([\s\S]*?\)\)?\}/)![0];
+    const editionRow = rows.match(/\{editionValue\(book\) && \([\s\S]*?\)\}/)![0];
     expect(editionRow).toContain("{editionValue(book)}");
   });
 
   it("BD15 P8: every category is a link to that category in Libraria", () => {
-    const row = dlBlock.match(/\{bookCategories\(book\)\.length > 0 && \([\s\S]*?<\/div>/)![0];
+    const row = rows.match(/\{bookCategories\(book\)\.length > 0 && \([\s\S]*?<\/DetailRow>/)![0];
     expect(row).toContain("bookCategories(book).map(");
     expect(row).toContain("buildBookstoreHref({}, { genre: category })");
   });
 
   it("BD15 P8: 18+ shows only for an adult book, the reading age only through readingAgeValue", () => {
-    expect(dlBlock).toMatch(/\{book\.is_adult && \([\s\S]*?\{ADULT_DETAIL_VALUE\}/);
-    expect(dlBlock).toMatch(/\{readingAgeValue\(book\) && \([\s\S]*?\{readingAgeValue\(book\)\}/);
+    expect(rows).toMatch(/\{book\.is_adult && \([\s\S]*?\{ADULT_DETAIL_VALUE\}/);
+    expect(rows).toMatch(/\{readingAgeValue\(book\) && \([\s\S]*?\{readingAgeValue\(book\)\}/);
   });
 
   it("Botuar për herë të parë uses formatDateOnly() (date-only, no timezone noise) and renders only when present", () => {
-    const dateRow = dlBlock.match(/\{book\.original_publication_date && \([\s\S]*?\)\)?\}/)![0];
+    const dateRow = rows.match(/\{book\.original_publication_date && \([\s\S]*?\)\}/)![0];
     expect(dateRow).toContain("formatDateOnly(book.original_publication_date)");
   });
 
-  it("Botuar në Librum requires BOTH a published book AND a real published_at -- never created_at/updated_at, never guessed for a legacy null", () => {
-    const publishedRow = dlBlock.match(/\{book\.status === "published" && book\.published_at && \([\s\S]*?\)\)?\}/)![0];
-    expect(publishedRow).toContain("formatTimestampAsDate(book.published_at)");
-    expect(publishedRow).not.toContain("created_at");
-    expect(publishedRow).not.toContain("updated_at");
+  it("Botuar (on Librum) requires BOTH a published book AND a real published_at -- never created_at/updated_at, never guessed for a legacy null", () => {
+    expect(source).toContain(
+      'book.status === "published" && book.published_at ? formatTimestampAsDate(book.published_at) : null;',
+    );
+    const publishedTile = tiles.match(/\{publishedOnLibrum && \([\s\S]*?\)\}/)![0];
+    expect(publishedTile).toContain("{publishedOnLibrum}");
+    expect(publishedTile).not.toContain("created_at");
+    expect(publishedTile).not.toContain("updated_at");
   });
 
   it("ISBN's existing behavior is preserved unchanged", () => {
-    const isbnRow = dlBlock.match(/\{book\.isbn && \([\s\S]*?\)\)?\}/)![0];
+    const isbnRow = rows.match(/\{book\.isbn && \([\s\S]*?\)\}/)![0];
     expect(isbnRow).toContain("{book.isbn}");
   });
 
@@ -126,9 +142,10 @@ describe("Book Detail: metadata dl row order and conditional rendering", () => {
 
 describe("Book Detail: no exposure of internal/private fields", () => {
   it("never renders a storage path, only public-URL-derived image src or plain text metadata", () => {
-    const dlBlock2 = block('<dl className="mt-4 grid', "</dl>");
-    expect(dlBlock2).not.toContain("file_path");
-    expect(dlBlock2).not.toContain("cover_path");
+    for (const dl of [block('<dl data-detail-tiles=""', "</dl>"), block('<dl data-detail-rows=""', "</dl>")]) {
+      expect(dl).not.toContain("file_path");
+      expect(dl).not.toContain("cover_path");
+    }
   });
 });
 
@@ -162,32 +179,33 @@ describe("Book Detail: format wording", () => {
     expect(source).not.toMatch(/E-lib[eë]r/i);
   });
 
+  // P1 (design B): plain words under the byline, no capitals.
   it("the eyebrow is the type and genre, and only when there is one", () => {
     expect(source).toContain(
-      '{bookEyebrow(book) && (\n            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">{bookEyebrow(book)}</p>',
+      '{bookEyebrow(book) && (\n            <p className="mt-1 text-[0.8125rem] text-muted">{bookEyebrow(book)}</p>',
     );
   });
 
   it("Të dhënat e librit shows the type before the genres", () => {
-    const details = source.slice(source.indexOf("Të dhënat e librit"));
-    const typeAt = details.indexOf("<dt className={DETAIL_LABEL_CLASSES}>{BOOK_TYPE_LABEL}</dt>");
+    const rows = block('<dl data-detail-rows=""', "</dl>");
+    const typeAt = rows.indexOf("<DetailRow label={BOOK_TYPE_LABEL}>{bookTypeOf(book)}</DetailRow>");
     expect(typeAt).toBeGreaterThan(0);
-    expect(typeAt).toBeLessThan(details.indexOf("categoriesLabel(bookCategories(book).length)"));
-    expect(details).toContain("{bookTypeOf(book) && (");
+    expect(typeAt).toBeLessThan(rows.indexOf("categoriesLabel(bookCategories(book).length)"));
+    expect(rows).toContain("{bookTypeOf(book) && (");
   });
 });
 
-// Upload notes D (Renato 11-07): "Faqe: N" (D2: bare number) right after
-// Formati, only once the current file is counted (Q4 a: hidden without).
-describe("Book Detail: page estimate", () => {
-  it("shows the Faqe row after Formati, and only with a count", () => {
-    const details = source.slice(source.indexOf("Të dhënat e librit"));
-    const formatAt = details.indexOf("<dt className={DETAIL_LABEL_CLASSES}>Formati</dt>");
-    const pagesAt = details.indexOf("<dt className={DETAIL_LABEL_CLASSES}>{PAGE_ESTIMATE_LABEL}</dt>");
-    expect(formatAt).toBeGreaterThan(0);
-    expect(pagesAt).toBeGreaterThan(formatAt);
-    expect(pagesAt).toBeLessThan(details.indexOf("{book.language && ("));
-    expect(details).toContain("{pageEstimateText(book.word_count) && (");
+// Upload notes D (Renato 11-07): "Faqe: N" (D2: bare number), only once
+// the current file is counted (Q4 a: hidden without). P1: the first tile;
+// Kohë leximi (Renato 11-10 a) comes from the same count.
+describe("Book Detail: page estimate and reading time", () => {
+  it("shows the Faqe tile first, and only with a count", () => {
+    const tiles = block('<dl data-detail-tiles=""', "</dl>");
+    expect(source).toContain("const pagesText = pageEstimateText(book.word_count);");
+    expect(source).toContain("const readingTime = readingTimeText(book.word_count);");
+    expect(tiles.indexOf("{pagesText && (")).toBeGreaterThan(0);
+    expect(tiles.indexOf("{pagesText && (")).toBeLessThan(tiles.indexOf("{readingTime && ("));
+    expect(tiles.indexOf("{readingTime && (")).toBeLessThan(tiles.indexOf("{book.language && ("));
   });
 
   it("reads the count from public_books, never the manuscript", () => {

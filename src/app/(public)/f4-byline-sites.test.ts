@@ -75,7 +75,8 @@ describe("PEN-NAMES-1: places that named the author now name the pen name", () =
     // BD3 patch 4: the byline can be an original author; these two
     // stay on the pen name.
     expect(source).toContain("const authorName = resolveBookPenName(book);");
-    expect(source).toContain('<p className="font-serif text-[1.375rem] text-primary">{authorName}</p>');
+    // P1 (design B): the name links to the pen name's page.
+    expect(source).toMatch(/<Link href=\{penNamePath\} className="[^"]*">\s*\{authorName\}\s*<\/Link>/);
     expect(source).toContain("title={authorName ? `Më shumë nga ${authorName}` : \"Më shumë nga ky autor\"}");
     expect(source).toContain('.eq("pen_name_id", book.pen_name_id)');
     expect(source).toMatch(/<Link href=\{penNamePath\} className=\{INLINE_LINK_CLASSES\}>\s*\{bookByline\}/);
@@ -115,11 +116,13 @@ describe("PEN-NAMES-1: places that named the author now name the pen name", () =
 
 // BD3 patch 4 (Renato 1 Nov, 1a 2a 4a 5a; 16:05Z 1a 2a 3a).
 describe("BD3 patch 4: the original author", () => {
-  it("book page: the original author is the byline (plain), 'Përktheu:' under it; About/More by stay on the pen name", () => {
+  // P1 (design B, Renato 11-10): the original author now links to the
+  // Libraria search for that name -- never to the uploader's pen name page.
+  it("book page: the original author is the byline (a Libraria search link), the translator after it; About/More by stay on the pen name", () => {
     const source = readSrc("app/(public)/libra/[id]/page.tsx");
     expect(source).toContain("const originalAuthor = resolveOriginalAuthor(book);");
-    expect(source).toMatch(/\{originalAuthor \? \(\s*<span className="font-semibold">\{originalAuthor\}<\/span>/);
-    expect(source).toContain("{TRANSLATED_BY}");
+    expect(source).toMatch(/\{originalAuthor \? \(\s*<Link href=\{buildBookstoreHref\(\{\}, \{ q: originalAuthor \}\)\} className=\{INLINE_LINK_CLASSES\}>\s*\{originalAuthor\}/);
+    expect(source).toContain("{TRANSLATOR_ROLE}");
     expect(source).toContain('(contributors ?? []).filter((c) => c.role === "Translator")');
     expect(source).toContain("otherContributors.length > 0");
     expect(source).toContain("originalAuthor,\n          translators: translatorNames,");
