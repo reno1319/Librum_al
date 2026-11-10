@@ -1,7 +1,10 @@
 import { buildBookstoreHref } from "@/lib/bookstore";
 
 // P2 (design B, Renato 11-10 option a): the site header's search box and
-// the cream row's Libraria links, on every public page. The header never
+// the cream row's Libraria links. P2b (Renato 11-10 16:25Z, option a):
+// only on Libraria and the book pages (usesShopHeader below); every other
+// public page, the homepage included, keeps the header as it was before
+// P2. The header never
 // reads the address's query (page-messages.sources.test.ts allows the
 // address to be read only through a page's own searchParams), so on
 // Libraria the PAGE adds its current genre, sort and price to the
@@ -21,3 +24,13 @@ export function headerGenreHref(genre: string): string {
 
 /** "Libra falas" in the cream row: the free filter, on its own. */
 export const FREE_BOOKS_HREF = buildBookstoreHref({}, { maxPrice: "0" });
+
+/**
+ * P2b: the pages that get the new header (search box + cream row):
+ * Libraria (/librari, any query) and a book page (/libra/<id>, exactly
+ * one segment, so /libra/<id>/report keeps the ordinary header).
+ */
+export function usesShopHeader(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+  return pathname === BOOKSTORE_PATH || /^\/libra\/[^/]+$/.test(pathname);
+}
