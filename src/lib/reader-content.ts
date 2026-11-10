@@ -149,7 +149,24 @@ function cleanText(raw: string): string {
   return raw.replace(/\u0000/g, "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export type ReaderChunk = { html: string; text: string; images: number[] };
+// SC1: the sample is cut between chunks, and a chapter wrapped in one
+// big container (Calibre style: <div class="calibre"> around every
+// paragraph) is ONE chunk. So a chunk made from a plain container (at the
+// top of the body, or inside another one) also lists its inner block
+// boundaries as `parts`. The chunk's html is exactly what it was before;
+// a part only says where the html may be cut: html.slice(0, end) + close
+// is the chunk up to and including that part, with the wrappers closed.
+// Each part's text/images are those since the previous boundary.
+export type ReaderPart = { end: number; close: string; text: string; images: number[]; heading: boolean };
+export type ReaderChunk = { html: string; text: string; images: number[]; parts?: ReaderPart[] };
+
+const SPLIT_TAGS = new Set(["div", "section", "article", "main", "header", "footer"]);
+const BLOCK_TAGS = new Set([
+  "p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "div", "ul", "ol", "li",
+  "figure", "figcaption", "aside", "table", "hr",
+  ...SPLIT_TAGS,
+]);
+const HEADING_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
 export type ReaderSanitizeContext = {
   classRules: Map<string, Set<ReaderClass>>;
   // Returns an image index for a picture of the book's own file, or null
@@ -168,10 +185,30 @@ type Frame = {
   html: string[];
   text: string[];
   images: number[];
+  // Only for a container whose blocks are tracked (SC1): boundaries
+  // within this frame's own inner html, plus the running inner length
+  // and the text/images since the last boundary.
+  parts: ReaderPart[] | null;
+  length: number;
+  pendingText: string[];
+  pendingImages: number[];
 };
 
-function frame(tag: string, allowed: boolean, dropped: boolean, classes = "", id = ""): Frame {
-  return { tag, allowed, dropped, classes, id, html: [], text: [], images: [] };
+function frame(tag: string, allowed: boolean, dropped: boolean, classes = "", id = "", tracked = false): Frame {
+  return { tag, allowed, dropped, classes, id, html: [], text: [], images: [], parts: tracked ? [] : null, length: 0, pendingText: [], pendingImages: [] };
+}
+
+// The cleaned wrapper of a closed frame, as its open and close strings.
+function wrapper(f: Frame): [string, string] {
+  if (f.allowed) {
+    const classAttr = f.classes ? ` class="${f.classes}"` : "";
+    const idAttr = f.id ? ` id="${f.id}"` : "";
+    return [`<${f.tag}${idAttr}${classAttr}>`, `</${f.tag}>`];
+  }
+  // An unwrapped container (section, a, ...) that carried layout:
+  // keep the layout on a neutral wrapper.
+  if (f.classes) return [`<div class="${f.classes}">`, "</div>"];
+  return ["", ""];
 }
 
 function classesFor(tag: string, attrs: string, ctx: ReaderSanitizeContext): string {
@@ -208,24 +245,58 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
     root.images = [];
   }
 
-  function appendText(raw: string) {
-    if (!raw || inDrop()) return;
-    const f = stack[stack.length - 1];
-    const t = cleanText(raw);
-    f.html.push(t);
-    f.text.push(t);
+  // Every write into a frame's inner html goes through here, so a
+  // tracked frame always knows its inner length and what came since its
+  // last boundary.
+  function put(f: Frame, html: string, text: string, images: number[]) {
+    f.html.push(html);
+    f.text.push(text);
+    f.images.push(...images);
+    if (f.parts) {
+      f.length += html.length;
+      f.pendingText.push(text);
+      f.pendingImages.push(...images);
+    }
   }
 
-  function emit(rendered: string, text: string, images: number[]) {
+  function appendText(raw: string) {
+    if (!raw || inDrop()) return;
+    const t = cleanText(raw);
+    put(stack[stack.length - 1], t, t, []);
+  }
+
+  // `childParts`: the closed child's own boundaries, already in the
+  // coordinates of `rendered` (its wrapper included).
+  function emit(rendered: string, text: string, images: number[], block = false, heading = false, childParts: ReaderPart[] | null = null) {
     const parent = stack[stack.length - 1];
     if (parent === root) {
       flushRoot();
-      if (text.trim() || images.length > 0) chunks.push({ html: rendered, text, images });
-    } else {
-      parent.html.push(rendered);
-      parent.text.push(text);
-      parent.images.push(...images);
+      if (text.trim() || images.length > 0) {
+        chunks.push(childParts && childParts.length > 1 ? { html: rendered, text, images, parts: childParts } : { html: rendered, text, images });
+      }
+      return;
     }
+    if (!parent.parts || !block) {
+      put(parent, rendered, text, images);
+      return;
+    }
+    const start = parent.length;
+    const before = parent.pendingText.join("");
+    const beforeImages = parent.pendingImages;
+    put(parent, rendered, text, images);
+    parent.pendingText = [];
+    parent.pendingImages = [];
+    const own = childParts ?? [{ end: rendered.length, close: "", text, images, heading }];
+    own.forEach((p, i) => {
+      parent.parts!.push({
+        end: start + p.end,
+        close: p.close,
+        // Loose text before this block belongs to its first part.
+        text: i === 0 ? before + p.text : p.text,
+        images: i === 0 ? [...beforeImages, ...p.images] : p.images,
+        heading: p.heading && (i > 0 || !before.trim()),
+      });
+    });
   }
 
   // Closes every frame above stack[idx - 1], innermost first.
@@ -234,18 +305,18 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
       const done = stack.pop()!;
       if (done.dropped) continue;
       const inner = done.html.join("");
-      const text = done.text.join("");
-      let rendered = inner;
-      if (done.allowed) {
-        const classAttr = done.classes ? ` class="${done.classes}"` : "";
-        const idAttr = done.id ? ` id="${done.id}"` : "";
-        rendered = `<${done.tag}${idAttr}${classAttr}>${inner}</${done.tag}>`;
-      } else if (done.classes) {
-        // An unwrapped container (section, a, ...) that carried layout:
-        // keep the layout on a neutral wrapper.
-        rendered = `<div class="${done.classes}">${inner}</div>`;
+      const [open, close] = wrapper(done);
+      const rendered = `${open}${inner}${close}`;
+      let parts: ReaderPart[] | null = null;
+      if (done.parts) {
+        // Loose content after the last block is the last part.
+        const tail = done.pendingText.join("");
+        if (tail.trim() || done.pendingImages.length > 0 || done.parts.length === 0) {
+          done.parts.push({ end: done.length, close: "", text: tail, images: done.pendingImages, heading: false });
+        }
+        parts = done.parts.map((p) => ({ ...p, end: open.length + p.end, close: p.close + close }));
       }
-      emit(rendered, text, done.images);
+      emit(rendered, done.text.join(""), done.images, BLOCK_TAGS.has(done.tag), HEADING_TAGS.has(done.tag), parts);
     }
   }
 
@@ -282,13 +353,12 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
       if (index !== null) {
         const alt = readAttr(attrs, "alt") ?? "";
         const f = stack[stack.length - 1];
-        f.html.push(`<img alt="${escapeAttr(decodeBasicEntities(alt).replace(/\u0000/g, "").slice(0, 300))}" src="${IMAGE_TOKEN_PREFIX}${index}${IMAGE_TOKEN_SUFFIX}">`);
-        f.images.push(index);
+        put(f, `<img alt="${escapeAttr(decodeBasicEntities(alt).replace(/\u0000/g, "").slice(0, 300))}" src="${IMAGE_TOKEN_PREFIX}${index}${IMAGE_TOKEN_SUFFIX}">`, "", [index]);
       }
       continue;
     }
     if (name === "br" || name === "hr") {
-      stack[stack.length - 1].html.push(`<${name}>`);
+      put(stack[stack.length - 1], `<${name}>`, "", []);
       continue;
     }
     if (selfClosing) continue;
@@ -300,7 +370,9 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
       id = `lb-h-${ctx.headingCounter.next}`;
       ctx.headingCounter.next += 1;
     }
-    stack.push(frame(name, allowed, false, classes, id));
+    const parent = stack[stack.length - 1];
+    const tracked = SPLIT_TAGS.has(name) && (parent === root || parent.parts !== null);
+    stack.push(frame(name, allowed, false, classes, id, tracked));
   }
   appendText(capped.slice(last));
   // Tags still open at the end of the document (e.g. `<p>hello` with no
