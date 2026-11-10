@@ -43,11 +43,11 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
     for (const snippet of expected) expect(source).toContain(snippet);
   });
 
-  // BOOKSTORE ORNATE SHELF: the fourth site is the ornate shelf's author line.
-  it("the bookstore resolves every book name through the byline (four sites), the bundle line through the bundle's pen name", () => {
+  // P2 (design B): the ornate shelf (the old fourth site) is gone; the
+  // feature strip, the grid and the free shelf remain.
+  it("the bookstore resolves every book name through the byline (three sites), the bundle line through the bundle's pen name", () => {
     const source = readSrc("app/(public)/librari/page.tsx");
-    expect(source.match(/resolveBookByline\(book\)/g)).toHaveLength(4);
-    expect(source).toContain("author: resolveBookByline(book),");
+    expect(source.match(/resolveBookByline\(book\)/g)).toHaveLength(3);
     expect(source).toContain("const authorName = bundle.pen?.name ?? null;");
     expect(source).not.toContain("resolvePublicAuthorName");
   });
