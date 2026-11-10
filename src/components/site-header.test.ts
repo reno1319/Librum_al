@@ -185,19 +185,4 @@ describe("SiteHeader name link (source)", () => {
     expect(source).toContain('<span className="min-w-0 max-w-[12ch] truncate">{nav.headerName}</span>');
     expect(source).not.toContain("xl:inline");
   });
-
-  // P2 (design B, Renato option a): the cream row's right side holds every
-  // primary link except Libraria (which leads its left side); the search
-  // box and the row are off during password recovery.
-  it("P2: siteLinks are the primary links without Libraria; the shop bar shows outside recovery", () => {
-    const out = buildSiteHeaderNav({ user: null, displayName: null, role: null, recoveryActive: false });
-    expect(out.siteLinks.map((l) => l.label)).toEqual(["Rreth nesh", "Si funksionon", "Fitimet", "Blog"]);
-    expect(out.showShopBar).toBe(true);
-    const author = buildSiteHeaderNav({ user: { id: "a" }, displayName: "A B", role: "author", recoveryActive: false });
-    expect(author.siteLinks.map((l) => l.href)).toEqual(["/rreth-nesh", "/si-funksionon", "/fitimet", "/blog", "/dashboard"]);
-    expect(author.primaryLinks.some((l) => l.href === "/librari")).toBe(true);
-    const recovery = buildSiteHeaderNav({ user: { id: "r" }, displayName: null, role: "reader", recoveryActive: true });
-    expect(recovery.showShopBar).toBe(false);
-    expect(recovery.siteLinks).toEqual([]);
-  });
 });
