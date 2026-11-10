@@ -95,8 +95,10 @@ describe("null-priced books are excluded from every discovery surface", () => {
     // left unfiltered would keep surfacing unbuyable books from the
     // page of a book the reader is already looking at.
     const source = code(read("libra/[id]/page.tsx"));
+    // P1: plus the "N libra në Librum" count, which counts exactly the
+    // books "More by" may list.
     const occurrences = source.split('.not("price_all", "is", null)').length - 1;
-    expect(occurrences).toBe(3);
+    expect(occurrences).toBe(4);
   });
 
   it("the bookstore's price RANGE filter is applied to price_all, not price_cents", () => {

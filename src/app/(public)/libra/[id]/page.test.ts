@@ -513,7 +513,8 @@ describe("BookDetailPage: redesign step 3", () => {
   it("a paid book's price card carries the mockup's three lines and the existing security note", async () => {
     const html = await render({ user: { id: "reader" } });
     expect(html).toContain("Blini e-librin — 250 lekë");
-    expect(html).toContain("EPUB, pa DRM. Lexojeni në telefon, tablet ose lexues elektronik.");
+    // P1: EPUB and DRM sit in their own smaller spans; the words are the same.
+    expect(html.replace(/<[^>]+>/g, "")).toContain("EPUB, pa DRM. Lexojeni në telefon, tablet ose lexues elektronik.");
     expect(html).toContain("Shkarkojeni kurdo nga Biblioteka juaj në Librum.");
     expect(html).toContain("Paguani me kartë.");
     expect(html).not.toContain("POK app");
@@ -560,5 +561,127 @@ describe("BookDetailPage: redesign step 3", () => {
     expect(anon).toContain('href="/login?next=/autore/pen-an-author"');
     const author = await render({ user: { id: "author" } });
     expect(author).not.toContain("Follow");
+  });
+});
+
+// ============================================================
+// P1 (design B, Renato 2026-11-10): the new book page -- white page,
+// detail tiles (reading time: minutes under an hour), the original
+// author as a Libraria search link, the price box's pills and sharing,
+// and the author section's count and link icons.
+// ============================================================
+describe("BookDetailPage: P1 design B", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    openPaidCheckout();
+    mockCreateClient.mockReset();
+    mockCreateAdminClient.mockReset();
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  async function render(options: { user?: { id: string } | null; book?: Record<string, unknown>; penBooks?: number | null; owns?: boolean }) {
+    const user = options.user ?? null;
+    const book = options.book ?? BOOK_ROW;
+    const client = {
+      auth: { getUser: async () => ({ data: { user } }) },
+      rpc: vi.fn(async (name: string) => ({ data: name === "user_owns_book" ? (options.owns ?? false) : null })),
+      storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/x.png" } }) }) },
+      from: (table: string) => {
+        if (table === "public_books") {
+          const publicPart: Record<string, unknown> = { ...book };
+          delete publicPart.author_id;
+          return queryStub({ data: [], count: options.penBooks ?? null }, { data: publicPart });
+        }
+        return bookTableStub(table, book, user) ?? queryStub({ data: [] }, { data: null });
+      },
+    };
+    mockCreateClient.mockImplementation(() => client);
+    mockCreateAdminClient.mockImplementation(() => ({ from: () => queryStub({ data: null }) }));
+    const element = await BookDetailPage(pageArgs());
+    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+  const text = (html: string) => html.replace(/<[^>]+>/g, "");
+
+  it("draws the page on white", async () => {
+    expect(await render({})).toMatch(/^<div class="flex flex-1 flex-col bg-surface"><main/);
+  });
+
+  it("tiles: pages and reading time from the counted words (minutes under an hour), Formati always", async () => {
+    const short = text(await render({ book: { ...BOOK_ROW, word_count: 1000, language: "sq" } }));
+    expect(short).toContain("Faqe4");
+    expect(short).toContain("Kohë leximi~4 min");
+    expect(short).toContain("GjuhaShqip");
+    expect(short).toContain("FormatiEPUB");
+    const long = text(await render({ book: { ...BOOK_ROW, word_count: 52_500 } }));
+    expect(long).toContain("Kohë leximi~4 orë");
+    const none = text(await render({}));
+    expect(none).not.toContain("Kohë leximi");
+    expect(none).not.toContain("Faqe");
+    expect(none).toContain("FormatiEPUB");
+  });
+
+  it("EPUB and DRM are capitals in their own smaller span", async () => {
+    const html = await render({ user: { id: "reader" }, book: { ...BOOK_ROW, price_all: 0 } });
+    expect(html).toContain('<span class="text-[0.82em] tracking-[0.03em]">EPUB</span>');
+    expect(html).toContain('<span class="text-[0.82em] tracking-[0.03em]">DRM</span>');
+  });
+
+  it("a translated book: the original author links to the Libraria search, the pen name follows as translator", async () => {
+    const html = await render({ book: { ...BOOK_ROW, original_author: "Arthur Machen" } });
+    expect(html).toContain('href="/librari?q=Arthur+Machen"');
+    expect(text(html)).toContain("nga Arthur Machen (Autor)");
+    expect(html).not.toMatch(/href="\/autore\/pen-an-author"[^>]*>Arthur Machen/);
+  });
+
+  it("an ordinary book: the pen name, linked to its page, then (Autor)", async () => {
+    const html = await render({});
+    expect(text(html)).toContain("nga An Author (Autor)");
+    expect(html).toMatch(/href="\/autore\/pen-an-author"[^>]*>An Author<\/a> <span class="text-muted">\(Autor\)<\/span>/);
+  });
+
+  it("the price box: a gold pill main action, the sample as an outline pill and on the cover, WhatsApp and copy link", async () => {
+    const html = await render({ user: { id: "reader" } });
+    const box = html.slice(html.indexOf('id="blerja"'), html.indexOf("</aside>"));
+    expect(box).toMatch(/<button type="submit" class="[^"]*rounded-full bg-accent[^"]*">Blini e-librin — 250 lekë<\/button>/);
+    expect(box).toMatch(/<button type="button" class="[^"]*rounded-full border border-primary[^"]*">Lexoni një pjesë<\/button>/);
+    expect(box).toContain(">Ruajeni për më vonë</button>");
+    expect(box).toContain('aria-label="Ndajeni në WhatsApp"');
+    expect(box).toMatch(/<a href="\/libra\/11111111-1111-4111-8111-111111111111"[^>]*><span aria-live="polite">Kopjo lidhjen<\/span><\/a>/);
+    expect(html).toMatch(/<button type="button" class="[^"]*rounded-full[^"]*">Shikoni brenda<\/button>/);
+  });
+
+  it("an owner gets no sample anywhere (unchanged rule)", async () => {
+    const html = await render({ user: { id: "reader" }, owns: true });
+    expect(html).not.toContain("Shikoni brenda");
+    expect(html).not.toContain("Lexoni një pjesë");
+  });
+
+  it("the cover opens large: a plain link to the image without JavaScript", async () => {
+    const html = await render({ book: { ...BOOK_ROW, cover_path: "c/x.png" } });
+    expect(html).toMatch(/<a href="https:\/\/cdn\.example\/x\.png" aria-label="Shikoni ballinën të madhe"[^>]*><img/);
+  });
+
+  it("the description and bio render in full on the server (the fold needs JavaScript)", async () => {
+    const html = await render({
+      book: { ...BOOK_ROW, description: "Një përshkrim.", pen: { ...BOOK_ROW.pen, bio: "Një bio." } },
+    });
+    expect(html).toContain("Një përshkrim.");
+    expect(html).toContain("Një bio.");
+    expect(html).not.toContain("Lexo më shumë");
+  });
+
+  it("the author's book count, only when there is one", async () => {
+    expect(text(await render({ penBooks: 1 }))).toContain("1 libër në Librum");
+    expect(text(await render({ penBooks: 3 }))).toContain("3 libra në Librum");
+    expect(text(await render({ penBooks: 0 }))).not.toMatch(/\d+ lib(ër|ra) në Librum/);
+    expect(text(await render({ penBooks: null }))).not.toMatch(/\d+ lib(ër|ra) në Librum/);
+  });
+
+  it("the author's links as Instagram / Facebook / globe icons, nofollow ugc", async () => {
+    const links = ["https://www.instagram.com/someone", "https://www.facebook.com/someone", "https://example.com/"];
+    const html = await render({ book: { ...BOOK_ROW, pen: { ...BOOK_ROW.pen, links } } });
+    expect(html).toContain('href="https://www.instagram.com/someone" rel="nofollow ugc noopener noreferrer" target="_blank" aria-label="Instagram: www.instagram.com/someone"');
+    expect(html).toContain('aria-label="Facebook: www.facebook.com/someone"');
+    expect(html).toContain('aria-label="example.com"');
   });
 });

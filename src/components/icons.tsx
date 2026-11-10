@@ -176,3 +176,40 @@ export function IconUnlock({ className, style }: IconProps) {
     </svg>
   );
 }
+
+// P1 book page (design B): the detail tiles' pictures.
+export function IconPage({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <rect x="5" y="3" width="14" height="18" rx="1" />
+      <path d="M8.5 7.5h7M8.5 11h7M8.5 14.5h7" />
+    </svg>
+  );
+}
+
+export function IconClock({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+export function IconCalendar({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <rect x="4" y="5" width="16" height="15" rx="1" />
+      <path d="M4 9h16M8 3v4M16 3v4" />
+    </svg>
+  );
+}
+
+export function IconDevice({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <rect x="6" y="2.5" width="12" height="19" rx="2" />
+      <path d="M10.5 18h3" />
+    </svg>
+  );
+}

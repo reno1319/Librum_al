@@ -21,21 +21,38 @@ export function BookShelf({
   title,
   books,
   supabase,
+  inline = false,
+  headingClassName,
 }: {
   title: string;
   books: BookWithAuthor[];
   supabase: SupabaseClient;
+  // P1 book page (design B): the "More by" row inside "Rreth autorit" --
+  // a small h3 heading and less space, under that section's own h2.
+  inline?: boolean;
+  // P1 book page: that page's own section heading look.
+  headingClassName?: string;
 }) {
   if (books.length === 0) return null;
 
+  const Heading = inline ? "h3" : "h2";
   return (
     // REDESIGN STEP 3: A2 heading (thin green serif) and the restyled
     // BookCard, in the same sideways-scrolling row.
-    <section style={{ marginTop: "3.5rem" }}>
-      <h2 className="font-serif text-[1.75rem] font-normal leading-tight text-primary">{title}</h2>
+    <section style={{ marginTop: inline ? "1.75rem" : "3.5rem" }}>
+      <Heading
+        className={
+          headingClassName ??
+          (inline
+            ? "text-[0.9375rem] font-semibold text-foreground"
+            : "font-serif text-[1.75rem] font-normal leading-tight text-primary")
+        }
+      >
+        {title}
+      </Heading>
       <div
         className="overflow-x-auto pb-2"
-        style={{ display: "flex", gap: "1.5rem", marginTop: "1.25rem" }}
+        style={{ display: "flex", gap: inline ? "1rem" : "1.5rem", marginTop: inline ? "0.75rem" : "1.25rem" }}
       >
         {books.map((book) => {
           const coverUrl = book.cover_path
@@ -46,7 +63,7 @@ export function BookShelf({
           return (
             <div
               key={book.id}
-              style={{ width: "9rem", flexShrink: 0 }}
+              style={{ width: inline ? "7.5rem" : "9rem", flexShrink: 0 }}
             >
               <BookCard
                 book={book}

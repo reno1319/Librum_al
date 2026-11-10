@@ -83,8 +83,10 @@ function shelfQuery(): Call[] | undefined {
   return publicBookQueries.find((q) => q.some(([m]) => m === "overlaps" || (m === "eq" && q.some(([, a]) => a[0] === "genre"))));
 }
 
+// P1 (design B): the plain "Label: value" lines under the tiles.
 function detailsBlock(html: string): string {
-  const start = html.indexOf("Të dhënat e librit");
+  expect(html).toContain("Të dhënat e librit");
+  const start = html.indexOf('data-detail-rows=""');
   expect(start).toBeGreaterThan(-1);
   return html.slice(start, html.indexOf("</dl>", start));
 }
@@ -131,40 +133,40 @@ describe("BD15 P8: the rich description", () => {
 describe("BD15 P8: book details (Q3 a)", () => {
   it("lists every category as a Libraria link, the reading age and the edition number", async () => {
     const dl = detailsBlock(await render(book()));
-    expect(dl).toContain(">Zhanret<");
+    expect(dl).toContain(">Zhanret:<");
     expect(dl).toContain('href="/librari?genre=Fantazi"');
     expect(dl).toContain('href="/librari?genre=Romanc%C3%AB"');
-    expect(dl).toContain(">Mosha<");
+    expect(dl).toContain(">Mosha:<");
     expect(dl).toContain("12+ vjeç");
-    expect(dl).toContain(">Botimi<");
-    expect(dl).toMatch(/>Botimi<\/dt><dd[^>]*>2<\/dd>/);
+    expect(dl).toContain(">Botimi:<");
+    expect(dl).toMatch(/>Botimi:<\/dt> <dd[^>]*>2<\/dd>/);
     expect(dl).not.toContain("Përmbajtja");
   });
 
   it("one category reads Zhanri", async () => {
     const dl = detailsBlock(await render(book({ categories: ["Fantazi"] })));
-    expect(dl).toContain(">Zhanri<");
-    expect(dl).not.toContain(">Zhanret<");
+    expect(dl).toContain(">Zhanri:<");
+    expect(dl).not.toContain(">Zhanret:<");
   });
 
   it("an 18+ book shows Përmbajtja: 18+ (për të rritur) and no Mosha row", async () => {
     const dl = detailsBlock(await render(book({ is_adult: true, reading_age_min: 18 })));
-    expect(dl).toContain(">Përmbajtja<");
+    expect(dl).toContain(">Përmbajtja:<");
     expect(dl).toContain("18+ (për të rritur)");
-    expect(dl).not.toContain(">Mosha<");
+    expect(dl).not.toContain(">Mosha:<");
   });
 
   it("an older book keeps its free-text edition; no edition and no age means no rows", async () => {
     const legacy = detailsBlock(await render(book({ edition_number: null, edition: "Botim i rishikuar" })));
     expect(legacy).toContain("Botim i rishikuar");
     const bare = detailsBlock(await render(book({ edition_number: null, edition: null, reading_age_min: null })));
-    expect(bare).not.toContain(">Botimi<");
-    expect(bare).not.toContain(">Mosha<");
+    expect(bare).not.toContain(">Botimi:<");
+    expect(bare).not.toContain(">Mosha:<");
   });
 
   it("a row the backfill missed (no categories) falls back to its genre", async () => {
     const dl = detailsBlock(await render(book({ categories: null })));
-    expect(dl).toContain(">Zhanri<");
+    expect(dl).toContain(">Zhanri:<");
     expect(dl).toContain('href="/librari?genre=Fantazi"');
   });
 });
