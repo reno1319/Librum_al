@@ -663,7 +663,7 @@ export default async function AdminBookPage({
               <form action={countBookPagesAsStaff.bind(null, book.id)} className="mt-3">
                 <button
                   type="submit"
-                  className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
+                  className="focus-ring inline-flex min-h-11 items-center justify-center rounded-full border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
                 >
                   {wordsResult.data ? "Count pages again" : "Count pages"}
                 </button>
@@ -912,7 +912,7 @@ export default async function AdminBookPage({
                   )}
                   <button
                     type="submit"
-                    className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground hover:opacity-90"
+                    className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-full bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground hover:opacity-90"
                   >
                     {kind === "listing"
                       ? "Approve the pre-order"
@@ -996,7 +996,7 @@ export default async function AdminBookPage({
                       </label>
                       <button
                         type="submit"
-                        className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] border border-primary bg-surface px-[1.125rem] font-semibold text-primary hover:bg-surface-hover"
+                        className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-full border border-primary bg-surface px-[1.125rem] font-semibold text-primary hover:bg-surface-hover"
                       >
                         Save the mention
                       </button>
@@ -1080,7 +1080,7 @@ export default async function AdminBookPage({
                     </label>
                     <button
                       type="submit"
-                      className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] border border-primary bg-surface px-[1.125rem] font-semibold text-primary hover:bg-surface-hover"
+                      className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-full border border-primary bg-surface px-[1.125rem] font-semibold text-primary hover:bg-surface-hover"
                     >
                       Save
                     </button>
@@ -1137,7 +1137,7 @@ export default async function AdminBookPage({
                 <form action={allowBookAgainAsStaff.bind(null, book.id)}>
                   <button
                     type="submit"
-                    className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
+                    className="focus-ring inline-flex min-h-11 items-center justify-center rounded-full border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
                   >
                     Allow the author to publish again
                   </button>

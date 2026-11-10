@@ -362,7 +362,7 @@ export default async function AdminPersonPage({
             </label>
             <button
               type="submit"
-              className="focus-ring min-h-11 rounded-control bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
+              className="focus-ring min-h-11 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
             >
               Save review name
             </button>

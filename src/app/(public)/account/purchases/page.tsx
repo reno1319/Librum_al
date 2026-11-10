@@ -344,7 +344,7 @@ export default async function AccountPurchasesPage({
                               <div className="flex flex-col items-end gap-1">
                                 <a
                                   href={`/api/books/${purchase.book_id}/download`}
-                                  className="rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+                                  className="rounded-full border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
                                 >
                                   Shkarkoni EPUB
                                 </a>

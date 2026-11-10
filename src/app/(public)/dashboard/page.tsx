@@ -177,13 +177,13 @@ export default async function DashboardPage({
       <div className="flex shrink-0 flex-wrap justify-end gap-2">
         <Link
           href="/dashboard/series"
-          className={buttonClasses("outline", "md", "min-h-11 rounded-[3px] border-[#c9c0ae] px-4 font-semibold")}
+          className={buttonClasses("outline", "md", "min-h-11 rounded-full border-[#c9c0ae] px-4 font-semibold")}
         >
           + Seri e re
         </Link>
         <Link
           href="/dashboard/books/new"
-          className={buttonClasses("primary", "md", "min-h-11 rounded-[3px] px-4 font-bold sm:px-5")}
+          className={buttonClasses("primary", "md", "min-h-11 rounded-full px-4 font-bold sm:px-5")}
         >
           + Libër i ri
         </Link>
@@ -225,7 +225,7 @@ export default async function DashboardPage({
             <div className="flex flex-wrap items-center justify-center gap-4">
               <Link
                 href="/dashboard/books/new"
-                className={buttonClasses("primary", "md", "min-h-11 rounded-[3px] px-5 font-bold")}
+                className={buttonClasses("primary", "md", "min-h-11 rounded-full px-5 font-bold")}
               >
                 Libër i ri
               </Link>
@@ -392,7 +392,7 @@ export default async function DashboardPage({
             </label>
             <button
               type="submit"
-              className={buttonClasses("outline", "sm", "col-span-2 min-h-11 rounded-[3px] border-[#c9c0ae] px-4 font-semibold lg:col-span-1")}
+              className={buttonClasses("outline", "sm", "col-span-2 min-h-11 rounded-full border-[#c9c0ae] px-4 font-semibold lg:col-span-1")}
             >
               Shfaqni
             </button>

@@ -238,7 +238,7 @@ export default async function AdminBookReportDetailPage({
         {book && reviewable && !takenDown && (
           <Link
             href={`/admin/books/${report.book_id}?report=${report.id}`}
-            className={buttonClasses("outline", "md", "mt-3 min-h-11 rounded-[3px]")}
+            className={buttonClasses("outline", "md", "mt-3 min-h-11 rounded-full")}
           >
             Unpublish this book
           </Link>

@@ -93,7 +93,7 @@ export default async function ReportBookPage({
 
         <button
           type="submit"
-          className="w-fit rounded-control bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+          className="w-fit rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
         >
           Dërgoni raportimin
         </button>

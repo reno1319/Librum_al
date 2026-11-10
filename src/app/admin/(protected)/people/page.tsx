@@ -126,7 +126,7 @@ export default async function AdminPeoplePage({
             className={`${formControlClasses} min-h-11 w-full`}
           />
         </label>
-        <button type="submit" className={buttonClasses("primary", "md", "min-h-11 shrink-0 rounded-[3px] px-5")}>
+        <button type="submit" className={buttonClasses("primary", "md", "min-h-11 shrink-0 rounded-full px-5")}>
           Search
         </button>
       </form>
@@ -139,7 +139,7 @@ export default async function AdminPeoplePage({
               key={option.value}
               href={peopleListHref(option.value, q)}
               aria-current={active ? "true" : undefined}
-              className={`focus-ring inline-flex min-h-11 items-center rounded-control border px-4 text-sm ${
+              className={`focus-ring inline-flex min-h-11 items-center rounded-full border px-4 text-sm ${
                 active
                   ? "border-primary bg-primary font-semibold text-primary-foreground"
                   : "border-border bg-surface text-foreground hover:bg-surface-hover"
@@ -247,14 +247,14 @@ export default async function AdminPeoplePage({
       {result.ok && lastPage > 1 && (
         <nav aria-label="Pages" className="flex flex-wrap justify-between gap-3">
           {page > 1 ? (
-            <Link href={peopleListHref(kind, q, page - 1)} className={buttonClasses("outline", "md", "min-h-11 rounded-[3px]")}>
+            <Link href={peopleListHref(kind, q, page - 1)} className={buttonClasses("outline", "md", "min-h-11 rounded-full")}>
               Newer
             </Link>
           ) : (
             <span />
           )}
           {page < lastPage && (
-            <Link href={peopleListHref(kind, q, page + 1)} className={buttonClasses("outline", "md", "min-h-11 rounded-[3px]")}>
+            <Link href={peopleListHref(kind, q, page + 1)} className={buttonClasses("outline", "md", "min-h-11 rounded-full")}>
               Older
             </Link>
           )}

@@ -193,7 +193,7 @@ export default async function PenNamesPage({
                   <form action={deletePenName.bind(null, penName.id)} className="mt-3">
                     <button
                       type="submit"
-                      className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                      className="focus-ring rounded-full border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
                     >
                       Fshini pseudonimin
                     </button>

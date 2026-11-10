@@ -309,14 +309,14 @@ export function AuthorBookRow({
         {copy.primary ? (
           <Link
             href={mainHref}
-            className="focus-ring inline-flex min-h-11 items-center justify-center rounded-[3px] bg-accent px-4 text-sm font-bold text-accent-foreground transition-colors hover:bg-[#c9a42c]"
+            className="focus-ring inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-4 text-sm font-bold text-accent-foreground transition-colors hover:bg-[#c9a42c]"
           >
             {copy.button}
           </Link>
         ) : (
           <Link
             href={mainHref}
-            className={buttonClasses("outline", "sm", "min-h-11 rounded-[3px] border-[#c9c0ae] px-4 font-semibold")}
+            className={buttonClasses("outline", "sm", "min-h-11 rounded-full border-[#c9c0ae] px-4 font-semibold")}
           >
             {copy.button}
           </Link>
@@ -325,7 +325,7 @@ export function AuthorBookRow({
         <DismissableDetails className="sm:relative" closeOnFocusOut>
           <summary
             aria-label={`Më shumë veprime për ${book.title}`}
-            className="focus-ring flex size-11 cursor-pointer list-none items-center justify-center rounded-[3px] border border-[#c9c0ae] bg-surface text-base font-bold text-foreground select-none hover:bg-surface-hover [&::-webkit-details-marker]:hidden"
+            className="focus-ring flex size-11 cursor-pointer list-none items-center justify-center rounded-full border border-[#c9c0ae] bg-surface text-base font-bold text-foreground select-none hover:bg-surface-hover [&::-webkit-details-marker]:hidden"
           >
             <span aria-hidden="true">···</span>
           </summary>

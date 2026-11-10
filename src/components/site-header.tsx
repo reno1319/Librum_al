@@ -108,13 +108,13 @@ export function buildSiteHeaderNav(params: {
 // green bar with cream text. Brass is a fill only, with green text on it
 // (5.85:1); cream on green is 11.1:1.
 const OUTLINE_ON_DARK_CLASSES =
-  "focus-ring inline-flex items-center rounded-[3px] border border-primary-foreground/40 px-4 py-2.5 font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover";
+  "focus-ring inline-flex items-center rounded-full border border-primary-foreground/40 px-4 py-2.5 font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover";
 // FIX1 (X12): "Log out" is a quiet cream text link, quieter than any
 // button on the page; the outline button stays for "Log in" only.
 const QUIET_LINK_ON_DARK_CLASSES =
   "focus-ring rounded-sm text-primary-foreground/85 underline underline-offset-4 transition-colors hover:text-primary-foreground hover:decoration-2";
 const BRASS_BUTTON_CLASSES =
-  "focus-ring inline-flex items-center rounded-[3px] bg-accent px-4 py-2.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground";
+  "focus-ring inline-flex items-center rounded-full bg-accent px-4 py-2.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground";
 
 export async function SiteHeader() {
   const supabase = await createClient();

@@ -33,4 +33,4 @@ export const fileInputClasses = "focus-ring rounded-sm text-sm";
 // otherwise draws in its own grey, gets the control border and corner.
 // Add a book's cover and manuscript pickers draw their button as a
 // green outline button instead (their PICKER_INPUT_CLASSES).
-export const plainFileInputClasses = `${fileInputClasses} file:mr-3 file:cursor-pointer file:rounded-control file:border file:border-solid file:border-control file:bg-surface file:px-3 file:py-1.5 file:text-sm file:text-foreground hover:file:bg-surface-hover`;
+export const plainFileInputClasses = `${fileInputClasses} file:mr-3 file:cursor-pointer file:rounded-full file:border file:border-solid file:border-control file:bg-surface file:px-3 file:py-1.5 file:text-sm file:text-foreground hover:file:bg-surface-hover`;

@@ -1609,7 +1609,7 @@ export default async function BookDetailPage({
             )}
             <button
               type="submit"
-              className={buttonClasses("primary", "md", "w-fit rounded-[3px]")}
+              className={buttonClasses("primary", "md", "w-fit rounded-full")}
             >
               {myReview ? "Përditësoni vlerësimin" : "Dërgoni vlerësimin"}
             </button>
