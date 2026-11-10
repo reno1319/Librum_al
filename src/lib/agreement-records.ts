@@ -21,8 +21,10 @@ import { AUTHOR_AGE_STATEMENT_VERSION } from "@/lib/author-age-statement";
 // 11-01 "3. a": Librum sells and pays a 70%/50% royalty; again nobody is
 // asked to accept again). "terms-sq-3" is D2's word change (Renato
 // 11-04: a book cover is "ballinë", not "kopertinë"; the meaning is the
-// same, nobody is asked to accept again). Its date is TERMS_LAST_UPDATED.
-export const TERMS_VERSION = "terms-sq-3";
+// same, nobody is asked to accept again). "terms-sq-4" is PL1's
+// pre-order paragraph in section 5 (Renato 11-10; nobody is asked to
+// accept again). Its date is TERMS_LAST_UPDATED.
+export const TERMS_VERSION = "terms-sq-4";
 
 // The sign-up form's and the Become-an-author form's Terms checkbox.
 export const TERMS_FIELD = "accept_terms";

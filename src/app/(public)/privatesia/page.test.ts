@@ -71,8 +71,16 @@ describe("POLICY PAGES: /privatesia", () => {
   });
 
   it("names the emails about new books from followed authors", () => {
-    expect(text).toContain("si dhe për librat e rinj të autorëve që ndiqni.");
+    expect(text).toContain("si dhe për librat e rinj të autorëve që ndiqni dhe për librat në parapublikim për të cilët keni kërkuar njoftim.");
     expect(text).toContain("Nuk dërgojmë emaile marketingu");
+  });
+
+  // PL1: the "Më njofto kur të dalë" requests (BD16 pre-orders).
+  it("names the pre-order notice requests, who sees them and how long they are kept", () => {
+    expect(text).toContain("autorët që ndiqni, kërkesat «Më njofto kur të dalë» për librat në parapublikim, vlerësimet,");
+    expect(text).toContain("Për një libër në parapublikim, autori sheh vetëm sa lexues presin njoftimin, jo kush janë.");
+    expect(text).toContain("Kërkesat «Më njofto»: derisa ta hiqni kërkesën ose ta fshini llogarinë.");
+    expect(text).toContain("por e ruajmë bashkë me shënimin që emaili u dërgua, derisa ta fshini llogarinë.");
   });
 
   it("no longer mentions Stripe (STRIPE REMOVAL, item 10, 5. a)", () => {

@@ -55,6 +55,15 @@ export const metadata: Metadata = {
 // nothing else changes. New TERMS_VERSION "terms-sq-3"; nobody is asked
 // to accept again. TERMS_LAST_UPDATED moves to the day this text goes
 // live on Production (the BD15 release sets it).
+//
+// PL1 (BD16 pre-orders, Renato 11-06 card "a", 11-10): one
+// "Parapublikimi" paragraph at the end of section 5 with the author
+// rules as built (src/lib/preorders.ts); no section is renumbered. A
+// pre-order is not sold: readers can only ask for an email. When paid
+// pre-orders ship with POK, this paragraph changes with them. Lawyer
+// list: next to section 17. New TERMS_VERSION "terms-sq-4"; nobody is
+// asked to accept again. TERMS_LAST_UPDATED moves to the day this text
+// goes live on Production (that release sets it).
 const SECTION_TITLES = [
   "Pranimi i Kushteve",
   "Kush jemi",
@@ -223,6 +232,23 @@ export default function TermsPage() {
                 pretendim, përfshirë shpenzimet ligjore. Librum ju njofton
                 pa vonesë për pretendimin dhe ju lejon të merrni pjesë në
                 përgjigjen ndaj tij.
+              </p>
+              <p className="mt-2">
+                <strong>Parapublikimi.</strong> Mund ta shfaqni një libër në
+                Librari para se të dalë, me një datë daljeje të paktën 14
+                ditë dhe jo më shumë se 6 muaj përpara. Librum e shqyrton çdo
+                parapublikim para se të shfaqet. Gjatë parapublikimit libri
+                nuk shitet: lexuesit mund të kërkojnë vetëm të njoftohen me
+                email. Dorëshkrimin final duhet ta dërgoni për shqyrtim të
+                paktën 3 ditë para datës së daljes. Data e daljes shtyhet
+                vetëm një herë: ose e shtyni ju, deri në 30 ditë, ose, nëse
+                dorëshkrimi final nuk vjen në kohë, Librum e shtyn vetë me 30
+                ditë. Nëse pas shtyrjes dorëshkrimi vonohet përsëri,
+                parapublikimi anulohet. Një libër mund të ketë të shumtën 2
+                parapublikime, dhe një libër që ka qenë i publikuar ose që
+                është në domenin publik nuk mund të bëhet parapublikim. Kur
+                një parapublikim anulohet, nga ju ose nga Librum, lexuesit që
+                kërkuan njoftim marrin një email.
               </p>
             </section>
 
