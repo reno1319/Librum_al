@@ -529,7 +529,11 @@ function BookstoreHeading({
         </form>
       </div>
 
-      <div className="mt-2.5 flex flex-wrap items-center gap-2 sm:gap-2.5">
+      {/* P2d (Renato 11-10): on phones the four pills sit in two tidy rows
+          of two equal pills (a 2x2 grid), all visible with no swiping;
+          "Hiqni filtrat" goes on its own line under them. From 640px up
+          the row wraps as before. */}
+      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2.5">
         {/* P2c: the genre list, as the old header menu had it. On phones
             it spans the page, 16px from each edge, so it never runs past
             the screen; from 640px up it hangs under the button. Each
@@ -662,17 +666,29 @@ function BookstoreHeading({
         </DismissableDetails>
 
         {/* P2c: Libra falas (the old header link) as a pill: free books,
-            keeping the current words, genre and sort. */}
+            keeping the current words, genre and sort. P2d: when it is on,
+            tapping it again switches it off (all prices, the rest kept). */}
         <Link
-          href={buildBookstoreHref(query, { minPrice: undefined, maxPrice: "0" })}
+          href={buildBookstoreHref(
+            query,
+            freeActive ? { maxPrice: undefined } : { minPrice: undefined, maxPrice: "0" },
+          )}
           aria-current={freeActive ? "true" : undefined}
-          className={`focus-ring ${FILTER_CONTROL_CLASSES} ${freeActive ? "border-primary text-primary" : ""}`}
+          className={`focus-ring ${FILTER_CONTROL_CLASSES} max-sm:justify-center ${freeActive ? "border-primary bg-primary! text-primary-foreground! hover:bg-primary-hover!" : ""}`}
         >
+          {/* P2d: when on, the pill is filled dark green with a tick, so
+              on and off are clearly different ("!" because the shared
+              pill classes already set a background and text colour). */}
+          {freeActive && (
+            <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3">
+              <path d="M2 6.5l2.5 2.5L10 3.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
+          )}
           Libra falas
         </Link>
 
         {isFiltered && (
-          <Link href="/librari" className={`${TEXT_LINK_CLASSES} ml-1 justify-self-start`}>
+          <Link href="/librari" className={`${TEXT_LINK_CLASSES} col-span-2 justify-self-start sm:ml-1`}>
             Hiqni filtrat
           </Link>
         )}
