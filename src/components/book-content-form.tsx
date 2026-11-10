@@ -105,13 +105,19 @@ export function BookContentForm({
         title="Pamja paraprake"
         help={
           book.hasManuscript
-            ? "Pamja paraprake tregon pjesën që lexuesit shohin para se ta blejnë librin. Për të parë gjithë librin, shkarkoni skedarin dhe hapeni në aplikacionin tuaj të leximit."
+            ? "Pamja paraprake tregon gjithë librin si në telefon, tablet ose lexues elektronik, me shenjën ku mbaron pjesa që lexuesit shohin para se ta blejnë."
             : "Ruajeni dorëshkrimin një herë, pastaj e shihni këtu."
         }
       >
         {book.hasManuscript && (
           <div className="flex flex-wrap gap-3">
-            <BookSampleReader bookId={book.id} bookTitle={book.title} label="Hap pamjen paraprake" />
+            <BookSampleReader
+              bookId={book.id}
+              bookTitle={book.title}
+              label="Hap pamjen paraprake"
+              mode="full"
+              coverUrl={book.coverUrl ?? null}
+            />
             {/* A plain link: the route checks the session and that this is the author's own book.
                 download: the page stays, so the unsaved-changes guard does not ask (upload notes 1). */}
             <a href={`/api/books/${book.id}/download`} download className={EDITOR_SMALL_BUTTON}>

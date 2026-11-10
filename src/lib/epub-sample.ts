@@ -187,21 +187,22 @@ function sanitizeBodyIntoChunks(bodyHtml: string): { html: string; text: string 
     root.text = [];
   }
 
-  // Text runs come straight from a token stream over valid (well-formed)
-  // XHTML, where any literal &, <, > a real author's prose contains is
-  // already XML-entity-escaped by the source document itself (&amp;,
-  // &lt;, &gt;) -- that's what makes it valid XML in the first place.
-  // Passed through verbatim here, not re-escaped: these substrings are
-  // already correct, safe HTML text content, and escaping them again
-  // would corrupt already-escaped entities (&amp; -> &amp;amp;, which
-  // would then visibly render as the literal text "&amp;" instead of
-  // "&"). A raw, unescaped `<` in text can't reach here at all -- the
-  // tokenizer itself would have matched it as the start of a tag, not
-  // text -- so this never becomes an HTML-injection vector.
+  // Text runs are whatever lies between the tokens TOKEN_RE matched. In
+  // well-formed XHTML they hold no raw `<`, but EPUB upload does not
+  // check well-formedness, so a broken tag with no closing `>` before
+  // the next real tag (`<img src=x onerror=alert(1)// <b>`) is never
+  // matched by TOKEN_RE and arrives here as "text". Passed through raw,
+  // the browser would parse it as a live element with its attributes
+  // (sample XSS fix, 9 Nov 2026). So `<` and `>` are always escaped in
+  // the HTML output. `&` is deliberately NOT escaped: entities already
+  // in the source (&amp;, &lt;, &#233;) must stay as they are, and an
+  // entity in a text node can only ever render as text, never markup.
+  // The plain `text` copy stays unescaped: it is used only for the 10%
+  // length and the word count, never rendered.
   function appendText(raw: string) {
     if (!raw || isInsideDrop()) return;
     const frame = stack[stack.length - 1];
-    frame.html.push(raw);
+    frame.html.push(raw.replace(/</g, "&lt;").replace(/>/g, "&gt;"));
     frame.text.push(raw);
   }
 

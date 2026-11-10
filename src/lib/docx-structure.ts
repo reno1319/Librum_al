@@ -30,7 +30,8 @@ export type GuessKind =
   | "typed_contents"
   | "verse"
   | "split_lines"
-  | "merged_title";
+  | "merged_title"
+  | "epigraph";
 
 export type CleanupGuess = {
   // Index of the Word paragraph (counting every top-level paragraph of
@@ -58,6 +59,9 @@ export type ParaPlan = {
   splitAtBreaks?: boolean;
   // W3 Part 2: one blank line before this paragraph (answer 4a).
   gapBefore?: boolean;
+  // K1a: a new ebook page starts here (a page break typed before the
+  // first chapter: title page, dedication, foreword, epigraphs).
+  pageBefore?: boolean;
 };
 
 export type StructureOptions = {
@@ -82,9 +86,18 @@ export type StructureOptions = {
   notVerse?: number[];
   // BD3 patch 2 (answer 1a): a removed copyright page the author brings
   // back, and a typed title page the author chooses to remove (the
-  // guess's paragraph number).
+  // guess's paragraph number). K1c (Renato 7 Nov, a): typed title lines
+  // that are the book's title (bookTitle) are removed by default, and
+  // keepTitlePage brings them back.
   keepCopyright?: number[];
   removeTitlePage?: number[];
+  keepTitlePage?: number[];
+  bookTitle?: string;
+  // KP2 (Renato 7 Nov): epigraphs the author turns back into normal
+  // text, and unsure ones the author confirms (the guess's paragraph
+  // number: the epigraph's first quote line).
+  notEpigraph?: number[];
+  makeEpigraph?: number[];
 };
 
 export type StructureResult = {
@@ -97,6 +110,8 @@ export type StructureResult = {
   contentsLinesRemoved: number;
   // BD3 patch 2: lines of the author's copyright page and typed title page.
   frontLinesRemoved: number;
+  // K1a: new pages started before the first chapter.
+  frontPages: number;
   emptyRemoved: number;
   paragraphsSplit: number;
   gaps: number;
@@ -187,9 +202,44 @@ const PART_HEADING_RE = new RegExp(
 // A dedication never counts as a book title (audit r3 H1, M1).
 const DEDICATION_START_RE = /^(?:p[ëe]r|for|to|kushtuar|dedikuar|in memoriam|n[ëe] kujtim)(?![\p{L}\d])/iu;
 const MAX_FRONT_PARAS = 60;
+const MAX_FRONT_PAGES = 20;
 const MAX_COPYRIGHT_PARA_WORDS = 90;
 const MAX_META_LINE_WORDS = 8;
 const MAX_TITLE_LINE_WORDS = 12;
+// KP2: an epigraph is 1-4 short quote paragraphs and a name line.
+const MAX_EPIGRAPH_QUOTES = 4;
+const MAX_EPIGRAPH_QUOTE_WORDS = 70;
+const MAX_EPIGRAPH_WORDS = 140;
+const MAX_EPIGRAPHS_IN_A_ROW = 3;
+// A word of a name: capitalised ("Prova", "O'Neill", "Saint-Exupéry")
+// or an initial ("J."); the small words names carry in between.
+const NAME_WORD_RE = /^(?:\p{Lu}[\p{L}'’.-]*|\p{Lu}\.)$/u;
+const NAME_LINK_RE = /^(?:de|da|di|del|della|van|von|der|den|la|le|du|al|el|bin|ibn|y|i|e|of|the)$/iu;
+// Where the name ends and the work starts: "Name – “Work”", "Name, Work", "Name (1912)".
+const SOURCE_SPLIT_RE = /\s+[–—-]\s+|,\s+|\s+\(/u;
+const OPEN_QUOTE_RE = /^["“„«‘'‹]/u;
+const CLOSE_QUOTE_RE = /["”“»’'›][.,;:…!?]*$/u;
+
+// KP2: the name line under an epigraph ("BESNIK PROVA", "— Besnik Prova",
+// "Mira Prova – “Netë të gjata”"). Never a sentence, a question or
+// a line that ends like a list item; the name itself is 1-5 name words.
+function epigraphSourceLine(t: string): { dash: boolean; caps: boolean; work: boolean } | null {
+  if (t.length === 0 || t.length > 100 || t.includes("\n") || words(t) > 14) return null;
+  if (SENTENCE_LIKE_END_RE.test(t) || /[,:;]["”»’)]*$/u.test(t)) return null;
+  const dash = DIALOGUE_START_RE.test(t);
+  const rest = t.replace(/^[—–-]\s*/u, "");
+  const m = rest.match(SOURCE_SPLIT_RE);
+  const name = (m && m.index !== undefined ? rest.slice(0, m.index) : rest).trim();
+  const ws = name.split(/\s+/).filter(Boolean);
+  if (ws.length === 0 || ws.length > 5 || !NAME_WORD_RE.test(ws[0])) return null;
+  if (!ws.every((w) => NAME_WORD_RE.test(w) || NAME_LINK_RE.test(w))) return null;
+  const letters = name.replace(/[^\p{L}]/gu, "");
+  // Audit N1: one word in capitals ("BUM", "KËTU") is a shout, not a name sign.
+  const caps =
+    ws.length >= 2 && letters.length >= 3 && letters === letters.toLocaleUpperCase("sq") && letters !== letters.toLocaleLowerCase("sq");
+  const work = !!m && m.index !== undefined && rest.slice(m.index + m[0].length).trim().length > 0;
+  return { dash, caps, work };
+}
 
 const ROMAN: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
 function trailingPageNumber(t: string): { value: number; roman: boolean } | null {
@@ -203,6 +253,17 @@ function trailingPageNumber(t: string): { value: number; roman: boolean } | null
     total += i + 1 < r.length && ROMAN[r[i + 1]] > v ? -v : v;
   }
   return { value: total, roman: true };
+}
+
+// K1c: a title compared without case, accents (ë, ç), punctuation or
+// extra spaces, so "LIBRI I BARDHE." is the book "Libri i Bardhë".
+function titleKey(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLocaleLowerCase("sq")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 function words(s: string): number {
@@ -341,21 +402,28 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   // ---- 2. layout facts per block ----
   const n = blocks.length;
   const newPage: boolean[] = new Array(n).fill(false);
+  // K1a: the same, counting only page breaks typed in the text (and
+  // section breaks), never Word's "page break before" setting.
+  const hardNewPage: boolean[] = new Array(n).fill(false);
   const emptiesBefore: number[] = new Array(n).fill(0);
   {
     let pendingBreak = false;
+    let pendingHard = false;
     let empties = 0;
     let seenContent = false;
     for (let j = 0; j < n; j++) {
       const f = para(j);
       if (f && (f.empty || isRemoved(j))) {
         if (f.breakBefore || f.breakAfter) pendingBreak = true;
+        if (f.hardBreakBefore || f.breakAfter) pendingHard = true;
         if (f.empty) empties++;
         continue;
       }
       newPage[j] = seenContent && (pendingBreak || (f?.breakBefore ?? false));
+      hardNewPage[j] = seenContent && (pendingHard || (f?.hardBreakBefore ?? false));
       emptiesBefore[j] = seenContent ? empties : 0;
       pendingBreak = f?.breakAfter ?? false;
+      pendingHard = f?.breakAfter ?? false;
       empties = 0;
       seenContent = true;
     }
@@ -923,11 +991,15 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   //   Title style), and a byline ("nga ...", "përktheu ...").
   // Only before the first chapter, plus the short lines right under the
   // title of a one-story book (its only chapter). The author can undo
-  // copyright group in the preview (keepCopyright); a title page is only
-  // offered for removal (removeTitlePage, Renato 1 Nov after audit r4).
+  // copyright group in the preview (keepCopyright). A title page is only
+  // offered for removal (removeTitlePage, Renato 1 Nov after audit r4),
+  // except lines that are the book's own title (K1c, Renato 7 Nov, a):
+  // those go by default and keepTitlePage brings them back.
   const firstChapter = textParas.find((j) => chapterSet.has(j));
   const keepCopyrightSet = new Set(options.keepCopyright ?? []);
   const removeTitlePageSet = new Set(options.removeTitlePage ?? []);
+  const keepTitlePageSet = new Set(options.keepTitlePage ?? []);
+  const bookTitleKey = titleKey(options.bookTitle ?? "");
   let frontLinesRemoved = 0;
   {
     const text = (j: number) => para(j)!.trimmed;
@@ -981,15 +1053,21 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
       i + 1 < pages.length || (!storyStarted && firstChapter !== undefined && newPage[firstChapter]);
 
     const removedNow = new Set<number>();
-    // `choiceSet`: for copyright lines, the author's undo (removed unless
-    // listed); for a title page, the author's own "remove" (kept unless
-    // listed: audit r4 showed the title cannot be told apart from a
-    // dedication or a heading alone on page 1 without the book's title).
-    const removeGroup = (lines: number[], kind: "copyright_page" | "title_page", sign: string, choiceSet: Set<number>) => {
+    // `choiceSet`: with `byDefault`, the author's undo (removed unless
+    // listed); without, the author's own "remove" (kept unless listed:
+    // audit r4 showed a big line on page 1 cannot be told apart from a
+    // dedication or a heading without the book's title).
+    const removeGroup = (
+      lines: number[],
+      kind: "copyright_page" | "title_page",
+      sign: string,
+      choiceSet: Set<number>,
+      byDefault = true,
+    ) => {
       const own = lines.filter((j) => !removedNow.has(j));
       if (own.length === 0 || own.every(separator)) return;
       const listed = choiceSet.has(indexOf(own[0]));
-      const kept = kind === "title_page" ? !listed : listed;
+      const kept = byDefault ? listed : !listed;
       for (const j of own) removedNow.add(j);
       if (!kept) {
         for (const j of own) {
@@ -1005,7 +1083,7 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
         text: kind === "title_page" ? own.map(text).join(" / ") : truncate(own.map(text).join(" / ")),
         confidence: "high",
         applied: !kept,
-        signs: [sign, ...(kind === "title_page" ? (kept ? [] : ["removed by the author"]) : kept ? ["kept by the author"] : [])],
+        signs: [sign, ...(byDefault ? (kept ? ["kept by the author"] : []) : kept ? [] : ["removed by the author"])],
       });
     };
     // Runs of touching copyright/meta/separator lines with a copyright
@@ -1065,9 +1143,10 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     // not a smaller author line, a byline, a year or a dedication
     // (audit r2 H1, H2, M1); a stray author name is harmless, a lost
     // dedication is not. A page with a prose paragraph on it is not a
-    // title page (audit r2 M2).
+    // title page (audit r2 M2). K1b: lines already taken out above (an
+    // old edition's licence paragraph) do not count.
     if (firstChapter !== undefined && pages.length > 0 && closed(0)) {
-      const page = pages[0];
+      const page = pages[0].filter((j) => !plans.get(j)?.remove);
       const isTitleStyle = (j: number) => /^title$/i.test(para(j)!.styleName.trim());
       const chapterSizes = [...chapterSet].map((j) => para(j)?.size ?? null).filter((x): x is number => x !== null);
       const biggest = chapterSizes.length > 0 ? Math.max(...chapterSizes) : median;
@@ -1091,13 +1170,41 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
           : bigger(para(j)!) && (para(j)!.size ?? 0) === pageMax && pageMax > biggest);
       const prosePara = page.some((j) => words(text(j)) > MAX_TITLE_LINE_WORDS);
       if (!prosePara && page.length <= 12) {
+        const anchors = page.filter(anchor);
+        // K1c: the lines that are the book's title -- all of them read
+        // together (a title on two lines), or one line on its own.
+        const together = bookTitleKey !== "" && titleKey(anchors.map(text).join(" ")) === bookTitleKey;
+        const isBookTitle = (j: number) => together || (bookTitleKey !== "" && titleKey(text(j)) === bookTitleKey);
         removeGroup(
-          page.filter(anchor),
+          anchors.filter(isBookTitle),
+          "title_page",
+          "typed title page with the book's own title; Librum's own page shows the title and the author",
+          keepTitlePageSet,
+        );
+        removeGroup(
+          anchors.filter((j) => !isBookTitle(j)),
           "title_page",
           "typed title page; Librum's own page shows the title and the author",
           removeTitlePageSet,
+          false,
         );
       }
+    }
+  }
+
+  // ---- 5b. front-matter pages (K1a, Renato 7 Nov) ----
+  // A page break typed before the first chapter starts a new ebook
+  // page, so a title page, a dedication, a foreword and epigraphs are
+  // not run together on one screen. Only typed breaks count (see
+  // hardNewPage); a file with more of them than a front part has is
+  // left as one page.
+  let frontPages = 0;
+  if (firstChapter !== undefined) {
+    // Every block, so a page holding only a picture counts too.
+    const starts = hardNewPage.flatMap((on, j) => (on && j < firstChapter ? [j] : []));
+    if (starts.length <= MAX_FRONT_PAGES) {
+      for (const j of starts) plan(j).pageBefore = true;
+      frontPages = starts.length;
     }
   }
 
@@ -1115,9 +1222,131 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
   for (const [t, c] of tabCounts) if (c > bodyTabsCount) { bodyTabs = t; bodyTabsCount = c; }
   const hasOwnStyle = (f: ParaFacts) => !!f.styleId && /^(quote|intense quote|list paragraph)$/i.test(f.styleName.trim());
 
+  // ---- 6a. epigraphs (KP2, Renato 7 Nov) ----
+  // Right after a chapter title, and on a page of its own before the
+  // first chapter: 1-4 short quote paragraphs and then a NAME line (the
+  // name decides; italics and quotation marks are only extra signs).
+  // The quote becomes an epigraph block (no first-line indent), the name
+  // line is set apart under it, and the story's first paragraph starts
+  // without an indent. Dialogue never matches (a quote line starting
+  // with a dash, or a sentence). With fewer than two signs the epigraph
+  // is only offered to the author (unsure guess, never silent); an
+  // epigraph with no name line is not covered.
+  {
+    const notEpigraphSet = new Set(options.notEpigraph ?? []);
+    const makeEpigraphSet = new Set(options.makeEpigraph ?? []);
+    const asideAlign = (f: ParaFacts) => f.align === "center" || f.align === "right" || f.align === "end";
+    const looseLine = (j: number) => {
+      const f = para(j);
+      return !!f && plainSet.has(j) && !plans.get(j)?.style && !f.hasObject && !f.num && !NOT_A_TITLE_RE.test(f.trimmed);
+    };
+    const quoteOk = (j: number) => {
+      const f = para(j);
+      return (
+        // Audit N2: a line bigger than the body is a title, not a quote.
+        !!f && looseLine(j) && !asideAlign(f) && !bigger(f) && !DIALOGUE_START_RE.test(f.trimmed) &&
+        words(f.trimmed) <= MAX_EPIGRAPH_QUOTE_WORDS
+      );
+    };
+    const sourceAt = (j: number) => {
+      const f = para(j);
+      if (!f || !looseLine(j) || bigger(f) || f.lineBreaks > 0) return null;
+      const t = f.trimmed;
+      if (PART_HEADING_RE.test(t) || LABEL_ONLY_RE.test(t) || CHAPTER_WORD_RE.test(t) || CONTENTS_TITLE_RE.test(t) || DEDICATION_START_RE.test(t)) return null;
+      return epigraphSourceLine(t);
+    };
+    type Epigraph = { quotes: number[]; source: number; signs: string[] };
+    const epigraphAt = (start: number): Epigraph | null => {
+      const quotes: number[] = [];
+      let total = 0;
+      let k = start;
+      while (quotes.length < MAX_EPIGRAPH_QUOTES) {
+        if (k < 0 || !quoteOk(k) || (quotes.length > 0 && newPage[k])) return null;
+        quotes.push(k);
+        total += words(para(k)!.trimmed);
+        if (total > MAX_EPIGRAPH_WORDS) return null;
+        const s = nextContent(k);
+        if (s < 0 || newPage[s]) return null;
+        const src = sourceAt(s);
+        if (src) {
+          const qs = quotes.map((q) => para(q)!);
+          const after = nextContent(s);
+          // "— Ana" over a line of dialogue is a conversation.
+          const dialogueAfter = after >= 0 && !!para(after) && DIALOGUE_START_RE.test(para(after)!.trimmed);
+          const signs = ["a name line after the quote"];
+          if (qs.every((f) => f.italic)) signs.push("quote in italics");
+          if (OPEN_QUOTE_RE.test(qs[0].trimmed) && CLOSE_QUOTE_RE.test(qs[qs.length - 1].trimmed)) signs.push("quote in quotation marks");
+          if (src.dash && !dialogueAfter) signs.push("name after a dash");
+          if (src.caps) signs.push("name in capitals");
+          if (src.work) signs.push("name and work");
+          if (para(s)!.align === "right" || para(s)!.align === "end") signs.push("name aligned right");
+          return { quotes, source: s, signs };
+        }
+        k = s;
+      }
+      return null;
+    };
+    const run = (start: number): { found: Epigraph[]; next: number } => {
+      const found: Epigraph[] = [];
+      let at = start;
+      while (found.length < MAX_EPIGRAPHS_IN_A_ROW && at >= 0 && !isHeading(at)) {
+        const e = epigraphAt(at);
+        if (!e) break;
+        found.push(e);
+        at = nextContent(e.source);
+      }
+      return { found, next: at };
+    };
+    const take = (found: Epigraph[]) => {
+      for (const e of found) {
+        const p = indexOf(e.quotes[0]);
+        const sure = e.signs.length >= 3; // the name line + two more signs
+        const byAuthor = notEpigraphSet.has(p) ? false : makeEpigraphSet.has(p) ? true : null;
+        const apply = byAuthor ?? sure;
+        if (apply) {
+          for (const q of e.quotes) plan(q).style = "epigraph";
+          plan(e.source).style = "epigraphSource";
+        }
+        guesses.push({
+          paragraph: p,
+          kind: "epigraph",
+          text: truncate(`${para(e.quotes[0])!.trimmed} — ${para(e.source)!.trimmed}`),
+          confidence: sure ? "high" : "medium",
+          applied: apply,
+          signs: [
+            ...e.signs,
+            ...(byAuthor !== null && byAuthor !== sure ? [byAuthor ? "confirmed by the author" : "kept as normal text by the author"] : []),
+          ],
+        });
+      }
+    };
+    // After each chapter title, with the story after it.
+    for (const c of [...chapterSet].sort((a, b) => a - b)) {
+      const { found, next } = run(nextContent(c));
+      if (found.length > 0 && next >= 0 && !!para(next) && !isHeading(next)) take(found);
+    }
+    // A page of its own before the first chapter (nothing else on it).
+    if (firstChapter !== undefined) {
+      let first = true;
+      for (let j = 0; j < firstChapter; j++) {
+        const f = para(j);
+        if (f && (f.empty || isRemoved(j))) continue;
+        const pageStart = first || newPage[j];
+        first = false;
+        if (!pageStart) continue;
+        const { found, next } = run(j);
+        if (found.length > 0 && (next < 0 || next >= firstChapter || newPage[next])) take(found);
+      }
+    }
+  }
+  const isEpigraph = (j: number) => {
+    const s = plans.get(j)?.style;
+    return s === "epigraph" || s === "epigraphSource";
+  };
+
   for (const j of plain) {
     const f = para(j)!;
-    if (hasOwnStyle(f) || f.num || f.hasObject) continue;
+    if (hasOwnStyle(f) || f.num || f.hasObject || isEpigraph(j)) continue;
     const len = f.trimmed.length;
     if (f.align === "center" && len <= 600 && centerMeaningful) plan(j).style = "center";
     else if ((f.align === "right" || f.align === "end") && len <= 600) plan(j).style = "right";
@@ -1402,6 +1631,7 @@ export function planStructure(blocks: Block[], options: StructureOptions = {}): 
     sceneBreaks,
     contentsLinesRemoved,
     frontLinesRemoved,
+    frontPages,
     emptyRemoved,
     paragraphsSplit,
     gaps,

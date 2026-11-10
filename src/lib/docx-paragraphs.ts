@@ -36,6 +36,10 @@ export type ParaFacts = {
   italic: boolean;
   caps: boolean;
   breakBefore: boolean;
+  // K1a: a page break typed in the text before the words (Insert > Page
+  // Break, Ctrl+Enter), not Word's "page break before" setting, which
+  // some files carry on every paragraph.
+  hardBreakBefore: boolean;
   breakAfter: boolean;
   empty: boolean;
   hasObject: boolean;
@@ -151,6 +155,7 @@ export function readParagraph(p: XElem, sheet: StyleSheet): ParaFacts {
   let text = "";
   let sawText = false;
   let breakBefore = pageBreakBefore;
+  let hardBreakBefore = false;
   let breakAfter = false;
   let hasObject = false;
   let hasNoteRef = false;
@@ -187,8 +192,10 @@ export function readParagraph(p: XElem, sheet: StyleSheet): ParaFacts {
       text += "\n";
       if (sawText) lineBreaks++;
     } else if (it.kind === "page") {
-      if (!sawText) breakBefore = true;
-      else breakAfter = true;
+      if (!sawText) {
+        breakBefore = true;
+        hardBreakBefore = true;
+      } else breakAfter = true;
     } else if (it.kind === "object") {
       hasObject = true;
       leading = false;
@@ -216,6 +223,7 @@ export function readParagraph(p: XElem, sheet: StyleSheet): ParaFacts {
     italic: chars > 0 && italicChars === chars,
     caps: chars > 0 && (upperCase || capsChars === chars),
     breakBefore,
+    hardBreakBefore,
     breakAfter,
     empty: !hasObject && !hasNoteRef && WS_RE.test(text),
     hasObject,

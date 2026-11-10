@@ -347,7 +347,8 @@ describe("addLibrumPages on a Word-made ebook", () => {
     expect(Object.keys(after.files)[0]).toBe("mimetype");
 
     const opf = await opfOf(result.bytes);
-    expect(spineIds(opf)).toEqual(["librum-front", "chapter1", "chapter2", "librum-end"]);
+    // K4: Librum's © page comes right before the contents page.
+    expect(spineIds(opf)).toEqual(["librum-front", "nav", "chapter1", "chapter2", "librum-end"]);
     expect(opf).toContain('<item id="librum-front" href="librum-faqja-hyrese.xhtml" media-type="application/xhtml+xml"/>');
     expect(opf).toContain('<item id="librum-end" href="librum-faqja-fundit.xhtml" media-type="application/xhtml+xml"/>');
 

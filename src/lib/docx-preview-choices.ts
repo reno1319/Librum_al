@@ -20,6 +20,9 @@ export const CHOICE_LISTS = [
   "notVerse",
   "keepCopyright",
   "removeTitlePage",
+  "keepTitlePage",
+  "notEpigraph",
+  "makeEpigraph",
 ] as const;
 export type ChoiceList = (typeof CHOICE_LISTS)[number];
 
@@ -44,6 +47,9 @@ export function emptyChoices(): PreviewChoices {
     notVerse: [],
     keepCopyright: [],
     removeTitlePage: [],
+    keepTitlePage: [],
+    notEpigraph: [],
+    makeEpigraph: [],
     fixQuotes: true,
   };
 }
@@ -94,8 +100,14 @@ const GUESS_LISTS: Record<GuessKind, { off?: ChoiceList; on?: ChoiceList }> = {
   merged_title: { off: "keepTitleApart" },
   split_lines: { off: "keepLines" },
   verse: { off: "notVerse" },
-  title_page: { on: "removeTitlePage" },
+  // K1c (Renato 7 Nov, a): a typed title line that is the book's title
+  // is removed by default (keepTitlePage brings it back); other big
+  // lines on page 1 are only offered (removeTitlePage), as since 1 Nov.
+  title_page: { off: "keepTitlePage", on: "removeTitlePage" },
   copyright_page: { off: "keepCopyright" },
+  // KP2: sure epigraphs are set by default (notEpigraph undoes them),
+  // unsure ones only when the author confirms (makeEpigraph).
+  epigraph: { off: "notEpigraph", on: "makeEpigraph" },
 };
 
 function has(choices: PreviewChoices, list: ChoiceList | undefined, p: number): boolean {
@@ -249,6 +261,12 @@ export function describeGuess(guess: CleanupGuess, on: boolean, canToggle: boole
       return on
         ? { state: `Faqja e të drejtave u hoq: ${t}. Librum shton vetë faqen e të drejtave në çdo shkarkim.`, action: act("Kjo nuk është faqe të drejtash"), unsure }
         : { state: `Mbetet në libër (Librum mendoi se ishte faqe të drejtash): ${t}`, action: act("Hiqe"), unsure };
+    // KP2 (Renato 7 Nov): a quote with its author's name at the start of
+    // a chapter or on a page of its own.
+    case "epigraph":
+      return on
+        ? { state: `U formatua si moto (citim me emrin e autorit): ${t}`, action: act("Ktheje në tekst të zakonshëm"), unsure }
+        : { state: `Mund të jetë moto (citim me emrin e autorit): ${t}`, action: act("Formatoje si moto"), unsure };
   }
 }
 

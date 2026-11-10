@@ -467,7 +467,7 @@ export function EbookPreview({
               >
                 {build.chapters.map((c, i) => (
                   <option key={i} value={i}>
-                    {i + 1}. {chapterLabel(c, i)}
+                    {chapterLabel(c, i)}
                   </option>
                 ))}
               </select>

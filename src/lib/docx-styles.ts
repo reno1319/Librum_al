@@ -216,6 +216,11 @@ export const LIBRUM_STYLES = {
   gap: { id: "LibrumGap", name: "Librum Gap" },
   // W4: a Heading 1 the author says is not a chapter.
   plain: { id: "LibrumPlain", name: "Librum Plain" },
+  // K1a: a new page before the first chapter (docx-converter splits there).
+  pageBreak: { id: "LibrumPageBreak", name: "Librum Page Break" },
+  // KP2: a chapter-opening (or front-page) epigraph and its name line.
+  epigraph: { id: "LibrumEpigraph", name: "Librum Epigraph" },
+  epigraphSource: { id: "LibrumEpigraphSource", name: "Librum Epigraph Source" },
 } as const;
 export type LibrumStyleKey = keyof typeof LIBRUM_STYLES;
 
